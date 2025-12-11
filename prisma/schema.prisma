@@ -1,0 +1,198 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ==========================================
+// Core User Management
+// ==========================================
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String?
+  password  String?  // For user authentication in your app
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  platforms      Platform[]
+  leads          Lead[]
+  conversations  Conversation[]
+  messages       Message[]
+
+  @@map("users")
+}
+
+// ==========================================
+// Multi-Platform Integration
+// ==========================================
+
+model Platform {
+  id               String   @id @default(uuid())
+  userId           String
+  platformName     String   // "thumbtack" | "yelp" | "angi" | "bark"
+  connected        Boolean  @default(true)
+  externalUserId   String?  // Platform's user ID
+  credentialsJson  String   // Encrypted: access_token, refresh_token, api_key, etc.
+  webhookSecret    String?  // Encrypted webhook verification secret
+  lastSyncAt       DateTime?
+  metadataJson     String?  // Additional platform-specific data
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, platformName])
+  @@index([userId])
+  @@index([platformName])
+  @@map("platforms")
+}
+
+// ==========================================
+// Normalized Lead Management
+// ==========================================
+
+model Lead {
+  id                String   @id @default(uuid())
+  userId            String
+  platform          String   // "thumbtack" | "yelp" | etc.
+  externalRequestId String   // Platform's unique lead/request ID
+  customerName      String
+  customerPhone     String?
+  customerEmail     String?
+  message           String   @db.Text
+  budget            Decimal? @db.Decimal(10, 2)
+  postcode          String?
+  city              String?
+  state             String?
+  category          String?  // Service category
+  status            String   @default("new") // "new" | "contacted" | "quoted" | "booked" | "lost"
+  threadId          String?  // Universal conversation ID
+  rawJson           String   @db.Text // Original platform payload
+  syncedToCrm       Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relationships
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [threadId], references: [id])
+
+  @@unique([platform, externalRequestId])
+  @@index([userId])
+  @@index([platform])
+  @@index([status])
+  @@index([createdAt])
+  @@map("leads")
+}
+
+// ==========================================
+// Messaging & Conversations
+// ==========================================
+
+model Conversation {
+  id              String   @id @default(uuid())
+  userId          String
+  platform        String   // "thumbtack" | "yelp" | etc.
+  externalThreadId String  // Platform's conversation/thread ID
+  customerName    String
+  lastMessageAt   DateTime @default(now())
+  unreadCount     Int      @default(0)
+  status          String   @default("active") // "active" | "archived" | "closed"
+  metadataJson    String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relationships
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages Message[]
+  leads    Lead[]
+
+  @@unique([platform, externalThreadId])
+  @@index([userId])
+  @@index([platform])
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+model Message {
+  id              String   @id @default(uuid())
+  conversationId  String
+  userId          String
+  platform        String   // "thumbtack" | "yelp" | etc.
+  externalMessageId String? // Platform's message ID
+  sender          String   // "pro" | "customer" | "system"
+  content         String   @db.Text
+  isRead          Boolean  @default(false)
+  sentAt          DateTime @default(now())
+  deliveredAt     DateTime?
+  rawJson         String?  @db.Text
+  createdAt       DateTime @default(now())
+
+  // Relationships
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([userId])
+  @@index([sentAt])
+  @@map("messages")
+}
+
+// ==========================================
+// Quote & Negotiation Tracking
+// ==========================================
+
+model Quote {
+  id              String   @id @default(uuid())
+  userId          String
+  platform        String
+  externalQuoteId String?  // Platform's quote ID
+  leadId          String?  // Reference to lead if applicable
+  amount          Decimal  @db.Decimal(10, 2)
+  currency        String   @default("USD")
+  description     String?  @db.Text
+  status          String   @default("pending") // "pending" | "accepted" | "rejected" | "expired"
+  validUntil      DateTime?
+  rawJson         String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([platform])
+  @@index([status])
+  @@map("quotes")
+}
+
+// ==========================================
+// Webhook Event Log
+// ==========================================
+
+model WebhookEvent {
+  id           String   @id @default(uuid())
+  platform     String
+  eventType    String   // "request.created" | "message.created" | etc.
+  payload      String   @db.Text
+  signature    String?
+  verified     Boolean  @default(false)
+  processed    Boolean  @default(false)
+  processingError String? @db.Text
+  receivedAt   DateTime @default(now())
+  processedAt  DateTime?
+
+  @@index([platform])
+  @@index([eventType])
+  @@index([processed])
+  @@index([receivedAt])
+  @@map("webhook_events")
+}
