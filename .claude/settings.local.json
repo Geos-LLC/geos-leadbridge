@@ -8,7 +8,8 @@
       "Bash(npx prisma generate:*)",
       "Bash(copy .env.example .env)",
       "Bash(npm run build:*)",
-      "Bash(npm run prisma:generate:*)"
+      "Bash(npm run prisma:generate:*)",
+      "Bash(npm run start:dev:*)"
     ]
   }
 }
