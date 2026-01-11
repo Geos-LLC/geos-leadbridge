@@ -66,7 +66,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       client_id: this.clientId,
       redirect_uri: this.redirectUri,
       response_type: 'code',
-      scope: 'demand::messages.read demand::messages.write demand::negotiations.read demand::users.read demand::webhooks.read demand::webhooks.write',
+      scope: 'supply::messages.read supply::messages.write supply::negotiations.read supply::users.read supply::webhooks.read supply::webhooks.write offline_access',
       state,
       audience: 'urn:partner-api',
     });
