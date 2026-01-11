@@ -37,12 +37,16 @@ export class LeadsService {
    * For other platforms: may fetch from API and store locally
    */
   async getLeads(userId: string, platformName: string, options?: any): Promise<NormalizedLead[]> {
+    console.log(`[LeadsService] getLeads called - userId: ${userId}, platform: ${platformName}, options:`, options);
+
     // For webhook-based platforms like Thumbtack, query local database
     if (platformName === 'thumbtack') {
-      return this.getCachedLeads(userId, {
+      const leads = await this.getCachedLeads(userId, {
         platform: platformName,
         limit: options?.limit,
       });
+      console.log(`[LeadsService] Found ${leads.length} leads for user ${userId}`);
+      return leads;
     }
 
     // For API-based platforms, fetch from adapter and cache
@@ -256,14 +260,17 @@ export class LeadsService {
    * Import a single Thumbtack negotiation by ID
    */
   async importThumbtackNegotiation(userId: string, negotiationId: string): Promise<NormalizedLead> {
+    console.log(`[LeadsService] importThumbtackNegotiation - userId: ${userId}, negotiationId: ${negotiationId}`);
     const credentials = await this.platformService.getCredentials(userId, 'thumbtack');
     const adapter = this.platformFactory.getAdapter('thumbtack') as any;
 
     // Fetch negotiation from Thumbtack API
     const lead = await adapter.getLead(credentials, negotiationId);
+    console.log(`[LeadsService] Fetched lead from Thumbtack:`, JSON.stringify(lead));
 
     // Store in database
     await this.upsertLead(userId, lead);
+    console.log(`[LeadsService] Lead upserted to database`);
 
     // Return the stored lead with DB ID
     const storedLead = await this.prisma.lead.findFirst({

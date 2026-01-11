@@ -28,6 +28,7 @@ interface LocalMessage {
 }
 
 export function Messages() {
+  console.log('[Messages] Component rendering');
   const navigate = useNavigate();
   const { leads, setLeads, selectedLead, setSelectedLead, selectedBusiness } = useAppStore();
   const [loading, setLoading] = useState(true);
