@@ -252,6 +252,7 @@ export class LeadsService {
         rawJson: JSON.stringify(lead.raw),
       },
       update: {
+        userId, // Update userId in case lead was imported by different user before
         customerName: lead.customerName,
         customerPhone: lead.customerPhone,
         customerEmail: lead.customerEmail,
