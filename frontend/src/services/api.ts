@@ -122,7 +122,7 @@ export const leadsApi = {
     const { data } = await api.post(`/v1/thumbtack/leads/${leadId}/message`, { message });
     return data;
   },
-  importNegotiation: async (negotiationId: string): Promise<{ lead: Lead }> => {
+  importNegotiation: async (negotiationId: string): Promise<{ lead: Lead; isNew: boolean; message: string }> => {
     const { data } = await api.post(`/v1/thumbtack/negotiations/${negotiationId}/import`);
     return data;
   },

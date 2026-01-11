@@ -9,6 +9,7 @@ import type { Business } from '../types';
 interface ImportResult {
   id: string;
   success: boolean;
+  isNew?: boolean;
   error?: string;
 }
 
@@ -181,7 +182,7 @@ export function Dashboard() {
       try {
         const result = await leadsApi.importNegotiation(id);
         console.log('[Dashboard] Import success for', id, result);
-        results.push({ id, success: true });
+        results.push({ id, success: true, isNew: result.isNew });
       } catch (err: any) {
         console.error('[Dashboard] Import failed for', id, err);
         results.push({
@@ -196,14 +197,20 @@ export function Dashboard() {
 
     setImporting(false);
 
-    const successCount = results.filter(r => r.success).length;
+    const newCount = results.filter(r => r.success && r.isNew).length;
+    const updatedCount = results.filter(r => r.success && !r.isNew).length;
     const failCount = results.filter(r => !r.success).length;
 
-    if (successCount > 0 && failCount === 0) {
-      setSuccess(`Successfully imported ${successCount} negotiation(s)`);
+    if (newCount > 0 && updatedCount === 0 && failCount === 0) {
+      setSuccess(`Successfully imported ${newCount} new negotiation(s)`);
       setImportIds('');
-    } else if (successCount > 0) {
-      setSuccess(`Imported ${successCount} negotiation(s), ${failCount} failed`);
+    } else if (newCount > 0 || updatedCount > 0) {
+      const parts = [];
+      if (newCount > 0) parts.push(`${newCount} new`);
+      if (updatedCount > 0) parts.push(`${updatedCount} already existed (updated)`);
+      if (failCount > 0) parts.push(`${failCount} failed`);
+      setSuccess(parts.join(', '));
+      if (failCount === 0) setImportIds('');
     } else {
       setError(`Failed to import all ${failCount} negotiation(s)`);
     }
@@ -463,11 +470,14 @@ export function Dashboard() {
                   {importResults.map((result, idx) => (
                     <div
                       key={idx}
-                      className={`result-item ${result.success ? 'success' : 'failed'}`}
+                      className={`result-item ${result.success ? (result.isNew ? 'success' : 'duplicate') : 'failed'}`}
                     >
                       <span className="result-id">{result.id}</span>
                       {result.success ? (
-                        <CheckCircle size={16} className="result-icon success" />
+                        <span className="result-status">
+                          <CheckCircle size={16} className={`result-icon ${result.isNew ? 'success' : 'duplicate'}`} />
+                          {result.isNew ? 'New' : 'Already exists'}
+                        </span>
                       ) : (
                         <span className="result-error">
                           <AlertCircle size={16} className="result-icon failed" />

@@ -271,9 +271,23 @@ export class LeadsService {
 
   /**
    * Import a single Thumbtack negotiation by ID
+   * Returns { lead, isNew } to indicate if this was a new import or update
    */
-  async importThumbtackNegotiation(userId: string, negotiationId: string): Promise<NormalizedLead> {
+  async importThumbtackNegotiation(userId: string, negotiationId: string): Promise<{ lead: NormalizedLead; isNew: boolean }> {
     console.log(`[LeadsService] importThumbtackNegotiation - userId: ${userId}, negotiationId: ${negotiationId}`);
+
+    // Check if lead already exists for this user
+    const existingLead = await this.prisma.lead.findFirst({
+      where: {
+        platform: 'thumbtack',
+        externalRequestId: negotiationId,
+        userId,
+      },
+    });
+
+    const isNew = !existingLead;
+    console.log(`[LeadsService] Lead ${isNew ? 'is new' : 'already exists'} for this user`);
+
     const credentials = await this.platformService.getCredentials(userId, 'thumbtack');
     const adapter = this.platformFactory.getAdapter('thumbtack') as any;
 
@@ -293,7 +307,7 @@ export class LeadsService {
       },
     });
 
-    return this.convertToNormalizedLead(storedLead);
+    return { lead: this.convertToNormalizedLead(storedLead), isNew };
   }
 
   /**

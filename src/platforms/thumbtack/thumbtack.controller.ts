@@ -321,11 +321,12 @@ export class ThumbtackController {
     @CurrentUser() user: any,
     @Param('negotiationId') negotiationId: string,
   ) {
-    const lead = await this.leadsService.importThumbtackNegotiation(user.userId, negotiationId);
+    const { lead, isNew } = await this.leadsService.importThumbtackNegotiation(user.userId, negotiationId);
 
     return {
       success: true,
-      message: 'Negotiation imported successfully',
+      isNew,
+      message: isNew ? 'Negotiation imported successfully' : 'Negotiation already exists (updated)',
       lead,
     };
   }

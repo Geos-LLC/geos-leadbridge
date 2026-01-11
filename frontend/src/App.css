@@ -759,6 +759,22 @@ body {
   color: var(--danger);
 }
 
+.result-item.duplicate {
+  background: #fff3cd;
+  border: 1px solid #ffe69c;
+}
+
+.result-icon.duplicate {
+  color: #856404;
+}
+
+.result-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
 /* ==========================================
    Messages Page
    ========================================== */
