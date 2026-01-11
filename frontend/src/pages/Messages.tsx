@@ -55,14 +55,17 @@ export function Messages() {
 
   const loadLeads = async () => {
     setLoading(true);
+    console.log('[Messages] Loading leads...');
     try {
       const { leads } = await leadsApi.getLeads(50);
+      console.log('[Messages] Loaded leads:', leads.length, leads);
       setLeads(leads);
       if (leads.length > 0 && !selectedLead) {
+        console.log('[Messages] Auto-selecting first lead:', leads[0]);
         setSelectedLead(leads[0]);
       }
     } catch (err) {
-      console.error('Failed to load leads:', err);
+      console.error('[Messages] Failed to load leads:', err);
     } finally {
       setLoading(false);
     }
@@ -71,8 +74,10 @@ export function Messages() {
   const loadMessagesForLead = async (lead: Lead) => {
     setLoadingMessages(true);
     setMessages([]);
+    console.log('[Messages] Loading messages for lead:', lead.id, lead.externalRequestId);
     try {
       const { messages: apiMessages } = await leadsApi.getMessages(lead.id);
+      console.log('[Messages] API returned messages:', apiMessages);
       const convertedMessages: LocalMessage[] = apiMessages.map((msg) => ({
         id: msg.id || msg.externalMessageId,
         content: msg.content,
@@ -80,9 +85,10 @@ export function Messages() {
         sentAt: new Date(msg.sentAt),
         externalId: msg.externalMessageId,
       }));
+      console.log('[Messages] Converted messages:', convertedMessages);
       setMessages(convertedMessages);
     } catch (err) {
-      console.error('Failed to load messages:', err);
+      console.error('[Messages] Failed to load messages:', err);
     } finally {
       setLoadingMessages(false);
     }
