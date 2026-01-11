@@ -18,6 +18,20 @@ export class LeadsService {
   ) {}
 
   /**
+   * Get businesses for a user from a specific platform (Thumbtack)
+   */
+  async getBusinesses(userId: string, platformName: string): Promise<any[]> {
+    const credentials = await this.platformService.getCredentials(userId, platformName);
+    const adapter = this.platformFactory.getAdapter(platformName) as any;
+
+    if (typeof adapter.getBusinesses === 'function') {
+      return await adapter.getBusinesses(credentials);
+    }
+
+    return [];
+  }
+
+  /**
    * Get leads for a user from a specific platform
    */
   async getLeads(userId: string, platformName: string, options?: any): Promise<NormalizedLead[]> {

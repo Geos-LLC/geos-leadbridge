@@ -42,7 +42,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
     this.clientSecret = this.configService.get<string>('thumbtack.clientSecret') || '';
     this.redirectUri = this.configService.get<string>('thumbtack.redirectUri') || '';
     this.authBaseUrl = this.configService.get<string>('thumbtack.authBaseUrl') || 'https://auth.thumbtack.com/oauth2';
-    this.apiBaseUrl = this.configService.get<string>('thumbtack.apiBaseUrl') || 'https://pro-api.thumbtack.com/v2';
+    this.apiBaseUrl = this.configService.get<string>('thumbtack.apiBaseUrl') || 'https://api.thumbtack.com/v4';
 
     this.httpClient = axios.create({
       baseURL: this.apiBaseUrl,
@@ -143,111 +143,107 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   }
 
   // ==========================================
+  // Business Management
+  // ==========================================
+
+  /**
+   * Get businesses for the authenticated user
+   * Note: Thumbtack uses webhooks for leads - this returns the user's businesses
+   */
+  async getBusinesses(credentials: PlatformCredentials): Promise<any[]> {
+    try {
+      const response = await this.httpClient.get('/businesses', {
+        headers: { Authorization: `Bearer ${credentials.accessToken}` },
+      });
+
+      return response.data.businesses || [];
+    } catch (error) {
+      this.logger.error('Error fetching businesses:', error.response?.data || error.message);
+      throw new Error('Failed to fetch businesses from Thumbtack');
+    }
+  }
+
+  // ==========================================
   // Lead Management
+  // Note: Thumbtack sends leads via webhooks - there's no direct fetch endpoint
+  // Leads received via webhook should be stored in database
   // ==========================================
 
   async getLeads(
     credentials: PlatformCredentials,
-    options?: LeadFetchOptions,
+    _options?: LeadFetchOptions,
   ): Promise<NormalizedLead[]> {
+    // Thumbtack doesn't have a leads fetch endpoint
+    // Leads are delivered via webhooks and should be stored in the database
+    // Return businesses info as a placeholder for now
+    this.logger.warn('Thumbtack delivers leads via webhooks. Use getBusinesses() to see connected businesses.');
+
     try {
-      const params: any = {
-        limit: options?.limit || 50,
-      };
-
-      if (options?.since) {
-        params.created_after = options.since.toISOString();
-      }
-
-      if (options?.cursor) {
-        params.cursor = options.cursor;
-      }
-
-      const response = await this.httpClient.get('/requests', {
-        headers: { Authorization: `Bearer ${credentials.accessToken}` },
-        params,
-      });
-
-      return response.data.requests.map((request: any) => this.normalizeRequest(request));
+      const businesses = await this.getBusinesses(credentials);
+      // Return empty leads array - actual leads come from webhooks
+      this.logger.log(`Found ${businesses.length} businesses. Leads are delivered via webhooks.`);
+      return [];
     } catch (error) {
-      this.logger.error('Error fetching leads:', error.response?.data || error.message);
-      throw new Error('Failed to fetch leads from Thumbtack');
+      this.logger.error('Error in getLeads:', error.response?.data || error.message);
+      throw new Error('Failed to fetch from Thumbtack. Note: Leads are delivered via webhooks.');
     }
   }
 
-  async getLead(credentials: PlatformCredentials, requestId: string): Promise<NormalizedLead> {
-    try {
-      const response = await this.httpClient.get(`/requests/${requestId}`, {
-        headers: { Authorization: `Bearer ${credentials.accessToken}` },
-      });
-
-      return this.normalizeRequest(response.data);
-    } catch (error) {
-      this.logger.error('Error fetching lead:', error.response?.data || error.message);
-      throw new Error('Failed to fetch lead from Thumbtack');
-    }
+  async getLead(_credentials: PlatformCredentials, _requestId: string): Promise<NormalizedLead> {
+    // Individual leads should be retrieved from local database
+    // as they come from webhooks, not API calls
+    throw new Error('Thumbtack leads are delivered via webhooks and stored locally. Query your database instead.');
   }
 
   // ==========================================
-  // Messaging
+  // Messaging (v4 API uses negotiations)
   // ==========================================
 
   async getConversations(
-    credentials: PlatformCredentials,
-    options?: PaginationOptions,
+    _credentials: PlatformCredentials,
+    _options?: PaginationOptions,
   ): Promise<NormalizedConversation[]> {
-    try {
-      const response = await this.httpClient.get('/messages/threads', {
-        headers: { Authorization: `Bearer ${credentials.accessToken}` },
-        params: {
-          limit: options?.limit || 50,
-          cursor: options?.cursor,
-        },
-      });
-
-      return response.data.threads.map((thread: any) => this.normalizeThread(thread));
-    } catch (error) {
-      this.logger.error('Error fetching conversations:', error.response?.data || error.message);
-      throw new Error('Failed to fetch conversations from Thumbtack');
-    }
+    // v4 API doesn't have a list conversations endpoint
+    // Messages are associated with negotiations (leads) which come via webhooks
+    this.logger.warn('Conversations are tied to negotiations (leads) delivered via webhooks');
+    return [];
   }
 
   async getConversation(
     credentials: PlatformCredentials,
-    threadId: string,
-    options?: PaginationOptions,
+    negotiationId: string,
+    _options?: PaginationOptions,
   ): Promise<NormalizedMessage[]> {
     try {
-      const response = await this.httpClient.get(`/messages/threads/${threadId}`, {
+      // v4 endpoint: GET /v4/negotiations/{negotiationID}/messages
+      const response = await this.httpClient.get(`/negotiations/${negotiationId}/messages`, {
         headers: { Authorization: `Bearer ${credentials.accessToken}` },
-        params: {
-          limit: options?.limit || 100,
-          cursor: options?.cursor,
-        },
       });
 
-      return response.data.messages.map((message: any) => this.normalizeMessage(message, threadId));
+      const messages = response.data.messages || response.data || [];
+      return messages.map((message: any) => this.normalizeMessage(message, negotiationId));
     } catch (error) {
-      this.logger.error('Error fetching conversation:', error.response?.data || error.message);
-      throw new Error('Failed to fetch conversation from Thumbtack');
+      this.logger.error('Error fetching messages:', error.response?.data || error.message);
+      throw new Error('Failed to fetch messages from Thumbtack');
     }
   }
 
   async sendMessage(
     credentials: PlatformCredentials,
-    threadId: string,
+    negotiationId: string,
     message: string,
   ): Promise<NormalizedMessage> {
     try {
+      // v4 endpoint: POST /v4/negotiations/{negotiationID}/messages
       const response = await this.httpClient.post(
-        `/messages/threads/${threadId}`,
-        { message },
+        `/negotiations/${negotiationId}/messages`,
+        { text: message },
         {
           headers: { Authorization: `Bearer ${credentials.accessToken}` },
         },
       );
 
-      return this.normalizeMessage(response.data, threadId);
+      return this.normalizeMessage(response.data, negotiationId);
     } catch (error) {
       this.logger.error('Error sending message:', error.response?.data || error.message);
       throw new Error('Failed to send message to Thumbtack');

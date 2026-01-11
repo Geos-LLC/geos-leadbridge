@@ -117,7 +117,22 @@ export class ThumbtackController {
   }
 
   // ==========================================
-  // Leads
+  // Businesses
+  // ==========================================
+
+  @Get('businesses')
+  async getBusinesses(@CurrentUser() user: any) {
+    const businesses = await this.leadsService.getBusinesses(user.userId, PlatformName.THUMBTACK);
+
+    return {
+      platform: PlatformName.THUMBTACK,
+      count: businesses.length,
+      businesses,
+    };
+  }
+
+  // ==========================================
+  // Leads (delivered via webhooks)
   // ==========================================
 
   @Get('leads')
@@ -142,6 +157,7 @@ export class ThumbtackController {
       platform: PlatformName.THUMBTACK,
       count: leads.length,
       leads,
+      note: 'Thumbtack delivers leads via webhooks. This returns leads stored from webhook events.',
     };
   }
 
