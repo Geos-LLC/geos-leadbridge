@@ -291,14 +291,20 @@ export class ThumbtackAdapter implements IPlatformAdapter {
     _options?: PaginationOptions,
   ): Promise<NormalizedMessage[]> {
     try {
+      this.logger.log(`Fetching messages for negotiation: ${negotiationId}`);
       // v4 endpoint: GET /api/v4/negotiations/{negotiationID}/messages
       // Response: { data: [...messages], pagination: { limit: 3 } }
       const response = await this.httpClient.get(`/negotiations/${negotiationId}/messages`, {
         headers: { Authorization: `Bearer ${credentials.accessToken}` },
       });
 
+      this.logger.log(`Thumbtack messages response: ${JSON.stringify(response.data)}`);
       const messages = response.data.data || response.data.messages || [];
-      return messages.map((message: any) => this.normalizeMessage(message, negotiationId));
+      this.logger.log(`Found ${messages.length} messages`);
+
+      const normalized = messages.map((message: any) => this.normalizeMessage(message, negotiationId));
+      this.logger.log(`Normalized messages: ${JSON.stringify(normalized)}`);
+      return normalized;
     } catch (error) {
       this.logger.error('Error fetching messages:', error.response?.data || error.message);
       throw new Error('Failed to fetch messages from Thumbtack');
