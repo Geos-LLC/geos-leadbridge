@@ -142,6 +142,28 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   }
 
   // ==========================================
+  // User Info
+  // ==========================================
+
+  /**
+   * Get the current user's info from Thumbtack
+   */
+  async getCurrentUser(credentials: PlatformCredentials): Promise<any> {
+    try {
+      this.logger.log('Fetching current user from Thumbtack API');
+      const response = await this.httpClient.get('/users/me', {
+        headers: { Authorization: `Bearer ${credentials.accessToken}` },
+      });
+
+      this.logger.log('Thumbtack user response:', JSON.stringify(response.data));
+      return response.data;
+    } catch (error) {
+      this.logger.error('Error fetching user:', error.response?.data || error.message);
+      throw new Error(`Failed to fetch user from Thumbtack: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  // ==========================================
   // Business Management
   // ==========================================
 
@@ -152,14 +174,27 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   async getBusinesses(credentials: PlatformCredentials): Promise<any[]> {
     try {
       this.logger.log('Fetching businesses from Thumbtack API');
+      this.logger.log('Token scope:', credentials.scope);
+      this.logger.log('Token expires:', credentials.expiresAt);
+
       const response = await this.httpClient.get('/businesses', {
         headers: { Authorization: `Bearer ${credentials.accessToken}` },
       });
 
       this.logger.log('Thumbtack businesses response:', JSON.stringify(response.data));
 
-      // API may return { data: [...] } or { businesses: [...] }
-      return response.data.data || response.data.businesses || response.data || [];
+      const businesses = response.data.data || response.data.businesses || response.data || [];
+      this.logger.log(`Found ${businesses.length} businesses`);
+
+      // If empty, log a helpful message
+      if (businesses.length === 0) {
+        this.logger.warn('No businesses returned. This could mean:');
+        this.logger.warn('1. The account is not a Thumbtack Pro account');
+        this.logger.warn('2. No business profiles have been created in Thumbtack Pro');
+        this.logger.warn('3. The OAuth scope supply::businesses.list was not granted');
+      }
+
+      return businesses;
     } catch (error) {
       this.logger.error('Error fetching businesses:', error.response?.data || error.message);
       this.logger.error('Full error:', error.response?.status, error.response?.statusText);

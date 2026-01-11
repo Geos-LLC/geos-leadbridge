@@ -115,6 +115,28 @@ export class ThumbtackController {
   }
 
   // ==========================================
+  // User Info
+  // ==========================================
+
+  /**
+   * Get the current Thumbtack user info
+   * Useful for debugging connection issues
+   */
+  @Get('user')
+  async getCurrentUser(@CurrentUser() user: any) {
+    const credentials = await this.platformService.getCredentials(user.userId, PlatformName.THUMBTACK);
+    const adapter = this.platformService['platformFactory'].getAdapter(PlatformName.THUMBTACK) as any;
+    const thumbtackUser = await adapter.getCurrentUser(credentials);
+
+    return {
+      platform: PlatformName.THUMBTACK,
+      user: thumbtackUser,
+      tokenScope: credentials.scope,
+      tokenExpiresAt: credentials.expiresAt,
+    };
+  }
+
+  // ==========================================
   // Businesses & Webhook Setup
   // ==========================================
 
