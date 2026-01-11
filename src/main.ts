@@ -45,12 +45,9 @@ async function bootstrap() {
     app.useStaticAssets(frontendPath);
 
     // SPA fallback - serve index.html for non-API routes
+    // Using regex pattern to avoid path-to-regexp issues with bare '*'
     const expressApp = app.getHttpAdapter().getInstance();
-    expressApp.get('*', (req: any, res: any, next: any) => {
-      // Skip API routes
-      if (req.path.startsWith('/api')) {
-        return next();
-      }
+    expressApp.get(/^(?!\/api).*/, (req: any, res: any) => {
       res.sendFile(path.join(frontendPath, 'index.html'));
     });
   }
