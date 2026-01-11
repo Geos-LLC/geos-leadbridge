@@ -25,8 +25,8 @@ export default () => ({
     clientSecret: process.env.THUMBTACK_CLIENT_SECRET,
     redirectUri: process.env.THUMBTACK_REDIRECT_URI || 'http://localhost:3000/v1/thumbtack/auth/callback',
     webhookSecret: process.env.THUMBTACK_WEBHOOK_SECRET,
-    apiBaseUrl: 'https://api.thumbtack.com/v2',
-    authBaseUrl: 'https://www.thumbtack.com/api/oauth2',
+    apiBaseUrl: 'https://pro-api.thumbtack.com/v2',
+    authBaseUrl: 'https://auth.thumbtack.com/oauth2',
   },
 
   yelp: {
