@@ -5,14 +5,17 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import * as dotenv from 'dotenv';
+import * as path from 'path';
+import * as fs from 'fs';
 
 // Load environment variables
 dotenv.config();
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Get configuration
   const configService = app.get(ConfigService);
@@ -33,8 +36,24 @@ async function bootstrap() {
     }),
   );
 
-  // Global prefix
+  // Global prefix for API routes
   app.setGlobalPrefix('api');
+
+  // Serve frontend static files in production
+  const frontendPath = path.join(__dirname, '..', 'frontend', 'dist');
+  if (fs.existsSync(frontendPath)) {
+    app.useStaticAssets(frontendPath);
+
+    // SPA fallback - serve index.html for non-API routes
+    const expressApp = app.getHttpAdapter().getInstance();
+    expressApp.get('*', (req: any, res: any, next: any) => {
+      // Skip API routes
+      if (req.path.startsWith('/api')) {
+        return next();
+      }
+      res.sendFile(path.join(frontendPath, 'index.html'));
+    });
+  }
 
   // Start server
   await app.listen(port);
