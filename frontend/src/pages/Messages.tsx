@@ -24,12 +24,14 @@ interface LocalMessage {
   content: string;
   sender: 'pro' | 'customer';
   sentAt: Date;
+  externalId?: string;
 }
 
 export function Messages() {
   const navigate = useNavigate();
   const { leads, setLeads, selectedLead, setSelectedLead, selectedBusiness } = useAppStore();
   const [loading, setLoading] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [messages, setMessages] = useState<LocalMessage[]>([]);
@@ -66,11 +68,24 @@ export function Messages() {
     }
   };
 
-  const loadMessagesForLead = (_lead: Lead) => {
-    // For now, we start with no messages since Thumbtack messages
-    // are retrieved separately. In a full implementation, you'd
-    // fetch messages from the API.
+  const loadMessagesForLead = async (lead: Lead) => {
+    setLoadingMessages(true);
     setMessages([]);
+    try {
+      const { messages: apiMessages } = await leadsApi.getMessages(lead.id);
+      const convertedMessages: LocalMessage[] = apiMessages.map((msg) => ({
+        id: msg.id || msg.externalMessageId,
+        content: msg.content,
+        sender: msg.sender,
+        sentAt: new Date(msg.sentAt),
+        externalId: msg.externalMessageId,
+      }));
+      setMessages(convertedMessages);
+    } catch (err) {
+      console.error('Failed to load messages:', err);
+    } finally {
+      setLoadingMessages(false);
+    }
   };
 
   const scrollToBottom = () => {
@@ -300,7 +315,12 @@ export function Messages() {
 
             {/* Messages Area */}
             <div className="messages-container">
-              {messages.length === 0 ? (
+              {loadingMessages ? (
+                <div className="no-messages">
+                  <Loader2 className="spinner" size={32} />
+                  <p>Loading messages...</p>
+                </div>
+              ) : messages.length === 0 ? (
                 <div className="no-messages">
                   <MessageSquare size={32} />
                   <p>No messages yet</p>

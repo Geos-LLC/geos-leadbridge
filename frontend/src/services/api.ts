@@ -90,6 +90,19 @@ export const thumbtackApi = {
   },
 };
 
+// Message type for API responses
+export interface ApiMessage {
+  id: string;
+  conversationId: string;
+  platform: string;
+  externalMessageId: string;
+  sender: 'customer' | 'pro';
+  content: string;
+  isRead: boolean;
+  sentAt: string;
+  deliveredAt?: string;
+}
+
 // Leads
 export const leadsApi = {
   getLeads: async (limit?: number): Promise<{ leads: Lead[]; count: number }> => {
@@ -99,6 +112,10 @@ export const leadsApi = {
   },
   getLead: async (id: string): Promise<Lead> => {
     const { data } = await api.get(`/v1/thumbtack/leads/${id}`);
+    return data;
+  },
+  getMessages: async (leadId: string): Promise<{ messages: ApiMessage[]; count: number }> => {
+    const { data } = await api.get(`/v1/thumbtack/leads/${leadId}/messages`);
     return data;
   },
   sendMessage: async (leadId: string, message: string): Promise<{ success: boolean }> => {

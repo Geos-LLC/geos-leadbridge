@@ -120,6 +120,25 @@ export class LeadsService {
   }
 
   /**
+   * Get messages for a lead/negotiation
+   */
+  async getMessages(userId: string, leadId: string): Promise<any[]> {
+    const lead = await this.getLead(userId, leadId);
+
+    // Use externalRequestId (negotiationID) to fetch messages from Thumbtack
+    const negotiationId = lead.externalRequestId;
+
+    const credentials = await this.platformService.getCredentials(userId, lead.platform);
+    const adapter = this.platformFactory.getAdapter(lead.platform) as any;
+
+    if (typeof adapter.getConversation === 'function') {
+      return await adapter.getConversation(credentials, negotiationId);
+    }
+
+    return [];
+  }
+
+  /**
    * Send a message to a lead
    */
   async sendMessage(

@@ -222,6 +222,21 @@ export class ThumbtackController {
     return this.leadsService.getLead(user.userId, id);
   }
 
+  /**
+   * Get messages for a lead/negotiation
+   */
+  @Get('leads/:id/messages')
+  async getMessages(@CurrentUser() user: any, @Param('id') id: string) {
+    const messages = await this.leadsService.getMessages(user.userId, id);
+
+    return {
+      platform: PlatformName.THUMBTACK,
+      leadId: id,
+      count: messages.length,
+      messages,
+    };
+  }
+
   @Post('leads/:id/message')
   async sendMessage(
     @CurrentUser() user: any,
