@@ -188,6 +188,8 @@ export class LeadsService {
 
   /**
    * Store/update lead in database
+   * Note: threadId is NOT set here because it references Conversation.id (foreign key)
+   * The negotiationID is stored in externalRequestId instead
    */
   private async upsertLead(userId: string, lead: NormalizedLead): Promise<void> {
     await this.prisma.lead.upsert({
@@ -211,7 +213,7 @@ export class LeadsService {
         state: lead.state,
         category: lead.category,
         status: lead.status,
-        threadId: lead.threadId,
+        // threadId intentionally NOT set - it's a FK to Conversation table
         rawJson: JSON.stringify(lead.raw),
       },
       update: {
@@ -225,7 +227,7 @@ export class LeadsService {
         state: lead.state,
         category: lead.category,
         status: lead.status,
-        threadId: lead.threadId,
+        // threadId intentionally NOT updated - it's a FK to Conversation table
         rawJson: JSON.stringify(lead.raw),
       },
     });
