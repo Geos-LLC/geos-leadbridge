@@ -199,25 +199,34 @@ export class ThumbtackAdapter implements IPlatformAdapter {
 
   /**
    * Normalize Thumbtack negotiation to NormalizedLead format
+   * API format: { negotiationID, createdAt, customer: { customerID, firstName, lastName, phone },
+   *              business: {...}, request: { requestID, description, category, location, details, ... },
+   *              estimate: {...}, status, leadPrice, chargeState }
    */
   private normalizeNegotiation(negotiation: any): NormalizedLead {
+    const customer = negotiation.customer || {};
+    const request = negotiation.request || {};
+    const location = request.location || {};
+
     return {
       id: '',
       platform: PlatformName.THUMBTACK,
-      externalRequestId: negotiation.negotiationID || negotiation.id,
-      customerName: negotiation.customer?.name || 'Unknown',
-      customerPhone: negotiation.customer?.phone,
-      customerEmail: negotiation.customer?.email,
-      message: negotiation.request?.description || negotiation.description || '',
-      budget: negotiation.request?.budget ? parseFloat(negotiation.request.budget) : undefined,
-      postcode: negotiation.request?.location?.zipCode || negotiation.location?.zipCode,
-      city: negotiation.request?.location?.city || negotiation.location?.city,
-      state: negotiation.request?.location?.state || negotiation.location?.state,
-      category: negotiation.request?.category?.name || negotiation.category,
+      externalRequestId: negotiation.negotiationID,
+      customerName: customer.firstName && customer.lastName
+        ? `${customer.firstName} ${customer.lastName}`
+        : customer.displayName || 'Unknown',
+      customerPhone: customer.phone,
+      customerEmail: undefined, // API doesn't provide email
+      message: request.description || '',
+      budget: negotiation.estimate?.total ? parseFloat(negotiation.estimate.total) : undefined,
+      postcode: location.zipCode,
+      city: location.city,
+      state: location.state,
+      category: request.category?.name,
       status: this.mapThumbtackStatus(negotiation.status),
-      threadId: negotiation.negotiationID || negotiation.id,
-      createdAt: new Date(negotiation.createdTime || negotiation.created_at || Date.now()),
-      updatedAt: new Date(negotiation.updatedTime || negotiation.updated_at || Date.now()),
+      threadId: negotiation.negotiationID,
+      createdAt: new Date(negotiation.createdAt || Date.now()),
+      updatedAt: new Date(negotiation.createdAt || Date.now()),
       raw: negotiation,
     };
   }
@@ -242,12 +251,13 @@ export class ThumbtackAdapter implements IPlatformAdapter {
     _options?: PaginationOptions,
   ): Promise<NormalizedMessage[]> {
     try {
-      // v4 endpoint: GET /v4/negotiations/{negotiationID}/messages
+      // v4 endpoint: GET /api/v4/negotiations/{negotiationID}/messages
+      // Response: { data: [...messages], pagination: { limit: 3 } }
       const response = await this.httpClient.get(`/negotiations/${negotiationId}/messages`, {
         headers: { Authorization: `Bearer ${credentials.accessToken}` },
       });
 
-      const messages = response.data.messages || response.data || [];
+      const messages = response.data.data || response.data.messages || [];
       return messages.map((message: any) => this.normalizeMessage(message, negotiationId));
     } catch (error) {
       this.logger.error('Error fetching messages:', error.response?.data || error.message);
@@ -344,16 +354,17 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   // ==========================================
 
   private normalizeMessage(message: any, conversationId: string): NormalizedMessage {
+    // API returns: messageID, negotiationID, customer, from ("Customer" | "Pro"), text, attachments, sentAt
     return {
       id: '', // Will be set by the service layer
       conversationId,
       platform: PlatformName.THUMBTACK,
-      externalMessageId: message.message_id,
-      sender: message.sender_type === 'pro' ? MessageSender.PRO : MessageSender.CUSTOMER,
-      content: message.text || message.message,
-      isRead: message.read || false,
-      sentAt: new Date(message.sent_at || message.created_at),
-      deliveredAt: message.delivered_at ? new Date(message.delivered_at) : undefined,
+      externalMessageId: message.messageID,
+      sender: message.from === 'Pro' ? MessageSender.PRO : MessageSender.CUSTOMER,
+      content: message.text,
+      isRead: true, // API doesn't provide read status
+      sentAt: new Date(message.sentAt),
+      deliveredAt: undefined,
       raw: message,
     };
   }
@@ -376,7 +387,12 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   }
 
   private mapThumbtackStatus(status: string): LeadStatus {
+    // API status values: "Open", "Canceled", "Picked"
     const statusMap: Record<string, LeadStatus> = {
+      open: LeadStatus.NEW,
+      canceled: LeadStatus.LOST,
+      picked: LeadStatus.BOOKED,
+      // Legacy values for backwards compatibility
       new: LeadStatus.NEW,
       contacted: LeadStatus.CONTACTED,
       quoted: LeadStatus.QUOTED,
