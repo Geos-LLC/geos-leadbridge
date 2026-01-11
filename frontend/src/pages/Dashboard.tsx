@@ -152,11 +152,16 @@ export function Dashboard() {
   };
 
   const handleImportNegotiations = async () => {
+    console.log('[Dashboard] handleImportNegotiations called');
+    console.log('[Dashboard] importIds value:', importIds);
+
     // Parse IDs - split by comma, newline, tab, or space
     const ids = importIds
       .split(/[,\n\t\s]+/)
       .map(id => id.trim())
       .filter(id => id.length > 0);
+
+    console.log('[Dashboard] Parsed IDs:', ids);
 
     if (ids.length === 0) {
       setError('Please enter at least one negotiation ID');
@@ -172,10 +177,13 @@ export function Dashboard() {
     const results: ImportResult[] = [];
 
     for (const id of ids) {
+      console.log('[Dashboard] Importing negotiation:', id);
       try {
-        await leadsApi.importNegotiation(id);
+        const result = await leadsApi.importNegotiation(id);
+        console.log('[Dashboard] Import success for', id, result);
         results.push({ id, success: true });
       } catch (err: any) {
+        console.error('[Dashboard] Import failed for', id, err);
         results.push({
           id,
           success: false,

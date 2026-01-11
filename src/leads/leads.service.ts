@@ -110,6 +110,8 @@ export class LeadsService {
     userId: string,
     filters?: { platform?: string; status?: string; limit?: number },
   ) {
+    console.log(`[LeadsService] getCachedLeads - userId: ${userId}, filters:`, filters);
+
     const leads = await this.prisma.lead.findMany({
       where: {
         userId,
@@ -119,6 +121,16 @@ export class LeadsService {
       orderBy: { createdAt: 'desc' },
       take: filters?.limit || 50,
     });
+
+    console.log(`[LeadsService] getCachedLeads found ${leads.length} leads in DB`);
+
+    // Debug: also check how many leads exist total for this user (without filters)
+    const totalLeads = await this.prisma.lead.count({ where: { userId } });
+    console.log(`[LeadsService] Total leads for user ${userId}: ${totalLeads}`);
+
+    // Debug: check if there are ANY leads in the database
+    const allLeadsCount = await this.prisma.lead.count();
+    console.log(`[LeadsService] Total leads in entire DB: ${allLeadsCount}`);
 
     return leads.map((lead) => this.convertToNormalizedLead(lead));
   }
