@@ -80,13 +80,15 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       const params = new URLSearchParams();
       params.append('grant_type', 'authorization_code');
       params.append('code', code);
-      params.append('client_id', this.clientId);
-      params.append('client_secret', this.clientSecret);
       params.append('redirect_uri', this.redirectUri);
+
+      // Thumbtack requires client_secret_basic authentication (credentials in header)
+      const basicAuth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
 
       const response = await axios.post(`${this.authBaseUrl}/token`, params, {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${basicAuth}`,
         },
       });
 
@@ -110,12 +112,14 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       const params = new URLSearchParams();
       params.append('grant_type', 'refresh_token');
       params.append('refresh_token', refreshToken);
-      params.append('client_id', this.clientId);
-      params.append('client_secret', this.clientSecret);
+
+      // Thumbtack requires client_secret_basic authentication (credentials in header)
+      const basicAuth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
 
       const response = await axios.post(`${this.authBaseUrl}/token`, params, {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${basicAuth}`,
         },
       });
 
