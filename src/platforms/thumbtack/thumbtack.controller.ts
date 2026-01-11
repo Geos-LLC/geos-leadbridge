@@ -14,6 +14,7 @@ import {
   Param,
   BadRequestException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
@@ -25,10 +26,15 @@ import { PlatformName } from '../../common/interfaces/platform.interface';
 @Controller('v1/thumbtack')
 @UseGuards(JwtAuthGuard)
 export class ThumbtackController {
+  private readonly frontendUrl: string;
+
   constructor(
     private platformService: PlatformService,
     private leadsService: LeadsService,
-  ) {}
+    private configService: ConfigService,
+  ) {
+    this.frontendUrl = this.configService.get<string>('frontendUrl') || 'http://localhost:5173';
+  }
 
   // ==========================================
   // OAuth Flow
@@ -49,17 +55,17 @@ export class ThumbtackController {
     @Query('error_description') errorDescription: string,
     @Res() res: Response,
   ) {
-    // Handle OAuth errors
+    // Handle OAuth errors - redirect to frontend with error
     if (error) {
-      return res.status(400).json({
-        success: false,
+      const errorParams = new URLSearchParams({
         error,
-        error_description: errorDescription,
+        error_description: errorDescription || 'OAuth authorization failed',
       });
+      return res.redirect(`${this.frontendUrl}/dashboard?${errorParams.toString()}`);
     }
 
     if (!code) {
-      throw new BadRequestException('Authorization code is required');
+      return res.redirect(`${this.frontendUrl}/dashboard?error=missing_code&error_description=Authorization code is required`);
     }
 
     try {
@@ -67,28 +73,20 @@ export class ThumbtackController {
       const userId = await this.platformService.getUserIdFromState(state);
 
       if (!userId) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid state parameter',
-          message: 'OAuth state expired or invalid. Please try connecting again.',
-        });
+        return res.redirect(`${this.frontendUrl}/dashboard?error=invalid_state&error_description=OAuth state expired or invalid. Please try connecting again.`);
       }
 
       // Exchange code for tokens
       await this.platformService.handleCallback(userId, PlatformName.THUMBTACK, code);
 
-      // Return success response
-      return res.json({
-        success: true,
-        message: 'Thumbtack account connected successfully!',
-        userId,
-      });
+      // Redirect to frontend dashboard with success
+      return res.redirect(`${this.frontendUrl}/dashboard?connected=thumbtack`);
     } catch (err) {
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to complete OAuth',
-        message: err.message,
+      const errorParams = new URLSearchParams({
+        error: 'oauth_failed',
+        error_description: err.message || 'Failed to complete OAuth',
       });
+      return res.redirect(`${this.frontendUrl}/dashboard?${errorParams.toString()}`);
     }
   }
 

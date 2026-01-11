@@ -12,7 +12,8 @@
       "Bash(npm run start:dev:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(railway logs:*)"
+      "Bash(railway logs:*)",
+      "Bash(git push:*)"
     ]
   }
 }

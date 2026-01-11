@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink } from 'lucide-react';
 import { platformsApi, thumbtackApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
@@ -8,6 +8,7 @@ import type { Business } from '../types';
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuthStore();
   const { platforms, setPlatforms, businesses, setBusinesses, setSelectedBusiness } = useAppStore();
   const [loading, setLoading] = useState(true);
@@ -17,6 +18,22 @@ export function Dashboard() {
   const [success, setSuccess] = useState('');
 
   const thumbtackConnected = platforms.find((p) => p.platformName === 'thumbtack')?.connected ?? false;
+
+  // Handle OAuth callback params
+  useEffect(() => {
+    const connected = searchParams.get('connected');
+    const oauthError = searchParams.get('error');
+    const errorDescription = searchParams.get('error_description');
+
+    if (connected === 'thumbtack') {
+      setSuccess('Thumbtack account connected successfully!');
+      // Clear the URL params
+      setSearchParams({});
+    } else if (oauthError) {
+      setError(errorDescription || `OAuth error: ${oauthError}`);
+      setSearchParams({});
+    }
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     loadPlatformStatus();
