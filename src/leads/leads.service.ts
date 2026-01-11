@@ -232,6 +232,52 @@ export class LeadsService {
   }
 
   /**
+   * Import a single Thumbtack negotiation by ID
+   */
+  async importThumbtackNegotiation(userId: string, negotiationId: string): Promise<NormalizedLead> {
+    const credentials = await this.platformService.getCredentials(userId, 'thumbtack');
+    const adapter = this.platformFactory.getAdapter('thumbtack') as any;
+
+    // Fetch negotiation from Thumbtack API
+    const lead = await adapter.getLead(credentials, negotiationId);
+
+    // Store in database
+    await this.upsertLead(userId, lead);
+
+    // Return the stored lead with DB ID
+    const storedLead = await this.prisma.lead.findFirst({
+      where: {
+        platform: 'thumbtack',
+        externalRequestId: negotiationId,
+      },
+    });
+
+    return this.convertToNormalizedLead(storedLead);
+  }
+
+  /**
+   * Import multiple Thumbtack negotiations
+   */
+  async importThumbtackNegotiations(
+    userId: string,
+    negotiationIds: string[],
+  ): Promise<{ imported: number; failed: number; errors: string[] }> {
+    const results = { imported: 0, failed: 0, errors: [] as string[] };
+
+    for (const negotiationId of negotiationIds) {
+      try {
+        await this.importThumbtackNegotiation(userId, negotiationId);
+        results.imported++;
+      } catch (error) {
+        results.failed++;
+        results.errors.push(`${negotiationId}: ${error.message}`);
+      }
+    }
+
+    return results;
+  }
+
+  /**
    * Convert database lead to normalized format
    */
   private convertToNormalizedLead(lead: any): NormalizedLead {

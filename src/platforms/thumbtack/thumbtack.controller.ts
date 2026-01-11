@@ -240,4 +240,47 @@ export class ThumbtackController {
       data: result,
     };
   }
+
+  // ==========================================
+  // Manual Lead Import (for existing leads)
+  // ==========================================
+
+  /**
+   * Import an existing lead/negotiation by ID from Thumbtack
+   * Use this to import leads that existed before webhook registration
+   */
+  @Post('negotiations/:negotiationId/import')
+  async importNegotiation(
+    @CurrentUser() user: any,
+    @Param('negotiationId') negotiationId: string,
+  ) {
+    const lead = await this.leadsService.importThumbtackNegotiation(user.userId, negotiationId);
+
+    return {
+      success: true,
+      message: 'Negotiation imported successfully',
+      lead,
+    };
+  }
+
+  /**
+   * Import multiple negotiations at once
+   */
+  @Post('negotiations/import-batch')
+  async importNegotiations(
+    @CurrentUser() user: any,
+    @Body('negotiationIds') negotiationIds: string[],
+  ) {
+    if (!negotiationIds || !Array.isArray(negotiationIds) || negotiationIds.length === 0) {
+      throw new BadRequestException('negotiationIds array is required');
+    }
+
+    const results = await this.leadsService.importThumbtackNegotiations(user.userId, negotiationIds);
+
+    return {
+      success: true,
+      message: `Imported ${results.imported} of ${negotiationIds.length} negotiations`,
+      ...results,
+    };
+  }
 }
