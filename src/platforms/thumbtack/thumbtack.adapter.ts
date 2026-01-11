@@ -68,11 +68,13 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       scope: 'supply::businesses.list supply::messages.read supply::messages.write supply::negotiations.read supply::users.read supply::webhooks.read supply::webhooks.write offline_access',
       state,
       audience: 'urn:partner-api',
-      prompt: 'consent', // Force consent screen to allow account selection
-      max_age: '0', // Force re-authentication (don't use cached session)
     });
 
-    return `${this.authBaseUrl}/auth?${params.toString()}`;
+    const oauthUrl = `${this.authBaseUrl}/auth?${params.toString()}`;
+
+    // Redirect through Thumbtack logout first to force fresh login
+    // The logout page will clear the session, then redirect to our OAuth URL
+    return `https://www.thumbtack.com/logout?next=${encodeURIComponent(oauthUrl)}`;
   }
 
   async handleCallback(code: string, _userId: string): Promise<PlatformCredentials> {
