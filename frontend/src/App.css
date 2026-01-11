@@ -1148,6 +1148,7 @@ body {
 
 .message.sent {
   align-self: flex-end;
+  margin-left: auto;
   background: var(--primary);
   color: white;
   border-bottom-right-radius: 4px;
@@ -1155,7 +1156,9 @@ body {
 
 .message.received {
   align-self: flex-start;
-  background: white;
+  margin-right: auto;
+  background: #f0f0f0;
+  color: #333;
   border: 1px solid var(--border-color);
   border-bottom-left-radius: 4px;
 }
