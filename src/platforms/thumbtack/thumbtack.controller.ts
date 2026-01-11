@@ -9,7 +9,6 @@ import {
   Post,
   Query,
   UseGuards,
-  Req,
   Res,
   Body,
   Param,
@@ -46,24 +45,50 @@ export class ThumbtackController {
   async handleCallback(
     @Query('code') code: string,
     @Query('state') state: string,
+    @Query('error') error: string,
+    @Query('error_description') errorDescription: string,
     @Res() res: Response,
   ) {
+    // Handle OAuth errors
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        error,
+        error_description: errorDescription,
+      });
+    }
+
     if (!code) {
       throw new BadRequestException('Authorization code is required');
     }
 
-    // In production, verify state and extract userId from it
-    // For now, this is a simplified version
-    // You would typically store the state in Redis with the userId
-
     try {
-      // Extract userId from state (in production, decrypt or look up in cache)
-      // For demo, we'll just redirect to a success page
-      // The frontend should initiate the OAuth flow with proper state management
+      // Get userId from state (stored during auth URL generation)
+      const userId = await this.platformService.getUserIdFromState(state);
 
-      return res.redirect(`/oauth/success?code=${code}`);
-    } catch (error) {
-      return res.redirect('/oauth/error');
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid state parameter',
+          message: 'OAuth state expired or invalid. Please try connecting again.',
+        });
+      }
+
+      // Exchange code for tokens
+      await this.platformService.handleCallback(userId, PlatformName.THUMBTACK, code);
+
+      // Return success response
+      return res.json({
+        success: true,
+        message: 'Thumbtack account connected successfully!',
+        userId,
+      });
+    } catch (err) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to complete OAuth',
+        message: err.message,
+      });
     }
   }
 

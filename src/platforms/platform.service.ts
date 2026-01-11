@@ -13,6 +13,8 @@ import { PlatformCredentials } from '../common/interfaces/platform.interface';
 @Injectable()
 export class PlatformService {
   private readonly encryptionKey: string;
+  // In-memory state storage (use Redis in production)
+  private stateToUserMap: Map<string, { userId: string; expires: number }> = new Map();
 
   constructor(
     private prisma: PrismaService,
@@ -29,11 +31,50 @@ export class PlatformService {
     const adapter = this.platformFactory.getAdapter(platformName);
     const state = EncryptionUtil.generateSecureRandom(16);
 
-    // Store state for verification during callback
-    // In production, use Redis or session storage
-    // For now, we'll include userId in the state
+    // Store state -> userId mapping (expires in 10 minutes)
+    this.stateToUserMap.set(state, {
+      userId,
+      expires: Date.now() + 10 * 60 * 1000,
+    });
+
+    // Clean up expired states
+    this.cleanupExpiredStates();
 
     return adapter.getAuthUrl(userId, state);
+  }
+
+  /**
+   * Get userId from OAuth state parameter
+   */
+  async getUserIdFromState(state: string): Promise<string | null> {
+    const entry = this.stateToUserMap.get(state);
+
+    if (!entry) {
+      return null;
+    }
+
+    // Check if expired
+    if (Date.now() > entry.expires) {
+      this.stateToUserMap.delete(state);
+      return null;
+    }
+
+    // Remove state after use (one-time use)
+    this.stateToUserMap.delete(state);
+
+    return entry.userId;
+  }
+
+  /**
+   * Clean up expired OAuth states
+   */
+  private cleanupExpiredStates(): void {
+    const now = Date.now();
+    for (const [state, entry] of this.stateToUserMap.entries()) {
+      if (now > entry.expires) {
+        this.stateToUserMap.delete(state);
+      }
+    }
   }
 
   /**
