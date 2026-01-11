@@ -54,6 +54,17 @@ export const platformsApi = {
     const { data } = await api.get('/v1/platforms/status');
     return data;
   },
+  getConnection: async (): Promise<{
+    thumbtack: {
+      connected: boolean;
+      configuredBusinessId: string | null;
+      webhookId: string | null;
+      lastSyncAt: string | null;
+    };
+  }> => {
+    const { data } = await api.get('/v1/platforms/connection');
+    return data;
+  },
   getAuthUrl: async (): Promise<{ authUrl: string }> => {
     const { data } = await api.get('/v1/thumbtack/auth/url');
     return data;

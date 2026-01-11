@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink } from 'lucide-react';
+import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Webhook } from 'lucide-react';
 import { platformsApi, thumbtackApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
@@ -14,6 +14,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [settingUpWebhook, setSettingUpWebhook] = useState<string | null>(null);
+  const [configuredBusinessId, setConfiguredBusinessId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -49,8 +50,12 @@ export function Dashboard() {
 
   const loadPlatformStatus = async () => {
     try {
-      const { platforms } = await platformsApi.getStatus();
-      setPlatforms(platforms);
+      const [statusResponse, connectionResponse] = await Promise.all([
+        platformsApi.getStatus(),
+        platformsApi.getConnection(),
+      ]);
+      setPlatforms(statusResponse.platforms);
+      setConfiguredBusinessId(connectionResponse.thumbtack.configuredBusinessId);
     } catch (err) {
       console.error('Failed to load platform status:', err);
     } finally {
@@ -86,6 +91,7 @@ export function Dashboard() {
     try {
       await thumbtackApi.setupWebhook(business.businessID);
       setSelectedBusiness(business);
+      setConfiguredBusinessId(business.businessID);
       setSuccess(`Webhook configured for ${business.name}! You can now receive leads.`);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to setup webhook');
@@ -193,47 +199,64 @@ export function Dashboard() {
             </div>
           ) : (
             <div className="businesses-grid">
-              {businesses.map((business) => (
-                <div key={business.businessID} className="business-card">
-                  {business.imageURL && (
-                    <img
-                      src={business.imageURL}
-                      alt={business.name}
-                      className="business-image"
-                    />
-                  )}
-                  <div className="business-info">
-                    <h3>{business.name}</h3>
-                    <p className="business-id">ID: {business.businessID}</p>
-                  </div>
-                  <div className="business-actions">
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => handleSetupWebhook(business)}
-                      disabled={settingUpWebhook === business.businessID}
-                    >
-                      {settingUpWebhook === business.businessID ? (
-                        <>
-                          <Loader2 className="spinner" size={16} />
-                          Setting up...
-                        </>
-                      ) : (
-                        <>
-                          <Link2 size={16} />
-                          Setup Webhook
-                        </>
+              {businesses.map((business) => {
+                const isConfigured = configuredBusinessId === business.businessID;
+                return (
+                  <div key={business.businessID} className={`business-card ${isConfigured ? 'configured' : ''}`}>
+                    {isConfigured && (
+                      <div className="configured-badge">
+                        <Webhook size={14} />
+                        Active
+                      </div>
+                    )}
+                    {business.imageURL && (
+                      <img
+                        src={business.imageURL}
+                        alt={business.name}
+                        className="business-image"
+                      />
+                    )}
+                    <div className="business-info">
+                      <h3>{business.name}</h3>
+                      <p className="business-id">ID: {business.businessID}</p>
+                      {isConfigured && (
+                        <p className="webhook-status">
+                          <CheckCircle size={14} />
+                          Webhook configured - receiving leads
+                        </p>
                       )}
-                    </button>
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => handleGoToMessages(business)}
-                    >
-                      <ExternalLink size={16} />
-                      View Leads
-                    </button>
+                    </div>
+                    <div className="business-actions">
+                      {!isConfigured && (
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => handleSetupWebhook(business)}
+                          disabled={settingUpWebhook === business.businessID}
+                        >
+                          {settingUpWebhook === business.businessID ? (
+                            <>
+                              <Loader2 className="spinner" size={16} />
+                              Setting up...
+                            </>
+                          ) : (
+                            <>
+                              <Link2 size={16} />
+                              Setup Webhook
+                            </>
+                          )}
+                        </button>
+                      )}
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => handleGoToMessages(business)}
+                      >
+                        <ExternalLink size={16} />
+                        View Leads
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>

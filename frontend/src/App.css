@@ -518,10 +518,42 @@ body {
   border-radius: var(--radius-lg);
   overflow: hidden;
   transition: all 0.2s;
+  position: relative;
 }
 
 .business-card:hover {
   box-shadow: var(--shadow);
+}
+
+.business-card.configured {
+  border-color: var(--success);
+  border-width: 2px;
+}
+
+.configured-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--success);
+  color: white;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 1;
+}
+
+.webhook-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--success);
+  font-weight: 500;
 }
 
 .business-image {
