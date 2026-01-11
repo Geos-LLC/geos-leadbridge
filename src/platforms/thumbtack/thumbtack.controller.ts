@@ -117,7 +117,7 @@ export class ThumbtackController {
   }
 
   // ==========================================
-  // Businesses
+  // Businesses & Webhook Setup
   // ==========================================
 
   @Get('businesses')
@@ -128,6 +128,42 @@ export class ThumbtackController {
       platform: PlatformName.THUMBTACK,
       count: businesses.length,
       businesses,
+    };
+  }
+
+  /**
+   * Setup webhook for a business to receive leads
+   * This registers your webhook URL with Thumbtack so you receive NegotiationCreatedV4 events
+   */
+  @Post('businesses/:businessId/webhooks/setup')
+  async setupWebhook(
+    @CurrentUser() user: any,
+    @Param('businessId') businessId: string,
+  ) {
+    const result = await this.platformService.setupThumbtackWebhook(user.userId, businessId);
+
+    return {
+      success: true,
+      message: 'Webhook registered successfully',
+      ...result,
+    };
+  }
+
+  /**
+   * Get registered webhooks for a business
+   */
+  @Get('businesses/:businessId/webhooks')
+  async getWebhooks(
+    @CurrentUser() user: any,
+    @Param('businessId') businessId: string,
+  ) {
+    const webhooks = await this.platformService.getThumbtackWebhooks(user.userId, businessId);
+
+    return {
+      platform: PlatformName.THUMBTACK,
+      businessId,
+      count: webhooks.length,
+      webhooks,
     };
   }
 

@@ -317,7 +317,73 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   }
 
   // ==========================================
-  // Webhook Handling
+  // Webhook Management
+  // ==========================================
+
+  /**
+   * Register a webhook for a business to receive NegotiationCreatedV4 and MessageCreatedV4 events
+   */
+  async registerWebhook(
+    credentials: PlatformCredentials,
+    businessId: string,
+    webhookUrl: string,
+  ): Promise<{ webhookId: string }> {
+    try {
+      const response = await this.httpClient.post(
+        `/businesses/${businessId}/webhooks`,
+        {
+          webhookURL: webhookUrl,
+          eventTypes: ['NegotiationCreatedV4', 'MessageCreatedV4'],
+          enabled: true,
+        },
+        {
+          headers: { Authorization: `Bearer ${credentials.accessToken}` },
+        },
+      );
+
+      return { webhookId: response.data.webhookID };
+    } catch (error) {
+      this.logger.error('Error registering webhook:', error.response?.data || error.message);
+      throw new Error('Failed to register webhook with Thumbtack');
+    }
+  }
+
+  /**
+   * Get all webhooks for a business
+   */
+  async getWebhooks(credentials: PlatformCredentials, businessId: string): Promise<any[]> {
+    try {
+      const response = await this.httpClient.get(`/businesses/${businessId}/webhooks`, {
+        headers: { Authorization: `Bearer ${credentials.accessToken}` },
+      });
+
+      return response.data.data || [];
+    } catch (error) {
+      this.logger.error('Error fetching webhooks:', error.response?.data || error.message);
+      throw new Error('Failed to fetch webhooks from Thumbtack');
+    }
+  }
+
+  /**
+   * Delete a webhook for a business
+   */
+  async deleteWebhook(
+    credentials: PlatformCredentials,
+    businessId: string,
+    webhookId: string,
+  ): Promise<void> {
+    try {
+      await this.httpClient.delete(`/businesses/${businessId}/webhooks/${webhookId}`, {
+        headers: { Authorization: `Bearer ${credentials.accessToken}` },
+      });
+    } catch (error) {
+      this.logger.error('Error deleting webhook:', error.response?.data || error.message);
+      throw new Error('Failed to delete webhook from Thumbtack');
+    }
+  }
+
+  // ==========================================
+  // Webhook Signature Verification
   // ==========================================
 
   verifyWebhookSignature(signature: string, payload: string, secret: string): boolean {

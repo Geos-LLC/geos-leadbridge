@@ -218,4 +218,53 @@ export class PlatformService {
   getSupportedPlatforms(): string[] {
     return this.platformFactory.getSupportedPlatforms();
   }
+
+  // ==========================================
+  // Thumbtack-specific Webhook Methods
+  // ==========================================
+
+  /**
+   * Setup webhook for Thumbtack business
+   * Registers webhook URL with Thumbtack to receive NegotiationCreatedV4 events
+   */
+  async setupThumbtackWebhook(userId: string, businessId: string): Promise<{ webhookId: string; businessId: string }> {
+    const credentials = await this.getCredentials(userId, 'thumbtack');
+    const adapter = this.platformFactory.getAdapter('thumbtack') as any;
+
+    // Get webhook URL from config
+    const baseUrl = this.configService.get<string>('thumbtack.redirectUri')?.replace('/v1/thumbtack/auth/callback', '') || '';
+    const webhookUrl = `${baseUrl}/webhooks/thumbtack`;
+
+    // Register webhook with Thumbtack
+    const result = await adapter.registerWebhook(credentials, businessId, webhookUrl);
+
+    // Store businessId and webhookId in platform connection
+    await this.prisma.platform.update({
+      where: {
+        userId_platformName: {
+          userId,
+          platformName: 'thumbtack',
+        },
+      },
+      data: {
+        externalBusinessId: businessId,
+        webhookId: result.webhookId,
+      },
+    });
+
+    return {
+      webhookId: result.webhookId,
+      businessId,
+    };
+  }
+
+  /**
+   * Get Thumbtack webhooks for a business
+   */
+  async getThumbtackWebhooks(userId: string, businessId: string): Promise<any[]> {
+    const credentials = await this.getCredentials(userId, 'thumbtack');
+    const adapter = this.platformFactory.getAdapter('thumbtack') as any;
+
+    return adapter.getWebhooks(credentials, businessId);
+  }
 }

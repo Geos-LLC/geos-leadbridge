@@ -71,17 +71,29 @@ export class WebhooksService {
 
   /**
    * Process webhook event based on type
+   * Thumbtack v4 format: { event: { eventType: "NegotiationCreatedV4", ... }, data: { negotiationID, customer, ... } }
    */
   private async processWebhookEvent(
     eventId: string,
     platform: string,
     payload: any,
   ): Promise<void> {
-    const eventType = payload.event_type;
+    // Thumbtack v4 uses event.eventType, legacy uses event_type
+    const eventType = payload.event?.eventType || payload.event_type;
 
     this.logger.log(`Processing ${platform} webhook: ${eventType}`);
 
     switch (eventType) {
+      // Thumbtack v4 event types
+      case 'NegotiationCreatedV4':
+        await this.handleNegotiationCreated(platform, payload.data);
+        break;
+
+      case 'MessageCreatedV4':
+        await this.handleMessageCreated(platform, payload.data);
+        break;
+
+      // Legacy event types (backwards compatibility)
       case 'request.created':
         await this.handleNewLead(platform, payload);
         break;
@@ -114,17 +126,84 @@ export class WebhooksService {
   }
 
   /**
-   * Handle new lead webhook
+   * Handle NegotiationCreatedV4 webhook (Thumbtack v4)
+   * Stores the lead in the database
+   */
+  private async handleNegotiationCreated(platform: string, data: any): Promise<void> {
+    const negotiationId = data.negotiationID;
+    const customer = data.customer || {};
+    const request = data.request || {};
+    const location = request.location || {};
+    const business = data.business || {};
+
+    this.logger.log('New negotiation received', { platform, negotiationId });
+
+    // Find user by businessID (stored when webhook is registered)
+    const platformConnection = await this.prisma.platform.findFirst({
+      where: {
+        platformName: platform,
+        externalBusinessId: business.businessID,
+      },
+    });
+
+    if (!platformConnection) {
+      this.logger.warn('No user found for business', { businessID: business.businessID });
+      return;
+    }
+
+    // Store the lead
+    await this.prisma.lead.upsert({
+      where: {
+        platform_externalRequestId: {
+          platform,
+          externalRequestId: negotiationId,
+        },
+      },
+      create: {
+        userId: platformConnection.userId,
+        platform,
+        externalRequestId: negotiationId,
+        customerName: `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown',
+        customerPhone: customer.phone,
+        message: request.description || '',
+        postcode: location.zipCode,
+        city: location.city,
+        state: location.state,
+        category: request.category?.name,
+        status: data.status?.toLowerCase() || 'new',
+        threadId: negotiationId,
+        rawJson: JSON.stringify(data),
+      },
+      update: {
+        customerName: `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown',
+        customerPhone: customer.phone,
+        message: request.description || '',
+        status: data.status?.toLowerCase() || 'new',
+        rawJson: JSON.stringify(data),
+      },
+    });
+
+    this.logger.log('Lead stored successfully', { negotiationId });
+  }
+
+  /**
+   * Handle MessageCreatedV4 webhook (Thumbtack v4)
+   */
+  private async handleMessageCreated(platform: string, data: any): Promise<void> {
+    this.logger.log('New message received', {
+      platform,
+      negotiationId: data.negotiationID,
+      messageId: data.messageID,
+    });
+
+    // You could store messages or trigger notifications here
+  }
+
+  /**
+   * Handle new lead webhook (legacy)
    */
   private async handleNewLead(platform: string, payload: any): Promise<void> {
     this.logger.log('New lead received', { platform, requestId: payload.request_id });
-
-    // Find the user associated with this webhook
-    // In production, you'd have a mapping from platform external ID to user ID
-    // For now, we'll just log it
-
-    // The lead will be fetched when the user next calls GET /leads
-    // Or you could implement a background job to sync leads periodically
   }
 
   /**

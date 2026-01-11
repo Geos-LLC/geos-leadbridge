@@ -38,17 +38,19 @@ model User {
 // ==========================================
 
 model Platform {
-  id               String   @id @default(uuid())
-  userId           String
-  platformName     String   // "thumbtack" | "yelp" | "angi" | "bark"
-  connected        Boolean  @default(true)
-  externalUserId   String?  // Platform's user ID
-  credentialsJson  String   // Encrypted: access_token, refresh_token, api_key, etc.
-  webhookSecret    String?  // Encrypted webhook verification secret
-  lastSyncAt       DateTime?
-  metadataJson     String?  // Additional platform-specific data
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                 String   @id @default(uuid())
+  userId             String
+  platformName       String   // "thumbtack" | "yelp" | "angi" | "bark"
+  connected          Boolean  @default(true)
+  externalUserId     String?  // Platform's user ID
+  externalBusinessId String?  // Platform's business ID (for webhook matching)
+  credentialsJson    String   // Encrypted: access_token, refresh_token, api_key, etc.
+  webhookSecret      String?  // Encrypted webhook verification secret
+  webhookId          String?  // Platform's webhook subscription ID
+  lastSyncAt         DateTime?
+  metadataJson       String?  // Additional platform-specific data
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   // Relationships
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -56,6 +58,7 @@ model Platform {
   @@unique([userId, platformName])
   @@index([userId])
   @@index([platformName])
+  @@index([externalBusinessId])
   @@map("platforms")
 }
 
