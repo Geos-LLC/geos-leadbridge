@@ -9,7 +9,9 @@
       "Bash(copy .env.example .env)",
       "Bash(npm run build:*)",
       "Bash(npm run prisma:generate:*)",
-      "Bash(npm run start:dev:*)"
+      "Bash(npm run start:dev:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

@@ -41,8 +41,8 @@ export class ThumbtackAdapter implements IPlatformAdapter {
     this.clientId = this.configService.get<string>('thumbtack.clientId') || '';
     this.clientSecret = this.configService.get<string>('thumbtack.clientSecret') || '';
     this.redirectUri = this.configService.get<string>('thumbtack.redirectUri') || '';
-    this.authBaseUrl = this.configService.get<string>('thumbtack.authBaseUrl') || 'https://www.thumbtack.com/api/oauth2';
-    this.apiBaseUrl = this.configService.get<string>('thumbtack.apiBaseUrl') || 'https://api.thumbtack.com/v2';
+    this.authBaseUrl = this.configService.get<string>('thumbtack.authBaseUrl') || 'https://auth.thumbtack.com/oauth2';
+    this.apiBaseUrl = this.configService.get<string>('thumbtack.apiBaseUrl') || 'https://pro-api.thumbtack.com/v2';
 
     this.httpClient = axios.create({
       baseURL: this.apiBaseUrl,
@@ -61,19 +61,20 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   // OAuth & Connection Management
   // ==========================================
 
-  getAuthUrl(userId: string, state: string): string {
+  getAuthUrl(_userId: string, state: string): string {
     const params = new URLSearchParams({
       client_id: this.clientId,
       redirect_uri: this.redirectUri,
       response_type: 'code',
-      scope: 'requests:read requests:write messages:read messages:write',
+      scope: 'demand::messages.read+demand::messages.write+demand::negotiations.read+demand::users.read+demand::webhooks.read+demand::webhooks.write',
       state,
+      audience: 'urn:partner-api',
     });
 
-    return `${this.authBaseUrl}/authorize?${params.toString()}`;
+    return `${this.authBaseUrl}/auth?${params.toString()}`;
   }
 
-  async handleCallback(code: string, userId: string): Promise<PlatformCredentials> {
+  async handleCallback(code: string, _userId: string): Promise<PlatformCredentials> {
     try {
       const response = await axios.post(`${this.authBaseUrl}/token`, {
         grant_type: 'authorization_code',
@@ -278,7 +279,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
     return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
   }
 
-  async handleWebhookEvent(event: any, userId?: string): Promise<WebhookEventResult> {
+  async handleWebhookEvent(event: any, _userId?: string): Promise<WebhookEventResult> {
     try {
       const eventType = event.event_type;
 
