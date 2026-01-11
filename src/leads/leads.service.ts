@@ -33,8 +33,19 @@ export class LeadsService {
 
   /**
    * Get leads for a user from a specific platform
+   * For Thumbtack: leads come via webhooks, so we query the local database
+   * For other platforms: may fetch from API and store locally
    */
   async getLeads(userId: string, platformName: string, options?: any): Promise<NormalizedLead[]> {
+    // For webhook-based platforms like Thumbtack, query local database
+    if (platformName === 'thumbtack') {
+      return this.getCachedLeads(userId, {
+        platform: platformName,
+        limit: options?.limit,
+      });
+    }
+
+    // For API-based platforms, fetch from adapter and cache
     const credentials = await this.platformService.getCredentials(userId, platformName);
     const adapter = this.platformFactory.getAdapter(platformName);
 
