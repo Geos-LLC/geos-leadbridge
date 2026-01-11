@@ -22,7 +22,6 @@ import {
   NormalizedMessage,
   NormalizedQuote,
   LeadStatus,
-  ConversationStatus,
   MessageSender,
   QuoteStatus,
 } from '../../common/dto/normalized.dto';
@@ -164,35 +163,63 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   }
 
   // ==========================================
-  // Lead Management
-  // Note: Thumbtack sends leads via webhooks - there's no direct fetch endpoint
-  // Leads received via webhook should be stored in database
+  // Negotiation/Lead Management
+  // Note: Thumbtack has NO "list all leads" endpoint
+  // Leads are delivered via webhooks and stored locally
+  // You can only fetch a SPECIFIC negotiation by ID
   // ==========================================
 
   async getLeads(
-    credentials: PlatformCredentials,
+    _credentials: PlatformCredentials,
     _options?: LeadFetchOptions,
   ): Promise<NormalizedLead[]> {
-    // Thumbtack doesn't have a leads fetch endpoint
-    // Leads are delivered via webhooks and should be stored in the database
-    // Return businesses info as a placeholder for now
-    this.logger.warn('Thumbtack delivers leads via webhooks. Use getBusinesses() to see connected businesses.');
+    // Thumbtack API does NOT have a "list negotiations" endpoint
+    // Leads must be received via webhooks and stored in your database
+    this.logger.warn('Thumbtack has no "list leads" API. Leads come via webhooks. Query your local database.');
+    return [];
+  }
 
+  /**
+   * Get a specific negotiation (lead) by ID from Thumbtack API
+   * Note: You must know the negotiationID (from webhook) to fetch details
+   */
+  async getLead(credentials: PlatformCredentials, negotiationId: string): Promise<NormalizedLead> {
     try {
-      const businesses = await this.getBusinesses(credentials);
-      // Return empty leads array - actual leads come from webhooks
-      this.logger.log(`Found ${businesses.length} businesses. Leads are delivered via webhooks.`);
-      return [];
+      // GET /v4/negotiations/{negotiationID}
+      const response = await this.httpClient.get(`/negotiations/${negotiationId}`, {
+        headers: { Authorization: `Bearer ${credentials.accessToken}` },
+      });
+
+      return this.normalizeNegotiation(response.data);
     } catch (error) {
-      this.logger.error('Error in getLeads:', error.response?.data || error.message);
-      throw new Error('Failed to fetch from Thumbtack. Note: Leads are delivered via webhooks.');
+      this.logger.error('Error fetching negotiation:', error.response?.data || error.message);
+      throw new Error('Failed to fetch negotiation from Thumbtack');
     }
   }
 
-  async getLead(_credentials: PlatformCredentials, _requestId: string): Promise<NormalizedLead> {
-    // Individual leads should be retrieved from local database
-    // as they come from webhooks, not API calls
-    throw new Error('Thumbtack leads are delivered via webhooks and stored locally. Query your database instead.');
+  /**
+   * Normalize Thumbtack negotiation to NormalizedLead format
+   */
+  private normalizeNegotiation(negotiation: any): NormalizedLead {
+    return {
+      id: '',
+      platform: PlatformName.THUMBTACK,
+      externalRequestId: negotiation.negotiationID || negotiation.id,
+      customerName: negotiation.customer?.name || 'Unknown',
+      customerPhone: negotiation.customer?.phone,
+      customerEmail: negotiation.customer?.email,
+      message: negotiation.request?.description || negotiation.description || '',
+      budget: negotiation.request?.budget ? parseFloat(negotiation.request.budget) : undefined,
+      postcode: negotiation.request?.location?.zipCode || negotiation.location?.zipCode,
+      city: negotiation.request?.location?.city || negotiation.location?.city,
+      state: negotiation.request?.location?.state || negotiation.location?.state,
+      category: negotiation.request?.category?.name || negotiation.category,
+      status: this.mapThumbtackStatus(negotiation.status),
+      threadId: negotiation.negotiationID || negotiation.id,
+      createdAt: new Date(negotiation.createdTime || negotiation.created_at || Date.now()),
+      updatedAt: new Date(negotiation.updatedTime || negotiation.updated_at || Date.now()),
+      raw: negotiation,
+    };
   }
 
   // ==========================================
@@ -315,42 +342,6 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   // ==========================================
   // Normalization Helpers
   // ==========================================
-
-  private normalizeRequest(request: any): NormalizedLead {
-    return {
-      id: '', // Will be set by the service layer
-      platform: PlatformName.THUMBTACK,
-      externalRequestId: request.request_id,
-      customerName: request.customer?.name || 'Unknown',
-      customerPhone: request.customer?.phone,
-      customerEmail: request.customer?.email,
-      message: request.message || request.description || '',
-      budget: request.budget ? parseFloat(request.budget) : undefined,
-      postcode: request.location?.postcode,
-      city: request.location?.city,
-      state: request.location?.state,
-      category: request.category,
-      status: this.mapThumbtackStatus(request.status),
-      threadId: request.thread_id,
-      createdAt: new Date(request.created_at),
-      updatedAt: new Date(request.updated_at || request.created_at),
-      raw: request,
-    };
-  }
-
-  private normalizeThread(thread: any): NormalizedConversation {
-    return {
-      id: '', // Will be set by the service layer
-      platform: PlatformName.THUMBTACK,
-      externalThreadId: thread.thread_id,
-      customerName: thread.customer_name || 'Unknown',
-      lastMessageAt: new Date(thread.last_message_at),
-      unreadCount: thread.unread_count || 0,
-      status: thread.archived ? ConversationStatus.ARCHIVED : ConversationStatus.ACTIVE,
-      createdAt: new Date(thread.created_at),
-      metadata: thread,
-    };
-  }
 
   private normalizeMessage(message: any, conversationId: string): NormalizedMessage {
     return {
