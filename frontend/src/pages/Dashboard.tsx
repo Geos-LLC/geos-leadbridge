@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Webhook } from 'lucide-react';
+import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Webhook, Unlink } from 'lucide-react';
 import { platformsApi, thumbtackApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
@@ -15,6 +15,7 @@ export function Dashboard() {
   const [connecting, setConnecting] = useState(false);
   const [settingUpWebhook, setSettingUpWebhook] = useState<string | null>(null);
   const [configuredBusinessId, setConfiguredBusinessId] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -81,6 +82,29 @@ export function Dashboard() {
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to get auth URL');
       setConnecting(false);
+    }
+  };
+
+  const handleDisconnectThumbtack = async () => {
+    if (!confirm('Are you sure you want to disconnect your Thumbtack account? You will stop receiving leads.')) {
+      return;
+    }
+    setDisconnecting(true);
+    setError('');
+    setSuccess('');
+    try {
+      await platformsApi.disconnect();
+      // Reset state
+      setPlatforms(platforms.map(p =>
+        p.platformName === 'thumbtack' ? { ...p, connected: false } : p
+      ));
+      setBusinesses([]);
+      setConfiguredBusinessId(null);
+      setSuccess('Thumbtack account disconnected successfully.');
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to disconnect Thumbtack');
+    } finally {
+      setDisconnecting(false);
     }
   };
 
@@ -163,25 +187,45 @@ export function Dashboard() {
             )}
           </div>
 
-          {!thumbtackConnected && (
-            <button
-              className="btn btn-primary"
-              onClick={handleConnectThumbtack}
-              disabled={connecting}
-            >
-              {connecting ? (
-                <>
-                  <Loader2 className="spinner" size={18} />
-                  Connecting...
-                </>
-              ) : (
-                <>
-                  <Link2 size={18} />
-                  Connect Thumbtack
-                </>
-              )}
-            </button>
-          )}
+          <div className="platform-actions">
+            {!thumbtackConnected ? (
+              <button
+                className="btn btn-primary"
+                onClick={handleConnectThumbtack}
+                disabled={connecting}
+              >
+                {connecting ? (
+                  <>
+                    <Loader2 className="spinner" size={18} />
+                    Connecting...
+                  </>
+                ) : (
+                  <>
+                    <Link2 size={18} />
+                    Connect Thumbtack
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                className="btn btn-danger"
+                onClick={handleDisconnectThumbtack}
+                disabled={disconnecting}
+              >
+                {disconnecting ? (
+                  <>
+                    <Loader2 className="spinner" size={18} />
+                    Disconnecting...
+                  </>
+                ) : (
+                  <>
+                    <Unlink size={18} />
+                    Disconnect
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </div>
       </section>
 
@@ -196,6 +240,9 @@ export function Dashboard() {
             <div className="empty-state">
               <Building2 size={48} />
               <p>No businesses found in your Thumbtack account</p>
+              <p className="empty-state-hint">
+                If you have a Pro account, try disconnecting and reconnecting to refresh permissions.
+              </p>
             </div>
           ) : (
             <div className="businesses-grid">

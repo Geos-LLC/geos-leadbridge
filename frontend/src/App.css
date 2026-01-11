@@ -85,6 +85,15 @@ body {
   background: var(--border-color);
 }
 
+.btn-danger {
+  background: var(--danger);
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #bb2d3b;
+}
+
 .btn-icon {
   display: flex;
   align-items: center;
@@ -505,6 +514,10 @@ body {
   color: #b45309;
 }
 
+.platform-actions {
+  margin-left: auto;
+}
+
 /* Business Cards */
 .businesses-grid {
   display: grid;
@@ -601,6 +614,12 @@ body {
 .empty-state svg {
   margin-bottom: 16px;
   opacity: 0.5;
+}
+
+.empty-state-hint {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
 /* ==========================================
