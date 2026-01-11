@@ -41,7 +41,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
     this.clientSecret = this.configService.get<string>('thumbtack.clientSecret') || '';
     this.redirectUri = this.configService.get<string>('thumbtack.redirectUri') || '';
     this.authBaseUrl = this.configService.get<string>('thumbtack.authBaseUrl') || 'https://auth.thumbtack.com/oauth2';
-    this.apiBaseUrl = this.configService.get<string>('thumbtack.apiBaseUrl') || 'https://api.thumbtack.com/v4';
+    this.apiBaseUrl = this.configService.get<string>('thumbtack.apiBaseUrl') || 'https://api.thumbtack.com/api/v4';
 
     this.httpClient = axios.create({
       baseURL: this.apiBaseUrl,
