@@ -36,6 +36,35 @@ export class ThumbtackController {
     this.frontendUrl = this.configService.get<string>('frontendUrl') || 'http://localhost:5173';
   }
 
+  /**
+   * Automatically setup webhooks for all businesses after OAuth connection
+   */
+  private async autoSetupWebhooks(userId: string): Promise<void> {
+    try {
+      // Get all businesses for this user
+      const businesses = await this.leadsService.getBusinesses(userId, PlatformName.THUMBTACK);
+
+      if (businesses.length === 0) {
+        console.log('No businesses found to setup webhooks for');
+        return;
+      }
+
+      // Setup webhook for each business
+      for (const business of businesses) {
+        try {
+          await this.platformService.setupThumbtackWebhook(userId, business.businessID);
+          console.log(`Webhook setup successfully for business: ${business.name} (${business.businessID})`);
+        } catch (err) {
+          // Log but don't fail - webhook might already exist
+          console.warn(`Failed to setup webhook for business ${business.businessID}:`, err.message);
+        }
+      }
+    } catch (err) {
+      console.error('Error in autoSetupWebhooks:', err.message);
+      // Don't throw - OAuth succeeded, webhooks are just a bonus
+    }
+  }
+
   // ==========================================
   // OAuth Flow
   // ==========================================
@@ -78,6 +107,9 @@ export class ThumbtackController {
 
       // Exchange code for tokens
       await this.platformService.handleCallback(userId, PlatformName.THUMBTACK, code);
+
+      // Auto-setup webhooks for all businesses
+      await this.autoSetupWebhooks(userId);
 
       // Redirect to frontend dashboard with success
       return res.redirect(`${this.frontendUrl}/dashboard?connected=thumbtack`);
