@@ -74,15 +74,25 @@ export function Dashboard() {
   };
 
   const handleConnectThumbtack = async () => {
-    setConnecting(true);
-    setError('');
-    try {
-      const { authUrl } = await platformsApi.getAuthUrl();
-      window.location.href = authUrl;
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to get auth URL');
-      setConnecting(false);
-    }
+    // Open Thumbtack logout in a new window first to clear any existing session
+    const logoutWindow = window.open('https://www.thumbtack.com/logout', '_blank', 'width=600,height=400');
+
+    // Wait a moment for logout to process, then close popup and redirect to OAuth
+    setTimeout(async () => {
+      if (logoutWindow) {
+        logoutWindow.close();
+      }
+
+      setConnecting(true);
+      setError('');
+      try {
+        const { authUrl } = await platformsApi.getAuthUrl();
+        window.location.href = authUrl;
+      } catch (err: any) {
+        setError(err.response?.data?.message || 'Failed to get auth URL');
+        setConnecting(false);
+      }
+    }, 2000); // 2 second delay to allow logout to complete
   };
 
   const handleDisconnectThumbtack = async () => {

@@ -70,11 +70,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       audience: 'urn:partner-api',
     });
 
-    const oauthUrl = `${this.authBaseUrl}/auth?${params.toString()}`;
-
-    // Redirect through Thumbtack logout first to force fresh login
-    // The logout page will clear the session, then redirect to our OAuth URL
-    return `https://www.thumbtack.com/logout?next=${encodeURIComponent(oauthUrl)}`;
+    return `${this.authBaseUrl}/auth?${params.toString()}`;
   }
 
   async handleCallback(code: string, _userId: string): Promise<PlatformCredentials> {
