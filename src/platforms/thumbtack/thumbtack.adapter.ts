@@ -467,6 +467,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
 
   private normalizeMessage(message: any, conversationId: string): NormalizedMessage {
     // API returns: messageID, negotiationID, customer, from ("Customer" | "Pro"), text, attachments, sentAt
+    // Attachments format: [{ url: "https://...", mimeType: "image/jpeg" }]
     return {
       id: '', // Will be set by the service layer
       conversationId,
@@ -474,6 +475,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       externalMessageId: message.messageID,
       sender: message.from === 'Pro' ? MessageSender.PRO : MessageSender.CUSTOMER,
       content: message.text,
+      attachments: message.attachments || [],
       isRead: true, // API doesn't provide read status
       sentAt: new Date(message.sentAt),
       deliveredAt: undefined,

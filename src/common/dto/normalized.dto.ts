@@ -129,6 +129,12 @@ export enum MessageSender {
   SYSTEM = 'system',
 }
 
+export interface MessageAttachment {
+  url: string;
+  mimeType?: string;
+  fileName?: string;
+}
+
 export class NormalizedMessage {
   @IsString()
   id: string; // Internal ID
@@ -148,6 +154,9 @@ export class NormalizedMessage {
 
   @IsString()
   content: string;
+
+  @IsOptional()
+  attachments?: MessageAttachment[]; // Image/file attachments
 
   @IsBoolean()
   isRead: boolean;

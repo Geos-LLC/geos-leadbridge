@@ -90,6 +90,13 @@ export const thumbtackApi = {
   },
 };
 
+// Attachment type for messages
+export interface MessageAttachment {
+  url: string;
+  mimeType?: string;
+  fileName?: string;
+}
+
 // Message type for API responses
 export interface ApiMessage {
   id: string;
@@ -98,6 +105,7 @@ export interface ApiMessage {
   externalMessageId: string;
   sender: 'customer' | 'pro';
   content: string;
+  attachments?: MessageAttachment[];
   isRead: boolean;
   sentAt: string;
   deliveredAt?: string;

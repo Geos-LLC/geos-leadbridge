@@ -1165,6 +1165,45 @@ body {
   line-height: 1.5;
 }
 
+.message-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.attachment-image-link {
+  display: block;
+  max-width: 100%;
+}
+
+.attachment-image {
+  max-width: 250px;
+  max-height: 200px;
+  border-radius: 8px;
+  object-fit: cover;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.attachment-image:hover {
+  transform: scale(1.02);
+}
+
+.attachment-link {
+  display: inline-block;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 6px;
+  color: var(--primary);
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.attachment-link:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
 .message-time {
   font-size: 11px;
   opacity: 0.7;

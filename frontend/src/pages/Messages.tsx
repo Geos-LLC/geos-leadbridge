@@ -15,7 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import { leadsApi } from '../services/api';
+import { leadsApi, type MessageAttachment } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import type { Lead } from '../types';
 
@@ -25,6 +25,7 @@ interface LocalMessage {
   sender: 'pro' | 'customer';
   sentAt: Date;
   externalId?: string;
+  attachments?: MessageAttachment[];
 }
 
 export function Messages() {
@@ -85,6 +86,7 @@ export function Messages() {
         sender: msg.sender,
         sentAt: new Date(msg.sentAt),
         externalId: msg.externalMessageId,
+        attachments: msg.attachments,
       }));
       console.log('[Messages] Converted messages:', convertedMessages);
       setMessages(convertedMessages);
@@ -339,7 +341,38 @@ export function Messages() {
                     key={msg.id}
                     className={`message ${msg.sender === 'pro' ? 'sent' : 'received'}`}
                   >
-                    <div className="message-content">{msg.content}</div>
+                    {msg.content && <div className="message-content">{msg.content}</div>}
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <div className="message-attachments">
+                        {msg.attachments.map((attachment, idx) => (
+                          attachment.mimeType?.startsWith('image/') ? (
+                            <a
+                              key={idx}
+                              href={attachment.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="attachment-image-link"
+                            >
+                              <img
+                                src={attachment.url}
+                                alt={attachment.fileName || `Image ${idx + 1}`}
+                                className="attachment-image"
+                              />
+                            </a>
+                          ) : (
+                            <a
+                              key={idx}
+                              href={attachment.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="attachment-link"
+                            >
+                              {attachment.fileName || 'Download attachment'}
+                            </a>
+                          )
+                        ))}
+                      </div>
+                    )}
                     <div className="message-time">
                       {msg.sentAt.toLocaleTimeString('en-US', {
                         hour: '2-digit',
