@@ -151,14 +151,19 @@ export class ThumbtackAdapter implements IPlatformAdapter {
    */
   async getBusinesses(credentials: PlatformCredentials): Promise<any[]> {
     try {
+      this.logger.log('Fetching businesses from Thumbtack API');
       const response = await this.httpClient.get('/businesses', {
         headers: { Authorization: `Bearer ${credentials.accessToken}` },
       });
 
-      return response.data.businesses || [];
+      this.logger.log('Thumbtack businesses response:', JSON.stringify(response.data));
+
+      // API may return { data: [...] } or { businesses: [...] }
+      return response.data.data || response.data.businesses || response.data || [];
     } catch (error) {
       this.logger.error('Error fetching businesses:', error.response?.data || error.message);
-      throw new Error('Failed to fetch businesses from Thumbtack');
+      this.logger.error('Full error:', error.response?.status, error.response?.statusText);
+      throw new Error(`Failed to fetch businesses from Thumbtack: ${error.response?.data?.message || error.message}`);
     }
   }
 

@@ -11,7 +11,8 @@
       "Bash(npm run prisma:generate:*)",
       "Bash(npm run start:dev:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(railway logs:*)"
     ]
   }
 }
