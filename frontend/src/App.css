@@ -622,6 +622,42 @@ body {
   color: var(--text-muted);
 }
 
+.empty-state-actions {
+  margin-top: 24px;
+  text-align: left;
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+  background: var(--bg-secondary);
+  padding: 20px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-color);
+}
+
+.empty-state-actions p {
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
+.reconnect-steps {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+}
+
+.reconnect-steps li {
+  margin-bottom: 8px;
+}
+
+.reconnect-steps a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.reconnect-steps a:hover {
+  text-decoration: underline;
+}
+
 /* ==========================================
    Messages Page
    ========================================== */

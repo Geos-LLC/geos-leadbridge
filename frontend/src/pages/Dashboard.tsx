@@ -241,8 +241,22 @@ export function Dashboard() {
               <Building2 size={48} />
               <p>No businesses found in your Thumbtack account</p>
               <p className="empty-state-hint">
-                If you have a Pro account, try disconnecting and reconnecting to refresh permissions.
+                This usually means you're connected to the wrong Thumbtack account.
               </p>
+              <div className="empty-state-actions">
+                <p><strong>To connect your Pro account:</strong></p>
+                <ol className="reconnect-steps">
+                  <li>Click "Disconnect" above</li>
+                  <li>
+                    <a href="https://www.thumbtack.com/logout" target="_blank" rel="noopener noreferrer">
+                      Log out of Thumbtack
+                    </a>
+                    {' '}in a new tab
+                  </li>
+                  <li>Come back here and click "Connect Thumbtack"</li>
+                  <li>Log in with your <strong>Pro account</strong> credentials</li>
+                </ol>
+              </div>
             </div>
           ) : (
             <div className="businesses-grid">
