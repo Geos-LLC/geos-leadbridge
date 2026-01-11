@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Webhook, Unlink } from 'lucide-react';
-import { platformsApi, thumbtackApi } from '../services/api';
+import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Webhook, Unlink, Download, X } from 'lucide-react';
+import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import type { Business } from '../types';
+
+interface ImportResult {
+  id: string;
+  success: boolean;
+  error?: string;
+}
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -18,6 +24,12 @@ export function Dashboard() {
   const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // Import negotiations state
+  const [importIds, setImportIds] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState<ImportResult[]>([]);
+  const [showImportResults, setShowImportResults] = useState(false);
 
   const thumbtackConnected = platforms.find((p) => p.platformName === 'thumbtack')?.connected ?? false;
 
@@ -137,6 +149,56 @@ export function Dashboard() {
   const handleGoToMessages = (business: Business) => {
     setSelectedBusiness(business);
     navigate('/messages');
+  };
+
+  const handleImportNegotiations = async () => {
+    // Parse IDs - split by comma, newline, tab, or space
+    const ids = importIds
+      .split(/[,\n\t\s]+/)
+      .map(id => id.trim())
+      .filter(id => id.length > 0);
+
+    if (ids.length === 0) {
+      setError('Please enter at least one negotiation ID');
+      return;
+    }
+
+    setImporting(true);
+    setError('');
+    setSuccess('');
+    setImportResults([]);
+    setShowImportResults(true);
+
+    const results: ImportResult[] = [];
+
+    for (const id of ids) {
+      try {
+        await leadsApi.importNegotiation(id);
+        results.push({ id, success: true });
+      } catch (err: any) {
+        results.push({
+          id,
+          success: false,
+          error: err.response?.data?.message || 'Failed to import',
+        });
+      }
+      // Update results as we go
+      setImportResults([...results]);
+    }
+
+    setImporting(false);
+
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+
+    if (successCount > 0 && failCount === 0) {
+      setSuccess(`Successfully imported ${successCount} negotiation(s)`);
+      setImportIds('');
+    } else if (successCount > 0) {
+      setSuccess(`Imported ${successCount} negotiation(s), ${failCount} failed`);
+    } else {
+      setError(`Failed to import all ${failCount} negotiation(s)`);
+    }
   };
 
   if (loading) {
@@ -330,6 +392,86 @@ export function Dashboard() {
               })}
             </div>
           )}
+        </section>
+      )}
+
+      {/* Import Negotiations Section */}
+      {thumbtackConnected && (
+        <section className="dashboard-section">
+          <h2>Import Negotiations</h2>
+          <p className="section-description">
+            Import existing negotiations by ID. Paste one or multiple IDs (comma, newline, or space separated).
+          </p>
+
+          <div className="import-section">
+            <textarea
+              className="import-textarea"
+              placeholder="Paste negotiation IDs here...&#10;&#10;Example:&#10;abc123&#10;def456&#10;ghi789&#10;&#10;Or: abc123, def456, ghi789"
+              value={importIds}
+              onChange={(e) => setImportIds(e.target.value)}
+              disabled={importing}
+              rows={6}
+            />
+
+            <div className="import-actions">
+              <button
+                className="btn btn-primary"
+                onClick={handleImportNegotiations}
+                disabled={importing || !importIds.trim()}
+              >
+                {importing ? (
+                  <>
+                    <Loader2 className="spinner" size={18} />
+                    Importing...
+                  </>
+                ) : (
+                  <>
+                    <Download size={18} />
+                    Import Negotiations
+                  </>
+                )}
+              </button>
+
+              {importIds && !importing && (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setImportIds('');
+                    setImportResults([]);
+                    setShowImportResults(false);
+                  }}
+                >
+                  <X size={18} />
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {/* Import Results */}
+            {showImportResults && importResults.length > 0 && (
+              <div className="import-results">
+                <h4>Import Results ({importResults.length} processed)</h4>
+                <div className="results-list">
+                  {importResults.map((result, idx) => (
+                    <div
+                      key={idx}
+                      className={`result-item ${result.success ? 'success' : 'failed'}`}
+                    >
+                      <span className="result-id">{result.id}</span>
+                      {result.success ? (
+                        <CheckCircle size={16} className="result-icon success" />
+                      ) : (
+                        <span className="result-error">
+                          <AlertCircle size={16} className="result-icon failed" />
+                          {result.error}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </section>
       )}
     </div>

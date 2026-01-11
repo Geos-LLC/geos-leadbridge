@@ -659,6 +659,107 @@ body {
 }
 
 /* ==========================================
+   Import Negotiations
+   ========================================== */
+.import-section {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+}
+
+.import-textarea {
+  width: 100%;
+  min-height: 150px;
+  padding: 12px;
+  font-family: monospace;
+  font-size: 13px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  resize: vertical;
+  background: var(--bg-secondary);
+}
+
+.import-textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.1);
+}
+
+.import-textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.import-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.import-results {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-color);
+}
+
+.import-results h4 {
+  margin-bottom: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.results-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.result-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+
+.result-item.success {
+  background: #d1e7dd;
+  border: 1px solid #a3cfbb;
+}
+
+.result-item.failed {
+  background: #f8d7da;
+  border: 1px solid #f1aeb5;
+}
+
+.result-id {
+  font-family: monospace;
+  font-weight: 500;
+}
+
+.result-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.result-icon.success {
+  color: var(--success);
+}
+
+.result-icon.failed {
+  color: var(--danger);
+}
+
+/* ==========================================
    Messages Page
    ========================================== */
 .messages-page {
