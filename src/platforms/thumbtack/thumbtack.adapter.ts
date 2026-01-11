@@ -76,12 +76,18 @@ export class ThumbtackAdapter implements IPlatformAdapter {
 
   async handleCallback(code: string, _userId: string): Promise<PlatformCredentials> {
     try {
-      const response = await axios.post(`${this.authBaseUrl}/token`, {
-        grant_type: 'authorization_code',
-        code,
-        client_id: this.clientId,
-        client_secret: this.clientSecret,
-        redirect_uri: this.redirectUri,
+      // OAuth2 token endpoint requires form-urlencoded format
+      const params = new URLSearchParams();
+      params.append('grant_type', 'authorization_code');
+      params.append('code', code);
+      params.append('client_id', this.clientId);
+      params.append('client_secret', this.clientSecret);
+      params.append('redirect_uri', this.redirectUri);
+
+      const response = await axios.post(`${this.authBaseUrl}/token`, params, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
       });
 
       const { access_token, refresh_token, expires_in, scope } = response.data;
@@ -100,18 +106,24 @@ export class ThumbtackAdapter implements IPlatformAdapter {
 
   async refreshAccessToken(refreshToken: string): Promise<PlatformCredentials> {
     try {
-      const response = await axios.post(`${this.authBaseUrl}/token`, {
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-        client_id: this.clientId,
-        client_secret: this.clientSecret,
+      // OAuth2 token endpoint requires form-urlencoded format
+      const params = new URLSearchParams();
+      params.append('grant_type', 'refresh_token');
+      params.append('refresh_token', refreshToken);
+      params.append('client_id', this.clientId);
+      params.append('client_secret', this.clientSecret);
+
+      const response = await axios.post(`${this.authBaseUrl}/token`, params, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
       });
 
-      const { access_token, refresh_token, expires_in, scope } = response.data;
+      const { access_token, refresh_token: new_refresh_token, expires_in, scope } = response.data;
 
       return {
         accessToken: access_token,
-        refreshToken: refresh_token || refreshToken, // Some providers don't return new refresh token
+        refreshToken: new_refresh_token || refreshToken, // Some providers don't return new refresh token
         expiresAt: new Date(Date.now() + expires_in * 1000),
         scope,
       };
