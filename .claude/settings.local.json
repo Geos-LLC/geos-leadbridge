@@ -13,7 +13,8 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(railway logs:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(npm ls:*)"
     ]
   }
 }
