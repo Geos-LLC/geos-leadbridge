@@ -293,17 +293,41 @@ export class ThumbtackAdapter implements IPlatformAdapter {
     try {
       this.logger.log(`Fetching messages for negotiation: ${negotiationId}`);
       // v4 endpoint: GET /api/v4/negotiations/{negotiationID}/messages
-      // Response: { data: [...messages], pagination: { limit: 3 } }
-      const response = await this.httpClient.get(`/negotiations/${negotiationId}/messages`, {
-        headers: { Authorization: `Bearer ${credentials.accessToken}` },
-      });
+      // Response: { data: [...messages], pagination: { limit, cursor } }
+      // We need to paginate to get all messages
 
-      this.logger.log(`Thumbtack messages response: ${JSON.stringify(response.data)}`);
-      const messages = response.data.data || response.data.messages || [];
-      this.logger.log(`Found ${messages.length} messages`);
+      const allMessages: any[] = [];
+      let cursor: string | undefined;
+      const limit = 50; // Max per request
 
-      const normalized = messages.map((message: any) => this.normalizeMessage(message, negotiationId));
-      this.logger.log(`Normalized messages: ${JSON.stringify(normalized)}`);
+      do {
+        const params: any = { limit };
+        if (cursor) {
+          params.cursor = cursor;
+        }
+
+        const response = await this.httpClient.get(`/negotiations/${negotiationId}/messages`, {
+          headers: { Authorization: `Bearer ${credentials.accessToken}` },
+          params,
+        });
+
+        this.logger.log(`Thumbtack messages response: ${JSON.stringify(response.data)}`);
+        const messages = response.data.data || response.data.messages || [];
+        allMessages.push(...messages);
+
+        // Check if there are more messages
+        cursor = response.data.pagination?.cursor;
+        this.logger.log(`Fetched ${messages.length} messages, cursor: ${cursor}`);
+
+      } while (cursor);
+
+      this.logger.log(`Total messages fetched: ${allMessages.length}`);
+
+      const normalized = allMessages.map((message: any) => this.normalizeMessage(message, negotiationId));
+
+      // Sort by sentAt ascending (oldest first)
+      normalized.sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime());
+
       return normalized;
     } catch (error) {
       this.logger.error('Error fetching messages:', error.response?.data || error.message);
