@@ -106,6 +106,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   }
 
   async refreshAccessToken(refreshToken: string): Promise<PlatformCredentials> {
+    this.logger.log('Attempting to refresh access token...');
     try {
       // OAuth2 token endpoint requires form-urlencoded format
       const params = new URLSearchParams();
@@ -114,6 +115,8 @@ export class ThumbtackAdapter implements IPlatformAdapter {
 
       // Thumbtack requires client_secret_basic authentication (credentials in header)
       const basicAuth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
+
+      this.logger.log(`Making token refresh request to: ${this.authBaseUrl}/token`);
 
       const response = await axios.post(`${this.authBaseUrl}/token`, params, {
         headers: {
@@ -124,15 +127,23 @@ export class ThumbtackAdapter implements IPlatformAdapter {
 
       const { access_token, refresh_token: new_refresh_token, expires_in, scope } = response.data;
 
+      const newExpiresAt = new Date(Date.now() + expires_in * 1000);
+      this.logger.log(`Token refreshed successfully! New token expires at: ${newExpiresAt.toISOString()}`);
+
       return {
         accessToken: access_token,
         refreshToken: new_refresh_token || refreshToken, // Some providers don't return new refresh token
-        expiresAt: new Date(Date.now() + expires_in * 1000),
+        expiresAt: newExpiresAt,
         scope,
       };
     } catch (error) {
-      this.logger.error('Token refresh error:', error.response?.data || error.message);
-      throw new Error('Failed to refresh access token');
+      this.logger.error('Token refresh error:', error.response?.status, error.response?.data || error.message);
+      this.logger.error('Full refresh error:', JSON.stringify({
+        status: error.response?.status,
+        data: error.response?.data,
+        message: error.message,
+      }));
+      throw new Error(`Failed to refresh access token: ${error.response?.data?.error_description || error.message}`);
     }
   }
 

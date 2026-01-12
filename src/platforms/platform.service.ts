@@ -147,9 +147,29 @@ export class PlatformService {
       this.encryptionKey,
     );
 
+    // Convert expiresAt string to Date if needed (from JSON storage)
+    const expiresAt = credentials.expiresAt
+      ? new Date(credentials.expiresAt)
+      : null;
+
     // Check if token is expired and refresh if needed
-    if (credentials.expiresAt && new Date() > credentials.expiresAt) {
-      return await this.refreshToken(userId, platformName, credentials);
+    // Add 5-minute buffer to refresh before actual expiration
+    const bufferMs = 5 * 60 * 1000; // 5 minutes
+    const now = new Date();
+
+    if (expiresAt && now.getTime() > (expiresAt.getTime() - bufferMs)) {
+      console.log(`[PlatformService] Token expired or expiring soon for ${platformName}`);
+      console.log(`[PlatformService] Token expires: ${expiresAt.toISOString()}, Now: ${now.toISOString()}`);
+      console.log(`[PlatformService] Refreshing token...`);
+
+      try {
+        const newCredentials = await this.refreshToken(userId, platformName, credentials);
+        console.log(`[PlatformService] Token refreshed successfully, new expiry: ${newCredentials.expiresAt}`);
+        return newCredentials;
+      } catch (error) {
+        console.error(`[PlatformService] Token refresh failed:`, error.message);
+        throw error;
+      }
     }
 
     return credentials;
