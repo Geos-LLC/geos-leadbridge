@@ -309,7 +309,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
 
       const allMessages: any[] = [];
       let cursor: string | undefined;
-      const limit = 50; // Max per request
+      const limit = 20; // Thumbtack API max is 20 per request
       let pageCount = 0;
 
       do {
