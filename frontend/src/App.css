@@ -1118,6 +1118,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  align-items: flex-start; /* Allow children to control their own width */
 }
 
 .no-messages {
@@ -1147,7 +1148,7 @@ body {
 }
 
 .message.sent {
-  align-self: flex-end;
+  align-self: flex-end !important;
   margin-left: auto;
   background: var(--primary);
   color: white;
