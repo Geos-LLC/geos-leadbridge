@@ -259,14 +259,22 @@ export class ThumbtackController {
    */
   @Get('leads/:id/messages')
   async getMessages(@CurrentUser() user: any, @Param('id') id: string) {
-    const messages = await this.leadsService.getMessages(user.userId, id);
+    console.log(`[ThumbtackController] getMessages called - userId: ${user.userId}, leadId: ${id}`);
+    try {
+      const messages = await this.leadsService.getMessages(user.userId, id);
+      console.log(`[ThumbtackController] getMessages success - ${messages.length} messages`);
 
-    return {
-      platform: PlatformName.THUMBTACK,
-      leadId: id,
-      count: messages.length,
-      messages,
-    };
+      return {
+        platform: PlatformName.THUMBTACK,
+        leadId: id,
+        count: messages.length,
+        messages,
+      };
+    } catch (error) {
+      console.error(`[ThumbtackController] getMessages error:`, error.message);
+      console.error(`[ThumbtackController] Full error:`, error);
+      throw error;
+    }
   }
 
   @Post('leads/:id/message')
