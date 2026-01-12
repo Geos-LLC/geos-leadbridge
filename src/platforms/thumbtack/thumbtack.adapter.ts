@@ -521,12 +521,17 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   private normalizeMessage(message: any, conversationId: string): NormalizedMessage {
     // API returns: messageID, negotiationID, customer, from ("Customer" | "Pro"), text, attachments, sentAt
     // Attachments format: [{ url: "https://...", mimeType: "image/jpeg" }]
+    // Note: 'from' field is case-sensitive, could be "Pro", "pro", "Customer", "customer"
+    const fromValue = (message.from || '').toLowerCase();
+    const isPro = fromValue === 'pro' || fromValue === 'business';
+    this.logger.log(`Message from: "${message.from}" -> isPro: ${isPro}`);
+
     return {
       id: '', // Will be set by the service layer
       conversationId,
       platform: PlatformName.THUMBTACK,
       externalMessageId: message.messageID,
-      sender: message.from === 'Pro' ? MessageSender.PRO : MessageSender.CUSTOMER,
+      sender: isPro ? MessageSender.PRO : MessageSender.CUSTOMER,
       content: message.text,
       attachments: message.attachments || [],
       isRead: true, // API doesn't provide read status

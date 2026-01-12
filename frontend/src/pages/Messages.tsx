@@ -80,14 +80,19 @@ export function Messages() {
     try {
       const { messages: apiMessages } = await leadsApi.getMessages(lead.id);
       console.log('[Messages] API returned messages:', apiMessages);
-      const convertedMessages: LocalMessage[] = apiMessages.map((msg) => ({
-        id: msg.id || msg.externalMessageId,
-        content: msg.content,
-        sender: msg.sender,
-        sentAt: new Date(msg.sentAt),
-        externalId: msg.externalMessageId,
-        attachments: msg.attachments,
-      }));
+      const convertedMessages: LocalMessage[] = apiMessages.map((msg) => {
+        // Normalize sender to lowercase for consistent comparison
+        const sender = (msg.sender || '').toLowerCase() as 'pro' | 'customer';
+        console.log('[Messages] Message sender raw:', msg.sender, '-> normalized:', sender);
+        return {
+          id: msg.id || msg.externalMessageId,
+          content: msg.content,
+          sender,
+          sentAt: new Date(msg.sentAt),
+          externalId: msg.externalMessageId,
+          attachments: msg.attachments,
+        };
+      });
       console.log('[Messages] Converted messages:', convertedMessages);
       setMessages(convertedMessages);
     } catch (err) {
