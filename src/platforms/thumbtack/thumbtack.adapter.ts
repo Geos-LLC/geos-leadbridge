@@ -299,29 +299,41 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       const allMessages: any[] = [];
       let cursor: string | undefined;
       const limit = 50; // Max per request
+      let pageCount = 0;
 
       do {
+        pageCount++;
         const params: any = { limit };
         if (cursor) {
           params.cursor = cursor;
         }
+
+        this.logger.log(`Fetching page ${pageCount}, cursor: ${cursor || 'none'}`);
 
         const response = await this.httpClient.get(`/negotiations/${negotiationId}/messages`, {
           headers: { Authorization: `Bearer ${credentials.accessToken}` },
           params,
         });
 
-        this.logger.log(`Thumbtack messages response: ${JSON.stringify(response.data)}`);
+        this.logger.log(`Thumbtack messages response (page ${pageCount}): status=${response.status}`);
+
         const messages = response.data.data || response.data.messages || [];
+        this.logger.log(`Page ${pageCount}: got ${messages.length} messages`);
         allMessages.push(...messages);
 
         // Check if there are more messages
         cursor = response.data.pagination?.cursor;
-        this.logger.log(`Fetched ${messages.length} messages, cursor: ${cursor}`);
+        this.logger.log(`Page ${pageCount}: next cursor: ${cursor || 'none'}`);
+
+        // Safety: limit to 20 pages max (1000 messages)
+        if (pageCount >= 20) {
+          this.logger.warn('Reached maximum pagination limit (20 pages)');
+          break;
+        }
 
       } while (cursor);
 
-      this.logger.log(`Total messages fetched: ${allMessages.length}`);
+      this.logger.log(`Total messages fetched: ${allMessages.length} across ${pageCount} pages`);
 
       const normalized = allMessages.map((message: any) => this.normalizeMessage(message, negotiationId));
 
@@ -330,8 +342,14 @@ export class ThumbtackAdapter implements IPlatformAdapter {
 
       return normalized;
     } catch (error) {
-      this.logger.error('Error fetching messages:', error.response?.data || error.message);
-      throw new Error('Failed to fetch messages from Thumbtack');
+      this.logger.error('Error fetching messages:', error.response?.status, error.response?.data || error.message);
+      this.logger.error('Full error details:', JSON.stringify({
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        message: error.message,
+      }));
+      throw new Error(`Failed to fetch messages from Thumbtack: ${error.response?.data?.message || error.message}`);
     }
   }
 

@@ -139,19 +139,32 @@ export class LeadsService {
    * Get messages for a lead/negotiation
    */
   async getMessages(userId: string, leadId: string): Promise<any[]> {
+    console.log(`[LeadsService] getMessages called - userId: ${userId}, leadId: ${leadId}`);
+
     const lead = await this.getLead(userId, leadId);
+    console.log(`[LeadsService] Found lead - externalRequestId: ${lead.externalRequestId}, platform: ${lead.platform}`);
 
     // Use externalRequestId (negotiationID) to fetch messages from Thumbtack
     const negotiationId = lead.externalRequestId;
 
-    const credentials = await this.platformService.getCredentials(userId, lead.platform);
-    const adapter = this.platformFactory.getAdapter(lead.platform) as any;
+    try {
+      const credentials = await this.platformService.getCredentials(userId, lead.platform);
+      const adapter = this.platformFactory.getAdapter(lead.platform) as any;
 
-    if (typeof adapter.getConversation === 'function') {
-      return await adapter.getConversation(credentials, negotiationId);
+      if (typeof adapter.getConversation === 'function') {
+        console.log(`[LeadsService] Fetching conversation for negotiationId: ${negotiationId}`);
+        const messages = await adapter.getConversation(credentials, negotiationId);
+        console.log(`[LeadsService] Got ${messages.length} messages from adapter`);
+        return messages;
+      }
+
+      console.log(`[LeadsService] Adapter does not have getConversation method`);
+      return [];
+    } catch (error) {
+      console.error(`[LeadsService] Error fetching messages:`, error.message);
+      console.error(`[LeadsService] Full error:`, error.response?.data || error);
+      throw error;
     }
-
-    return [];
   }
 
   /**
