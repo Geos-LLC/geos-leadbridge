@@ -276,17 +276,16 @@ export class LeadsService {
   async importThumbtackNegotiation(userId: string, negotiationId: string): Promise<{ lead: NormalizedLead; isNew: boolean }> {
     console.log(`[LeadsService] importThumbtackNegotiation - userId: ${userId}, negotiationId: ${negotiationId}`);
 
-    // Check if lead already exists for this user
+    // Check if lead already exists in DB (regardless of userId - could be from webhook or different user)
     const existingLead = await this.prisma.lead.findFirst({
       where: {
         platform: 'thumbtack',
         externalRequestId: negotiationId,
-        userId,
       },
     });
 
     const isNew = !existingLead;
-    console.log(`[LeadsService] Lead ${isNew ? 'is new' : 'already exists'} for this user`);
+    console.log(`[LeadsService] Lead ${isNew ? 'is new' : 'already exists in DB'}${existingLead ? ` (owner: ${existingLead.userId})` : ''}`);
 
     const credentials = await this.platformService.getCredentials(userId, 'thumbtack');
     const adapter = this.platformFactory.getAdapter('thumbtack') as any;
@@ -295,7 +294,7 @@ export class LeadsService {
     const lead = await adapter.getLead(credentials, negotiationId);
     console.log(`[LeadsService] Fetched lead from Thumbtack:`, JSON.stringify(lead));
 
-    // Store in database
+    // Store in database (upsert will update userId if different)
     await this.upsertLead(userId, lead);
     console.log(`[LeadsService] Lead upserted to database`);
 
