@@ -10,8 +10,10 @@ interface AppState {
   // Businesses
   businesses: Business[];
   selectedBusiness: Business | null;
+  configuredBusinessId: string | null; // Currently connected business ID
   setBusinesses: (businesses: Business[]) => void;
   setSelectedBusiness: (business: Business | null) => void;
+  setConfiguredBusinessId: (id: string | null) => void;
 
   // Leads
   leads: Lead[];
@@ -19,6 +21,9 @@ interface AppState {
   setLeads: (leads: Lead[]) => void;
   setSelectedLead: (lead: Lead | null) => void;
   updateLead: (lead: Lead) => void;
+
+  // Helper to check if a lead belongs to the currently connected account
+  isLeadAccessible: (lead: Lead) => boolean;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -34,8 +39,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Businesses
   businesses: [],
   selectedBusiness: null,
+  configuredBusinessId: null,
   setBusinesses: (businesses) => set({ businesses }),
   setSelectedBusiness: (business) => set({ selectedBusiness: business }),
+  setConfiguredBusinessId: (id) => set({ configuredBusinessId: id }),
 
   // Leads
   leads: [],
@@ -47,4 +54,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       leads: state.leads.map((lead) => (lead.id === updatedLead.id ? updatedLead : lead)),
       selectedLead: state.selectedLead?.id === updatedLead.id ? updatedLead : state.selectedLead,
     })),
+
+  // Helper to check if a lead belongs to the currently connected account
+  isLeadAccessible: (lead) => {
+    const { configuredBusinessId } = get();
+    // If no businessId on lead or no configured business, assume accessible
+    if (!lead.businessId || !configuredBusinessId) return true;
+    return lead.businessId === configuredBusinessId;
+  },
 }));

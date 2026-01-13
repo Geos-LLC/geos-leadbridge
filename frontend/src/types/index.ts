@@ -12,6 +12,7 @@ export interface AuthResponse {
 export interface Lead {
   id: string;
   platform: string;
+  businessId?: string; // Platform's business ID (for multi-account filtering)
   externalRequestId: string;
   customerName: string;
   customerPhone: string | null;

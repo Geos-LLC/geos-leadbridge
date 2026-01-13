@@ -859,6 +859,32 @@ body {
   border-left: 3px solid var(--primary);
 }
 
+.lead-item.inaccessible {
+  opacity: 0.7;
+  background: #fff8e1;
+}
+
+.lead-item.inaccessible .lead-avatar {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.lead-item.inaccessible.selected {
+  background: #fff3cd;
+  border-left: 3px solid var(--warning);
+}
+
+.lead-badge-other-account {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  background: #fff3cd;
+  color: #856404;
+  border-radius: var(--radius-sm);
+}
+
 .lead-avatar {
   width: 40px;
   height: 40px;
@@ -1139,6 +1165,33 @@ body {
 .no-messages small {
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.no-messages.inaccessible-warning {
+  padding: 24px;
+  background: #fff8e1;
+  border-radius: var(--radius);
+  margin: 24px;
+  max-width: 400px;
+}
+
+.no-messages.inaccessible-warning svg {
+  color: #f9a825;
+  opacity: 1;
+}
+
+.no-messages.inaccessible-warning h4 {
+  color: #856404;
+  margin-bottom: 8px;
+}
+
+.no-messages.inaccessible-warning p {
+  color: #856404;
+  margin-bottom: 12px;
+}
+
+.no-messages.inaccessible-warning small {
+  color: #a98307;
 }
 
 .message {

@@ -17,7 +17,7 @@ export function Dashboard() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuthStore();
-  const { platforms, setPlatforms, businesses, setBusinesses, setSelectedBusiness } = useAppStore();
+  const { platforms, setPlatforms, businesses, setBusinesses, setSelectedBusiness, setConfiguredBusinessId: setGlobalConfiguredBusinessId } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [settingUpWebhook, setSettingUpWebhook] = useState<string | null>(null);
@@ -69,7 +69,9 @@ export function Dashboard() {
         platformsApi.getConnection(),
       ]);
       setPlatforms(statusResponse.platforms);
-      setConfiguredBusinessId(connectionResponse.thumbtack.configuredBusinessId);
+      const businessId = connectionResponse.thumbtack.configuredBusinessId;
+      setConfiguredBusinessId(businessId);
+      setGlobalConfiguredBusinessId(businessId); // Also set in global store for Messages page
     } catch (err) {
       console.error('Failed to load platform status:', err);
     } finally {
