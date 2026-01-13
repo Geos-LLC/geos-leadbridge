@@ -36,22 +36,32 @@ export class LeadsService {
    * For Thumbtack: leads come via webhooks, so we query the local database
    * For other platforms: may fetch from API and store locally
    *
-   * Note: Leads are NOT filtered by businessId - all leads for the user are shown
-   * regardless of which Thumbtack account is currently connected. This allows
-   * users to switch between accounts while keeping all their leads visible.
+   * Leads are filtered by the currently connected businessId - only leads
+   * belonging to the connected Thumbtack account are shown.
    */
   async getLeads(userId: string, platformName: string, options?: any): Promise<NormalizedLead[]> {
     console.log(`[LeadsService] getLeads called - userId: ${userId}, platform: ${platformName}, options:`, options);
 
     // For webhook-based platforms like Thumbtack, query local database
     if (platformName === 'thumbtack') {
-      // Get all leads for this user (not filtered by businessId)
-      // This allows leads to persist when switching between Thumbtack accounts
+      // Get the currently connected business ID to filter leads
+      const platform = await this.prisma.platform.findFirst({
+        where: {
+          userId,
+          platformName,
+          connected: true,
+        },
+      });
+      const businessId = platform?.externalBusinessId ?? undefined;
+      console.log(`[LeadsService] Connected businessId: ${businessId}`);
+
+      // Only show leads for the currently connected account
       const leads = await this.getCachedLeads(userId, {
         platform: platformName,
+        businessId,
         limit: options?.limit,
       });
-      console.log(`[LeadsService] Found ${leads.length} leads for user ${userId}`);
+      console.log(`[LeadsService] Found ${leads.length} leads for user ${userId} (businessId: ${businessId})`);
       return leads;
     }
 

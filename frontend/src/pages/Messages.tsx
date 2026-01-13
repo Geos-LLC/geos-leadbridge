@@ -14,9 +14,8 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronUp,
-  AlertTriangle,
 } from 'lucide-react';
-import { leadsApi, platformsApi, type MessageAttachment } from '../services/api';
+import { leadsApi, type MessageAttachment } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import type { Lead } from '../types';
 
@@ -32,7 +31,7 @@ interface LocalMessage {
 export function Messages() {
   console.log('[Messages] Component rendering');
   const navigate = useNavigate();
-  const { leads, setLeads, selectedLead, setSelectedLead, selectedBusiness, isLeadAccessible, configuredBusinessId, setConfiguredBusinessId } = useAppStore();
+  const { leads, setLeads, selectedLead, setSelectedLead, selectedBusiness } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
@@ -41,32 +40,15 @@ export function Messages() {
   const [expandedDetails, setExpandedDetails] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Check if the selected lead is accessible (belongs to currently connected account)
-  const isSelectedLeadAccessible = selectedLead ? isLeadAccessible(selectedLead) : true;
-
   useEffect(() => {
     loadLeads();
-    loadConfiguredBusinessId();
   }, []);
 
   useEffect(() => {
-    if (selectedLead && isLeadAccessible(selectedLead)) {
-      // Only load messages if the lead belongs to the currently connected account
+    if (selectedLead) {
       loadMessagesForLead(selectedLead);
-    } else if (selectedLead) {
-      // Clear messages for inaccessible leads
-      setMessages([]);
     }
-  }, [selectedLead, configuredBusinessId]);
-
-  const loadConfiguredBusinessId = async () => {
-    try {
-      const connectionResponse = await platformsApi.getConnection();
-      setConfiguredBusinessId(connectionResponse.thumbtack.configuredBusinessId);
-    } catch (err) {
-      console.error('[Messages] Failed to load configured business ID:', err);
-    }
-  };
+  }, [selectedLead]);
 
   useEffect(() => {
     scrollToBottom();
@@ -213,31 +195,27 @@ export function Messages() {
               <small>New leads will appear here</small>
             </div>
           ) : (
-            leads.map((lead) => {
-              const accessible = isLeadAccessible(lead);
-              return (
-                <div
-                  key={lead.id}
-                  className={`lead-item ${selectedLead?.id === lead.id ? 'selected' : ''} ${!accessible ? 'inaccessible' : ''}`}
-                  onClick={() => setSelectedLead(lead)}
-                >
-                  <div className="lead-avatar">
-                    {accessible ? <User size={20} /> : <AlertTriangle size={20} />}
-                  </div>
-                  <div className="lead-preview">
-                    <div className="lead-header">
-                      <span className="lead-name">{lead.customerName}</span>
-                      <span className="lead-time">{formatDate(lead.createdAt)}</span>
-                    </div>
-                    <div className="lead-meta">
-                      <span className="lead-category">{lead.category || 'Service Request'}</span>
-                      {!accessible && <span className="lead-badge-other-account">Other account</span>}
-                    </div>
-                    <p className="lead-snippet">{lead.message?.slice(0, 60)}...</p>
-                  </div>
+            leads.map((lead) => (
+              <div
+                key={lead.id}
+                className={`lead-item ${selectedLead?.id === lead.id ? 'selected' : ''}`}
+                onClick={() => setSelectedLead(lead)}
+              >
+                <div className="lead-avatar">
+                  <User size={20} />
                 </div>
-              );
-            })
+                <div className="lead-preview">
+                  <div className="lead-header">
+                    <span className="lead-name">{lead.customerName}</span>
+                    <span className="lead-time">{formatDate(lead.createdAt)}</span>
+                  </div>
+                  <div className="lead-meta">
+                    <span className="lead-category">{lead.category || 'Service Request'}</span>
+                  </div>
+                  <p className="lead-snippet">{lead.message?.slice(0, 60)}...</p>
+                </div>
+              </div>
+            ))
           )}
         </div>
       </aside>
@@ -350,14 +328,7 @@ export function Messages() {
 
             {/* Messages Area */}
             <div className="messages-container">
-              {!isSelectedLeadAccessible ? (
-                <div className="no-messages inaccessible-warning">
-                  <AlertTriangle size={48} />
-                  <h4>Different Thumbtack Account</h4>
-                  <p>This lead belongs to a different Thumbtack account than the one currently connected.</p>
-                  <small>To view messages and interact with this lead, disconnect and reconnect with the correct Thumbtack account from the Dashboard.</small>
-                </div>
-              ) : loadingMessages ? (
+              {loadingMessages ? (
                 <div className="no-messages">
                   <Loader2 className="spinner" size={32} />
                   <p>Loading messages...</p>
@@ -424,13 +395,13 @@ export function Messages() {
                 type="text"
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
-                placeholder={isSelectedLeadAccessible ? "Type a message..." : "Cannot message - different account"}
-                disabled={sendingMessage || !isSelectedLeadAccessible}
+                placeholder="Type a message..."
+                disabled={sendingMessage}
               />
               <button
                 type="submit"
                 className="btn btn-primary send-btn"
-                disabled={!messageText.trim() || sendingMessage || !isSelectedLeadAccessible}
+                disabled={!messageText.trim() || sendingMessage}
               >
                 {sendingMessage ? <Loader2 className="spinner" size={20} /> : <Send size={20} />}
               </button>
