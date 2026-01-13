@@ -49,7 +49,7 @@ export class LeadsService {
           connected: true,
         },
       });
-      const businessId = platform?.externalBusinessId;
+      const businessId = platform?.externalBusinessId ?? undefined;
       console.log(`[LeadsService] Connected businessId: ${businessId}`);
 
       const leads = await this.getCachedLeads(userId, {
