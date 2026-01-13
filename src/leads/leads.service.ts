@@ -145,6 +145,14 @@ export class LeadsService {
     const totalLeads = await this.prisma.lead.count({ where: { userId } });
     console.log(`[LeadsService] Total leads for user ${userId}: ${totalLeads}`);
 
+    // Debug: show businessIds of all leads for this user
+    const allUserLeads = await this.prisma.lead.findMany({
+      where: { userId },
+      select: { id: true, businessId: true, customerName: true },
+    });
+    console.log(`[LeadsService] All leads for user with their businessIds:`,
+      allUserLeads.map(l => ({ id: l.id.slice(0, 8), businessId: l.businessId, name: l.customerName })));
+
     // Debug: check if there are ANY leads in the database
     const allLeadsCount = await this.prisma.lead.count();
     console.log(`[LeadsService] Total leads in entire DB: ${allLeadsCount}`);
