@@ -258,10 +258,12 @@ export class ThumbtackAdapter implements IPlatformAdapter {
     const customer = negotiation.customer || {};
     const request = negotiation.request || {};
     const location = request.location || {};
+    const business = negotiation.business || {};
 
     return {
       id: '',
       platform: PlatformName.THUMBTACK,
+      businessId: business.businessID,
       externalRequestId: negotiation.negotiationID,
       customerName: customer.firstName && customer.lastName
         ? `${customer.firstName} ${customer.lastName}`

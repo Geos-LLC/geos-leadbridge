@@ -134,10 +134,6 @@ export const leadsApi = {
     const { data } = await api.post(`/v1/thumbtack/negotiations/${negotiationId}/import`);
     return data;
   },
-  clearLeads: async (): Promise<{ deletedLeads: number; deletedConversations: number; deletedMessages: number }> => {
-    const { data } = await api.post('/v1/thumbtack/leads/clear');
-    return data;
-  },
 };
 
 export default api;

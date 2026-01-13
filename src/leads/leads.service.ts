@@ -41,11 +41,23 @@ export class LeadsService {
 
     // For webhook-based platforms like Thumbtack, query local database
     if (platformName === 'thumbtack') {
+      // Get the currently connected business ID to filter leads
+      const platform = await this.prisma.platform.findFirst({
+        where: {
+          userId,
+          platformName,
+          connected: true,
+        },
+      });
+      const businessId = platform?.externalBusinessId;
+      console.log(`[LeadsService] Connected businessId: ${businessId}`);
+
       const leads = await this.getCachedLeads(userId, {
         platform: platformName,
+        businessId,
         limit: options?.limit,
       });
-      console.log(`[LeadsService] Found ${leads.length} leads for user ${userId}`);
+      console.log(`[LeadsService] Found ${leads.length} leads for user ${userId} (businessId: ${businessId})`);
       return leads;
     }
 
@@ -108,7 +120,7 @@ export class LeadsService {
    */
   async getCachedLeads(
     userId: string,
-    filters?: { platform?: string; status?: string; limit?: number },
+    filters?: { platform?: string; status?: string; businessId?: string; limit?: number },
   ) {
     console.log(`[LeadsService] getCachedLeads - userId: ${userId}, filters:`, filters);
 
@@ -117,6 +129,7 @@ export class LeadsService {
         userId,
         ...(filters?.platform && { platform: filters.platform }),
         ...(filters?.status && { status: filters.status }),
+        ...(filters?.businessId && { businessId: filters.businessId }),
       },
       orderBy: { createdAt: 'desc' },
       take: filters?.limit || 50,
@@ -250,6 +263,7 @@ export class LeadsService {
       create: {
         userId,
         platform: lead.platform,
+        businessId: lead.businessId,
         externalRequestId: lead.externalRequestId,
         customerName: lead.customerName,
         customerPhone: lead.customerPhone,
@@ -266,6 +280,7 @@ export class LeadsService {
       },
       update: {
         userId, // Update userId in case lead was imported by different user before
+        businessId: lead.businessId,
         customerName: lead.customerName,
         customerPhone: lead.customerPhone,
         customerEmail: lead.customerEmail,
@@ -366,45 +381,6 @@ export class LeadsService {
       createdAt: lead.createdAt,
       updatedAt: lead.updatedAt,
       raw: lead.rawJson ? JSON.parse(lead.rawJson) : undefined,
-    };
-  }
-
-  /**
-   * Clear all leads for a user and platform
-   * Used when switching accounts to start fresh
-   */
-  async clearLeads(
-    userId: string,
-    platform: string,
-  ): Promise<{ deletedLeads: number; deletedConversations: number; deletedMessages: number }> {
-    // Delete messages first (foreign key constraint)
-    const deletedMessages = await this.prisma.message.deleteMany({
-      where: {
-        userId,
-        platform,
-      },
-    });
-
-    // Delete conversations
-    const deletedConversations = await this.prisma.conversation.deleteMany({
-      where: {
-        userId,
-        platform,
-      },
-    });
-
-    // Delete leads
-    const deletedLeads = await this.prisma.lead.deleteMany({
-      where: {
-        userId,
-        platform,
-      },
-    });
-
-    return {
-      deletedLeads: deletedLeads.count,
-      deletedConversations: deletedConversations.count,
-      deletedMessages: deletedMessages.count,
     };
   }
 }

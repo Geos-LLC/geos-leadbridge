@@ -70,6 +70,7 @@ model Lead {
   id                String   @id @default(uuid())
   userId            String
   platform          String   // "thumbtack" | "yelp" | etc.
+  businessId        String?  // Platform's business ID (for multi-account filtering)
   externalRequestId String   // Platform's unique lead/request ID
   customerName      String
   customerPhone     String?
@@ -94,6 +95,7 @@ model Lead {
   @@unique([platform, externalRequestId])
   @@index([userId])
   @@index([platform])
+  @@index([businessId])
   @@index([status])
   @@index([createdAt])
   @@map("leads")

@@ -162,6 +162,7 @@ export class WebhooksService {
       create: {
         userId: platformConnection.userId,
         platform,
+        businessId: business.businessID,
         externalRequestId: negotiationId,
         customerName: `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown',
         customerPhone: customer.phone,

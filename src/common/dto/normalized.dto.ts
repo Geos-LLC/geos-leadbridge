@@ -28,6 +28,10 @@ export class NormalizedLead {
   @IsString()
   platform: string; // "thumbtack" | "yelp" | etc.
 
+  @IsOptional()
+  @IsString()
+  businessId?: string; // Platform's business ID (for multi-account filtering)
+
   @IsString()
   externalRequestId: string; // Platform's request/lead ID
 
