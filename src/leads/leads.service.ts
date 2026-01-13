@@ -368,4 +368,43 @@ export class LeadsService {
       raw: lead.rawJson ? JSON.parse(lead.rawJson) : undefined,
     };
   }
+
+  /**
+   * Clear all leads for a user and platform
+   * Used when switching accounts to start fresh
+   */
+  async clearLeads(
+    userId: string,
+    platform: string,
+  ): Promise<{ deletedLeads: number; deletedConversations: number; deletedMessages: number }> {
+    // Delete messages first (foreign key constraint)
+    const deletedMessages = await this.prisma.message.deleteMany({
+      where: {
+        userId,
+        platform,
+      },
+    });
+
+    // Delete conversations
+    const deletedConversations = await this.prisma.conversation.deleteMany({
+      where: {
+        userId,
+        platform,
+      },
+    });
+
+    // Delete leads
+    const deletedLeads = await this.prisma.lead.deleteMany({
+      where: {
+        userId,
+        platform,
+      },
+    });
+
+    return {
+      deletedLeads: deletedLeads.count,
+      deletedConversations: deletedConversations.count,
+      deletedMessages: deletedMessages.count,
+    };
+  }
 }

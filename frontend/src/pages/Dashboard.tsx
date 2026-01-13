@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Webhook, Unlink, Download, X } from 'lucide-react';
+import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Webhook, Unlink, Download, X, Trash2 } from 'lucide-react';
 import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
@@ -23,6 +23,7 @@ export function Dashboard() {
   const [settingUpWebhook, setSettingUpWebhook] = useState<string | null>(null);
   const [configuredBusinessId, setConfiguredBusinessId] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [clearingLeads, setClearingLeads] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -128,6 +129,23 @@ export function Dashboard() {
       setError(err.response?.data?.message || 'Failed to disconnect Thumbtack');
     } finally {
       setDisconnecting(false);
+    }
+  };
+
+  const handleClearLeads = async () => {
+    if (!confirm('Are you sure you want to clear ALL leads? This will delete all leads, conversations, and messages. This cannot be undone.')) {
+      return;
+    }
+    setClearingLeads(true);
+    setError('');
+    setSuccess('');
+    try {
+      const result = await leadsApi.clearLeads();
+      setSuccess(`Cleared ${result.deletedLeads} leads, ${result.deletedConversations} conversations, ${result.deletedMessages} messages.`);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to clear leads');
+    } finally {
+      setClearingLeads(false);
     }
   };
 
@@ -294,23 +312,42 @@ export function Dashboard() {
                 )}
               </button>
             ) : (
-              <button
-                className="btn btn-danger"
-                onClick={handleDisconnectThumbtack}
-                disabled={disconnecting}
-              >
-                {disconnecting ? (
-                  <>
-                    <Loader2 className="spinner" size={18} />
-                    Disconnecting...
-                  </>
-                ) : (
-                  <>
-                    <Unlink size={18} />
-                    Disconnect
-                  </>
-                )}
-              </button>
+              <>
+                <button
+                  className="btn btn-warning"
+                  onClick={handleClearLeads}
+                  disabled={clearingLeads}
+                >
+                  {clearingLeads ? (
+                    <>
+                      <Loader2 className="spinner" size={18} />
+                      Clearing...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={18} />
+                      Clear Leads
+                    </>
+                  )}
+                </button>
+                <button
+                  className="btn btn-danger"
+                  onClick={handleDisconnectThumbtack}
+                  disabled={disconnecting}
+                >
+                  {disconnecting ? (
+                    <>
+                      <Loader2 className="spinner" size={18} />
+                      Disconnecting...
+                    </>
+                  ) : (
+                    <>
+                      <Unlink size={18} />
+                      Disconnect
+                    </>
+                  )}
+                </button>
+              </>
             )}
           </div>
         </div>

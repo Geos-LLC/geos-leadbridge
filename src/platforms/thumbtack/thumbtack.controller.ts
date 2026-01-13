@@ -146,6 +146,21 @@ export class ThumbtackController {
     };
   }
 
+  /**
+   * Clear all leads for the user's Thumbtack account
+   * Use this when switching accounts to start fresh
+   */
+  @Post('leads/clear')
+  async clearLeads(@CurrentUser() user: any) {
+    const result = await this.leadsService.clearLeads(user.userId, PlatformName.THUMBTACK);
+
+    return {
+      success: true,
+      message: `Cleared ${result.deletedLeads} leads, ${result.deletedConversations} conversations, ${result.deletedMessages} messages`,
+      ...result,
+    };
+  }
+
   // ==========================================
   // User Info
   // ==========================================

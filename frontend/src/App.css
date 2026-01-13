@@ -94,6 +94,15 @@ body {
   background: #bb2d3b;
 }
 
+.btn-warning {
+  background: #ffc107;
+  color: #212529;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: #e0a800;
+}
+
 .btn-icon {
   display: flex;
   align-items: center;
