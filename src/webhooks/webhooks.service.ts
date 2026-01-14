@@ -33,17 +33,18 @@ export class WebhooksService {
     });
 
     // Verify signature if both signature and secret are present
+    // Note: Thumbtack webhooks don't include a signature header, so we accept them without verification
     let isValid = false;
     if (signature && secret) {
       isValid = adapter.verifyWebhookSignature(signature, JSON.stringify(payload), secret);
+    } else if (!signature) {
+      // Thumbtack doesn't send signature headers - accept webhooks without verification
+      this.logger.log('Accepting webhook without signature (Thumbtack does not sign webhooks)');
+      isValid = true;
     } else if (!secret) {
-      // If no secret is configured, accept the webhook (dev mode)
+      // If no secret is configured, accept the webhook
       this.logger.warn('No webhook secret configured - accepting webhook without verification');
       isValid = true;
-    } else {
-      // Signature missing but secret is configured
-      this.logger.warn('Webhook signature missing but secret is configured');
-      isValid = false;
     }
 
     // Log webhook event
