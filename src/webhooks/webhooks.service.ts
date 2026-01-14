@@ -170,7 +170,7 @@ export class WebhooksService {
       return;
     }
 
-    // Store the lead
+    // Store the lead (threadId is optional and managed separately)
     await this.prisma.lead.upsert({
       where: {
         platform_externalRequestId: {
@@ -191,7 +191,6 @@ export class WebhooksService {
         state: location.state,
         category: request.category?.name,
         status: data.status?.toLowerCase() || 'new',
-        threadId: negotiationId,
         rawJson: JSON.stringify(data),
       },
       update: {
