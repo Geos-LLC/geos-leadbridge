@@ -21,12 +21,30 @@ export class WebhooksService {
   /**
    * Handle incoming webhook from Thumbtack
    */
-  async handleThumbtackWebhook(signature: string, payload: any): Promise<void> {
+  async handleThumbtackWebhook(signature: string | undefined, payload: any): Promise<void> {
     const secret = this.configService.get<string>('thumbtack.webhookSecret') || '';
     const adapter = this.platformFactory.getAdapter('thumbtack');
 
-    // Verify signature
-    const isValid = adapter.verifyWebhookSignature(signature, JSON.stringify(payload), secret);
+    // Log webhook receipt for debugging
+    this.logger.log('Received Thumbtack webhook', {
+      hasSignature: !!signature,
+      hasSecret: !!secret,
+      eventType: payload?.event?.eventType || payload?.event_type || 'unknown',
+    });
+
+    // Verify signature if both signature and secret are present
+    let isValid = false;
+    if (signature && secret) {
+      isValid = adapter.verifyWebhookSignature(signature, JSON.stringify(payload), secret);
+    } else if (!secret) {
+      // If no secret is configured, accept the webhook (dev mode)
+      this.logger.warn('No webhook secret configured - accepting webhook without verification');
+      isValid = true;
+    } else {
+      // Signature missing but secret is configured
+      this.logger.warn('Webhook signature missing but secret is configured');
+      isValid = false;
+    }
 
     // Log webhook event
     const event = await this.prisma.webhookEvent.create({

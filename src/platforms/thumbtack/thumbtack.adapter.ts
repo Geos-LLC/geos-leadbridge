@@ -488,11 +488,31 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   // ==========================================
 
   verifyWebhookSignature(signature: string, payload: string, secret: string): boolean {
-    const hmac = crypto.createHmac('sha256', secret);
-    hmac.update(payload);
-    const expectedSignature = hmac.digest('hex');
+    // Guard against undefined/null inputs
+    if (!signature || !payload || !secret) {
+      this.logger.warn('verifyWebhookSignature called with missing parameters', {
+        hasSignature: !!signature,
+        hasPayload: !!payload,
+        hasSecret: !!secret,
+      });
+      return false;
+    }
 
-    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
+    try {
+      const hmac = crypto.createHmac('sha256', secret);
+      hmac.update(payload);
+      const expectedSignature = hmac.digest('hex');
+
+      // Handle different signature lengths
+      if (signature.length !== expectedSignature.length) {
+        return false;
+      }
+
+      return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
+    } catch (error) {
+      this.logger.error('Error verifying webhook signature:', error.message);
+      return false;
+    }
   }
 
   async handleWebhookEvent(event: any, _userId?: string): Promise<WebhookEventResult> {

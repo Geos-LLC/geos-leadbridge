@@ -111,7 +111,7 @@ export function Dashboard() {
   };
 
   const handleDisconnectThumbtack = async () => {
-    if (!confirm('Are you sure you want to disconnect your Thumbtack account? You will stop receiving leads.')) {
+    if (!confirm('Are you sure you want to disconnect your Thumbtack account?\n\nNote: New leads will still be received via webhook. Disconnecting only removes API access (viewing conversations, sending messages).')) {
       return;
     }
     setDisconnecting(true);
