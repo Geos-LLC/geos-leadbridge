@@ -157,13 +157,66 @@ export class WebhooksService {
 
     this.logger.log('New negotiation received', { platform, negotiationId });
 
-    // Find user by businessID (stored when webhook is registered)
-    const platformConnection = await this.prisma.platform.findFirst({
+    // Find user by businessID - first try exact match, then find any connected user for this platform
+    // This handles multiple businesses under one OAuth connection
+    let platformConnection = await this.prisma.platform.findFirst({
       where: {
         platformName: platform,
         externalBusinessId: business.businessID,
       },
     });
+
+    // If no exact match, find any connected platform for this user
+    // (Thumbtack OAuth grants access to all businesses for that user)
+    if (!platformConnection) {
+      // Check if there's a lead already for this business to find the user
+      const existingLead = await this.prisma.lead.findFirst({
+        where: {
+          platform,
+          businessId: business.businessID,
+        },
+      });
+
+      if (existingLead) {
+        platformConnection = await this.prisma.platform.findFirst({
+          where: {
+            platformName: platform,
+            userId: existingLead.userId,
+            connected: true,
+          },
+        });
+      }
+    }
+
+    // If still no match, try to find any connected Thumbtack platform
+    // This is a fallback - webhook came for a business we haven't seen before
+    if (!platformConnection) {
+      this.logger.warn('No exact platform match, searching for any connected Thumbtack user', { businessID: business.businessID });
+
+      // Get all connected Thumbtack platforms
+      const connectedPlatforms = await this.prisma.platform.findMany({
+        where: {
+          platformName: platform,
+          connected: true,
+        },
+      });
+
+      // For now, if there's only one connected user, use that
+      // In production with multiple users, you'd need a business-to-user mapping table
+      if (connectedPlatforms.length === 1) {
+        platformConnection = connectedPlatforms[0];
+        this.logger.log('Using single connected platform for webhook', {
+          userId: platformConnection.userId,
+          businessID: business.businessID
+        });
+      } else if (connectedPlatforms.length > 1) {
+        this.logger.warn('Multiple connected platforms found, cannot determine user', {
+          businessID: business.businessID,
+          platformCount: connectedPlatforms.length
+        });
+        return;
+      }
+    }
 
     if (!platformConnection) {
       this.logger.warn('No user found for business', { businessID: business.businessID });
@@ -222,13 +275,51 @@ export class WebhooksService {
 
     // If we have business info, ensure the lead exists
     if (businessId && negotiationId) {
-      // Find user by businessID
-      const platformConnection = await this.prisma.platform.findFirst({
+      // Find user by businessID - use same fallback logic as handleNegotiationCreated
+      let platformConnection = await this.prisma.platform.findFirst({
         where: {
           platformName: platform,
           externalBusinessId: businessId,
         },
       });
+
+      // If no exact match, check if lead already exists for this business
+      if (!platformConnection) {
+        const existingLeadForBusiness = await this.prisma.lead.findFirst({
+          where: {
+            platform,
+            businessId,
+          },
+        });
+
+        if (existingLeadForBusiness) {
+          platformConnection = await this.prisma.platform.findFirst({
+            where: {
+              platformName: platform,
+              userId: existingLeadForBusiness.userId,
+              connected: true,
+            },
+          });
+        }
+      }
+
+      // Fallback: if only one connected platform, use that
+      if (!platformConnection) {
+        const connectedPlatforms = await this.prisma.platform.findMany({
+          where: {
+            platformName: platform,
+            connected: true,
+          },
+        });
+
+        if (connectedPlatforms.length === 1) {
+          platformConnection = connectedPlatforms[0];
+          this.logger.log('Using single connected platform for message webhook', {
+            userId: platformConnection.userId,
+            businessId
+          });
+        }
+      }
 
       if (platformConnection) {
         // Check if lead exists, if not create it
