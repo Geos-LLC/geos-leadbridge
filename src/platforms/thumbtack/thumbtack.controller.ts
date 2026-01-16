@@ -33,7 +33,10 @@ export class ThumbtackController {
     private leadsService: LeadsService,
     private configService: ConfigService,
   ) {
-    this.frontendUrl = this.configService.get<string>('frontendUrl') || 'http://localhost:5173';
+    // Sanitize frontendUrl - remove trailing slashes and whitespace
+    const rawUrl = this.configService.get<string>('frontendUrl') || 'http://localhost:5173';
+    this.frontendUrl = rawUrl.trim().replace(/\/+$/, '');
+    console.log('[ThumbtackController] frontendUrl configured as:', this.frontendUrl);
   }
 
   /**
@@ -112,7 +115,9 @@ export class ThumbtackController {
       await this.autoSetupWebhooks(userId);
 
       // Redirect to frontend dashboard with success
-      return res.redirect(`${this.frontendUrl}/dashboard?connected=thumbtack`);
+      const redirectUrl = `${this.frontendUrl}/dashboard?connected=thumbtack`;
+      console.log('[ThumbtackController] Redirecting to:', redirectUrl);
+      return res.redirect(redirectUrl);
     } catch (err) {
       const errorParams = new URLSearchParams({
         error: 'oauth_failed',
