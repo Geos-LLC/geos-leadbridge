@@ -1,7 +1,6 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Home, MessageSquare, LogOut } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
-import logo from '/Thumbtack_Bridge_Logo.png';
 
 export function Layout() {
   const navigate = useNavigate();
@@ -19,7 +18,7 @@ export function Layout() {
     <div className="app-layout">
       <nav className="sidebar-nav">
         <div className="nav-brand">
-          <img src={logo} alt="Thumbtack Bridge" className="nav-logo" />
+          <img src="/Thumbtack_Bridge_Logo.png" alt="Thumbtack Bridge" className="nav-logo" />
         </div>
 
         <div className="nav-links">
