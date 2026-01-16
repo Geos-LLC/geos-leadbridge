@@ -207,15 +207,63 @@ export class WebhooksService {
 
   /**
    * Handle MessageCreatedV4 webhook (Thumbtack v4)
+   * Also creates the lead if it doesn't exist (in case NegotiationCreatedV4 was missed)
    */
   private async handleMessageCreated(platform: string, data: any): Promise<void> {
+    const negotiationId = data.negotiationID;
+    const businessId = data.business?.businessID;
+
     this.logger.log('New message received', {
       platform,
-      negotiationId: data.negotiationID,
+      negotiationId,
       messageId: data.messageID,
+      businessId,
     });
 
-    // You could store messages or trigger notifications here
+    // If we have business info, ensure the lead exists
+    if (businessId && negotiationId) {
+      // Find user by businessID
+      const platformConnection = await this.prisma.platform.findFirst({
+        where: {
+          platformName: platform,
+          externalBusinessId: businessId,
+        },
+      });
+
+      if (platformConnection) {
+        // Check if lead exists, if not create it
+        const existingLead = await this.prisma.lead.findFirst({
+          where: {
+            platform,
+            externalRequestId: negotiationId,
+          },
+        });
+
+        if (!existingLead) {
+          this.logger.log('Lead not found, creating from MessageCreatedV4', { negotiationId, businessId });
+
+          const customer = data.customer || {};
+
+          await this.prisma.lead.create({
+            data: {
+              userId: platformConnection.userId,
+              platform,
+              businessId,
+              externalRequestId: negotiationId,
+              customerName: customer.name || `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown',
+              customerPhone: customer.phone,
+              message: data.text || '',
+              status: 'new',
+              rawJson: JSON.stringify(data),
+            },
+          });
+
+          this.logger.log('Lead created from message webhook', { negotiationId });
+        }
+      } else {
+        this.logger.warn('No platform connection found for business', { businessId });
+      }
+    }
   }
 
   /**
