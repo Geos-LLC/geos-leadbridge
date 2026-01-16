@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { UserPlus, Mail, Lock, User, AlertCircle } from 'lucide-react';
+import { Mail, Lock, User, AlertCircle } from 'lucide-react';
 import { authApi } from '../services/api';
 import { useAuthStore } from '../store/authStore';
+import logo from '/Thumbtack_Bridge_Logo.png';
 
 export function Register() {
   const navigate = useNavigate();
@@ -45,7 +46,7 @@ export function Register() {
     <div className="auth-container">
       <div className="auth-card">
         <div className="auth-header">
-          <UserPlus size={48} className="auth-icon" />
+          <img src={logo} alt="Thumbtack Bridge" className="auth-logo" />
           <h1>Create Account</h1>
           <p>Get started with Thumbtack Bridge</p>
         </div>
