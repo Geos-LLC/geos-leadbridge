@@ -1601,3 +1601,98 @@ body {
     padding-bottom: 50vh;
   }
 }
+
+/* ==========================================
+   Multi-Account Lead Indicators
+   ========================================== */
+
+/* Lead item from different account */
+.lead-item.other-account {
+  background: linear-gradient(to right, #fff8e1, transparent);
+}
+
+.lead-item.other-account:hover {
+  background: linear-gradient(to right, #fff3cd, var(--bg-secondary));
+}
+
+.lead-item.other-account.selected {
+  background: linear-gradient(to right, #fff3cd, #e7f1ff);
+}
+
+/* Account badge on leads */
+.lead-account-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lead-account-badge.current {
+  background: #d4edda;
+  color: #155724;
+}
+
+.lead-account-badge.other {
+  background: #fff3cd;
+  color: #856404;
+}
+
+/* Disabled message input for other accounts */
+.message-input-disabled {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  background: #fff8e1;
+  border-top: 1px solid var(--border-color);
+  color: #856404;
+  font-size: 14px;
+}
+
+.message-input-disabled svg {
+  flex-shrink: 0;
+}
+
+.message-input-disabled strong {
+  color: #664d03;
+}
+
+/* Account Filter in Messages Sidebar */
+.account-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.account-filter svg {
+  flex-shrink: 0;
+}
+
+.account-filter-select {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.account-filter-select:focus {
+  outline: none;
+  border-color: var(--primary);
+}

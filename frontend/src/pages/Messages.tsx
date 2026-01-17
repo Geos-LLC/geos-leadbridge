@@ -14,6 +14,8 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronUp,
+  AlertCircle,
+  Building2,
 } from 'lucide-react';
 import { leadsApi, type MessageAttachment } from '../services/api';
 import { useAppStore } from '../store/appStore';
@@ -31,13 +33,14 @@ interface LocalMessage {
 export function Messages() {
   console.log('[Messages] Component rendering');
   const navigate = useNavigate();
-  const { leads, setLeads, selectedLead, setSelectedLead, selectedBusiness } = useAppStore();
+  const { leads, setLeads, selectedLead, setSelectedLead, selectedBusiness, configuredBusinessId, savedAccounts } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [expandedDetails, setExpandedDetails] = useState(false);
+  const [accountFilter, setAccountFilter] = useState<string>('all'); // 'all' or businessId
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -158,6 +161,32 @@ export function Messages() {
     return details;
   };
 
+  // Get account name for a lead
+  const getAccountNameForLead = (lead: Lead): string | null => {
+    if (!lead.businessId) return null;
+    const account = savedAccounts.find(a => a.businessId === lead.businessId);
+    return account?.businessName || null;
+  };
+
+  // Check if the lead belongs to the currently connected account
+  const isLeadFromCurrentAccount = (lead: Lead): boolean => {
+    if (!lead.businessId || !configuredBusinessId) return true; // Assume accessible if no info
+    return lead.businessId === configuredBusinessId;
+  };
+
+  // Check if messaging is enabled for the selected lead
+  const canSendMessage = selectedLead ? isLeadFromCurrentAccount(selectedLead) : false;
+
+  // Get unique accounts from leads for filter dropdown
+  const accountsInLeads = savedAccounts.filter(account =>
+    leads.some(lead => lead.businessId === account.businessId)
+  );
+
+  // Filter leads by selected account
+  const filteredLeads = accountFilter === 'all'
+    ? leads
+    : leads.filter(lead => lead.businessId === accountFilter);
+
   if (loading) {
     return (
       <div className="loading-container">
@@ -181,41 +210,67 @@ export function Messages() {
           </button>
         </div>
 
-        {selectedBusiness && (
-          <div className="business-badge">
-            {selectedBusiness.name}
+        {/* Account Filter */}
+        {accountsInLeads.length > 0 && (
+          <div className="account-filter">
+            <Building2 size={16} />
+            <select
+              value={accountFilter}
+              onChange={(e) => setAccountFilter(e.target.value)}
+              className="account-filter-select"
+            >
+              <option value="all">All Accounts ({leads.length})</option>
+              {accountsInLeads.map((account) => {
+                const count = leads.filter(l => l.businessId === account.businessId).length;
+                return (
+                  <option key={account.businessId} value={account.businessId}>
+                    {account.businessName} ({count})
+                  </option>
+                );
+              })}
+            </select>
           </div>
         )}
 
         <div className="leads-list">
-          {leads.length === 0 ? (
+          {filteredLeads.length === 0 ? (
             <div className="empty-leads">
               <MessageSquare size={32} />
               <p>No leads yet</p>
               <small>New leads will appear here</small>
             </div>
           ) : (
-            leads.map((lead) => (
-              <div
-                key={lead.id}
-                className={`lead-item ${selectedLead?.id === lead.id ? 'selected' : ''}`}
-                onClick={() => setSelectedLead(lead)}
-              >
-                <div className="lead-avatar">
-                  <User size={20} />
-                </div>
-                <div className="lead-preview">
-                  <div className="lead-header">
-                    <span className="lead-name">{lead.customerName}</span>
-                    <span className="lead-time">{formatDate(lead.createdAt)}</span>
+            filteredLeads.map((lead) => {
+              const accountName = getAccountNameForLead(lead);
+              const isCurrentAccount = isLeadFromCurrentAccount(lead);
+              return (
+                <div
+                  key={lead.id}
+                  className={`lead-item ${selectedLead?.id === lead.id ? 'selected' : ''} ${!isCurrentAccount ? 'other-account' : ''}`}
+                  onClick={() => setSelectedLead(lead)}
+                >
+                  <div className="lead-avatar">
+                    <User size={20} />
                   </div>
-                  <div className="lead-meta">
-                    <span className="lead-category">{lead.category || 'Service Request'}</span>
+                  <div className="lead-preview">
+                    <div className="lead-header">
+                      <span className="lead-name">{lead.customerName}</span>
+                      <span className="lead-time">{formatDate(lead.createdAt)}</span>
+                    </div>
+                    <div className="lead-meta">
+                      <span className="lead-category">{lead.category || 'Service Request'}</span>
+                      {accountName && (
+                        <span className={`lead-account-badge ${isCurrentAccount ? 'current' : 'other'}`}>
+                          <Building2 size={12} />
+                          {accountName}
+                        </span>
+                      )}
+                    </div>
+                    <p className="lead-snippet">{lead.message?.slice(0, 60)}...</p>
                   </div>
-                  <p className="lead-snippet">{lead.message?.slice(0, 60)}...</p>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </aside>
@@ -390,22 +445,31 @@ export function Messages() {
             </div>
 
             {/* Message Input */}
-            <form className="message-input-form" onSubmit={handleSendMessage}>
-              <input
-                type="text"
-                value={messageText}
-                onChange={(e) => setMessageText(e.target.value)}
-                placeholder="Type a message..."
-                disabled={sendingMessage}
-              />
-              <button
-                type="submit"
-                className="btn btn-primary send-btn"
-                disabled={!messageText.trim() || sendingMessage}
-              >
-                {sendingMessage ? <Loader2 className="spinner" size={20} /> : <Send size={20} />}
-              </button>
-            </form>
+            {canSendMessage ? (
+              <form className="message-input-form" onSubmit={handleSendMessage}>
+                <input
+                  type="text"
+                  value={messageText}
+                  onChange={(e) => setMessageText(e.target.value)}
+                  placeholder="Type a message..."
+                  disabled={sendingMessage}
+                />
+                <button
+                  type="submit"
+                  className="btn btn-primary send-btn"
+                  disabled={!messageText.trim() || sendingMessage}
+                >
+                  {sendingMessage ? <Loader2 className="spinner" size={20} /> : <Send size={20} />}
+                </button>
+              </form>
+            ) : (
+              <div className="message-input-disabled">
+                <AlertCircle size={18} />
+                <span>
+                  Switch to <strong>{getAccountNameForLead(selectedLead) || 'this account'}</strong> to send messages
+                </span>
+              </div>
+            )}
           </>
         ) : (
           <div className="no-lead-selected">
