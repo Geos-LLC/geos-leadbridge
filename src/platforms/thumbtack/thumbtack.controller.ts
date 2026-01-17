@@ -42,6 +42,7 @@ export class ThumbtackController {
 
   /**
    * Automatically setup webhooks for all businesses after OAuth connection
+   * Also saves each business as a saved account for multi-account switching
    */
   private async autoSetupWebhooks(userId: string): Promise<void> {
     try {
@@ -53,11 +54,22 @@ export class ThumbtackController {
         return;
       }
 
-      // Setup webhook for each business
+      // Setup webhook and save account for each business
       for (const business of businesses) {
         try {
           await this.platformService.setupThumbtackWebhook(userId, business.businessID);
           console.log(`Webhook setup successfully for business: ${business.name} (${business.businessID})`);
+
+          // Auto-save account for multi-account switching
+          await this.platformService.saveAccount(
+            userId,
+            PlatformName.THUMBTACK,
+            business.businessID,
+            business.name,
+            business.imageURL,
+            undefined, // No email hint for auto-setup
+          );
+          console.log(`Account saved for business: ${business.name}`);
         } catch (err) {
           // Log but don't fail - webhook might already exist
           console.warn(`Failed to setup webhook for business ${business.businessID}:`, err.message);

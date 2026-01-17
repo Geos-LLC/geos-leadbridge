@@ -52,8 +52,9 @@ export function Dashboard() {
 
     if (connected === 'thumbtack') {
       setSuccess('Thumbtack account connected successfully!');
-      // Reload platform status to reflect the new connection
+      // Reload platform status and saved accounts to reflect the new connection
       loadPlatformStatus();
+      loadSavedAccounts();
       // Clear the URL params
       setSearchParams({});
     } else if (oauthError) {
