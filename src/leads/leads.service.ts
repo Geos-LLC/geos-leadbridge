@@ -36,32 +36,22 @@ export class LeadsService {
    * For Thumbtack: leads come via webhooks, so we query the local database
    * For other platforms: may fetch from API and store locally
    *
-   * Leads are filtered by the currently connected businessId - only leads
-   * belonging to the connected Thumbtack account are shown.
+   * Returns ALL leads for the user across all connected accounts.
+   * Frontend handles filtering by businessId if needed.
    */
   async getLeads(userId: string, platformName: string, options?: any): Promise<NormalizedLead[]> {
     console.log(`[LeadsService] getLeads called - userId: ${userId}, platform: ${platformName}, options:`, options);
 
     // For webhook-based platforms like Thumbtack, query local database
     if (platformName === 'thumbtack') {
-      // Get the currently connected business ID to filter leads
-      const platform = await this.prisma.platform.findFirst({
-        where: {
-          userId,
-          platformName,
-          connected: true,
-        },
-      });
-      const businessId = platform?.externalBusinessId ?? undefined;
-      console.log(`[LeadsService] Connected businessId: ${businessId}`);
-
-      // Only show leads for the currently connected account
+      // Return ALL leads for the user (no businessId filter)
+      // Frontend filters by businessId if needed for account switching
       const leads = await this.getCachedLeads(userId, {
         platform: platformName,
-        businessId,
+        // No businessId filter - return all accounts' leads
         limit: options?.limit,
       });
-      console.log(`[LeadsService] Found ${leads.length} leads for user ${userId} (businessId: ${businessId})`);
+      console.log(`[LeadsService] Found ${leads.length} leads for user ${userId} (all accounts)`);
       return leads;
     }
 
@@ -378,6 +368,7 @@ export class LeadsService {
     return {
       id: lead.id,
       platform: lead.platform,
+      businessId: lead.businessId, // Include businessId for multi-account filtering
       externalRequestId: lead.externalRequestId,
       customerName: lead.customerName,
       customerPhone: lead.customerPhone,
