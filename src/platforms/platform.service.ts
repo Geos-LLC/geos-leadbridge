@@ -369,4 +369,75 @@ export class PlatformService {
       },
     });
   }
+
+  /**
+   * Sync saved accounts from existing leads
+   * This backfills any accounts that have leads but aren't in saved_accounts
+   */
+  async syncSavedAccountsFromLeads(userId: string, platform: string): Promise<{ synced: number }> {
+    // Get all unique businessIds from leads for this user/platform
+    const leadsWithBusinesses = await this.prisma.lead.findMany({
+      where: {
+        userId,
+        platform,
+        businessId: { not: null },
+      },
+      select: {
+        businessId: true,
+        rawJson: true, // We'll try to extract business name from raw data
+      },
+      distinct: ['businessId'],
+    });
+
+    // Get existing saved accounts
+    const existingSavedAccounts = await this.prisma.savedAccount.findMany({
+      where: {
+        userId,
+        platform,
+      },
+      select: {
+        businessId: true,
+      },
+    });
+
+    const existingBusinessIds = new Set(existingSavedAccounts.map(a => a.businessId));
+
+    // Find leads with businessIds that aren't in saved_accounts
+    const missingAccounts = leadsWithBusinesses.filter(
+      lead => lead.businessId && !existingBusinessIds.has(lead.businessId)
+    );
+
+    // Create saved accounts for missing ones
+    let synced = 0;
+    for (const lead of missingAccounts) {
+      if (lead.businessId) {
+        // Try to extract business name from rawJson
+        let businessName = `Business ${lead.businessId.slice(-6)}`;
+        try {
+          const rawData = JSON.parse(lead.rawJson);
+          // Thumbtack stores business info in the payload
+          if (rawData.business?.name) {
+            businessName = rawData.business.name;
+          } else if (rawData.businessName) {
+            businessName = rawData.businessName;
+          }
+        } catch {
+          // Keep default name if parsing fails
+        }
+
+        await this.saveAccount(
+          userId,
+          platform,
+          lead.businessId,
+          businessName,
+          undefined,
+          undefined,
+        );
+        synced++;
+        console.log(`[PlatformService] Synced saved account from leads: ${businessName} (${lead.businessId})`);
+      }
+    }
+
+    return { synced };
+  }
 }

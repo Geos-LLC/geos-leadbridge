@@ -400,9 +400,17 @@ export class ThumbtackController {
 
   /**
    * Get all saved Thumbtack accounts for switching
+   * Also syncs any missing accounts from existing leads
    */
   @Get('saved-accounts')
   async getSavedAccounts(@CurrentUser() user: any) {
+    // First, sync any missing accounts from existing leads
+    // This handles accounts that were connected before auto-save was implemented
+    const { synced } = await this.platformService.syncSavedAccountsFromLeads(user.userId, PlatformName.THUMBTACK);
+    if (synced > 0) {
+      console.log(`[ThumbtackController] Synced ${synced} saved accounts from leads`);
+    }
+
     const accounts = await this.platformService.getSavedAccounts(user.userId, PlatformName.THUMBTACK);
 
     return {
