@@ -251,6 +251,7 @@ export class LeadsService {
 
   /**
    * Send a message to a lead
+   * Also stores the sent message locally to ensure it appears even if webhook is delayed
    */
   async sendMessage(
     userId: string,
@@ -266,7 +267,71 @@ export class LeadsService {
     const credentials = await this.platformService.getCredentials(userId, lead.platform);
     const adapter = this.platformFactory.getAdapter(lead.platform);
 
-    return await adapter.sendMessage(credentials, lead.threadId, message);
+    // Send to Thumbtack
+    const sentMessage = await adapter.sendMessage(credentials, lead.externalRequestId, message);
+
+    // Store the sent message locally
+    // This ensures it appears immediately even if webhook is delayed
+    try {
+      // Find or create conversation
+      let conversation = await this.prisma.conversation.findUnique({
+        where: {
+          platform_externalThreadId: {
+            platform: lead.platform,
+            externalThreadId: lead.externalRequestId,
+          },
+        },
+      });
+
+      if (!conversation) {
+        conversation = await this.prisma.conversation.create({
+          data: {
+            userId,
+            platform: lead.platform,
+            externalThreadId: lead.externalRequestId,
+            customerName: lead.customerName,
+            lastMessageAt: new Date(),
+            status: 'active',
+          },
+        });
+      }
+
+      // Check if message already exists (webhook might have already stored it)
+      const existingMessage = await this.prisma.message.findFirst({
+        where: {
+          platform: lead.platform,
+          externalMessageId: sentMessage.externalMessageId,
+        },
+      });
+
+      if (!existingMessage) {
+        await this.prisma.message.create({
+          data: {
+            conversationId: conversation.id,
+            userId,
+            platform: lead.platform,
+            externalMessageId: sentMessage.externalMessageId,
+            sender: 'pro',
+            content: message,
+            isRead: true,
+            sentAt: new Date(sentMessage.sentAt),
+            rawJson: JSON.stringify(sentMessage),
+          },
+        });
+        console.log(`[LeadsService] Stored sent message locally: ${sentMessage.externalMessageId}`);
+      }
+
+      // Update conversation's lastMessageAt
+      await this.prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { lastMessageAt: new Date() },
+      });
+    } catch (err) {
+      // Log but don't fail - message was sent successfully
+      console.error('[LeadsService] Failed to store sent message locally:', err.message);
+    }
+
+    return sentMessage;
   }
 
   /**

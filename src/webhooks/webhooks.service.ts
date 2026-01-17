@@ -485,6 +485,7 @@ export class WebhooksService {
     }
 
     // Check if message already exists (avoid duplicates)
+    // First check by externalMessageId (same webhook received twice)
     const existingMessage = await this.prisma.message.findFirst({
       where: {
         platform,
@@ -493,7 +494,34 @@ export class WebhooksService {
     });
 
     if (existingMessage) {
-      this.logger.log('Message already exists, skipping', { messageId });
+      this.logger.log('Message already exists (same messageId), skipping', { messageId });
+      return;
+    }
+
+    // Also check for duplicate content in same conversation to avoid
+    // storing the same message multiple times (e.g., initial message from
+    // NegotiationCreatedV4 and MessageCreatedV4 with same content)
+    const messageContent = data.text || '';
+    const messageTimestamp = new Date(data.createTimestamp || Date.now());
+
+    // Check for recent message with same content (within 5 minutes)
+    const duplicateContentMessage = await this.prisma.message.findFirst({
+      where: {
+        conversationId: conversation.id,
+        content: messageContent,
+        sentAt: {
+          gte: new Date(messageTimestamp.getTime() - 5 * 60 * 1000), // 5 min before
+          lte: new Date(messageTimestamp.getTime() + 5 * 60 * 1000), // 5 min after
+        },
+      },
+    });
+
+    if (duplicateContentMessage) {
+      this.logger.log('Message with same content already exists in timeframe, skipping', {
+        messageId,
+        existingId: duplicateContentMessage.externalMessageId,
+        content: messageContent.substring(0, 50),
+      });
       return;
     }
 
