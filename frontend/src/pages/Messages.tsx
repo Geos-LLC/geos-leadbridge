@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Send,
@@ -31,14 +31,26 @@ interface LocalMessage {
 export function Messages() {
   console.log('[Messages] Component rendering');
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { leads, setLeads, selectedLead, setSelectedLead, updateLead, configuredBusinessId, savedAccounts } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [messages, setMessages] = useState<LocalMessage[]>([]);
-  const [accountFilter, setAccountFilter] = useState<string>('all'); // 'all' or businessId
+  // Get account filter from URL params, default to 'all'
+  const accountFilter = searchParams.get('account') || 'all';
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Update account filter in URL
+  const setAccountFilter = (value: string) => {
+    if (value === 'all') {
+      searchParams.delete('account');
+    } else {
+      searchParams.set('account', value);
+    }
+    setSearchParams(searchParams);
+  };
 
   useEffect(() => {
     loadLeads();
