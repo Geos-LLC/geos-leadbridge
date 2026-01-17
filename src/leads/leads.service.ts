@@ -317,6 +317,63 @@ export class LeadsService {
   }
 
   /**
+   * Sync lead status from Thumbtack API
+   * Fetches fresh data from Thumbtack and updates local database
+   * Only works if connected to the lead's business account
+   */
+  async syncLeadStatus(userId: string, leadId: string): Promise<NormalizedLead> {
+    const lead = await this.getLead(userId, leadId);
+    console.log(`[LeadsService] syncLeadStatus - leadId: ${leadId}, negotiationId: ${lead.externalRequestId}`);
+
+    // Check if current connection matches the lead's business
+    const platform = await this.prisma.platform.findFirst({
+      where: {
+        userId,
+        platformName: lead.platform,
+        connected: true,
+      },
+    });
+
+    const isConnectedToRightAccount = platform?.externalBusinessId === lead.businessId;
+
+    if (!isConnectedToRightAccount) {
+      console.log(`[LeadsService] Not connected to lead's account, cannot sync status`);
+      return lead; // Return existing lead without sync
+    }
+
+    try {
+      const credentials = await this.platformService.getCredentials(userId, lead.platform);
+      const adapter = this.platformFactory.getAdapter(lead.platform) as any;
+
+      if (typeof adapter.getLead !== 'function') {
+        console.log(`[LeadsService] Adapter does not support getLead`);
+        return lead;
+      }
+
+      // Fetch fresh negotiation data from Thumbtack
+      const freshLead = await adapter.getLead(credentials, lead.externalRequestId);
+      console.log(`[LeadsService] Fresh lead status from Thumbtack: ${freshLead.status}`);
+
+      // Update local database with fresh status
+      if (freshLead.status !== lead.status) {
+        await this.prisma.lead.update({
+          where: { id: leadId },
+          data: {
+            status: freshLead.status,
+            updatedAt: new Date(),
+          },
+        });
+        console.log(`[LeadsService] Updated lead status: ${lead.status} -> ${freshLead.status}`);
+      }
+
+      return this.getLead(userId, leadId);
+    } catch (error) {
+      console.error(`[LeadsService] Error syncing lead status:`, error.message);
+      return lead; // Return existing lead on error
+    }
+  }
+
+  /**
    * Store/update lead in database
    * Note: threadId is NOT set here because it references Conversation.id (foreign key)
    * The negotiationID is stored in externalRequestId instead

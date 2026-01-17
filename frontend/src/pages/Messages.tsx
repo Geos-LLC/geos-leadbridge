@@ -33,7 +33,7 @@ interface LocalMessage {
 export function Messages() {
   console.log('[Messages] Component rendering');
   const navigate = useNavigate();
-  const { leads, setLeads, selectedLead, setSelectedLead, configuredBusinessId, savedAccounts } = useAppStore();
+  const { leads, setLeads, selectedLead, setSelectedLead, updateLead, configuredBusinessId, savedAccounts } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
@@ -80,6 +80,21 @@ export function Messages() {
     setMessages([]);
     console.log('[Messages] Loading messages for lead:', lead.id, lead.externalRequestId);
     try {
+      // Sync lead status from Thumbtack (if connected to correct account)
+      // This runs in parallel with message loading
+      leadsApi.syncLead(lead.id).then(({ lead: syncedLead }) => {
+        if (syncedLead && syncedLead.status !== lead.status) {
+          console.log('[Messages] Lead status synced:', lead.status, '->', syncedLead.status);
+          updateLead(syncedLead);
+          // If this is the selected lead, update it too
+          if (selectedLead?.id === syncedLead.id) {
+            setSelectedLead(syncedLead);
+          }
+        }
+      }).catch((err) => {
+        console.log('[Messages] Could not sync lead status (might be different account):', err.message);
+      });
+
       const { messages: apiMessages } = await leadsApi.getMessages(lead.id);
       console.log('[Messages] API returned messages:', apiMessages);
       const convertedMessages: LocalMessage[] = apiMessages.map((msg) => {
@@ -255,7 +270,9 @@ export function Messages() {
                   <div className="lead-preview">
                     <div className="lead-header">
                       <span className="lead-name">{lead.customerName}</span>
-                      <span className="lead-time">{formatDate(lead.createdAt)}</span>
+                      <span className={`lead-status-badge status-${lead.status}`}>
+                        {lead.status}
+                      </span>
                     </div>
                     <div className="lead-meta">
                       <span className="lead-category">{lead.category || 'Service Request'}</span>

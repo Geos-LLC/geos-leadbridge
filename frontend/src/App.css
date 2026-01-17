@@ -1098,6 +1098,47 @@ body {
   color: #15803d;
 }
 
+.status-badge.lost {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+/* Lead status badge in sidebar */
+.lead-status-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.lead-status-badge.status-new {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.lead-status-badge.status-contacted {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.lead-status-badge.status-quoted {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.lead-status-badge.status-booked {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.lead-status-badge.status-lost {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
 .request-details {
   margin-bottom: 20px;
 }

@@ -166,6 +166,10 @@ export const leadsApi = {
     const { data } = await api.post(`/v1/thumbtack/negotiations/${negotiationId}/import`);
     return data;
   },
+  syncLead: async (leadId: string): Promise<{ success: boolean; lead: Lead }> => {
+    const { data } = await api.post(`/v1/leads/${leadId}/sync`);
+    return data;
+  },
 };
 
 export default api;

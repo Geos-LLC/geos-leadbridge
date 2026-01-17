@@ -106,4 +106,18 @@ export class LeadsController {
       data: result,
     };
   }
+
+  /**
+   * Sync lead status from platform (fetches fresh data)
+   * Only works if connected to the lead's business account
+   */
+  @Post(':id/sync')
+  async syncLead(@CurrentUser() user: any, @Param('id') id: string) {
+    const lead = await this.leadsService.syncLeadStatus(user.userId, id);
+
+    return {
+      success: true,
+      lead,
+    };
+  }
 }
