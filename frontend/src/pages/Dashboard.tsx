@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Webhook, Unlink, Download, X, Users, Trash2 } from 'lucide-react';
+import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Unlink, Download, X, Users, Trash2 } from 'lucide-react';
 import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
-import type { Business } from '../types';
 
 interface ImportResult {
   id: string;
@@ -20,14 +19,10 @@ export function Dashboard() {
   const {
     platforms, setPlatforms,
     businesses, setBusinesses,
-    setSelectedBusiness,
-    setConfiguredBusinessId: setGlobalConfiguredBusinessId,
     savedAccounts, setSavedAccounts, removeSavedAccount: removeFromStore
   } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
-  const [settingUpWebhook, setSettingUpWebhook] = useState<string | null>(null);
-  const [configuredBusinessId, setConfiguredBusinessId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -84,14 +79,8 @@ export function Dashboard() {
 
   const loadPlatformStatus = async () => {
     try {
-      const [statusResponse, connectionResponse] = await Promise.all([
-        platformsApi.getStatus(),
-        platformsApi.getConnection(),
-      ]);
-      setPlatforms(statusResponse.platforms);
-      const businessId = connectionResponse.thumbtack.configuredBusinessId;
-      setConfiguredBusinessId(businessId);
-      setGlobalConfiguredBusinessId(businessId); // Also set in global store for Messages page
+      const { platforms } = await platformsApi.getStatus();
+      setPlatforms(platforms);
     } catch (err) {
       console.error('Failed to load platform status:', err);
     } finally {
@@ -144,44 +133,12 @@ export function Dashboard() {
         p.platformName === 'thumbtack' ? { ...p, connected: false } : p
       ));
       setBusinesses([]);
-      setConfiguredBusinessId(null);
-      setGlobalConfiguredBusinessId(null);
       setSuccess('Thumbtack account disconnected successfully.');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to disconnect Thumbtack');
     } finally {
       setDisconnectingBusinessId(null);
     }
-  };
-
-  const handleSetupWebhook = async (business: Business, emailHint?: string) => {
-    setSettingUpWebhook(business.businessID);
-    setError('');
-    setSuccess('');
-    try {
-      // Setup webhook and save account for multi-account switching
-      await thumbtackApi.setupWebhook(
-        business.businessID,
-        business.name,
-        business.imageURL,
-        emailHint
-      );
-      setSelectedBusiness(business);
-      setConfiguredBusinessId(business.businessID);
-      setGlobalConfiguredBusinessId(business.businessID);
-      setSuccess(`Webhook configured for ${business.name}! You can now receive leads.`);
-      // Reload saved accounts to include the new one
-      loadSavedAccounts();
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to setup webhook');
-    } finally {
-      setSettingUpWebhook(null);
-    }
-  };
-
-  const handleGoToMessages = (business: Business) => {
-    setSelectedBusiness(business);
-    navigate('/messages');
   };
 
   const handleRemoveSavedAccount = async (accountId: string) => {
@@ -353,22 +310,23 @@ export function Dashboard() {
           <div className="businesses-grid">
             {/* Show connected businesses from API */}
             {businesses.map((business) => {
-              const isConfigured = configuredBusinessId === business.businessID;
               const savedAccount = savedAccounts.find(a => a.businessId === business.businessID);
               return (
-                <div key={business.businessID} className={`business-card ${isConfigured ? 'configured' : ''}`}>
-                  {isConfigured && (
-                    <div className="configured-badge">
-                      <Webhook size={14} />
-                      Active
-                    </div>
-                  )}
-                  {business.imageURL && (
+                <div key={business.businessID} className="business-card connected">
+                  <div className="status-badge connected">
+                    <CheckCircle size={14} />
+                    Connected
+                  </div>
+                  {business.imageURL ? (
                     <img
                       src={business.imageURL}
                       alt={business.name}
                       className="business-image"
                     />
+                  ) : (
+                    <div className="business-image-placeholder">
+                      <Building2 size={32} />
+                    </div>
                   )}
                   <div className="business-info">
                     <h3>{business.name}</h3>
@@ -376,76 +334,47 @@ export function Dashboard() {
                     {savedAccount?.emailHint && (
                       <p className="email-hint">{savedAccount.emailHint}</p>
                     )}
-                    {isConfigured && (
-                      <p className="webhook-status">
-                        <CheckCircle size={14} />
-                        Webhook configured - receiving leads
-                      </p>
-                    )}
                   </div>
                   <div className="business-actions">
-                    {!isConfigured && (
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => handleSetupWebhook(business)}
-                        disabled={settingUpWebhook === business.businessID}
-                      >
-                        {settingUpWebhook === business.businessID ? (
-                          <>
-                            <Loader2 className="spinner" size={16} />
-                            Setting up...
-                          </>
-                        ) : (
-                          <>
-                            <Link2 size={16} />
-                            Setup Webhook
-                          </>
-                        )}
-                      </button>
-                    )}
-                    {isConfigured && (
-                      <>
-                        <button
-                          className="btn btn-danger"
-                          onClick={() => handleDisconnectThumbtack(business.businessID)}
-                          disabled={disconnectingBusinessId === business.businessID}
-                          title="Disconnect this account"
-                        >
-                          {disconnectingBusinessId === business.businessID ? (
-                            <>
-                              <Loader2 className="spinner" size={16} />
-                              Disconnecting...
-                            </>
-                          ) : (
-                            <>
-                              <Unlink size={16} />
-                              Disconnect
-                            </>
-                          )}
-                        </button>
-                        {savedAccount && (
-                          <button
-                            className="btn-icon btn-danger-subtle"
-                            onClick={() => handleRemoveSavedAccount(savedAccount.id)}
-                            disabled={removingAccountId === savedAccount.id}
-                            title="Remove from saved accounts"
-                          >
-                            {removingAccountId === savedAccount.id ? (
-                              <Loader2 className="spinner" size={16} />
-                            ) : (
-                              <Trash2 size={16} />
-                            )}
-                          </button>
-                        )}
-                      </>
-                    )}
                     <button
                       className="btn btn-primary"
-                      onClick={() => handleGoToMessages(business)}
+                      onClick={() => navigate(`/messages?account=${business.businessID}`)}
                     >
                       <ExternalLink size={16} />
                       View Leads
                     </button>
+                    <button
+                      className="btn btn-danger"
+                      onClick={() => handleDisconnectThumbtack(business.businessID)}
+                      disabled={disconnectingBusinessId === business.businessID}
+                      title="Disconnect this account"
+                    >
+                      {disconnectingBusinessId === business.businessID ? (
+                        <>
+                          <Loader2 className="spinner" size={16} />
+                          Disconnecting...
+                        </>
+                      ) : (
+                        <>
+                          <Unlink size={16} />
+                          Disconnect
+                        </>
+                      )}
+                    </button>
+                    {savedAccount && (
+                      <button
+                        className="btn-icon btn-danger-subtle"
+                        onClick={() => handleRemoveSavedAccount(savedAccount.id)}
+                        disabled={removingAccountId === savedAccount.id}
+                        title="Delete saved account data"
+                      >
+                        {removingAccountId === savedAccount.id ? (
+                          <Loader2 className="spinner" size={16} />
+                        ) : (
+                          <Trash2 size={16} />
+                        )}
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -459,6 +388,10 @@ export function Dashboard() {
                     key={account.id}
                     className="business-card saved-only"
                   >
+                    <div className="status-badge saved">
+                      <Users size={14} />
+                      Saved
+                    </div>
                     {account.imageUrl ? (
                       <img
                         src={account.imageUrl}
@@ -476,18 +409,11 @@ export function Dashboard() {
                       {account.emailHint && (
                         <p className="email-hint">{account.emailHint}</p>
                       )}
-                      <p className="saved-account-note">
-                        <Users size={14} />
-                        Saved account
-                      </p>
                     </div>
                     <div className="business-actions">
                       <button
                         className="btn btn-primary"
-                        onClick={() => {
-                          // Navigate to messages filtered by this business
-                          navigate(`/messages?account=${account.businessId}`);
-                        }}
+                        onClick={() => navigate(`/messages?account=${account.businessId}`)}
                       >
                         <ExternalLink size={16} />
                         View Leads
@@ -496,7 +422,7 @@ export function Dashboard() {
                         className="btn-icon btn-danger-subtle"
                         onClick={() => handleRemoveSavedAccount(account.id)}
                         disabled={removingAccountId === account.id}
-                        title="Remove saved account"
+                        title="Delete saved account"
                       >
                         {removingAccountId === account.id ? (
                           <Loader2 className="spinner" size={16} />

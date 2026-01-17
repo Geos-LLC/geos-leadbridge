@@ -550,19 +550,18 @@ body {
   box-shadow: var(--shadow);
 }
 
-.business-card.configured {
+.business-card.connected {
   border-color: var(--success);
   border-width: 2px;
 }
 
-.configured-badge {
+.status-badge {
   position: absolute;
   top: 12px;
   right: 12px;
   display: flex;
   align-items: center;
   gap: 4px;
-  background: var(--success);
   color: white;
   padding: 4px 10px;
   border-radius: 20px;
@@ -571,14 +570,12 @@ body {
   z-index: 1;
 }
 
-.webhook-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  font-size: 13px;
-  color: var(--success);
-  font-weight: 500;
+.status-badge.connected {
+  background: var(--success);
+}
+
+.status-badge.saved {
+  background: var(--text-secondary);
 }
 
 .business-image {
@@ -601,15 +598,6 @@ body {
 .business-card.saved-only {
   border-style: dashed;
   border-color: var(--border-color);
-}
-
-.saved-account-note {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
 }
 
 .empty-state-hint-box {
