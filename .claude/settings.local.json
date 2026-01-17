@@ -15,7 +15,8 @@
       "Bash(railway logs:*)",
       "Bash(git push:*)",
       "Bash(npm ls:*)",
-      "Bash(npx vercel:*)"
+      "Bash(npx vercel:*)",
+      "Bash(node:*)"
     ]
   }
 }

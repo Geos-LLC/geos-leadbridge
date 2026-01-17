@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Webhook, Unlink, Download, X, Users, Trash2, RefreshCw } from 'lucide-react';
+import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Webhook, Unlink, Download, X, Users, Trash2, RefreshCw, Save } from 'lucide-react';
 import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
@@ -41,6 +41,7 @@ export function Dashboard() {
   // Switch account modal state
   const [switchingAccount, setSwitchingAccount] = useState<SavedAccount | null>(null);
   const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
+  const [savingAccountId, setSavingAccountId] = useState<string | null>(null);
 
   const thumbtackConnected = platforms.find((p) => p.platformName === 'thumbtack')?.connected ?? false;
 
@@ -233,6 +234,29 @@ export function Dashboard() {
       setError(err.response?.data?.message || 'Failed to remove saved account');
     } finally {
       setRemovingAccountId(null);
+    }
+  };
+
+  const handleSaveAccount = async (business: Business) => {
+    setSavingAccountId(business.businessID);
+    setError('');
+    try {
+      // Prompt for email hint
+      const emailHint = prompt('Enter the email associated with this Thumbtack account (optional - helps when switching accounts):');
+
+      await thumbtackApi.saveAccount(
+        business.businessID,
+        business.name,
+        business.imageURL,
+        emailHint || undefined
+      );
+      setSuccess(`Account "${business.name}" saved for quick switching!`);
+      // Reload saved accounts
+      loadSavedAccounts();
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to save account');
+    } finally {
+      setSavingAccountId(null);
     }
   };
 
@@ -474,6 +498,26 @@ export function Dashboard() {
                             <>
                               <Link2 size={16} />
                               Setup Webhook
+                            </>
+                          )}
+                        </button>
+                      )}
+                      {isConfigured && !savedAccounts.some(a => a.businessId === business.businessID) && (
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => handleSaveAccount(business)}
+                          disabled={savingAccountId === business.businessID}
+                          title="Save this account for quick switching"
+                        >
+                          {savingAccountId === business.businessID ? (
+                            <>
+                              <Loader2 className="spinner" size={16} />
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              <Save size={16} />
+                              Save Account
                             </>
                           )}
                         </button>
