@@ -260,101 +260,182 @@ export class WebhooksService {
 
   /**
    * Handle MessageCreatedV4 webhook (Thumbtack v4)
-   * Also creates the lead if it doesn't exist (in case NegotiationCreatedV4 was missed)
+   * Creates/updates lead and stores the message in the database
    */
   private async handleMessageCreated(platform: string, data: any): Promise<void> {
     const negotiationId = data.negotiationID;
     const businessId = data.business?.businessID;
+    const messageId = data.messageID;
 
     this.logger.log('New message received', {
       platform,
       negotiationId,
-      messageId: data.messageID,
+      messageId,
       businessId,
     });
 
-    // If we have business info, ensure the lead exists
-    if (businessId && negotiationId) {
-      // Find user by businessID - use same fallback logic as handleNegotiationCreated
-      let platformConnection = await this.prisma.platform.findFirst({
+    if (!businessId || !negotiationId) {
+      this.logger.warn('Missing businessId or negotiationId in message webhook');
+      return;
+    }
+
+    // Find user by businessID - use same fallback logic as handleNegotiationCreated
+    let platformConnection = await this.prisma.platform.findFirst({
+      where: {
+        platformName: platform,
+        externalBusinessId: businessId,
+      },
+    });
+
+    // If no exact match, check if lead already exists for this business
+    if (!platformConnection) {
+      const existingLeadForBusiness = await this.prisma.lead.findFirst({
         where: {
-          platformName: platform,
-          externalBusinessId: businessId,
+          platform,
+          businessId,
         },
       });
 
-      // If no exact match, check if lead already exists for this business
-      if (!platformConnection) {
-        const existingLeadForBusiness = await this.prisma.lead.findFirst({
-          where: {
-            platform,
-            businessId,
-          },
-        });
-
-        if (existingLeadForBusiness) {
-          platformConnection = await this.prisma.platform.findFirst({
-            where: {
-              platformName: platform,
-              userId: existingLeadForBusiness.userId,
-              connected: true,
-            },
-          });
-        }
-      }
-
-      // Fallback: if only one connected platform, use that
-      if (!platformConnection) {
-        const connectedPlatforms = await this.prisma.platform.findMany({
+      if (existingLeadForBusiness) {
+        platformConnection = await this.prisma.platform.findFirst({
           where: {
             platformName: platform,
+            userId: existingLeadForBusiness.userId,
             connected: true,
           },
         });
-
-        if (connectedPlatforms.length === 1) {
-          platformConnection = connectedPlatforms[0];
-          this.logger.log('Using single connected platform for message webhook', {
-            userId: platformConnection.userId,
-            businessId
-          });
-        }
-      }
-
-      if (platformConnection) {
-        // Check if lead exists, if not create it
-        const existingLead = await this.prisma.lead.findFirst({
-          where: {
-            platform,
-            externalRequestId: negotiationId,
-          },
-        });
-
-        if (!existingLead) {
-          this.logger.log('Lead not found, creating from MessageCreatedV4', { negotiationId, businessId });
-
-          const customer = data.customer || {};
-
-          await this.prisma.lead.create({
-            data: {
-              userId: platformConnection.userId,
-              platform,
-              businessId,
-              externalRequestId: negotiationId,
-              customerName: customer.name || `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown',
-              customerPhone: customer.phone,
-              message: data.text || '',
-              status: 'new',
-              rawJson: JSON.stringify(data),
-            },
-          });
-
-          this.logger.log('Lead created from message webhook', { negotiationId });
-        }
-      } else {
-        this.logger.warn('No platform connection found for business', { businessId });
       }
     }
+
+    // Fallback: if only one connected platform, use that
+    if (!platformConnection) {
+      const connectedPlatforms = await this.prisma.platform.findMany({
+        where: {
+          platformName: platform,
+          connected: true,
+        },
+      });
+
+      if (connectedPlatforms.length === 1) {
+        platformConnection = connectedPlatforms[0];
+        this.logger.log('Using single connected platform for message webhook', {
+          userId: platformConnection.userId,
+          businessId
+        });
+      }
+    }
+
+    if (!platformConnection) {
+      this.logger.warn('No platform connection found for business', { businessId });
+      return;
+    }
+
+    const userId = platformConnection.userId;
+
+    // Ensure lead exists
+    let lead = await this.prisma.lead.findFirst({
+      where: {
+        platform,
+        externalRequestId: negotiationId,
+      },
+    });
+
+    if (!lead) {
+      this.logger.log('Lead not found, creating from MessageCreatedV4', { negotiationId, businessId });
+
+      const customer = data.customer || {};
+
+      lead = await this.prisma.lead.create({
+        data: {
+          userId,
+          platform,
+          businessId,
+          externalRequestId: negotiationId,
+          customerName: customer.name || `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown',
+          customerPhone: customer.phone,
+          message: data.text || '',
+          status: 'new',
+          rawJson: JSON.stringify(data),
+        },
+      });
+
+      this.logger.log('Lead created from message webhook', { negotiationId });
+    }
+
+    // Ensure conversation exists (use negotiationId as externalThreadId)
+    let conversation = await this.prisma.conversation.findUnique({
+      where: {
+        platform_externalThreadId: {
+          platform,
+          externalThreadId: negotiationId,
+        },
+      },
+    });
+
+    if (!conversation) {
+      const customer = data.customer || {};
+      conversation = await this.prisma.conversation.create({
+        data: {
+          userId,
+          platform,
+          externalThreadId: negotiationId,
+          customerName: customer.name || lead.customerName || 'Unknown',
+          lastMessageAt: new Date(data.createTimestamp || Date.now()),
+          status: 'active',
+        },
+      });
+      this.logger.log('Conversation created', { conversationId: conversation.id, negotiationId });
+
+      // Link lead to conversation if not already linked
+      if (!lead.threadId) {
+        await this.prisma.lead.update({
+          where: { id: lead.id },
+          data: { threadId: conversation.id },
+        });
+      }
+    }
+
+    // Check if message already exists (avoid duplicates)
+    const existingMessage = await this.prisma.message.findFirst({
+      where: {
+        platform,
+        externalMessageId: messageId,
+      },
+    });
+
+    if (existingMessage) {
+      this.logger.log('Message already exists, skipping', { messageId });
+      return;
+    }
+
+    // Determine sender (pro or customer)
+    const sender = data.sender?.toLowerCase() === 'pro' ? 'pro' : 'customer';
+
+    // Store the message
+    await this.prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        userId,
+        platform,
+        externalMessageId: messageId,
+        sender,
+        content: data.text || '',
+        isRead: sender === 'pro', // Mark own messages as read
+        sentAt: new Date(data.createTimestamp || Date.now()),
+        rawJson: JSON.stringify(data),
+      },
+    });
+
+    // Update conversation's lastMessageAt and unread count
+    await this.prisma.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        lastMessageAt: new Date(data.createTimestamp || Date.now()),
+        unreadCount: sender === 'customer' ? { increment: 1 } : undefined,
+      },
+    });
+
+    this.logger.log('Message stored successfully', { messageId, conversationId: conversation.id });
   }
 
   /**

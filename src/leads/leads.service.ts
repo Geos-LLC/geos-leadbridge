@@ -152,16 +152,43 @@ export class LeadsService {
 
   /**
    * Get messages for a lead/negotiation
+   * First checks local database, then falls back to API if connected to the right account
    */
   async getMessages(userId: string, leadId: string): Promise<any[]> {
     console.log(`[LeadsService] getMessages called - userId: ${userId}, leadId: ${leadId}`);
 
     const lead = await this.getLead(userId, leadId);
-    console.log(`[LeadsService] Found lead - externalRequestId: ${lead.externalRequestId}, platform: ${lead.platform}`);
+    console.log(`[LeadsService] Found lead - externalRequestId: ${lead.externalRequestId}, platform: ${lead.platform}, businessId: ${lead.businessId}`);
 
-    // Use externalRequestId (negotiationID) to fetch messages from Thumbtack
     const negotiationId = lead.externalRequestId;
 
+    // First, check if we have messages stored locally (from webhooks)
+    const localMessages = await this.getLocalMessages(userId, lead.platform, negotiationId);
+
+    if (localMessages.length > 0) {
+      console.log(`[LeadsService] Found ${localMessages.length} messages in local database`);
+      return localMessages;
+    }
+
+    // Check if current connection matches the lead's business
+    const platform = await this.prisma.platform.findFirst({
+      where: {
+        userId,
+        platformName: lead.platform,
+        connected: true,
+      },
+    });
+
+    const isConnectedToRightAccount = platform?.externalBusinessId === lead.businessId;
+    console.log(`[LeadsService] Connected businessId: ${platform?.externalBusinessId}, Lead businessId: ${lead.businessId}, Match: ${isConnectedToRightAccount}`);
+
+    // If not connected to the right account, return empty (can't fetch from API)
+    if (!isConnectedToRightAccount) {
+      console.log(`[LeadsService] Not connected to lead's account, returning empty messages`);
+      return [];
+    }
+
+    // Try to fetch from API
     try {
       const credentials = await this.platformService.getCredentials(userId, lead.platform);
       const adapter = this.platformFactory.getAdapter(lead.platform) as any;
@@ -178,8 +205,48 @@ export class LeadsService {
     } catch (error) {
       console.error(`[LeadsService] Error fetching messages:`, error.message);
       console.error(`[LeadsService] Full error:`, error.response?.data || error);
-      throw error;
+      // Return empty array instead of throwing - lead from another account
+      return [];
     }
+  }
+
+  /**
+   * Get messages from local database (stored via webhooks)
+   */
+  private async getLocalMessages(userId: string, platform: string, negotiationId: string): Promise<any[]> {
+    // Find conversation by negotiationId (stored as externalThreadId)
+    const conversation = await this.prisma.conversation.findUnique({
+      where: {
+        platform_externalThreadId: {
+          platform,
+          externalThreadId: negotiationId,
+        },
+      },
+    });
+
+    if (!conversation) {
+      return [];
+    }
+
+    const messages = await this.prisma.message.findMany({
+      where: {
+        conversationId: conversation.id,
+      },
+      orderBy: { sentAt: 'asc' },
+    });
+
+    // Convert to the format expected by frontend
+    return messages.map(msg => ({
+      id: msg.id,
+      conversationId: msg.conversationId,
+      platform: msg.platform,
+      externalMessageId: msg.externalMessageId,
+      sender: msg.sender,
+      content: msg.content,
+      isRead: msg.isRead,
+      sentAt: msg.sentAt.toISOString(),
+      deliveredAt: msg.deliveredAt?.toISOString(),
+    }));
   }
 
   /**
