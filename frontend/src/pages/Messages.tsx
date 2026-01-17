@@ -322,6 +322,16 @@ export function Messages() {
                     {selectedLead.city}, {selectedLead.state} {selectedLead.postcode}
                   </span>
                 )}
+                <span className="quick-info-item">
+                  <Calendar size={16} />
+                  {formatDate(selectedLead.createdAt)}
+                </span>
+                {selectedLead.raw?.estimate?.total && (
+                  <span className="quick-info-item">
+                    <DollarSign size={16} />
+                    {selectedLead.raw.estimate.total}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -431,63 +441,7 @@ export function Messages() {
             <h3>Lead Details</h3>
           </div>
           <div className="details-sidebar-content">
-            {/* Customer Info */}
-            <div className="details-section">
-              <h4>Customer</h4>
-              <div className="customer-info">
-                <div className="lead-avatar large">
-                  <User size={24} />
-                </div>
-                <div>
-                  <p className="customer-name">{selectedLead.customerName}</p>
-                  {selectedLead.customerPhone && (
-                    <a href={`tel:${selectedLead.customerPhone}`} className="customer-contact">
-                      <Phone size={14} />
-                      {formatPhoneNumber(selectedLead.customerPhone)}
-                    </a>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Location */}
-            {selectedLead.city && (
-              <div className="details-section">
-                <h4>Location</h4>
-                <p className="detail-value">
-                  <MapPin size={14} />
-                  {selectedLead.city}, {selectedLead.state} {selectedLead.postcode}
-                </p>
-              </div>
-            )}
-
-            {/* Status & Dates */}
-            <div className="details-section">
-              <h4>Status</h4>
-              <span className={`status-badge status-${selectedLead.status?.toLowerCase()}`}>
-                {selectedLead.status}
-              </span>
-            </div>
-
-            <div className="details-section">
-              <h4>Received</h4>
-              <p className="detail-value">
-                <Calendar size={14} />
-                {formatDate(selectedLead.createdAt)}
-              </p>
-            </div>
-
-            {/* Estimate & Lead Cost */}
-            {selectedLead.raw?.estimate?.total && (
-              <div className="details-section">
-                <h4>Estimate</h4>
-                <p className="detail-value">
-                  <DollarSign size={14} />
-                  {selectedLead.raw.estimate.total}
-                </p>
-              </div>
-            )}
-
+            {/* Lead Cost */}
             {selectedLead.raw?.leadPrice && (
               <div className="details-section">
                 <h4>Lead Cost</h4>
