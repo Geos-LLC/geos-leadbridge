@@ -1917,6 +1917,19 @@ body {
   color: #15803d;
 }
 
+.status-badge.status-completed,
+.lead-status-badge.status-completed {
+  background: #f3e8ff;
+  color: #7c3aed;
+}
+
+/* Fallback for legacy lowercase status values */
+.status-badge.status-new,
+.lead-status-badge.status-new {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
 /* Responsive: Hide right sidebar on smaller screens */
 @media (max-width: 1200px) {
   .lead-details-sidebar {

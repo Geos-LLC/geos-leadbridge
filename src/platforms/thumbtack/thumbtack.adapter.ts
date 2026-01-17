@@ -581,7 +581,12 @@ export class ThumbtackAdapter implements IPlatformAdapter {
 
   private mapThumbtackStatus(status: string): string {
     // Return the raw status from Thumbtack without interpretation
-    // API returns: "Open", "Canceled", "Picked"
+    // API returns status values like:
+    // - "Open" = Not scheduled yet (lead is open/active)
+    // - "Picked" = Scheduled/Hired (customer picked this pro)
+    // - "Canceled" = No Hire (customer canceled or didn't hire)
+    // - "Completed" = Job Done
+    // The UI labels (Not scheduled yet, Scheduled, Job Done, No Hire) are UI-friendly versions
     return status || 'Open';
   }
 }

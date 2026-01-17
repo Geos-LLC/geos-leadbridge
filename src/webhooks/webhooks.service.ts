@@ -227,6 +227,7 @@ export class WebhooksService {
     const customerName = `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown';
 
     // Store the lead
+    // Note: Keep status as-is from Thumbtack API (Open, Picked, Canceled, Completed)
     const lead = await this.prisma.lead.upsert({
       where: {
         platform_externalRequestId: {
@@ -246,14 +247,14 @@ export class WebhooksService {
         city: location.city,
         state: location.state,
         category: request.category?.name,
-        status: data.status?.toLowerCase() || 'new',
+        status: data.status || 'Open',
         rawJson: JSON.stringify(data),
       },
       update: {
         customerName,
         customerPhone: customer.phone,
         message: request.description || '',
-        status: data.status?.toLowerCase() || 'new',
+        status: data.status || 'Open',
         rawJson: JSON.stringify(data),
       },
     });
@@ -442,7 +443,7 @@ export class WebhooksService {
           customerName: customer.name || `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown',
           customerPhone: customer.phone,
           message: data.text || '',
-          status: 'new',
+          status: 'Open', // Default to Open for new leads created from message
           rawJson: JSON.stringify(data),
         },
       });
