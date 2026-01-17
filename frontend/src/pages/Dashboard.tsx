@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Webhook, Unlink, Download, X, Users, Trash2, RefreshCw, Save } from 'lucide-react';
+import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Webhook, Unlink, Download, X, Users, Trash2, RefreshCw } from 'lucide-react';
 import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
@@ -28,7 +28,6 @@ export function Dashboard() {
   const [connecting, setConnecting] = useState(false);
   const [settingUpWebhook, setSettingUpWebhook] = useState<string | null>(null);
   const [configuredBusinessId, setConfiguredBusinessId] = useState<string | null>(null);
-  const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -41,7 +40,7 @@ export function Dashboard() {
   // Switch account modal state
   const [switchingAccount, setSwitchingAccount] = useState<SavedAccount | null>(null);
   const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
-  const [savingAccountId, setSavingAccountId] = useState<string | null>(null);
+  const [disconnectingBusinessId, setDisconnectingBusinessId] = useState<string | null>(null);
 
   const thumbtackConnected = platforms.find((p) => p.platformName === 'thumbtack')?.connected ?? false;
 
@@ -131,11 +130,11 @@ export function Dashboard() {
     }, 2000); // 2 second delay to allow logout to complete
   };
 
-  const handleDisconnectThumbtack = async () => {
-    if (!confirm('Are you sure you want to disconnect your Thumbtack account?\n\nNote: New leads will still be received via webhook. Disconnecting only removes API access (viewing conversations, sending messages).')) {
+  const handleDisconnectThumbtack = async (businessId: string) => {
+    if (!confirm('Are you sure you want to disconnect this Thumbtack account?\n\nNote: Leads will still be received via webhook. Disconnecting only removes API access for sending messages.')) {
       return;
     }
-    setDisconnecting(true);
+    setDisconnectingBusinessId(businessId);
     setError('');
     setSuccess('');
     try {
@@ -146,11 +145,12 @@ export function Dashboard() {
       ));
       setBusinesses([]);
       setConfiguredBusinessId(null);
+      setGlobalConfiguredBusinessId(null);
       setSuccess('Thumbtack account disconnected successfully.');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to disconnect Thumbtack');
     } finally {
-      setDisconnecting(false);
+      setDisconnectingBusinessId(null);
     }
   };
 
@@ -234,29 +234,6 @@ export function Dashboard() {
       setError(err.response?.data?.message || 'Failed to remove saved account');
     } finally {
       setRemovingAccountId(null);
-    }
-  };
-
-  const handleSaveAccount = async (business: Business) => {
-    setSavingAccountId(business.businessID);
-    setError('');
-    try {
-      // Prompt for email hint
-      const emailHint = prompt('Enter the email associated with this Thumbtack account (optional - helps when switching accounts):');
-
-      await thumbtackApi.saveAccount(
-        business.businessID,
-        business.name,
-        business.imageURL,
-        emailHint || undefined
-      );
-      setSuccess(`Account "${business.name}" saved for quick switching!`);
-      // Reload saved accounts
-      loadSavedAccounts();
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to save account');
-    } finally {
-      setSavingAccountId(null);
     }
   };
 
@@ -383,43 +360,23 @@ export function Dashboard() {
           </div>
 
           <div className="platform-actions">
-            {!thumbtackConnected ? (
-              <button
-                className="btn btn-primary"
-                onClick={handleConnectThumbtack}
-                disabled={connecting}
-              >
-                {connecting ? (
-                  <>
-                    <Loader2 className="spinner" size={18} />
-                    Connecting...
-                  </>
-                ) : (
-                  <>
-                    <Link2 size={18} />
-                    Connect Thumbtack
-                  </>
-                )}
-              </button>
-            ) : (
-              <button
-                className="btn btn-danger"
-                onClick={handleDisconnectThumbtack}
-                disabled={disconnecting}
-              >
-                {disconnecting ? (
-                  <>
-                    <Loader2 className="spinner" size={18} />
-                    Disconnecting...
-                  </>
-                ) : (
-                  <>
-                    <Unlink size={18} />
-                    Disconnect
-                  </>
-                )}
-              </button>
-            )}
+            <button
+              className="btn btn-primary"
+              onClick={handleConnectThumbtack}
+              disabled={connecting}
+            >
+              {connecting ? (
+                <>
+                  <Loader2 className="spinner" size={18} />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <Link2 size={18} />
+                  {thumbtackConnected ? 'Add Another Account' : 'Connect Thumbtack'}
+                </>
+              )}
+            </button>
           </div>
         </div>
       </section>
@@ -487,50 +444,42 @@ export function Dashboard() {
                         )}
                       </button>
                     )}
-                    {isConfigured && (() => {
-                      if (savedAccount) {
-                        return (
+                    {isConfigured && (
+                      <>
+                        <button
+                          className="btn btn-danger"
+                          onClick={() => handleDisconnectThumbtack(business.businessID)}
+                          disabled={disconnectingBusinessId === business.businessID}
+                          title="Disconnect this account"
+                        >
+                          {disconnectingBusinessId === business.businessID ? (
+                            <>
+                              <Loader2 className="spinner" size={16} />
+                              Disconnecting...
+                            </>
+                          ) : (
+                            <>
+                              <Unlink size={16} />
+                              Disconnect
+                            </>
+                          )}
+                        </button>
+                        {savedAccount && (
                           <button
-                            className="btn btn-danger-subtle"
+                            className="btn-icon btn-danger-subtle"
                             onClick={() => handleRemoveSavedAccount(savedAccount.id)}
                             disabled={removingAccountId === savedAccount.id}
                             title="Remove from saved accounts"
                           >
                             {removingAccountId === savedAccount.id ? (
-                              <>
-                                <Loader2 className="spinner" size={16} />
-                                Removing...
-                              </>
+                              <Loader2 className="spinner" size={16} />
                             ) : (
-                              <>
-                                <Trash2 size={16} />
-                                Remove Saved
-                              </>
+                              <Trash2 size={16} />
                             )}
                           </button>
-                        );
-                      }
-                      return (
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => handleSaveAccount(business)}
-                          disabled={savingAccountId === business.businessID}
-                          title="Save this account for quick switching"
-                        >
-                          {savingAccountId === business.businessID ? (
-                            <>
-                              <Loader2 className="spinner" size={16} />
-                              Saving...
-                            </>
-                          ) : (
-                            <>
-                              <Save size={16} />
-                              Save Account
-                            </>
-                          )}
-                        </button>
-                      );
-                    })()}
+                        )}
+                      </>
+                    )}
                     <button
                       className="btn btn-primary"
                       onClick={() => handleGoToMessages(business)}
