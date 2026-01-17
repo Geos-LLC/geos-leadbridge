@@ -502,26 +502,51 @@ export function Dashboard() {
                           )}
                         </button>
                       )}
-                      {isConfigured && !savedAccounts.some(a => a.businessId === business.businessID) && (
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => handleSaveAccount(business)}
-                          disabled={savingAccountId === business.businessID}
-                          title="Save this account for quick switching"
-                        >
-                          {savingAccountId === business.businessID ? (
-                            <>
-                              <Loader2 className="spinner" size={16} />
-                              Saving...
-                            </>
-                          ) : (
-                            <>
-                              <Save size={16} />
-                              Save Account
-                            </>
-                          )}
-                        </button>
-                      )}
+                      {isConfigured && (() => {
+                        const savedAccount = savedAccounts.find(a => a.businessId === business.businessID);
+                        if (savedAccount) {
+                          return (
+                            <button
+                              className="btn btn-danger-subtle"
+                              onClick={() => handleRemoveSavedAccount(savedAccount.id)}
+                              disabled={removingAccountId === savedAccount.id}
+                              title="Remove from saved accounts"
+                            >
+                              {removingAccountId === savedAccount.id ? (
+                                <>
+                                  <Loader2 className="spinner" size={16} />
+                                  Removing...
+                                </>
+                              ) : (
+                                <>
+                                  <Trash2 size={16} />
+                                  Remove Saved
+                                </>
+                              )}
+                            </button>
+                          );
+                        }
+                        return (
+                          <button
+                            className="btn btn-secondary"
+                            onClick={() => handleSaveAccount(business)}
+                            disabled={savingAccountId === business.businessID}
+                            title="Save this account for quick switching"
+                          >
+                            {savingAccountId === business.businessID ? (
+                              <>
+                                <Loader2 className="spinner" size={16} />
+                                Saving...
+                              </>
+                            ) : (
+                              <>
+                                <Save size={16} />
+                                Save Account
+                              </>
+                            )}
+                          </button>
+                        );
+                      })()}
                       <button
                         className="btn btn-primary"
                         onClick={() => handleGoToMessages(business)}
