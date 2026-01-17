@@ -369,6 +369,7 @@ export class LeadsService {
   /**
    * Import a single Thumbtack negotiation by ID
    * Returns { lead, isNew } to indicate if this was a new import or update
+   * Also imports and stores all messages for the negotiation
    */
   async importThumbtackNegotiation(userId: string, negotiationId: string): Promise<{ lead: NormalizedLead; isNew: boolean }> {
     console.log(`[LeadsService] importThumbtackNegotiation - userId: ${userId}, negotiationId: ${negotiationId}`);
@@ -403,7 +404,118 @@ export class LeadsService {
       },
     });
 
+    if (!storedLead) {
+      throw new NotFoundException('Lead not found after import');
+    }
+
+    // Also import messages for this negotiation
+    await this.importMessagesForNegotiation(userId, 'thumbtack', negotiationId, storedLead.customerName);
+
     return { lead: this.convertToNormalizedLead(storedLead), isNew };
+  }
+
+  /**
+   * Import and store messages for a negotiation from the API
+   */
+  private async importMessagesForNegotiation(
+    userId: string,
+    platform: string,
+    negotiationId: string,
+    customerName: string,
+  ): Promise<void> {
+    console.log(`[LeadsService] Importing messages for negotiation: ${negotiationId}`);
+
+    try {
+      const credentials = await this.platformService.getCredentials(userId, platform);
+      const adapter = this.platformFactory.getAdapter(platform) as any;
+
+      if (typeof adapter.getConversation !== 'function') {
+        console.log(`[LeadsService] Adapter does not support getConversation`);
+        return;
+      }
+
+      const messages = await adapter.getConversation(credentials, negotiationId);
+      console.log(`[LeadsService] Fetched ${messages.length} messages from API`);
+
+      if (messages.length === 0) {
+        return;
+      }
+
+      // Ensure conversation exists
+      let conversation = await this.prisma.conversation.findUnique({
+        where: {
+          platform_externalThreadId: {
+            platform,
+            externalThreadId: negotiationId,
+          },
+        },
+      });
+
+      if (!conversation) {
+        conversation = await this.prisma.conversation.create({
+          data: {
+            userId,
+            platform,
+            externalThreadId: negotiationId,
+            customerName: customerName || 'Unknown',
+            lastMessageAt: new Date(),
+            status: 'active',
+          },
+        });
+        console.log(`[LeadsService] Created conversation: ${conversation.id}`);
+
+        // Link lead to conversation
+        await this.prisma.lead.updateMany({
+          where: {
+            platform,
+            externalRequestId: negotiationId,
+          },
+          data: { threadId: conversation.id },
+        });
+      }
+
+      // Store each message (skip duplicates)
+      for (const msg of messages) {
+        const existingMsg = await this.prisma.message.findFirst({
+          where: {
+            platform,
+            externalMessageId: msg.externalMessageId,
+          },
+        });
+
+        if (existingMsg) {
+          continue; // Skip duplicate
+        }
+
+        await this.prisma.message.create({
+          data: {
+            conversationId: conversation.id,
+            userId,
+            platform,
+            externalMessageId: msg.externalMessageId,
+            sender: msg.sender?.toLowerCase() || 'customer',
+            content: msg.content || '',
+            isRead: true, // Imported messages are considered read
+            sentAt: new Date(msg.sentAt),
+            rawJson: JSON.stringify(msg),
+          },
+        });
+      }
+
+      // Update conversation's lastMessageAt
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg) {
+        await this.prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { lastMessageAt: new Date(lastMsg.sentAt) },
+        });
+      }
+
+      console.log(`[LeadsService] Imported ${messages.length} messages for negotiation ${negotiationId}`);
+    } catch (error) {
+      console.error(`[LeadsService] Error importing messages:`, error.message);
+      // Don't throw - lead import succeeded, messages are optional
+    }
   }
 
   /**
