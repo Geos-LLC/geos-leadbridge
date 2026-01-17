@@ -588,6 +588,53 @@ body {
   background: var(--bg-tertiary);
 }
 
+.business-image-placeholder {
+  width: 100%;
+  height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+}
+
+.business-card.saved-only {
+  border-style: dashed;
+  border-color: var(--border-color);
+}
+
+.saved-account-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.empty-state-hint-box {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: var(--radius);
+  color: #92400e;
+}
+
+.empty-state-hint-box svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.empty-state-hint-box p {
+  margin: 0 0 4px 0;
+}
+
+.empty-state-hint-box p:last-child {
+  margin-bottom: 0;
+}
+
 .business-info {
   padding: 16px;
 }

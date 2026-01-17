@@ -424,140 +424,201 @@ export function Dashboard() {
         </div>
       </section>
 
-      {thumbtackConnected && (
+      {/* Accounts Section - shows both live businesses and saved accounts */}
+      {(thumbtackConnected || savedAccounts.length > 0) && (
         <section className="dashboard-section">
-          <h2>Your Businesses</h2>
+          <h2>Your Accounts</h2>
           <p className="section-description">
-            Select a business to set up webhooks and start receiving leads
+            {thumbtackConnected
+              ? 'Manage your connected businesses and saved accounts'
+              : 'Your saved accounts (connect to Thumbtack to access them)'}
           </p>
 
-          {businesses.length === 0 ? (
-            <div className="empty-state">
-              <Building2 size={48} />
-              <p>No businesses found in your Thumbtack account</p>
-              <p className="empty-state-hint">
-                This usually means you're connected to the wrong Thumbtack account.
-              </p>
-              <div className="empty-state-actions">
-                <p><strong>To connect your Pro account:</strong></p>
-                <ol className="reconnect-steps">
-                  <li>Click "Disconnect" above</li>
-                  <li>
-                    <a href="https://www.thumbtack.com/logout" target="_blank" rel="noopener noreferrer">
-                      Log out of Thumbtack
-                    </a>
-                    {' '}in a new tab
-                  </li>
-                  <li>Come back here and click "Connect Thumbtack"</li>
-                  <li>Log in with your <strong>Pro account</strong> credentials</li>
-                </ol>
-              </div>
-            </div>
-          ) : (
-            <div className="businesses-grid">
-              {businesses.map((business) => {
-                const isConfigured = configuredBusinessId === business.businessID;
-                return (
-                  <div key={business.businessID} className={`business-card ${isConfigured ? 'configured' : ''}`}>
-                    {isConfigured && (
-                      <div className="configured-badge">
-                        <Webhook size={14} />
-                        Active
-                      </div>
-                    )}
-                    {business.imageURL && (
-                      <img
-                        src={business.imageURL}
-                        alt={business.name}
-                        className="business-image"
-                      />
-                    )}
-                    <div className="business-info">
-                      <h3>{business.name}</h3>
-                      <p className="business-id">ID: {business.businessID}</p>
-                      {isConfigured && (
-                        <p className="webhook-status">
-                          <CheckCircle size={14} />
-                          Webhook configured - receiving leads
-                        </p>
-                      )}
+          <div className="businesses-grid">
+            {/* Show connected businesses from API */}
+            {businesses.map((business) => {
+              const isConfigured = configuredBusinessId === business.businessID;
+              const savedAccount = savedAccounts.find(a => a.businessId === business.businessID);
+              return (
+                <div key={business.businessID} className={`business-card ${isConfigured ? 'configured' : ''}`}>
+                  {isConfigured && (
+                    <div className="configured-badge">
+                      <Webhook size={14} />
+                      Active
                     </div>
-                    <div className="business-actions">
-                      {!isConfigured && (
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => handleSetupWebhook(business)}
-                          disabled={settingUpWebhook === business.businessID}
-                        >
-                          {settingUpWebhook === business.businessID ? (
-                            <>
-                              <Loader2 className="spinner" size={16} />
-                              Setting up...
-                            </>
-                          ) : (
-                            <>
-                              <Link2 size={16} />
-                              Setup Webhook
-                            </>
-                          )}
-                        </button>
-                      )}
-                      {isConfigured && (() => {
-                        const savedAccount = savedAccounts.find(a => a.businessId === business.businessID);
-                        if (savedAccount) {
-                          return (
-                            <button
-                              className="btn btn-danger-subtle"
-                              onClick={() => handleRemoveSavedAccount(savedAccount.id)}
-                              disabled={removingAccountId === savedAccount.id}
-                              title="Remove from saved accounts"
-                            >
-                              {removingAccountId === savedAccount.id ? (
-                                <>
-                                  <Loader2 className="spinner" size={16} />
-                                  Removing...
-                                </>
-                              ) : (
-                                <>
-                                  <Trash2 size={16} />
-                                  Remove Saved
-                                </>
-                              )}
-                            </button>
-                          );
-                        }
+                  )}
+                  {business.imageURL && (
+                    <img
+                      src={business.imageURL}
+                      alt={business.name}
+                      className="business-image"
+                    />
+                  )}
+                  <div className="business-info">
+                    <h3>{business.name}</h3>
+                    <p className="business-id">ID: {business.businessID}</p>
+                    {savedAccount?.emailHint && (
+                      <p className="email-hint">{savedAccount.emailHint}</p>
+                    )}
+                    {isConfigured && (
+                      <p className="webhook-status">
+                        <CheckCircle size={14} />
+                        Webhook configured - receiving leads
+                      </p>
+                    )}
+                  </div>
+                  <div className="business-actions">
+                    {!isConfigured && (
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => handleSetupWebhook(business)}
+                        disabled={settingUpWebhook === business.businessID}
+                      >
+                        {settingUpWebhook === business.businessID ? (
+                          <>
+                            <Loader2 className="spinner" size={16} />
+                            Setting up...
+                          </>
+                        ) : (
+                          <>
+                            <Link2 size={16} />
+                            Setup Webhook
+                          </>
+                        )}
+                      </button>
+                    )}
+                    {isConfigured && (() => {
+                      if (savedAccount) {
                         return (
                           <button
-                            className="btn btn-secondary"
-                            onClick={() => handleSaveAccount(business)}
-                            disabled={savingAccountId === business.businessID}
-                            title="Save this account for quick switching"
+                            className="btn btn-danger-subtle"
+                            onClick={() => handleRemoveSavedAccount(savedAccount.id)}
+                            disabled={removingAccountId === savedAccount.id}
+                            title="Remove from saved accounts"
                           >
-                            {savingAccountId === business.businessID ? (
+                            {removingAccountId === savedAccount.id ? (
                               <>
                                 <Loader2 className="spinner" size={16} />
-                                Saving...
+                                Removing...
                               </>
                             ) : (
                               <>
-                                <Save size={16} />
-                                Save Account
+                                <Trash2 size={16} />
+                                Remove Saved
                               </>
                             )}
                           </button>
                         );
-                      })()}
+                      }
+                      return (
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => handleSaveAccount(business)}
+                          disabled={savingAccountId === business.businessID}
+                          title="Save this account for quick switching"
+                        >
+                          {savingAccountId === business.businessID ? (
+                            <>
+                              <Loader2 className="spinner" size={16} />
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              <Save size={16} />
+                              Save Account
+                            </>
+                          )}
+                        </button>
+                      );
+                    })()}
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => handleGoToMessages(business)}
+                    >
+                      <ExternalLink size={16} />
+                      View Leads
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Show saved accounts that are NOT in the current businesses list (from other connections) */}
+            {savedAccounts
+              .filter(account => !businesses.some(b => b.businessID === account.businessId))
+              .map((account) => {
+                const isCurrentAccount = configuredBusinessId === account.businessId;
+                return (
+                  <div
+                    key={account.id}
+                    className={`business-card saved-only ${isCurrentAccount ? 'configured' : ''}`}
+                  >
+                    {isCurrentAccount && (
+                      <div className="configured-badge">
+                        <CheckCircle size={14} />
+                        Current
+                      </div>
+                    )}
+                    {account.imageUrl ? (
+                      <img
+                        src={account.imageUrl}
+                        alt={account.businessName}
+                        className="business-image"
+                      />
+                    ) : (
+                      <div className="business-image-placeholder">
+                        <Building2 size={32} />
+                      </div>
+                    )}
+                    <div className="business-info">
+                      <h3>{account.businessName}</h3>
+                      <p className="business-id">ID: {account.businessId}</p>
+                      {account.emailHint && (
+                        <p className="email-hint">{account.emailHint}</p>
+                      )}
+                      <p className="saved-account-note">
+                        <Users size={14} />
+                        Saved account (switch to access)
+                      </p>
+                    </div>
+                    <div className="business-actions">
+                      {thumbtackConnected && !isCurrentAccount && (
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => handleSwitchAccount(account)}
+                          disabled={connecting}
+                        >
+                          <RefreshCw size={16} />
+                          Switch Account
+                        </button>
+                      )}
                       <button
-                        className="btn btn-primary"
-                        onClick={() => handleGoToMessages(business)}
+                        className="btn btn-danger-subtle"
+                        onClick={() => handleRemoveSavedAccount(account.id)}
+                        disabled={removingAccountId === account.id}
+                        title="Remove saved account"
                       >
-                        <ExternalLink size={16} />
-                        View Leads
+                        {removingAccountId === account.id ? (
+                          <Loader2 className="spinner" size={16} />
+                        ) : (
+                          <Trash2 size={16} />
+                        )}
                       </button>
                     </div>
                   </div>
                 );
               })}
+          </div>
+
+          {/* Show hint if no businesses and no saved accounts */}
+          {businesses.length === 0 && savedAccounts.length === 0 && thumbtackConnected && (
+            <div className="empty-state-hint-box">
+              <AlertCircle size={18} />
+              <div>
+                <p><strong>No businesses found</strong></p>
+                <p>This usually means you're connected with a consumer account instead of a Pro account.</p>
+                <p>Try disconnecting and logging in with your Thumbtack Pro credentials.</p>
+              </div>
             </div>
           )}
         </section>
@@ -642,84 +703,6 @@ export function Dashboard() {
                 </div>
               </div>
             )}
-          </div>
-        </section>
-      )}
-
-      {/* Saved Accounts Section */}
-      {savedAccounts.length > 0 && (
-        <section className="dashboard-section">
-          <h2>
-            <Users size={20} />
-            Saved Accounts
-          </h2>
-          <p className="section-description">
-            Switch between your Thumbtack accounts. Click to switch (requires re-login).
-          </p>
-
-          <div className="saved-accounts-grid">
-            {savedAccounts.map((account) => {
-              const isCurrentAccount = configuredBusinessId === account.businessId;
-              return (
-                <div
-                  key={account.id}
-                  className={`saved-account-card ${isCurrentAccount ? 'current' : ''}`}
-                >
-                  {isCurrentAccount && (
-                    <div className="current-badge">
-                      <CheckCircle size={14} />
-                      Current
-                    </div>
-                  )}
-                  <div className="saved-account-content">
-                    {account.imageUrl ? (
-                      <img
-                        src={account.imageUrl}
-                        alt={account.businessName}
-                        className="saved-account-image"
-                      />
-                    ) : (
-                      <div className="saved-account-placeholder">
-                        <Building2 size={24} />
-                      </div>
-                    )}
-                    <div className="saved-account-info">
-                      <h4>{account.businessName}</h4>
-                      {account.emailHint && (
-                        <p className="email-hint">{account.emailHint}</p>
-                      )}
-                      <p className="last-used">
-                        Last used: {new Date(account.lastUsedAt).toLocaleDateString()}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="saved-account-actions">
-                    {!isCurrentAccount && (
-                      <button
-                        className="btn btn-primary btn-sm"
-                        onClick={() => handleSwitchAccount(account)}
-                        disabled={connecting}
-                      >
-                        <RefreshCw size={14} />
-                        Switch
-                      </button>
-                    )}
-                    <button
-                      className="btn btn-icon btn-danger-subtle"
-                      onClick={() => handleRemoveSavedAccount(account.id)}
-                      disabled={removingAccountId === account.id}
-                      title="Remove saved account"
-                    >
-                      {removingAccountId === account.id ? (
-                        <Loader2 className="spinner" size={14} />
-                      ) : (
-                        <Trash2 size={14} />
-                      )}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
           </div>
         </section>
       )}
