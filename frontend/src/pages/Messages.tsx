@@ -15,9 +15,10 @@ import {
   AlertCircle,
   Building2,
 } from 'lucide-react';
-import { leadsApi, type MessageAttachment } from '../services/api';
+import { leadsApi, thumbtackApi, type MessageAttachment } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import type { Lead } from '../types';
+import { Search } from 'lucide-react';
 
 interface LocalMessage {
   id: string;
@@ -56,13 +57,14 @@ export function Messages() {
   console.log('[Messages] Component rendering');
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { leads, setLeads, selectedLead, setSelectedLead, updateLead, configuredBusinessId, savedAccounts } = useAppStore();
+  const { leads, setLeads, selectedLead, setSelectedLead, updateLead, configuredBusinessId, savedAccounts, setSavedAccounts } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [lastSeenTimestamps, setLastSeenTimestamps] = useState<Record<string, string>>(() => getLastSeenTimestamps());
+  const [searchQuery, setSearchQuery] = useState('');
   // Get account filter from URL params, default to 'all'
   const accountFilter = searchParams.get('account') || 'all';
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -79,7 +81,17 @@ export function Messages() {
 
   useEffect(() => {
     loadLeads();
+    loadSavedAccounts();
   }, []);
+
+  const loadSavedAccounts = async () => {
+    try {
+      const { accounts } = await thumbtackApi.getSavedAccounts();
+      setSavedAccounts(accounts);
+    } catch (err) {
+      console.error('[Messages] Failed to load saved accounts:', err);
+    }
+  };
 
   useEffect(() => {
     if (selectedLead) {
@@ -243,10 +255,17 @@ export function Messages() {
     leads.some(lead => lead.businessId === account.businessId)
   );
 
-  // Filter leads by selected account
-  const filteredLeads = accountFilter === 'all'
-    ? leads
-    : leads.filter(lead => lead.businessId === accountFilter);
+  // Filter leads by selected account and search query
+  const filteredLeads = leads.filter(lead => {
+    // Account filter
+    const matchesAccount = accountFilter === 'all' || lead.businessId === accountFilter;
+    // Name search (case-insensitive)
+    const matchesSearch = !searchQuery.trim() ||
+      lead.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      lead.category?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      lead.message?.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesAccount && matchesSearch;
+  });
 
   if (loading) {
     return (
@@ -269,6 +288,18 @@ export function Messages() {
           <button className="btn-icon" onClick={loadLeads} title="Refresh">
             <RefreshCw size={20} />
           </button>
+        </div>
+
+        {/* Search Input */}
+        <div className="leads-search">
+          <Search size={16} />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by name..."
+            className="leads-search-input"
+          />
         </div>
 
         {/* Account Filter */}

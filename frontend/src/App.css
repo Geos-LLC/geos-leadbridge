@@ -1739,6 +1739,41 @@ body {
   color: #664d03;
 }
 
+/* Search Input in Messages Sidebar */
+.leads-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.leads-search svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.leads-search-input {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.leads-search-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.leads-search-input::placeholder {
+  color: var(--text-muted);
+}
+
 /* Account Filter in Messages Sidebar */
 .account-filter {
   display: flex;
