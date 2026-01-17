@@ -57,7 +57,7 @@ export function Messages() {
   console.log('[Messages] Component rendering');
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { leads, setLeads, selectedLead, setSelectedLead, updateLead, configuredBusinessId, savedAccounts, setSavedAccounts } = useAppStore();
+  const { leads, setLeads, selectedLead, setSelectedLead, configuredBusinessId, savedAccounts, setSavedAccounts } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
@@ -138,21 +138,8 @@ export function Messages() {
     // Mark this lead as seen when we load its messages
     markLeadAsSeen(lead);
     try {
-      // Sync lead status from Thumbtack (if connected to correct account)
-      // This runs in parallel with message loading
-      leadsApi.syncLead(lead.id).then(({ lead: syncedLead }) => {
-        if (syncedLead && syncedLead.status !== lead.status) {
-          console.log('[Messages] Lead status synced:', lead.status, '->', syncedLead.status);
-          updateLead(syncedLead);
-          // If this is the selected lead, update it too
-          if (selectedLead?.id === syncedLead.id) {
-            setSelectedLead(syncedLead);
-          }
-        }
-      }).catch((err) => {
-        console.log('[Messages] Could not sync lead status (might be different account):', err.message);
-      });
-
+      // Messages come from local database (stored via webhooks)
+      // No API sync needed - webhooks deliver all updates
       const { messages: apiMessages } = await leadsApi.getMessages(lead.id);
       console.log('[Messages] API returned messages:', apiMessages);
       const convertedMessages: LocalMessage[] = apiMessages.map((msg) => {
