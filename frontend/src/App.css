@@ -914,6 +914,38 @@ body {
   height: 48px;
 }
 
+/* Update indicator dot for new/updated leads */
+.lead-avatar {
+  position: relative;
+}
+
+.update-indicator {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  background: #3b82f6;
+  border-radius: 50%;
+  border: 2px solid var(--bg-secondary);
+}
+
+.lead-item.has-updates {
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.lead-item.has-updates:hover {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.lead-item.has-updates.selected {
+  background: var(--bg-tertiary);
+}
+
+.lead-item.has-updates .lead-name {
+  font-weight: 700;
+}
+
 .lead-preview {
   flex: 1;
   min-width: 0;

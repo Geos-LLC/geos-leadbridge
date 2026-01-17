@@ -28,6 +28,30 @@ interface LocalMessage {
   attachments?: MessageAttachment[];
 }
 
+// Helper to get/set last seen timestamps from localStorage
+const LAST_SEEN_KEY = 'leads_last_seen';
+
+function getLastSeenTimestamps(): Record<string, string> {
+  try {
+    const stored = localStorage.getItem(LAST_SEEN_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+}
+
+function setLastSeenTimestamp(leadId: string, timestamp: string): void {
+  const timestamps = getLastSeenTimestamps();
+  timestamps[leadId] = timestamp;
+  localStorage.setItem(LAST_SEEN_KEY, JSON.stringify(timestamps));
+}
+
+function hasNewUpdates(lead: Lead, lastSeenTimestamps: Record<string, string>): boolean {
+  const lastSeen = lastSeenTimestamps[lead.id];
+  if (!lastSeen) return true; // Never seen = new
+  return new Date(lead.updatedAt) > new Date(lastSeen);
+}
+
 export function Messages() {
   console.log('[Messages] Component rendering');
   const navigate = useNavigate();
@@ -38,6 +62,7 @@ export function Messages() {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [messages, setMessages] = useState<LocalMessage[]>([]);
+  const [lastSeenTimestamps, setLastSeenTimestamps] = useState<Record<string, string>>(() => getLastSeenTimestamps());
   // Get account filter from URL params, default to 'all'
   const accountFilter = searchParams.get('account') || 'all';
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -72,10 +97,14 @@ export function Messages() {
     try {
       const { leads } = await leadsApi.getLeads(50);
       console.log('[Messages] Loaded leads:', leads.length, leads);
-      setLeads(leads);
-      if (leads.length > 0 && !selectedLead) {
-        console.log('[Messages] Auto-selecting first lead:', leads[0]);
-        setSelectedLead(leads[0]);
+      // Sort leads by updatedAt descending (most recently updated first)
+      const sortedLeads = [...leads].sort((a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      );
+      setLeads(sortedLeads);
+      if (sortedLeads.length > 0 && !selectedLead) {
+        console.log('[Messages] Auto-selecting most recently updated lead:', sortedLeads[0]);
+        setSelectedLead(sortedLeads[0]);
       }
     } catch (err) {
       console.error('[Messages] Failed to load leads:', err);
@@ -84,10 +113,18 @@ export function Messages() {
     }
   };
 
+  // Mark a lead as seen (update last seen timestamp)
+  const markLeadAsSeen = (lead: Lead) => {
+    setLastSeenTimestamp(lead.id, lead.updatedAt);
+    setLastSeenTimestamps(prev => ({ ...prev, [lead.id]: lead.updatedAt }));
+  };
+
   const loadMessagesForLead = async (lead: Lead) => {
     setLoadingMessages(true);
     setMessages([]);
     console.log('[Messages] Loading messages for lead:', lead.id, lead.externalRequestId);
+    // Mark this lead as seen when we load its messages
+    markLeadAsSeen(lead);
     try {
       // Sync lead status from Thumbtack (if connected to correct account)
       // This runs in parallel with message loading
@@ -267,14 +304,16 @@ export function Messages() {
             filteredLeads.map((lead) => {
               const accountName = getAccountNameForLead(lead);
               const isCurrentAccount = isLeadFromCurrentAccount(lead);
+              const isUpdated = hasNewUpdates(lead, lastSeenTimestamps);
               return (
                 <div
                   key={lead.id}
-                  className={`lead-item ${selectedLead?.id === lead.id ? 'selected' : ''} ${!isCurrentAccount ? 'other-account' : ''}`}
+                  className={`lead-item ${selectedLead?.id === lead.id ? 'selected' : ''} ${!isCurrentAccount ? 'other-account' : ''} ${isUpdated ? 'has-updates' : ''}`}
                   onClick={() => setSelectedLead(lead)}
                 >
                   <div className="lead-avatar">
                     <User size={20} />
+                    {isUpdated && <span className="update-indicator" />}
                   </div>
                   <div className="lead-preview">
                     <div className="lead-header">
