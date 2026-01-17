@@ -687,4 +687,78 @@ export class LeadsService {
       raw: lead.rawJson ? JSON.parse(lead.rawJson) : undefined,
     };
   }
+
+  /**
+   * Clean up duplicate messages in a conversation
+   * Keeps only the first message for each unique content+timestamp combo
+   */
+  async cleanupDuplicateMessages(conversationId: string): Promise<{ deleted: number }> {
+    console.log(`[LeadsService] Cleaning up duplicate messages for conversation: ${conversationId}`);
+
+    const messages = await this.prisma.message.findMany({
+      where: { conversationId },
+      orderBy: { sentAt: 'asc' },
+    });
+
+    const seen = new Map<string, string>(); // content+timestamp -> message id
+    const toDelete: string[] = [];
+
+    for (const msg of messages) {
+      // Create a key from content and approximate timestamp (within 1 second)
+      const timestamp = Math.floor(new Date(msg.sentAt).getTime() / 1000);
+      const key = `${msg.content}:${timestamp}`;
+
+      if (seen.has(key)) {
+        // This is a duplicate, mark for deletion
+        toDelete.push(msg.id);
+      } else {
+        seen.set(key, msg.id);
+      }
+    }
+
+    if (toDelete.length > 0) {
+      await this.prisma.message.deleteMany({
+        where: { id: { in: toDelete } },
+      });
+      console.log(`[LeadsService] Deleted ${toDelete.length} duplicate messages`);
+    }
+
+    return { deleted: toDelete.length };
+  }
+
+  /**
+   * Re-sync messages for a lead from the API
+   * Cleans up duplicates and imports any missing messages
+   */
+  async resyncMessages(userId: string, leadId: string): Promise<{ cleaned: number; imported: number }> {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, userId },
+    });
+
+    if (!lead) {
+      throw new NotFoundException('Lead not found');
+    }
+
+    // Get or create conversation
+    let conversation = await this.prisma.conversation.findFirst({
+      where: {
+        platform: lead.platform,
+        externalThreadId: lead.externalRequestId,
+      },
+    });
+
+    if (conversation) {
+      // Clean up duplicates first
+      const { deleted } = await this.cleanupDuplicateMessages(conversation.id);
+
+      // Re-import messages from API to get any missing ones
+      await this.importMessagesForNegotiation(userId, lead.platform, lead.externalRequestId, lead.customerName);
+
+      return { cleaned: deleted, imported: 0 }; // Import count not tracked here
+    }
+
+    // No conversation exists, just import
+    await this.importMessagesForNegotiation(userId, lead.platform, lead.externalRequestId, lead.customerName);
+    return { cleaned: 0, imported: 0 };
+  }
 }

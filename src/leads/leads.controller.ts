@@ -120,4 +120,19 @@ export class LeadsController {
       lead,
     };
   }
+
+  /**
+   * Re-sync messages for a lead
+   * Cleans up duplicates and imports any missing messages from the API
+   */
+  @Post(':id/resync-messages')
+  async resyncMessages(@CurrentUser() user: any, @Param('id') id: string) {
+    const result = await this.leadsService.resyncMessages(user.userId, id);
+
+    return {
+      success: true,
+      message: `Cleaned ${result.cleaned} duplicates`,
+      ...result,
+    };
+  }
 }
