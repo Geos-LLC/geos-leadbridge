@@ -287,4 +287,86 @@ export class PlatformService {
 
     return adapter.getWebhooks(credentials, businessId);
   }
+
+  // ==========================================
+  // Saved Accounts Methods
+  // ==========================================
+
+  /**
+   * Save account info for multi-account switching
+   */
+  async saveAccount(
+    userId: string,
+    platform: string,
+    businessId: string,
+    businessName: string,
+    imageUrl?: string,
+    emailHint?: string,
+  ): Promise<void> {
+    await this.prisma.savedAccount.upsert({
+      where: {
+        userId_platform_businessId: {
+          userId,
+          platform,
+          businessId,
+        },
+      },
+      create: {
+        userId,
+        platform,
+        businessId,
+        businessName,
+        imageUrl,
+        emailHint,
+        lastUsedAt: new Date(),
+      },
+      update: {
+        businessName,
+        imageUrl,
+        emailHint,
+        lastUsedAt: new Date(),
+      },
+    });
+  }
+
+  /**
+   * Get all saved accounts for a user
+   */
+  async getSavedAccounts(userId: string, platform?: string) {
+    return this.prisma.savedAccount.findMany({
+      where: {
+        userId,
+        ...(platform && { platform }),
+      },
+      orderBy: { lastUsedAt: 'desc' },
+    });
+  }
+
+  /**
+   * Remove a saved account
+   */
+  async removeSavedAccount(userId: string, accountId: string): Promise<void> {
+    await this.prisma.savedAccount.deleteMany({
+      where: {
+        id: accountId,
+        userId, // Ensure user owns the account
+      },
+    });
+  }
+
+  /**
+   * Update last used time for a saved account
+   */
+  async updateSavedAccountLastUsed(userId: string, platform: string, businessId: string): Promise<void> {
+    await this.prisma.savedAccount.updateMany({
+      where: {
+        userId,
+        platform,
+        businessId,
+      },
+      data: {
+        lastUsedAt: new Date(),
+      },
+    });
+  }
 }

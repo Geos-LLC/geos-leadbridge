@@ -29,6 +29,7 @@ model User {
   leads          Lead[]
   conversations  Conversation[]
   messages       Message[]
+  savedAccounts  SavedAccount[]
 
   @@map("users")
 }
@@ -177,6 +178,29 @@ model Quote {
   @@index([platform])
   @@index([status])
   @@map("quotes")
+}
+
+// ==========================================
+// Saved Accounts (for multi-account switching)
+// ==========================================
+
+model SavedAccount {
+  id           String   @id @default(uuid())
+  userId       String
+  platform     String   // "thumbtack"
+  businessId   String   // Platform's business ID
+  businessName String   // Display name
+  emailHint    String?  // Email used for this account (optional hint)
+  imageUrl     String?  // Business logo URL
+  lastUsedAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, platform, businessId])
+  @@index([userId])
+  @@map("saved_accounts")
 }
 
 // ==========================================

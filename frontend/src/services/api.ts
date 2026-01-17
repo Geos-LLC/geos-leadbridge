@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { AuthResponse, Lead, Business, Platform } from '../types';
+import type { AuthResponse, Lead, Business, Platform, SavedAccount } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://thumbtack-bridge-production.up.railway.app/api';
 
@@ -80,12 +80,44 @@ export const thumbtackApi = {
     const { data } = await api.get('/v1/thumbtack/businesses');
     return data;
   },
-  setupWebhook: async (businessId: string): Promise<{ webhookId: string }> => {
-    const { data } = await api.post(`/v1/thumbtack/businesses/${businessId}/webhooks/setup`);
+  setupWebhook: async (
+    businessId: string,
+    businessName?: string,
+    imageUrl?: string,
+    emailHint?: string,
+  ): Promise<{ webhookId: string }> => {
+    const { data } = await api.post(`/v1/thumbtack/businesses/${businessId}/webhooks/setup`, {
+      businessName,
+      imageUrl,
+      emailHint,
+    });
     return data;
   },
   getWebhooks: async (businessId: string): Promise<{ webhooks: any[] }> => {
     const { data } = await api.get(`/v1/thumbtack/businesses/${businessId}/webhooks`);
+    return data;
+  },
+  // Saved accounts for multi-account switching
+  getSavedAccounts: async (): Promise<{ accounts: SavedAccount[]; count: number }> => {
+    const { data } = await api.get('/v1/thumbtack/saved-accounts');
+    return data;
+  },
+  saveAccount: async (
+    businessId: string,
+    businessName: string,
+    imageUrl?: string,
+    emailHint?: string,
+  ): Promise<{ success: boolean }> => {
+    const { data } = await api.post('/v1/thumbtack/saved-accounts', {
+      businessId,
+      businessName,
+      imageUrl,
+      emailHint,
+    });
+    return data;
+  },
+  removeSavedAccount: async (id: string): Promise<{ success: boolean }> => {
+    const { data } = await api.delete(`/v1/thumbtack/saved-accounts/${id}`);
     return data;
   },
 };

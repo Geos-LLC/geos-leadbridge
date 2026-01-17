@@ -7,6 +7,7 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Query,
   UseGuards,
   Res,
@@ -191,13 +192,29 @@ export class ThumbtackController {
   /**
    * Setup webhook for a business to receive leads
    * This registers your webhook URL with Thumbtack so you receive NegotiationCreatedV4 events
+   * Also saves the account for multi-account switching
    */
   @Post('businesses/:businessId/webhooks/setup')
   async setupWebhook(
     @CurrentUser() user: any,
     @Param('businessId') businessId: string,
+    @Body('businessName') businessName?: string,
+    @Body('imageUrl') imageUrl?: string,
+    @Body('emailHint') emailHint?: string,
   ) {
     const result = await this.platformService.setupThumbtackWebhook(user.userId, businessId);
+
+    // Auto-save account for multi-account switching
+    if (businessName) {
+      await this.platformService.saveAccount(
+        user.userId,
+        PlatformName.THUMBTACK,
+        businessId,
+        businessName,
+        imageUrl,
+        emailHint,
+      );
+    }
 
     return {
       success: true,
@@ -362,6 +379,70 @@ export class ThumbtackController {
       success: true,
       message: `Imported ${results.imported} of ${negotiationIds.length} negotiations`,
       ...results,
+    };
+  }
+
+  // ==========================================
+  // Saved Accounts (for multi-account switching)
+  // ==========================================
+
+  /**
+   * Get all saved Thumbtack accounts for switching
+   */
+  @Get('saved-accounts')
+  async getSavedAccounts(@CurrentUser() user: any) {
+    const accounts = await this.platformService.getSavedAccounts(user.userId, PlatformName.THUMBTACK);
+
+    return {
+      platform: PlatformName.THUMBTACK,
+      count: accounts.length,
+      accounts,
+    };
+  }
+
+  /**
+   * Save a Thumbtack account for later switching
+   */
+  @Post('saved-accounts')
+  async saveAccount(
+    @CurrentUser() user: any,
+    @Body('businessId') businessId: string,
+    @Body('businessName') businessName: string,
+    @Body('imageUrl') imageUrl?: string,
+    @Body('emailHint') emailHint?: string,
+  ) {
+    if (!businessId || !businessName) {
+      throw new BadRequestException('businessId and businessName are required');
+    }
+
+    await this.platformService.saveAccount(
+      user.userId,
+      PlatformName.THUMBTACK,
+      businessId,
+      businessName,
+      imageUrl,
+      emailHint,
+    );
+
+    return {
+      success: true,
+      message: 'Account saved successfully',
+    };
+  }
+
+  /**
+   * Remove a saved account
+   */
+  @Delete('saved-accounts/:id')
+  async removeSavedAccount(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    await this.platformService.removeSavedAccount(user.userId, id);
+
+    return {
+      success: true,
+      message: 'Saved account removed',
     };
   }
 }

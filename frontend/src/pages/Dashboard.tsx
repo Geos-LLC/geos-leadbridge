@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Webhook, Unlink, Download, X } from 'lucide-react';
+import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Webhook, Unlink, Download, X, Users, Trash2, RefreshCw } from 'lucide-react';
 import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
-import type { Business } from '../types';
+import type { Business, SavedAccount } from '../types';
 
 interface ImportResult {
   id: string;
@@ -17,7 +17,13 @@ export function Dashboard() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuthStore();
-  const { platforms, setPlatforms, businesses, setBusinesses, setSelectedBusiness, setConfiguredBusinessId: setGlobalConfiguredBusinessId } = useAppStore();
+  const {
+    platforms, setPlatforms,
+    businesses, setBusinesses,
+    setSelectedBusiness,
+    setConfiguredBusinessId: setGlobalConfiguredBusinessId,
+    savedAccounts, setSavedAccounts, removeSavedAccount: removeFromStore
+  } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [settingUpWebhook, setSettingUpWebhook] = useState<string | null>(null);
@@ -31,6 +37,10 @@ export function Dashboard() {
   const [importing, setImporting] = useState(false);
   const [importResults, setImportResults] = useState<ImportResult[]>([]);
   const [showImportResults, setShowImportResults] = useState(false);
+
+  // Switch account modal state
+  const [switchingAccount, setSwitchingAccount] = useState<SavedAccount | null>(null);
+  const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
 
   const thumbtackConnected = platforms.find((p) => p.platformName === 'thumbtack')?.connected ?? false;
 
@@ -54,6 +64,7 @@ export function Dashboard() {
 
   useEffect(() => {
     loadPlatformStatus();
+    loadSavedAccounts();
   }, []);
 
   useEffect(() => {
@@ -61,6 +72,15 @@ export function Dashboard() {
       loadBusinesses();
     }
   }, [thumbtackConnected]);
+
+  const loadSavedAccounts = async () => {
+    try {
+      const { accounts } = await thumbtackApi.getSavedAccounts();
+      setSavedAccounts(accounts);
+    } catch (err) {
+      console.error('Failed to load saved accounts:', err);
+    }
+  };
 
   const loadPlatformStatus = async () => {
     try {
@@ -133,15 +153,24 @@ export function Dashboard() {
     }
   };
 
-  const handleSetupWebhook = async (business: Business) => {
+  const handleSetupWebhook = async (business: Business, emailHint?: string) => {
     setSettingUpWebhook(business.businessID);
     setError('');
     setSuccess('');
     try {
-      await thumbtackApi.setupWebhook(business.businessID);
+      // Setup webhook and save account for multi-account switching
+      await thumbtackApi.setupWebhook(
+        business.businessID,
+        business.name,
+        business.imageURL,
+        emailHint
+      );
       setSelectedBusiness(business);
       setConfiguredBusinessId(business.businessID);
+      setGlobalConfiguredBusinessId(business.businessID);
       setSuccess(`Webhook configured for ${business.name}! You can now receive leads.`);
+      // Reload saved accounts to include the new one
+      loadSavedAccounts();
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to setup webhook');
     } finally {
@@ -152,6 +181,59 @@ export function Dashboard() {
   const handleGoToMessages = (business: Business) => {
     setSelectedBusiness(business);
     navigate('/messages');
+  };
+
+  const handleSwitchAccount = async (account: SavedAccount) => {
+    setSwitchingAccount(account);
+  };
+
+  const confirmSwitchAccount = async () => {
+    if (!switchingAccount) return;
+
+    // Disconnect current account
+    try {
+      await platformsApi.disconnect();
+    } catch (err) {
+      console.error('Failed to disconnect:', err);
+    }
+
+    // Reset state
+    setPlatforms(platforms.map(p =>
+      p.platformName === 'thumbtack' ? { ...p, connected: false } : p
+    ));
+    setBusinesses([]);
+    setConfiguredBusinessId(null);
+    setSwitchingAccount(null);
+
+    // Open Thumbtack logout and then OAuth
+    const logoutWindow = window.open('https://www.thumbtack.com/logout', '_blank', 'width=600,height=400');
+
+    setTimeout(async () => {
+      if (logoutWindow) {
+        logoutWindow.close();
+      }
+
+      setConnecting(true);
+      try {
+        const { authUrl } = await platformsApi.getAuthUrl();
+        window.location.href = authUrl;
+      } catch (err: any) {
+        setError(err.response?.data?.message || 'Failed to get auth URL');
+        setConnecting(false);
+      }
+    }, 2000);
+  };
+
+  const handleRemoveSavedAccount = async (accountId: string) => {
+    setRemovingAccountId(accountId);
+    try {
+      await thumbtackApi.removeSavedAccount(accountId);
+      removeFromStore(accountId);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to remove saved account');
+    } finally {
+      setRemovingAccountId(null);
+    }
   };
 
   const handleImportNegotiations = async () => {
@@ -493,6 +575,139 @@ export function Dashboard() {
             )}
           </div>
         </section>
+      )}
+
+      {/* Saved Accounts Section */}
+      {savedAccounts.length > 0 && (
+        <section className="dashboard-section">
+          <h2>
+            <Users size={20} />
+            Saved Accounts
+          </h2>
+          <p className="section-description">
+            Switch between your Thumbtack accounts. Click to switch (requires re-login).
+          </p>
+
+          <div className="saved-accounts-grid">
+            {savedAccounts.map((account) => {
+              const isCurrentAccount = configuredBusinessId === account.businessId;
+              return (
+                <div
+                  key={account.id}
+                  className={`saved-account-card ${isCurrentAccount ? 'current' : ''}`}
+                >
+                  {isCurrentAccount && (
+                    <div className="current-badge">
+                      <CheckCircle size={14} />
+                      Current
+                    </div>
+                  )}
+                  <div className="saved-account-content">
+                    {account.imageUrl ? (
+                      <img
+                        src={account.imageUrl}
+                        alt={account.businessName}
+                        className="saved-account-image"
+                      />
+                    ) : (
+                      <div className="saved-account-placeholder">
+                        <Building2 size={24} />
+                      </div>
+                    )}
+                    <div className="saved-account-info">
+                      <h4>{account.businessName}</h4>
+                      {account.emailHint && (
+                        <p className="email-hint">{account.emailHint}</p>
+                      )}
+                      <p className="last-used">
+                        Last used: {new Date(account.lastUsedAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="saved-account-actions">
+                    {!isCurrentAccount && (
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => handleSwitchAccount(account)}
+                        disabled={connecting}
+                      >
+                        <RefreshCw size={14} />
+                        Switch
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-icon btn-danger-subtle"
+                      onClick={() => handleRemoveSavedAccount(account.id)}
+                      disabled={removingAccountId === account.id}
+                      title="Remove saved account"
+                    >
+                      {removingAccountId === account.id ? (
+                        <Loader2 className="spinner" size={14} />
+                      ) : (
+                        <Trash2 size={14} />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Switch Account Modal */}
+      {switchingAccount && (
+        <div className="modal-overlay" onClick={() => setSwitchingAccount(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Switch Account</h3>
+              <button className="btn-icon" onClick={() => setSwitchingAccount(null)}>
+                <X size={20} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p>You're about to switch to:</p>
+              <div className="switch-account-preview">
+                {switchingAccount.imageUrl ? (
+                  <img src={switchingAccount.imageUrl} alt={switchingAccount.businessName} />
+                ) : (
+                  <div className="saved-account-placeholder">
+                    <Building2 size={32} />
+                  </div>
+                )}
+                <div>
+                  <strong>{switchingAccount.businessName}</strong>
+                  {switchingAccount.emailHint && (
+                    <p className="email-hint">Log in with: {switchingAccount.emailHint}</p>
+                  )}
+                </div>
+              </div>
+              <div className="switch-steps">
+                <p><strong>This will:</strong></p>
+                <ol>
+                  <li>Disconnect your current Thumbtack account</li>
+                  <li>Open Thumbtack logout page</li>
+                  <li>Redirect to Thumbtack login</li>
+                </ol>
+                {switchingAccount.emailHint && (
+                  <p className="switch-reminder">
+                    <AlertCircle size={16} />
+                    Remember to log in with <strong>{switchingAccount.emailHint}</strong>
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setSwitchingAccount(null)}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={confirmSwitchAccount}>
+                <RefreshCw size={16} />
+                Switch Account
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

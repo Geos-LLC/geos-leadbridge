@@ -53,3 +53,14 @@ export interface Platform {
   connected: boolean;
   expiresAt?: string;
 }
+
+export interface SavedAccount {
+  id: string;
+  platform: string;
+  businessId: string;
+  businessName: string;
+  emailHint?: string;
+  imageUrl?: string;
+  lastUsedAt: string;
+  createdAt: string;
+}
