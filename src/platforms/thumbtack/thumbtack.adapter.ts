@@ -21,7 +21,6 @@ import {
   NormalizedConversation,
   NormalizedMessage,
   NormalizedQuote,
-  LeadStatus,
   MessageSender,
   QuoteStatus,
 } from '../../common/dto/normalized.dto';
@@ -580,20 +579,9 @@ export class ThumbtackAdapter implements IPlatformAdapter {
     };
   }
 
-  private mapThumbtackStatus(status: string): LeadStatus {
-    // API status values: "Open", "Canceled", "Picked"
-    const statusMap: Record<string, LeadStatus> = {
-      open: LeadStatus.NEW,
-      canceled: LeadStatus.LOST,
-      picked: LeadStatus.BOOKED,
-      // Legacy values for backwards compatibility
-      new: LeadStatus.NEW,
-      contacted: LeadStatus.CONTACTED,
-      quoted: LeadStatus.QUOTED,
-      hired: LeadStatus.BOOKED,
-      declined: LeadStatus.LOST,
-    };
-
-    return statusMap[status?.toLowerCase()] || LeadStatus.NEW;
+  private mapThumbtackStatus(status: string): string {
+    // Return the raw status from Thumbtack without interpretation
+    // API returns: "Open", "Canceled", "Picked"
+    return status || 'Open';
   }
 }

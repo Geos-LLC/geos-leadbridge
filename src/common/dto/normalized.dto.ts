@@ -69,8 +69,8 @@ export class NormalizedLead {
   @IsString()
   category?: string; // Service category
 
-  @IsEnum(LeadStatus)
-  status: LeadStatus;
+  @IsString()
+  status: string; // Raw status from platform (e.g., "Open", "Canceled", "Picked" for Thumbtack)
 
   @IsOptional()
   @IsString()

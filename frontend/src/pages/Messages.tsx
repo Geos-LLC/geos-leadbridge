@@ -12,8 +12,6 @@ import {
   Loader2,
   MessageSquare,
   RefreshCw,
-  ChevronDown,
-  ChevronUp,
   AlertCircle,
   Building2,
 } from 'lucide-react';
@@ -39,7 +37,6 @@ export function Messages() {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [messages, setMessages] = useState<LocalMessage[]>([]);
-  const [expandedDetails, setExpandedDetails] = useState(false);
   const [accountFilter, setAccountFilter] = useState<string>('all'); // 'all' or businessId
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -270,7 +267,7 @@ export function Messages() {
                   <div className="lead-preview">
                     <div className="lead-header">
                       <span className="lead-name">{lead.customerName}</span>
-                      <span className={`lead-status-badge status-${lead.status}`}>
+                      <span className={`lead-status-badge status-${lead.status?.toLowerCase()}`}>
                         {lead.status}
                       </span>
                     </div>
@@ -303,7 +300,12 @@ export function Messages() {
                   <User size={24} />
                 </div>
                 <div>
-                  <h3>{selectedLead.customerName}</h3>
+                  <div className="lead-name-row">
+                    <h3>{selectedLead.customerName}</h3>
+                    <span className={`status-badge status-${selectedLead.status?.toLowerCase()}`}>
+                      {selectedLead.status}
+                    </span>
+                  </div>
                   <p>{selectedLead.category || 'Service Request'}</p>
                 </div>
               </div>
@@ -321,81 +323,6 @@ export function Messages() {
                   </span>
                 )}
               </div>
-            </div>
-
-            {/* Expandable Lead Details */}
-            <div className="lead-details-panel">
-              <button
-                className="details-toggle"
-                onClick={() => setExpandedDetails(!expandedDetails)}
-              >
-                <span>Lead Details</span>
-                {expandedDetails ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-              </button>
-
-              {expandedDetails && (
-                <div className="details-content">
-                  <div className="details-grid">
-                    <div className="detail-item">
-                      <Calendar size={16} />
-                      <div>
-                        <label>Received</label>
-                        <span>{formatDate(selectedLead.createdAt)}</span>
-                      </div>
-                    </div>
-                    {selectedLead.raw?.estimate?.total && (
-                      <div className="detail-item">
-                        <DollarSign size={16} />
-                        <div>
-                          <label>Estimate</label>
-                          <span>{selectedLead.raw.estimate.total}</span>
-                        </div>
-                      </div>
-                    )}
-                    {selectedLead.raw?.leadPrice && (
-                      <div className="detail-item">
-                        <Tag size={16} />
-                        <div>
-                          <label>Lead Cost</label>
-                          <span>{selectedLead.raw.leadPrice}</span>
-                        </div>
-                      </div>
-                    )}
-                    <div className="detail-item">
-                      <Tag size={16} />
-                      <div>
-                        <label>Status</label>
-                        <span className={`status-badge ${selectedLead.status}`}>
-                          {selectedLead.status}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Customer Request Details */}
-                  {getLeadDetails(selectedLead).length > 0 && (
-                    <div className="request-details">
-                      <h4>Request Details</h4>
-                      <dl>
-                        {getLeadDetails(selectedLead).map((detail, idx) => (
-                          <div key={idx} className="detail-row">
-                            <dt>{detail.question}</dt>
-                            <dd>{detail.answer}</dd>
-                          </div>
-                        ))}
-                      </dl>
-                    </div>
-                  )}
-
-                  {/* Original Message */}
-                  {selectedLead.message && (
-                    <div className="original-message">
-                      <h4>Customer Message</h4>
-                      <p>{selectedLead.message}</p>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
 
             {/* Messages Area */}
@@ -496,6 +423,106 @@ export function Messages() {
           </div>
         )}
       </main>
+
+      {/* Right Details Panel */}
+      {selectedLead && (
+        <aside className="lead-details-sidebar">
+          <div className="details-sidebar-header">
+            <h3>Lead Details</h3>
+          </div>
+          <div className="details-sidebar-content">
+            {/* Customer Info */}
+            <div className="details-section">
+              <h4>Customer</h4>
+              <div className="customer-info">
+                <div className="lead-avatar large">
+                  <User size={24} />
+                </div>
+                <div>
+                  <p className="customer-name">{selectedLead.customerName}</p>
+                  {selectedLead.customerPhone && (
+                    <a href={`tel:${selectedLead.customerPhone}`} className="customer-contact">
+                      <Phone size={14} />
+                      {formatPhoneNumber(selectedLead.customerPhone)}
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Location */}
+            {selectedLead.city && (
+              <div className="details-section">
+                <h4>Location</h4>
+                <p className="detail-value">
+                  <MapPin size={14} />
+                  {selectedLead.city}, {selectedLead.state} {selectedLead.postcode}
+                </p>
+              </div>
+            )}
+
+            {/* Status & Dates */}
+            <div className="details-section">
+              <h4>Status</h4>
+              <span className={`status-badge status-${selectedLead.status?.toLowerCase()}`}>
+                {selectedLead.status}
+              </span>
+            </div>
+
+            <div className="details-section">
+              <h4>Received</h4>
+              <p className="detail-value">
+                <Calendar size={14} />
+                {formatDate(selectedLead.createdAt)}
+              </p>
+            </div>
+
+            {/* Estimate & Lead Cost */}
+            {selectedLead.raw?.estimate?.total && (
+              <div className="details-section">
+                <h4>Estimate</h4>
+                <p className="detail-value">
+                  <DollarSign size={14} />
+                  {selectedLead.raw.estimate.total}
+                </p>
+              </div>
+            )}
+
+            {selectedLead.raw?.leadPrice && (
+              <div className="details-section">
+                <h4>Lead Cost</h4>
+                <p className="detail-value">
+                  <Tag size={14} />
+                  {selectedLead.raw.leadPrice}
+                </p>
+              </div>
+            )}
+
+            {/* Request Details */}
+            {getLeadDetails(selectedLead).length > 0 && (
+              <div className="details-section">
+                <h4>Request Details</h4>
+                <dl className="request-details-list">
+                  {getLeadDetails(selectedLead).map((detail, idx) => (
+                    <div key={idx} className="detail-row">
+                      <dt>{detail.question}</dt>
+                      <dd>{detail.answer}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            )}
+
+            {/* Original Message */}
+            {selectedLead.message && (
+              <div className="details-section">
+                <h4>Customer Message</h4>
+                <p className="customer-message">{selectedLead.message}</p>
+              </div>
+            )}
+          </div>
+        </aside>
+      )}
     </div>
   );
 }
