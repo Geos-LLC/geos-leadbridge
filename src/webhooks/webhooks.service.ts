@@ -223,8 +223,11 @@ export class WebhooksService {
       return;
     }
 
-    // Store the lead (threadId is optional and managed separately)
-    await this.prisma.lead.upsert({
+    const userId = platformConnection.userId;
+    const customerName = `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown';
+
+    // Store the lead
+    const lead = await this.prisma.lead.upsert({
       where: {
         platform_externalRequestId: {
           platform,
@@ -232,11 +235,11 @@ export class WebhooksService {
         },
       },
       create: {
-        userId: platformConnection.userId,
+        userId,
         platform,
         businessId: business.businessID,
         externalRequestId: negotiationId,
-        customerName: `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown',
+        customerName,
         customerPhone: customer.phone,
         message: request.description || '',
         postcode: location.zipCode,
@@ -247,7 +250,7 @@ export class WebhooksService {
         rawJson: JSON.stringify(data),
       },
       update: {
-        customerName: `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown',
+        customerName,
         customerPhone: customer.phone,
         message: request.description || '',
         status: data.status?.toLowerCase() || 'new',
@@ -256,6 +259,91 @@ export class WebhooksService {
     });
 
     this.logger.log('Lead stored successfully', { negotiationId });
+
+    // Create conversation and store initial message
+    await this.createConversationAndInitialMessage(
+      userId,
+      platform,
+      negotiationId,
+      customerName,
+      request.description || '',
+      lead.id,
+      data,
+    );
+  }
+
+  /**
+   * Create conversation and store initial customer message for a new negotiation
+   */
+  private async createConversationAndInitialMessage(
+    userId: string,
+    platform: string,
+    negotiationId: string,
+    customerName: string,
+    initialMessage: string,
+    leadId: string,
+    rawData: any,
+  ): Promise<void> {
+    // Check if conversation already exists
+    let conversation = await this.prisma.conversation.findUnique({
+      where: {
+        platform_externalThreadId: {
+          platform,
+          externalThreadId: negotiationId,
+        },
+      },
+    });
+
+    if (!conversation) {
+      conversation = await this.prisma.conversation.create({
+        data: {
+          userId,
+          platform,
+          externalThreadId: negotiationId,
+          customerName,
+          lastMessageAt: new Date(),
+          status: 'active',
+        },
+      });
+      this.logger.log('Conversation created for new negotiation', { conversationId: conversation.id, negotiationId });
+
+      // Link lead to conversation
+      await this.prisma.lead.update({
+        where: { id: leadId },
+        data: { threadId: conversation.id },
+      });
+    }
+
+    // Store the initial customer message if there is one
+    if (initialMessage && initialMessage.trim()) {
+      // Generate a unique ID for this initial message (negotiationId + "_initial")
+      const initialMessageId = `${negotiationId}_initial`;
+
+      // Check if we already stored this initial message
+      const existingMessage = await this.prisma.message.findFirst({
+        where: {
+          platform,
+          externalMessageId: initialMessageId,
+        },
+      });
+
+      if (!existingMessage) {
+        await this.prisma.message.create({
+          data: {
+            conversationId: conversation.id,
+            userId,
+            platform,
+            externalMessageId: initialMessageId,
+            sender: 'customer',
+            content: initialMessage,
+            isRead: false,
+            sentAt: new Date(),
+            rawJson: JSON.stringify(rawData),
+          },
+        });
+        this.logger.log('Initial customer message stored', { negotiationId, messageLength: initialMessage.length });
+      }
+    }
   }
 
   /**
