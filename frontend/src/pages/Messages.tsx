@@ -84,6 +84,25 @@ export function Messages() {
     loadSavedAccounts();
   }, []);
 
+  // When account filter changes, ensure selected lead is still visible
+  useEffect(() => {
+    if (leads.length === 0) return;
+
+    const visibleLeads = leads.filter(lead =>
+      accountFilter === 'all' || lead.businessId === accountFilter
+    );
+
+    if (visibleLeads.length > 0) {
+      const currentSelectionVisible = selectedLead && visibleLeads.some(l => l.id === selectedLead.id);
+      if (!currentSelectionVisible) {
+        console.log('[Messages] Filter changed, selecting first visible lead:', visibleLeads[0]);
+        setSelectedLead(visibleLeads[0]);
+      }
+    } else {
+      setSelectedLead(null);
+    }
+  }, [accountFilter]);
+
   const loadSavedAccounts = async () => {
     try {
       const { accounts } = await thumbtackApi.getSavedAccounts();
@@ -107,16 +126,29 @@ export function Messages() {
     setLoading(true);
     console.log('[Messages] Loading leads...');
     try {
-      const { leads } = await leadsApi.getLeads(50);
-      console.log('[Messages] Loaded leads:', leads.length, leads);
+      const { leads: loadedLeads } = await leadsApi.getLeads(50);
+      console.log('[Messages] Loaded leads:', loadedLeads.length, loadedLeads);
       // Sort leads by updatedAt descending (most recently updated first)
-      const sortedLeads = [...leads].sort((a, b) =>
+      const sortedLeads = [...loadedLeads].sort((a, b) =>
         new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
       );
       setLeads(sortedLeads);
-      if (sortedLeads.length > 0 && !selectedLead) {
-        console.log('[Messages] Auto-selecting most recently updated lead:', sortedLeads[0]);
-        setSelectedLead(sortedLeads[0]);
+
+      // Apply current account filter to determine visible leads
+      const visibleLeads = sortedLeads.filter(lead =>
+        accountFilter === 'all' || lead.businessId === accountFilter
+      );
+
+      // Select first visible lead if no lead selected or current selection is not visible
+      if (visibleLeads.length > 0) {
+        const currentSelectionVisible = selectedLead && visibleLeads.some(l => l.id === selectedLead.id);
+        if (!currentSelectionVisible) {
+          console.log('[Messages] Auto-selecting first visible lead:', visibleLeads[0]);
+          setSelectedLead(visibleLeads[0]);
+        }
+      } else {
+        // No visible leads, clear selection
+        setSelectedLead(null);
       }
     } catch (err) {
       console.error('[Messages] Failed to load leads:', err);
