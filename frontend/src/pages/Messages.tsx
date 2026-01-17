@@ -33,7 +33,7 @@ interface LocalMessage {
 export function Messages() {
   console.log('[Messages] Component rendering');
   const navigate = useNavigate();
-  const { leads, setLeads, selectedLead, setSelectedLead, selectedBusiness, configuredBusinessId, savedAccounts } = useAppStore();
+  const { leads, setLeads, selectedLead, setSelectedLead, configuredBusinessId, savedAccounts } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
