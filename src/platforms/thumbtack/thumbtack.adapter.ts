@@ -64,7 +64,8 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       client_id: this.clientId,
       redirect_uri: this.redirectUri,
       response_type: 'code',
-      scope: 'supply::businesses.list supply::messages.read supply::messages.write supply::negotiations.read supply::users.read supply::webhooks.read supply::webhooks.write offline_access',
+      // Include openid email profile scopes to get ID token with user info
+      scope: 'openid email profile supply::businesses.list supply::messages.read supply::messages.write supply::negotiations.read supply::users.read supply::webhooks.read supply::webhooks.write offline_access',
       state,
       audience: 'urn:partner-api',
     });
@@ -90,13 +91,31 @@ export class ThumbtackAdapter implements IPlatformAdapter {
         },
       });
 
-      const { access_token, refresh_token, expires_in, scope } = response.data;
+      const { access_token, refresh_token, expires_in, scope, id_token } = response.data;
+      this.logger.log('Token response received, id_token present:', !!id_token);
+
+      // Extract email from ID token (JWT) if present
+      let email: string | undefined;
+      if (id_token) {
+        try {
+          // ID token is a JWT - decode the payload (middle part)
+          const parts = id_token.split('.');
+          if (parts.length === 3) {
+            const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+            this.logger.log('ID token payload:', JSON.stringify(payload));
+            email = payload.email;
+          }
+        } catch (err) {
+          this.logger.warn('Failed to decode id_token:', err.message);
+        }
+      }
 
       return {
         accessToken: access_token,
         refreshToken: refresh_token,
         expiresAt: new Date(Date.now() + expires_in * 1000),
         scope,
+        email, // Include email from ID token
       };
     } catch (error) {
       this.logger.error('OAuth callback error:', error.response?.data || error.message);

@@ -58,16 +58,14 @@ export class ThumbtackController {
         return;
       }
 
-      // Try to get the user's email from Thumbtack
+      // Get the user's email from stored credentials (extracted from ID token during OAuth)
       let userEmail: string | undefined;
       try {
         const credentials = await this.platformService.getCredentials(userId, PlatformName.THUMBTACK);
-        const adapter = this.platformFactory.getAdapter(PlatformName.THUMBTACK) as ThumbtackAdapter;
-        const userInfo = await adapter.getUserInfo(credentials);
-        userEmail = userInfo.email;
-        console.log(`Got user email from Thumbtack: ${userEmail}`);
+        userEmail = credentials.email;
+        console.log(`Got user email from credentials: ${userEmail || 'none'}`);
       } catch (err) {
-        console.warn('Could not fetch user email:', err.message);
+        console.warn('Could not fetch credentials:', err.message);
       }
 
       // Setup webhook and save account for each business
@@ -80,7 +78,7 @@ export class ThumbtackController {
             business.businessID,
             business.name,
             business.imageURL,
-            userEmail, // Email from Thumbtack API
+            userEmail, // Email from ID token
           );
           console.log(`Account saved for business: ${business.name} (email: ${userEmail || 'none'})`);
 

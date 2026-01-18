@@ -157,6 +157,7 @@ export interface PlatformCredentials {
   expiresAt?: Date;
   scope?: string;
   externalUserId?: string;
+  email?: string; // Email from ID token (OpenID Connect)
   metadata?: Record<string, any>;
 }
 
