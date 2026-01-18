@@ -116,8 +116,8 @@ export const thumbtackApi = {
     });
     return data;
   },
-  removeSavedAccount: async (id: string): Promise<{ success: boolean }> => {
-    const { data } = await api.delete(`/v1/thumbtack/saved-accounts/${id}`);
+  removeSavedAccount: async (id: string, deleteLeads: boolean = false): Promise<{ success: boolean; deletedLeads: number }> => {
+    const { data } = await api.delete(`/v1/thumbtack/saved-accounts/${id}?deleteLeads=${deleteLeads}`);
     return data;
   },
 };

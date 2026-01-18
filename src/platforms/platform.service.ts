@@ -343,15 +343,61 @@ export class PlatformService {
   }
 
   /**
-   * Remove a saved account
+   * Remove a saved account and optionally its leads/messages
    */
-  async removeSavedAccount(userId: string, accountId: string): Promise<void> {
-    await this.prisma.savedAccount.deleteMany({
+  async removeSavedAccount(userId: string, accountId: string, deleteLeads: boolean = false): Promise<{ deletedLeads: number }> {
+    // First get the account to find the businessId
+    const account = await this.prisma.savedAccount.findFirst({
       where: {
         id: accountId,
-        userId, // Ensure user owns the account
+        userId,
       },
     });
+
+    if (!account) {
+      return { deletedLeads: 0 };
+    }
+
+    let deletedLeadsCount = 0;
+
+    if (deleteLeads) {
+      // Delete all leads for this business (messages will cascade via conversation)
+      const leads = await this.prisma.lead.findMany({
+        where: {
+          userId,
+          businessId: account.businessId,
+        },
+        select: { id: true, threadId: true },
+      });
+
+      // Delete conversations and their messages for these leads
+      const conversationIds = leads.map(l => l.threadId).filter(Boolean) as string[];
+      if (conversationIds.length > 0) {
+        // Messages cascade delete with conversation
+        await this.prisma.conversation.deleteMany({
+          where: { id: { in: conversationIds } },
+        });
+      }
+
+      // Delete the leads
+      await this.prisma.lead.deleteMany({
+        where: {
+          userId,
+          businessId: account.businessId,
+        },
+      });
+
+      deletedLeadsCount = leads.length;
+      console.log(`[PlatformService] Deleted ${leads.length} leads for account ${account.businessName}`);
+    }
+
+    // Delete the saved account
+    await this.prisma.savedAccount.delete({
+      where: { id: accountId },
+    });
+
+    console.log(`[PlatformService] Removed account ${account.businessName}`);
+    return { deletedLeads: deletedLeadsCount };
   }
 
   /**

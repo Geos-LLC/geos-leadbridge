@@ -269,13 +269,21 @@ export function Messages() {
   // Check if messaging is enabled for the selected lead
   const canSendMessage = selectedLead ? isLeadFromCurrentAccount(selectedLead) : false;
 
+  // Get saved account businessIds for filtering
+  const savedAccountIds = new Set(savedAccounts.map(a => a.businessId));
+
+  // Only show leads from saved accounts
+  const leadsFromSavedAccounts = leads.filter(lead =>
+    lead.businessId && savedAccountIds.has(lead.businessId)
+  );
+
   // Get unique accounts from leads for filter dropdown
   const accountsInLeads = savedAccounts.filter(account =>
-    leads.some(lead => lead.businessId === account.businessId)
+    leadsFromSavedAccounts.some(lead => lead.businessId === account.businessId)
   );
 
   // Filter leads by selected account and search query
-  const filteredLeads = leads.filter(lead => {
+  const filteredLeads = leadsFromSavedAccounts.filter(lead => {
     // Account filter
     const matchesAccount = accountFilter === 'all' || lead.businessId === accountFilter;
     // Name search (case-insensitive)
@@ -330,9 +338,9 @@ export function Messages() {
               onChange={(e) => setAccountFilter(e.target.value)}
               className="account-filter-select"
             >
-              <option value="all">All Accounts ({leads.length})</option>
+              <option value="all">All Accounts ({leadsFromSavedAccounts.length})</option>
               {accountsInLeads.map((account) => {
-                const count = leads.filter(l => l.businessId === account.businessId).length;
+                const count = leadsFromSavedAccounts.filter(l => l.businessId === account.businessId).length;
                 return (
                   <option key={account.businessId} value={account.businessId}>
                     {account.businessName} ({count})

@@ -33,6 +33,8 @@ export function Dashboard() {
 
   // Account management state
   const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
+  const [confirmRemoveAccount, setConfirmRemoveAccount] = useState<{ id: string; name: string } | null>(null);
+  const [deleteLeadsOnRemove, setDeleteLeadsOnRemove] = useState(false);
 
   const thumbtackConnected = platforms.find((p) => p.platformName === 'thumbtack')?.connected ?? false;
 
@@ -102,16 +104,30 @@ export function Dashboard() {
     }, 2000); // 2 second delay to allow logout to complete
   };
 
-  const handleRemoveSavedAccount = async (accountId: string) => {
-    setRemovingAccountId(accountId);
+  const handleRemoveSavedAccount = async () => {
+    if (!confirmRemoveAccount) return;
+
+    setRemovingAccountId(confirmRemoveAccount.id);
     try {
-      await thumbtackApi.removeSavedAccount(accountId);
-      removeFromStore(accountId);
+      const result = await thumbtackApi.removeSavedAccount(confirmRemoveAccount.id, deleteLeadsOnRemove);
+      removeFromStore(confirmRemoveAccount.id);
+      if (deleteLeadsOnRemove && result.deletedLeads > 0) {
+        setSuccess(`Account removed along with ${result.deletedLeads} leads`);
+      } else {
+        setSuccess('Account removed');
+      }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to remove saved account');
     } finally {
       setRemovingAccountId(null);
+      setConfirmRemoveAccount(null);
+      setDeleteLeadsOnRemove(false);
     }
+  };
+
+  const openRemoveConfirmation = (account: { id: string; businessName: string }) => {
+    setConfirmRemoveAccount({ id: account.id, name: account.businessName });
+    setDeleteLeadsOnRemove(false);
   };
 
   const handleImportNegotiations = async () => {
@@ -297,7 +313,7 @@ export function Dashboard() {
                   </button>
                   <button
                     className="btn-icon btn-danger-subtle"
-                    onClick={() => handleRemoveSavedAccount(account.id)}
+                    onClick={() => openRemoveConfirmation(account)}
                     disabled={removingAccountId === account.id}
                     title="Remove account"
                   >
@@ -395,6 +411,54 @@ export function Dashboard() {
             )}
           </div>
         </section>
+      )}
+
+      {/* Remove Account Confirmation Modal */}
+      {confirmRemoveAccount && (
+        <div className="modal-overlay" onClick={() => setConfirmRemoveAccount(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Remove Account</h3>
+            <p>Are you sure you want to remove <strong>{confirmRemoveAccount.name}</strong>?</p>
+
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={deleteLeadsOnRemove}
+                onChange={(e) => setDeleteLeadsOnRemove(e.target.checked)}
+              />
+              Also delete all leads and messages from this account
+            </label>
+
+            <p className="modal-hint">
+              {deleteLeadsOnRemove
+                ? 'This will permanently delete all leads and conversations from this account.'
+                : 'Leads will be kept but hidden from the Messages page.'}
+            </p>
+
+            <div className="modal-actions">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setConfirmRemoveAccount(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={handleRemoveSavedAccount}
+                disabled={removingAccountId === confirmRemoveAccount.id}
+              >
+                {removingAccountId === confirmRemoveAccount.id ? (
+                  <>
+                    <Loader2 className="spinner" size={16} />
+                    Removing...
+                  </>
+                ) : (
+                  'Remove Account'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

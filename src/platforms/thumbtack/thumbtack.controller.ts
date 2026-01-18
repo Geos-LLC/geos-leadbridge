@@ -458,18 +458,23 @@ export class ThumbtackController {
   }
 
   /**
-   * Remove a saved account
+   * Remove a saved account and optionally its leads
    */
   @Delete('saved-accounts/:id')
   async removeSavedAccount(
     @CurrentUser() user: any,
     @Param('id') id: string,
+    @Query('deleteLeads') deleteLeads?: string,
   ) {
-    await this.platformService.removeSavedAccount(user.userId, id);
+    const shouldDeleteLeads = deleteLeads === 'true';
+    const result = await this.platformService.removeSavedAccount(user.userId, id, shouldDeleteLeads);
 
     return {
       success: true,
-      message: 'Saved account removed',
+      message: shouldDeleteLeads
+        ? `Account and ${result.deletedLeads} leads removed`
+        : 'Account removed (leads kept)',
+      deletedLeads: result.deletedLeads,
     };
   }
 }
