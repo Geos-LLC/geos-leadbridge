@@ -84,24 +84,34 @@ export function Messages() {
     loadSavedAccounts();
   }, []);
 
-  // When account filter changes, ensure selected lead is still visible
+  // When account filter or savedAccounts change, ensure selected lead is valid
   useEffect(() => {
-    if (leads.length === 0) return;
+    if (leads.length === 0 || savedAccounts.length === 0) return;
 
-    const visibleLeads = leads.filter(lead =>
+    // Get saved account businessIds for filtering
+    const savedAccountIds = new Set(savedAccounts.map(a => a.businessId));
+
+    // Only consider leads from saved accounts
+    const leadsFromSavedAccounts = leads.filter(lead =>
+      lead.businessId && savedAccountIds.has(lead.businessId)
+    );
+
+    // Apply account filter
+    const visibleLeads = leadsFromSavedAccounts.filter(lead =>
       accountFilter === 'all' || lead.businessId === accountFilter
     );
 
     if (visibleLeads.length > 0) {
       const currentSelectionVisible = selectedLead && visibleLeads.some(l => l.id === selectedLead.id);
       if (!currentSelectionVisible) {
-        console.log('[Messages] Filter changed, selecting first visible lead:', visibleLeads[0]);
+        console.log('[Messages] Selection invalid, selecting first visible lead:', visibleLeads[0]);
         setSelectedLead(visibleLeads[0]);
       }
     } else {
+      console.log('[Messages] No visible leads, clearing selection');
       setSelectedLead(null);
     }
-  }, [accountFilter]);
+  }, [accountFilter, savedAccounts, leads]);
 
   const loadSavedAccounts = async () => {
     try {
@@ -133,23 +143,7 @@ export function Messages() {
         new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
       );
       setLeads(sortedLeads);
-
-      // Apply current account filter to determine visible leads
-      const visibleLeads = sortedLeads.filter(lead =>
-        accountFilter === 'all' || lead.businessId === accountFilter
-      );
-
-      // Select first visible lead if no lead selected or current selection is not visible
-      if (visibleLeads.length > 0) {
-        const currentSelectionVisible = selectedLead && visibleLeads.some(l => l.id === selectedLead.id);
-        if (!currentSelectionVisible) {
-          console.log('[Messages] Auto-selecting first visible lead:', visibleLeads[0]);
-          setSelectedLead(visibleLeads[0]);
-        }
-      } else {
-        // No visible leads, clear selection
-        setSelectedLead(null);
-      }
+      // Selection will be handled by the savedAccounts effect
     } catch (err) {
       console.error('[Messages] Failed to load leads:', err);
     } finally {
