@@ -163,30 +163,47 @@ export function Dashboard() {
     }
   };
 
-  const handleToggleWebhook = async (account: { id: string; businessName: string; webhookId?: string | null }) => {
+  const handleDisconnectWebhook = async (account: { id: string; businessName: string }) => {
     setTogglingWebhookId(account.id);
     setError('');
     try {
-      if (account.webhookId) {
-        // Disconnect
-        await thumbtackApi.disconnectAccount(account.id);
-        setSavedAccounts(savedAccounts.map(a =>
-          a.id === account.id ? { ...a, webhookId: null } : a
-        ));
-        setSuccess(`Webhook disconnected for ${account.businessName}`);
-      } else {
-        // Reconnect
-        const result = await thumbtackApi.reconnectAccount(account.id);
-        setSavedAccounts(savedAccounts.map(a =>
-          a.id === account.id ? { ...a, webhookId: result.webhookId } : a
-        ));
-        setSuccess(`Webhook reconnected for ${account.businessName}`);
-      }
+      await thumbtackApi.disconnectAccount(account.id);
+      setSavedAccounts(savedAccounts.map(a =>
+        a.id === account.id ? { ...a, webhookId: null } : a
+      ));
+      setSuccess(`Webhook disconnected for ${account.businessName}`);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to toggle webhook');
+      setError(err.response?.data?.message || 'Failed to disconnect webhook');
     } finally {
       setTogglingWebhookId(null);
     }
+  };
+
+  const handleReconnectWebhook = async (account: { id: string; businessName: string; emailHint?: string }) => {
+    // Reconnect uses the same OAuth flow as "Add Another Account"
+    // Show which email to use if we have it
+    const emailHint = account.emailHint ? ` with ${account.emailHint}` : '';
+    setSuccess(`Reconnecting ${account.businessName}${emailHint}. Please log in when prompted.`);
+
+    // Open Thumbtack logout in a new window first to clear any existing session
+    const logoutWindow = window.open('https://www.thumbtack.com/logout', '_blank', 'width=600,height=400');
+
+    // Wait a moment for logout to process, then close popup and redirect to OAuth
+    setTimeout(async () => {
+      if (logoutWindow) {
+        logoutWindow.close();
+      }
+
+      setConnecting(true);
+      setError('');
+      try {
+        const { authUrl } = await platformsApi.getAuthUrl();
+        window.location.href = authUrl;
+      } catch (err: any) {
+        setError(err.response?.data?.message || 'Failed to get auth URL');
+        setConnecting(false);
+      }
+    }, 2000);
   };
 
   const handleImportNegotiations = async () => {
@@ -409,9 +426,12 @@ export function Dashboard() {
                   </button>
                   <button
                     className={`btn-icon ${account.webhookId ? 'btn-secondary-subtle' : 'btn-success-subtle'}`}
-                    onClick={() => handleToggleWebhook(account)}
-                    disabled={togglingWebhookId === account.id}
-                    title={account.webhookId ? 'Disconnect webhooks' : 'Reconnect webhooks'}
+                    onClick={() => account.webhookId
+                      ? handleDisconnectWebhook(account)
+                      : handleReconnectWebhook(account)
+                    }
+                    disabled={togglingWebhookId === account.id || connecting}
+                    title={account.webhookId ? 'Disconnect webhooks' : 'Reconnect (re-authenticate with Thumbtack)'}
                   >
                     {togglingWebhookId === account.id ? (
                       <Loader2 className="spinner" size={16} />
