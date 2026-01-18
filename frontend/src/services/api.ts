@@ -120,6 +120,10 @@ export const thumbtackApi = {
     const { data } = await api.delete(`/v1/thumbtack/saved-accounts/${id}?deleteLeads=${deleteLeads}`);
     return data;
   },
+  updateSavedAccount: async (id: string, updates: { emailHint?: string }): Promise<{ success: boolean }> => {
+    const { data } = await api.patch(`/v1/thumbtack/saved-accounts/${id}`, updates);
+    return data;
+  },
 };
 
 // Attachment type for messages

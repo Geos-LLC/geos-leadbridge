@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Download, X, Unlink, Trash2 } from 'lucide-react';
+import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Download, X, Unlink, Trash2, Mail, Pencil, Check } from 'lucide-react';
 import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
@@ -35,6 +35,11 @@ export function Dashboard() {
   const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
   const [confirmRemoveAccount, setConfirmRemoveAccount] = useState<{ id: string; name: string } | null>(null);
   const [deleteLeadsOnRemove, setDeleteLeadsOnRemove] = useState(false);
+
+  // Email editing state
+  const [editingEmailId, setEditingEmailId] = useState<string | null>(null);
+  const [editEmailValue, setEditEmailValue] = useState('');
+  const [savingEmail, setSavingEmail] = useState(false);
 
   // Handle OAuth callback params
   useEffect(() => {
@@ -126,6 +131,33 @@ export function Dashboard() {
   const openRemoveConfirmation = (account: { id: string; businessName: string }) => {
     setConfirmRemoveAccount({ id: account.id, name: account.businessName });
     setDeleteLeadsOnRemove(false);
+  };
+
+  const startEditingEmail = (account: { id: string; emailHint?: string }) => {
+    setEditingEmailId(account.id);
+    setEditEmailValue(account.emailHint || '');
+  };
+
+  const cancelEditingEmail = () => {
+    setEditingEmailId(null);
+    setEditEmailValue('');
+  };
+
+  const saveEmail = async (accountId: string) => {
+    setSavingEmail(true);
+    try {
+      await thumbtackApi.updateSavedAccount(accountId, { emailHint: editEmailValue });
+      // Update local state
+      setSavedAccounts(savedAccounts.map(a =>
+        a.id === accountId ? { ...a, emailHint: editEmailValue } : a
+      ));
+      setEditingEmailId(null);
+      setEditEmailValue('');
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to update email');
+    } finally {
+      setSavingEmail(false);
+    }
   };
 
   const handleImportNegotiations = async () => {
@@ -288,8 +320,45 @@ export function Dashboard() {
                 <div className="business-info">
                   <h3>{account.businessName}</h3>
                   <p className="business-id">ID: {account.businessId}</p>
-                  {account.emailHint && (
-                    <p className="email-hint">{account.emailHint}</p>
+                  {editingEmailId === account.id ? (
+                    <div className="email-edit-row">
+                      <Mail size={14} />
+                      <input
+                        type="email"
+                        value={editEmailValue}
+                        onChange={(e) => setEditEmailValue(e.target.value)}
+                        placeholder="account@email.com"
+                        className="email-input"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveEmail(account.id);
+                          if (e.key === 'Escape') cancelEditingEmail();
+                        }}
+                      />
+                      <button
+                        className="btn-icon btn-success-subtle"
+                        onClick={() => saveEmail(account.id)}
+                        disabled={savingEmail}
+                        title="Save"
+                      >
+                        {savingEmail ? <Loader2 className="spinner" size={14} /> : <Check size={14} />}
+                      </button>
+                      <button
+                        className="btn-icon btn-secondary-subtle"
+                        onClick={cancelEditingEmail}
+                        title="Cancel"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="email-display-row" onClick={() => startEditingEmail(account)}>
+                      <Mail size={14} />
+                      <span className="email-hint">
+                        {account.emailHint || 'Add email...'}
+                      </span>
+                      <Pencil size={12} className="edit-icon" />
+                    </div>
                   )}
                 </div>
                 <div className="business-actions">

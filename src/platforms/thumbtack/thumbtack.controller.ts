@@ -7,6 +7,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Query,
   UseGuards,
@@ -454,6 +455,23 @@ export class ThumbtackController {
     return {
       success: true,
       message: 'Account saved successfully',
+    };
+  }
+
+  /**
+   * Update a saved account (e.g., email hint)
+   */
+  @Patch('saved-accounts/:id')
+  async updateSavedAccount(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body('emailHint') emailHint?: string,
+  ) {
+    await this.platformService.updateSavedAccount(user.userId, id, { emailHint });
+
+    return {
+      success: true,
+      message: 'Account updated successfully',
     };
   }
 

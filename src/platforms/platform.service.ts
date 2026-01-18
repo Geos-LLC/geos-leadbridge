@@ -343,6 +343,21 @@ export class PlatformService {
   }
 
   /**
+   * Update a saved account
+   */
+  async updateSavedAccount(userId: string, accountId: string, updates: { emailHint?: string }): Promise<void> {
+    await this.prisma.savedAccount.updateMany({
+      where: {
+        id: accountId,
+        userId,
+      },
+      data: {
+        ...(updates.emailHint !== undefined && { emailHint: updates.emailHint }),
+      },
+    });
+  }
+
+  /**
    * Remove a saved account and optionally its leads/messages
    */
   async removeSavedAccount(userId: string, accountId: string, deleteLeads: boolean = false): Promise<{ deletedLeads: number }> {
