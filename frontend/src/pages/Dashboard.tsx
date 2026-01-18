@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Download, X, Trash2 } from 'lucide-react';
+import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Download, X, Unlink } from 'lucide-react';
 import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
@@ -17,7 +17,7 @@ export function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuthStore();
   const {
-    platforms, setPlatforms,
+    setPlatforms,
     savedAccounts, setSavedAccounts, removeSavedAccount: removeFromStore
   } = useAppStore();
   const [loading, setLoading] = useState(true);
@@ -35,8 +35,6 @@ export function Dashboard() {
   const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
   const [confirmRemoveAccount, setConfirmRemoveAccount] = useState<{ id: string; name: string } | null>(null);
   const [deleteLeadsOnRemove, setDeleteLeadsOnRemove] = useState(false);
-
-  const thumbtackConnected = platforms.find((p) => p.platformName === 'thumbtack')?.connected ?? false;
 
   // Handle OAuth callback params
   useEffect(() => {
@@ -234,22 +232,8 @@ export function Dashboard() {
             <div className="platform-logo thumbtack-logo">TT</div>
             <div>
               <h3>Thumbtack</h3>
-              <p>Connect your Thumbtack Pro account to receive and manage leads</p>
+              <p>Connect your Thumbtack Pro accounts to receive and manage leads</p>
             </div>
-          </div>
-
-          <div className="platform-status">
-            {thumbtackConnected ? (
-              <span className="status connected">
-                <CheckCircle size={16} />
-                Connected
-              </span>
-            ) : (
-              <span className="status disconnected">
-                <AlertCircle size={16} />
-                Not Connected
-              </span>
-            )}
           </div>
 
           <div className="platform-actions">
@@ -266,7 +250,7 @@ export function Dashboard() {
               ) : (
                 <>
                   <Link2 size={18} />
-                  {thumbtackConnected ? 'Add Another Account' : 'Connect Thumbtack'}
+                  {savedAccounts.length > 0 ? 'Add Another Account' : 'Connect Thumbtack'}
                 </>
               )}
             </button>
@@ -285,6 +269,11 @@ export function Dashboard() {
           <div className="businesses-grid">
             {savedAccounts.map((account) => (
               <div key={account.id} className="business-card">
+                {/* Connected badge */}
+                <div className="account-status-badge connected">
+                  <CheckCircle size={12} />
+                  Connected
+                </div>
                 {account.imageUrl ? (
                   <img
                     src={account.imageUrl}
@@ -312,15 +301,15 @@ export function Dashboard() {
                     View Leads
                   </button>
                   <button
-                    className="btn-icon btn-danger-subtle"
+                    className="btn-icon btn-secondary-subtle"
                     onClick={() => openRemoveConfirmation(account)}
                     disabled={removingAccountId === account.id}
-                    title="Remove account"
+                    title="Disconnect account"
                   >
                     {removingAccountId === account.id ? (
                       <Loader2 className="spinner" size={16} />
                     ) : (
-                      <Trash2 size={16} />
+                      <Unlink size={16} />
                     )}
                   </button>
                 </div>
@@ -331,7 +320,7 @@ export function Dashboard() {
       )}
 
       {/* Import Negotiations Section */}
-      {thumbtackConnected && (
+      {savedAccounts.length > 0 && (
         <section className="dashboard-section">
           <h2>Import Negotiations</h2>
           <p className="section-description">

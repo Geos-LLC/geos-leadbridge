@@ -16,7 +16,8 @@
       "Bash(git push:*)",
       "Bash(npm ls:*)",
       "Bash(npx vercel:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

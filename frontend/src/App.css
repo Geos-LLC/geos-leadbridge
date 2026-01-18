@@ -567,6 +567,43 @@ body {
   color: var(--text-muted);
 }
 
+/* Account Status Badge - positioned on card */
+.account-status-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 20px;
+  z-index: 1;
+}
+
+.account-status-badge.connected {
+  background: rgba(21, 128, 61, 0.9);
+  color: white;
+}
+
+.account-status-badge.disconnected {
+  background: rgba(180, 83, 9, 0.9);
+  color: white;
+}
+
+/* Secondary subtle button style */
+.btn-secondary-subtle {
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  padding: 6px;
+}
+
+.btn-secondary-subtle:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
 
 .empty-state-hint-box {
   display: flex;
