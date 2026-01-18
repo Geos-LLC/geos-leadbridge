@@ -73,10 +73,7 @@ export class ThumbtackController {
       // Setup webhook and save account for each business
       for (const business of businesses) {
         try {
-          await this.platformService.setupThumbtackWebhook(userId, business.businessID);
-          console.log(`Webhook setup successfully for business: ${business.name} (${business.businessID})`);
-
-          // Auto-save account for multi-account switching (with email from Thumbtack)
+          // First save the account (so setupThumbtackWebhook can update it with webhookId)
           await this.platformService.saveAccount(
             userId,
             PlatformName.THUMBTACK,
@@ -86,6 +83,10 @@ export class ThumbtackController {
             userEmail, // Email from Thumbtack API
           );
           console.log(`Account saved for business: ${business.name} (email: ${userEmail || 'none'})`);
+
+          // Then setup webhook (this will update the saved account with webhookId)
+          await this.platformService.setupThumbtackWebhook(userId, business.businessID);
+          console.log(`Webhook setup successfully for business: ${business.name} (${business.businessID})`);
         } catch (err) {
           // Log but don't fail - webhook might already exist
           console.warn(`Failed to setup webhook for business ${business.businessID}:`, err.message);
