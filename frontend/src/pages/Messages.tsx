@@ -233,6 +233,23 @@ export function Messages() {
     });
   };
 
+  // Format time for lead list (compact relative format)
+  const formatLeadTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'now';
+    if (diffMins < 60) return `${diffMins}m`;
+    if (diffHours < 24) return `${diffHours}h`;
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays}d`;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
   const formatPhoneNumber = (phone: string | null) => {
     if (!phone) return 'N/A';
     const cleaned = phone.replace(/\D/g, '');
@@ -370,19 +387,20 @@ export function Messages() {
                   <div className="lead-preview">
                     <div className="lead-header">
                       <span className="lead-name">{lead.customerName}</span>
+                      <span className="lead-time">{formatLeadTime(lead.updatedAt)}</span>
+                    </div>
+                    <div className="lead-meta">
+                      <span className="lead-category">{lead.category || 'Service Request'}</span>
                       <span className={`lead-status-badge status-${lead.status?.toLowerCase()}`}>
                         {lead.status}
                       </span>
                     </div>
-                    <div className="lead-meta">
-                      <span className="lead-category">{lead.category || 'Service Request'}</span>
-                      {accountName && (
-                        <span className={`lead-account-badge ${isCurrentAccount ? 'current' : 'other'}`}>
-                          <Building2 size={12} />
-                          {accountName}
-                        </span>
-                      )}
-                    </div>
+                    {accountName && (
+                      <span className={`lead-account-badge ${isCurrentAccount ? 'current' : 'other'}`}>
+                        <Building2 size={12} />
+                        {accountName}
+                      </span>
+                    )}
                     <p className="lead-snippet">{lead.message?.slice(0, 60)}...</p>
                   </div>
                 </div>
