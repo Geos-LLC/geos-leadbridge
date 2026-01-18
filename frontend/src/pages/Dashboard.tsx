@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Unlink, Download, X, Users, Trash2 } from 'lucide-react';
+import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Download, X, Trash2 } from 'lucide-react';
 import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
@@ -18,7 +18,6 @@ export function Dashboard() {
   const { user } = useAuthStore();
   const {
     platforms, setPlatforms,
-    businesses, setBusinesses,
     savedAccounts, setSavedAccounts, removeSavedAccount: removeFromStore
   } = useAppStore();
   const [loading, setLoading] = useState(true);
@@ -34,7 +33,6 @@ export function Dashboard() {
 
   // Account management state
   const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
-  const [disconnectingBusinessId, setDisconnectingBusinessId] = useState<string | null>(null);
 
   const thumbtackConnected = platforms.find((p) => p.platformName === 'thumbtack')?.connected ?? false;
 
@@ -62,12 +60,6 @@ export function Dashboard() {
     loadSavedAccounts();
   }, []);
 
-  useEffect(() => {
-    if (thumbtackConnected) {
-      loadBusinesses();
-    }
-  }, [thumbtackConnected]);
-
   const loadSavedAccounts = async () => {
     try {
       const { accounts } = await thumbtackApi.getSavedAccounts();
@@ -85,15 +77,6 @@ export function Dashboard() {
       console.error('Failed to load platform status:', err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadBusinesses = async () => {
-    try {
-      const { businesses } = await thumbtackApi.getBusinesses();
-      setBusinesses(businesses);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load businesses');
     }
   };
 
@@ -117,28 +100,6 @@ export function Dashboard() {
         setConnecting(false);
       }
     }, 2000); // 2 second delay to allow logout to complete
-  };
-
-  const handleDisconnectThumbtack = async (businessId: string) => {
-    if (!confirm('Are you sure you want to disconnect this Thumbtack account?\n\nNote: Leads will still be received via webhook. Disconnecting only removes API access for sending messages.')) {
-      return;
-    }
-    setDisconnectingBusinessId(businessId);
-    setError('');
-    setSuccess('');
-    try {
-      await platformsApi.disconnect();
-      // Reset state
-      setPlatforms(platforms.map(p =>
-        p.platformName === 'thumbtack' ? { ...p, connected: false } : p
-      ));
-      setBusinesses([]);
-      setSuccess('Thumbtack account disconnected successfully.');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to disconnect Thumbtack');
-    } finally {
-      setDisconnectingBusinessId(null);
-    }
   };
 
   const handleRemoveSavedAccount = async (accountId: string) => {
@@ -297,155 +258,59 @@ export function Dashboard() {
         </div>
       </section>
 
-      {/* Accounts Section - shows both live businesses and saved accounts */}
-      {(thumbtackConnected || savedAccounts.length > 0) && (
+      {/* Accounts Section - shows all saved accounts */}
+      {savedAccounts.length > 0 && (
         <section className="dashboard-section">
           <h2>Your Accounts</h2>
           <p className="section-description">
-            {thumbtackConnected
-              ? 'Manage your connected businesses and saved accounts'
-              : 'Your saved accounts (connect to Thumbtack to access them)'}
+            All accounts are receiving leads via webhooks. Click "View Leads" to see messages.
           </p>
 
           <div className="businesses-grid">
-            {/* Show connected businesses from API */}
-            {businesses.map((business) => {
-              const savedAccount = savedAccounts.find(a => a.businessId === business.businessID);
-              return (
-                <div key={business.businessID} className="business-card connected">
-                  <div className="status-badge connected">
-                    <CheckCircle size={14} />
-                    Connected
+            {savedAccounts.map((account) => (
+              <div key={account.id} className="business-card">
+                {account.imageUrl ? (
+                  <img
+                    src={account.imageUrl}
+                    alt={account.businessName}
+                    className="business-image"
+                  />
+                ) : (
+                  <div className="business-image-placeholder">
+                    <Building2 size={32} />
                   </div>
-                  {business.imageURL ? (
-                    <img
-                      src={business.imageURL}
-                      alt={business.name}
-                      className="business-image"
-                    />
-                  ) : (
-                    <div className="business-image-placeholder">
-                      <Building2 size={32} />
-                    </div>
+                )}
+                <div className="business-info">
+                  <h3>{account.businessName}</h3>
+                  <p className="business-id">ID: {account.businessId}</p>
+                  {account.emailHint && (
+                    <p className="email-hint">{account.emailHint}</p>
                   )}
-                  <div className="business-info">
-                    <h3>{business.name}</h3>
-                    <p className="business-id">ID: {business.businessID}</p>
-                    {savedAccount?.emailHint && (
-                      <p className="email-hint">{savedAccount.emailHint}</p>
-                    )}
-                  </div>
-                  <div className="business-actions">
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => navigate(`/messages?account=${business.businessID}`)}
-                    >
-                      <ExternalLink size={16} />
-                      View Leads
-                    </button>
-                    <button
-                      className="btn btn-danger"
-                      onClick={() => handleDisconnectThumbtack(business.businessID)}
-                      disabled={disconnectingBusinessId === business.businessID}
-                      title="Disconnect this account"
-                    >
-                      {disconnectingBusinessId === business.businessID ? (
-                        <>
-                          <Loader2 className="spinner" size={16} />
-                          Disconnecting...
-                        </>
-                      ) : (
-                        <>
-                          <Unlink size={16} />
-                          Disconnect
-                        </>
-                      )}
-                    </button>
-                    {savedAccount && (
-                      <button
-                        className="btn-icon btn-danger-subtle"
-                        onClick={() => handleRemoveSavedAccount(savedAccount.id)}
-                        disabled={removingAccountId === savedAccount.id}
-                        title="Delete saved account data"
-                      >
-                        {removingAccountId === savedAccount.id ? (
-                          <Loader2 className="spinner" size={16} />
-                        ) : (
-                          <Trash2 size={16} />
-                        )}
-                      </button>
-                    )}
-                  </div>
                 </div>
-              );
-            })}
-
-            {/* Show saved accounts that are NOT in the current businesses list (from other connections) */}
-            {savedAccounts
-              .filter(account => !businesses.some(b => b.businessID === account.businessId))
-              .map((account) => (
-                  <div
-                    key={account.id}
-                    className="business-card saved-only"
+                <div className="business-actions">
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => navigate(`/messages?account=${account.businessId}`)}
                   >
-                    <div className="status-badge saved">
-                      <Users size={14} />
-                      Saved
-                    </div>
-                    {account.imageUrl ? (
-                      <img
-                        src={account.imageUrl}
-                        alt={account.businessName}
-                        className="business-image"
-                      />
+                    <ExternalLink size={16} />
+                    View Leads
+                  </button>
+                  <button
+                    className="btn-icon btn-danger-subtle"
+                    onClick={() => handleRemoveSavedAccount(account.id)}
+                    disabled={removingAccountId === account.id}
+                    title="Remove account"
+                  >
+                    {removingAccountId === account.id ? (
+                      <Loader2 className="spinner" size={16} />
                     ) : (
-                      <div className="business-image-placeholder">
-                        <Building2 size={32} />
-                      </div>
+                      <Trash2 size={16} />
                     )}
-                    <div className="business-info">
-                      <h3>{account.businessName}</h3>
-                      <p className="business-id">ID: {account.businessId}</p>
-                      {account.emailHint && (
-                        <p className="email-hint">{account.emailHint}</p>
-                      )}
-                    </div>
-                    <div className="business-actions">
-                      <button
-                        className="btn btn-primary"
-                        onClick={() => navigate(`/messages?account=${account.businessId}`)}
-                      >
-                        <ExternalLink size={16} />
-                        View Leads
-                      </button>
-                      <button
-                        className="btn-icon btn-danger-subtle"
-                        onClick={() => handleRemoveSavedAccount(account.id)}
-                        disabled={removingAccountId === account.id}
-                        title="Delete saved account"
-                      >
-                        {removingAccountId === account.id ? (
-                          <Loader2 className="spinner" size={16} />
-                        ) : (
-                          <Trash2 size={16} />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-          </div>
-
-          {/* Show hint if no businesses and no saved accounts */}
-          {businesses.length === 0 && savedAccounts.length === 0 && thumbtackConnected && (
-            <div className="empty-state-hint-box">
-              <AlertCircle size={18} />
-              <div>
-                <p><strong>No businesses found</strong></p>
-                <p>This usually means you're connected with a consumer account instead of a Pro account.</p>
-                <p>Try disconnecting and logging in with your Thumbtack Pro credentials.</p>
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            ))}
+          </div>
         </section>
       )}
 
