@@ -22,8 +22,10 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PlatformService } from '../platform.service';
+import { PlatformFactory } from '../platform.factory';
 import { LeadsService } from '../../leads/leads.service';
 import { PlatformName } from '../../common/interfaces/platform.interface';
+import { ThumbtackAdapter } from './thumbtack.adapter';
 
 @Controller('v1/thumbtack')
 @UseGuards(JwtAuthGuard)
@@ -32,6 +34,7 @@ export class ThumbtackController {
 
   constructor(
     private platformService: PlatformService,
+    private platformFactory: PlatformFactory,
     private leadsService: LeadsService,
     private configService: ConfigService,
   ) {
@@ -55,22 +58,34 @@ export class ThumbtackController {
         return;
       }
 
+      // Try to get the user's email from Thumbtack
+      let userEmail: string | undefined;
+      try {
+        const credentials = await this.platformService.getCredentials(userId, PlatformName.THUMBTACK);
+        const adapter = this.platformFactory.getAdapter(PlatformName.THUMBTACK) as ThumbtackAdapter;
+        const userInfo = await adapter.getUserInfo(credentials);
+        userEmail = userInfo.email;
+        console.log(`Got user email from Thumbtack: ${userEmail}`);
+      } catch (err) {
+        console.warn('Could not fetch user email:', err.message);
+      }
+
       // Setup webhook and save account for each business
       for (const business of businesses) {
         try {
           await this.platformService.setupThumbtackWebhook(userId, business.businessID);
           console.log(`Webhook setup successfully for business: ${business.name} (${business.businessID})`);
 
-          // Auto-save account for multi-account switching
+          // Auto-save account for multi-account switching (with email from Thumbtack)
           await this.platformService.saveAccount(
             userId,
             PlatformName.THUMBTACK,
             business.businessID,
             business.name,
             business.imageURL,
-            undefined, // No email hint for auto-setup
+            userEmail, // Email from Thumbtack API
           );
-          console.log(`Account saved for business: ${business.name}`);
+          console.log(`Account saved for business: ${business.name} (email: ${userEmail || 'none'})`);
         } catch (err) {
           // Log but don't fail - webhook might already exist
           console.warn(`Failed to setup webhook for business ${business.businessID}:`, err.message);
@@ -472,6 +487,39 @@ export class ThumbtackController {
     return {
       success: true,
       message: 'Account updated successfully',
+    };
+  }
+
+  /**
+   * Disconnect webhooks for a saved account
+   */
+  @Post('saved-accounts/:id/disconnect')
+  async disconnectAccountWebhook(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    await this.platformService.disconnectAccountWebhook(user.userId, id);
+
+    return {
+      success: true,
+      message: 'Webhook disconnected',
+    };
+  }
+
+  /**
+   * Reconnect webhooks for a saved account
+   */
+  @Post('saved-accounts/:id/reconnect')
+  async reconnectAccountWebhook(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    const result = await this.platformService.reconnectAccountWebhook(user.userId, id);
+
+    return {
+      success: true,
+      message: 'Webhook reconnected',
+      webhookId: result.webhookId,
     };
   }
 

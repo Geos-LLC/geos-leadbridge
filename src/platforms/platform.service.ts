@@ -272,10 +272,82 @@ export class PlatformService {
       },
     });
 
+    // Also update the saved account with webhookId
+    await this.prisma.savedAccount.updateMany({
+      where: {
+        userId,
+        platform: 'thumbtack',
+        businessId,
+      },
+      data: {
+        webhookId: result.webhookId,
+      },
+    });
+
     return {
       webhookId: result.webhookId,
       businessId,
     };
+  }
+
+  /**
+   * Disconnect webhooks for a saved account
+   */
+  async disconnectAccountWebhook(userId: string, accountId: string): Promise<{ success: boolean }> {
+    // Get the saved account
+    const account = await this.prisma.savedAccount.findFirst({
+      where: {
+        id: accountId,
+        userId,
+      },
+    });
+
+    if (!account || !account.webhookId) {
+      console.log(`[PlatformService] No webhook to disconnect for account ${accountId}`);
+      return { success: true };
+    }
+
+    try {
+      const credentials = await this.getCredentials(userId, account.platform);
+      const adapter = this.platformFactory.getAdapter(account.platform) as any;
+
+      // Delete the webhook from Thumbtack
+      await adapter.deleteWebhook(credentials, account.businessId, account.webhookId);
+      console.log(`[PlatformService] Deleted webhook ${account.webhookId} for business ${account.businessId}`);
+    } catch (err) {
+      console.warn(`[PlatformService] Could not delete webhook: ${err.message}`);
+      // Continue to clear local state even if API call fails
+    }
+
+    // Clear the webhookId from saved account
+    await this.prisma.savedAccount.update({
+      where: { id: accountId },
+      data: { webhookId: null },
+    });
+
+    return { success: true };
+  }
+
+  /**
+   * Reconnect webhooks for a saved account
+   */
+  async reconnectAccountWebhook(userId: string, accountId: string): Promise<{ webhookId: string }> {
+    // Get the saved account
+    const account = await this.prisma.savedAccount.findFirst({
+      where: {
+        id: accountId,
+        userId,
+      },
+    });
+
+    if (!account) {
+      throw new Error('Account not found');
+    }
+
+    // Setup new webhook
+    const result = await this.setupThumbtackWebhook(userId, account.businessId);
+
+    return { webhookId: result.webhookId };
   }
 
   /**

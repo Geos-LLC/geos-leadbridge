@@ -178,6 +178,31 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   // ==========================================
 
   /**
+   * Get the authenticated user's info (including email)
+   */
+  async getUserInfo(credentials: PlatformCredentials): Promise<{ email?: string; name?: string }> {
+    try {
+      this.logger.log('Fetching user info from Thumbtack API');
+
+      // Try /me endpoint first
+      const response = await this.httpClient.get('/me', {
+        headers: { Authorization: `Bearer ${credentials.accessToken}` },
+      });
+
+      this.logger.log('Thumbtack /me response:', JSON.stringify(response.data));
+
+      return {
+        email: response.data.email || response.data.data?.email,
+        name: response.data.name || response.data.data?.name,
+      };
+    } catch (error) {
+      this.logger.warn('Could not fetch /me endpoint:', error.response?.status, error.response?.data?.message || error.message);
+      // Not all Thumbtack apps have access to /me - return empty
+      return {};
+    }
+  }
+
+  /**
    * Get businesses for the authenticated user
    * Note: Thumbtack uses webhooks for leads - this returns the user's businesses
    */

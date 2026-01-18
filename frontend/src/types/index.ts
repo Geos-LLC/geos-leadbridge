@@ -61,6 +61,7 @@ export interface SavedAccount {
   businessName: string;
   emailHint?: string;
   imageUrl?: string;
+  webhookId?: string | null; // Webhook subscription ID (null = disconnected)
   lastUsedAt: string;
   createdAt: string;
 }

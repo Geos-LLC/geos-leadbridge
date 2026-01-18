@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Download, X, Unlink, Trash2, Mail, Pencil, Check } from 'lucide-react';
+import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Download, X, Unlink, Trash2, Mail, Pencil, Check, RefreshCw } from 'lucide-react';
 import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
@@ -40,6 +40,9 @@ export function Dashboard() {
   const [editingEmailId, setEditingEmailId] = useState<string | null>(null);
   const [editEmailValue, setEditEmailValue] = useState('');
   const [savingEmail, setSavingEmail] = useState(false);
+
+  // Webhook disconnect/reconnect state
+  const [togglingWebhookId, setTogglingWebhookId] = useState<string | null>(null);
 
   // Handle OAuth callback params
   useEffect(() => {
@@ -157,6 +160,32 @@ export function Dashboard() {
       setError(err.response?.data?.message || 'Failed to update email');
     } finally {
       setSavingEmail(false);
+    }
+  };
+
+  const handleToggleWebhook = async (account: { id: string; businessName: string; webhookId?: string | null }) => {
+    setTogglingWebhookId(account.id);
+    setError('');
+    try {
+      if (account.webhookId) {
+        // Disconnect
+        await thumbtackApi.disconnectAccount(account.id);
+        setSavedAccounts(savedAccounts.map(a =>
+          a.id === account.id ? { ...a, webhookId: null } : a
+        ));
+        setSuccess(`Webhook disconnected for ${account.businessName}`);
+      } else {
+        // Reconnect
+        const result = await thumbtackApi.reconnectAccount(account.id);
+        setSavedAccounts(savedAccounts.map(a =>
+          a.id === account.id ? { ...a, webhookId: result.webhookId } : a
+        ));
+        setSuccess(`Webhook reconnected for ${account.businessName}`);
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to toggle webhook');
+    } finally {
+      setTogglingWebhookId(null);
     }
   };
 
@@ -301,10 +330,19 @@ export function Dashboard() {
           <div className="businesses-grid">
             {savedAccounts.map((account) => (
               <div key={account.id} className="business-card">
-                {/* Connected badge */}
-                <div className="account-status-badge connected">
-                  <CheckCircle size={12} />
-                  Connected
+                {/* Status badge based on webhookId */}
+                <div className={`account-status-badge ${account.webhookId ? 'connected' : 'disconnected'}`}>
+                  {account.webhookId ? (
+                    <>
+                      <CheckCircle size={12} />
+                      Connected
+                    </>
+                  ) : (
+                    <>
+                      <AlertCircle size={12} />
+                      Disconnected
+                    </>
+                  )}
                 </div>
                 {account.imageUrl ? (
                   <img
@@ -370,11 +408,18 @@ export function Dashboard() {
                     View Leads
                   </button>
                   <button
-                    className="btn-icon btn-secondary-subtle"
-                    onClick={() => {/* TODO: Implement disconnect */}}
-                    title="Disconnect webhooks"
+                    className={`btn-icon ${account.webhookId ? 'btn-secondary-subtle' : 'btn-success-subtle'}`}
+                    onClick={() => handleToggleWebhook(account)}
+                    disabled={togglingWebhookId === account.id}
+                    title={account.webhookId ? 'Disconnect webhooks' : 'Reconnect webhooks'}
                   >
-                    <Unlink size={16} />
+                    {togglingWebhookId === account.id ? (
+                      <Loader2 className="spinner" size={16} />
+                    ) : account.webhookId ? (
+                      <Unlink size={16} />
+                    ) : (
+                      <RefreshCw size={16} />
+                    )}
                   </button>
                   <button
                     className="btn-icon btn-danger-subtle"

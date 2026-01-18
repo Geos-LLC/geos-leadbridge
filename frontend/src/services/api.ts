@@ -124,6 +124,14 @@ export const thumbtackApi = {
     const { data } = await api.patch(`/v1/thumbtack/saved-accounts/${id}`, updates);
     return data;
   },
+  disconnectAccount: async (id: string): Promise<{ success: boolean }> => {
+    const { data } = await api.post(`/v1/thumbtack/saved-accounts/${id}/disconnect`);
+    return data;
+  },
+  reconnectAccount: async (id: string): Promise<{ success: boolean; webhookId: string }> => {
+    const { data } = await api.post(`/v1/thumbtack/saved-accounts/${id}/reconnect`);
+    return data;
+  },
 };
 
 // Attachment type for messages

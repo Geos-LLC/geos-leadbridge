@@ -192,6 +192,7 @@ model SavedAccount {
   businessName String   // Display name
   emailHint    String?  // Email used for this account (optional hint)
   imageUrl     String?  // Business logo URL
+  webhookId    String?  // Webhook subscription ID for this business
   lastUsedAt   DateTime @default(now())
   createdAt    DateTime @default(now())
 
