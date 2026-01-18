@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Download, X, Unlink } from 'lucide-react';
+import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Download, X, Unlink, Trash2 } from 'lucide-react';
 import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
@@ -302,14 +302,21 @@ export function Dashboard() {
                   </button>
                   <button
                     className="btn-icon btn-secondary-subtle"
+                    onClick={() => {/* TODO: Implement disconnect */}}
+                    title="Disconnect webhooks"
+                  >
+                    <Unlink size={16} />
+                  </button>
+                  <button
+                    className="btn-icon btn-danger-subtle"
                     onClick={() => openRemoveConfirmation(account)}
                     disabled={removingAccountId === account.id}
-                    title="Disconnect account"
+                    title="Delete account"
                   >
                     {removingAccountId === account.id ? (
                       <Loader2 className="spinner" size={16} />
                     ) : (
-                      <Unlink size={16} />
+                      <Trash2 size={16} />
                     )}
                   </button>
                 </div>
