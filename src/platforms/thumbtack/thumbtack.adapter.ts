@@ -469,6 +469,13 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       return { webhookId: response.data.webhookID };
     } catch (error) {
       this.logger.error('Error registering webhook:', error.response?.data || error.message);
+      const status = error.response?.status;
+      if (status === 403) {
+        throw new Error('Permission denied: Your current Thumbtack login does not have access to this business. Please reconnect using the correct Thumbtack account.');
+      }
+      if (status === 401) {
+        throw new Error('Authentication expired: Please reconnect your Thumbtack account.');
+      }
       throw new Error('Failed to register webhook with Thumbtack');
     }
   }
