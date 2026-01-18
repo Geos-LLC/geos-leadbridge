@@ -1147,6 +1147,27 @@ body {
   color: var(--primary);
 }
 
+.resync-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+}
+
+.resync-btn:hover:not(:disabled) {
+  background: var(--bg-secondary);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.resync-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Lead Details Panel */
 .lead-details-panel {
   background: white;

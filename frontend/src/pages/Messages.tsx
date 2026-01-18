@@ -61,6 +61,7 @@ export function Messages() {
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [resyncingMessages, setResyncingMessages] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [lastSeenTimestamps, setLastSeenTimestamps] = useState<Record<string, string>>(() => getLastSeenTimestamps());
@@ -192,6 +193,21 @@ export function Messages() {
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const handleResyncMessages = async () => {
+    if (!selectedLead) return;
+    setResyncingMessages(true);
+    try {
+      const result = await leadsApi.resyncMessages(selectedLead.id);
+      console.log('[Messages] Resync result:', result);
+      // Reload messages after resync
+      await loadMessagesForLead(selectedLead);
+    } catch (err) {
+      console.error('[Messages] Failed to resync messages:', err);
+    } finally {
+      setResyncingMessages(false);
+    }
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -453,6 +469,14 @@ export function Messages() {
                     {selectedLead.raw.estimate.total}
                   </span>
                 )}
+                <button
+                  className="btn-icon resync-btn"
+                  onClick={handleResyncMessages}
+                  disabled={resyncingMessages}
+                  title="Resync messages from Thumbtack"
+                >
+                  {resyncingMessages ? <Loader2 className="spinner" size={16} /> : <RefreshCw size={16} />}
+                </button>
               </div>
             </div>
 
