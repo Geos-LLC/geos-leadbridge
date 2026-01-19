@@ -12,11 +12,50 @@ import { PlatformFactory } from '../platforms/platform.factory';
 export class WebhooksService {
   private readonly logger = new Logger(WebhooksService.name);
 
+  // In-memory deduplication cache to prevent processing same webhook multiple times
+  // Key: "eventType:negotiationId", Value: timestamp of first processing
+  private processingCache: Map<string, number> = new Map();
+  private readonly CACHE_TTL_MS = 30 * 1000; // 30 seconds TTL
+
   constructor(
     private prisma: PrismaService,
     private platformFactory: PlatformFactory,
     private configService: ConfigService,
-  ) {}
+  ) {
+    // Clean up expired cache entries every minute
+    setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
+  }
+
+  /**
+   * Clean up expired entries from processing cache
+   */
+  private cleanupProcessingCache(): void {
+    const now = Date.now();
+    for (const [key, timestamp] of this.processingCache.entries()) {
+      if (now - timestamp > this.CACHE_TTL_MS) {
+        this.processingCache.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Check if webhook event is being or was recently processed
+   * Returns true if this is a duplicate that should be skipped
+   */
+  private isDuplicateWebhook(eventType: string, uniqueId: string): boolean {
+    const cacheKey = `${eventType}:${uniqueId}`;
+    const existing = this.processingCache.get(cacheKey);
+    const now = Date.now();
+
+    if (existing && (now - existing) < this.CACHE_TTL_MS) {
+      this.logger.log(`Duplicate webhook detected, skipping: ${cacheKey}`);
+      return true;
+    }
+
+    // Mark as being processed
+    this.processingCache.set(cacheKey, now);
+    return false;
+  }
 
   /**
    * Handle incoming webhook from Thumbtack
@@ -48,10 +87,13 @@ export class WebhooksService {
     }
 
     // Log webhook event
+    // Thumbtack v4 uses payload.event.eventType, legacy uses payload.event_type
+    const eventType = payload.event?.eventType || payload.event_type || 'unknown';
+
     const event = await this.prisma.webhookEvent.create({
       data: {
         platform: 'thumbtack',
-        eventType: payload.event_type || 'unknown',
+        eventType,
         payload: JSON.stringify(payload),
         signature,
         verified: isValid,
@@ -100,7 +142,28 @@ export class WebhooksService {
     // Thumbtack v4 uses event.eventType, legacy uses event_type
     const eventType = payload.event?.eventType || payload.event_type;
 
-    this.logger.log(`Processing ${platform} webhook: ${eventType}`);
+    // Get unique ID for deduplication (negotiationID for v4 events, request_id for legacy)
+    const negotiationId = payload.data?.negotiationID;
+    const messageId = payload.data?.messageID;
+    const requestId = payload.request_id;
+    const uniqueId = messageId || negotiationId || requestId;
+
+    // Check for duplicate webhook (same event received multiple times from different subscriptions)
+    if (uniqueId && this.isDuplicateWebhook(eventType, uniqueId)) {
+      this.logger.log(`Skipping duplicate ${eventType} webhook for ${uniqueId}`);
+      // Mark as processed but note it was a duplicate
+      await this.prisma.webhookEvent.update({
+        where: { id: eventId },
+        data: {
+          processed: true,
+          processingError: 'Duplicate webhook - already processed',
+          processedAt: new Date(),
+        },
+      });
+      return;
+    }
+
+    this.logger.log(`Processing ${platform} webhook: ${eventType}`, { uniqueId });
 
     switch (eventType) {
       // Thumbtack v4 event types
@@ -285,30 +348,32 @@ export class WebhooksService {
     leadId: string,
     rawData: any,
   ): Promise<void> {
-    // Check if conversation already exists
-    let conversation = await this.prisma.conversation.findUnique({
+    // Use upsert to handle race conditions when multiple webhooks arrive simultaneously
+    const conversation = await this.prisma.conversation.upsert({
       where: {
         platform_externalThreadId: {
           platform,
           externalThreadId: negotiationId,
         },
       },
+      create: {
+        userId,
+        platform,
+        externalThreadId: negotiationId,
+        customerName,
+        lastMessageAt: new Date(),
+        status: 'active',
+      },
+      update: {
+        // No-op update - conversation already exists
+      },
     });
 
-    if (!conversation) {
-      conversation = await this.prisma.conversation.create({
-        data: {
-          userId,
-          platform,
-          externalThreadId: negotiationId,
-          customerName,
-          lastMessageAt: new Date(),
-          status: 'active',
-        },
-      });
-      this.logger.log('Conversation created for new negotiation', { conversationId: conversation.id, negotiationId });
+    this.logger.log('Conversation ensured for negotiation', { conversationId: conversation.id, negotiationId });
 
-      // Link lead to conversation
+    // Link lead to conversation if not already linked
+    const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
+    if (lead && !lead.threadId) {
       await this.prisma.lead.update({
         where: { id: leadId },
         data: { threadId: conversation.id },
@@ -320,17 +385,17 @@ export class WebhooksService {
       // Generate a unique ID for this initial message (negotiationId + "_initial")
       const initialMessageId = `${negotiationId}_initial`;
 
-      // Check if we already stored this initial message
-      const existingMessage = await this.prisma.message.findFirst({
-        where: {
-          platform,
-          externalMessageId: initialMessageId,
-        },
-      });
-
-      if (!existingMessage) {
-        await this.prisma.message.create({
-          data: {
+      // Use upsert to handle race conditions where multiple webhook handlers
+      // might try to create the same initial message simultaneously
+      try {
+        await this.prisma.message.upsert({
+          where: {
+            platform_externalMessageId: {
+              platform,
+              externalMessageId: initialMessageId,
+            },
+          },
+          create: {
             conversationId: conversation.id,
             userId,
             platform,
@@ -341,8 +406,18 @@ export class WebhooksService {
             sentAt: new Date(),
             rawJson: JSON.stringify(rawData),
           },
+          update: {
+            // No-op update - message already exists, just skip
+          },
         });
         this.logger.log('Initial customer message stored', { negotiationId, messageLength: initialMessage.length });
+      } catch (error) {
+        // Handle unique constraint violation (race condition with another webhook)
+        if (error.code === 'P2002') {
+          this.logger.log('Initial message already exists (race condition handled)', { negotiationId });
+        } else {
+          throw error;
+        }
       }
     }
   }
@@ -421,127 +496,109 @@ export class WebhooksService {
 
     const userId = platformConnection.userId;
 
-    // Ensure lead exists
-    let lead = await this.prisma.lead.findFirst({
+    // Ensure lead exists using upsert to handle race conditions
+    const customer = data.customer || {};
+    const customerName = customer.displayName || customer.name || `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown';
+
+    const lead = await this.prisma.lead.upsert({
       where: {
+        platform_externalRequestId: {
+          platform,
+          externalRequestId: negotiationId,
+        },
+      },
+      create: {
+        userId,
         platform,
+        businessId,
         externalRequestId: negotiationId,
+        customerName,
+        customerPhone: customer.phone,
+        message: data.text || '',
+        status: 'Open', // Default to Open for new leads created from message
+        rawJson: JSON.stringify(data),
+      },
+      update: {
+        // Update customer name if we have a better one
+        customerName,
       },
     });
 
-    if (!lead) {
-      this.logger.log('Lead not found, creating from MessageCreatedV4', { negotiationId, businessId });
+    this.logger.log('Lead ensured via upsert', { negotiationId, leadId: lead.id });
 
-      const customer = data.customer || {};
+    // Ensure conversation exists using upsert to handle race conditions
+    const messageTimestampForConv = new Date(data.sentAt || data.createTimestamp || Date.now());
 
-      lead = await this.prisma.lead.create({
-        data: {
-          userId,
-          platform,
-          businessId,
-          externalRequestId: negotiationId,
-          customerName: customer.name || `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown',
-          customerPhone: customer.phone,
-          message: data.text || '',
-          status: 'Open', // Default to Open for new leads created from message
-          rawJson: JSON.stringify(data),
-        },
-      });
-
-      this.logger.log('Lead created from message webhook', { negotiationId });
-    }
-
-    // Ensure conversation exists (use negotiationId as externalThreadId)
-    let conversation = await this.prisma.conversation.findUnique({
+    const conversation = await this.prisma.conversation.upsert({
       where: {
         platform_externalThreadId: {
           platform,
           externalThreadId: negotiationId,
         },
       },
-    });
-
-    if (!conversation) {
-      const customer = data.customer || {};
-      conversation = await this.prisma.conversation.create({
-        data: {
-          userId,
-          platform,
-          externalThreadId: negotiationId,
-          customerName: customer.name || lead.customerName || 'Unknown',
-          lastMessageAt: new Date(data.createTimestamp || Date.now()),
-          status: 'active',
-        },
-      });
-      this.logger.log('Conversation created', { conversationId: conversation.id, negotiationId });
-
-      // Link lead to conversation if not already linked
-      if (!lead.threadId) {
-        await this.prisma.lead.update({
-          where: { id: lead.id },
-          data: { threadId: conversation.id },
-        });
-      }
-    }
-
-    // Check if message already exists (avoid duplicates)
-    // First check by externalMessageId (same webhook received twice)
-    const existingMessage = await this.prisma.message.findFirst({
-      where: {
+      create: {
+        userId,
         platform,
-        externalMessageId: messageId,
+        externalThreadId: negotiationId,
+        customerName: customerName || lead.customerName || 'Unknown',
+        lastMessageAt: messageTimestampForConv,
+        status: 'active',
+      },
+      update: {
+        // Update lastMessageAt if this message is newer
+        lastMessageAt: messageTimestampForConv,
       },
     });
 
-    if (existingMessage) {
-      this.logger.log('Message already exists (same messageId), skipping', { messageId });
-      return;
-    }
+    this.logger.log('Conversation ensured via upsert', { conversationId: conversation.id, negotiationId });
 
-    // Also check for duplicate content in same conversation to avoid
-    // storing the same message multiple times (e.g., initial message from
-    // NegotiationCreatedV4 and MessageCreatedV4 with same content)
-    const messageContent = data.text || '';
-    const messageTimestamp = new Date(data.createTimestamp || Date.now());
-
-    // Check for recent message with same content (within 5 minutes)
-    const duplicateContentMessage = await this.prisma.message.findFirst({
-      where: {
-        conversationId: conversation.id,
-        content: messageContent,
-        sentAt: {
-          gte: new Date(messageTimestamp.getTime() - 5 * 60 * 1000), // 5 min before
-          lte: new Date(messageTimestamp.getTime() + 5 * 60 * 1000), // 5 min after
-        },
-      },
-    });
-
-    if (duplicateContentMessage) {
-      this.logger.log('Message with same content already exists in timeframe, skipping', {
-        messageId,
-        existingId: duplicateContentMessage.externalMessageId,
-        content: messageContent.substring(0, 50),
+    // Link lead to conversation if not already linked
+    if (!lead.threadId) {
+      await this.prisma.lead.update({
+        where: { id: lead.id },
+        data: { threadId: conversation.id },
       });
-      return;
     }
 
     // Determine sender (pro or customer)
-    const sender = data.sender?.toLowerCase() === 'pro' ? 'pro' : 'customer';
+    // Thumbtack uses "from" field with values "Customer" or "Pro"
+    const fromValue = (data.from || data.sender || '').toLowerCase();
+    const sender = fromValue === 'pro' ? 'pro' : 'customer';
+    const messageContent = data.text || '';
+    const messageTimestamp = new Date(data.sentAt || data.createTimestamp || Date.now());
 
-    // Store the message
-    await this.prisma.message.create({
-      data: {
-        conversationId: conversation.id,
-        userId,
-        platform,
-        externalMessageId: messageId,
-        sender,
-        content: data.text || '',
-        isRead: sender === 'pro', // Mark own messages as read
-        sentAt: new Date(data.createTimestamp || Date.now()),
-        rawJson: JSON.stringify(data),
-      },
-    });
+    // Use upsert to handle race conditions and duplicates atomically
+    try {
+      await this.prisma.message.upsert({
+        where: {
+          platform_externalMessageId: {
+            platform,
+            externalMessageId: messageId,
+          },
+        },
+        create: {
+          conversationId: conversation.id,
+          userId,
+          platform,
+          externalMessageId: messageId,
+          sender,
+          content: messageContent,
+          isRead: sender === 'pro', // Mark own messages as read
+          sentAt: messageTimestamp,
+          rawJson: JSON.stringify(data),
+        },
+        update: {
+          // No-op update - message already exists
+        },
+      });
+    } catch (error) {
+      // Handle unique constraint violation (race condition)
+      if (error.code === 'P2002') {
+        this.logger.log('Message already exists (race condition handled)', { messageId });
+        return;
+      }
+      throw error;
+    }
 
     // Update conversation's lastMessageAt and unread count
     await this.prisma.conversation.update({
