@@ -648,7 +648,15 @@ export class LeadsService {
     } catch (error) {
       console.error(`[LeadsService] Error importing messages:`, error.message);
       console.error(`[LeadsService] Full error:`, error);
-      // Don't throw - lead import succeeded, messages are optional
+
+      // Check if this is a 403 error (wrong account credentials)
+      if (error.message?.includes('403') || error.message?.includes('Forbidden')) {
+        throw new BadRequestException(
+          'Cannot access this conversation. The currently connected Thumbtack account may not have access to this lead. Try reconnecting the correct account.'
+        );
+      }
+
+      // For other errors, don't throw - lead import succeeded, messages are optional
       return 0;
     }
   }
@@ -757,31 +765,10 @@ export class LeadsService {
 
     console.log(`[LeadsService] Found lead: ${lead.externalRequestId}, platform: ${lead.platform}, businessId: ${lead.businessId}`);
 
-    // Check if currently connected to the right account for this lead
-    const platformConn = await this.prisma.platform.findUnique({
-      where: {
-        userId_platformName: {
-          userId,
-          platformName: lead.platform,
-        },
-      },
-    });
-
-    if (lead.businessId && platformConn?.externalBusinessId !== lead.businessId) {
-      // Get the saved account name for better error message
-      const savedAccount = await this.prisma.savedAccount.findFirst({
-        where: {
-          userId,
-          platform: lead.platform,
-          businessId: lead.businessId,
-        },
-      });
-      const accountName = savedAccount?.businessName || `account ${lead.businessId}`;
-      console.log(`[LeadsService] Wrong account connected. Lead belongs to ${lead.businessId}, connected to ${platformConn?.externalBusinessId}`);
-      throw new BadRequestException(
-        `Cannot resync: This lead belongs to "${accountName}". Please reconnect that account first.`
-      );
-    }
+    // Note: We don't check if the current credentials match the lead's businessId anymore.
+    // The API will return 403 if credentials don't have access, which we handle gracefully.
+    // This allows resync to work as long as the user has SOME valid Thumbtack credentials,
+    // and the actual business access is determined by Thumbtack's API.
 
     // Get conversation
     const conversation = await this.prisma.conversation.findFirst({
