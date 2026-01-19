@@ -544,23 +544,28 @@ export class LeadsService {
     platform: string,
     negotiationId: string,
     customerName: string,
-  ): Promise<void> {
+  ): Promise<number> {
     console.log(`[LeadsService] Importing messages for negotiation: ${negotiationId}`);
 
     try {
+      console.log(`[LeadsService] Getting credentials for user: ${userId}, platform: ${platform}`);
       const credentials = await this.platformService.getCredentials(userId, platform);
+      console.log(`[LeadsService] Got credentials, accessToken present: ${!!credentials.accessToken}`);
+
       const adapter = this.platformFactory.getAdapter(platform) as any;
 
       if (typeof adapter.getConversation !== 'function') {
         console.log(`[LeadsService] Adapter does not support getConversation`);
-        return;
+        return 0;
       }
 
+      console.log(`[LeadsService] Calling adapter.getConversation for negotiation: ${negotiationId}`);
       const messages = await adapter.getConversation(credentials, negotiationId);
       console.log(`[LeadsService] Fetched ${messages.length} messages from API`);
 
       if (messages.length === 0) {
-        return;
+        console.log(`[LeadsService] No messages found for negotiation ${negotiationId}`);
+        return 0;
       }
 
       // Ensure conversation exists
@@ -634,9 +639,12 @@ export class LeadsService {
       }
 
       console.log(`[LeadsService] Imported ${messages.length} messages for negotiation ${negotiationId}`);
+      return messages.length;
     } catch (error) {
       console.error(`[LeadsService] Error importing messages:`, error.message);
+      console.error(`[LeadsService] Full error:`, error);
       // Don't throw - lead import succeeded, messages are optional
+      return 0;
     }
   }
 
@@ -731,13 +739,18 @@ export class LeadsService {
    * Cleans up duplicates and imports any missing messages
    */
   async resyncMessages(userId: string, leadId: string): Promise<{ cleaned: number; imported: number }> {
+    console.log(`[LeadsService] resyncMessages called - leadId: ${leadId}, userId: ${userId}`);
+
     const lead = await this.prisma.lead.findFirst({
       where: { id: leadId, userId },
     });
 
     if (!lead) {
+      console.log(`[LeadsService] Lead not found: ${leadId}`);
       throw new NotFoundException('Lead not found');
     }
+
+    console.log(`[LeadsService] Found lead: ${lead.externalRequestId}, platform: ${lead.platform}`);
 
     // Get or create conversation
     let conversation = await this.prisma.conversation.findFirst({
@@ -747,18 +760,25 @@ export class LeadsService {
       },
     });
 
+    console.log(`[LeadsService] Conversation exists: ${!!conversation}`);
+
     if (conversation) {
       // Clean up duplicates first
       const { deleted } = await this.cleanupDuplicateMessages(conversation.id);
+      console.log(`[LeadsService] Cleaned up ${deleted} duplicate messages`);
 
       // Re-import messages from API to get any missing ones
+      console.log(`[LeadsService] Calling importMessagesForNegotiation...`);
       await this.importMessagesForNegotiation(userId, lead.platform, lead.externalRequestId, lead.customerName);
+      console.log(`[LeadsService] importMessagesForNegotiation completed`);
 
       return { cleaned: deleted, imported: 0 }; // Import count not tracked here
     }
 
     // No conversation exists, just import
+    console.log(`[LeadsService] No conversation, calling importMessagesForNegotiation...`);
     await this.importMessagesForNegotiation(userId, lead.platform, lead.externalRequestId, lead.customerName);
+    console.log(`[LeadsService] importMessagesForNegotiation completed`);
     return { cleaned: 0, imported: 0 };
   }
 }
