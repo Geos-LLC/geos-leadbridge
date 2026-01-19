@@ -251,7 +251,32 @@ export class WebhooksService {
       }
     }
 
-    // If still no match, try to find any connected Thumbtack platform
+    // Fallback: check SavedAccount table for businessId -> userId mapping
+    // This handles multi-account scenarios where the businessId isn't the currently connected one
+    if (!platformConnection) {
+      const savedAccount = await this.prisma.savedAccount.findFirst({
+        where: {
+          platform,
+          businessId: business.businessID,
+        },
+      });
+
+      if (savedAccount) {
+        this.logger.log('Found user via SavedAccount lookup for negotiation', {
+          userId: savedAccount.userId,
+          businessID: business.businessID,
+        });
+        platformConnection = await this.prisma.platform.findFirst({
+          where: {
+            platformName: platform,
+            userId: savedAccount.userId,
+            connected: true,
+          },
+        });
+      }
+    }
+
+    // Last resort: try to find any connected Thumbtack platform
     // This is a fallback - webhook came for a business we haven't seen before
     if (!platformConnection) {
       this.logger.warn('No exact platform match, searching for any connected Thumbtack user', { businessID: business.businessID });
@@ -265,7 +290,6 @@ export class WebhooksService {
       });
 
       // For now, if there's only one connected user, use that
-      // In production with multiple users, you'd need a business-to-user mapping table
       if (connectedPlatforms.length === 1) {
         platformConnection = connectedPlatforms[0];
         this.logger.log('Using single connected platform for webhook', {
@@ -431,7 +455,32 @@ export class WebhooksService {
       }
     }
 
-    // Fallback: if only one connected platform, use that
+    // Fallback: check SavedAccount table for businessId -> userId mapping
+    // This handles multi-account scenarios where the businessId isn't the currently connected one
+    if (!platformConnection) {
+      const savedAccount = await this.prisma.savedAccount.findFirst({
+        where: {
+          platform,
+          businessId,
+        },
+      });
+
+      if (savedAccount) {
+        this.logger.log('Found user via SavedAccount lookup', {
+          userId: savedAccount.userId,
+          businessId,
+        });
+        platformConnection = await this.prisma.platform.findFirst({
+          where: {
+            platformName: platform,
+            userId: savedAccount.userId,
+            connected: true,
+          },
+        });
+      }
+    }
+
+    // Last resort fallback: if only one connected platform, use that
     if (!platformConnection) {
       const connectedPlatforms = await this.prisma.platform.findMany({
         where: {
