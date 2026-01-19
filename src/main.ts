@@ -7,6 +7,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { LeadsService } from './leads/leads.service';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -54,6 +55,17 @@ async function bootstrap() {
 
   // Start server
   await app.listen(port);
+
+  // Run one-time cleanup of synthetic messages on startup
+  try {
+    const leadsService = app.get(LeadsService);
+    const result = await leadsService.cleanupAllSyntheticMessages();
+    if (result.deleted > 0) {
+      console.log(`[Startup] Cleaned up ${result.deleted} synthetic messages`);
+    }
+  } catch (error) {
+    console.error('[Startup] Error cleaning up synthetic messages:', error.message);
+  }
 
   console.log(`
   ╔═══════════════════════════════════════════════════════╗

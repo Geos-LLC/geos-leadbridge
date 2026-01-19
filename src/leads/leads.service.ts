@@ -722,7 +722,7 @@ export class LeadsService {
   /**
    * Re-sync messages for a lead
    * With webhook-based architecture, messages are already in the database.
-   * This function just returns the current message count from the database.
+   * This function cleans up old synthetic messages and returns current count.
    *
    * Note: True "resync" requires API credentials for the specific account,
    * which we don't store per-account. Webhooks are the source of truth.
@@ -754,6 +754,9 @@ export class LeadsService {
       return { cleaned: 0, imported: 0 };
     }
 
+    // Clean up old synthetic messages (those with _initial suffix)
+    const cleanedCount = await this.cleanupSyntheticMessages(conversation.id, lead.externalRequestId);
+
     const messageCount = await this.prisma.message.count({
       where: { conversationId: conversation.id },
     });
@@ -761,6 +764,48 @@ export class LeadsService {
     console.log(`[LeadsService] Found ${messageCount} messages in database for negotiation ${lead.externalRequestId}`);
 
     // Return the message count - messages are already in DB from webhooks
-    return { cleaned: 0, imported: messageCount };
+    return { cleaned: cleanedCount, imported: messageCount };
+  }
+
+  /**
+   * Clean up old synthetic messages that were created before MessageCreatedV4 webhook
+   * These have externalMessageId ending with '_initial' and duplicate the real first message
+   */
+  private async cleanupSyntheticMessages(conversationId: string, negotiationId: string): Promise<number> {
+    // Find and delete synthetic messages (those with _initial suffix in externalMessageId)
+    const syntheticMessageId = `${negotiationId}_initial`;
+
+    const deleted = await this.prisma.message.deleteMany({
+      where: {
+        conversationId,
+        externalMessageId: syntheticMessageId,
+      },
+    });
+
+    if (deleted.count > 0) {
+      console.log(`[LeadsService] Deleted ${deleted.count} synthetic message(s) for negotiation ${negotiationId}`);
+    }
+
+    return deleted.count;
+  }
+
+  /**
+   * Clean up all synthetic messages across all conversations
+   * One-time migration helper
+   */
+  async cleanupAllSyntheticMessages(): Promise<{ deleted: number }> {
+    console.log(`[LeadsService] Cleaning up all synthetic messages...`);
+
+    // Delete all messages where externalMessageId ends with '_initial'
+    const deleted = await this.prisma.message.deleteMany({
+      where: {
+        externalMessageId: {
+          endsWith: '_initial',
+        },
+      },
+    });
+
+    console.log(`[LeadsService] Deleted ${deleted.count} synthetic messages`);
+    return { deleted: deleted.count };
   }
 }
