@@ -720,8 +720,12 @@ export class LeadsService {
   }
 
   /**
-   * Re-sync messages for a lead from the API
-   * Deletes all existing messages and re-imports from Thumbtack API (source of truth)
+   * Re-sync messages for a lead
+   * With webhook-based architecture, messages are already in the database.
+   * This function just returns the current message count from the database.
+   *
+   * Note: True "resync" requires API credentials for the specific account,
+   * which we don't store per-account. Webhooks are the source of truth.
    */
   async resyncMessages(userId: string, leadId: string): Promise<{ cleaned: number; imported: number }> {
     console.log(`[LeadsService] resyncMessages called - leadId: ${leadId}, userId: ${userId}`);
@@ -737,12 +741,7 @@ export class LeadsService {
 
     console.log(`[LeadsService] Found lead: ${lead.externalRequestId}, platform: ${lead.platform}, businessId: ${lead.businessId}`);
 
-    // Note: We don't check if the current credentials match the lead's businessId anymore.
-    // The API will return 403 if credentials don't have access, which we handle gracefully.
-    // This allows resync to work as long as the user has SOME valid Thumbtack credentials,
-    // and the actual business access is determined by Thumbtack's API.
-
-    // Get conversation
+    // Get conversation and count messages
     const conversation = await this.prisma.conversation.findFirst({
       where: {
         platform: lead.platform,
@@ -750,25 +749,18 @@ export class LeadsService {
       },
     });
 
-    console.log(`[LeadsService] Conversation exists: ${!!conversation}`);
-
-    let deletedCount = 0;
-
-    if (conversation) {
-      // Delete ALL existing messages for this conversation
-      // We'll re-import fresh from the API (source of truth)
-      const deleteResult = await this.prisma.message.deleteMany({
-        where: { conversationId: conversation.id },
-      });
-      deletedCount = deleteResult.count;
-      console.log(`[LeadsService] Deleted ${deletedCount} existing messages before fresh import`);
+    if (!conversation) {
+      console.log(`[LeadsService] No conversation found for this lead`);
+      return { cleaned: 0, imported: 0 };
     }
 
-    // Import fresh messages from API
-    console.log(`[LeadsService] Calling importMessagesForNegotiation for fresh import...`);
-    const imported = await this.importMessagesForNegotiation(userId, lead.platform, lead.externalRequestId, lead.customerName);
-    console.log(`[LeadsService] importMessagesForNegotiation completed - imported ${imported} messages`);
+    const messageCount = await this.prisma.message.count({
+      where: { conversationId: conversation.id },
+    });
 
-    return { cleaned: deletedCount, imported };
+    console.log(`[LeadsService] Found ${messageCount} messages in database for negotiation ${lead.externalRequestId}`);
+
+    // Return the message count - messages are already in DB from webhooks
+    return { cleaned: 0, imported: messageCount };
   }
 }
