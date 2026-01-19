@@ -652,7 +652,7 @@ export class LeadsService {
       // Check if this is a 403 error (wrong account credentials)
       if (error.message?.includes('403') || error.message?.includes('Forbidden')) {
         throw new BadRequestException(
-          'Cannot access this conversation. The currently connected Thumbtack account may not have access to this lead. Try reconnecting the correct account.'
+          'Cannot resync - this lead belongs to a different account. New messages still arrive via webhooks automatically.'
         );
       }
 
