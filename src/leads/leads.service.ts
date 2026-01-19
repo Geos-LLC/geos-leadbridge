@@ -601,32 +601,37 @@ export class LeadsService {
         });
       }
 
-      // Store each message (skip duplicates)
+      // Store each message using upsert to handle race conditions
+      let importedCount = 0;
       for (const msg of messages) {
-        const existingMsg = await this.prisma.message.findFirst({
-          where: {
-            platform,
-            externalMessageId: msg.externalMessageId,
-          },
-        });
-
-        if (existingMsg) {
-          continue; // Skip duplicate
+        try {
+          await this.prisma.message.upsert({
+            where: {
+              platform_externalMessageId: {
+                platform,
+                externalMessageId: msg.externalMessageId,
+              },
+            },
+            create: {
+              conversationId: conversation.id,
+              userId,
+              platform,
+              externalMessageId: msg.externalMessageId,
+              sender: msg.sender?.toLowerCase() || 'customer',
+              content: msg.content || '',
+              isRead: true, // Imported messages are considered read
+              sentAt: new Date(msg.sentAt),
+              rawJson: JSON.stringify(msg.raw || msg), // Include full raw data with attachments
+            },
+            update: {
+              // Update rawJson to include latest data (attachments, etc)
+              rawJson: JSON.stringify(msg.raw || msg),
+            },
+          });
+          importedCount++;
+        } catch (error) {
+          console.error(`[LeadsService] Error upserting message ${msg.externalMessageId}:`, error.message);
         }
-
-        await this.prisma.message.create({
-          data: {
-            conversationId: conversation.id,
-            userId,
-            platform,
-            externalMessageId: msg.externalMessageId,
-            sender: msg.sender?.toLowerCase() || 'customer',
-            content: msg.content || '',
-            isRead: true, // Imported messages are considered read
-            sentAt: new Date(msg.sentAt),
-            rawJson: JSON.stringify(msg),
-          },
-        });
       }
 
       // Update conversation's lastMessageAt
@@ -638,8 +643,8 @@ export class LeadsService {
         });
       }
 
-      console.log(`[LeadsService] Imported ${messages.length} messages for negotiation ${negotiationId}`);
-      return messages.length;
+      console.log(`[LeadsService] Imported ${importedCount} messages for negotiation ${negotiationId}`);
+      return importedCount;
     } catch (error) {
       console.error(`[LeadsService] Error importing messages:`, error.message);
       console.error(`[LeadsService] Full error:`, error);
@@ -736,7 +741,7 @@ export class LeadsService {
 
   /**
    * Re-sync messages for a lead from the API
-   * Cleans up duplicates and imports any missing messages
+   * Deletes all existing messages and re-imports from Thumbtack API (source of truth)
    */
   async resyncMessages(userId: string, leadId: string): Promise<{ cleaned: number; imported: number }> {
     console.log(`[LeadsService] resyncMessages called - leadId: ${leadId}, userId: ${userId}`);
@@ -753,7 +758,7 @@ export class LeadsService {
     console.log(`[LeadsService] Found lead: ${lead.externalRequestId}, platform: ${lead.platform}, businessId: ${lead.businessId}`);
 
     // Check if currently connected to the right account for this lead
-    const platform = await this.prisma.platform.findUnique({
+    const platformConn = await this.prisma.platform.findUnique({
       where: {
         userId_platformName: {
           userId,
@@ -762,7 +767,7 @@ export class LeadsService {
       },
     });
 
-    if (lead.businessId && platform?.externalBusinessId !== lead.businessId) {
+    if (lead.businessId && platformConn?.externalBusinessId !== lead.businessId) {
       // Get the saved account name for better error message
       const savedAccount = await this.prisma.savedAccount.findFirst({
         where: {
@@ -772,14 +777,14 @@ export class LeadsService {
         },
       });
       const accountName = savedAccount?.businessName || `account ${lead.businessId}`;
-      console.log(`[LeadsService] Wrong account connected. Lead belongs to ${lead.businessId}, connected to ${platform?.externalBusinessId}`);
+      console.log(`[LeadsService] Wrong account connected. Lead belongs to ${lead.businessId}, connected to ${platformConn?.externalBusinessId}`);
       throw new BadRequestException(
         `Cannot resync: This lead belongs to "${accountName}". Please reconnect that account first.`
       );
     }
 
-    // Get or create conversation
-    let conversation = await this.prisma.conversation.findFirst({
+    // Get conversation
+    const conversation = await this.prisma.conversation.findFirst({
       where: {
         platform: lead.platform,
         externalThreadId: lead.externalRequestId,
@@ -788,23 +793,23 @@ export class LeadsService {
 
     console.log(`[LeadsService] Conversation exists: ${!!conversation}`);
 
+    let deletedCount = 0;
+
     if (conversation) {
-      // Clean up duplicates first
-      const { deleted } = await this.cleanupDuplicateMessages(conversation.id);
-      console.log(`[LeadsService] Cleaned up ${deleted} duplicate messages`);
-
-      // Re-import messages from API to get any missing ones
-      console.log(`[LeadsService] Calling importMessagesForNegotiation...`);
-      await this.importMessagesForNegotiation(userId, lead.platform, lead.externalRequestId, lead.customerName);
-      console.log(`[LeadsService] importMessagesForNegotiation completed`);
-
-      return { cleaned: deleted, imported: 0 }; // Import count not tracked here
+      // Delete ALL existing messages for this conversation
+      // We'll re-import fresh from the API (source of truth)
+      const deleteResult = await this.prisma.message.deleteMany({
+        where: { conversationId: conversation.id },
+      });
+      deletedCount = deleteResult.count;
+      console.log(`[LeadsService] Deleted ${deletedCount} existing messages before fresh import`);
     }
 
-    // No conversation exists, just import
-    console.log(`[LeadsService] No conversation, calling importMessagesForNegotiation...`);
-    await this.importMessagesForNegotiation(userId, lead.platform, lead.externalRequestId, lead.customerName);
-    console.log(`[LeadsService] importMessagesForNegotiation completed`);
-    return { cleaned: 0, imported: 0 };
+    // Import fresh messages from API
+    console.log(`[LeadsService] Calling importMessagesForNegotiation for fresh import...`);
+    const imported = await this.importMessagesForNegotiation(userId, lead.platform, lead.externalRequestId, lead.customerName);
+    console.log(`[LeadsService] importMessagesForNegotiation completed - imported ${imported} messages`);
+
+    return { cleaned: deletedCount, imported };
   }
 }
