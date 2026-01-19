@@ -198,7 +198,7 @@ export class LeadsService {
     // Convert to the format expected by frontend
     return messages.map(msg => {
       // Parse rawJson to get attachments and other data
-      let raw = {};
+      let raw: Record<string, any> = {};
       try {
         raw = msg.rawJson ? JSON.parse(msg.rawJson) : {};
       } catch (e) {
