@@ -152,7 +152,8 @@ export class LeadsService {
 
   /**
    * Get messages for a lead/negotiation
-   * First checks local database, then falls back to API if connected to the right account
+   * All messages come from the database (stored via webhooks)
+   * No API fallback needed - webhooks handle all connected accounts
    */
   async getMessages(userId: string, leadId: string): Promise<any[]> {
     console.log(`[LeadsService] getMessages called - userId: ${userId}, leadId: ${leadId}`);
@@ -162,52 +163,11 @@ export class LeadsService {
 
     const negotiationId = lead.externalRequestId;
 
-    // First, check if we have messages stored locally (from webhooks)
-    const localMessages = await this.getLocalMessages(userId, lead.platform, negotiationId);
+    // Get messages from database (stored via webhooks)
+    const messages = await this.getLocalMessages(userId, lead.platform, negotiationId);
+    console.log(`[LeadsService] Found ${messages.length} messages in database for negotiation ${negotiationId}`);
 
-    if (localMessages.length > 0) {
-      console.log(`[LeadsService] Found ${localMessages.length} messages in local database`);
-      return localMessages;
-    }
-
-    // Check if current connection matches the lead's business
-    const platform = await this.prisma.platform.findFirst({
-      where: {
-        userId,
-        platformName: lead.platform,
-        connected: true,
-      },
-    });
-
-    const isConnectedToRightAccount = platform?.externalBusinessId === lead.businessId;
-    console.log(`[LeadsService] Connected businessId: ${platform?.externalBusinessId}, Lead businessId: ${lead.businessId}, Match: ${isConnectedToRightAccount}`);
-
-    // If not connected to the right account, return empty (can't fetch from API)
-    if (!isConnectedToRightAccount) {
-      console.log(`[LeadsService] Not connected to lead's account, returning empty messages`);
-      return [];
-    }
-
-    // Try to fetch from API
-    try {
-      const credentials = await this.platformService.getCredentials(userId, lead.platform);
-      const adapter = this.platformFactory.getAdapter(lead.platform) as any;
-
-      if (typeof adapter.getConversation === 'function') {
-        console.log(`[LeadsService] Fetching conversation for negotiationId: ${negotiationId}`);
-        const messages = await adapter.getConversation(credentials, negotiationId);
-        console.log(`[LeadsService] Got ${messages.length} messages from adapter`);
-        return messages;
-      }
-
-      console.log(`[LeadsService] Adapter does not have getConversation method`);
-      return [];
-    } catch (error) {
-      console.error(`[LeadsService] Error fetching messages:`, error.message);
-      console.error(`[LeadsService] Full error:`, error.response?.data || error);
-      // Return empty array instead of throwing - lead from another account
-      return [];
-    }
+    return messages;
   }
 
   /**
@@ -236,17 +196,29 @@ export class LeadsService {
     });
 
     // Convert to the format expected by frontend
-    return messages.map(msg => ({
-      id: msg.id,
-      conversationId: msg.conversationId,
-      platform: msg.platform,
-      externalMessageId: msg.externalMessageId,
-      sender: msg.sender,
-      content: msg.content,
-      isRead: msg.isRead,
-      sentAt: msg.sentAt.toISOString(),
-      deliveredAt: msg.deliveredAt?.toISOString(),
-    }));
+    return messages.map(msg => {
+      // Parse rawJson to get attachments and other data
+      let raw = {};
+      try {
+        raw = msg.rawJson ? JSON.parse(msg.rawJson) : {};
+      } catch (e) {
+        // Ignore parse errors
+      }
+
+      return {
+        id: msg.id,
+        conversationId: msg.conversationId,
+        platform: msg.platform,
+        externalMessageId: msg.externalMessageId,
+        sender: msg.sender,
+        content: msg.content,
+        isRead: msg.isRead,
+        sentAt: msg.sentAt.toISOString(),
+        deliveredAt: msg.deliveredAt?.toISOString(),
+        attachments: raw.attachments || [],
+        raw,
+      };
+    });
   }
 
   /**
