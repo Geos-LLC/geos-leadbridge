@@ -47,15 +47,18 @@ export class ThumbtackController {
   /**
    * Automatically setup webhooks for all businesses after OAuth connection
    * Also saves each business as a saved account for multi-account switching
+   * Skips businesses that already have active webhooks
    */
-  private async autoSetupWebhooks(userId: string): Promise<void> {
+  private async autoSetupWebhooks(userId: string): Promise<{ skippedAlreadyConnected: string[] }> {
+    const skippedAlreadyConnected: string[] = [];
+
     try {
       // Get all businesses for this user
       const businesses = await this.leadsService.getBusinesses(userId, PlatformName.THUMBTACK);
 
       if (businesses.length === 0) {
         console.log('No businesses found to setup webhooks for');
-        return;
+        return { skippedAlreadyConnected };
       }
 
       // Get the user's email from stored credentials (extracted from ID token during OAuth)
@@ -71,6 +74,18 @@ export class ThumbtackController {
       // Setup webhook and save account for each business
       for (const business of businesses) {
         try {
+          // Check if this business already has an active webhook (from any user)
+          const existingAccount = await this.platformService.getAccountByBusinessId(
+            PlatformName.THUMBTACK,
+            business.businessID,
+          );
+
+          if (existingAccount && existingAccount.webhookId) {
+            console.log(`Business ${business.name} (${business.businessID}) already has active webhook - skipping`);
+            skippedAlreadyConnected.push(business.name);
+            continue;
+          }
+
           // First save the account (so setupThumbtackWebhook can update it with webhookId)
           await this.platformService.saveAccount(
             userId,
@@ -94,6 +109,8 @@ export class ThumbtackController {
       console.error('Error in autoSetupWebhooks:', err.message);
       // Don't throw - OAuth succeeded, webhooks are just a bonus
     }
+
+    return { skippedAlreadyConnected };
   }
 
   // ==========================================
@@ -140,10 +157,18 @@ export class ThumbtackController {
       await this.platformService.handleCallback(userId, PlatformName.THUMBTACK, code);
 
       // Auto-setup webhooks for all businesses
-      await this.autoSetupWebhooks(userId);
+      const { skippedAlreadyConnected } = await this.autoSetupWebhooks(userId);
 
-      // Redirect to frontend dashboard with success
-      const redirectUrl = `${this.frontendUrl}/dashboard?connected=thumbtack`;
+      // Build redirect URL with appropriate message
+      const params = new URLSearchParams({ connected: 'thumbtack' });
+
+      // If some accounts were skipped because they already have webhooks
+      if (skippedAlreadyConnected.length > 0) {
+        params.set('warning', 'already_connected');
+        params.set('skipped_accounts', skippedAlreadyConnected.join(', '));
+      }
+
+      const redirectUrl = `${this.frontendUrl}/dashboard?${params.toString()}`;
       console.log('[ThumbtackController] Redirecting to:', redirectUrl);
       return res.redirect(redirectUrl);
     } catch (err) {

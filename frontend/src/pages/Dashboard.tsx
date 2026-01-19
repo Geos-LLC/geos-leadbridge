@@ -49,9 +49,16 @@ export function Dashboard() {
     const connected = searchParams.get('connected');
     const oauthError = searchParams.get('error');
     const errorDescription = searchParams.get('error_description');
+    const warning = searchParams.get('warning');
+    const skippedAccounts = searchParams.get('skipped_accounts');
 
     if (connected === 'thumbtack') {
-      setSuccess('Thumbtack account connected successfully!');
+      // Check if any accounts were skipped because they're already connected
+      if (warning === 'already_connected' && skippedAccounts) {
+        setError(`The following account(s) already have active webhooks and were skipped: ${skippedAccounts}. To reconnect, first disconnect the webhook from the existing connection.`);
+      } else {
+        setSuccess('Thumbtack account connected successfully!');
+      }
       // Reload platform status and saved accounts to reflect the new connection
       loadPlatformStatus();
       loadSavedAccounts();

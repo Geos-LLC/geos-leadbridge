@@ -504,6 +504,19 @@ export class PlatformService {
   }
 
   /**
+   * Get a saved account by businessId (across all users)
+   * Used to check if a business already has webhooks set up
+   */
+  async getAccountByBusinessId(platform: string, businessId: string) {
+    return this.prisma.savedAccount.findFirst({
+      where: {
+        platform,
+        businessId,
+      },
+    });
+  }
+
+  /**
    * Sync saved accounts from existing leads
    * This backfills any accounts that have leads but aren't in saved_accounts
    */
