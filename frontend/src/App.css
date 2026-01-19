@@ -1168,6 +1168,44 @@ body {
   cursor: not-allowed;
 }
 
+/* Resync Error Message */
+.resync-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--error-bg, #fef2f2);
+  border: 1px solid var(--error-border, #fecaca);
+  color: var(--error, #dc2626);
+  font-size: 13px;
+  margin: 0 16px;
+  border-radius: 6px;
+}
+
+.resync-error svg {
+  flex-shrink: 0;
+}
+
+.resync-error span {
+  flex: 1;
+}
+
+.resync-error .dismiss-btn {
+  padding: 4px;
+  background: transparent;
+  border: none;
+  color: var(--error, #dc2626);
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.resync-error .dismiss-btn:hover {
+  background: rgba(220, 38, 38, 0.1);
+}
+
 /* Lead Details Panel */
 .lead-details-panel {
   background: white;

@@ -14,6 +14,7 @@ import {
   RefreshCw,
   AlertCircle,
   Building2,
+  X,
 } from 'lucide-react';
 import { leadsApi, thumbtackApi, type MessageAttachment } from '../services/api';
 import { useAppStore } from '../store/appStore';
@@ -62,6 +63,7 @@ export function Messages() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [resyncingMessages, setResyncingMessages] = useState(false);
+  const [resyncError, setResyncError] = useState<string | null>(null);
   const [messageText, setMessageText] = useState('');
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [lastSeenTimestamps, setLastSeenTimestamps] = useState<Record<string, string>>(() => getLastSeenTimestamps());
@@ -198,13 +200,16 @@ export function Messages() {
   const handleResyncMessages = async () => {
     if (!selectedLead) return;
     setResyncingMessages(true);
+    setResyncError(null);
     try {
       const result = await leadsApi.resyncMessages(selectedLead.id);
       console.log('[Messages] Resync result:', result);
       // Reload messages after resync
       await loadMessagesForLead(selectedLead);
-    } catch (err) {
+    } catch (err: any) {
       console.error('[Messages] Failed to resync messages:', err);
+      const errorMessage = err.response?.data?.message || 'Failed to resync messages';
+      setResyncError(errorMessage);
     } finally {
       setResyncingMessages(false);
     }
@@ -479,6 +484,17 @@ export function Messages() {
                 </button>
               </div>
             </div>
+
+            {/* Resync Error Message */}
+            {resyncError && (
+              <div className="resync-error">
+                <AlertCircle size={16} />
+                <span>{resyncError}</span>
+                <button className="dismiss-btn" onClick={() => setResyncError(null)}>
+                  <X size={14} />
+                </button>
+              </div>
+            )}
 
             {/* Messages Area */}
             <div className="messages-container">

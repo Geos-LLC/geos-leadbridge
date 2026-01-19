@@ -3,7 +3,7 @@
  * Manages lead retrieval and synchronization across platforms
  */
 
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
 import { PlatformService } from '../platforms/platform.service';
 import { PlatformFactory } from '../platforms/platform.factory';
@@ -750,7 +750,33 @@ export class LeadsService {
       throw new NotFoundException('Lead not found');
     }
 
-    console.log(`[LeadsService] Found lead: ${lead.externalRequestId}, platform: ${lead.platform}`);
+    console.log(`[LeadsService] Found lead: ${lead.externalRequestId}, platform: ${lead.platform}, businessId: ${lead.businessId}`);
+
+    // Check if currently connected to the right account for this lead
+    const platform = await this.prisma.platform.findUnique({
+      where: {
+        userId_platformName: {
+          userId,
+          platformName: lead.platform,
+        },
+      },
+    });
+
+    if (lead.businessId && platform?.externalBusinessId !== lead.businessId) {
+      // Get the saved account name for better error message
+      const savedAccount = await this.prisma.savedAccount.findFirst({
+        where: {
+          userId,
+          platform: lead.platform,
+          businessId: lead.businessId,
+        },
+      });
+      const accountName = savedAccount?.businessName || `account ${lead.businessId}`;
+      console.log(`[LeadsService] Wrong account connected. Lead belongs to ${lead.businessId}, connected to ${platform?.externalBusinessId}`);
+      throw new BadRequestException(
+        `Cannot resync: This lead belongs to "${accountName}". Please reconnect that account first.`
+      );
+    }
 
     // Get or create conversation
     let conversation = await this.prisma.conversation.findFirst({
