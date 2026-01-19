@@ -324,29 +324,25 @@ export class WebhooksService {
 
     this.logger.log('Lead stored successfully', { negotiationId });
 
-    // Create conversation and store initial message
-    await this.createConversationAndInitialMessage(
+    // Create conversation (messages will arrive via MessageCreatedV4 webhook)
+    await this.ensureConversationForLead(
       userId,
       platform,
       negotiationId,
       customerName,
-      request.description || '',
       lead.id,
-      data,
     );
   }
 
   /**
-   * Create conversation and store initial customer message for a new negotiation
+   * Create conversation for a new negotiation (messages come via MessageCreatedV4 webhook)
    */
-  private async createConversationAndInitialMessage(
+  private async ensureConversationForLead(
     userId: string,
     platform: string,
     negotiationId: string,
     customerName: string,
-    initialMessage: string,
     leadId: string,
-    rawData: any,
   ): Promise<void> {
     // Use upsert to handle race conditions when multiple webhooks arrive simultaneously
     const conversation = await this.prisma.conversation.upsert({
@@ -380,46 +376,10 @@ export class WebhooksService {
       });
     }
 
-    // Store the initial customer message if there is one
-    if (initialMessage && initialMessage.trim()) {
-      // Generate a unique ID for this initial message (negotiationId + "_initial")
-      const initialMessageId = `${negotiationId}_initial`;
-
-      // Use upsert to handle race conditions where multiple webhook handlers
-      // might try to create the same initial message simultaneously
-      try {
-        await this.prisma.message.upsert({
-          where: {
-            platform_externalMessageId: {
-              platform,
-              externalMessageId: initialMessageId,
-            },
-          },
-          create: {
-            conversationId: conversation.id,
-            userId,
-            platform,
-            externalMessageId: initialMessageId,
-            sender: 'customer',
-            content: initialMessage,
-            isRead: false,
-            sentAt: new Date(),
-            rawJson: JSON.stringify(rawData),
-          },
-          update: {
-            // No-op update - message already exists, just skip
-          },
-        });
-        this.logger.log('Initial customer message stored', { negotiationId, messageLength: initialMessage.length });
-      } catch (error) {
-        // Handle unique constraint violation (race condition with another webhook)
-        if (error.code === 'P2002') {
-          this.logger.log('Initial message already exists (race condition handled)', { negotiationId });
-        } else {
-          throw error;
-        }
-      }
-    }
+    // Note: We do NOT store the initial message from the lead here.
+    // The MessageCreatedV4 webhook will arrive separately with the actual message
+    // and its real Thumbtack message ID. This prevents duplicate "first messages".
+    this.logger.log('Conversation ready, messages will arrive via MessageCreatedV4 webhook', { negotiationId });
   }
 
   /**
