@@ -721,11 +721,8 @@ export class LeadsService {
 
   /**
    * Re-sync messages for a lead
-   * With webhook-based architecture, messages are already in the database.
-   * This function cleans up old synthetic messages and returns current count.
-   *
-   * Note: True "resync" requires API credentials for the specific account,
-   * which we don't store per-account. Webhooks are the source of truth.
+   * If connected to the correct account, imports messages from Thumbtack API.
+   * Also cleans up old synthetic messages.
    */
   async resyncMessages(userId: string, leadId: string): Promise<{ cleaned: number; imported: number }> {
     console.log(`[LeadsService] resyncMessages called - leadId: ${leadId}, userId: ${userId}`);
@@ -741,8 +738,8 @@ export class LeadsService {
 
     console.log(`[LeadsService] Found lead: ${lead.externalRequestId}, platform: ${lead.platform}, businessId: ${lead.businessId}`);
 
-    // Get conversation and count messages
-    const conversation = await this.prisma.conversation.findFirst({
+    // Get or create conversation
+    let conversation = await this.prisma.conversation.findFirst({
       where: {
         platform: lead.platform,
         externalThreadId: lead.externalRequestId,
@@ -750,21 +747,61 @@ export class LeadsService {
     });
 
     if (!conversation) {
-      console.log(`[LeadsService] No conversation found for this lead`);
-      return { cleaned: 0, imported: 0 };
+      // Create conversation if it doesn't exist
+      conversation = await this.prisma.conversation.create({
+        data: {
+          userId,
+          platform: lead.platform,
+          externalThreadId: lead.externalRequestId,
+          customerName: lead.customerName,
+          lastMessageAt: new Date(),
+          status: 'active',
+        },
+      });
+      console.log(`[LeadsService] Created conversation: ${conversation.id}`);
     }
 
     // Clean up old synthetic messages (those with _initial suffix)
     const cleanedCount = await this.cleanupSyntheticMessages(conversation.id, lead.externalRequestId);
 
-    const messageCount = await this.prisma.message.count({
-      where: { conversationId: conversation.id },
+    // Check if current connection matches the lead's business
+    const platform = await this.prisma.platform.findFirst({
+      where: {
+        userId,
+        platformName: lead.platform,
+        connected: true,
+      },
     });
 
-    console.log(`[LeadsService] Found ${messageCount} messages in database for negotiation ${lead.externalRequestId}`);
+    const isConnectedToRightAccount = platform?.externalBusinessId === lead.businessId;
+    console.log(`[LeadsService] Connected to right account: ${isConnectedToRightAccount} (connected: ${platform?.externalBusinessId}, lead: ${lead.businessId})`);
 
-    // Return the message count - messages are already in DB from webhooks
-    return { cleaned: cleanedCount, imported: messageCount };
+    let importedCount = 0;
+
+    // If connected to the right account, import messages from API
+    if (isConnectedToRightAccount) {
+      try {
+        importedCount = await this.importMessagesForNegotiation(
+          userId,
+          lead.platform,
+          lead.externalRequestId,
+          lead.customerName,
+        );
+        console.log(`[LeadsService] Imported ${importedCount} messages from API`);
+      } catch (error) {
+        console.error(`[LeadsService] Error importing messages:`, error.message);
+        // Don't throw - return what we have
+      }
+    } else {
+      // Not connected to right account - just return current message count
+      const messageCount = await this.prisma.message.count({
+        where: { conversationId: conversation.id },
+      });
+      console.log(`[LeadsService] Not connected to lead's account. Current messages in DB: ${messageCount}`);
+      importedCount = messageCount;
+    }
+
+    return { cleaned: cleanedCount, imported: importedCount };
   }
 
   /**
