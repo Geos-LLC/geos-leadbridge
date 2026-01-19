@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { ToastNotifications } from './components/ToastNotifications';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Dashboard } from './pages/Dashboard';
@@ -13,6 +14,8 @@ function App() {
 
   return (
     <BrowserRouter>
+      {/* Global toast notifications */}
+      <ToastNotifications />
       <Routes>
         {/* Public routes */}
         <Route

@@ -1,5 +1,6 @@
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import type { AuthResponse, Lead, Business, Platform, SavedAccount } from '../types';
+import { notify } from '../store/notificationStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://thumbtack-bridge-production.up.railway.app/api';
 
@@ -19,15 +20,119 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle 401 errors
+// Error message mapping for common errors
+function getErrorDetails(error: AxiosError<any>): { title: string; message: string } | null {
+  const status = error.response?.status;
+  const data = error.response?.data;
+  const errorMessage = data?.message || data?.error || error.message;
+
+  // Skip showing toast for 401 (handled separately with redirect)
+  if (status === 401) {
+    return null;
+  }
+
+  // Token/Auth errors
+  if (errorMessage?.toLowerCase().includes('token') ||
+      errorMessage?.toLowerCase().includes('expired') ||
+      errorMessage?.toLowerCase().includes('refresh')) {
+    return {
+      title: 'Authentication Error',
+      message: 'Your session may have expired. Please reconnect your Thumbtack account.',
+    };
+  }
+
+  // Not found errors
+  if (status === 404) {
+    if (errorMessage?.toLowerCase().includes('lead') ||
+        errorMessage?.toLowerCase().includes('negotiation')) {
+      return {
+        title: 'Lead Not Found',
+        message: 'This lead may have been removed or is no longer accessible.',
+      };
+    }
+    if (errorMessage?.toLowerCase().includes('account') ||
+        errorMessage?.toLowerCase().includes('platform') ||
+        errorMessage?.toLowerCase().includes('connected')) {
+      return {
+        title: 'Account Not Connected',
+        message: 'Please connect your Thumbtack account first.',
+      };
+    }
+    return {
+      title: 'Not Found',
+      message: errorMessage || 'The requested resource was not found.',
+    };
+  }
+
+  // Forbidden errors (wrong account, permission issues)
+  if (status === 403) {
+    return {
+      title: 'Access Denied',
+      message: errorMessage || 'You don\'t have permission to access this resource.',
+    };
+  }
+
+  // Bad request (validation errors)
+  if (status === 400) {
+    return {
+      title: 'Invalid Request',
+      message: errorMessage || 'The request was invalid. Please check your input.',
+    };
+  }
+
+  // Server errors
+  if (status && status >= 500) {
+    return {
+      title: 'Server Error',
+      message: 'Something went wrong on our end. Please try again later.',
+    };
+  }
+
+  // Network errors
+  if (error.code === 'ERR_NETWORK' || !error.response) {
+    return {
+      title: 'Connection Error',
+      message: 'Unable to connect to the server. Please check your internet connection.',
+    };
+  }
+
+  // Webhook/API errors from Thumbtack
+  if (errorMessage?.toLowerCase().includes('webhook')) {
+    return {
+      title: 'Webhook Error',
+      message: errorMessage || 'There was a problem with the webhook connection.',
+    };
+  }
+
+  // Generic error with message
+  if (errorMessage) {
+    return {
+      title: 'Error',
+      message: errorMessage,
+    };
+  }
+
+  return null;
+}
+
+// Handle errors and show toast notifications
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  (error: AxiosError<any>) => {
+    // Handle 401 - redirect to login
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';
+      return Promise.reject(error);
     }
+
+    // Show toast notification for other errors
+    const errorDetails = getErrorDetails(error);
+    if (errorDetails) {
+      notify.error(errorDetails.title, errorDetails.message);
+    }
+
     return Promise.reject(error);
   }
 );
