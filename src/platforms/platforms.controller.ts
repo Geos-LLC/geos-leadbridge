@@ -9,6 +9,8 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PlatformService } from './platform.service';
 import { PlatformFactory } from './platform.factory';
 import { PrismaService } from '../common/utils/prisma.service';
+import { EncryptionUtil } from '../common/utils/encryption.util';
+import { ConfigService } from '@nestjs/config';
 
 export interface HealthIssue {
   code: 'token_expired' | 'no_webhooks' | 'not_connected' | 'token_invalid' | 'api_error';
@@ -17,16 +19,23 @@ export interface HealthIssue {
   message: string;
   action?: string;
   actionLabel?: string;
+  accountId?: string;    // Which saved account has the issue
+  accountName?: string;  // Display name of the account
 }
 
 @Controller('v1/platforms')
 @UseGuards(JwtAuthGuard)
 export class PlatformsController {
+  private readonly encryptionKey: string;
+
   constructor(
     private platformService: PlatformService,
     private platformFactory: PlatformFactory,
     private prisma: PrismaService,
-  ) {}
+    private configService: ConfigService,
+  ) {
+    this.encryptionKey = this.configService.get<string>('encryption.key') || 'default-32-char-encryption-key';
+  }
 
   /**
    * Get connection status for all platforms
@@ -90,6 +99,7 @@ export class PlatformsController {
   /**
    * Health check endpoint - validates token and checks for issues
    * Returns a list of issues that need user attention
+   * Checks each saved account individually for multi-account support
    */
   @Get('health')
   async getHealth(@CurrentUser() user: any): Promise<{ healthy: boolean; issues: HealthIssue[] }> {
@@ -118,11 +128,12 @@ export class PlatformsController {
       return { healthy: issues.length === 0, issues };
     }
 
-    // Check 2: Do any saved accounts have webhooks?
+    // Get all saved accounts
     const savedAccounts = await this.prisma.savedAccount.findMany({
       where: { userId: user.userId, platform: 'thumbtack' },
     });
 
+    // Check 2: Do any saved accounts have webhooks?
     const accountsWithWebhooks = savedAccounts.filter(a => a.webhookId);
     if (savedAccounts.length > 0 && accountsWithWebhooks.length === 0) {
       issues.push({
@@ -135,11 +146,18 @@ export class PlatformsController {
       });
     }
 
-    // Check 3: Validate token by making a test API call
-    if (platform.credentialsJson) {
+    // Check 3: Validate credentials for EACH saved account with credentials
+    const adapter = this.platformFactory.getAdapter('thumbtack') as any;
+
+    for (const account of savedAccounts) {
+      // Only check accounts that have stored credentials
+      if (!account.credentialsJson) continue;
+
       try {
-        const adapter = this.platformFactory.getAdapter('thumbtack') as any;
-        const credentials = JSON.parse(platform.credentialsJson);
+        const credentials = EncryptionUtil.decryptObject<{ accessToken: string }>(
+          account.credentialsJson,
+          this.encryptionKey,
+        );
 
         // Try to get businesses - this validates the token
         await adapter.getBusinesses(credentials);
@@ -152,26 +170,32 @@ export class PlatformsController {
             code: 'token_expired',
             severity: 'error',
             title: 'Session Expired',
-            message: 'Your Thumbtack session has expired. Please reconnect to continue receiving leads and sending messages.',
+            message: `Session expired for "${account.businessName}". Please reconnect this account.`,
             action: 'reconnect',
-            actionLabel: 'Reconnect Thumbtack',
+            actionLabel: 'Reconnect Account',
+            accountId: account.id,
+            accountName: account.businessName,
           });
         } else if (statusCode === 403 || errMsg.includes('forbidden') || errMsg.includes('revoked')) {
           issues.push({
             code: 'token_invalid',
             severity: 'error',
             title: 'Access Revoked',
-            message: 'Your Thumbtack access has been revoked. Please reconnect your account.',
+            message: `Access revoked for "${account.businessName}". Please reconnect this account.`,
             action: 'reconnect',
-            actionLabel: 'Reconnect Thumbtack',
+            actionLabel: 'Reconnect Account',
+            accountId: account.id,
+            accountName: account.businessName,
           });
-        } else if (!errMsg.includes('network') && !errMsg.includes('timeout')) {
-          // Only report non-network errors as issues
+        } else if (!errMsg.includes('network') && !errMsg.includes('timeout') && !errMsg.includes('decrypt')) {
+          // Only report non-network/non-decryption errors as issues
           issues.push({
             code: 'api_error',
             severity: 'warning',
             title: 'Connection Issue',
-            message: 'There was a problem connecting to Thumbtack. Some features may not work correctly.',
+            message: `Problem connecting to Thumbtack for "${account.businessName}".`,
+            accountId: account.id,
+            accountName: account.businessName,
           });
         }
       }

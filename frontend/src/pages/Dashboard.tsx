@@ -371,9 +371,9 @@ export function Dashboard() {
       )}
 
       {/* Health Issues Banner - persistent warning for critical issues */}
-      {healthIssues.filter(i => i.severity === 'error').map((issue) => (
+      {healthIssues.filter(i => i.severity === 'error').map((issue, index) => (
         <div
-          key={issue.code}
+          key={`${issue.code}-${issue.accountId || index}`}
           className="health-issue-banner"
           style={{
             background: issue.severity === 'error' ? '#fef2f2' : '#fffbeb',
@@ -392,7 +392,7 @@ export function Dashboard() {
           />
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 600, color: issue.severity === 'error' ? '#991b1b' : '#92400e', marginBottom: '4px' }}>
-              {issue.title}
+              {issue.accountName ? `${issue.title} - ${issue.accountName}` : issue.title}
             </div>
             <div style={{ fontSize: '14px', color: issue.severity === 'error' ? '#b91c1c' : '#a16207' }}>
               {issue.message}

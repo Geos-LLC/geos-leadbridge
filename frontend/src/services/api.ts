@@ -161,6 +161,8 @@ export interface HealthIssue {
   message: string;
   action?: string;
   actionLabel?: string;
+  accountId?: string;    // Which saved account has the issue
+  accountName?: string;  // Display name of the account
 }
 
 // Platforms
