@@ -432,6 +432,24 @@ export class PlatformService {
     return adapter.getWebhooks(credentials, businessId);
   }
 
+  /**
+   * Delete a specific webhook from Thumbtack
+   * Used for cleaning up duplicate webhooks
+   */
+  async deleteThumbtackWebhook(userId: string, businessId: string, webhookId: string): Promise<void> {
+    // Try account-specific credentials first
+    let credentials: { accessToken: string; refreshToken?: string };
+    const accountCreds = await this.getAccountCredentialsByBusinessId(userId, 'thumbtack', businessId);
+    if (accountCreds) {
+      credentials = accountCreds;
+    } else {
+      credentials = await this.getCredentials(userId, 'thumbtack');
+    }
+    const adapter = this.platformFactory.getAdapter('thumbtack') as any;
+
+    await adapter.deleteWebhook(credentials, businessId, webhookId);
+  }
+
   // ==========================================
   // Saved Accounts Methods
   // ==========================================

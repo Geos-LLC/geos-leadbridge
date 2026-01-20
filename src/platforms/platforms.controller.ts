@@ -3,7 +3,7 @@
  * Handles platform connection status and configuration
  */
 
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PlatformService } from './platform.service';
@@ -189,6 +189,68 @@ export class PlatformsController {
       byEventType,
       yourBusinessIds: businessIds,
       recentEvents: summary.slice(0, 20),
+    };
+  }
+
+  /**
+   * Cleanup endpoint - removes duplicate webhooks for each account
+   * Keeps only the current webhook (storedWebhookId), deletes all others
+   */
+  @Post('webhooks/cleanup')
+  async cleanupDuplicateWebhooks(@CurrentUser() user: any) {
+    const savedAccounts = await this.prisma.savedAccount.findMany({
+      where: { userId: user.userId, platform: 'thumbtack' },
+    });
+
+    const results: any[] = [];
+
+    for (const account of savedAccounts) {
+      const accountResult: any = {
+        accountId: account.id,
+        businessId: account.businessId,
+        businessName: account.businessName,
+        currentWebhookId: account.webhookId,
+        deleted: [] as string[],
+        errors: [] as string[],
+      };
+
+      try {
+        // Get all webhooks for this account
+        const webhooks = await this.platformService.getThumbtackWebhooks(user.userId, account.businessId);
+
+        // Find webhooks to delete (all except the current one)
+        const webhooksToDelete = webhooks.filter((w: any) => w.webhookID !== account.webhookId);
+
+        accountResult.totalWebhooks = webhooks.length;
+        accountResult.toDelete = webhooksToDelete.length;
+
+        // Delete each duplicate webhook
+        for (const webhook of webhooksToDelete) {
+          try {
+            await this.platformService.deleteThumbtackWebhook(user.userId, account.businessId, webhook.webhookID);
+            accountResult.deleted.push(webhook.webhookID);
+          } catch (err: any) {
+            accountResult.errors.push(`${webhook.webhookID}: ${err.message}`);
+          }
+        }
+
+        accountResult.status = accountResult.errors.length === 0 ? 'success' : 'partial';
+      } catch (error: any) {
+        accountResult.status = 'error';
+        accountResult.error = error.message;
+      }
+
+      results.push(accountResult);
+    }
+
+    const totalDeleted = results.reduce((sum, r) => sum + (r.deleted?.length || 0), 0);
+    const totalErrors = results.reduce((sum, r) => sum + (r.errors?.length || 0), 0);
+
+    return {
+      success: totalErrors === 0,
+      totalDeleted,
+      totalErrors,
+      accounts: results,
     };
   }
 
