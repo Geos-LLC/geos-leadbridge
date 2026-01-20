@@ -323,7 +323,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       city: location.city,
       state: location.state,
       category: request.category?.name,
-      status: this.mapThumbtackStatus(negotiation.status),
+      status: this.mapThumbtackStatus(negotiation.status, negotiation.chargeState),
       threadId: negotiation.negotiationID,
       createdAt: new Date(negotiation.createdAt || Date.now()),
       updatedAt: new Date(negotiation.createdAt || Date.now()),
@@ -634,14 +634,24 @@ export class ThumbtackAdapter implements IPlatformAdapter {
     };
   }
 
-  private mapThumbtackStatus(status: string): string {
-    // Return the raw status from Thumbtack without interpretation
-    // API returns status values like:
+  private mapThumbtackStatus(status: string, chargeState?: string): string {
+    // Thumbtack API status mapping with chargeState consideration
+    // API status values:
     // - "Open" = Not scheduled yet (lead is open/active)
     // - "Picked" = Scheduled/Hired (customer picked this pro)
     // - "Canceled" = No Hire (customer canceled or didn't hire)
     // - "Completed" = Job Done
-    // The UI labels (Not scheduled yet, Scheduled, Job Done, No Hire) are UI-friendly versions
+    //
+    // However, Thumbtack's API sometimes returns status: "Open" even when job is done.
+    // The chargeState field indicates the actual job completion:
+    // - "Charged" = Pro was charged, meaning job was completed
+    // - "Pending" = Waiting for charge
+    // - "Refunded" = Charge was refunded
+    //
+    // If status is "Open" but chargeState is "Charged", treat as Completed
+    if (status === 'Open' && chargeState === 'Charged') {
+      return 'Completed';
+    }
     return status || 'Open';
   }
 }
