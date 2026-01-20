@@ -48,12 +48,13 @@ export class WebhooksService {
     const now = Date.now();
 
     if (existing && (now - existing) < this.CACHE_TTL_MS) {
-      this.logger.log(`Duplicate webhook detected, skipping: ${cacheKey}`);
+      this.logger.log(`Duplicate webhook detected, skipping: ${cacheKey} (age: ${now - existing}ms)`);
       return true;
     }
 
     // Mark as being processed
     this.processingCache.set(cacheKey, now);
+    this.logger.log(`Processing new webhook: ${cacheKey}`);
     return false;
   }
 
@@ -64,11 +65,15 @@ export class WebhooksService {
     const secret = this.configService.get<string>('thumbtack.webhookSecret') || '';
     const adapter = this.platformFactory.getAdapter('thumbtack');
 
-    // Log webhook receipt for debugging
+    // Log webhook receipt for debugging - include businessId to identify which account
+    const businessId = payload?.data?.business?.businessID;
+    const negotiationId = payload?.data?.negotiationID;
     this.logger.log('Received Thumbtack webhook', {
       hasSignature: !!signature,
       hasSecret: !!secret,
       eventType: payload?.event?.eventType || payload?.event_type || 'unknown',
+      businessId,
+      negotiationId,
     });
 
     // Verify signature if both signature and secret are present
