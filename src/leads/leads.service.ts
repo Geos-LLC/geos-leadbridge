@@ -231,6 +231,7 @@ export class LeadsService {
   /**
    * Send a message to a lead
    * Also stores the sent message locally to ensure it appears even if webhook is delayed
+   * Uses account-specific credentials when available for multi-account support
    */
   async sendMessage(
     userId: string,
@@ -243,7 +244,19 @@ export class LeadsService {
       throw new NotFoundException('No conversation thread found for this lead');
     }
 
-    const credentials = await this.platformService.getCredentials(userId, lead.platform);
+    // Get account-specific credentials first, then fall back to platform credentials
+    let credentials: { accessToken: string; refreshToken?: string };
+    if (lead.businessId) {
+      const accountCreds = await this.platformService.getAccountCredentialsByBusinessId(userId, lead.platform, lead.businessId);
+      if (accountCreds) {
+        console.log(`[LeadsService] Using account-specific credentials for sending message (business: ${lead.businessId})`);
+        credentials = accountCreds;
+      } else {
+        credentials = await this.platformService.getCredentials(userId, lead.platform);
+      }
+    } else {
+      credentials = await this.platformService.getCredentials(userId, lead.platform);
+    }
     const adapter = this.platformFactory.getAdapter(lead.platform);
 
     // Send to Thumbtack
@@ -315,6 +328,7 @@ export class LeadsService {
 
   /**
    * Send a quote to a lead
+   * Uses account-specific credentials when available for multi-account support
    */
   async sendQuote(
     userId: string,
@@ -324,7 +338,19 @@ export class LeadsService {
   ): Promise<any> {
     const lead = await this.getLead(userId, leadId);
 
-    const credentials = await this.platformService.getCredentials(userId, lead.platform);
+    // Get account-specific credentials first, then fall back to platform credentials
+    let credentials: { accessToken: string; refreshToken?: string };
+    if (lead.businessId) {
+      const accountCreds = await this.platformService.getAccountCredentialsByBusinessId(userId, lead.platform, lead.businessId);
+      if (accountCreds) {
+        console.log(`[LeadsService] Using account-specific credentials for sending quote (business: ${lead.businessId})`);
+        credentials = accountCreds;
+      } else {
+        credentials = await this.platformService.getCredentials(userId, lead.platform);
+      }
+    } else {
+      credentials = await this.platformService.getCredentials(userId, lead.platform);
+    }
     const adapter = this.platformFactory.getAdapter(lead.platform);
 
     const quote = await adapter.sendQuote(credentials, lead.externalRequestId, {
@@ -363,30 +389,43 @@ export class LeadsService {
   /**
    * Sync lead status from Thumbtack API
    * Fetches fresh data from Thumbtack and updates local database
-   * Only works if connected to the lead's business account
+   * Uses account-specific credentials when available for multi-account support
    */
   async syncLeadStatus(userId: string, leadId: string): Promise<NormalizedLead> {
     const lead = await this.getLead(userId, leadId);
     console.log(`[LeadsService] syncLeadStatus - leadId: ${leadId}, negotiationId: ${lead.externalRequestId}`);
 
-    // Check if current connection matches the lead's business
-    const platform = await this.prisma.platform.findFirst({
-      where: {
-        userId,
-        platformName: lead.platform,
-        connected: true,
-      },
-    });
+    // Get account-specific credentials first, then fall back to platform credentials
+    let credentials: { accessToken: string; refreshToken?: string } | null = null;
+    if (lead.businessId) {
+      credentials = await this.platformService.getAccountCredentialsByBusinessId(userId, lead.platform, lead.businessId);
+      if (credentials) {
+        console.log(`[LeadsService] Using account-specific credentials for sync (business: ${lead.businessId})`);
+      }
+    }
 
-    const isConnectedToRightAccount = platform?.externalBusinessId === lead.businessId;
+    // Fall back to platform credentials
+    if (!credentials) {
+      // Check if current connection matches the lead's business
+      const platform = await this.prisma.platform.findFirst({
+        where: {
+          userId,
+          platformName: lead.platform,
+          connected: true,
+        },
+      });
 
-    if (!isConnectedToRightAccount) {
-      console.log(`[LeadsService] Not connected to lead's account, cannot sync status`);
-      return lead; // Return existing lead without sync
+      const isConnectedToRightAccount = platform?.externalBusinessId === lead.businessId;
+
+      if (!isConnectedToRightAccount) {
+        console.log(`[LeadsService] No credentials available for lead's account, cannot sync status`);
+        return lead; // Return existing lead without sync
+      }
+
+      credentials = await this.platformService.getCredentials(userId, lead.platform);
     }
 
     try {
-      const credentials = await this.platformService.getCredentials(userId, lead.platform);
       const adapter = this.platformFactory.getAdapter(lead.platform) as any;
 
       if (typeof adapter.getLead !== 'function') {
@@ -476,8 +515,9 @@ export class LeadsService {
   async importThumbtackNegotiation(userId: string, negotiationId: string, accountId?: string): Promise<{ lead: NormalizedLead; isNew: boolean }> {
     console.log(`[LeadsService] importThumbtackNegotiation - userId: ${userId}, negotiationId: ${negotiationId}, accountId: ${accountId}`);
 
-    // If accountId provided, verify it belongs to this user and get the businessId
+    // If accountId provided, verify it belongs to this user and get the businessId and credentials
     let targetBusinessId: string | undefined;
+    let accountCredentials: { accessToken: string; refreshToken?: string } | null = null;
     if (accountId) {
       const savedAccount = await this.prisma.savedAccount.findFirst({
         where: {
@@ -489,6 +529,16 @@ export class LeadsService {
       if (savedAccount) {
         targetBusinessId = savedAccount.businessId;
         console.log(`[LeadsService] Using saved account: ${savedAccount.businessName} (businessId: ${targetBusinessId})`);
+
+        // Get account-specific credentials
+        if (savedAccount.credentialsJson) {
+          try {
+            accountCredentials = EncryptionUtil.decryptObject(savedAccount.credentialsJson, this.encryptionKey);
+            console.log(`[LeadsService] Using account-specific credentials for import`);
+          } catch (err) {
+            console.warn(`[LeadsService] Failed to decrypt account credentials:`, err.message);
+          }
+        }
       } else {
         console.warn(`[LeadsService] Account ${accountId} not found for user ${userId}`);
       }
@@ -505,7 +555,13 @@ export class LeadsService {
     const isNew = !existingLead;
     console.log(`[LeadsService] Lead ${isNew ? 'is new' : 'already exists in DB'}${existingLead ? ` (owner: ${existingLead.userId})` : ''}`);
 
-    const credentials = await this.platformService.getCredentials(userId, 'thumbtack');
+    // Use account-specific credentials if available, otherwise fall back to platform credentials
+    let credentials: { accessToken: string; refreshToken?: string };
+    if (accountCredentials) {
+      credentials = accountCredentials;
+    } else {
+      credentials = await this.platformService.getCredentials(userId, 'thumbtack');
+    }
     const adapter = this.platformFactory.getAdapter('thumbtack') as any;
 
     // Fetch negotiation from Thumbtack API
@@ -534,8 +590,8 @@ export class LeadsService {
       throw new NotFoundException('Lead not found after import');
     }
 
-    // Also import messages for this negotiation
-    await this.importMessagesForNegotiation(userId, 'thumbtack', negotiationId, storedLead.customerName);
+    // Also import messages for this negotiation using account-specific credentials if available
+    await this.importMessagesForNegotiation(userId, 'thumbtack', negotiationId, storedLead.customerName, accountCredentials || undefined);
 
     return { lead: this.convertToNormalizedLead(storedLead), isNew };
   }
