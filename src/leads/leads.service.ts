@@ -1020,6 +1020,62 @@ export class LeadsService {
   }
 
   /**
+   * Migrate lead dates - reads createdAt from rawJson and updates the lead
+   * One-time migration to fix leads that were imported with wrong dates
+   */
+  async migrateLeadDates(userId: string): Promise<{ updated: number; skipped: number; errors: string[] }> {
+    console.log(`[LeadsService] Migrating lead dates for user: ${userId}`);
+
+    const leads = await this.prisma.lead.findMany({
+      where: { userId },
+      select: { id: true, rawJson: true, createdAt: true, customerName: true },
+    });
+
+    let updated = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (const lead of leads) {
+      try {
+        if (!lead.rawJson) {
+          skipped++;
+          continue;
+        }
+
+        const rawData = JSON.parse(lead.rawJson);
+        const originalCreatedAt = rawData.createdAt;
+
+        if (!originalCreatedAt) {
+          skipped++;
+          continue;
+        }
+
+        const newDate = new Date(originalCreatedAt);
+
+        // Only update if the date is different (more than 1 day difference)
+        const diffMs = Math.abs(lead.createdAt.getTime() - newDate.getTime());
+        const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+        if (diffDays > 1) {
+          await this.prisma.lead.update({
+            where: { id: lead.id },
+            data: { createdAt: newDate },
+          });
+          console.log(`[LeadsService] Updated ${lead.customerName}: ${lead.createdAt.toISOString()} -> ${newDate.toISOString()}`);
+          updated++;
+        } else {
+          skipped++;
+        }
+      } catch (err: any) {
+        errors.push(`${lead.id}: ${err.message}`);
+      }
+    }
+
+    console.log(`[LeadsService] Migration complete - updated: ${updated}, skipped: ${skipped}, errors: ${errors.length}`);
+    return { updated, skipped, errors };
+  }
+
+  /**
    * Preview bulk message for multiple leads
    * Returns personalized messages for each lead
    */

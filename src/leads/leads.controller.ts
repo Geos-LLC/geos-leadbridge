@@ -224,4 +224,14 @@ export class LeadsController {
       ...result,
     };
   }
+
+  /**
+   * One-time migration endpoint to fix createdAt dates for existing leads
+   * Reads the original createdAt from rawJson and updates the lead
+   */
+  @Post('migrate-dates')
+  async migrateDates(@CurrentUser() user: any) {
+    const result = await this.leadsService.migrateLeadDates(user.userId);
+    return result;
+  }
 }
