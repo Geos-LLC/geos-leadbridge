@@ -186,16 +186,17 @@ model Quote {
 // ==========================================
 
 model SavedAccount {
-  id           String   @id @default(uuid())
-  userId       String
-  platform     String   // "thumbtack"
-  businessId   String   // Platform's business ID
-  businessName String   // Display name
-  emailHint    String?  // Email used for this account (optional hint)
-  imageUrl     String?  // Business logo URL
-  webhookId    String?  // Webhook subscription ID for this business
-  lastUsedAt   DateTime @default(now())
-  createdAt    DateTime @default(now())
+  id              String   @id @default(uuid())
+  userId          String
+  platform        String   // "thumbtack"
+  businessId      String   // Platform's business ID
+  businessName    String   // Display name
+  emailHint       String?  // Email used for this account (optional hint)
+  imageUrl        String?  // Business logo URL
+  webhookId       String?  // Webhook subscription ID for this business
+  credentialsJson String?  // Encrypted: access_token, refresh_token for THIS account
+  lastUsedAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
 
   // Relationships
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

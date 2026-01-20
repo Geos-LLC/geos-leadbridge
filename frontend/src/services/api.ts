@@ -153,6 +153,16 @@ export const authApi = {
   },
 };
 
+// Health issue type from backend
+export interface HealthIssue {
+  code: 'token_expired' | 'no_webhooks' | 'not_connected' | 'token_invalid' | 'api_error';
+  severity: 'error' | 'warning';
+  title: string;
+  message: string;
+  action?: string;
+  actionLabel?: string;
+}
+
 // Platforms
 export const platformsApi = {
   getStatus: async (): Promise<{ platforms: Platform[] }> => {
@@ -168,6 +178,10 @@ export const platformsApi = {
     };
   }> => {
     const { data } = await api.get('/v1/platforms/connection');
+    return data;
+  },
+  getHealth: async (): Promise<{ healthy: boolean; issues: HealthIssue[] }> => {
+    const { data } = await api.get('/v1/platforms/health');
     return data;
   },
   getAuthUrl: async (): Promise<{ authUrl: string }> => {
@@ -229,7 +243,14 @@ export const thumbtackApi = {
     const { data } = await api.patch(`/v1/thumbtack/saved-accounts/${id}`, updates);
     return data;
   },
-  disconnectAccount: async (id: string): Promise<{ success: boolean }> => {
+  disconnectAccount: async (id: string): Promise<{
+    success: boolean;
+    webhookDeleted: boolean;
+    message: string;
+    errorCode?: 'token_expired' | 'token_revoked' | 'webhook_not_found' | 'network_error' | 'permission_denied' | 'unknown';
+    errorMessage?: string;
+    warning?: string;
+  }> => {
     const { data } = await api.post(`/v1/thumbtack/saved-accounts/${id}/disconnect`);
     return data;
   },
@@ -279,8 +300,8 @@ export const leadsApi = {
     const { data } = await api.post(`/v1/thumbtack/leads/${leadId}/message`, { message });
     return data;
   },
-  importNegotiation: async (negotiationId: string): Promise<{ lead: Lead; isNew: boolean; message: string }> => {
-    const { data } = await api.post(`/v1/thumbtack/negotiations/${negotiationId}/import`);
+  importNegotiation: async (negotiationId: string, accountId?: string): Promise<{ lead: Lead; isNew: boolean; message: string }> => {
+    const { data } = await api.post(`/v1/thumbtack/negotiations/${negotiationId}/import`, { accountId });
     return data;
   },
   syncLead: async (leadId: string): Promise<{ success: boolean; lead: Lead }> => {

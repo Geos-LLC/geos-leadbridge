@@ -4,18 +4,25 @@
  */
 
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { PlatformService } from '../platforms/platform.service';
 import { PlatformFactory } from '../platforms/platform.factory';
+import { EncryptionUtil } from '../common/utils/encryption.util';
 import { NormalizedLead } from '../common/dto/normalized.dto';
 
 @Injectable()
 export class LeadsService {
+  private readonly encryptionKey: string;
+
   constructor(
     private prisma: PrismaService,
     private platformService: PlatformService,
     private platformFactory: PlatformFactory,
-  ) {}
+    private configService: ConfigService,
+  ) {
+    this.encryptionKey = this.configService.get<string>('encryption.key') || 'default-32-char-encryption-key';
+  }
 
   /**
    * Get businesses for a user from a specific platform (Thumbtack)
@@ -464,9 +471,28 @@ export class LeadsService {
    * Import a single Thumbtack negotiation by ID
    * Returns { lead, isNew } to indicate if this was a new import or update
    * Also imports and stores all messages for the negotiation
+   * @param accountId - Optional saved account ID to associate the lead with the correct business
    */
-  async importThumbtackNegotiation(userId: string, negotiationId: string): Promise<{ lead: NormalizedLead; isNew: boolean }> {
-    console.log(`[LeadsService] importThumbtackNegotiation - userId: ${userId}, negotiationId: ${negotiationId}`);
+  async importThumbtackNegotiation(userId: string, negotiationId: string, accountId?: string): Promise<{ lead: NormalizedLead; isNew: boolean }> {
+    console.log(`[LeadsService] importThumbtackNegotiation - userId: ${userId}, negotiationId: ${negotiationId}, accountId: ${accountId}`);
+
+    // If accountId provided, verify it belongs to this user and get the businessId
+    let targetBusinessId: string | undefined;
+    if (accountId) {
+      const savedAccount = await this.prisma.savedAccount.findFirst({
+        where: {
+          id: accountId,
+          userId,
+          platform: 'thumbtack',
+        },
+      });
+      if (savedAccount) {
+        targetBusinessId = savedAccount.businessId;
+        console.log(`[LeadsService] Using saved account: ${savedAccount.businessName} (businessId: ${targetBusinessId})`);
+      } else {
+        console.warn(`[LeadsService] Account ${accountId} not found for user ${userId}`);
+      }
+    }
 
     // Check if lead already exists in DB (regardless of userId - could be from webhook or different user)
     const existingLead = await this.prisma.lead.findFirst({
@@ -485,6 +511,12 @@ export class LeadsService {
     // Fetch negotiation from Thumbtack API
     const lead = await adapter.getLead(credentials, negotiationId);
     console.log(`[LeadsService] Fetched lead from Thumbtack:`, JSON.stringify(lead));
+
+    // If we have a target businessId, verify the lead belongs to that business
+    if (targetBusinessId && lead.businessId && lead.businessId !== targetBusinessId) {
+      console.warn(`[LeadsService] Lead businessId (${lead.businessId}) doesn't match selected account (${targetBusinessId})`);
+      // Still proceed - the API response tells us the actual businessId
+    }
 
     // Store in database (upsert will update userId if different)
     await this.upsertLead(userId, lead);
@@ -510,18 +542,27 @@ export class LeadsService {
 
   /**
    * Import and store messages for a negotiation from the API
+   * @param accountCredentials - Optional account-specific credentials (for multi-login support)
    */
   private async importMessagesForNegotiation(
     userId: string,
     platform: string,
     negotiationId: string,
     customerName: string,
+    accountCredentials?: { accessToken: string; refreshToken?: string },
   ): Promise<number> {
     console.log(`[LeadsService] Importing messages for negotiation: ${negotiationId}`);
 
     try {
-      console.log(`[LeadsService] Getting credentials for user: ${userId}, platform: ${platform}`);
-      const credentials = await this.platformService.getCredentials(userId, platform);
+      // Use account-specific credentials if provided, otherwise fall back to platform credentials
+      let credentials: { accessToken: string; refreshToken?: string };
+      if (accountCredentials) {
+        console.log(`[LeadsService] Using account-specific credentials`);
+        credentials = accountCredentials;
+      } else {
+        console.log(`[LeadsService] Getting credentials for user: ${userId}, platform: ${platform}`);
+        credentials = await this.platformService.getCredentials(userId, platform);
+      }
       console.log(`[LeadsService] Got credentials, accessToken present: ${!!credentials.accessToken}`);
 
       const adapter = this.platformFactory.getAdapter(platform) as any;
@@ -764,28 +805,60 @@ export class LeadsService {
     // Clean up old synthetic messages (those with _initial suffix)
     const cleanedCount = await this.cleanupSyntheticMessages(conversation.id, lead.externalRequestId);
 
-    // Check if current connection matches the lead's business
-    const platform = await this.prisma.platform.findFirst({
+    // Check if user has a SavedAccount for this lead's business (with credentials)
+    const savedAccount = lead.businessId ? await this.prisma.savedAccount.findFirst({
       where: {
         userId,
-        platformName: lead.platform,
-        connected: true,
+        platform: lead.platform,
+        businessId: lead.businessId,
       },
-    });
+    }) : null;
 
-    const isConnectedToRightAccount = platform?.externalBusinessId === lead.businessId;
-    console.log(`[LeadsService] Connected to right account: ${isConnectedToRightAccount} (connected: ${platform?.externalBusinessId}, lead: ${lead.businessId})`);
+    // Try to get account-specific credentials first, then fall back to platform credentials
+    let accountCredentials: { accessToken: string; refreshToken?: string } | null = null;
+    if (savedAccount?.credentialsJson) {
+      try {
+        accountCredentials = EncryptionUtil.decryptObject(savedAccount.credentialsJson, this.encryptionKey);
+        console.log(`[LeadsService] Using account-specific credentials for ${savedAccount.businessName}`);
+      } catch (err) {
+        console.warn(`[LeadsService] Failed to decrypt account credentials:`, err.message);
+      }
+    }
+
+    // If no account credentials, check platform credentials as fallback
+    if (!accountCredentials) {
+      const platform = await this.prisma.platform.findFirst({
+        where: {
+          userId,
+          platformName: lead.platform,
+          connected: true,
+        },
+      });
+
+      if (platform?.credentialsJson) {
+        try {
+          accountCredentials = EncryptionUtil.decryptObject(platform.credentialsJson, this.encryptionKey);
+          console.log(`[LeadsService] Using platform credentials as fallback`);
+        } catch (err) {
+          console.warn(`[LeadsService] Failed to decrypt platform credentials:`, err.message);
+        }
+      }
+    }
+
+    const hasCredentials = !!accountCredentials;
+    console.log(`[LeadsService] Has credentials: ${hasCredentials} (savedAccount: ${savedAccount?.businessName || 'none'})`);
 
     let importedCount = 0;
 
-    // If connected to the right account, import messages from API
-    if (isConnectedToRightAccount) {
+    // If we have credentials, import messages from API
+    if (hasCredentials && accountCredentials) {
       try {
         importedCount = await this.importMessagesForNegotiation(
           userId,
           lead.platform,
           lead.externalRequestId,
           lead.customerName,
+          accountCredentials,
         );
         console.log(`[LeadsService] Imported ${importedCount} messages from API`);
       } catch (error) {
@@ -793,11 +866,11 @@ export class LeadsService {
         // Don't throw - return what we have
       }
     } else {
-      // Not connected to right account - just return current message count
+      // No credentials available - just return current message count
       const messageCount = await this.prisma.message.count({
         where: { conversationId: conversation.id },
       });
-      console.log(`[LeadsService] Not connected to lead's account. Current messages in DB: ${messageCount}`);
+      console.log(`[LeadsService] No credentials available. Current messages in DB: ${messageCount}`);
       importedCount = messageCount;
     }
 

@@ -292,8 +292,15 @@ export class PlatformService {
 
   /**
    * Disconnect webhooks for a saved account
+   * Returns detailed status about what happened
    */
-  async disconnectAccountWebhook(userId: string, accountId: string): Promise<{ success: boolean }> {
+  async disconnectAccountWebhook(userId: string, accountId: string): Promise<{
+    success: boolean;
+    webhookDeleted: boolean;
+    warning?: string;
+    errorCode?: 'token_expired' | 'token_revoked' | 'webhook_not_found' | 'network_error' | 'permission_denied' | 'unknown';
+    errorMessage?: string;
+  }> {
     // Get the saved account
     const account = await this.prisma.savedAccount.findFirst({
       where: {
@@ -304,8 +311,13 @@ export class PlatformService {
 
     if (!account || !account.webhookId) {
       console.log(`[PlatformService] No webhook to disconnect for account ${accountId}`);
-      return { success: true };
+      return { success: true, webhookDeleted: true };
     }
+
+    let webhookDeleted = false;
+    let errorCode: 'token_expired' | 'token_revoked' | 'webhook_not_found' | 'network_error' | 'permission_denied' | 'unknown' | undefined;
+    let errorMessage: string | undefined;
+    let warning: string | undefined;
 
     try {
       const credentials = await this.getCredentials(userId, account.platform);
@@ -314,18 +326,51 @@ export class PlatformService {
       // Delete the webhook from Thumbtack
       await adapter.deleteWebhook(credentials, account.businessId, account.webhookId);
       console.log(`[PlatformService] Deleted webhook ${account.webhookId} for business ${account.businessId}`);
-    } catch (err) {
+      webhookDeleted = true;
+    } catch (err: any) {
       console.warn(`[PlatformService] Could not delete webhook: ${err.message}`);
-      // Continue to clear local state even if API call fails
+
+      // Categorize the error
+      const errMsg = err.message?.toLowerCase() || '';
+      const statusCode = err.response?.status || err.status;
+
+      if (statusCode === 401 || errMsg.includes('unauthorized') || errMsg.includes('token') || errMsg.includes('expired')) {
+        errorCode = 'token_expired';
+        errorMessage = 'Your Thumbtack session has expired. The webhook may still be active on Thumbtack\'s side.';
+        warning = 'Thumbtack may continue sending messages until you reconnect and disconnect again, or manually remove the webhook from Thumbtack.';
+      } else if (statusCode === 403 || errMsg.includes('forbidden') || errMsg.includes('permission') || errMsg.includes('revoked')) {
+        errorCode = 'permission_denied';
+        errorMessage = 'Access to this account was revoked or permissions changed.';
+        warning = 'You may need to reconnect your Thumbtack account to manage webhooks.';
+      } else if (statusCode === 404 || errMsg.includes('not found')) {
+        // Webhook already deleted - this is actually fine
+        errorCode = 'webhook_not_found';
+        errorMessage = 'Webhook was already removed from Thumbtack.';
+        webhookDeleted = true; // It's gone, so effectively deleted
+      } else if (errMsg.includes('network') || errMsg.includes('timeout') || errMsg.includes('econnrefused')) {
+        errorCode = 'network_error';
+        errorMessage = 'Could not connect to Thumbtack. Please check your internet connection and try again.';
+        warning = 'The webhook may still be active. Try disconnecting again when the connection is restored.';
+      } else {
+        errorCode = 'unknown';
+        errorMessage = err.message || 'An unexpected error occurred while removing the webhook.';
+        warning = 'The webhook may still be active on Thumbtack\'s side.';
+      }
     }
 
-    // Clear the webhookId from saved account
+    // Clear the webhookId from saved account regardless of API result
     await this.prisma.savedAccount.update({
       where: { id: accountId },
       data: { webhookId: null },
     });
 
-    return { success: true };
+    return {
+      success: true,
+      webhookDeleted,
+      ...(errorCode && { errorCode }),
+      ...(errorMessage && { errorMessage }),
+      ...(warning && { warning }),
+    };
   }
 
   /**
@@ -366,6 +411,7 @@ export class PlatformService {
 
   /**
    * Save account info for multi-account switching
+   * Now also stores credentials per-account for multi-login support
    */
   async saveAccount(
     userId: string,
@@ -374,7 +420,14 @@ export class PlatformService {
     businessName: string,
     imageUrl?: string,
     emailHint?: string,
+    credentials?: { accessToken: string; refreshToken?: string; email?: string },
   ): Promise<void> {
+    // Encrypt credentials if provided
+    let encryptedCredentials: string | undefined;
+    if (credentials) {
+      encryptedCredentials = EncryptionUtil.encryptObject(credentials, this.encryptionKey);
+    }
+
     await this.prisma.savedAccount.upsert({
       where: {
         userId_platform_businessId: {
@@ -390,15 +443,56 @@ export class PlatformService {
         businessName,
         imageUrl,
         emailHint,
+        credentialsJson: encryptedCredentials,
         lastUsedAt: new Date(),
       },
       update: {
         businessName,
         imageUrl,
         emailHint,
+        // Only update credentials if provided (don't overwrite existing with undefined)
+        ...(encryptedCredentials && { credentialsJson: encryptedCredentials }),
         lastUsedAt: new Date(),
       },
     });
+  }
+
+  /**
+   * Get decrypted credentials for a specific saved account
+   */
+  async getAccountCredentials(userId: string, accountId: string): Promise<{ accessToken: string; refreshToken?: string; email?: string } | null> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: accountId, userId },
+    });
+
+    if (!account?.credentialsJson) {
+      return null;
+    }
+
+    try {
+      return EncryptionUtil.decryptObject(account.credentialsJson, this.encryptionKey);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Get decrypted credentials for a saved account by businessId
+   */
+  async getAccountCredentialsByBusinessId(userId: string, platform: string, businessId: string): Promise<{ accessToken: string; refreshToken?: string; email?: string } | null> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { userId, platform, businessId },
+    });
+
+    if (!account?.credentialsJson) {
+      return null;
+    }
+
+    try {
+      return EncryptionUtil.decryptObject(account.credentialsJson, this.encryptionKey);
+    } catch {
+      return null;
+    }
   }
 
   /**

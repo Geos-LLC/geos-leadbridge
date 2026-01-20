@@ -70,6 +70,8 @@ export function Messages() {
   const [searchQuery, setSearchQuery] = useState('');
   // Get account filter from URL params, default to 'all'
   const accountFilter = searchParams.get('account') || 'all';
+  // Get date filter from URL params, default to 'all' (no filter)
+  const dateFilter = searchParams.get('date') || 'all';
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Update account filter in URL
@@ -80,6 +82,26 @@ export function Messages() {
       searchParams.set('account', value);
     }
     setSearchParams(searchParams);
+  };
+
+  // Update date filter in URL
+  const setDateFilter = (value: string) => {
+    if (value === 'all') {
+      searchParams.delete('date');
+    } else {
+      searchParams.set('date', value);
+    }
+    setSearchParams(searchParams);
+  };
+
+  // Calculate date cutoff based on filter
+  const getDateCutoff = (filter: string): Date | null => {
+    if (filter === 'all') return null;
+    const now = new Date();
+    const months = parseInt(filter, 10);
+    if (isNaN(months)) return null;
+    const cutoff = new Date(now.getFullYear(), now.getMonth() - months, now.getDate());
+    return cutoff;
   };
 
   useEffect(() => {
@@ -314,16 +336,19 @@ export function Messages() {
     leadsFromSavedAccounts.some(lead => lead.businessId === account.businessId)
   );
 
-  // Filter leads by selected account and search query
+  // Filter leads by selected account, date, and search query
+  const dateCutoff = getDateCutoff(dateFilter);
   const filteredLeads = leadsFromSavedAccounts.filter(lead => {
     // Account filter
     const matchesAccount = accountFilter === 'all' || lead.businessId === accountFilter;
+    // Date filter - check if lead was created after the cutoff
+    const matchesDate = !dateCutoff || new Date(lead.createdAt) >= dateCutoff;
     // Name search (case-insensitive)
     const matchesSearch = !searchQuery.trim() ||
       lead.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       lead.category?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       lead.message?.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesAccount && matchesSearch;
+    return matchesAccount && matchesDate && matchesSearch;
   });
 
   if (loading) {
@@ -382,6 +407,24 @@ export function Messages() {
             </select>
           </div>
         )}
+
+        {/* Date Filter */}
+        <div className="account-filter">
+          <Calendar size={16} />
+          <select
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value)}
+            className="account-filter-select"
+          >
+            <option value="all">All Time</option>
+            <option value="1">Last 1 Month</option>
+            <option value="3">Last 3 Months</option>
+            <option value="6">Last 6 Months</option>
+            <option value="12">Last 1 Year</option>
+            <option value="24">Last 2 Years</option>
+            <option value="36">Last 3 Years</option>
+          </select>
+        </div>
 
         <div className="leads-list">
           {filteredLeads.length === 0 ? (

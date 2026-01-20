@@ -61,12 +61,11 @@ export class ThumbtackController {
         return { skippedAlreadyConnected };
       }
 
-      // Get the user's email from stored credentials (extracted from ID token during OAuth)
-      let userEmail: string | undefined;
+      // Get the full credentials from stored platform (to save per-account)
+      let credentials: { accessToken: string; refreshToken?: string; email?: string } | undefined;
       try {
-        const credentials = await this.platformService.getCredentials(userId, PlatformName.THUMBTACK);
-        userEmail = credentials.email;
-        console.log(`Got user email from credentials: ${userEmail || 'none'}`);
+        credentials = await this.platformService.getCredentials(userId, PlatformName.THUMBTACK);
+        console.log(`Got credentials for saving per-account (email: ${credentials.email || 'none'})`);
       } catch (err) {
         console.warn('Could not fetch credentials:', err.message);
       }
@@ -86,16 +85,17 @@ export class ThumbtackController {
             continue;
           }
 
-          // First save the account (so setupThumbtackWebhook can update it with webhookId)
+          // First save the account WITH credentials (so setupThumbtackWebhook can update it with webhookId)
           await this.platformService.saveAccount(
             userId,
             PlatformName.THUMBTACK,
             business.businessID,
             business.name,
             business.imageURL,
-            userEmail, // Email from ID token
+            credentials?.email, // Email from ID token
+            credentials, // Store credentials per-account for multi-login support
           );
-          console.log(`Account saved for business: ${business.name} (email: ${userEmail || 'none'})`);
+          console.log(`Account saved for business: ${business.name} (email: ${credentials?.email || 'none'}, with credentials: ${!!credentials})`);
 
           // Then setup webhook (this will update the saved account with webhookId)
           await this.platformService.setupThumbtackWebhook(userId, business.businessID);
@@ -397,13 +397,15 @@ export class ThumbtackController {
   /**
    * Import an existing lead/negotiation by ID from Thumbtack
    * Use this to import leads that existed before webhook registration
+   * @param accountId - Optional saved account ID to use for import (determines which business the negotiation belongs to)
    */
   @Post('negotiations/:negotiationId/import')
   async importNegotiation(
     @CurrentUser() user: any,
     @Param('negotiationId') negotiationId: string,
+    @Body('accountId') accountId?: string,
   ) {
-    const { lead, isNew } = await this.leadsService.importThumbtackNegotiation(user.userId, negotiationId);
+    const { lead, isNew } = await this.leadsService.importThumbtackNegotiation(user.userId, negotiationId, accountId);
 
     return {
       success: true,
@@ -516,17 +518,24 @@ export class ThumbtackController {
 
   /**
    * Disconnect webhooks for a saved account
+   * Returns detailed status about what happened (success, warnings, errors)
    */
   @Post('saved-accounts/:id/disconnect')
   async disconnectAccountWebhook(
     @CurrentUser() user: any,
     @Param('id') id: string,
   ) {
-    await this.platformService.disconnectAccountWebhook(user.userId, id);
+    const result = await this.platformService.disconnectAccountWebhook(user.userId, id);
 
     return {
-      success: true,
-      message: 'Webhook disconnected',
+      success: result.success,
+      webhookDeleted: result.webhookDeleted,
+      message: result.webhookDeleted
+        ? 'Webhook disconnected successfully'
+        : 'Webhook removed locally but may still be active on Thumbtack',
+      ...(result.errorCode && { errorCode: result.errorCode }),
+      ...(result.errorMessage && { errorMessage: result.errorMessage }),
+      ...(result.warning && { warning: result.warning }),
     };
   }
 

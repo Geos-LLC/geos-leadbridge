@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Download, X, Unlink, Trash2, Mail, Pencil, Check, RefreshCw } from 'lucide-react';
-import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
+import { platformsApi, thumbtackApi, leadsApi, type HealthIssue } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
+import { notify } from '../store/notificationStore';
 
 interface ImportResult {
   id: string;
@@ -30,6 +31,7 @@ export function Dashboard() {
   const [importing, setImporting] = useState(false);
   const [importResults, setImportResults] = useState<ImportResult[]>([]);
   const [showImportResults, setShowImportResults] = useState(false);
+  const [selectedImportAccountId, setSelectedImportAccountId] = useState<string | null>(null);
 
   // Account management state
   const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
@@ -43,6 +45,19 @@ export function Dashboard() {
 
   // Webhook disconnect/reconnect state
   const [togglingWebhookId, setTogglingWebhookId] = useState<string | null>(null);
+
+  // Disconnect warning modal state
+  const [disconnectWarning, setDisconnectWarning] = useState<{
+    accountId: string;
+    accountName: string;
+    errorCode: string;
+    errorMessage: string;
+    warning: string;
+  } | null>(null);
+
+  // Health check state - track issues and whether we've shown notifications
+  const [healthIssues, setHealthIssues] = useState<HealthIssue[]>([]);
+  const healthCheckDone = useRef(false);
 
   // Handle OAuth callback params
   useEffect(() => {
@@ -73,6 +88,7 @@ export function Dashboard() {
   useEffect(() => {
     loadPlatformStatus();
     loadSavedAccounts();
+    runHealthCheck();
   }, []);
 
   const loadSavedAccounts = async () => {
@@ -92,6 +108,30 @@ export function Dashboard() {
       console.error('Failed to load platform status:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Run health check and show toast notifications for any issues
+  const runHealthCheck = async () => {
+    // Only run once per session to avoid spamming notifications
+    if (healthCheckDone.current) return;
+
+    try {
+      const { issues } = await platformsApi.getHealth();
+      setHealthIssues(issues);
+
+      // Show toast notifications for each issue (only once)
+      healthCheckDone.current = true;
+
+      for (const issue of issues) {
+        if (issue.severity === 'error') {
+          notify.error(issue.title, issue.message, 0); // 0 = don't auto-dismiss errors
+        } else {
+          notify.warning(issue.title, issue.message, 10000); // warnings dismiss after 10s
+        }
+      }
+    } catch (err) {
+      console.error('Health check failed:', err);
     }
   };
 
@@ -174,11 +214,26 @@ export function Dashboard() {
     setTogglingWebhookId(account.id);
     setError('');
     try {
-      await thumbtackApi.disconnectAccount(account.id);
+      const result = await thumbtackApi.disconnectAccount(account.id);
+
+      // Update local state regardless of API result
       setSavedAccounts(savedAccounts.map(a =>
         a.id === account.id ? { ...a, webhookId: null } : a
       ));
-      setSuccess(`Webhook disconnected for ${account.businessName}`);
+
+      // Check if there was a warning (webhook not fully deleted from Thumbtack)
+      if (!result.webhookDeleted && result.errorCode && result.errorCode !== 'webhook_not_found') {
+        // Show warning modal with details and solutions
+        setDisconnectWarning({
+          accountId: account.id,
+          accountName: account.businessName,
+          errorCode: result.errorCode,
+          errorMessage: result.errorMessage || 'Could not remove webhook from Thumbtack.',
+          warning: result.warning || 'Thumbtack may continue sending messages.',
+        });
+      } else {
+        setSuccess(`Webhook disconnected for ${account.businessName}`);
+      }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to disconnect webhook');
     } finally {
@@ -216,6 +271,12 @@ export function Dashboard() {
   const handleImportNegotiations = async () => {
     console.log('[Dashboard] handleImportNegotiations called');
     console.log('[Dashboard] importIds value:', importIds);
+    console.log('[Dashboard] selectedImportAccountId:', selectedImportAccountId);
+
+    if (!selectedImportAccountId) {
+      setError('Please select an account to import from');
+      return;
+    }
 
     // Parse IDs - split by comma, newline, tab, or space
     const ids = importIds
@@ -239,9 +300,9 @@ export function Dashboard() {
     const results: ImportResult[] = [];
 
     for (const id of ids) {
-      console.log('[Dashboard] Importing negotiation:', id);
+      console.log('[Dashboard] Importing negotiation:', id, 'for account:', selectedImportAccountId);
       try {
-        const result = await leadsApi.importNegotiation(id);
+        const result = await leadsApi.importNegotiation(id, selectedImportAccountId);
         console.log('[Dashboard] Import success for', id, result);
         results.push({ id, success: true, isNew: result.isNew });
       } catch (err: any) {
@@ -308,6 +369,55 @@ export function Dashboard() {
           <span>{success}</span>
         </div>
       )}
+
+      {/* Health Issues Banner - persistent warning for critical issues */}
+      {healthIssues.filter(i => i.severity === 'error').map((issue) => (
+        <div
+          key={issue.code}
+          className="health-issue-banner"
+          style={{
+            background: issue.severity === 'error' ? '#fef2f2' : '#fffbeb',
+            border: `1px solid ${issue.severity === 'error' ? '#fecaca' : '#fde68a'}`,
+            borderRadius: '8px',
+            padding: '16px',
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '12px',
+          }}
+        >
+          <AlertCircle
+            size={20}
+            style={{ color: issue.severity === 'error' ? '#dc2626' : '#d97706', flexShrink: 0, marginTop: '2px' }}
+          />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 600, color: issue.severity === 'error' ? '#991b1b' : '#92400e', marginBottom: '4px' }}>
+              {issue.title}
+            </div>
+            <div style={{ fontSize: '14px', color: issue.severity === 'error' ? '#b91c1c' : '#a16207' }}>
+              {issue.message}
+            </div>
+          </div>
+          {issue.action === 'connect' && (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={handleConnectThumbtack}
+              disabled={connecting}
+            >
+              {issue.actionLabel || 'Connect'}
+            </button>
+          )}
+          {issue.action === 'reconnect' && (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={handleConnectThumbtack}
+              disabled={connecting}
+            >
+              {issue.actionLabel || 'Reconnect'}
+            </button>
+          )}
+        </div>
+      ))}
 
       <section className="dashboard-section">
         <h2>Platform Connections</h2>
@@ -472,16 +582,106 @@ export function Dashboard() {
         <section className="dashboard-section">
           <h2>Import Negotiations</h2>
           <p className="section-description">
-            Import existing negotiations by ID. Paste one or multiple IDs (comma, newline, or space separated).
+            Select an account and import existing negotiations by ID.
           </p>
 
           <div className="import-section">
+            {/* Account Selection for Import */}
+            <div className="import-account-selection" style={{ marginBottom: '16px' }}>
+              <label style={{ fontWeight: 500, marginBottom: '8px', display: 'block' }}>
+                Select account to import from:
+              </label>
+              <div className="import-account-cards" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                {savedAccounts.map((account) => {
+                  const isSelected = selectedImportAccountId === account.id;
+                  return (
+                    <div
+                      key={account.id}
+                      onClick={() => setSelectedImportAccountId(account.id)}
+                      style={{
+                        padding: '12px 16px',
+                        border: isSelected ? '2px solid var(--primary)' : '1px solid var(--border)',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        background: isSelected ? 'var(--primary-light, #f0f7ff)' : 'var(--surface)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {account.businessLogo ? (
+                        <img
+                          src={account.businessLogo}
+                          alt=""
+                          style={{ width: '28px', height: '28px', borderRadius: '4px', objectFit: 'cover' }}
+                        />
+                      ) : (
+                        <Building2 size={28} style={{ color: 'var(--text-secondary)' }} />
+                      )}
+                      <div>
+                        <div style={{ fontWeight: 500, fontSize: '14px' }}>{account.businessName}</div>
+                        {account.emailHint && (
+                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{account.emailHint}</div>
+                        )}
+                      </div>
+                      {isSelected && (
+                        <CheckCircle size={18} style={{ color: 'var(--primary)', marginLeft: 'auto' }} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Warning if no account selected */}
+            {!selectedImportAccountId && (
+              <div
+                style={{
+                  background: '#fef3c7',
+                  border: '1px solid #fde68a',
+                  borderRadius: '8px',
+                  padding: '12px',
+                  marginBottom: '16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                }}
+              >
+                <AlertCircle size={18} style={{ color: '#d97706', flexShrink: 0 }} />
+                <span style={{ fontSize: '14px', color: '#92400e' }}>
+                  Please select an account above before importing negotiations.
+                </span>
+              </div>
+            )}
+
+            {/* Selected account confirmation */}
+            {selectedImportAccountId && (
+              <div
+                style={{
+                  background: '#ecfdf5',
+                  border: '1px solid #a7f3d0',
+                  borderRadius: '8px',
+                  padding: '12px',
+                  marginBottom: '16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                }}
+              >
+                <CheckCircle size={18} style={{ color: '#059669', flexShrink: 0 }} />
+                <span style={{ fontSize: '14px', color: '#065f46' }}>
+                  Importing for: <strong>{savedAccounts.find(a => a.id === selectedImportAccountId)?.businessName}</strong>
+                </span>
+              </div>
+            )}
+
             <textarea
               className="import-textarea"
               placeholder="Paste negotiation IDs here...&#10;&#10;Example:&#10;abc123&#10;def456&#10;ghi789&#10;&#10;Or: abc123, def456, ghi789"
               value={importIds}
               onChange={(e) => setImportIds(e.target.value)}
-              disabled={importing}
+              disabled={importing || !selectedImportAccountId}
               rows={6}
             />
 
@@ -489,7 +689,7 @@ export function Dashboard() {
               <button
                 className="btn btn-primary"
                 onClick={handleImportNegotiations}
-                disabled={importing || !importIds.trim()}
+                disabled={importing || !importIds.trim() || !selectedImportAccountId}
               >
                 {importing ? (
                   <>
@@ -548,6 +748,80 @@ export function Dashboard() {
             )}
           </div>
         </section>
+      )}
+
+      {/* Disconnect Warning Modal */}
+      {disconnectWarning && (
+        <div className="modal-overlay" onClick={() => setDisconnectWarning(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>
+              <AlertCircle size={20} style={{ color: '#f59e0b', marginRight: '8px', verticalAlign: 'middle' }} />
+              Webhook Disconnect Warning
+            </h3>
+            <p><strong>{disconnectWarning.accountName}</strong></p>
+
+            <div className="warning-details" style={{ background: '#fef3c7', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
+              <p style={{ margin: '0 0 8px 0', fontWeight: 500, color: '#92400e' }}>
+                {disconnectWarning.errorMessage}
+              </p>
+              <p style={{ margin: 0, fontSize: '13px', color: '#a16207' }}>
+                {disconnectWarning.warning}
+              </p>
+            </div>
+
+            <div className="warning-solution" style={{ marginBottom: '16px' }}>
+              <p style={{ fontWeight: 500, marginBottom: '8px' }}>How to fix:</p>
+              {disconnectWarning.errorCode === 'token_expired' && (
+                <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '14px', color: 'var(--text-secondary)' }}>
+                  <li>Click "Reconnect" below to refresh your Thumbtack connection</li>
+                  <li>Then try disconnecting again</li>
+                </ul>
+              )}
+              {disconnectWarning.errorCode === 'permission_denied' && (
+                <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '14px', color: 'var(--text-secondary)' }}>
+                  <li>Your Thumbtack permissions may have changed</li>
+                  <li>Click "Reconnect" to re-authorize access</li>
+                  <li>Or manually remove the webhook from your Thumbtack account settings</li>
+                </ul>
+              )}
+              {disconnectWarning.errorCode === 'network_error' && (
+                <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '14px', color: 'var(--text-secondary)' }}>
+                  <li>Check your internet connection</li>
+                  <li>Try disconnecting again in a few moments</li>
+                </ul>
+              )}
+              {(disconnectWarning.errorCode === 'unknown' || disconnectWarning.errorCode === 'token_revoked') && (
+                <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '14px', color: 'var(--text-secondary)' }}>
+                  <li>Try reconnecting your Thumbtack account</li>
+                  <li>Or contact support if the issue persists</li>
+                </ul>
+              )}
+            </div>
+
+            <div className="modal-actions">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setDisconnectWarning(null)}
+              >
+                Close
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  // Find the account and trigger reconnect
+                  const account = savedAccounts.find(a => a.id === disconnectWarning.accountId);
+                  if (account) {
+                    setDisconnectWarning(null);
+                    handleReconnectWebhook(account);
+                  }
+                }}
+              >
+                <RefreshCw size={16} style={{ marginRight: '6px' }} />
+                Reconnect Account
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Remove Account Confirmation Modal */}
