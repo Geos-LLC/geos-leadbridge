@@ -592,6 +592,11 @@ body {
   color: white;
 }
 
+.account-status-badge.error {
+  background: rgba(220, 38, 38, 0.95);
+  color: white;
+}
+
 /* Secondary subtle button style */
 .btn-secondary-subtle {
   background: transparent;
