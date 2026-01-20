@@ -287,6 +287,8 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       // Log raw status from Thumbtack API for debugging
       const data = response.data;
       this.logger.log(`[getLead] Raw negotiation from API - status: "${data?.status}", chargeState: "${data?.chargeState}", negotiationId: ${negotiationId}`);
+      // Log full response to see if there's appointment/schedule data
+      this.logger.log(`[getLead] Full negotiation data keys: ${Object.keys(data || {}).join(', ')}`);
 
       return this.normalizeNegotiation(response.data);
     } catch (error) {
@@ -635,23 +637,24 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   }
 
   private mapThumbtackStatus(status: string, chargeState?: string): string {
-    // Thumbtack API status mapping with chargeState consideration
+    // Thumbtack API status mapping
     // API status values:
-    // - "Open" = Not scheduled yet (lead is open/active)
-    // - "Picked" = Scheduled/Hired (customer picked this pro)
+    // - "Open" = Active lead (could be "Not scheduled yet" OR "Scheduled" in UI)
+    // - "Picked" = Customer hired this pro
     // - "Canceled" = No Hire (customer canceled or didn't hire)
     // - "Completed" = Job Done
     //
-    // However, Thumbtack's API sometimes returns status: "Open" even when job is done.
-    // The chargeState field indicates the actual job completion:
-    // - "Charged" = Pro was charged, meaning job was completed
-    // - "Pending" = Waiting for charge
+    // Note: Thumbtack's API "status" field doesn't distinguish between
+    // "Not scheduled yet" and "Scheduled" - both appear as "Open".
+    // The scheduling info may be in a different field (appointment/schedule data).
+    //
+    // chargeState values:
+    // - "Charged" = Pro was charged for the lead (happens when responding)
+    // - "Pending" = Not yet charged
     // - "Refunded" = Charge was refunded
     //
-    // If status is "Open" but chargeState is "Charged", treat as Completed
-    if (status === 'Open' && chargeState === 'Charged') {
-      return 'Completed';
-    }
+    // We pass through the status as-is for now.
+    // TODO: Investigate if there's an appointment/schedule field to detect "Scheduled" status
     return status || 'Open';
   }
 }
