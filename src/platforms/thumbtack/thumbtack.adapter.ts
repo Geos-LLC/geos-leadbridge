@@ -284,34 +284,6 @@ export class ThumbtackAdapter implements IPlatformAdapter {
         headers: { Authorization: `Bearer ${credentials.accessToken}` },
       });
 
-      // Log raw status from Thumbtack API for debugging
-      const data = response.data;
-      this.logger.log(`[getLead] Raw negotiation from API - status: "${data?.status}", chargeState: "${data?.chargeState}", negotiationId: ${negotiationId}`);
-      // Log full response to see if there's appointment/schedule data
-      this.logger.log(`[getLead] Full negotiation data keys: ${Object.keys(data || {}).join(', ')}`);
-      // Log nested object keys to find scheduling fields
-      if (data?.request) {
-        this.logger.log(`[getLead] request keys: ${Object.keys(data.request).join(', ')}`);
-        // Log proposedTimes - this might contain scheduling info
-        if (data.request.proposedTimes) {
-          this.logger.log(`[getLead] request.proposedTimes: ${JSON.stringify(data.request.proposedTimes)}`);
-        }
-        // Log request.schedule or similar if exists
-        if (data.request.schedule) this.logger.log(`[getLead] request.schedule: ${JSON.stringify(data.request.schedule)}`);
-        if (data.request.appointment) this.logger.log(`[getLead] request.appointment: ${JSON.stringify(data.request.appointment)}`);
-        if (data.request.scheduledAt) this.logger.log(`[getLead] request.scheduledAt: ${data.request.scheduledAt}`);
-        if (data.request.timing) this.logger.log(`[getLead] request.timing: ${JSON.stringify(data.request.timing)}`);
-      }
-      if (data?.estimate) {
-        this.logger.log(`[getLead] estimate keys: ${Object.keys(data.estimate).join(', ')}`);
-      }
-      // Look for any appointment/schedule related fields anywhere in the response
-      const jsonStr = JSON.stringify(data);
-      if (jsonStr.includes('schedule') || jsonStr.includes('appointment') || jsonStr.includes('Schedule') || jsonStr.includes('Appointment')) {
-        this.logger.log(`[getLead] Found schedule/appointment keyword in response - dumping full JSON`);
-        this.logger.log(`[getLead] Full JSON: ${jsonStr}`);
-      }
-
       return this.normalizeNegotiation(response.data);
     } catch (error) {
       this.logger.error('Error fetching negotiation:', error.response?.data || error.message);
@@ -658,25 +630,23 @@ export class ThumbtackAdapter implements IPlatformAdapter {
     };
   }
 
-  private mapThumbtackStatus(status: string, chargeState?: string): string {
-    // Thumbtack API status mapping
-    // API status values:
-    // - "Open" = Active lead (could be "Not scheduled yet" OR "Scheduled" in UI)
-    // - "Picked" = Customer hired this pro
-    // - "Canceled" = No Hire (customer canceled or didn't hire)
-    // - "Completed" = Job Done
+  private mapThumbtackStatus(status: string, _chargeState?: string): string {
+    // Thumbtack Partner API status mapping (as of Jan 2026)
     //
-    // Note: Thumbtack's API "status" field doesn't distinguish between
-    // "Not scheduled yet" and "Scheduled" - both appear as "Open".
-    // The scheduling info may be in a different field (appointment/schedule data).
+    // API returns only 4 status values:
+    // - "Open" = Active lead (includes "Not scheduled yet", "Scheduled" in UI)
+    // - "Picked" = Customer hired this pro (includes "Hired", "Job done" in UI)
+    // - "Canceled" = No Hire
+    // - "Completed" = (rarely seen, may not be used)
     //
-    // chargeState values:
-    // - "Charged" = Pro was charged for the lead (happens when responding)
-    // - "Pending" = Not yet charged
-    // - "Refunded" = Charge was refunded
+    // LIMITATION: Thumbtack's Partner API does NOT expose the granular UI statuses.
+    // When a pro marks a lead as "Scheduled" or "Job done" in Thumbtack's UI,
+    // the API still returns "Open" or "Picked" respectively.
+    // This is a known API limitation - emailed Thumbtack support for clarification.
     //
-    // We pass through the status as-is for now.
-    // TODO: Investigate if there's an appointment/schedule field to detect "Scheduled" status
+    // chargeState ("Charged", "Pending", "Refunded") indicates billing, not job status.
+    //
+    // We pass through the API status as-is.
     return status || 'Open';
   }
 }
