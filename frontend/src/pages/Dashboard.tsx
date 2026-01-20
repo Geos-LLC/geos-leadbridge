@@ -59,6 +59,13 @@ export function Dashboard() {
   const [healthIssues, setHealthIssues] = useState<HealthIssue[]>([]);
   const healthCheckDone = useRef(false);
 
+  // Session expired state - track which account needs reconnection
+  const [sessionExpiredAccount, setSessionExpiredAccount] = useState<{
+    id: string;
+    businessName: string;
+    emailHint?: string;
+  } | null>(null);
+
   // Handle OAuth callback params
   useEffect(() => {
     const connected = searchParams.get('connected');
@@ -299,6 +306,8 @@ export function Dashboard() {
 
     const results: ImportResult[] = [];
 
+    let sessionExpired = false;
+
     for (const id of ids) {
       console.log('[Dashboard] Importing negotiation:', id, 'for account:', selectedImportAccountId);
       try {
@@ -307,10 +316,19 @@ export function Dashboard() {
         results.push({ id, success: true, isNew: result.isNew });
       } catch (err: any) {
         console.error('[Dashboard] Import failed for', id, err);
+        const errorMsg = err.response?.data?.message || 'Failed to import';
+
+        // Check if it's a session expired error
+        if (errorMsg.toLowerCase().includes('session') ||
+            errorMsg.toLowerCase().includes('reconnect') ||
+            errorMsg.toLowerCase().includes('expired')) {
+          sessionExpired = true;
+        }
+
         results.push({
           id,
           success: false,
-          error: err.response?.data?.message || 'Failed to import',
+          error: errorMsg,
         });
       }
       // Update results as we go
@@ -323,7 +341,10 @@ export function Dashboard() {
     const updatedCount = results.filter(r => r.success && !r.isNew).length;
     const failCount = results.filter(r => !r.success).length;
 
-    if (newCount > 0 && updatedCount === 0 && failCount === 0) {
+    if (sessionExpired) {
+      // Show session expired error with reconnect option - handled by sessionExpiredAccount state
+      setSessionExpiredAccount(savedAccounts.find(a => a.id === selectedImportAccountId) || null);
+    } else if (newCount > 0 && updatedCount === 0 && failCount === 0) {
       setSuccess(`Successfully imported ${newCount} new negotiation(s)`);
       setImportIds('');
     } else if (newCount > 0 || updatedCount > 0) {
@@ -367,6 +388,64 @@ export function Dashboard() {
         <div className="success-message">
           <CheckCircle size={18} />
           <span>{success}</span>
+        </div>
+      )}
+
+      {/* Session Expired Banner - shows when import fails due to expired token */}
+      {sessionExpiredAccount && (
+        <div
+          style={{
+            background: '#fef2f2',
+            border: '2px solid #f87171',
+            borderRadius: '8px',
+            padding: '16px 20px',
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '16px',
+            boxShadow: '0 2px 8px rgba(239, 68, 68, 0.15)',
+          }}
+        >
+          <AlertCircle size={24} style={{ color: '#dc2626', flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 600, fontSize: '16px', color: '#991b1b', marginBottom: '4px' }}>
+              Session Expired - {sessionExpiredAccount.businessName}
+            </div>
+            <div style={{ fontSize: '14px', color: '#b91c1c' }}>
+              {sessionExpiredAccount.emailHint
+                ? `Please log in with ${sessionExpiredAccount.emailHint} to reconnect this account.`
+                : 'Please log in to reconnect this account.'}
+            </div>
+          </div>
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              setSessionExpiredAccount(null);
+              handleReconnectWebhook(sessionExpiredAccount);
+            }}
+            disabled={connecting}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            {connecting ? (
+              <>
+                <Loader2 className="spinner" size={16} />
+                Reconnecting...
+              </>
+            ) : (
+              <>
+                <RefreshCw size={16} style={{ marginRight: '6px' }} />
+                Reconnect Now
+              </>
+            )}
+          </button>
+          <button
+            className="btn-icon btn-secondary-subtle"
+            onClick={() => setSessionExpiredAccount(null)}
+            title="Dismiss"
+            style={{ flexShrink: 0 }}
+          >
+            <X size={18} />
+          </button>
         </div>
       )}
 
