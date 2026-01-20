@@ -74,6 +74,10 @@ function getErrorDetails(error: AxiosError<any>): { title: string; message: stri
 
   // Bad request (validation errors)
   if (status === 400) {
+    // Don't show toast for login-required errors - Dashboard handles these with a banner
+    if (errorMessage && errorMessage.toLowerCase().includes('login required')) {
+      return null;
+    }
     return {
       title: 'Invalid Request',
       message: errorMessage || 'The request was invalid. Please check your input.',

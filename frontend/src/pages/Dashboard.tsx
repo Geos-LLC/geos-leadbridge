@@ -316,13 +316,17 @@ export function Dashboard() {
         results.push({ id, success: true, isNew: result.isNew });
       } catch (err: any) {
         console.error('[Dashboard] Import failed for', id, err);
-        const errorMsg = err.response?.data?.message || 'Failed to import';
+        console.log('[Dashboard] err.response?.data:', err.response?.data);
+        // NestJS BadRequestException returns { message: "...", statusCode: 400, error: "Bad Request" }
+        const errorMsg = err.response?.data?.message || err.response?.data?.error || 'Failed to import';
+        console.log('[Dashboard] Extracted errorMsg:', errorMsg);
 
         // Check if it's a login required error (token expired)
         if (errorMsg.toLowerCase().includes('session') ||
             errorMsg.toLowerCase().includes('reconnect') ||
             errorMsg.toLowerCase().includes('expired') ||
             errorMsg.toLowerCase().includes('login required')) {
+          console.log('[Dashboard] Detected login required error!');
           sessionExpired = true;
         }
 
