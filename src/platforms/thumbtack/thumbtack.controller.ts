@@ -80,7 +80,15 @@ export class ThumbtackController {
           );
 
           if (existingAccount && existingAccount.webhookId) {
-            console.log(`Business ${business.name} (${business.businessID}) already has active webhook - skipping`);
+            console.log(`Business ${business.name} (${business.businessID}) already has active webhook - updating credentials only`);
+            // Update credentials for the existing account (token refresh for import)
+            if (credentials) {
+              await this.platformService.updateAccountCredentials(
+                existingAccount.id,
+                credentials,
+              );
+              console.log(`Updated credentials for existing account: ${business.name}`);
+            }
             skippedAlreadyConnected.push(business.name);
             continue;
           }

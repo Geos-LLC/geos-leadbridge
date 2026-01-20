@@ -77,7 +77,10 @@ export function Dashboard() {
     if (connected === 'thumbtack') {
       // Check if any accounts were skipped because they're already connected
       if (warning === 'already_connected' && skippedAccounts) {
-        setError(`The following account(s) already have active webhooks and were skipped: ${skippedAccounts}. To reconnect, first disconnect the webhook from the existing connection.`);
+        // Tokens were refreshed, only webhook setup was skipped
+        setSuccess(`Login refreshed for ${skippedAccounts}. You can now import leads.`);
+        // Clear the session expired banner since we just logged in
+        setSessionExpiredAccount(null);
       } else {
         setSuccess('Thumbtack account connected successfully!');
       }

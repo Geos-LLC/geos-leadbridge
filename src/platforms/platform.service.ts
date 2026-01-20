@@ -504,6 +504,24 @@ export class PlatformService {
   }
 
   /**
+   * Update credentials for an existing saved account (e.g., after token refresh)
+   */
+  async updateAccountCredentials(
+    accountId: string,
+    credentials: { accessToken: string; refreshToken?: string; email?: string },
+  ): Promise<void> {
+    const encryptedCredentials = EncryptionUtil.encryptObject(credentials, this.encryptionKey);
+
+    await this.prisma.savedAccount.update({
+      where: { id: accountId },
+      data: {
+        credentialsJson: encryptedCredentials,
+        lastUsedAt: new Date(),
+      },
+    });
+  }
+
+  /**
    * Get decrypted credentials for a saved account by businessId
    */
   async getAccountCredentialsByBusinessId(userId: string, platform: string, businessId: string): Promise<{ accessToken: string; refreshToken?: string; email?: string } | null> {
