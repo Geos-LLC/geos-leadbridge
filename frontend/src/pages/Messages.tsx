@@ -118,42 +118,52 @@ export function Messages() {
     setSearchParams(searchParams);
   };
 
-  // Calculate date range based on filter (format: "YYYY-MM" for specific month)
-  const getDateRange = (filter: string): { start: Date; end: Date } | null => {
+  // Parse date filter to get year and month (format: "YYYY-MM")
+  const parseDateFilter = (filter: string): { year: number; month: number } | null => {
     if (filter === 'all') return null;
-    // Parse YYYY-MM format
     const match = filter.match(/^(\d{4})-(\d{2})$/);
     if (!match) return null;
-    const year = parseInt(match[1], 10);
-    const month = parseInt(match[2], 10) - 1; // JS months are 0-indexed
-    // Use UTC to avoid timezone issues
-    const start = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
-    const end = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999)); // Last day of month
-    return { start, end };
+    return {
+      year: parseInt(match[1], 10),
+      month: parseInt(match[2], 10) - 1, // JS months are 0-indexed
+    };
   };
 
-  // Generate month options based on actual leads data
+  // Generate all months from oldest lead date to current month
   const getMonthOptionsFromLeads = (leadsList: Lead[]): { value: string; label: string }[] => {
     if (leadsList.length === 0) return [];
 
-    // Get unique months from leads
-    const monthsSet = new Set<string>();
+    // Find the oldest lead date
+    let oldestDate = new Date();
     leadsList.forEach(lead => {
       const date = new Date(lead.createdAt);
-      const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      monthsSet.add(value);
+      if (date < oldestDate) {
+        oldestDate = date;
+      }
     });
 
-    // Convert to array and sort descending (newest first)
-    const months = Array.from(monthsSet).sort((a, b) => b.localeCompare(a));
+    // Generate all months from oldest lead to now
+    const options: { value: string; label: string }[] = [];
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const startYear = oldestDate.getFullYear();
+    const startMonth = oldestDate.getMonth();
 
-    // Convert to options with labels
-    return months.map(value => {
-      const [year, month] = value.split('-').map(Number);
-      const date = new Date(year, month - 1, 1);
-      const label = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      return { value, label };
-    });
+    // Loop from current month back to oldest month
+    for (let year = currentYear; year >= startYear; year--) {
+      const monthStart = year === currentYear ? currentMonth : 11;
+      const monthEnd = year === startYear ? startMonth : 0;
+
+      for (let month = monthStart; month >= monthEnd; month--) {
+        const value = `${year}-${String(month + 1).padStart(2, '0')}`;
+        const date = new Date(year, month, 1);
+        const label = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        options.push({ value, label });
+      }
+    }
+
+    return options;
   };
 
   useEffect(() => {
@@ -526,20 +536,18 @@ export function Messages() {
   const monthOptions = getMonthOptionsFromLeads(leadsFromSavedAccounts);
 
   // Filter leads by selected account, date, and search query
-  const dateRange = getDateRange(dateFilter);
+  const parsedDateFilter = parseDateFilter(dateFilter);
   const filteredLeads = leadsFromSavedAccounts.filter(lead => {
     // Account filter
     const matchesAccount = accountFilter === 'all' || lead.businessId === accountFilter;
     // Date filter - check if lead was created within the selected month
     let matchesDate = true;
-    if (dateRange) {
+    if (parsedDateFilter) {
       const leadDate = new Date(lead.createdAt);
       // Compare using year and month to avoid timezone issues
       const leadYear = leadDate.getFullYear();
       const leadMonth = leadDate.getMonth();
-      const startYear = dateRange.start.getUTCFullYear();
-      const startMonth = dateRange.start.getUTCMonth();
-      matchesDate = leadYear === startYear && leadMonth === startMonth;
+      matchesDate = leadYear === parsedDateFilter.year && leadMonth === parsedDateFilter.month;
     }
     // Name search (case-insensitive)
     const matchesSearch = !searchQuery.trim() ||
