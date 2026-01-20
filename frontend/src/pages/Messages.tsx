@@ -126,22 +126,34 @@ export function Messages() {
     if (!match) return null;
     const year = parseInt(match[1], 10);
     const month = parseInt(match[2], 10) - 1; // JS months are 0-indexed
-    const start = new Date(year, month, 1);
-    const end = new Date(year, month + 1, 0, 23, 59, 59, 999); // Last day of month
+    // Use UTC to avoid timezone issues
+    const start = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+    const end = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999)); // Last day of month
     return { start, end };
   };
 
-  // Generate month options for the last 24 months
-  const getMonthOptions = (): { value: string; label: string }[] => {
-    const options: { value: string; label: string }[] = [];
-    const now = new Date();
-    for (let i = 0; i < 24; i++) {
-      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+  // Generate month options based on actual leads data
+  const getMonthOptionsFromLeads = (leadsList: Lead[]): { value: string; label: string }[] => {
+    if (leadsList.length === 0) return [];
+
+    // Get unique months from leads
+    const monthsSet = new Set<string>();
+    leadsList.forEach(lead => {
+      const date = new Date(lead.createdAt);
       const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      monthsSet.add(value);
+    });
+
+    // Convert to array and sort descending (newest first)
+    const months = Array.from(monthsSet).sort((a, b) => b.localeCompare(a));
+
+    // Convert to options with labels
+    return months.map(value => {
+      const [year, month] = value.split('-').map(Number);
+      const date = new Date(year, month - 1, 1);
       const label = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      options.push({ value, label });
-    }
-    return options;
+      return { value, label };
+    });
   };
 
   useEffect(() => {
@@ -510,15 +522,25 @@ export function Messages() {
     leadsFromSavedAccounts.some(lead => lead.businessId === account.businessId)
   );
 
+  // Generate month options from actual leads data
+  const monthOptions = getMonthOptionsFromLeads(leadsFromSavedAccounts);
+
   // Filter leads by selected account, date, and search query
   const dateRange = getDateRange(dateFilter);
-  const monthOptions = getMonthOptions();
   const filteredLeads = leadsFromSavedAccounts.filter(lead => {
     // Account filter
     const matchesAccount = accountFilter === 'all' || lead.businessId === accountFilter;
     // Date filter - check if lead was created within the selected month
-    const leadDate = new Date(lead.createdAt);
-    const matchesDate = !dateRange || (leadDate >= dateRange.start && leadDate <= dateRange.end);
+    let matchesDate = true;
+    if (dateRange) {
+      const leadDate = new Date(lead.createdAt);
+      // Compare using year and month to avoid timezone issues
+      const leadYear = leadDate.getFullYear();
+      const leadMonth = leadDate.getMonth();
+      const startYear = dateRange.start.getUTCFullYear();
+      const startMonth = dateRange.start.getUTCMonth();
+      matchesDate = leadYear === startYear && leadMonth === startMonth;
+    }
     // Name search (case-insensitive)
     const matchesSearch = !searchQuery.trim() ||
       lead.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
