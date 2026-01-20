@@ -135,9 +135,9 @@ export function Dashboard() {
 
       for (const issue of issues) {
         if (issue.severity === 'error') {
-          notify.error(issue.title, issue.message, 2000); // auto-dismiss after 2 seconds
+          notify.error(issue.title, issue.message, 3000); // auto-dismiss after 3 seconds
         } else {
-          notify.warning(issue.title, issue.message, 2000); // auto-dismiss after 2 seconds
+          notify.warning(issue.title, issue.message, 3000); // auto-dismiss after 3 seconds
         }
       }
     } catch (err) {
@@ -310,6 +310,7 @@ export function Dashboard() {
     const results: ImportResult[] = [];
 
     let sessionExpired = false;
+    let wrongAccount = false;
 
     for (const id of ids) {
       console.log('[Dashboard] Importing negotiation:', id, 'for account:', selectedImportAccountId);
@@ -333,6 +334,13 @@ export function Dashboard() {
           sessionExpired = true;
         }
 
+        // Check if it's a wrong account error
+        if (errorMsg.toLowerCase().includes('wrong account') ||
+            errorMsg.toLowerCase().includes('different thumbtack business')) {
+          console.log('[Dashboard] Detected wrong account error!');
+          wrongAccount = true;
+        }
+
         results.push({
           id,
           success: false,
@@ -352,6 +360,9 @@ export function Dashboard() {
     if (sessionExpired) {
       // Show session expired error with reconnect option - handled by sessionExpiredAccount state
       setSessionExpiredAccount(savedAccounts.find(a => a.id === selectedImportAccountId) || null);
+    } else if (wrongAccount) {
+      // Show clear error about wrong account selection
+      setError('Wrong account selected. These leads belong to a different Thumbtack business. Please select the correct account from the dropdown.');
     } else if (newCount > 0 && updatedCount === 0 && failCount === 0) {
       setSuccess(`Successfully imported ${newCount} new negotiation(s)`);
       setImportIds('');
