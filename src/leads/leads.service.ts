@@ -120,14 +120,13 @@ export class LeadsService {
 
   /**
    * Get lead from cached database
+   * Returns all leads (no limit) to support date filtering across full history
    */
   async getCachedLeads(
     userId: string,
     filters?: { platform?: string; status?: string; businessId?: string; limit?: number },
   ) {
-    console.log(`[LeadsService] getCachedLeads - userId: ${userId}, filters:`, filters);
-
-    const leads = await this.prisma.lead.findMany({
+    const queryOptions: any = {
       where: {
         userId,
         ...(filters?.platform && { platform: filters.platform }),
@@ -142,26 +141,15 @@ export class LeadsService {
         },
       },
       orderBy: { createdAt: 'desc' },
-      take: filters?.limit || 50,
-    });
+    };
 
-    console.log(`[LeadsService] getCachedLeads found ${leads.length} leads in DB`);
+    // Only apply limit if explicitly specified
+    // Note: We don't use a default limit to allow date filtering across all leads
+    if (filters?.limit) {
+      queryOptions.take = filters.limit;
+    }
 
-    // Debug: also check how many leads exist total for this user (without filters)
-    const totalLeads = await this.prisma.lead.count({ where: { userId } });
-    console.log(`[LeadsService] Total leads for user ${userId}: ${totalLeads}`);
-
-    // Debug: show businessIds of all leads for this user
-    const allUserLeads = await this.prisma.lead.findMany({
-      where: { userId },
-      select: { id: true, businessId: true, customerName: true },
-    });
-    console.log(`[LeadsService] All leads for user with their businessIds:`,
-      allUserLeads.map(l => ({ id: l.id.slice(0, 8), businessId: l.businessId, name: l.customerName })));
-
-    // Debug: check if there are ANY leads in the database
-    const allLeadsCount = await this.prisma.lead.count();
-    console.log(`[LeadsService] Total leads in entire DB: ${allLeadsCount}`);
+    const leads = await this.prisma.lead.findMany(queryOptions);
 
     return leads.map((lead) => this.convertToNormalizedLead(lead));
   }
@@ -469,6 +457,7 @@ export class LeadsService {
    * Store/update lead in database
    * Note: threadId is NOT set here because it references Conversation.id (foreign key)
    * The negotiationID is stored in externalRequestId instead
+   * Uses the original createdAt from the platform (Thumbtack) if available
    */
   private async upsertLead(userId: string, lead: NormalizedLead): Promise<void> {
     await this.prisma.lead.upsert({
@@ -495,6 +484,8 @@ export class LeadsService {
         status: lead.status,
         // threadId intentionally NOT set - it's a FK to Conversation table
         rawJson: JSON.stringify(lead.raw),
+        // Use original createdAt from platform if available
+        createdAt: lead.createdAt || new Date(),
       },
       update: {
         userId, // Update userId in case lead was imported by different user before
@@ -511,6 +502,8 @@ export class LeadsService {
         status: lead.status,
         // threadId intentionally NOT updated - it's a FK to Conversation table
         rawJson: JSON.stringify(lead.raw),
+        // Update createdAt to use original platform date (in case it was imported with wrong date before)
+        createdAt: lead.createdAt || undefined,
       },
     });
   }
