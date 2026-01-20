@@ -32,6 +32,7 @@ export function Dashboard() {
   const [importResults, setImportResults] = useState<ImportResult[]>([]);
   const [showImportResults, setShowImportResults] = useState(false);
   const [selectedImportAccountId, setSelectedImportAccountId] = useState<string | null>(null);
+  const [importTotal, setImportTotal] = useState(0); // Total IDs to import
 
   // Account management state
   const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
@@ -300,6 +301,9 @@ export function Dashboard() {
       setError('Please enter at least one negotiation ID');
       return;
     }
+
+    // Set total for progress tracking
+    setImportTotal(ids.length);
 
     setImporting(true);
     setError('');
@@ -844,10 +848,46 @@ export function Dashboard() {
               )}
             </div>
 
+            {/* Import Progress Bar - shown during import */}
+            {importing && importTotal > 0 && (
+              <div style={{ marginTop: '16px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '14px', fontWeight: 500 }}>
+                    Importing leads...
+                  </span>
+                  <span style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
+                    {importResults.length} / {importTotal}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    width: '100%',
+                    height: '8px',
+                    background: 'var(--border, #e5e7eb)',
+                    borderRadius: '4px',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${(importResults.length / importTotal) * 100}%`,
+                      height: '100%',
+                      background: 'var(--primary, #3b82f6)',
+                      borderRadius: '4px',
+                      transition: 'width 0.3s ease',
+                    }}
+                  />
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                  {importResults.filter(r => r.success).length} successful, {importResults.filter(r => !r.success).length} failed
+                </div>
+              </div>
+            )}
+
             {/* Import Results */}
-            {showImportResults && importResults.length > 0 && (
+            {showImportResults && importResults.length > 0 && !importing && (
               <div className="import-results">
-                <h4>Import Results ({importResults.length} processed)</h4>
+                <h4>Import Results ({importResults.length} / {importTotal} processed)</h4>
                 <div className="results-list">
                   {importResults.map((result, idx) => (
                     <div
