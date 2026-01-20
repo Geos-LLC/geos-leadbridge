@@ -416,6 +416,15 @@ export class ThumbtackAdapter implements IPlatformAdapter {
         data: error.response?.data,
         message: error.message,
       }));
+
+      const status = error.response?.status;
+      if (status === 403) {
+        throw new Error('Wrong account selected. This lead belongs to a different Thumbtack business. Please select the correct account.');
+      }
+      if (status === 401) {
+        throw new Error('Login required. Please log in to Thumbtack to import messages.');
+      }
+
       throw new Error(`Failed to fetch messages from Thumbtack: ${error.response?.data?.message || error.message}`);
     }
   }
