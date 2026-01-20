@@ -415,8 +415,13 @@ export class ThumbtackController {
         lead,
       };
     } catch (err: any) {
-      // Check if it's a session/token error and return a clear message
-      if (err.message?.includes('Session expired') || err.message?.includes('reconnect')) {
+      // Check if it's a login/token error and return a clear message
+      const errMsg = err.message?.toLowerCase() || '';
+      if (errMsg.includes('login required') ||
+          errMsg.includes('session expired') ||
+          errMsg.includes('reconnect') ||
+          errMsg.includes('token') ||
+          errMsg.includes('unauthorized')) {
         throw new BadRequestException(err.message);
       }
       // Re-throw other errors
