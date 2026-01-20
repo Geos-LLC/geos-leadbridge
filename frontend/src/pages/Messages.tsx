@@ -94,14 +94,30 @@ export function Messages() {
     setSearchParams(searchParams);
   };
 
-  // Calculate date cutoff based on filter
-  const getDateCutoff = (filter: string): Date | null => {
+  // Calculate date range based on filter (format: "YYYY-MM" for specific month)
+  const getDateRange = (filter: string): { start: Date; end: Date } | null => {
     if (filter === 'all') return null;
+    // Parse YYYY-MM format
+    const match = filter.match(/^(\d{4})-(\d{2})$/);
+    if (!match) return null;
+    const year = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10) - 1; // JS months are 0-indexed
+    const start = new Date(year, month, 1);
+    const end = new Date(year, month + 1, 0, 23, 59, 59, 999); // Last day of month
+    return { start, end };
+  };
+
+  // Generate month options for the last 24 months
+  const getMonthOptions = (): { value: string; label: string }[] => {
+    const options: { value: string; label: string }[] = [];
     const now = new Date();
-    const months = parseInt(filter, 10);
-    if (isNaN(months)) return null;
-    const cutoff = new Date(now.getFullYear(), now.getMonth() - months, now.getDate());
-    return cutoff;
+    for (let i = 0; i < 24; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const label = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      options.push({ value, label });
+    }
+    return options;
   };
 
   useEffect(() => {
@@ -337,12 +353,14 @@ export function Messages() {
   );
 
   // Filter leads by selected account, date, and search query
-  const dateCutoff = getDateCutoff(dateFilter);
+  const dateRange = getDateRange(dateFilter);
+  const monthOptions = getMonthOptions();
   const filteredLeads = leadsFromSavedAccounts.filter(lead => {
     // Account filter
     const matchesAccount = accountFilter === 'all' || lead.businessId === accountFilter;
-    // Date filter - check if lead was created after the cutoff
-    const matchesDate = !dateCutoff || new Date(lead.createdAt) >= dateCutoff;
+    // Date filter - check if lead was created within the selected month
+    const leadDate = new Date(lead.createdAt);
+    const matchesDate = !dateRange || (leadDate >= dateRange.start && leadDate <= dateRange.end);
     // Name search (case-insensitive)
     const matchesSearch = !searchQuery.trim() ||
       lead.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -417,12 +435,11 @@ export function Messages() {
             className="account-filter-select"
           >
             <option value="all">All Time</option>
-            <option value="1">Last 1 Month</option>
-            <option value="3">Last 3 Months</option>
-            <option value="6">Last 6 Months</option>
-            <option value="12">Last 1 Year</option>
-            <option value="24">Last 2 Years</option>
-            <option value="36">Last 3 Years</option>
+            {monthOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
         </div>
 

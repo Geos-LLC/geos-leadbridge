@@ -310,7 +310,7 @@ export const leadsApi = {
     const { data } = await api.post(`/v1/leads/${leadId}/sync`);
     return data;
   },
-  resyncMessages: async (leadId: string): Promise<{ success: boolean; cleaned: number; imported: number }> => {
+  resyncMessages: async (leadId: string): Promise<{ success: boolean; cleaned: number; imported: number; statusUpdated?: boolean }> => {
     const { data } = await api.post(`/v1/leads/${leadId}/resync-messages`);
     return data;
   },

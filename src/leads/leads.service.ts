@@ -821,7 +821,7 @@ export class LeadsService {
    * If connected to the correct account, imports messages from Thumbtack API.
    * Also cleans up old synthetic messages.
    */
-  async resyncMessages(userId: string, leadId: string): Promise<{ cleaned: number; imported: number }> {
+  async resyncMessages(userId: string, leadId: string): Promise<{ cleaned: number; imported: number; statusUpdated: boolean }> {
     console.log(`[LeadsService] resyncMessages called - leadId: ${leadId}, userId: ${userId}`);
 
     const lead = await this.prisma.lead.findFirst({
@@ -905,8 +905,9 @@ export class LeadsService {
     console.log(`[LeadsService] Has credentials: ${hasCredentials} (savedAccount: ${savedAccount?.businessName || 'none'})`);
 
     let importedCount = 0;
+    let statusUpdated = false;
 
-    // If we have credentials, import messages from API
+    // If we have credentials, import messages and sync lead status from API
     if (hasCredentials && accountCredentials) {
       try {
         importedCount = await this.importMessagesForNegotiation(
@@ -921,6 +922,30 @@ export class LeadsService {
         console.error(`[LeadsService] Error importing messages:`, error.message);
         // Don't throw - return what we have
       }
+
+      // Also sync lead status from API
+      try {
+        const adapter = this.platformFactory.getAdapter(lead.platform) as any;
+        if (typeof adapter.getLead === 'function') {
+          const freshLead = await adapter.getLead(accountCredentials, lead.externalRequestId);
+          console.log(`[LeadsService] Fresh lead status from Thumbtack: ${freshLead.status}`);
+
+          if (freshLead.status && freshLead.status !== lead.status) {
+            await this.prisma.lead.update({
+              where: { id: leadId },
+              data: {
+                status: freshLead.status,
+                updatedAt: new Date(),
+              },
+            });
+            console.log(`[LeadsService] Updated lead status: ${lead.status} -> ${freshLead.status}`);
+            statusUpdated = true;
+          }
+        }
+      } catch (error) {
+        console.error(`[LeadsService] Error syncing lead status:`, error.message);
+        // Don't throw - messages imported successfully
+      }
     } else {
       // No credentials available - just return current message count
       const messageCount = await this.prisma.message.count({
@@ -930,7 +955,7 @@ export class LeadsService {
       importedCount = messageCount;
     }
 
-    return { cleaned: cleanedCount, imported: importedCount };
+    return { cleaned: cleanedCount, imported: importedCount, statusUpdated };
   }
 
   /**
