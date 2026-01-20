@@ -13,6 +13,32 @@ interface ImportResult {
   error?: string;
 }
 
+// Keys for persisting import state across OAuth redirects
+const IMPORT_STATE_KEY = 'pending_import_state';
+
+interface PendingImportState {
+  accountId: string;
+  importIds: string;
+  businessId: string; // To match account after reload
+}
+
+function savePendingImportState(state: PendingImportState): void {
+  localStorage.setItem(IMPORT_STATE_KEY, JSON.stringify(state));
+}
+
+function getPendingImportState(): PendingImportState | null {
+  try {
+    const stored = localStorage.getItem(IMPORT_STATE_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearPendingImportState(): void {
+  localStorage.removeItem(IMPORT_STATE_KEY);
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -95,6 +121,25 @@ export function Dashboard() {
       setSearchParams({});
     }
   }, [searchParams, setSearchParams]);
+
+  // Restore pending import state after OAuth redirect (once savedAccounts are loaded)
+  useEffect(() => {
+    if (savedAccounts.length === 0) return;
+
+    const pendingState = getPendingImportState();
+    if (!pendingState) return;
+
+    // Find the account by businessId (account IDs may change, but businessId is stable)
+    const account = savedAccounts.find(a => a.businessId === pendingState.businessId);
+    if (account) {
+      console.log('[Dashboard] Restoring pending import state:', pendingState);
+      setSelectedImportAccountId(account.id);
+      setImportIds(pendingState.importIds);
+    }
+
+    // Clear the pending state after restoring
+    clearPendingImportState();
+  }, [savedAccounts]);
 
   useEffect(() => {
     loadPlatformStatus();
@@ -924,6 +969,16 @@ export function Dashboard() {
             <button
               className="btn btn-primary"
               onClick={() => {
+                // Save import state before redirecting to OAuth
+                const account = savedAccounts.find(a => a.id === sessionExpiredAccount.id);
+                if (account && importIds.trim()) {
+                  savePendingImportState({
+                    accountId: sessionExpiredAccount.id,
+                    importIds: importIds,
+                    businessId: account.businessId,
+                  });
+                  console.log('[Dashboard] Saved pending import state before OAuth redirect');
+                }
                 setSessionExpiredAccount(null);
                 handleReconnectWebhook(sessionExpiredAccount);
               }}
