@@ -292,6 +292,10 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       // Log nested object keys to find scheduling fields
       if (data?.request) {
         this.logger.log(`[getLead] request keys: ${Object.keys(data.request).join(', ')}`);
+        // Log proposedTimes - this might contain scheduling info
+        if (data.request.proposedTimes) {
+          this.logger.log(`[getLead] request.proposedTimes: ${JSON.stringify(data.request.proposedTimes)}`);
+        }
         // Log request.schedule or similar if exists
         if (data.request.schedule) this.logger.log(`[getLead] request.schedule: ${JSON.stringify(data.request.schedule)}`);
         if (data.request.appointment) this.logger.log(`[getLead] request.appointment: ${JSON.stringify(data.request.appointment)}`);
