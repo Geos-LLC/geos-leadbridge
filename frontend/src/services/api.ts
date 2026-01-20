@@ -31,14 +31,15 @@ function getErrorDetails(error: AxiosError<any>): { title: string; message: stri
     return null;
   }
 
-  // Token/Auth errors
-  if (errorMessage?.toLowerCase().includes('token') ||
-      errorMessage?.toLowerCase().includes('expired') ||
-      errorMessage?.toLowerCase().includes('refresh')) {
-    return {
-      title: 'Authentication Error',
-      message: 'Your session may have expired. Please reconnect your Thumbtack account.',
-    };
+  // Skip toasts for login/token errors - Dashboard handles these with a reconnect banner
+  const lowerMsg = errorMessage?.toLowerCase() || '';
+  if (lowerMsg.includes('login required') ||
+      lowerMsg.includes('token') ||
+      lowerMsg.includes('expired') ||
+      lowerMsg.includes('session') ||
+      lowerMsg.includes('unauthorized') ||
+      lowerMsg.includes('reconnect')) {
+    return null;
   }
 
   // Not found errors
@@ -74,30 +75,14 @@ function getErrorDetails(error: AxiosError<any>): { title: string; message: stri
 
   // Bad request (validation errors)
   if (status === 400) {
-    // Don't show toast for login-required errors - Dashboard handles these with a banner
-    if (errorMessage && errorMessage.toLowerCase().includes('login required')) {
-      return null;
-    }
     return {
       title: 'Invalid Request',
       message: errorMessage || 'The request was invalid. Please check your input.',
     };
   }
 
-  // Server errors - show actual message if it's useful (contains actionable info)
+  // Server errors
   if (status && status >= 500) {
-    // If the error message mentions session/reconnect/token, it's actionable - show it
-    if (errorMessage && (
-      errorMessage.toLowerCase().includes('session') ||
-      errorMessage.toLowerCase().includes('reconnect') ||
-      errorMessage.toLowerCase().includes('token') ||
-      errorMessage.toLowerCase().includes('expired')
-    )) {
-      return {
-        title: 'Session Expired',
-        message: errorMessage,
-      };
-    }
     return {
       title: 'Server Error',
       message: 'Something went wrong on our end. Please try again later.',

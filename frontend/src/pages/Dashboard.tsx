@@ -325,22 +325,27 @@ export function Dashboard() {
       } catch (err: any) {
         console.error('[Dashboard] Import failed for', id, err);
         console.log('[Dashboard] err.response?.data:', err.response?.data);
+        console.log('[Dashboard] err.message:', err.message);
         // NestJS BadRequestException returns { message: "...", statusCode: 400, error: "Bad Request" }
-        const errorMsg = err.response?.data?.message || err.response?.data?.error || 'Failed to import';
+        // Also check err.message for cases where backend threw an error that wasn't converted to response
+        const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to import';
         console.log('[Dashboard] Extracted errorMsg:', errorMsg);
 
         // Check if it's a login required error (token expired)
-        if (errorMsg.toLowerCase().includes('session') ||
-            errorMsg.toLowerCase().includes('reconnect') ||
-            errorMsg.toLowerCase().includes('expired') ||
-            errorMsg.toLowerCase().includes('login required')) {
+        const lowerErrorMsg = errorMsg.toLowerCase();
+        if (lowerErrorMsg.includes('session') ||
+            lowerErrorMsg.includes('reconnect') ||
+            lowerErrorMsg.includes('expired') ||
+            lowerErrorMsg.includes('login required') ||
+            lowerErrorMsg.includes('token') ||
+            lowerErrorMsg.includes('unauthorized')) {
           console.log('[Dashboard] Detected login required error!');
           sessionExpired = true;
         }
 
         // Check if it's a wrong account error
-        if (errorMsg.toLowerCase().includes('wrong account') ||
-            errorMsg.toLowerCase().includes('different thumbtack business')) {
+        if (lowerErrorMsg.includes('wrong account') ||
+            lowerErrorMsg.includes('different thumbtack business')) {
           console.log('[Dashboard] Detected wrong account error!');
           wrongAccount = true;
         }
@@ -414,65 +419,6 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Login Required Banner - shows when import fails due to expired token */}
-      {sessionExpiredAccount && (
-        <div
-          style={{
-            background: '#f0f9ff',
-            border: '2px solid #0ea5e9',
-            borderRadius: '8px',
-            padding: '16px 20px',
-            marginBottom: '20px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '16px',
-            boxShadow: '0 2px 8px rgba(14, 165, 233, 0.15)',
-          }}
-        >
-          <RefreshCw size={24} style={{ color: '#0284c7', flexShrink: 0 }} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600, fontSize: '16px', color: '#0c4a6e', marginBottom: '4px' }}>
-              Login Required to Import - {sessionExpiredAccount.businessName}
-            </div>
-            <div style={{ fontSize: '14px', color: '#0369a1', marginBottom: '4px' }}>
-              To import old leads, you need to log in to Thumbtack again.
-              {sessionExpiredAccount.emailHint && ` Use ${sessionExpiredAccount.emailHint}.`}
-            </div>
-            <div style={{ fontSize: '12px', color: '#64748b' }}>
-              Note: New leads will still arrive automatically via webhooks. This login is only needed for importing old leads.
-            </div>
-          </div>
-          <button
-            className="btn btn-primary"
-            onClick={() => {
-              setSessionExpiredAccount(null);
-              handleReconnectWebhook(sessionExpiredAccount);
-            }}
-            disabled={connecting}
-            style={{ whiteSpace: 'nowrap' }}
-          >
-            {connecting ? (
-              <>
-                <Loader2 className="spinner" size={16} />
-                Logging in...
-              </>
-            ) : (
-              <>
-                <ExternalLink size={16} style={{ marginRight: '6px' }} />
-                Log In to Thumbtack
-              </>
-            )}
-          </button>
-          <button
-            className="btn-icon btn-secondary-subtle"
-            onClick={() => setSessionExpiredAccount(null)}
-            title="Dismiss"
-            style={{ flexShrink: 0 }}
-          >
-            <X size={18} />
-          </button>
-        </div>
-      )}
 
       {/* Health Issues Banner - persistent warning for critical issues */}
       {healthIssues.filter(i => i.severity === 'error').map((issue, index) => (
@@ -911,6 +857,67 @@ export function Dashboard() {
                 </div>
               </div>
             )}
+          </div>
+        </section>
+      )}
+
+      {/* Login Required Banner - shows at bottom when import fails due to expired token */}
+      {sessionExpiredAccount && (
+        <section className="dashboard-section">
+          <div
+            style={{
+              background: '#f0f9ff',
+              border: '2px solid #0ea5e9',
+              borderRadius: '8px',
+              padding: '16px 20px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px',
+              boxShadow: '0 2px 8px rgba(14, 165, 233, 0.15)',
+            }}
+          >
+            <RefreshCw size={24} style={{ color: '#0284c7', flexShrink: 0 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: '16px', color: '#0c4a6e', marginBottom: '4px' }}>
+                Login Required to Import - {sessionExpiredAccount.businessName}
+              </div>
+              <div style={{ fontSize: '14px', color: '#0369a1', marginBottom: '4px' }}>
+                To import old leads, you need to log in to Thumbtack again.
+                {sessionExpiredAccount.emailHint && ` Use ${sessionExpiredAccount.emailHint}.`}
+              </div>
+              <div style={{ fontSize: '12px', color: '#64748b' }}>
+                Note: New leads will still arrive automatically via webhooks. This login is only needed for importing old leads.
+              </div>
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={() => {
+                setSessionExpiredAccount(null);
+                handleReconnectWebhook(sessionExpiredAccount);
+              }}
+              disabled={connecting}
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              {connecting ? (
+                <>
+                  <Loader2 className="spinner" size={16} />
+                  Logging in...
+                </>
+              ) : (
+                <>
+                  <ExternalLink size={16} style={{ marginRight: '6px' }} />
+                  Log In to Thumbtack
+                </>
+              )}
+            </button>
+            <button
+              className="btn-icon btn-secondary-subtle"
+              onClick={() => setSessionExpiredAccount(null)}
+              title="Dismiss"
+              style={{ flexShrink: 0 }}
+            >
+              <X size={18} />
+            </button>
           </div>
         </section>
       )}
