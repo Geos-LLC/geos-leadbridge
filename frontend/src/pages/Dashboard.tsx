@@ -938,75 +938,70 @@ export function Dashboard() {
         </section>
       )}
 
-      {/* Login Required Banner - shows at bottom when import fails due to expired token */}
+      {/* Login Required Modal - shows when import fails due to expired token */}
       {sessionExpiredAccount && (
-        <section className="dashboard-section">
-          <div
-            style={{
-              background: '#f0f9ff',
-              border: '2px solid #0ea5e9',
-              borderRadius: '8px',
-              padding: '16px 20px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '16px',
-              boxShadow: '0 2px 8px rgba(14, 165, 233, 0.15)',
-            }}
-          >
-            <RefreshCw size={24} style={{ color: '#0284c7', flexShrink: 0 }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, fontSize: '16px', color: '#0c4a6e', marginBottom: '4px' }}>
-                Login Required to Import - {sessionExpiredAccount.businessName}
-              </div>
-              <div style={{ fontSize: '14px', color: '#0369a1', marginBottom: '4px' }}>
+        <div className="modal-overlay" onClick={() => setSessionExpiredAccount(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>
+              <RefreshCw size={20} style={{ color: '#0284c7', marginRight: '8px', verticalAlign: 'middle' }} />
+              Login Required to Import
+            </h3>
+            <p><strong>{sessionExpiredAccount.businessName}</strong></p>
+
+            <div style={{ background: '#f0f9ff', padding: '12px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #bae6fd' }}>
+              <p style={{ margin: '0 0 8px 0', color: '#0369a1' }}>
                 To import old leads, you need to log in to Thumbtack again.
-                {sessionExpiredAccount.emailHint && ` Use ${sessionExpiredAccount.emailHint}.`}
-              </div>
-              <div style={{ fontSize: '12px', color: '#64748b' }}>
+                {sessionExpiredAccount.emailHint && (
+                  <span style={{ display: 'block', marginTop: '4px', fontWeight: 500 }}>
+                    Use: {sessionExpiredAccount.emailHint}
+                  </span>
+                )}
+              </p>
+              <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
                 Note: New leads will still arrive automatically via webhooks. This login is only needed for importing old leads.
-              </div>
+              </p>
             </div>
-            <button
-              className="btn btn-primary"
-              onClick={() => {
-                // Save import state before redirecting to OAuth
-                const account = savedAccounts.find(a => a.id === sessionExpiredAccount.id);
-                if (account && importIds.trim()) {
-                  savePendingImportState({
-                    accountId: sessionExpiredAccount.id,
-                    importIds: importIds,
-                    businessId: account.businessId,
-                  });
-                  console.log('[Dashboard] Saved pending import state before OAuth redirect');
-                }
-                setSessionExpiredAccount(null);
-                handleReconnectWebhook(sessionExpiredAccount);
-              }}
-              disabled={connecting}
-              style={{ whiteSpace: 'nowrap' }}
-            >
-              {connecting ? (
-                <>
-                  <Loader2 className="spinner" size={16} />
-                  Logging in...
-                </>
-              ) : (
-                <>
-                  <ExternalLink size={16} style={{ marginRight: '6px' }} />
-                  Log In to Thumbtack
-                </>
-              )}
-            </button>
-            <button
-              className="btn-icon btn-secondary-subtle"
-              onClick={() => setSessionExpiredAccount(null)}
-              title="Dismiss"
-              style={{ flexShrink: 0 }}
-            >
-              <X size={18} />
-            </button>
+
+            <div className="modal-actions">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setSessionExpiredAccount(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  // Save import state before redirecting to OAuth
+                  const account = savedAccounts.find(a => a.id === sessionExpiredAccount.id);
+                  if (account && importIds.trim()) {
+                    savePendingImportState({
+                      accountId: sessionExpiredAccount.id,
+                      importIds: importIds,
+                      businessId: account.businessId,
+                    });
+                    console.log('[Dashboard] Saved pending import state before OAuth redirect');
+                  }
+                  setSessionExpiredAccount(null);
+                  handleReconnectWebhook(sessionExpiredAccount);
+                }}
+                disabled={connecting}
+              >
+                {connecting ? (
+                  <>
+                    <Loader2 className="spinner" size={16} />
+                    Logging in...
+                  </>
+                ) : (
+                  <>
+                    <ExternalLink size={16} style={{ marginRight: '6px' }} />
+                    Log In to Thumbtack
+                  </>
+                )}
+              </button>
+            </div>
           </div>
-        </section>
+        </div>
       )}
 
       {/* Disconnect Warning Modal */}
