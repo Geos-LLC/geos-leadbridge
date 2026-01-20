@@ -287,6 +287,17 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       return this.normalizeNegotiation(response.data);
     } catch (error) {
       this.logger.error('Error fetching negotiation:', error.response?.data || error.message);
+
+      // Check for auth errors (401, token expired, etc.)
+      const status = error.response?.status;
+      const responseData = error.response?.data;
+      if (status === 401 ||
+          responseData?.title === 'Unauthorized' ||
+          responseData?.detail?.includes('token') ||
+          responseData?.detail?.includes('not active')) {
+        throw new Error('Session expired. Please reconnect your Thumbtack account before importing.');
+      }
+
       throw new Error('Failed to fetch negotiation from Thumbtack');
     }
   }

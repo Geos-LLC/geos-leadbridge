@@ -80,8 +80,20 @@ function getErrorDetails(error: AxiosError<any>): { title: string; message: stri
     };
   }
 
-  // Server errors
+  // Server errors - show actual message if it's useful (contains actionable info)
   if (status && status >= 500) {
+    // If the error message mentions session/reconnect/token, it's actionable - show it
+    if (errorMessage && (
+      errorMessage.toLowerCase().includes('session') ||
+      errorMessage.toLowerCase().includes('reconnect') ||
+      errorMessage.toLowerCase().includes('token') ||
+      errorMessage.toLowerCase().includes('expired')
+    )) {
+      return {
+        title: 'Session Expired',
+        message: errorMessage,
+      };
+    }
     return {
       title: 'Server Error',
       message: 'Something went wrong on our end. Please try again later.',
