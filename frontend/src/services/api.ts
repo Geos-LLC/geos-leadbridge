@@ -164,6 +164,35 @@ export interface HealthIssue {
   actionLabel?: string;
 }
 
+// Webhook diagnostic types
+export interface WebhookVerifyResult {
+  accountId: string;
+  businessId: string;
+  businessName: string;
+  storedWebhookId: string | null;
+  actualWebhooks?: {
+    webhookId: string;
+    webhookURL: string;
+    eventTypes: string[];
+    enabled: boolean;
+  }[];
+  status: 'active' | 'no_webhooks' | 'error';
+  match?: boolean;
+  error?: string;
+}
+
+export interface WebhookEventSummary {
+  id: string;
+  eventType: string;
+  businessId?: string;
+  negotiationId?: string;
+  messageId?: string;
+  isYourAccount?: boolean;
+  receivedAt: string;
+  processed: boolean;
+  error?: string;
+}
+
 // Platforms
 export const platformsApi = {
   getStatus: async (): Promise<{ platforms: Platform[] }> => {
@@ -191,6 +220,20 @@ export const platformsApi = {
   },
   disconnect: async (): Promise<void> => {
     await api.post('/v1/thumbtack/auth/disconnect');
+  },
+  // Diagnostic endpoints
+  verifyWebhooks: async (): Promise<{ accounts: WebhookVerifyResult[] }> => {
+    const { data } = await api.get('/v1/platforms/webhooks/verify');
+    return data;
+  },
+  getRecentWebhookEvents: async (): Promise<{
+    totalEvents: number;
+    byEventType: Record<string, { count: number; yourAccount: number }>;
+    yourBusinessIds: string[];
+    recentEvents: WebhookEventSummary[];
+  }> => {
+    const { data } = await api.get('/v1/platforms/webhooks/recent');
+    return data;
   },
 };
 
