@@ -289,6 +289,24 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       this.logger.log(`[getLead] Raw negotiation from API - status: "${data?.status}", chargeState: "${data?.chargeState}", negotiationId: ${negotiationId}`);
       // Log full response to see if there's appointment/schedule data
       this.logger.log(`[getLead] Full negotiation data keys: ${Object.keys(data || {}).join(', ')}`);
+      // Log nested object keys to find scheduling fields
+      if (data?.request) {
+        this.logger.log(`[getLead] request keys: ${Object.keys(data.request).join(', ')}`);
+        // Log request.schedule or similar if exists
+        if (data.request.schedule) this.logger.log(`[getLead] request.schedule: ${JSON.stringify(data.request.schedule)}`);
+        if (data.request.appointment) this.logger.log(`[getLead] request.appointment: ${JSON.stringify(data.request.appointment)}`);
+        if (data.request.scheduledAt) this.logger.log(`[getLead] request.scheduledAt: ${data.request.scheduledAt}`);
+        if (data.request.timing) this.logger.log(`[getLead] request.timing: ${JSON.stringify(data.request.timing)}`);
+      }
+      if (data?.estimate) {
+        this.logger.log(`[getLead] estimate keys: ${Object.keys(data.estimate).join(', ')}`);
+      }
+      // Look for any appointment/schedule related fields anywhere in the response
+      const jsonStr = JSON.stringify(data);
+      if (jsonStr.includes('schedule') || jsonStr.includes('appointment') || jsonStr.includes('Schedule') || jsonStr.includes('Appointment')) {
+        this.logger.log(`[getLead] Found schedule/appointment keyword in response - dumping full JSON`);
+        this.logger.log(`[getLead] Full JSON: ${jsonStr}`);
+      }
 
       return this.normalizeNegotiation(response.data);
     } catch (error) {
