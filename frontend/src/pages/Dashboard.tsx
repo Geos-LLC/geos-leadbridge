@@ -610,9 +610,9 @@ export function Dashboard() {
                         transition: 'all 0.15s ease',
                       }}
                     >
-                      {account.businessLogo ? (
+                      {account.imageUrl ? (
                         <img
-                          src={account.businessLogo}
+                          src={account.imageUrl}
                           alt=""
                           style={{ width: '28px', height: '28px', borderRadius: '4px', objectFit: 'cover' }}
                         />
