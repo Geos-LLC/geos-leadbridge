@@ -1,5 +1,5 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Home, MessageSquare, LogOut } from 'lucide-react';
+import { Home, MessageSquare, Settings, LogOut } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 
 export function Layout() {
@@ -29,6 +29,10 @@ export function Layout() {
           <Link to="/messages" className={`nav-link ${isActive('/messages') ? 'active' : ''}`}>
             <MessageSquare size={20} />
             <span>Messages</span>
+          </Link>
+          <Link to="/message-settings" className={`nav-link ${isActive('/message-settings') ? 'active' : ''}`}>
+            <Settings size={20} />
+            <span>Message Settings</span>
           </Link>
         </div>
 

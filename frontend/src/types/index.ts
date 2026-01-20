@@ -66,3 +66,29 @@ export interface SavedAccount {
   lastUsedAt: string;
   createdAt: string;
 }
+
+// Message Templates for bulk follow-up messages
+export interface MessageTemplate {
+  id: string;
+  name: string;
+  content: string;
+  isDefault: boolean;
+  usageCount: number;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
+export interface BulkMessagePreview {
+  leadId: string;
+  customerName: string;
+  personalizedMessage: string;
+  canSend: boolean;
+  error?: string;
+}
+
+export interface BulkSendResult {
+  total: number;
+  successful: number;
+  failed: number;
+  results: { leadId: string; success: boolean; error?: string }[];
+}

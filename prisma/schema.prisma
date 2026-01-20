@@ -25,11 +25,12 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  platforms      Platform[]
-  leads          Lead[]
-  conversations  Conversation[]
-  messages       Message[]
-  savedAccounts  SavedAccount[]
+  platforms        Platform[]
+  leads            Lead[]
+  conversations    Conversation[]
+  messages         Message[]
+  savedAccounts    SavedAccount[]
+  messageTemplates MessageTemplate[]
 
   @@map("users")
 }
@@ -179,6 +180,28 @@ model Quote {
   @@index([platform])
   @@index([status])
   @@map("quotes")
+}
+
+// ==========================================
+// Message Templates (for bulk follow-up messages)
+// ==========================================
+
+model MessageTemplate {
+  id          String    @id @default(uuid())
+  userId      String
+  name        String    // Template name for identification
+  content     String    @db.Text // Template content with {variables}
+  isDefault   Boolean   @default(false)
+  usageCount  Int       @default(0)
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("message_templates")
 }
 
 // ==========================================

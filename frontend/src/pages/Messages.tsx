@@ -15,11 +15,14 @@ import {
   AlertCircle,
   Building2,
   X,
+  Search,
+  CheckSquare,
+  Square,
+  Mail,
 } from 'lucide-react';
-import { leadsApi, thumbtackApi, type MessageAttachment } from '../services/api';
+import { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, type MessageAttachment } from '../services/api';
 import { useAppStore } from '../store/appStore';
-import type { Lead } from '../types';
-import { Search } from 'lucide-react';
+import type { Lead, MessageTemplate, BulkMessagePreview } from '../types';
 
 interface LocalMessage {
   id: string;
@@ -79,6 +82,21 @@ export function Messages() {
   // Get date filter from URL params, default to 'all' (no filter)
   const dateFilter = searchParams.get('date') || 'all';
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Multi-select state
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+
+  // Bulk send modal state
+  const [showBulkSendModal, setShowBulkSendModal] = useState(false);
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [customMessage, setCustomMessage] = useState('');
+  const [bulkPreviews, setBulkPreviews] = useState<BulkMessagePreview[]>([]);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [sendingBulk, setSendingBulk] = useState(false);
+  const [bulkSendProgress, setBulkSendProgress] = useState<{ sent: number; total: number } | null>(null);
 
   // Update account filter in URL
   const setAccountFilter = (value: string) => {
@@ -351,6 +369,134 @@ export function Messages() {
   // Check if messaging is enabled for the selected lead
   const canSendMessage = selectedLead ? isLeadFromCurrentAccount(selectedLead) : false;
 
+  // Multi-select functions
+  const toggleMultiSelect = () => {
+    if (multiSelectMode) {
+      setSelectedLeadIds(new Set());
+    }
+    setMultiSelectMode(!multiSelectMode);
+  };
+
+  const toggleLeadSelection = (leadId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newSet = new Set(selectedLeadIds);
+    if (newSet.has(leadId)) {
+      newSet.delete(leadId);
+    } else {
+      newSet.add(leadId);
+    }
+    setSelectedLeadIds(newSet);
+  };
+
+  const selectAllVisible = () => {
+    const allIds = filteredLeads.map(l => l.id);
+    setSelectedLeadIds(new Set(allIds));
+  };
+
+  const clearSelection = () => {
+    setSelectedLeadIds(new Set());
+  };
+
+  // Bulk send modal functions
+  const openBulkSendModal = async () => {
+    setShowBulkSendModal(true);
+    setSelectedTemplateId(null);
+    setCustomMessage('');
+    setBulkPreviews([]);
+
+    // Load templates
+    setLoadingTemplates(true);
+    try {
+      const { templates: loadedTemplates } = await templatesApi.getTemplates();
+      setTemplates(loadedTemplates);
+      // Auto-select default template if available
+      const defaultTemplate = loadedTemplates.find(t => t.isDefault);
+      if (defaultTemplate) {
+        setSelectedTemplateId(defaultTemplate.id);
+        setCustomMessage(defaultTemplate.content);
+      }
+    } catch (err) {
+      console.error('Failed to load templates:', err);
+    } finally {
+      setLoadingTemplates(false);
+    }
+  };
+
+  const closeBulkSendModal = () => {
+    setShowBulkSendModal(false);
+    setSelectedTemplateId(null);
+    setCustomMessage('');
+    setBulkPreviews([]);
+    setBulkSendProgress(null);
+  };
+
+  const handleTemplateSelect = (templateId: string) => {
+    setSelectedTemplateId(templateId);
+    const template = templates.find(t => t.id === templateId);
+    if (template) {
+      setCustomMessage(template.content);
+    }
+    setBulkPreviews([]); // Clear previews when template changes
+  };
+
+  const loadBulkPreview = async () => {
+    if (!customMessage.trim() || selectedLeadIds.size === 0) return;
+
+    setLoadingPreview(true);
+    try {
+      const { previews } = await bulkMessageApi.preview(
+        Array.from(selectedLeadIds),
+        customMessage,
+      );
+      setBulkPreviews(previews);
+    } catch (err) {
+      console.error('Failed to load preview:', err);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const handleBulkSend = async () => {
+    if (!customMessage.trim() || selectedLeadIds.size === 0) return;
+
+    setSendingBulk(true);
+    setBulkSendProgress({ sent: 0, total: selectedLeadIds.size });
+
+    try {
+      const result = await bulkMessageApi.send(
+        Array.from(selectedLeadIds),
+        customMessage,
+        selectedTemplateId || undefined,
+      );
+
+      setBulkSendProgress({ sent: result.successful, total: result.total });
+
+      // Show success/partial success
+      if (result.failed === 0) {
+        alert(`Successfully sent ${result.successful} messages!`);
+      } else {
+        alert(`Sent ${result.successful} of ${result.total} messages. ${result.failed} failed.`);
+      }
+
+      // Close modal and clear selection
+      closeBulkSendModal();
+      setSelectedLeadIds(new Set());
+      setMultiSelectMode(false);
+    } catch (err) {
+      console.error('Failed to send bulk messages:', err);
+      alert('Failed to send messages. Please try again.');
+    } finally {
+      setSendingBulk(false);
+      setBulkSendProgress(null);
+    }
+  };
+
+  // Get count of leads that can receive messages (have thread)
+  const sendableLeadsCount = Array.from(selectedLeadIds).filter(id => {
+    const lead = leads.find(l => l.id === id);
+    return lead?.threadId;
+  }).length;
+
   // Get saved account businessIds for filtering
   const savedAccountIds = new Set(savedAccounts.map(a => a.businessId));
 
@@ -399,10 +545,45 @@ export function Messages() {
             <ArrowLeft size={20} />
           </button>
           <h2>Leads</h2>
+          <button
+            className={`btn-icon ${multiSelectMode ? 'active' : ''}`}
+            onClick={toggleMultiSelect}
+            title={multiSelectMode ? 'Exit selection mode' : 'Select multiple'}
+          >
+            <CheckSquare size={20} />
+          </button>
           <button className="btn-icon" onClick={loadLeads} title="Refresh">
             <RefreshCw size={20} />
           </button>
         </div>
+
+        {/* Selection Toolbar */}
+        {multiSelectMode && (
+          <div className="selection-toolbar">
+            <div className="selection-count">
+              {selectedLeadIds.size} selected
+              {selectedLeadIds.size > 0 && sendableLeadsCount < selectedLeadIds.size && (
+                <span className="selection-warning"> ({sendableLeadsCount} can send)</span>
+              )}
+            </div>
+            <div className="selection-actions">
+              <button className="btn-text" onClick={selectAllVisible}>
+                Select All
+              </button>
+              <button className="btn-text" onClick={clearSelection} disabled={selectedLeadIds.size === 0}>
+                Clear
+              </button>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={openBulkSendModal}
+                disabled={selectedLeadIds.size === 0}
+              >
+                <Mail size={14} />
+                Send Follow-up
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Search Input */}
         <div className="leads-search">
@@ -467,12 +648,21 @@ export function Messages() {
               const accountName = getAccountNameForLead(lead);
               const isCurrentAccount = isLeadFromCurrentAccount(lead);
               const isUpdated = hasNewUpdates(lead, lastSeenTimestamps);
+              const isChecked = selectedLeadIds.has(lead.id);
               return (
                 <div
                   key={lead.id}
-                  className={`lead-item ${selectedLead?.id === lead.id ? 'selected' : ''} ${!isCurrentAccount ? 'other-account' : ''} ${isUpdated ? 'has-updates' : ''}`}
-                  onClick={() => setSelectedLead(lead)}
+                  className={`lead-item ${selectedLead?.id === lead.id ? 'selected' : ''} ${!isCurrentAccount ? 'other-account' : ''} ${isUpdated ? 'has-updates' : ''} ${isChecked ? 'checked' : ''}`}
+                  onClick={() => multiSelectMode ? toggleLeadSelection(lead.id, { stopPropagation: () => {} } as React.MouseEvent) : setSelectedLead(lead)}
                 >
+                  {multiSelectMode && (
+                    <div
+                      className="lead-checkbox"
+                      onClick={(e) => toggleLeadSelection(lead.id, e)}
+                    >
+                      {isChecked ? <CheckSquare size={20} /> : <Square size={20} />}
+                    </div>
+                  )}
                   <div className="lead-avatar">
                     <User size={20} />
                     {isUpdated && <span className="update-indicator" />}
@@ -709,6 +899,140 @@ export function Messages() {
             )}
           </div>
         </aside>
+      )}
+
+      {/* Bulk Send Modal */}
+      {showBulkSendModal && (
+        <div className="modal-overlay" onClick={closeBulkSendModal}>
+          <div className="bulk-send-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Send Follow-up Message</h3>
+              <button className="btn-icon" onClick={closeBulkSendModal}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <div className="bulk-send-info">
+                <Mail size={18} />
+                <span>
+                  Sending to <strong>{selectedLeadIds.size}</strong> lead{selectedLeadIds.size !== 1 ? 's' : ''}
+                  {sendableLeadsCount < selectedLeadIds.size && (
+                    <span className="warning"> ({sendableLeadsCount} have active conversations)</span>
+                  )}
+                </span>
+              </div>
+
+              {/* Template Selector */}
+              <div className="form-group">
+                <label>Template</label>
+                {loadingTemplates ? (
+                  <div className="loading-templates">
+                    <Loader2 className="spinner" size={16} />
+                    Loading templates...
+                  </div>
+                ) : templates.length === 0 ? (
+                  <p className="no-templates-hint">
+                    No templates yet. <a href="/message-settings">Create one</a>
+                  </p>
+                ) : (
+                  <select
+                    value={selectedTemplateId || ''}
+                    onChange={(e) => handleTemplateSelect(e.target.value)}
+                    className="template-select"
+                  >
+                    <option value="">-- Custom message --</option>
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} {t.isDefault && '(Default)'}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Message Content */}
+              <div className="form-group">
+                <label>Message</label>
+                <textarea
+                  value={customMessage}
+                  onChange={(e) => {
+                    setCustomMessage(e.target.value);
+                    setBulkPreviews([]); // Clear previews when message changes
+                  }}
+                  placeholder="Hi {firstName}, thanks for reaching out about {category}..."
+                  className="bulk-message-textarea"
+                  rows={5}
+                />
+                <div className="variables-hint">
+                  Variables: {'{customerName}'} {'{firstName}'} {'{category}'} {'{city}'} {'{state}'}
+                </div>
+              </div>
+
+              {/* Preview Section */}
+              <div className="preview-section">
+                <div className="preview-header">
+                  <h4>Preview</h4>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={loadBulkPreview}
+                    disabled={loadingPreview || !customMessage.trim()}
+                  >
+                    {loadingPreview ? <Loader2 className="spinner" size={14} /> : 'Generate Preview'}
+                  </button>
+                </div>
+
+                {bulkPreviews.length > 0 && (
+                  <div className="previews-list">
+                    {bulkPreviews.slice(0, 3).map((preview) => (
+                      <div
+                        key={preview.leadId}
+                        className={`preview-item ${preview.canSend ? '' : 'cannot-send'}`}
+                      >
+                        <div className="preview-name">
+                          {preview.customerName}
+                          {!preview.canSend && <span className="preview-error">{preview.error}</span>}
+                        </div>
+                        <div className="preview-message">{preview.personalizedMessage}</div>
+                      </div>
+                    ))}
+                    {bulkPreviews.length > 3 && (
+                      <p className="more-previews">...and {bulkPreviews.length - 3} more</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              {bulkSendProgress && (
+                <div className="send-progress">
+                  Sending... {bulkSendProgress.sent}/{bulkSendProgress.total}
+                </div>
+              )}
+              <button className="btn btn-secondary" onClick={closeBulkSendModal} disabled={sendingBulk}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleBulkSend}
+                disabled={sendingBulk || !customMessage.trim() || selectedLeadIds.size === 0}
+              >
+                {sendingBulk ? (
+                  <>
+                    <Loader2 className="spinner" size={16} />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send size={16} />
+                    Send to {selectedLeadIds.size} Lead{selectedLeadIds.size !== 1 ? 's' : ''}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -10,6 +10,7 @@ import { PlatformService } from '../platforms/platform.service';
 import { PlatformFactory } from '../platforms/platform.factory';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { NormalizedLead } from '../common/dto/normalized.dto';
+import { TemplatesService } from '../templates/templates.service';
 
 @Injectable()
 export class LeadsService {
@@ -20,6 +21,7 @@ export class LeadsService {
     private platformService: PlatformService,
     private platformFactory: PlatformFactory,
     private configService: ConfigService,
+    private templatesService: TemplatesService,
   ) {
     this.encryptionKey = this.configService.get<string>('encryption.key') || 'default-32-char-encryption-key';
   }
@@ -1022,5 +1024,152 @@ export class LeadsService {
 
     console.log(`[LeadsService] Deleted ${deleted.count} synthetic messages`);
     return { deleted: deleted.count };
+  }
+
+  /**
+   * Preview bulk message for multiple leads
+   * Returns personalized messages for each lead
+   */
+  async previewBulkMessage(
+    userId: string,
+    leadIds: string[],
+    templateContent: string,
+  ): Promise<{
+    leadId: string;
+    customerName: string;
+    personalizedMessage: string;
+    canSend: boolean;
+    error?: string;
+  }[]> {
+    console.log(`[LeadsService] previewBulkMessage - userId: ${userId}, leadIds: ${leadIds.length}, template: ${templateContent.substring(0, 50)}...`);
+
+    const previews = [];
+
+    for (const leadId of leadIds) {
+      try {
+        const lead = await this.prisma.lead.findFirst({
+          where: { id: leadId, userId },
+        });
+
+        if (!lead) {
+          previews.push({
+            leadId,
+            customerName: 'Unknown',
+            personalizedMessage: '',
+            canSend: false,
+            error: 'Lead not found',
+          });
+          continue;
+        }
+
+        // Check if lead has a conversation thread
+        const hasThread = !!lead.threadId;
+
+        const personalizedMessage = this.templatesService.personalizeMessage(templateContent, {
+          customerName: lead.customerName,
+          category: lead.category,
+          city: lead.city,
+          state: lead.state,
+        });
+
+        previews.push({
+          leadId,
+          customerName: lead.customerName,
+          personalizedMessage,
+          canSend: hasThread,
+          error: hasThread ? undefined : 'No conversation thread - cannot send message',
+        });
+      } catch (error) {
+        previews.push({
+          leadId,
+          customerName: 'Unknown',
+          personalizedMessage: '',
+          canSend: false,
+          error: error.message,
+        });
+      }
+    }
+
+    return previews;
+  }
+
+  /**
+   * Send bulk messages to multiple leads
+   * Uses throttling (500ms delay) to avoid rate limits
+   */
+  async sendBulkMessages(
+    userId: string,
+    leadIds: string[],
+    templateContent: string,
+    templateId?: string,
+  ): Promise<{
+    total: number;
+    successful: number;
+    failed: number;
+    results: { leadId: string; success: boolean; error?: string }[];
+  }> {
+    console.log(`[LeadsService] sendBulkMessages - userId: ${userId}, leadIds: ${leadIds.length}`);
+
+    const results: { leadId: string; success: boolean; error?: string }[] = [];
+    let successful = 0;
+    let failed = 0;
+
+    for (let i = 0; i < leadIds.length; i++) {
+      const leadId = leadIds[i];
+
+      try {
+        const lead = await this.prisma.lead.findFirst({
+          where: { id: leadId, userId },
+        });
+
+        if (!lead) {
+          results.push({ leadId, success: false, error: 'Lead not found' });
+          failed++;
+          continue;
+        }
+
+        if (!lead.threadId) {
+          results.push({ leadId, success: false, error: 'No conversation thread' });
+          failed++;
+          continue;
+        }
+
+        // Personalize the message for this lead
+        const personalizedMessage = this.templatesService.personalizeMessage(templateContent, {
+          customerName: lead.customerName,
+          category: lead.category,
+          city: lead.city,
+          state: lead.state,
+        });
+
+        // Send the message
+        await this.sendMessage(userId, leadId, personalizedMessage);
+
+        results.push({ leadId, success: true });
+        successful++;
+
+        // Throttle: wait 500ms between sends (except for last one)
+        if (i < leadIds.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } catch (error) {
+        results.push({ leadId, success: false, error: error.message });
+        failed++;
+      }
+    }
+
+    // Record template usage if a template ID was provided
+    if (templateId) {
+      await this.templatesService.recordUsage(userId, templateId);
+    }
+
+    console.log(`[LeadsService] Bulk send complete: ${successful} successful, ${failed} failed`);
+
+    return {
+      total: leadIds.length,
+      successful,
+      failed,
+      results,
+    };
   }
 }

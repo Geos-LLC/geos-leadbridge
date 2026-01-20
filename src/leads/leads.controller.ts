@@ -136,4 +136,92 @@ export class LeadsController {
       ...result,
     };
   }
+
+  /**
+   * Preview bulk message for multiple leads
+   * Returns personalized messages for each lead
+   */
+  @Post('bulk-message/preview')
+  async previewBulkMessage(
+    @CurrentUser() user: any,
+    @Body('leadIds') leadIds: string[],
+    @Body('templateContent') templateContent: string,
+  ) {
+    console.log(`[LeadsController] POST /bulk-message/preview - userId: ${user.userId}, leads: ${leadIds?.length}`);
+
+    if (!leadIds || leadIds.length === 0) {
+      return {
+        success: false,
+        error: 'No leads provided',
+        previews: [],
+      };
+    }
+
+    if (!templateContent) {
+      return {
+        success: false,
+        error: 'No template content provided',
+        previews: [],
+      };
+    }
+
+    const previews = await this.leadsService.previewBulkMessage(
+      user.userId,
+      leadIds,
+      templateContent,
+    );
+
+    return {
+      success: true,
+      previews,
+    };
+  }
+
+  /**
+   * Send bulk messages to multiple leads
+   */
+  @Post('bulk-message/send')
+  async sendBulkMessages(
+    @CurrentUser() user: any,
+    @Body('leadIds') leadIds: string[],
+    @Body('templateContent') templateContent: string,
+    @Body('templateId') templateId?: string,
+  ) {
+    console.log(`[LeadsController] POST /bulk-message/send - userId: ${user.userId}, leads: ${leadIds?.length}`);
+
+    if (!leadIds || leadIds.length === 0) {
+      return {
+        success: false,
+        error: 'No leads provided',
+        total: 0,
+        successful: 0,
+        failed: 0,
+        results: [],
+      };
+    }
+
+    if (!templateContent) {
+      return {
+        success: false,
+        error: 'No template content provided',
+        total: 0,
+        successful: 0,
+        failed: 0,
+        results: [],
+      };
+    }
+
+    const result = await this.leadsService.sendBulkMessages(
+      user.userId,
+      leadIds,
+      templateContent,
+      templateId,
+    );
+
+    return {
+      success: result.failed === 0,
+      message: `Sent ${result.successful} of ${result.total} messages`,
+      ...result,
+    };
+  }
 }

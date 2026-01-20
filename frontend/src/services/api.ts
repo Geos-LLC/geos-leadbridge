@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import type { AuthResponse, Lead, Business, Platform, SavedAccount } from '../types';
+import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult } from '../types';
 import { notify } from '../store/notificationStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://thumbtack-bridge-production.up.railway.app/api';
@@ -315,6 +315,42 @@ export const leadsApi = {
   },
   resyncMessages: async (leadId: string): Promise<{ success: boolean; cleaned: number; imported: number; statusUpdated?: boolean }> => {
     const { data } = await api.post(`/v1/leads/${leadId}/resync-messages`);
+    return data;
+  },
+};
+
+// Message Templates
+export const templatesApi = {
+  getTemplates: async (): Promise<{ templates: MessageTemplate[]; count: number }> => {
+    const { data } = await api.get('/v1/templates');
+    return data;
+  },
+  getTemplate: async (id: string): Promise<MessageTemplate> => {
+    const { data } = await api.get(`/v1/templates/${id}`);
+    return data;
+  },
+  createTemplate: async (name: string, content: string, isDefault?: boolean): Promise<{ success: boolean; template: MessageTemplate }> => {
+    const { data } = await api.post('/v1/templates', { name, content, isDefault });
+    return data;
+  },
+  updateTemplate: async (id: string, updates: { name?: string; content?: string; isDefault?: boolean }): Promise<{ success: boolean; template: MessageTemplate }> => {
+    const { data } = await api.patch(`/v1/templates/${id}`, updates);
+    return data;
+  },
+  deleteTemplate: async (id: string): Promise<{ success: boolean }> => {
+    const { data } = await api.delete(`/v1/templates/${id}`);
+    return data;
+  },
+};
+
+// Bulk Messaging
+export const bulkMessageApi = {
+  preview: async (leadIds: string[], templateContent: string): Promise<{ success: boolean; previews: BulkMessagePreview[] }> => {
+    const { data } = await api.post('/v1/leads/bulk-message/preview', { leadIds, templateContent });
+    return data;
+  },
+  send: async (leadIds: string[], templateContent: string, templateId?: string): Promise<{ success: boolean; message: string } & BulkSendResult> => {
+    const { data } = await api.post('/v1/leads/bulk-message/send', { leadIds, templateContent, templateId });
     return data;
   },
 };
