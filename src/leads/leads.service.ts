@@ -571,10 +571,11 @@ export class LeadsService {
       console.log(`[LeadsService] Fetched lead from Thumbtack:`, JSON.stringify(lead));
     } catch (err: any) {
       const errMsg = err.message?.toLowerCase() || '';
-      // Check if it's a token/auth error
-      if (errMsg.includes('token') || errMsg.includes('unauthorized') || errMsg.includes('invalid') ||
+      // Check if it's a token/auth error - re-throw with the message from adapter
+      if (errMsg.includes('login required') || errMsg.includes('session') ||
+          errMsg.includes('token') || errMsg.includes('unauthorized') || errMsg.includes('invalid') ||
           errMsg.includes('expired') || errMsg.includes('not active') || err.response?.status === 401) {
-        throw new Error('Session expired. Please reconnect your Thumbtack account on the Dashboard before importing.');
+        throw err; // Re-throw the error from adapter which has a clear message
       }
       // Re-throw other errors as-is
       throw err;

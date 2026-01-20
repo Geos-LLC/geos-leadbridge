@@ -295,7 +295,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
           responseData?.title === 'Unauthorized' ||
           responseData?.detail?.includes('token') ||
           responseData?.detail?.includes('not active')) {
-        throw new Error('Session expired. Please reconnect your Thumbtack account before importing.');
+        throw new Error('Login required to import. Please log in to Thumbtack to import old leads. (New leads still arrive automatically.)');
       }
 
       throw new Error('Failed to fetch negotiation from Thumbtack');

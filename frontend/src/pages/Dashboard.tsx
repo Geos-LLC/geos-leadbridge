@@ -391,30 +391,32 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Session Expired Banner - shows when import fails due to expired token */}
+      {/* Login Required Banner - shows when import fails due to expired token */}
       {sessionExpiredAccount && (
         <div
           style={{
-            background: '#fef2f2',
-            border: '2px solid #f87171',
+            background: '#f0f9ff',
+            border: '2px solid #0ea5e9',
             borderRadius: '8px',
             padding: '16px 20px',
             marginBottom: '20px',
             display: 'flex',
             alignItems: 'center',
             gap: '16px',
-            boxShadow: '0 2px 8px rgba(239, 68, 68, 0.15)',
+            boxShadow: '0 2px 8px rgba(14, 165, 233, 0.15)',
           }}
         >
-          <AlertCircle size={24} style={{ color: '#dc2626', flexShrink: 0 }} />
+          <RefreshCw size={24} style={{ color: '#0284c7', flexShrink: 0 }} />
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600, fontSize: '16px', color: '#991b1b', marginBottom: '4px' }}>
-              Session Expired - {sessionExpiredAccount.businessName}
+            <div style={{ fontWeight: 600, fontSize: '16px', color: '#0c4a6e', marginBottom: '4px' }}>
+              Login Required to Import - {sessionExpiredAccount.businessName}
             </div>
-            <div style={{ fontSize: '14px', color: '#b91c1c' }}>
-              {sessionExpiredAccount.emailHint
-                ? `Please log in with ${sessionExpiredAccount.emailHint} to reconnect this account.`
-                : 'Please log in to reconnect this account.'}
+            <div style={{ fontSize: '14px', color: '#0369a1', marginBottom: '4px' }}>
+              To import old leads, you need to log in to Thumbtack again.
+              {sessionExpiredAccount.emailHint && ` Use ${sessionExpiredAccount.emailHint}.`}
+            </div>
+            <div style={{ fontSize: '12px', color: '#64748b' }}>
+              Note: New leads will still arrive automatically via webhooks. This login is only needed for importing old leads.
             </div>
           </div>
           <button
@@ -429,12 +431,12 @@ export function Dashboard() {
             {connecting ? (
               <>
                 <Loader2 className="spinner" size={16} />
-                Reconnecting...
+                Logging in...
               </>
             ) : (
               <>
-                <RefreshCw size={16} style={{ marginRight: '6px' }} />
-                Reconnect Now
+                <ExternalLink size={16} style={{ marginRight: '6px' }} />
+                Log In to Thumbtack
               </>
             )}
           </button>
