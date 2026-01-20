@@ -82,6 +82,10 @@ export class NormalizedLead {
   @IsDate()
   updatedAt: Date;
 
+  @IsOptional()
+  @IsDate()
+  lastMessageAt?: Date; // Timestamp of last message in conversation
+
   raw?: any; // Original platform payload for debugging
 }
 

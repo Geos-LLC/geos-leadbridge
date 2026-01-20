@@ -50,8 +50,14 @@ function setLastSeenTimestamp(leadId: string, timestamp: string): void {
 
 function hasNewUpdates(lead: Lead, lastSeenTimestamps: Record<string, string>): boolean {
   const lastSeen = lastSeenTimestamps[lead.id];
-  if (!lastSeen) return true; // Never seen = new
-  return new Date(lead.updatedAt) > new Date(lastSeen);
+  // Use lastMessageAt if available, otherwise fall back to createdAt
+  const lastMessageTime = lead.lastMessageAt || lead.createdAt;
+  if (!lastSeen) {
+    // Never seen - but only mark as "new" if there's been activity after the lead was created
+    // This prevents newly imported leads from showing as "new"
+    return lead.lastMessageAt ? new Date(lead.lastMessageAt) > new Date(lead.createdAt) : false;
+  }
+  return new Date(lastMessageTime) > new Date(lastSeen);
 }
 
 export function Messages() {
@@ -179,10 +185,13 @@ export function Messages() {
     try {
       const { leads: loadedLeads } = await leadsApi.getLeads(50);
       console.log('[Messages] Loaded leads:', loadedLeads.length, loadedLeads);
-      // Sort leads by updatedAt descending (most recently updated first)
-      const sortedLeads = [...loadedLeads].sort((a, b) =>
-        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      );
+      // Sort leads by lastMessageAt descending (most recent message first)
+      // Fall back to createdAt if lastMessageAt is not available
+      const sortedLeads = [...loadedLeads].sort((a, b) => {
+        const aTime = a.lastMessageAt || a.createdAt;
+        const bTime = b.lastMessageAt || b.createdAt;
+        return new Date(bTime).getTime() - new Date(aTime).getTime();
+      });
       setLeads(sortedLeads);
       // Selection will be handled by the savedAccounts effect
     } catch (err) {
@@ -192,10 +201,11 @@ export function Messages() {
     }
   };
 
-  // Mark a lead as seen (update last seen timestamp)
+  // Mark a lead as seen (update last seen timestamp to lastMessageAt)
   const markLeadAsSeen = (lead: Lead) => {
-    setLastSeenTimestamp(lead.id, lead.updatedAt);
-    setLastSeenTimestamps(prev => ({ ...prev, [lead.id]: lead.updatedAt }));
+    const timestamp = lead.lastMessageAt || lead.createdAt;
+    setLastSeenTimestamp(lead.id, timestamp);
+    setLastSeenTimestamps(prev => ({ ...prev, [lead.id]: timestamp }));
   };
 
   const loadMessagesForLead = async (lead: Lead) => {
@@ -470,7 +480,7 @@ export function Messages() {
                   <div className="lead-preview">
                     <div className="lead-header">
                       <span className="lead-name">{lead.customerName}</span>
-                      <span className="lead-time">{formatLeadTime(lead.updatedAt)}</span>
+                      <span className="lead-time">{formatLeadTime(lead.lastMessageAt || lead.createdAt)}</span>
                     </div>
                     <div className="lead-meta">
                       <span className="lead-category">{lead.category || 'Service Request'}</span>

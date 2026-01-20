@@ -604,4 +604,21 @@ export class ThumbtackController {
       deletedLeads: result.deletedLeads,
     };
   }
+
+  /**
+   * Validate token for a saved account
+   * Use this before importing to check if re-login is needed
+   */
+  @Get('saved-accounts/:id/validate-token')
+  async validateAccountToken(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    const result = await this.platformService.validateAccountToken(user.userId, id);
+
+    return {
+      valid: result.valid,
+      ...(result.reason && { reason: result.reason }),
+    };
+  }
 }

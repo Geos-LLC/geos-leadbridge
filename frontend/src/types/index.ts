@@ -27,6 +27,7 @@ export interface Lead {
   threadId: string | null;
   createdAt: string;
   updatedAt: string;
+  lastMessageAt?: string; // Timestamp of last message in conversation
   raw?: any;
 }
 

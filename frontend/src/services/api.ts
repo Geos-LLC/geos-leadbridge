@@ -259,6 +259,10 @@ export const thumbtackApi = {
     const { data } = await api.post(`/v1/thumbtack/saved-accounts/${id}/reconnect`);
     return data;
   },
+  validateToken: async (id: string): Promise<{ valid: boolean; reason?: string }> => {
+    const { data } = await api.get(`/v1/thumbtack/saved-accounts/${id}/validate-token`);
+    return data;
+  },
 };
 
 // Attachment type for messages

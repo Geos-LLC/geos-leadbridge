@@ -132,6 +132,13 @@ export class LeadsService {
         ...(filters?.status && { status: filters.status }),
         ...(filters?.businessId && { businessId: filters.businessId }),
       },
+      include: {
+        conversation: {
+          select: {
+            lastMessageAt: true,
+          },
+        },
+      },
       orderBy: { createdAt: 'desc' },
       take: filters?.limit || 50,
     });
@@ -769,6 +776,9 @@ export class LeadsService {
    * Convert database lead to normalized format
    */
   private convertToNormalizedLead(lead: any): NormalizedLead {
+    // Get lastMessageAt from conversation if available, otherwise use lead's createdAt
+    const lastMessageAt = lead.conversation?.lastMessageAt || lead.createdAt;
+
     return {
       id: lead.id,
       platform: lead.platform,
@@ -787,6 +797,7 @@ export class LeadsService {
       threadId: lead.threadId,
       createdAt: lead.createdAt,
       updatedAt: lead.updatedAt,
+      lastMessageAt: lastMessageAt, // Include lastMessageAt for sorting and display
       raw: lead.rawJson ? JSON.parse(lead.rawJson) : undefined,
     };
   }

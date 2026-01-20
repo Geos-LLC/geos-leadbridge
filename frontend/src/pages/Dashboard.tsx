@@ -302,13 +302,39 @@ export function Dashboard() {
       return;
     }
 
-    // Set total for progress tracking
-    setImportTotal(ids.length);
-
     setImporting(true);
     setError('');
     setSuccess('');
     setImportResults([]);
+
+    // FIRST: Validate token before attempting any imports
+    console.log('[Dashboard] Validating token for account:', selectedImportAccountId);
+    try {
+      const validation = await thumbtackApi.validateToken(selectedImportAccountId);
+      console.log('[Dashboard] Token validation result:', validation);
+
+      if (!validation.valid) {
+        console.log('[Dashboard] Token invalid, showing login banner');
+        // Token is invalid - show the login required banner immediately
+        const account = savedAccounts.find(a => a.id === selectedImportAccountId);
+        setSessionExpiredAccount(account || null);
+        setImporting(false);
+        return;
+      }
+    } catch (err: any) {
+      console.error('[Dashboard] Token validation failed:', err);
+      // If validation call itself fails, assume token is invalid
+      const account = savedAccounts.find(a => a.id === selectedImportAccountId);
+      setSessionExpiredAccount(account || null);
+      setImporting(false);
+      return;
+    }
+
+    // Token is valid, proceed with imports
+    console.log('[Dashboard] Token valid, proceeding with imports');
+
+    // Set total for progress tracking
+    setImportTotal(ids.length);
     setShowImportResults(true);
 
     const results: ImportResult[] = [];

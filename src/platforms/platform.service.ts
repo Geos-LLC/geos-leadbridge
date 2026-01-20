@@ -656,6 +656,54 @@ export class PlatformService {
   }
 
   /**
+   * Validate token for a saved account by making a simple API call
+   * Returns { valid: true } if token works, or { valid: false, reason: string } if not
+   */
+  async validateAccountToken(userId: string, accountId: string): Promise<{ valid: boolean; reason?: string }> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: accountId, userId },
+    });
+
+    if (!account) {
+      return { valid: false, reason: 'Account not found' };
+    }
+
+    // Get credentials for this account
+    const credentials = await this.getAccountCredentials(userId, accountId);
+    if (!credentials) {
+      return { valid: false, reason: 'No credentials stored for this account. Please reconnect.' };
+    }
+
+    // Try making a simple API call to validate the token
+    try {
+      const adapter = this.platformFactory.getAdapter(account.platform) as any;
+      // Use getBusinesses as a simple validation call - it will fail if token is expired
+      await adapter.getBusinesses(credentials);
+      return { valid: true };
+    } catch (error: any) {
+      const errMsg = error.message?.toLowerCase() || '';
+      const status = error.response?.status;
+
+      console.log(`[PlatformService] Token validation failed - status: ${status}, message: ${errMsg}`);
+
+      if (status === 401 ||
+          errMsg.includes('unauthorized') ||
+          errMsg.includes('token') ||
+          errMsg.includes('expired') ||
+          errMsg.includes('invalid') ||
+          errMsg.includes('not active')) {
+        return {
+          valid: false,
+          reason: 'Login required to import. Please log in to Thumbtack to import old leads. (New leads still arrive automatically.)',
+        };
+      }
+
+      // Other errors - still treat as invalid for safety
+      return { valid: false, reason: error.message || 'Failed to validate token' };
+    }
+  }
+
+  /**
    * Sync saved accounts from existing leads
    * This backfills any accounts that have leads but aren't in saved_accounts
    */
