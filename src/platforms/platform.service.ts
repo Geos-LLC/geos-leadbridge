@@ -246,9 +246,19 @@ export class PlatformService {
   /**
    * Setup webhook for Thumbtack business
    * Registers webhook URL with Thumbtack to receive NegotiationCreatedV4 events
+   * Uses account-specific credentials if available, falls back to platform credentials
    */
   async setupThumbtackWebhook(userId: string, businessId: string): Promise<{ webhookId: string; businessId: string }> {
-    const credentials = await this.getCredentials(userId, 'thumbtack');
+    // Try account-specific credentials first, then fall back to platform credentials
+    let credentials: { accessToken: string; refreshToken?: string };
+    const accountCreds = await this.getAccountCredentialsByBusinessId(userId, 'thumbtack', businessId);
+    if (accountCreds) {
+      console.log(`[PlatformService] Using account-specific credentials for webhook setup (business: ${businessId})`);
+      credentials = accountCreds;
+    } else {
+      console.log(`[PlatformService] Using platform credentials for webhook setup (business: ${businessId})`);
+      credentials = await this.getCredentials(userId, 'thumbtack');
+    }
     const adapter = this.platformFactory.getAdapter('thumbtack') as any;
 
     // Get webhook URL from config
@@ -320,7 +330,16 @@ export class PlatformService {
     let warning: string | undefined;
 
     try {
-      const credentials = await this.getCredentials(userId, account.platform);
+      // Try account-specific credentials first, then fall back to platform credentials
+      let credentials: { accessToken: string; refreshToken?: string };
+      const accountCreds = await this.getAccountCredentials(userId, accountId);
+      if (accountCreds) {
+        console.log(`[PlatformService] Using account-specific credentials for webhook deletion`);
+        credentials = accountCreds;
+      } else {
+        console.log(`[PlatformService] Using platform credentials for webhook deletion`);
+        credentials = await this.getCredentials(userId, account.platform);
+      }
       const adapter = this.platformFactory.getAdapter(account.platform) as any;
 
       // Delete the webhook from Thumbtack
@@ -397,9 +416,17 @@ export class PlatformService {
 
   /**
    * Get Thumbtack webhooks for a business
+   * Uses account-specific credentials if available, falls back to platform credentials
    */
   async getThumbtackWebhooks(userId: string, businessId: string): Promise<any[]> {
-    const credentials = await this.getCredentials(userId, 'thumbtack');
+    // Try account-specific credentials first
+    let credentials: { accessToken: string; refreshToken?: string };
+    const accountCreds = await this.getAccountCredentialsByBusinessId(userId, 'thumbtack', businessId);
+    if (accountCreds) {
+      credentials = accountCreds;
+    } else {
+      credentials = await this.getCredentials(userId, 'thumbtack');
+    }
     const adapter = this.platformFactory.getAdapter('thumbtack') as any;
 
     return adapter.getWebhooks(credentials, businessId);
