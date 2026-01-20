@@ -318,10 +318,11 @@ export function Dashboard() {
         console.error('[Dashboard] Import failed for', id, err);
         const errorMsg = err.response?.data?.message || 'Failed to import';
 
-        // Check if it's a session expired error
+        // Check if it's a login required error (token expired)
         if (errorMsg.toLowerCase().includes('session') ||
             errorMsg.toLowerCase().includes('reconnect') ||
-            errorMsg.toLowerCase().includes('expired')) {
+            errorMsg.toLowerCase().includes('expired') ||
+            errorMsg.toLowerCase().includes('login required')) {
           sessionExpired = true;
         }
 
