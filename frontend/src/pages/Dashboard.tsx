@@ -366,9 +366,15 @@ export function Dashboard() {
     const updatedCount = results.filter(r => r.success && !r.isNew).length;
     const failCount = results.filter(r => !r.success).length;
 
+    console.log('[Dashboard] Import complete - sessionExpired:', sessionExpired, 'wrongAccount:', wrongAccount);
+    console.log('[Dashboard] selectedImportAccountId:', selectedImportAccountId);
+    console.log('[Dashboard] savedAccounts:', savedAccounts);
+
     if (sessionExpired) {
       // Show session expired error with reconnect option - handled by sessionExpiredAccount state
-      setSessionExpiredAccount(savedAccounts.find(a => a.id === selectedImportAccountId) || null);
+      const account = savedAccounts.find(a => a.id === selectedImportAccountId);
+      console.log('[Dashboard] Found account for banner:', account);
+      setSessionExpiredAccount(account || null);
     } else if (wrongAccount) {
       // Show clear error about wrong account selection
       setError('Wrong account selected. These leads belong to a different Thumbtack business. Please select the correct account from the dropdown.');
