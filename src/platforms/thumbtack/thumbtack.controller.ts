@@ -425,14 +425,20 @@ export class ThumbtackController {
     } catch (err: any) {
       // Check if it's a login/token error and return a clear message
       const errMsg = err.message?.toLowerCase() || '';
+      console.log(`[ThumbtackController] Import error - message: "${err.message}"`);
+
       if (errMsg.includes('login required') ||
           errMsg.includes('session expired') ||
           errMsg.includes('reconnect') ||
           errMsg.includes('token') ||
-          errMsg.includes('unauthorized')) {
+          errMsg.includes('unauthorized') ||
+          errMsg.includes('invalid') ||
+          errMsg.includes('not active')) {
+        console.log(`[ThumbtackController] Detected auth error, throwing BadRequestException`);
         throw new BadRequestException(err.message);
       }
       // Re-throw other errors
+      console.log(`[ThumbtackController] Not an auth error, re-throwing`);
       throw err;
     }
   }

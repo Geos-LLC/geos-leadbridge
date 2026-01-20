@@ -291,10 +291,16 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       // Check for auth errors (401, token expired, etc.)
       const status = error.response?.status;
       const responseData = error.response?.data;
+      const detail = responseData?.detail || '';
+
+      // Log for debugging
+      this.logger.error(`Auth check - status: ${status}, title: ${responseData?.title}, detail: ${detail}`);
+
       if (status === 401 ||
           responseData?.title === 'Unauthorized' ||
-          responseData?.detail?.includes('token') ||
-          responseData?.detail?.includes('not active')) {
+          detail.includes('token') ||
+          detail.includes('not active') ||
+          detail.includes('invalid')) {
         throw new Error('Login required to import. Please log in to Thumbtack to import old leads. (New leads still arrive automatically.)');
       }
 
