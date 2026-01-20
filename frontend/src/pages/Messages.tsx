@@ -142,6 +142,9 @@ export function Messages() {
       }
     });
 
+    console.log('[DateFilter] Oldest lead date:', oldestDate.toISOString());
+    console.log('[DateFilter] Leads count:', leadsList.length);
+
     // Generate all months from oldest lead to now
     const options: { value: string; label: string }[] = [];
     const now = new Date();
@@ -149,6 +152,8 @@ export function Messages() {
     const currentMonth = now.getMonth();
     const startYear = oldestDate.getFullYear();
     const startMonth = oldestDate.getMonth();
+
+    console.log('[DateFilter] Range:', { currentYear, currentMonth, startYear, startMonth });
 
     // Loop from current month back to oldest month
     for (let year = currentYear; year >= startYear; year--) {
@@ -162,6 +167,8 @@ export function Messages() {
         options.push({ value, label });
       }
     }
+
+    console.log('[DateFilter] Generated options:', options.length, options);
 
     return options;
   };
