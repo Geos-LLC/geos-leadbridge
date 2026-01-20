@@ -245,8 +245,9 @@ export class PlatformService {
 
   /**
    * Setup webhook for Thumbtack business
-   * Registers webhook URL with Thumbtack to receive NegotiationCreatedV4 events
+   * Registers webhook URL with Thumbtack to receive NegotiationCreatedV4 and MessageCreatedV4 events
    * Uses account-specific credentials if available, falls back to platform credentials
+   * Automatically cleans up any existing webhooks before creating a new one
    */
   async setupThumbtackWebhook(userId: string, businessId: string): Promise<{ webhookId: string; businessId: string }> {
     // Try account-specific credentials first, then fall back to platform credentials
@@ -264,6 +265,25 @@ export class PlatformService {
     // Get webhook URL from config
     const baseUrl = this.configService.get<string>('thumbtack.redirectUri')?.replace('/v1/thumbtack/auth/callback', '') || '';
     const webhookUrl = `${baseUrl}/webhooks/thumbtack`;
+
+    // Clean up any existing webhooks before creating a new one
+    try {
+      const existingWebhooks = await adapter.getWebhooks(credentials, businessId);
+      if (existingWebhooks && existingWebhooks.length > 0) {
+        console.log(`[PlatformService] Found ${existingWebhooks.length} existing webhooks for business ${businessId}, cleaning up...`);
+        for (const webhook of existingWebhooks) {
+          try {
+            await adapter.deleteWebhook(credentials, businessId, webhook.webhookID);
+            console.log(`[PlatformService] Deleted old webhook ${webhook.webhookID}`);
+          } catch (deleteErr: any) {
+            console.warn(`[PlatformService] Failed to delete old webhook ${webhook.webhookID}: ${deleteErr.message}`);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[PlatformService] Could not fetch existing webhooks for cleanup: ${err.message}`);
+      // Continue with registration even if cleanup fails
+    }
 
     // Register webhook with Thumbtack
     const result = await adapter.registerWebhook(credentials, businessId, webhookUrl);
