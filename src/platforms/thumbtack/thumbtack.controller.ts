@@ -405,14 +405,23 @@ export class ThumbtackController {
     @Param('negotiationId') negotiationId: string,
     @Body('accountId') accountId?: string,
   ) {
-    const { lead, isNew } = await this.leadsService.importThumbtackNegotiation(user.userId, negotiationId, accountId);
+    try {
+      const { lead, isNew } = await this.leadsService.importThumbtackNegotiation(user.userId, negotiationId, accountId);
 
-    return {
-      success: true,
-      isNew,
-      message: isNew ? 'Negotiation imported successfully' : 'Negotiation already exists (updated)',
-      lead,
-    };
+      return {
+        success: true,
+        isNew,
+        message: isNew ? 'Negotiation imported successfully' : 'Negotiation already exists (updated)',
+        lead,
+      };
+    } catch (err: any) {
+      // Check if it's a session/token error and return a clear message
+      if (err.message?.includes('Session expired') || err.message?.includes('reconnect')) {
+        throw new BadRequestException(err.message);
+      }
+      // Re-throw other errors
+      throw err;
+    }
   }
 
   /**

@@ -565,8 +565,20 @@ export class LeadsService {
     const adapter = this.platformFactory.getAdapter('thumbtack') as any;
 
     // Fetch negotiation from Thumbtack API
-    const lead = await adapter.getLead(credentials, negotiationId);
-    console.log(`[LeadsService] Fetched lead from Thumbtack:`, JSON.stringify(lead));
+    let lead;
+    try {
+      lead = await adapter.getLead(credentials, negotiationId);
+      console.log(`[LeadsService] Fetched lead from Thumbtack:`, JSON.stringify(lead));
+    } catch (err: any) {
+      const errMsg = err.message?.toLowerCase() || '';
+      // Check if it's a token/auth error
+      if (errMsg.includes('token') || errMsg.includes('unauthorized') || errMsg.includes('invalid') ||
+          errMsg.includes('expired') || errMsg.includes('not active') || err.response?.status === 401) {
+        throw new Error('Session expired. Please reconnect your Thumbtack account on the Dashboard before importing.');
+      }
+      // Re-throw other errors as-is
+      throw err;
+    }
 
     // If we have a target businessId, verify the lead belongs to that business
     if (targetBusinessId && lead.businessId && lead.businessId !== targetBusinessId) {

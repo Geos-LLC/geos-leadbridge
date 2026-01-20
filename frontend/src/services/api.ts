@@ -155,14 +155,12 @@ export const authApi = {
 
 // Health issue type from backend
 export interface HealthIssue {
-  code: 'token_expired' | 'no_webhooks' | 'not_connected' | 'token_invalid' | 'api_error';
+  code: 'no_webhooks' | 'not_connected';
   severity: 'error' | 'warning';
   title: string;
   message: string;
   action?: string;
   actionLabel?: string;
-  accountId?: string;    // Which saved account has the issue
-  accountName?: string;  // Display name of the account
 }
 
 // Platforms

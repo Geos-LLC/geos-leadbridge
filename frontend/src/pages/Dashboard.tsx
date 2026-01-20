@@ -278,16 +278,6 @@ export function Dashboard() {
       return;
     }
 
-    // Check if the selected account has a token issue (needs reconnect)
-    const accountIssue = healthIssues.find(
-      i => i.accountId === selectedImportAccountId && (i.code === 'token_expired' || i.code === 'token_invalid')
-    );
-    if (accountIssue) {
-      const account = savedAccounts.find(a => a.id === selectedImportAccountId);
-      setError(`Session expired for ${account?.businessName || 'this account'}. Please reconnect before importing.`);
-      return;
-    }
-
     // Parse IDs - split by comma, newline, tab, or space
     const ids = importIds
       .split(/[,\n\t\s]+/)
@@ -383,7 +373,7 @@ export function Dashboard() {
       {/* Health Issues Banner - persistent warning for critical issues */}
       {healthIssues.filter(i => i.severity === 'error').map((issue, index) => (
         <div
-          key={`${issue.code}-${issue.accountId || index}`}
+          key={`${issue.code}-${index}`}
           className="health-issue-banner"
           style={{
             background: '#fef2f2',
@@ -403,14 +393,14 @@ export function Dashboard() {
           />
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 600, fontSize: '16px', color: '#991b1b', marginBottom: '6px' }}>
-              {issue.accountName ? `${issue.title} - ${issue.accountName}` : issue.title}
+              {issue.title}
             </div>
             <div style={{ fontSize: '14px', color: '#b91c1c', marginBottom: '8px' }}>
               {issue.message}
             </div>
             {issue.action === 'reconnect' && (
               <div style={{ fontSize: '13px', color: '#7f1d1d' }}>
-                Click "Reconnect" to log in again with {issue.accountName ? `the ${issue.accountName} account` : 'your Thumbtack account'}.
+                Click "Reconnect" to log in again with your Thumbtack account.
               </div>
             )}
           </div>
@@ -434,18 +424,7 @@ export function Dashboard() {
           {issue.action === 'reconnect' && (
             <button
               className="btn btn-primary"
-              onClick={() => {
-                // If we have an accountId, find the account and use its email hint
-                if (issue.accountId) {
-                  const account = savedAccounts.find(a => a.id === issue.accountId);
-                  if (account) {
-                    handleReconnectWebhook(account);
-                    return;
-                  }
-                }
-                // Fallback to generic connect
-                handleConnectThumbtack();
-              }}
+              onClick={handleConnectThumbtack}
               disabled={connecting}
               style={{ whiteSpace: 'nowrap' }}
             >
@@ -508,27 +487,11 @@ export function Dashboard() {
           </p>
 
           <div className="businesses-grid">
-            {savedAccounts.map((account) => {
-              // Check if this account has a health issue (token expired, etc.)
-              const accountIssue = healthIssues.find(
-                i => i.accountId === account.id && (i.code === 'token_expired' || i.code === 'token_invalid')
-              );
-              const needsReconnect = !!accountIssue;
-
-              return (
-              <div
-                key={account.id}
-                className="business-card"
-                style={needsReconnect ? { border: '2px solid #f87171', background: '#fef2f2' } : undefined}
-              >
-                {/* Status badge - show error if needs reconnect */}
-                <div className={`account-status-badge ${needsReconnect ? 'error' : account.webhookId ? 'connected' : 'disconnected'}`}>
-                  {needsReconnect ? (
-                    <>
-                      <AlertCircle size={12} />
-                      Needs Reconnect
-                    </>
-                  ) : account.webhookId ? (
+            {savedAccounts.map((account) => (
+              <div key={account.id} className="business-card">
+                {/* Status badge based on webhookId */}
+                <div className={`account-status-badge ${account.webhookId ? 'connected' : 'disconnected'}`}>
+                  {account.webhookId ? (
                     <>
                       <CheckCircle size={12} />
                       Connected
@@ -595,43 +558,6 @@ export function Dashboard() {
                     </div>
                   )}
                 </div>
-
-                {/* Show reconnect prompt when token is expired */}
-                {needsReconnect && (
-                  <div
-                    style={{
-                      background: '#fef2f2',
-                      border: '1px solid #fecaca',
-                      borderRadius: '6px',
-                      padding: '12px',
-                      marginBottom: '12px',
-                      textAlign: 'center',
-                    }}
-                  >
-                    <div style={{ fontSize: '13px', color: '#b91c1c', marginBottom: '8px' }}>
-                      <strong>Session expired.</strong> Click below to reconnect.
-                    </div>
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => handleReconnectWebhook(account)}
-                      disabled={connecting}
-                      style={{ width: '100%' }}
-                    >
-                      {connecting ? (
-                        <>
-                          <Loader2 className="spinner" size={16} />
-                          Reconnecting...
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw size={16} style={{ marginRight: '6px' }} />
-                          Reconnect Account
-                        </>
-                      )}
-                    </button>
-                  </div>
-                )}
-
                 <div className="business-actions">
                   <button
                     className="btn btn-primary"
@@ -671,8 +597,7 @@ export function Dashboard() {
                   </button>
                 </div>
               </div>
-            );
-            })}
+            ))}
           </div>
         </section>
       )}
@@ -694,40 +619,20 @@ export function Dashboard() {
               <div className="import-account-cards" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                 {savedAccounts.map((account) => {
                   const isSelected = selectedImportAccountId === account.id;
-                  // Check if this account has a token issue
-                  const hasTokenIssue = healthIssues.some(
-                    i => i.accountId === account.id && (i.code === 'token_expired' || i.code === 'token_invalid')
-                  );
                   return (
                     <div
                       key={account.id}
-                      onClick={() => {
-                        if (hasTokenIssue) {
-                          // Don't select, show error instead
-                          setError(`${account.businessName} needs to be reconnected before importing.`);
-                          return;
-                        }
-                        setSelectedImportAccountId(account.id);
-                      }}
+                      onClick={() => setSelectedImportAccountId(account.id)}
                       style={{
                         padding: '12px 16px',
-                        border: hasTokenIssue
-                          ? '2px solid #f87171'
-                          : isSelected
-                          ? '2px solid var(--primary)'
-                          : '1px solid var(--border)',
+                        border: isSelected ? '2px solid var(--primary)' : '1px solid var(--border)',
                         borderRadius: '8px',
-                        cursor: hasTokenIssue ? 'not-allowed' : 'pointer',
-                        background: hasTokenIssue
-                          ? '#fef2f2'
-                          : isSelected
-                          ? 'var(--primary-light, #f0f7ff)'
-                          : 'var(--surface)',
+                        cursor: 'pointer',
+                        background: isSelected ? 'var(--primary-light, #f0f7ff)' : 'var(--surface)',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '10px',
                         transition: 'all 0.15s ease',
-                        opacity: hasTokenIssue ? 0.8 : 1,
                       }}
                     >
                       {account.imageUrl ? (
@@ -737,25 +642,17 @@ export function Dashboard() {
                           style={{ width: '28px', height: '28px', borderRadius: '4px', objectFit: 'cover' }}
                         />
                       ) : (
-                        <Building2 size={28} style={{ color: hasTokenIssue ? '#dc2626' : 'var(--text-secondary)' }} />
+                        <Building2 size={28} style={{ color: 'var(--text-secondary)' }} />
                       )}
                       <div>
-                        <div style={{ fontWeight: 500, fontSize: '14px', color: hasTokenIssue ? '#991b1b' : undefined }}>
-                          {account.businessName}
-                        </div>
-                        {hasTokenIssue ? (
-                          <div style={{ fontSize: '12px', color: '#dc2626', fontWeight: 500 }}>
-                            Needs reconnect
-                          </div>
-                        ) : account.emailHint ? (
+                        <div style={{ fontWeight: 500, fontSize: '14px' }}>{account.businessName}</div>
+                        {account.emailHint && (
                           <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{account.emailHint}</div>
-                        ) : null}
+                        )}
                       </div>
-                      {hasTokenIssue ? (
-                        <AlertCircle size={18} style={{ color: '#dc2626', marginLeft: 'auto' }} />
-                      ) : isSelected ? (
+                      {isSelected && (
                         <CheckCircle size={18} style={{ color: 'var(--primary)', marginLeft: 'auto' }} />
-                      ) : null}
+                      )}
                     </div>
                   );
                 })}
