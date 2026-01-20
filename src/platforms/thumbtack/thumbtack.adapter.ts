@@ -284,6 +284,10 @@ export class ThumbtackAdapter implements IPlatformAdapter {
         headers: { Authorization: `Bearer ${credentials.accessToken}` },
       });
 
+      // Log raw status from Thumbtack API for debugging
+      const data = response.data;
+      this.logger.log(`[getLead] Raw negotiation from API - status: "${data?.status}", chargeState: "${data?.chargeState}", negotiationId: ${negotiationId}`);
+
       return this.normalizeNegotiation(response.data);
     } catch (error) {
       this.logger.error('Error fetching negotiation:', error.response?.data || error.message);
