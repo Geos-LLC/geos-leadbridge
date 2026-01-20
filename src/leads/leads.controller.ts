@@ -127,6 +127,7 @@ export class LeadsController {
    */
   @Post(':id/resync-messages')
   async resyncMessages(@CurrentUser() user: any, @Param('id') id: string) {
+    console.log(`[LeadsController] POST /resync-messages called - leadId: ${id}, userId: ${user.userId}`);
     const result = await this.leadsService.resyncMessages(user.userId, id);
 
     return {

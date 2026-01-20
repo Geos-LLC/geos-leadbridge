@@ -237,9 +237,11 @@ export function Messages() {
 
   const handleResyncMessages = async () => {
     if (!selectedLead) return;
+    console.log('[Messages] Resync button clicked for lead:', selectedLead.id, selectedLead.customerName);
     setResyncingMessages(true);
     setResyncError(null);
     try {
+      console.log('[Messages] Calling leadsApi.resyncMessages...');
       const result = await leadsApi.resyncMessages(selectedLead.id);
       console.log('[Messages] Resync result:', result);
       // Reload messages after resync
