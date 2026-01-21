@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Plus, Pencil, Trash2, Loader2, Save, X, Zap, Clock, Play, Pause, ChevronDown, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { automationApi, thumbtackApi, templatesApi } from '../services/api';
@@ -56,6 +56,7 @@ export function AutomationSettings() {
   const [newTemplateName, setNewTemplateName] = useState('');
   const [newTemplateContent, setNewTemplateContent] = useState('');
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const templateContentRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     loadData();
@@ -195,7 +196,8 @@ export function AutomationSettings() {
     if (rule.triggerType === 'new_lead') {
       return 'New Lead';
     }
-    return rule.replyTriggerMode === 'every_reply' ? 'Every Customer Reply' : 'First Customer Reply';
+    // Note: First customer message is excluded, so "First Reply" means 2nd message
+    return rule.replyTriggerMode === 'every_reply' ? 'Every Reply' : 'First Reply';
   }
 
   function handleTemplateChange(value: string) {
@@ -241,7 +243,21 @@ export function AutomationSettings() {
   }
 
   function insertVariable(variable: string) {
-    setNewTemplateContent(prev => prev + variable);
+    const textarea = templateContentRef.current;
+    if (textarea) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const newContent = newTemplateContent.substring(0, start) + variable + newTemplateContent.substring(end);
+      setNewTemplateContent(newContent);
+      // Restore focus and set cursor position after the inserted variable
+      requestAnimationFrame(() => {
+        textarea.focus();
+        textarea.selectionStart = textarea.selectionEnd = start + variable.length;
+      });
+    } else {
+      // Fallback: append to end if ref not available
+      setNewTemplateContent(prev => prev + variable);
+    }
   }
 
   if (loading) {
@@ -336,6 +352,7 @@ export function AutomationSettings() {
                 <div className="form-group">
                   <label>Message Content *</label>
                   <textarea
+                    ref={templateContentRef}
                     value={newTemplateContent}
                     onChange={e => setNewTemplateContent(e.target.value)}
                     placeholder="Hi {firstName}, thanks for reaching out about {category}! I wanted to follow up..."
@@ -473,7 +490,7 @@ export function AutomationSettings() {
                     onChange={e => setFormTriggerType(e.target.value as 'new_lead' | 'customer_reply')}
                   >
                     <option value="new_lead">New Lead Received</option>
-                    <option value="customer_reply">Customer Replies</option>
+                    <option value="customer_reply">Customer Replies (excludes first message)</option>
                   </select>
                   <ChevronDown size={16} />
                 </div>
@@ -482,6 +499,7 @@ export function AutomationSettings() {
               {formTriggerType === 'customer_reply' && (
                 <div className="form-group">
                   <label>When to trigger</label>
+                  <p className="form-hint">The customer's initial message is not counted as a reply.</p>
                   <div className="radio-group">
                     <label className="radio-label">
                       <input
@@ -716,6 +734,7 @@ export function AutomationSettings() {
               <div className="form-group">
                 <label>Message Content *</label>
                 <textarea
+                  ref={templateContentRef}
                   value={newTemplateContent}
                   onChange={e => setNewTemplateContent(e.target.value)}
                   placeholder="Hi {firstName}, thanks for reaching out about {category}! I wanted to follow up..."

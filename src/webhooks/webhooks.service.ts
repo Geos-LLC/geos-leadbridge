@@ -649,10 +649,10 @@ export class WebhooksService {
 
     this.logger.log('Message stored successfully', { messageId, conversationId: conversation.id });
 
-    // Trigger automation rules for customer replies
+    // Trigger automation rules for customer replies (excludes first message)
     if (sender === 'customer') {
       try {
-        // Count customer messages to determine if this is the first reply
+        // Count customer messages to determine reply position
         const customerMessageCount = await this.prisma.message.count({
           where: { conversationId: conversation.id, sender: 'customer' },
         });
@@ -663,6 +663,7 @@ export class WebhooksService {
           negotiationId,
           leadId: lead.id,
           isFirstCustomerReply: customerMessageCount === 1,
+          isSecondCustomerMessage: customerMessageCount === 2, // First actual reply after initial message
           customerName: lead.customerName,
           category: lead.category || undefined,
           city: lead.city || undefined,

@@ -41,6 +41,7 @@ export interface AutomationTriggerContext {
 
 export interface CustomerReplyContext extends AutomationTriggerContext {
   isFirstCustomerReply: boolean;
+  isSecondCustomerMessage?: boolean; // True when this is the 2nd customer message (first actual reply)
 }
 
 @Injectable()
@@ -365,9 +366,17 @@ export class AutomationService implements OnModuleInit {
 
   /**
    * Handle customer reply event - triggers "customer_reply" automation rules
+   * Note: The first customer message is excluded from triggering automations.
+   * This only triggers on the 2nd and subsequent customer messages.
    */
   async handleCustomerReply(context: CustomerReplyContext): Promise<void> {
     this.logger.log(`Handling customer reply automation: ${context.negotiationId}, isFirst: ${context.isFirstCustomerReply}`);
+
+    // Skip the first customer message - only trigger on actual replies (2nd+ messages)
+    if (context.isFirstCustomerReply) {
+      this.logger.log(`Skipping first customer message - automations only trigger on replies`);
+      return;
+    }
 
     // Find saved account by businessId
     const savedAccount = await this.prisma.savedAccount.findFirst({
@@ -398,9 +407,9 @@ export class AutomationService implements OnModuleInit {
     this.logger.log(`Found ${rules.length} customer_reply rules for account ${savedAccount.businessName}`);
 
     for (const rule of rules) {
-      // Check reply trigger mode
-      if (rule.replyTriggerMode === 'first_only' && !context.isFirstCustomerReply) {
-        this.logger.log(`Skipping rule ${rule.id} - only triggers on first reply`);
+      // Check reply trigger mode - "first_only" means the first reply AFTER initial message (2nd message)
+      if (rule.replyTriggerMode === 'first_only' && context.isSecondCustomerMessage !== true) {
+        this.logger.log(`Skipping rule ${rule.id} - only triggers on first reply after initial message`);
         continue;
       }
 

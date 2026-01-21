@@ -3125,6 +3125,12 @@ body {
   color: var(--text-muted);
 }
 
+.form-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 8px 0;
+}
+
 .radio-group {
   display: flex;
   flex-direction: column;
