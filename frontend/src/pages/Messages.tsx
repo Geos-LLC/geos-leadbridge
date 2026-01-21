@@ -223,7 +223,8 @@ export function Messages() {
     setLoading(true);
     console.log('[Messages] Loading leads...');
     try {
-      const { leads: loadedLeads } = await leadsApi.getLeads(50);
+      // Load all leads (no limit) to support date filtering across full history
+      const { leads: loadedLeads } = await leadsApi.getLeads();
       console.log('[Messages] Loaded leads:', loadedLeads.length, loadedLeads);
       // Sort leads by lastMessageAt descending (most recent message first)
       // Fall back to createdAt if lastMessageAt is not available
