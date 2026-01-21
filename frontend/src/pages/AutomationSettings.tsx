@@ -1,8 +1,17 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Plus, Pencil, Trash2, Loader2, Save, X, Zap, Clock, Play, Pause, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Plus, Pencil, Trash2, Loader2, Save, X, Zap, Clock, Play, Pause, ChevronDown, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { automationApi, thumbtackApi, templatesApi } from '../services/api';
 import type { AutomationRule, SavedAccount, MessageTemplate } from '../types';
+
+// Available variables for templates
+const TEMPLATE_VARIABLES = [
+  { name: '{customerName}', description: 'Full customer name' },
+  { name: '{firstName}', description: 'First name only' },
+  { name: '{category}', description: 'Service category or "your project"' },
+  { name: '{city}', description: 'Customer city' },
+  { name: '{state}', description: 'Customer state' },
+];
 
 // Delay options in minutes
 const DELAY_OPTIONS = [
@@ -41,6 +50,12 @@ export function AutomationSettings() {
 
   // Delete confirmation
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Quick template creation modal
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [newTemplateContent, setNewTemplateContent] = useState('');
+  const [savingTemplate, setSavingTemplate] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -183,6 +198,52 @@ export function AutomationSettings() {
     return rule.replyTriggerMode === 'every_reply' ? 'Every Customer Reply' : 'First Customer Reply';
   }
 
+  function handleTemplateChange(value: string) {
+    if (value === '__new__') {
+      setShowTemplateModal(true);
+    } else {
+      setFormTemplateId(value);
+    }
+  }
+
+  function openTemplateModal() {
+    setNewTemplateName('');
+    setNewTemplateContent('');
+    setShowTemplateModal(true);
+  }
+
+  function closeTemplateModal() {
+    setShowTemplateModal(false);
+    setNewTemplateName('');
+    setNewTemplateContent('');
+  }
+
+  async function handleCreateTemplate() {
+    if (!newTemplateName.trim() || !newTemplateContent.trim()) {
+      return;
+    }
+
+    try {
+      setSavingTemplate(true);
+      const { template } = await templatesApi.createTemplate(
+        newTemplateName.trim(),
+        newTemplateContent.trim(),
+      );
+      // Add new template to list and select it
+      setTemplates(prev => [template, ...prev]);
+      setFormTemplateId(template.id);
+      closeTemplateModal();
+    } catch (err: any) {
+      setError(err.message || 'Failed to create template');
+    } finally {
+      setSavingTemplate(false);
+    }
+  }
+
+  function insertVariable(variable: string) {
+    setNewTemplateContent(prev => prev + variable);
+  }
+
   if (loading) {
     return (
       <div className="automation-settings">
@@ -226,7 +287,7 @@ export function AutomationSettings() {
     );
   }
 
-  if (templates.length === 0) {
+  if (templates.length === 0 && !showTemplateModal) {
     return (
       <div className="automation-settings">
         <div className="settings-header">
@@ -240,10 +301,78 @@ export function AutomationSettings() {
         </div>
         <div className="empty-state">
           <p>You need to create a message template before setting up automations.</p>
-          <button className="btn btn-primary" onClick={() => navigate('/settings/messages')}>
+          <button className="btn btn-primary" onClick={openTemplateModal}>
+            <Plus size={16} />
             Create Template
           </button>
         </div>
+
+        {/* Quick Template Creation Modal */}
+        {showTemplateModal && (
+          <div className="modal-overlay" onClick={closeTemplateModal}>
+            <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3>
+                  <FileText size={20} />
+                  Create New Template
+                </h3>
+                <button className="btn-icon" onClick={closeTemplateModal}>
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="modal-body">
+                <div className="form-group">
+                  <label>Template Name *</label>
+                  <input
+                    type="text"
+                    value={newTemplateName}
+                    onChange={e => setNewTemplateName(e.target.value)}
+                    placeholder="e.g., Welcome Message"
+                    autoFocus
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Message Content *</label>
+                  <textarea
+                    value={newTemplateContent}
+                    onChange={e => setNewTemplateContent(e.target.value)}
+                    placeholder="Hi {firstName}, thanks for reaching out about {category}! I wanted to follow up..."
+                    rows={6}
+                  />
+                  <div className="variable-buttons">
+                    {TEMPLATE_VARIABLES.map(v => (
+                      <button
+                        key={v.name}
+                        type="button"
+                        className="variable-btn"
+                        onClick={() => insertVariable(v.name)}
+                        title={v.description}
+                      >
+                        {v.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="modal-actions">
+                <button className="btn btn-secondary" onClick={closeTemplateModal} disabled={savingTemplate}>
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleCreateTemplate}
+                  disabled={savingTemplate || !newTemplateName.trim() || !newTemplateContent.trim()}
+                >
+                  {savingTemplate ? <Loader2 size={16} className="spinner" /> : <Save size={16} />}
+                  Create Template
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -378,18 +507,29 @@ export function AutomationSettings() {
 
               <div className="form-group">
                 <label>Template *</label>
-                <div className="select-wrapper">
-                  <select
-                    value={formTemplateId}
-                    onChange={e => setFormTemplateId(e.target.value)}
+                <div className="template-select-row">
+                  <div className="select-wrapper">
+                    <select
+                      value={formTemplateId}
+                      onChange={e => handleTemplateChange(e.target.value)}
+                    >
+                      {templates.map(t => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                      <option value="__new__">+ Create New Template</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={openTemplateModal}
+                    title="Create new template"
                   >
-                    {templates.map(t => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={16} />
+                    <Plus size={14} />
+                  </button>
                 </div>
                 {formTemplateId && (
                   <div className="template-preview-small">
@@ -541,6 +681,73 @@ export function AutomationSettings() {
                 disabled={saving}
               >
                 {saving ? <Loader2 size={16} className="spinner" /> : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Template Creation Modal */}
+      {showTemplateModal && (
+        <div className="modal-overlay" onClick={closeTemplateModal}>
+          <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>
+                <FileText size={20} />
+                Create New Template
+              </h3>
+              <button className="btn-icon" onClick={closeTemplateModal}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <div className="form-group">
+                <label>Template Name *</label>
+                <input
+                  type="text"
+                  value={newTemplateName}
+                  onChange={e => setNewTemplateName(e.target.value)}
+                  placeholder="e.g., Welcome Message"
+                  autoFocus
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Message Content *</label>
+                <textarea
+                  value={newTemplateContent}
+                  onChange={e => setNewTemplateContent(e.target.value)}
+                  placeholder="Hi {firstName}, thanks for reaching out about {category}! I wanted to follow up..."
+                  rows={6}
+                />
+                <div className="variable-buttons">
+                  {TEMPLATE_VARIABLES.map(v => (
+                    <button
+                      key={v.name}
+                      type="button"
+                      className="variable-btn"
+                      onClick={() => insertVariable(v.name)}
+                      title={v.description}
+                    >
+                      {v.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={closeTemplateModal} disabled={savingTemplate}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleCreateTemplate}
+                disabled={savingTemplate || !newTemplateName.trim() || !newTemplateContent.trim()}
+              >
+                {savingTemplate ? <Loader2 size={16} className="spinner" /> : <Save size={16} />}
+                Create Template
               </button>
             </div>
           </div>

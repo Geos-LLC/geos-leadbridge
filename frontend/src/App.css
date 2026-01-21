@@ -3326,3 +3326,110 @@ body {
   color: var(--text-secondary);
   margin-bottom: 24px;
 }
+
+/* Template Select Row - with create button */
+.template-select-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.template-select-row .select-wrapper {
+  flex: 1;
+}
+
+.template-select-row .btn-sm {
+  padding: 8px 12px;
+  flex-shrink: 0;
+}
+
+/* Large Modal for Template Creation */
+.modal-lg {
+  max-width: 560px;
+  width: 100%;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 18px;
+}
+
+.modal-header h3 svg {
+  color: var(--primary);
+}
+
+.modal-body {
+  margin-bottom: 20px;
+}
+
+.modal-body .form-group {
+  margin-bottom: 16px;
+}
+
+.modal-body .form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.modal-body input[type="text"],
+.modal-body textarea {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-family: inherit;
+  background: white;
+}
+
+.modal-body textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.modal-body input[type="text"]:focus,
+.modal-body textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.1);
+}
+
+.modal-body .variable-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.modal-body .variable-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: monospace;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--primary);
+  transition: all 0.2s;
+}
+
+.modal-body .variable-btn:hover {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
