@@ -880,48 +880,35 @@ export class LeadsService {
     // Clean up old synthetic messages (those with _initial suffix)
     const cleanedCount = await this.cleanupSyntheticMessages(conversation.id, lead.externalRequestId);
 
-    // Check if user has a SavedAccount for this lead's business (with credentials)
-    const savedAccount = lead.businessId ? await this.prisma.savedAccount.findFirst({
-      where: {
-        userId,
-        platform: lead.platform,
-        businessId: lead.businessId,
-      },
-    }) : null;
-
-    // Try to get account-specific credentials first, then fall back to platform credentials
+    // Try to get account-specific credentials first (with automatic token refresh)
+    // Using PlatformService methods ensures expired tokens are refreshed automatically
     let accountCredentials: { accessToken: string; refreshToken?: string } | null = null;
-    if (savedAccount?.credentialsJson) {
+
+    if (lead.businessId) {
       try {
-        accountCredentials = EncryptionUtil.decryptObject(savedAccount.credentialsJson, this.encryptionKey);
-        console.log(`[LeadsService] Using account-specific credentials for ${savedAccount.businessName}`);
-      } catch (err) {
-        console.warn(`[LeadsService] Failed to decrypt account credentials:`, err.message);
+        // This method handles token refresh automatically
+        accountCredentials = await this.platformService.getAccountCredentialsByBusinessId(userId, lead.platform, lead.businessId);
+        if (accountCredentials) {
+          console.log(`[LeadsService] Using account-specific credentials for business ${lead.businessId}`);
+        }
+      } catch (err: any) {
+        console.warn(`[LeadsService] Failed to get account credentials:`, err.message);
       }
     }
 
-    // If no account credentials, check platform credentials as fallback
+    // If no account credentials, try platform credentials as fallback (also with token refresh)
     if (!accountCredentials) {
-      const platform = await this.prisma.platform.findFirst({
-        where: {
-          userId,
-          platformName: lead.platform,
-          connected: true,
-        },
-      });
-
-      if (platform?.credentialsJson) {
-        try {
-          accountCredentials = EncryptionUtil.decryptObject(platform.credentialsJson, this.encryptionKey);
-          console.log(`[LeadsService] Using platform credentials as fallback`);
-        } catch (err) {
-          console.warn(`[LeadsService] Failed to decrypt platform credentials:`, err.message);
-        }
+      try {
+        // getCredentials handles token refresh automatically
+        accountCredentials = await this.platformService.getCredentials(userId, lead.platform);
+        console.log(`[LeadsService] Using platform credentials as fallback`);
+      } catch (err: any) {
+        console.warn(`[LeadsService] Failed to get platform credentials:`, err.message);
       }
     }
 
     const hasCredentials = !!accountCredentials;
-    console.log(`[LeadsService] Has credentials: ${hasCredentials} (savedAccount: ${savedAccount?.businessName || 'none'})`);
+    console.log(`[LeadsService] Has credentials: ${hasCredentials} for business ${lead.businessId || 'unknown'}`);
 
     let importedCount = 0;
     let statusUpdated = false;
