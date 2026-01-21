@@ -65,18 +65,25 @@ export class WebhooksService {
    * Handle incoming webhook from Thumbtack
    */
   async handleThumbtackWebhook(signature: string | undefined, payload: any): Promise<void> {
+    this.logger.log('========================================');
+    this.logger.log('=== THUMBTACK WEBHOOK ENTRY POINT ===');
+    this.logger.log('========================================');
+    this.logger.log(`Raw payload: ${JSON.stringify(payload, null, 2)}`);
+
     const secret = this.configService.get<string>('thumbtack.webhookSecret') || '';
     const adapter = this.platformFactory.getAdapter('thumbtack');
 
     // Log webhook receipt for debugging - include businessId to identify which account
     const businessId = payload?.data?.business?.businessID;
     const negotiationId = payload?.data?.negotiationID;
+    const messageId = payload?.data?.messageID;
     this.logger.log('Received Thumbtack webhook', {
       hasSignature: !!signature,
       hasSecret: !!secret,
       eventType: payload?.event?.eventType || payload?.event_type || 'unknown',
       businessId,
       negotiationId,
+      messageId,
     });
 
     // Verify signature if both signature and secret are present
@@ -147,14 +154,23 @@ export class WebhooksService {
     platform: string,
     payload: any,
   ): Promise<void> {
+    // DEBUG: Log the full payload structure
+    this.logger.log('=== WEBHOOK RECEIVED ===');
+    this.logger.log(`Raw payload keys: ${Object.keys(payload).join(', ')}`);
+    this.logger.log(`payload.event: ${JSON.stringify(payload.event)}`);
+    this.logger.log(`payload.event_type: ${payload.event_type}`);
+    this.logger.log(`payload.data keys: ${payload.data ? Object.keys(payload.data).join(', ') : 'NO DATA'}`);
+
     // Thumbtack v4 uses event.eventType, legacy uses event_type
     const eventType = payload.event?.eventType || payload.event_type;
+    this.logger.log(`Resolved eventType: ${eventType}`);
 
     // Get unique ID for deduplication (negotiationID for v4 events, request_id for legacy)
     const negotiationId = payload.data?.negotiationID;
     const messageId = payload.data?.messageID;
     const requestId = payload.request_id;
     const uniqueId = messageId || negotiationId || requestId;
+    this.logger.log(`IDs - negotiationId: ${negotiationId}, messageId: ${messageId}, requestId: ${requestId}, uniqueId: ${uniqueId}`);
 
     // Check for duplicate webhook (same event received multiple times from different subscriptions)
     if (uniqueId && this.isDuplicateWebhook(eventType, uniqueId)) {
@@ -172,15 +188,20 @@ export class WebhooksService {
     }
 
     this.logger.log(`Processing ${platform} webhook: ${eventType}`, { uniqueId });
+    this.logger.log('=== ENTERING SWITCH ===');
 
     switch (eventType) {
       // Thumbtack v4 event types
       case 'NegotiationCreatedV4':
+        this.logger.log('>>> Matched NegotiationCreatedV4 - calling handleNegotiationCreated');
         await this.handleNegotiationCreated(platform, payload.data);
+        this.logger.log('<<< handleNegotiationCreated completed');
         break;
 
       case 'MessageCreatedV4':
+        this.logger.log('>>> Matched MessageCreatedV4 - calling handleMessageCreated');
         await this.handleMessageCreated(platform, payload.data);
+        this.logger.log('<<< handleMessageCreated completed');
         break;
 
       // Legacy event types (backwards compatibility)
@@ -220,13 +241,22 @@ export class WebhooksService {
    * Stores the lead in the database
    */
   private async handleNegotiationCreated(platform: string, data: any): Promise<void> {
+    this.logger.log('=== handleNegotiationCreated START ===');
+    this.logger.log(`Full data: ${JSON.stringify(data, null, 2)}`);
+
     const negotiationId = data.negotiationID;
     const customer = data.customer || {};
     const request = data.request || {};
     const location = request.location || {};
     const business = data.business || {};
 
-    this.logger.log('New negotiation received', { platform, negotiationId });
+    this.logger.log('Parsed fields:', {
+      negotiationId,
+      businessId: business.businessID,
+      customerName: customer.displayName || `${customer.firstName} ${customer.lastName}`,
+      hasRequest: !!request,
+      hasLocation: !!location,
+    });
 
     // Find user by businessID - first try exact match, then find any connected user for this platform
     // This handles multiple businesses under one OAuth connection
@@ -440,19 +470,28 @@ export class WebhooksService {
    * Creates/updates lead and stores the message in the database
    */
   private async handleMessageCreated(platform: string, data: any): Promise<void> {
+    this.logger.log('=== handleMessageCreated START ===');
+    this.logger.log(`Full message data: ${JSON.stringify(data, null, 2)}`);
+
     const negotiationId = data.negotiationID;
     const businessId = data.business?.businessID;
     const messageId = data.messageID;
+    const messageText = data.text;
+    const messageFrom = data.from;
+    const sentAt = data.sentAt;
 
-    this.logger.log('New message received', {
+    this.logger.log('Parsed message fields:', {
       platform,
       negotiationId,
       messageId,
       businessId,
+      messageFrom,
+      messageTextLength: messageText?.length || 0,
+      sentAt,
     });
 
     if (!businessId || !negotiationId) {
-      this.logger.warn('Missing businessId or negotiationId in message webhook');
+      this.logger.warn('Missing businessId or negotiationId in message webhook', { businessId, negotiationId });
       return;
     }
 
