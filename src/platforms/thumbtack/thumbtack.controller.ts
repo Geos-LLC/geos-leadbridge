@@ -62,10 +62,16 @@ export class ThumbtackController {
       }
 
       // Get the full credentials from stored platform (to save per-account)
-      let credentials: { accessToken: string; refreshToken?: string; email?: string } | undefined;
+      let credentials: { accessToken: string; refreshToken?: string; email?: string; expiresAt?: Date } | undefined;
       try {
-        credentials = await this.platformService.getCredentials(userId, PlatformName.THUMBTACK);
-        console.log(`Got credentials for saving per-account (email: ${credentials.email || 'none'})`);
+        const platformCreds = await this.platformService.getCredentials(userId, PlatformName.THUMBTACK);
+        credentials = {
+          accessToken: platformCreds.accessToken,
+          refreshToken: platformCreds.refreshToken,
+          email: platformCreds.email,
+          expiresAt: platformCreds.expiresAt,
+        };
+        console.log(`Got credentials for saving per-account (email: ${credentials.email || 'none'}, expires: ${credentials.expiresAt || 'unknown'})`);
       } catch (err) {
         console.warn('Could not fetch credentials:', err.message);
       }

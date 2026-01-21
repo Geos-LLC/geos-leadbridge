@@ -485,7 +485,7 @@ export class PlatformService {
     businessName: string,
     imageUrl?: string,
     emailHint?: string,
-    credentials?: { accessToken: string; refreshToken?: string; email?: string },
+    credentials?: { accessToken: string; refreshToken?: string; email?: string; expiresAt?: Date },
   ): Promise<void> {
     // Encrypt credentials if provided
     let encryptedCredentials: string | undefined;
@@ -546,7 +546,7 @@ export class PlatformService {
    */
   async updateAccountCredentials(
     accountId: string,
-    credentials: { accessToken: string; refreshToken?: string; email?: string },
+    credentials: { accessToken: string; refreshToken?: string; email?: string; expiresAt?: Date },
   ): Promise<void> {
     const encryptedCredentials = EncryptionUtil.encryptObject(credentials, this.encryptionKey);
 
@@ -561,6 +561,7 @@ export class PlatformService {
 
   /**
    * Get decrypted credentials for a saved account by businessId
+   * Automatically refreshes expired tokens
    */
   async getAccountCredentialsByBusinessId(userId: string, platform: string, businessId: string): Promise<{ accessToken: string; refreshToken?: string; email?: string } | null> {
     const account = await this.prisma.savedAccount.findFirst({
@@ -572,7 +573,48 @@ export class PlatformService {
     }
 
     try {
-      return EncryptionUtil.decryptObject(account.credentialsJson, this.encryptionKey);
+      const credentials = EncryptionUtil.decryptObject<{ accessToken: string; refreshToken?: string; email?: string; expiresAt?: string }>(
+        account.credentialsJson,
+        this.encryptionKey,
+      );
+
+      // Check if token is expired and refresh if needed
+      if (credentials.expiresAt && credentials.refreshToken) {
+        const expiresAt = new Date(credentials.expiresAt);
+        const bufferMs = 5 * 60 * 1000; // 5 minutes buffer
+        const now = new Date();
+
+        if (now.getTime() > (expiresAt.getTime() - bufferMs)) {
+          console.log(`[PlatformService] Account token expired for business ${businessId}, refreshing...`);
+          console.log(`[PlatformService] Token expires: ${expiresAt.toISOString()}, Now: ${now.toISOString()}`);
+
+          try {
+            const adapter = this.platformFactory.getAdapter(platform);
+            const newCredentials = await adapter.refreshAccessToken(credentials.refreshToken);
+
+            // Update stored credentials with new token
+            await this.updateAccountCredentials(account.id, {
+              accessToken: newCredentials.accessToken,
+              refreshToken: newCredentials.refreshToken || credentials.refreshToken,
+              email: credentials.email,
+              expiresAt: newCredentials.expiresAt,
+            });
+
+            console.log(`[PlatformService] Account token refreshed successfully for business ${businessId}`);
+            return {
+              accessToken: newCredentials.accessToken,
+              refreshToken: newCredentials.refreshToken || credentials.refreshToken,
+              email: credentials.email,
+            };
+          } catch (refreshError: any) {
+            console.error(`[PlatformService] Failed to refresh account token for business ${businessId}:`, refreshError.message);
+            // Return existing credentials and let the API call fail with proper error
+            return credentials;
+          }
+        }
+      }
+
+      return credentials;
     } catch {
       return null;
     }
