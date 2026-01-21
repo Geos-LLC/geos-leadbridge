@@ -19,6 +19,8 @@ import {
   CheckSquare,
   Square,
   Mail,
+  FileText,
+  ChevronDown,
 } from 'lucide-react';
 import { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, type MessageAttachment } from '../services/api';
 import { useAppStore } from '../store/appStore';
@@ -166,10 +168,38 @@ export function Messages() {
     return options;
   };
 
+  // Load templates for single message composer
+  const [singleMessageTemplates, setSingleMessageTemplates] = useState<MessageTemplate[]>([]);
+  const [showTemplateDropdown, setShowTemplateDropdown] = useState(false);
+
   useEffect(() => {
     loadLeads();
     loadSavedAccounts();
+    loadTemplatesForSingleMessage();
   }, []);
+
+  const loadTemplatesForSingleMessage = async () => {
+    try {
+      const { templates } = await templatesApi.getTemplates();
+      setSingleMessageTemplates(templates);
+    } catch (err) {
+      console.error('[Messages] Failed to load templates:', err);
+    }
+  };
+
+  const applyTemplateToMessage = (template: MessageTemplate) => {
+    if (!selectedLead) return;
+    // Personalize the template with lead data
+    let personalizedMessage = template.content;
+    const firstName = selectedLead.customerName.split(' ')[0];
+    personalizedMessage = personalizedMessage.replace(/\{customerName\}/g, selectedLead.customerName);
+    personalizedMessage = personalizedMessage.replace(/\{firstName\}/g, firstName);
+    personalizedMessage = personalizedMessage.replace(/\{category\}/g, selectedLead.category || 'your project');
+    personalizedMessage = personalizedMessage.replace(/\{city\}/g, selectedLead.city || '');
+    personalizedMessage = personalizedMessage.replace(/\{state\}/g, selectedLead.state || '');
+    setMessageText(personalizedMessage);
+    setShowTemplateDropdown(false);
+  };
 
   // When account filter or savedAccounts change, ensure selected lead is valid
   useEffect(() => {
@@ -854,22 +884,56 @@ export function Messages() {
 
             {/* Message Input */}
             {canSendMessage ? (
-              <form className="message-input-form" onSubmit={handleSendMessage}>
-                <input
-                  type="text"
-                  value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
-                  placeholder="Type a message..."
-                  disabled={sendingMessage}
-                />
-                <button
-                  type="submit"
-                  className="btn btn-primary send-btn"
-                  disabled={!messageText.trim() || sendingMessage}
-                >
-                  {sendingMessage ? <Loader2 className="spinner" size={20} /> : <Send size={20} />}
-                </button>
-              </form>
+              <div className="message-input-container">
+                {/* Template Selector Dropdown */}
+                <div className="template-selector">
+                  <button
+                    type="button"
+                    className="btn-icon template-btn"
+                    onClick={() => setShowTemplateDropdown(!showTemplateDropdown)}
+                    title="Use template"
+                  >
+                    <FileText size={20} />
+                    <ChevronDown size={14} />
+                  </button>
+                  {showTemplateDropdown && singleMessageTemplates.length > 0 && (
+                    <div className="template-dropdown">
+                      <div className="template-dropdown-header">Use Template</div>
+                      {singleMessageTemplates.map((template) => (
+                        <button
+                          key={template.id}
+                          className="template-dropdown-item"
+                          onClick={() => applyTemplateToMessage(template)}
+                        >
+                          <span className="template-name">{template.name}</span>
+                          <span className="template-preview">{template.content.substring(0, 50)}...</span>
+                        </button>
+                      ))}
+                      {singleMessageTemplates.length === 0 && (
+                        <div className="template-dropdown-empty">
+                          No templates yet. Create one in Message Settings.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <form className="message-input-form" onSubmit={handleSendMessage}>
+                  <input
+                    type="text"
+                    value={messageText}
+                    onChange={(e) => setMessageText(e.target.value)}
+                    placeholder="Type a message..."
+                    disabled={sendingMessage}
+                  />
+                  <button
+                    type="submit"
+                    className="btn btn-primary send-btn"
+                    disabled={!messageText.trim() || sendingMessage}
+                  >
+                    {sendingMessage ? <Loader2 className="spinner" size={20} /> : <Send size={20} />}
+                  </button>
+                </form>
+              </div>
             ) : (
               <div className="message-input-disabled">
                 <AlertCircle size={18} />
@@ -953,6 +1017,24 @@ export function Messages() {
                   )}
                 </span>
               </div>
+              {/* Show active filters */}
+              {(accountFilter !== 'all' || dateFilter !== 'all') && (
+                <div className="bulk-send-filters">
+                  <span className="filter-label">Filtered by:</span>
+                  {accountFilter !== 'all' && (
+                    <span className="filter-tag">
+                      <Building2 size={12} />
+                      {savedAccounts.find(a => a.businessId === accountFilter)?.businessName || 'Account'}
+                    </span>
+                  )}
+                  {dateFilter !== 'all' && (
+                    <span className="filter-tag">
+                      <Calendar size={12} />
+                      {monthOptions.find(m => m.value === dateFilter)?.label || dateFilter}
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* Template Selector */}
               <div className="form-group">
