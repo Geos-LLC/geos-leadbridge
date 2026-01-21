@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult } from '../types';
+import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage } from '../types';
 import { notify } from '../store/notificationStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://thumbtack-bridge-production.up.railway.app/api';
@@ -394,6 +394,61 @@ export const bulkMessageApi = {
   },
   send: async (leadIds: string[], templateContent: string, templateId?: string): Promise<{ success: boolean; message: string } & BulkSendResult> => {
     const { data } = await api.post('/v1/leads/bulk-message/send', { leadIds, templateContent, templateId });
+    return data;
+  },
+};
+
+// Automation Rules
+export interface CreateAutomationRuleDto {
+  savedAccountId: string;
+  name: string;
+  triggerType: 'new_lead' | 'customer_reply';
+  replyTriggerMode?: 'first_only' | 'every_reply';
+  templateId: string;
+  delayMinutes?: number;
+  enabled?: boolean;
+}
+
+export interface UpdateAutomationRuleDto {
+  name?: string;
+  triggerType?: 'new_lead' | 'customer_reply';
+  replyTriggerMode?: 'first_only' | 'every_reply';
+  templateId?: string;
+  delayMinutes?: number;
+  enabled?: boolean;
+}
+
+export const automationApi = {
+  getRules: async (): Promise<{ rules: AutomationRule[] }> => {
+    const { data } = await api.get('/v1/automation/rules');
+    return data;
+  },
+  getRulesForAccount: async (accountId: string): Promise<{ rules: AutomationRule[] }> => {
+    const { data } = await api.get(`/v1/automation/rules/account/${accountId}`);
+    return data;
+  },
+  getRule: async (ruleId: string): Promise<AutomationRule> => {
+    const { data } = await api.get(`/v1/automation/rules/${ruleId}`);
+    return data;
+  },
+  createRule: async (ruleData: CreateAutomationRuleDto): Promise<{ success: boolean; message: string; rule: AutomationRule }> => {
+    const { data } = await api.post('/v1/automation/rules', ruleData);
+    return data;
+  },
+  updateRule: async (ruleId: string, updates: UpdateAutomationRuleDto): Promise<{ success: boolean; message: string; rule: AutomationRule }> => {
+    const { data } = await api.patch(`/v1/automation/rules/${ruleId}`, updates);
+    return data;
+  },
+  deleteRule: async (ruleId: string): Promise<{ success: boolean; message: string }> => {
+    const { data } = await api.delete(`/v1/automation/rules/${ruleId}`);
+    return data;
+  },
+  getPendingMessages: async (ruleId: string): Promise<{ pending: PendingAutomatedMessage[] }> => {
+    const { data } = await api.get(`/v1/automation/rules/${ruleId}/pending`);
+    return data;
+  },
+  cancelPendingMessage: async (pendingId: string): Promise<{ success: boolean; message: string }> => {
+    const { data } = await api.post(`/v1/automation/pending/${pendingId}/cancel`);
     return data;
   },
 };

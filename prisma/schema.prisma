@@ -31,6 +31,7 @@ model User {
   messages         Message[]
   savedAccounts    SavedAccount[]
   messageTemplates MessageTemplate[]
+  automationRules  AutomationRule[]
 
   @@map("users")
 }
@@ -91,8 +92,9 @@ model Lead {
   updatedAt         DateTime @updatedAt
 
   // Relationships
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  conversation Conversation? @relation(fields: [threadId], references: [id])
+  user            User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation    Conversation?             @relation(fields: [threadId], references: [id])
+  pendingMessages PendingAutomatedMessage[]
 
   @@unique([platform, externalRequestId])
   @@index([userId])
@@ -198,7 +200,8 @@ model MessageTemplate {
   updatedAt   DateTime  @updatedAt
 
   // Relationships
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  automationRules AutomationRule[]
 
   @@index([userId])
   @@map("message_templates")
@@ -222,7 +225,8 @@ model SavedAccount {
   createdAt       DateTime @default(now())
 
   // Relationships
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  automationRules AutomationRule[]
 
   @@unique([userId, platform, businessId])
   @@index([userId])
@@ -250,4 +254,57 @@ model WebhookEvent {
   @@index([processed])
   @@index([receivedAt])
   @@map("webhook_events")
+}
+
+// ==========================================
+// Automation Rules (for auto-sending messages)
+// ==========================================
+
+model AutomationRule {
+  id               String    @id @default(uuid())
+  savedAccountId   String    // Per-account rules
+  userId           String
+  name             String    // User-friendly rule name
+  triggerType      String    // "new_lead" | "customer_reply"
+  replyTriggerMode String?   // For customer_reply: "first_only" | "every_reply"
+  templateId       String    // Reference to MessageTemplate
+  delayMinutes     Int       @default(0) // Delay before sending (0 = immediate)
+  enabled          Boolean   @default(true)
+  triggerCount     Int       @default(0)
+  lastTriggeredAt  DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Relationships
+  savedAccount    SavedAccount              @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
+  user            User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template        MessageTemplate           @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  pendingMessages PendingAutomatedMessage[]
+
+  @@index([savedAccountId])
+  @@index([userId])
+  @@index([triggerType])
+  @@index([enabled])
+  @@map("automation_rules")
+}
+
+model PendingAutomatedMessage {
+  id               String    @id @default(uuid())
+  automationRuleId String
+  leadId           String
+  negotiationId    String    // External negotiation ID (for dedup)
+  scheduledFor     DateTime  // When to send
+  status           String    @default("pending") // "pending" | "sent" | "cancelled" | "failed"
+  failureReason    String?
+  sentAt           DateTime?
+  createdAt        DateTime  @default(now())
+
+  // Relationships
+  automationRule AutomationRule @relation(fields: [automationRuleId], references: [id], onDelete: Cascade)
+  lead           Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([automationRuleId, negotiationId])
+  @@index([status])
+  @@index([scheduledFor])
+  @@map("pending_automated_messages")
 }

@@ -3,10 +3,11 @@
  * Processes webhook events from various platforms
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { PlatformFactory } from '../platforms/platform.factory';
+import { AutomationService } from '../automation/automation.service';
 
 @Injectable()
 export class WebhooksService {
@@ -21,6 +22,8 @@ export class WebhooksService {
     private prisma: PrismaService,
     private platformFactory: PlatformFactory,
     private configService: ConfigService,
+    @Inject(forwardRef(() => AutomationService))
+    private automationService: AutomationService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -366,6 +369,22 @@ export class WebhooksService {
       customerName,
       lead.id,
     );
+
+    // Trigger automation rules for new leads
+    try {
+      await this.automationService.handleNewLead({
+        userId,
+        businessId: business.businessID,
+        negotiationId,
+        leadId: lead.id,
+        customerName,
+        category: request.category?.name,
+        city: location.city,
+        state: location.state,
+      });
+    } catch (err: any) {
+      this.logger.error('Automation trigger failed for new lead', err.message);
+    }
   }
 
   /**
@@ -629,6 +648,30 @@ export class WebhooksService {
     });
 
     this.logger.log('Message stored successfully', { messageId, conversationId: conversation.id });
+
+    // Trigger automation rules for customer replies
+    if (sender === 'customer') {
+      try {
+        // Count customer messages to determine if this is the first reply
+        const customerMessageCount = await this.prisma.message.count({
+          where: { conversationId: conversation.id, sender: 'customer' },
+        });
+
+        await this.automationService.handleCustomerReply({
+          userId,
+          businessId,
+          negotiationId,
+          leadId: lead.id,
+          isFirstCustomerReply: customerMessageCount === 1,
+          customerName: lead.customerName,
+          category: lead.category || undefined,
+          city: lead.city || undefined,
+          state: lead.state || undefined,
+        });
+      } catch (err: any) {
+        this.logger.error('Automation trigger failed for customer reply', err.message);
+      }
+    }
   }
 
   /**

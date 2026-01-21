@@ -92,3 +92,40 @@ export interface BulkSendResult {
   failed: number;
   results: { leadId: string; success: boolean; error?: string }[];
 }
+
+// Automation Rules
+export interface AutomationRule {
+  id: string;
+  savedAccountId: string;
+  name: string;
+  triggerType: 'new_lead' | 'customer_reply';
+  replyTriggerMode?: 'first_only' | 'every_reply';
+  templateId: string;
+  delayMinutes: number;
+  enabled: boolean;
+  triggerCount: number;
+  lastTriggeredAt: string | null;
+  createdAt: string;
+  savedAccount?: {
+    id: string;
+    businessId: string;
+    businessName: string;
+  };
+  template?: {
+    id: string;
+    name: string;
+    content: string;
+  };
+}
+
+export interface PendingAutomatedMessage {
+  id: string;
+  scheduledFor: string;
+  status: 'pending' | 'sent' | 'cancelled' | 'failed';
+  failureReason?: string;
+  sentAt?: string | null;
+  lead?: {
+    customerName: string;
+    category?: string;
+  };
+}

@@ -7,6 +7,7 @@ import { Register } from './pages/Register';
 import { Dashboard } from './pages/Dashboard';
 import { Messages } from './pages/Messages';
 import { MessageSettings } from './pages/MessageSettings';
+import { AutomationSettings } from './pages/AutomationSettings';
 import { useAuthStore } from './store/authStore';
 import './App.css';
 
@@ -34,6 +35,7 @@ function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/messages" element={<Messages />} />
             <Route path="/message-settings" element={<MessageSettings />} />
+            <Route path="/automation" element={<AutomationSettings />} />
           </Route>
         </Route>
 
