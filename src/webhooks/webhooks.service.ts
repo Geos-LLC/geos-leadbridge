@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { PlatformFactory } from '../platforms/platform.factory';
 import { AutomationService } from '../automation/automation.service';
+import { LeadsService } from '../leads/leads.service';
 
 @Injectable()
 export class WebhooksService {
@@ -24,6 +25,8 @@ export class WebhooksService {
     private configService: ConfigService,
     @Inject(forwardRef(() => AutomationService))
     private automationService: AutomationService,
+    @Inject(forwardRef(() => LeadsService))
+    private leadsService: LeadsService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -369,6 +372,15 @@ export class WebhooksService {
       customerName,
       lead.id,
     );
+
+    // Import messages from Thumbtack API immediately (don't wait for MessageCreatedV4 webhooks)
+    try {
+      this.logger.log('Importing messages for new lead', { negotiationId });
+      await this.leadsService.resyncMessages(userId, lead.id);
+      this.logger.log('Messages imported successfully', { negotiationId });
+    } catch (err: any) {
+      this.logger.warn('Failed to import messages for new lead (will arrive via webhook)', err.message);
+    }
 
     // Trigger automation rules for new leads
     try {
