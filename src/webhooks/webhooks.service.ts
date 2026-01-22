@@ -424,10 +424,7 @@ export class WebhooksService {
       });
     }
 
-    // Note: We do NOT store the initial message from the lead here.
-    // The MessageCreatedV4 webhook will arrive separately with the actual message
-    // and its real Thumbtack message ID. This prevents duplicate "first messages".
-    this.logger.log('Conversation ready, messages will arrive via MessageCreatedV4 webhook', { negotiationId });
+    this.logger.log('Conversation ready', { conversationId: conversation.id, negotiationId });
   }
 
   /**

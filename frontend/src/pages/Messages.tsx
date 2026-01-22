@@ -180,7 +180,7 @@ export function Messages() {
     // Refresh leads when tab becomes visible (background refresh - no loading state)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        console.log('[Messages] Tab became visible, refreshing leads in background');
+        console.log('[Messages] Tab became visible, refreshing data in background');
         loadLeadsBackground();
       }
     };
@@ -190,6 +190,18 @@ export function Messages() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
+
+  // Also refresh current conversation messages when tab becomes visible
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && selectedLead) {
+        console.log('[Messages] Tab visible, refreshing messages for current conversation');
+        loadMessagesForLead(selectedLead);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [selectedLead]);
 
   const loadTemplatesForSingleMessage = async () => {
     try {
@@ -257,45 +269,6 @@ export function Messages() {
       loadMessagesForLead(selectedLead);
     }
   }, [selectedLead]);
-
-  // Auto-poll messages every 10 seconds when viewing a conversation
-  useEffect(() => {
-    if (!selectedLead) return;
-
-    const pollMessages = async () => {
-      // Only poll if tab is visible
-      if (document.visibilityState !== 'visible') return;
-
-      try {
-        const { messages: apiMessages } = await leadsApi.getMessages(selectedLead.id);
-        const convertedMessages: LocalMessage[] = apiMessages.map((msg) => {
-          const sender = (msg.sender || '').toLowerCase() as 'pro' | 'customer';
-          return {
-            id: msg.id || msg.externalMessageId,
-            content: msg.content,
-            sender,
-            sentAt: new Date(msg.sentAt),
-            externalId: msg.externalMessageId,
-            attachments: msg.attachments,
-          };
-        });
-
-        // Only update if message count changed (new messages arrived)
-        if (convertedMessages.length !== messages.length) {
-          console.log('[Messages] New messages detected, updating UI');
-          setMessages(convertedMessages);
-          markLeadAsSeen(selectedLead);
-        }
-      } catch (err) {
-        // Silent fail for polling - don't spam errors
-      }
-    };
-
-    // Poll every 10 seconds
-    const pollInterval = setInterval(pollMessages, 10000);
-
-    return () => clearInterval(pollInterval);
-  }, [selectedLead?.id, messages.length]);
 
   useEffect(() => {
     scrollToBottom();
