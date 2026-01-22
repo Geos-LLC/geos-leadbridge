@@ -176,6 +176,19 @@ export function Messages() {
     loadLeads();
     loadSavedAccounts();
     loadTemplatesForSingleMessage();
+
+    // Refresh leads when tab becomes visible (background refresh - no loading state)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[Messages] Tab became visible, refreshing leads in background');
+        loadLeadsBackground();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   const loadTemplatesForSingleMessage = async () => {
@@ -245,6 +258,45 @@ export function Messages() {
     }
   }, [selectedLead]);
 
+  // Auto-poll messages every 10 seconds when viewing a conversation
+  useEffect(() => {
+    if (!selectedLead) return;
+
+    const pollMessages = async () => {
+      // Only poll if tab is visible
+      if (document.visibilityState !== 'visible') return;
+
+      try {
+        const { messages: apiMessages } = await leadsApi.getMessages(selectedLead.id);
+        const convertedMessages: LocalMessage[] = apiMessages.map((msg) => {
+          const sender = (msg.sender || '').toLowerCase() as 'pro' | 'customer';
+          return {
+            id: msg.id || msg.externalMessageId,
+            content: msg.content,
+            sender,
+            sentAt: new Date(msg.sentAt),
+            externalId: msg.externalMessageId,
+            attachments: msg.attachments,
+          };
+        });
+
+        // Only update if message count changed (new messages arrived)
+        if (convertedMessages.length !== messages.length) {
+          console.log('[Messages] New messages detected, updating UI');
+          setMessages(convertedMessages);
+          markLeadAsSeen(selectedLead);
+        }
+      } catch (err) {
+        // Silent fail for polling - don't spam errors
+      }
+    };
+
+    // Poll every 10 seconds
+    const pollInterval = setInterval(pollMessages, 10000);
+
+    return () => clearInterval(pollInterval);
+  }, [selectedLead?.id, messages.length]);
+
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
@@ -269,6 +321,22 @@ export function Messages() {
       console.error('[Messages] Failed to load leads:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Background refresh - doesn't show loading state, just updates data silently
+  const loadLeadsBackground = async () => {
+    try {
+      const { leads: loadedLeads } = await leadsApi.getLeads();
+      const sortedLeads = [...loadedLeads].sort((a, b) => {
+        const aTime = a.lastMessageAt || a.createdAt;
+        const bTime = b.lastMessageAt || b.createdAt;
+        return new Date(bTime).getTime() - new Date(aTime).getTime();
+      });
+      setLeads(sortedLeads);
+      console.log('[Messages] Background refresh complete:', sortedLeads.length, 'leads');
+    } catch (err) {
+      console.error('[Messages] Background refresh failed:', err);
     }
   };
 
