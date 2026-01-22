@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { PlatformFactory } from '../platforms/platform.factory';
 import { AutomationService } from '../automation/automation.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class WebhooksService {
@@ -24,6 +25,8 @@ export class WebhooksService {
     private configService: ConfigService,
     @Inject(forwardRef(() => AutomationService))
     private automationService: AutomationService,
+    @Inject(forwardRef(() => NotificationsService))
+    private notificationsService: NotificationsService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -379,6 +382,37 @@ export class WebhooksService {
       });
     } catch (err: any) {
       this.logger.error('Automation trigger failed for new lead', err.message);
+    }
+
+    // Send SMS notification to company for new lead
+    try {
+      // Find the saved account for this business to get notification settings
+      const savedAccount = await this.prisma.savedAccount.findFirst({
+        where: {
+          platform,
+          businessId: business.businessID,
+          userId,
+        },
+      });
+
+      if (savedAccount) {
+        await this.notificationsService.sendLeadNotification({
+          userId,
+          savedAccountId: savedAccount.id,
+          leadId: lead.id,
+          lead: {
+            customerName,
+            customerPhone: customer.phone,
+            category: request.category?.name,
+            city: location.city,
+            state: location.state,
+          },
+        });
+      } else {
+        this.logger.log('No saved account found for SMS notification', { businessId: business.businessID });
+      }
+    } catch (err: any) {
+      this.logger.error('SMS notification failed for new lead', err.message);
     }
   }
 

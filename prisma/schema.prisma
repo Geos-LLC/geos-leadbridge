@@ -225,8 +225,9 @@ model SavedAccount {
   createdAt       DateTime @default(now())
 
   // Relationships
-  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  automationRules AutomationRule[]
+  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  automationRules      AutomationRule[]
+  notificationSettings NotificationSettings?
 
   @@unique([userId, platform, businessId])
   @@index([userId])
@@ -307,4 +308,58 @@ model PendingAutomatedMessage {
   @@index([status])
   @@index([scheduledFor])
   @@map("pending_automated_messages")
+}
+
+// ==========================================
+// SMS Notification Settings (Callio Integration)
+// ==========================================
+
+model NotificationSettings {
+  id                String   @id @default(uuid())
+  savedAccountId    String   @unique // Per-account settings
+  enabled           Boolean  @default(false)
+  destinationPhone  String?  // Company phone to send notifications to
+  senderMode        String   @default("shared") // "shared" | "dedicated" | "openphone"
+  callioWorkspaceId String?  // Callio workspace ID for this tenant
+  template          String   @db.Text @default("New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}")
+  quietHoursStart   String?  // e.g., "22:00"
+  quietHoursEnd     String?  // e.g., "08:00"
+  quietHoursTimezone String? @default("America/New_York")
+  requirePhone      Boolean  @default(true) // Only notify if lead has phone
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relationships
+  savedAccount      SavedAccount       @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
+  notificationLogs  NotificationLog[]
+
+  @@index([savedAccountId])
+  @@map("notification_settings")
+}
+
+model NotificationLog {
+  id                    String    @id @default(uuid())
+  notificationSettingsId String
+  leadId                String?   // Reference to the lead that triggered this
+  toPhone               String    // Destination phone number
+  fromPhone             String?   // Sender phone number
+  provider              String?   // "twilio" | "openphone" | etc.
+  callioMessageId       String?   // Callio's message ID
+  callioConversationId  String?   // Callio's conversation ID
+  status                String    @default("pending") // "pending" | "queued" | "sent" | "delivered" | "failed"
+  error                 String?   @db.Text
+  messageBody           String    @db.Text // Rendered message content
+  metadata              String?   @db.Text // JSON metadata
+  createdAt             DateTime  @default(now())
+  sentAt                DateTime?
+  deliveredAt           DateTime?
+
+  // Relationships
+  notificationSettings NotificationSettings @relation(fields: [notificationSettingsId], references: [id], onDelete: Cascade)
+
+  @@index([notificationSettingsId])
+  @@index([leadId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("notification_logs")
 }

@@ -129,3 +129,34 @@ export interface PendingAutomatedMessage {
     category?: string;
   };
 }
+
+// SMS Notification Settings (Callio Integration)
+export interface NotificationSettings {
+  id: string;
+  savedAccountId: string;
+  enabled: boolean;
+  destinationPhone: string | null;
+  senderMode: 'shared' | 'dedicated' | 'openphone';
+  callioWorkspaceId: string | null;
+  template: string;
+  quietHoursStart: string | null;
+  quietHoursEnd: string | null;
+  quietHoursTimezone: string | null;
+  requirePhone: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NotificationLog {
+  id: string;
+  leadId: string | null;
+  toPhone: string;
+  fromPhone: string | null;
+  provider: string | null;
+  status: 'pending' | 'queued' | 'sent' | 'delivered' | 'failed';
+  error: string | null;
+  messageBody: string;
+  createdAt: string;
+  sentAt: string | null;
+  deliveredAt: string | null;
+}

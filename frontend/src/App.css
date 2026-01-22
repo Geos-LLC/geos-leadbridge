@@ -3439,3 +3439,357 @@ body {
   color: white;
   border-color: var(--primary);
 }
+
+/* ==========================================
+   SMS Notification Settings Page
+   ========================================== */
+.notification-settings {
+  padding: 32px;
+  max-width: 800px;
+}
+
+.notification-settings .settings-header h1 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.notification-settings .settings-header h1 svg {
+  color: var(--primary);
+}
+
+.notification-settings .settings-content {
+  margin-top: 24px;
+}
+
+.notification-settings .account-selector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 16px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius);
+}
+
+.notification-settings .account-selector label {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* Settings Sections */
+.notification-settings .settings-section {
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 20px;
+}
+
+.notification-settings .section-header {
+  margin-bottom: 20px;
+}
+
+.notification-settings .section-header h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.notification-settings .section-header h2 svg {
+  color: var(--text-secondary);
+}
+
+/* Toggle Switch */
+.toggle-switch {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.toggle-switch input[type="checkbox"] {
+  display: none;
+}
+
+.toggle-slider {
+  position: relative;
+  width: 48px;
+  height: 26px;
+  background: var(--border-color);
+  border-radius: 26px;
+  transition: background 0.3s;
+  flex-shrink: 0;
+}
+
+.toggle-slider::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: left 0.3s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--success);
+}
+
+.toggle-switch input:checked + .toggle-slider::after {
+  left: 25px;
+}
+
+.toggle-label {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Radio Groups */
+.notification-settings .radio-group.vertical {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.notification-settings .radio-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.notification-settings .radio-label:hover:not(.disabled) {
+  border-color: var(--primary);
+}
+
+.notification-settings .radio-label.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.notification-settings .radio-label input[type="radio"] {
+  margin-top: 2px;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+
+.notification-settings .radio-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notification-settings .radio-content strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.notification-settings .radio-description {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Form Elements */
+.notification-settings .form-group {
+  margin-bottom: 16px;
+}
+
+.notification-settings .form-group label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.notification-settings input[type="text"],
+.notification-settings input[type="tel"],
+.notification-settings input[type="time"],
+.notification-settings select,
+.notification-settings textarea {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: 14px;
+  background: white;
+  font-family: inherit;
+}
+
+.notification-settings textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+.notification-settings input:focus,
+.notification-settings select:focus,
+.notification-settings textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.1);
+}
+
+.notification-settings .form-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Quiet Hours Config */
+.quiet-hours-config {
+  margin-top: 16px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+}
+
+.quiet-hours-config .form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+/* Variable Buttons */
+.notification-settings .variable-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.notification-settings .variable-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: monospace;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--primary);
+  transition: all 0.2s;
+}
+
+.notification-settings .variable-btn:hover {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+/* Settings Actions */
+.notification-settings .settings-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-bottom: 24px;
+}
+
+/* Success Message */
+.success-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #d1fae5;
+  border: 1px solid #10b981;
+  border-radius: var(--radius);
+  color: #065f46;
+  margin-bottom: 16px;
+}
+
+.success-message svg {
+  flex-shrink: 0;
+}
+
+/* Notification Logs Table */
+.notification-logs {
+  overflow-x: auto;
+}
+
+.notification-logs table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.notification-logs th,
+.notification-logs td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.notification-logs th {
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+}
+
+.notification-logs tbody tr:hover {
+  background: var(--bg-secondary);
+}
+
+.notification-logs .log-time {
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.notification-logs .log-phone {
+  font-family: monospace;
+}
+
+.notification-logs .log-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notification-logs .status-icon.success {
+  color: var(--success);
+}
+
+.notification-logs .status-icon.error {
+  color: var(--danger);
+}
+
+.notification-logs .status-icon.pending {
+  color: var(--warning);
+}
+
+.notification-logs .log-error {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  background: var(--danger);
+  color: white;
+  font-size: 10px;
+  font-weight: bold;
+  border-radius: 50%;
+  cursor: help;
+  margin-left: 4px;
+}
+
+.notification-logs .log-message {
+  color: var(--text-secondary);
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

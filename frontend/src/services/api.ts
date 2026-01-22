@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage } from '../types';
+import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog } from '../types';
 import { notify } from '../store/notificationStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://thumbtack-bridge-production.up.railway.app/api';
@@ -449,6 +449,40 @@ export const automationApi = {
   },
   cancelPendingMessage: async (pendingId: string): Promise<{ success: boolean; message: string }> => {
     const { data } = await api.post(`/v1/automation/pending/${pendingId}/cancel`);
+    return data;
+  },
+};
+
+// Update notification settings DTO
+export interface UpdateNotificationSettingsDto {
+  enabled?: boolean;
+  destinationPhone?: string;
+  senderMode?: 'shared' | 'dedicated' | 'openphone';
+  callioWorkspaceId?: string;
+  template?: string;
+  quietHoursStart?: string;
+  quietHoursEnd?: string;
+  quietHoursTimezone?: string;
+  requirePhone?: boolean;
+}
+
+// SMS Notifications (Callio Integration)
+export const notificationsApi = {
+  getSettings: async (savedAccountId: string): Promise<{ success: boolean; settings: NotificationSettings | null }> => {
+    const { data } = await api.get(`/v1/notifications/settings/${savedAccountId}`);
+    return data;
+  },
+  updateSettings: async (savedAccountId: string, updates: UpdateNotificationSettingsDto): Promise<{ success: boolean; message: string; settings: NotificationSettings }> => {
+    const { data } = await api.put(`/v1/notifications/settings/${savedAccountId}`, updates);
+    return data;
+  },
+  getLogs: async (savedAccountId: string, limit?: number): Promise<{ success: boolean; count: number; logs: NotificationLog[] }> => {
+    const params = limit ? { limit } : {};
+    const { data } = await api.get(`/v1/notifications/logs/${savedAccountId}`, { params });
+    return data;
+  },
+  sendTest: async (savedAccountId: string): Promise<{ success: boolean; message: string }> => {
+    const { data } = await api.post(`/v1/notifications/test/${savedAccountId}`);
     return data;
   },
 };

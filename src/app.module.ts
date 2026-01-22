@@ -12,6 +12,7 @@ import { LeadsModule } from './leads/leads.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { TemplatesModule } from './templates/templates.module';
 import { AutomationModule } from './automation/automation.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PrismaService } from './common/utils/prisma.service';
 
@@ -27,6 +28,7 @@ import { PrismaService } from './common/utils/prisma.service';
     WebhooksModule,
     TemplatesModule,
     AutomationModule,
+    NotificationsModule,
   ],
   providers: [
     PrismaService,
