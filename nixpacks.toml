@@ -2,7 +2,7 @@
 nixPkgs = ["nodejs_18", "npm-9_x", "openssl"]
 
 [phases.install]
-cmds = ["npm ci --include=dev", "cd frontend && npm ci"]
+cmds = ["npm ci --include=dev", "cd frontend && npm ci --include=dev"]
 
 [phases.build]
 cmds = ["npm run build", "cd frontend && npm run build"]
