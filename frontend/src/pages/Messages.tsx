@@ -186,21 +186,12 @@ export function Messages() {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Auto-poll leads every 30 seconds while page is visible
-    const leadsInterval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        console.log('[Messages] Auto-polling leads...');
-        loadLeadsBackground();
-      }
-    }, 30000);
-
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      clearInterval(leadsInterval);
     };
   }, []);
 
-  // Also refresh current conversation messages when tab becomes visible + auto-poll
+  // Refresh current conversation messages when tab becomes visible
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && selectedLead) {
@@ -209,20 +200,8 @@ export function Messages() {
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    // Auto-poll messages every 10 seconds while viewing a conversation
-    const messagesInterval = setInterval(() => {
-      if (document.visibilityState === 'visible' && selectedLead && !loadingMessages) {
-        console.log('[Messages] Auto-polling messages for:', selectedLead.customerName);
-        loadMessagesForLead(selectedLead);
-      }
-    }, 10000);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      clearInterval(messagesInterval);
-    };
-  }, [selectedLead, loadingMessages]);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [selectedLead]);
 
   const loadTemplatesForSingleMessage = async () => {
     try {
