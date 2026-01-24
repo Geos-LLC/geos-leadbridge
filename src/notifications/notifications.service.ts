@@ -489,7 +489,7 @@ export class NotificationsService {
 
     try {
       const response = await fetch(
-        'https://callio-production-47ac.up.railway.app/v1/phone-numbers',
+        'https://callio-production-47ac.up.railway.app/api/v1/phone-numbers',
         {
           method: 'GET',
           headers: {
@@ -536,7 +536,7 @@ export class NotificationsService {
   async validateCallioApiKey(apiKey: string): Promise<{ valid: boolean; phoneNumbers: CallioPhoneNumber[] }> {
     try {
       const response = await fetch(
-        'https://callio-production-47ac.up.railway.app/v1/phone-numbers',
+        'https://callio-production-47ac.up.railway.app/api/v1/phone-numbers',
         {
           method: 'GET',
           headers: {
