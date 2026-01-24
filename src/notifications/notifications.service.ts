@@ -488,8 +488,11 @@ export class NotificationsService {
     }
 
     try {
+      const endpoint = 'https://callio-production-47ac.up.railway.app/api/v1/phone-numbers';
+      this.logger.log(`[getPhoneNumbers] Hitting endpoint: ${endpoint}`);
+
       const response = await fetch(
-        'https://callio-production-47ac.up.railway.app/v1/phone-numbers',
+        endpoint,
         {
           method: 'GET',
           headers: {
@@ -499,9 +502,11 @@ export class NotificationsService {
         },
       );
 
+      this.logger.log(`[getPhoneNumbers] Response status: ${response.status}`);
+
       if (!response.ok) {
         const error = await response.text();
-        this.logger.error(`Callio API error: ${response.status} - ${error}`);
+        this.logger.error(`[getPhoneNumbers] Callio API error: ${response.status} - ${error}`);
         throw new Error(`Failed to fetch phone numbers: ${response.status}`);
       }
 
@@ -534,9 +539,12 @@ export class NotificationsService {
    * Validate Callio API key by attempting to fetch phone numbers
    */
   async validateCallioApiKey(apiKey: string): Promise<{ valid: boolean; phoneNumbers: CallioPhoneNumber[] }> {
+    const endpoint = 'https://callio-production-47ac.up.railway.app/api/v1/phone-numbers';
+    this.logger.log(`[validateCallioApiKey] Hitting endpoint: ${endpoint}`);
+
     try {
       const response = await fetch(
-        'https://callio-production-47ac.up.railway.app/v1/phone-numbers',
+        endpoint,
         {
           method: 'GET',
           headers: {
@@ -546,7 +554,10 @@ export class NotificationsService {
         },
       );
 
+      this.logger.log(`[validateCallioApiKey] Response status: ${response.status}`);
+
       if (!response.ok) {
+        this.logger.error(`[validateCallioApiKey] Failed with status: ${response.status}`);
         return { valid: false, phoneNumbers: [] };
       }
 
@@ -621,12 +632,13 @@ export class NotificationsService {
       requestBody.sender.fromNumber = params.fromPhone;
     }
 
-    this.logger.log(`Callio request body: ${JSON.stringify(requestBody)}`);
-
+    const endpoint = 'https://callio-production-47ac.up.railway.app/api/v1/messages/send';
+    this.logger.log(`[sendViaCallio] Hitting endpoint: ${endpoint}`);
+    this.logger.log(`[sendViaCallio] Request body: ${JSON.stringify(requestBody)}`);
 
     try {
       const response = await fetch(
-        'https://callio-production-47ac.up.railway.app/v1/messages/send',
+        endpoint,
         {
           method: 'POST',
           headers: {
@@ -637,9 +649,11 @@ export class NotificationsService {
         },
       );
 
+      this.logger.log(`[sendViaCallio] Response status: ${response.status}`);
+
       if (!response.ok) {
         const errorText = await response.text();
-        this.logger.error(`Callio API error: ${response.status} - ${errorText}`);
+        this.logger.error(`[sendViaCallio] Callio API error: ${response.status} - ${errorText}`);
         throw new Error(`Callio API error: ${response.status}`);
       }
 
