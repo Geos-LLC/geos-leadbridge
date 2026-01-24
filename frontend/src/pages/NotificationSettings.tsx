@@ -368,25 +368,24 @@ export function NotificationSettings() {
       )}
 
       <div className="settings-content">
-        {/* Account Selector */}
-        {accounts.length > 1 && (
-          <div className="account-selector">
-            <label>Select Account:</label>
-            <div className="select-wrapper">
-              <select
-                value={selectedAccountId}
-                onChange={e => setSelectedAccountId(e.target.value)}
-              >
-                {accounts.map(acc => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.businessName}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={16} />
-            </div>
+        {/* Account Selector - always show */}
+        <div className="account-selector">
+          <label>Account:</label>
+          <div className="select-wrapper">
+            <select
+              value={selectedAccountId}
+              onChange={e => setSelectedAccountId(e.target.value)}
+            >
+              {accounts.map(acc => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.businessName}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={16} />
           </div>
-        )}
+          <span className="account-count">{accounts.length} account{accounts.length !== 1 ? 's' : ''} connected</span>
+        </div>
 
         {loading ? (
           <div className="loading-container">

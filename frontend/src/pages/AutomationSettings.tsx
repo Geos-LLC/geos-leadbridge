@@ -417,26 +417,25 @@ export function AutomationSettings() {
       )}
 
       <div className="settings-content">
-        {/* Account Filter */}
-        {accounts.length > 1 && (
-          <div className="account-filter">
-            <label>Filter by account:</label>
-            <div className="select-wrapper">
-              <select
-                value={selectedAccountId}
-                onChange={e => setSelectedAccountId(e.target.value)}
-              >
-                <option value="all">All Accounts</option>
-                {accounts.map(acc => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.businessName}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={16} />
-            </div>
+        {/* Account Filter - always show */}
+        <div className="account-filter">
+          <label>Filter by account:</label>
+          <div className="select-wrapper">
+            <select
+              value={selectedAccountId}
+              onChange={e => setSelectedAccountId(e.target.value)}
+            >
+              <option value="all">All Accounts ({accounts.length})</option>
+              {accounts.map(acc => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.businessName}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={16} />
           </div>
-        )}
+          <span className="rules-count">{filteredRules.length} rule{filteredRules.length !== 1 ? 's' : ''}</span>
+        </div>
 
         {/* Rules Section */}
         <div className="rules-section">

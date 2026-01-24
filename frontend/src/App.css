@@ -3477,6 +3477,16 @@ body {
   color: var(--text-secondary);
 }
 
+.notification-settings .account-selector .account-count,
+.account-filter .rules-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  padding: 4px 10px;
+  border-radius: 12px;
+}
+
 /* Settings Sections */
 .notification-settings .settings-section {
   background: white;
