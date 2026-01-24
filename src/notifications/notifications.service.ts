@@ -595,7 +595,7 @@ export class NotificationsService {
 
     try {
       const response = await fetch(
-        'https://callio-production-47ac.up.railway.app/api/v1/leadbridge/send',
+        'https://callio-production-47ac.up.railway.app/api/v1/messages/send',
         {
           method: 'POST',
           headers: {
