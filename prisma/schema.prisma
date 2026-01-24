@@ -323,6 +323,7 @@ model NotificationSettings {
   callioApiKey      String?  // Encrypted Callio API key
   callioFromPhone   String?  // Selected phone number from Callio to send from
   callioWorkspaceId String?  // Callio workspace ID for this tenant
+  callioWebhookId   String?  // Callio webhook ID for delivery status updates
   template          String   @db.Text @default("New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}")
   quietHoursStart   String?  // e.g., "22:00"
   quietHoursEnd     String?  // e.g., "08:00"

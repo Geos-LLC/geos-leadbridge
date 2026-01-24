@@ -216,22 +216,19 @@ export function NotificationSettings() {
       setValidatingApiKey(true);
       setError(null);
 
-      const result = await notificationsApi.validateCallioApiKey(callioApiKey);
+      // Use the new connect endpoint that validates, creates webhook, and stores settings
+      const result = await notificationsApi.connectCallio(selectedAccountId, callioApiKey);
 
-      if (!result.valid) {
-        setError('Invalid API key. Please check your Callio API key and try again.');
+      if (!result.success) {
+        setError(result.error || 'Invalid API key. Please check your Callio API key and try again.');
         return;
       }
-
-      // Save the API key
-      await notificationsApi.updateSettings(selectedAccountId, {
-        callioApiKey: callioApiKey,
-      });
 
       setCallioConnected(true);
       setCallioPhoneNumbers(result.phoneNumbers);
       setShowApiKeyInput(false);
-      setSuccessMessage('Connected to Callio successfully');
+      setCallioApiKey(''); // Clear the API key from state for security
+      setSuccessMessage('Connected to Callio successfully (webhook auto-configured)');
       setTimeout(() => setSuccessMessage(null), 3000);
 
       // Auto-select first phone number if available
@@ -248,10 +245,14 @@ export function NotificationSettings() {
   async function handleDisconnectCallio() {
     try {
       setError(null);
-      await notificationsApi.updateSettings(selectedAccountId, {
-        callioApiKey: '',
-        callioFromPhone: '',
-      });
+
+      // Use the new disconnect endpoint that deletes webhook and clears settings
+      const result = await notificationsApi.disconnectCallio(selectedAccountId);
+
+      if (!result.success) {
+        setError(result.error || 'Failed to disconnect');
+        return;
+      }
 
       setCallioConnected(false);
       setCallioApiKey('');

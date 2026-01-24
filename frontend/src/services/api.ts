@@ -506,6 +506,14 @@ export const notificationsApi = {
     const { data } = await api.get(`/v1/notifications/callio/phone-numbers/${savedAccountId}`);
     return data;
   },
+  connectCallio: async (savedAccountId: string, apiKey: string): Promise<{ success: boolean; phoneNumbers: CallioPhoneNumber[]; error?: string }> => {
+    const { data } = await api.post(`/v1/notifications/callio/connect/${savedAccountId}`, { apiKey });
+    return data;
+  },
+  disconnectCallio: async (savedAccountId: string): Promise<{ success: boolean; error?: string }> => {
+    const { data } = await api.delete(`/v1/notifications/callio/disconnect/${savedAccountId}`);
+    return data;
+  },
 };
 
 export default api;

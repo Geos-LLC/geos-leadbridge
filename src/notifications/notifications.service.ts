@@ -596,6 +596,157 @@ export class NotificationsService {
   }
 
   /**
+   * Create a webhook in Callio for delivery status updates
+   */
+  async createCallioWebhook(apiKey: string, webhookUrl: string): Promise<{ webhookId: string | null; error?: string }> {
+    const endpoint = 'https://callio-production-47ac.up.railway.app/api/v1/webhooks';
+    this.logger.log(`[createCallioWebhook] Creating webhook at: ${endpoint}`);
+    this.logger.log(`[createCallioWebhook] Webhook URL: ${webhookUrl}`);
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: webhookUrl,
+          events: ['message.delivered', 'message.failed', 'message.sent', 'message.status_update'],
+          active: true,
+        }),
+      });
+
+      this.logger.log(`[createCallioWebhook] Response status: ${response.status}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.logger.error(`[createCallioWebhook] Failed: ${response.status} - ${errorText}`);
+        return { webhookId: null, error: `Failed to create webhook: ${response.status}` };
+      }
+
+      const result = await response.json();
+      this.logger.log(`[createCallioWebhook] Result: ${JSON.stringify(result)}`);
+
+      const webhookId = result.data?.id || result.id || result.webhookId;
+      return { webhookId };
+    } catch (error: any) {
+      this.logger.error('[createCallioWebhook] Error:', error.message);
+      return { webhookId: null, error: error.message };
+    }
+  }
+
+  /**
+   * Delete a webhook from Callio
+   */
+  async deleteCallioWebhook(apiKey: string, webhookId: string): Promise<{ success: boolean; error?: string }> {
+    const endpoint = `https://callio-production-47ac.up.railway.app/api/v1/webhooks/${webhookId}`;
+    this.logger.log(`[deleteCallioWebhook] Deleting webhook: ${endpoint}`);
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      this.logger.log(`[deleteCallioWebhook] Response status: ${response.status}`);
+
+      if (!response.ok && response.status !== 404) {
+        const errorText = await response.text();
+        this.logger.error(`[deleteCallioWebhook] Failed: ${response.status} - ${errorText}`);
+        return { success: false, error: `Failed to delete webhook: ${response.status}` };
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      this.logger.error('[deleteCallioWebhook] Error:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Connect to Callio - validates API key, creates webhook, and stores settings
+   */
+  async connectCallio(
+    savedAccountId: string,
+    apiKey: string,
+    webhookBaseUrl: string,
+  ): Promise<{ success: boolean; phoneNumbers: CallioPhoneNumber[]; error?: string }> {
+    this.logger.log(`[connectCallio] Connecting account ${savedAccountId}`);
+
+    // 1. Validate the API key
+    const validation = await this.validateCallioApiKey(apiKey);
+    if (!validation.valid) {
+      return { success: false, phoneNumbers: [], error: 'Invalid API key' };
+    }
+
+    // 2. Create webhook for delivery status
+    const webhookUrl = `${webhookBaseUrl}/api/webhooks/callio/delivery-status`;
+    const webhookResult = await this.createCallioWebhook(apiKey, webhookUrl);
+
+    if (webhookResult.error) {
+      this.logger.warn(`[connectCallio] Webhook creation failed: ${webhookResult.error}`);
+      // Continue anyway - webhook can be created manually later
+    }
+
+    // 3. Store the API key and webhook ID
+    await this.prisma.notificationSettings.upsert({
+      where: { savedAccountId },
+      update: {
+        callioApiKey: apiKey,
+        callioWebhookId: webhookResult.webhookId,
+      },
+      create: {
+        savedAccountId,
+        callioApiKey: apiKey,
+        callioWebhookId: webhookResult.webhookId,
+      },
+    });
+
+    this.logger.log(`[connectCallio] Connected successfully. WebhookId: ${webhookResult.webhookId}`);
+    return { success: true, phoneNumbers: validation.phoneNumbers };
+  }
+
+  /**
+   * Disconnect from Callio - deletes webhook and clears settings
+   */
+  async disconnectCallio(savedAccountId: string): Promise<{ success: boolean; error?: string }> {
+    this.logger.log(`[disconnectCallio] Disconnecting account ${savedAccountId}`);
+
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+    });
+
+    if (!settings) {
+      return { success: true }; // Already disconnected
+    }
+
+    // Delete webhook if exists
+    if (settings.callioApiKey && settings.callioWebhookId) {
+      const deleteResult = await this.deleteCallioWebhook(settings.callioApiKey, settings.callioWebhookId);
+      if (!deleteResult.success) {
+        this.logger.warn(`[disconnectCallio] Failed to delete webhook: ${deleteResult.error}`);
+      }
+    }
+
+    // Clear Callio settings
+    await this.prisma.notificationSettings.update({
+      where: { savedAccountId },
+      data: {
+        callioApiKey: null,
+        callioFromPhone: null,
+        callioWebhookId: null,
+      },
+    });
+
+    this.logger.log(`[disconnectCallio] Disconnected successfully`);
+    return { success: true };
+  }
+
+  /**
    * Send message via Callio API
    */
   private async sendViaCallio(params: {

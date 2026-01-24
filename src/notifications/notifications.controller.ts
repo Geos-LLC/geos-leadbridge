@@ -8,11 +8,14 @@ import {
   Get,
   Put,
   Post,
+  Delete,
   Param,
   Body,
   Query,
   UseGuards,
+  Req,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import {
@@ -24,6 +27,15 @@ import {
 @UseGuards(JwtAuthGuard)
 export class NotificationsController {
   constructor(private notificationsService: NotificationsService) {}
+
+  /**
+   * Get the base URL for webhooks from the request
+   */
+  private getWebhookBaseUrl(req: Request): string {
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.headers['x-forwarded-host'] || req.headers.host || req.hostname;
+    return `${protocol}://${host}`;
+  }
 
   /**
    * Get notification settings for a saved account
@@ -146,6 +158,70 @@ export class NotificationsController {
     return {
       success: true,
       phoneNumbers,
+    };
+  }
+
+  /**
+   * Connect to Callio - validates API key, creates webhook, stores settings
+   */
+  @Post('callio/connect/:savedAccountId')
+  async connectCallio(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+    @Body() body: { apiKey: string },
+    @Req() req: Request,
+  ) {
+    // Verify the saved account belongs to the user
+    const account = await this.notificationsService['prisma'].savedAccount.findFirst({
+      where: { id: savedAccountId, userId: user.userId },
+    });
+
+    if (!account) {
+      return {
+        success: false,
+        error: 'Account not found',
+      };
+    }
+
+    const webhookBaseUrl = this.getWebhookBaseUrl(req);
+    const result = await this.notificationsService.connectCallio(
+      savedAccountId,
+      body.apiKey,
+      webhookBaseUrl,
+    );
+
+    return {
+      success: result.success,
+      phoneNumbers: result.phoneNumbers,
+      error: result.error,
+    };
+  }
+
+  /**
+   * Disconnect from Callio - deletes webhook, clears settings
+   */
+  @Delete('callio/disconnect/:savedAccountId')
+  async disconnectCallio(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    // Verify the saved account belongs to the user
+    const account = await this.notificationsService['prisma'].savedAccount.findFirst({
+      where: { id: savedAccountId, userId: user.userId },
+    });
+
+    if (!account) {
+      return {
+        success: false,
+        error: 'Account not found',
+      };
+    }
+
+    const result = await this.notificationsService.disconnectCallio(savedAccountId);
+
+    return {
+      success: result.success,
+      error: result.error,
     };
   }
 }
