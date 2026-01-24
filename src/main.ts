@@ -16,7 +16,9 @@ import * as fs from 'fs';
 dotenv.config();
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true, // Enable raw body for webhook signature verification
+  });
 
   // Get configuration
   const configService = app.get(ConfigService);

@@ -5,6 +5,7 @@
 
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
 import { PrismaService } from '../common/utils/prisma.service';
 import { PlatformFactory } from '../platforms/platform.factory';
 import { AutomationService } from '../automation/automation.service';
@@ -743,6 +744,154 @@ export class WebhooksService {
     this.logger.log('Negotiation updated', { platform, requestId: payload.request_id });
 
     // Update quote/negotiation in database
+  }
+
+  /**
+   * Verify Callio webhook signature using HMAC-SHA256
+   */
+  private verifyCallioSignature(rawBody: string, signature: string, secret: string): boolean {
+    if (!signature || !secret) {
+      return false;
+    }
+    const expectedSignature = crypto
+      .createHmac('sha256', secret)
+      .update(rawBody)
+      .digest('hex');
+    return crypto.timingSafeEqual(
+      Buffer.from(signature),
+      Buffer.from(expectedSignature),
+    );
+  }
+
+  /**
+   * Handle Callio delivery status webhook
+   * Updates NotificationLog with delivery status
+   */
+  async handleCallioDeliveryStatus(params: {
+    eventType: string;
+    timestamp: string;
+    tenantId: string;
+    signature: string;
+    payload: any;
+    rawBody: string;
+  }): Promise<void> {
+    const { eventType, timestamp, tenantId, signature, payload, rawBody } = params;
+
+    this.logger.log('=== CALLIO WEBHOOK RECEIVED ===');
+    this.logger.log(`Event: ${eventType}, Tenant: ${tenantId}, Timestamp: ${timestamp}`);
+    this.logger.log(`Payload: ${JSON.stringify(payload)}`);
+
+    // Verify signature
+    const webhookSecret = this.configService.get<string>('callio.webhookSecret');
+    let isVerified = false;
+
+    if (webhookSecret && signature) {
+      try {
+        isVerified = this.verifyCallioSignature(rawBody, signature, webhookSecret);
+        this.logger.log(`Signature verification: ${isVerified ? 'PASSED' : 'FAILED'}`);
+      } catch (err: any) {
+        this.logger.warn('Signature verification error:', err.message);
+        isVerified = false;
+      }
+    } else if (!webhookSecret) {
+      // If no secret configured, accept webhook (development mode)
+      this.logger.warn('No CALLIO_WEBHOOK_SECRET configured - accepting webhook without verification');
+      isVerified = true;
+    } else if (!signature) {
+      this.logger.warn('No signature header received - rejecting webhook');
+      isVerified = false;
+    }
+
+    // Log webhook event
+    const event = await this.prisma.webhookEvent.create({
+      data: {
+        platform: 'callio',
+        eventType: eventType || payload?.event || 'unknown',
+        payload: rawBody,
+        signature,
+        verified: isVerified,
+        processed: false,
+      },
+    });
+
+    // Reject if signature verification failed (when secret is configured)
+    if (!isVerified && webhookSecret) {
+      this.logger.warn('Rejecting Callio webhook due to invalid signature', { eventId: event.id });
+      await this.prisma.webhookEvent.update({
+        where: { id: event.id },
+        data: {
+          processed: true,
+          processingError: 'Invalid signature',
+          processedAt: new Date(),
+        },
+      });
+      return;
+    }
+
+    try {
+      const data = payload?.data || payload;
+      const messageId = data?.messageId;
+      const status = data?.status;
+      const errorCode = data?.errorCode;
+      const errorMessage = data?.errorMessage;
+      const leadId = data?.leadId;
+
+      this.logger.log(`Processing delivery status: messageId=${messageId}, status=${status}, leadId=${leadId}`);
+
+      // Find the NotificationLog by callioMessageId
+      if (messageId) {
+        const log = await this.prisma.notificationLog.findFirst({
+          where: { callioMessageId: messageId },
+        });
+
+        if (log) {
+          // Map Callio status to our status
+          let newStatus = status;
+          if (status === 'delivered') {
+            newStatus = 'delivered';
+          } else if (status === 'failed') {
+            newStatus = 'failed';
+          } else if (status === 'sent') {
+            newStatus = 'sent';
+          }
+
+          // Update the log with delivery status
+          await this.prisma.notificationLog.update({
+            where: { id: log.id },
+            data: {
+              status: newStatus,
+              ...(status === 'delivered' && { deliveredAt: new Date() }),
+              ...(status === 'failed' && { error: errorMessage || `Error code: ${errorCode}` }),
+            },
+          });
+
+          this.logger.log(`Updated NotificationLog ${log.id} with status: ${newStatus}`);
+        } else {
+          this.logger.warn(`NotificationLog not found for messageId: ${messageId}`);
+        }
+      }
+
+      // Mark webhook as processed
+      await this.prisma.webhookEvent.update({
+        where: { id: event.id },
+        data: {
+          processed: true,
+          processedAt: new Date(),
+        },
+      });
+    } catch (error: any) {
+      this.logger.error('Error processing Callio webhook', error);
+
+      // Mark webhook as failed
+      await this.prisma.webhookEvent.update({
+        where: { id: event.id },
+        data: {
+          processed: true,
+          processedAt: new Date(),
+          processingError: error.message || 'Unknown error',
+        },
+      });
+    }
   }
 
   /**

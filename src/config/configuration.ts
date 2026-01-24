@@ -37,4 +37,8 @@ export default () => ({
     webhookSecret: process.env.YELP_WEBHOOK_SECRET,
     apiBaseUrl: 'https://api.yelp.com/v3',
   },
+
+  callio: {
+    webhookSecret: process.env.CALLIO_WEBHOOK_SECRET,
+  },
 });

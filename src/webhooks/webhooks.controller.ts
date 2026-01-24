@@ -13,7 +13,10 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  RawBodyRequest,
+  Req,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { WebhooksService } from './webhooks.service';
 import { Public } from '../common/decorators/public.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -46,6 +49,33 @@ export class WebhooksController {
   @HttpCode(HttpStatus.OK)
   async handleYelpWebhook(@Headers('x-yelp-signature') signature: string, @Body() payload: any) {
     // Future implementation
+    return { received: true };
+  }
+
+  /**
+   * Callio webhook endpoint for SMS delivery status updates
+   * Receives message.delivered, message.failed, message.status_update events
+   */
+  @Public()
+  @Post('callio/delivery-status')
+  @HttpCode(HttpStatus.OK)
+  async handleCallioDeliveryStatus(
+    @Headers('x-callio-event') eventType: string,
+    @Headers('x-callio-timestamp') timestamp: string,
+    @Headers('x-callio-tenant-id') tenantId: string,
+    @Headers('x-callio-signature') signature: string,
+    @Body() payload: any,
+    @Req() req: RawBodyRequest<Request>,
+  ) {
+    await this.webhooksService.handleCallioDeliveryStatus({
+      eventType,
+      timestamp,
+      tenantId,
+      signature,
+      payload,
+      rawBody: req.rawBody?.toString() || JSON.stringify(payload),
+    });
+
     return { received: true };
   }
 
