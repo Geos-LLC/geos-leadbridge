@@ -49,6 +49,13 @@ export interface NotificationRuleResponse {
   lastTriggeredAt: string | null;
   createdAt: string;
   updatedAt: string;
+  // Account info (included when fetching all rules)
+  savedAccountId?: string;
+  savedAccount?: {
+    id: string;
+    businessId: string;
+    businessName: string;
+  };
 }
 
 export interface CustomerReplyContext {
@@ -250,6 +257,48 @@ export class NotificationsService {
   // ==========================================
   // Notification Rule CRUD
   // ==========================================
+
+  /**
+   * Get all notification rules across all accounts for a user
+   */
+  async getAllRules(userId: string): Promise<NotificationRuleResponse[]> {
+    // Get all saved accounts for this user
+    const accounts = await this.prisma.savedAccount.findMany({
+      where: { userId },
+      include: {
+        notificationSettings: {
+          include: {
+            notificationRules: {
+              orderBy: { createdAt: 'desc' },
+            },
+          },
+        },
+      },
+    });
+
+    const allRules: NotificationRuleResponse[] = [];
+
+    for (const account of accounts) {
+      if (account.notificationSettings?.notificationRules) {
+        for (const rule of account.notificationSettings.notificationRules) {
+          allRules.push({
+            ...this.formatRule(rule),
+            savedAccountId: account.id,
+            savedAccount: {
+              id: account.id,
+              businessId: account.businessId,
+              businessName: account.businessName,
+            },
+          });
+        }
+      }
+    }
+
+    // Sort by creation date (newest first)
+    return allRules.sort((a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
 
   /**
    * Get all notification rules for a saved account

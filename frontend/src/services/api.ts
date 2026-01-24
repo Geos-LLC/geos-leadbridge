@@ -522,6 +522,10 @@ export const notificationsApi = {
     return data;
   },
   // Notification Rules
+  getAllRules: async (): Promise<{ success: boolean; count: number; rules: NotificationRule[] }> => {
+    const { data } = await api.get('/v1/notifications/rules');
+    return data;
+  },
   getRules: async (savedAccountId: string): Promise<{ success: boolean; count: number; rules: NotificationRule[] }> => {
     const { data } = await api.get(`/v1/notifications/rules/${savedAccountId}`);
     return data;

@@ -40,7 +40,7 @@ const TIMEZONE_OPTIONS = [
 export function NotificationSettings() {
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
   const [logs, setLogs] = useState<NotificationLog[]>([]);
   const [rules, setRules] = useState<NotificationRule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,7 +84,9 @@ export function NotificationSettings() {
   }, []);
 
   useEffect(() => {
-    if (selectedAccountId) {
+    if (selectedAccountId === 'all') {
+      loadAllRules();
+    } else if (selectedAccountId) {
       loadSettings(selectedAccountId);
     }
   }, [selectedAccountId]);
@@ -94,11 +96,25 @@ export function NotificationSettings() {
       setLoading(true);
       const { accounts } = await thumbtackApi.getSavedAccounts();
       setAccounts(accounts);
-      if (accounts.length > 0) {
-        setSelectedAccountId(accounts[0].id);
-      }
+      // Default to "all" to show all rules
+      setSelectedAccountId('all');
+      // Also load all rules
+      loadAllRules();
     } catch (err: any) {
       setError(err.message || 'Failed to load accounts');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadAllRules() {
+    try {
+      setLoading(true);
+      setError(null);
+      const rulesRes = await notificationsApi.getAllRules();
+      setRules(rulesRes.rules);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load rules');
     } finally {
       setLoading(false);
     }
@@ -244,6 +260,10 @@ export function NotificationSettings() {
   }
 
   function startEditRule(rule: NotificationRule) {
+    // If viewing all accounts, switch to the rule's account for editing
+    if (selectedAccountId === 'all' && rule.savedAccountId) {
+      setSelectedAccountId(rule.savedAccountId);
+    }
     setEditingRule(rule);
     setIsCreatingRule(false);
     setRuleForm({
@@ -273,6 +293,7 @@ export function NotificationSettings() {
 
       if (editingRule) {
         // Update existing rule
+        const accountId = editingRule.savedAccountId || selectedAccountId;
         const updates: UpdateNotificationRuleDto = {
           name: ruleForm.name,
           triggerType: ruleForm.triggerType,
@@ -280,8 +301,9 @@ export function NotificationSettings() {
           template: ruleForm.template,
           enabled: ruleForm.enabled,
         };
-        const result = await notificationsApi.updateRule(selectedAccountId, editingRule.id, updates);
-        setRules(prev => prev.map(r => r.id === editingRule.id ? result.rule : r));
+        const result = await notificationsApi.updateRule(accountId, editingRule.id, updates);
+        const updatedRule = { ...result.rule, savedAccountId: editingRule.savedAccountId, savedAccount: editingRule.savedAccount };
+        setRules(prev => prev.map(r => r.id === editingRule.id ? updatedRule : r));
         setSuccessMessage('Rule updated successfully');
       } else {
         // Create new rule
@@ -293,7 +315,14 @@ export function NotificationSettings() {
           enabled: ruleForm.enabled,
         };
         const result = await notificationsApi.createRule(selectedAccountId, ruleData);
-        setRules(prev => [result.rule, ...prev]);
+        // Add account info to the new rule
+        const account = accounts.find(a => a.id === selectedAccountId);
+        const newRule = {
+          ...result.rule,
+          savedAccountId: selectedAccountId,
+          savedAccount: account ? { id: account.id, businessId: account.businessId, businessName: account.businessName } : undefined,
+        };
+        setRules(prev => [newRule, ...prev]);
         setSuccessMessage('Rule created successfully');
       }
 
@@ -307,12 +336,19 @@ export function NotificationSettings() {
   }
 
   async function handleDeleteRule(ruleId: string) {
-    if (!selectedAccountId) return;
     if (!confirm('Are you sure you want to delete this rule?')) return;
+
+    // Get the account ID from the rule (for all accounts view) or from selectedAccountId
+    const rule = rules.find(r => r.id === ruleId);
+    const accountId = rule?.savedAccountId || selectedAccountId;
+    if (!accountId || accountId === 'all') {
+      setError('Cannot delete rule - account not found');
+      return;
+    }
 
     try {
       setError(null);
-      await notificationsApi.deleteRule(selectedAccountId, ruleId);
+      await notificationsApi.deleteRule(accountId, ruleId);
       setRules(prev => prev.filter(r => r.id !== ruleId));
       setSuccessMessage('Rule deleted successfully');
       setTimeout(() => setSuccessMessage(null), 3000);
@@ -322,22 +358,30 @@ export function NotificationSettings() {
   }
 
   async function handleToggleRule(rule: NotificationRule) {
-    if (!selectedAccountId) return;
+    // Get the account ID from the rule (for all accounts view) or from selectedAccountId
+    const accountId = rule.savedAccountId || selectedAccountId;
+    if (!accountId || accountId === 'all') {
+      setError('Cannot update rule - account not found');
+      return;
+    }
 
     try {
-      const result = await notificationsApi.updateRule(selectedAccountId, rule.id, {
+      const result = await notificationsApi.updateRule(accountId, rule.id, {
         enabled: !rule.enabled,
       });
-      setRules(prev => prev.map(r => r.id === rule.id ? result.rule : r));
+      const updatedRule = { ...result.rule, savedAccountId: rule.savedAccountId, savedAccount: rule.savedAccount };
+      setRules(prev => prev.map(r => r.id === rule.id ? updatedRule : r));
     } catch (err: any) {
       setError(err.message || 'Failed to update rule');
     }
   }
 
   async function handleTestRule(ruleId: string) {
-    if (!selectedAccountId) return;
-    if (!destinationPhone) {
-      setError('Please enter a destination phone number first');
+    // Get the account ID from the rule (for all accounts view) or from selectedAccountId
+    const rule = rules.find(r => r.id === ruleId);
+    const accountId = rule?.savedAccountId || selectedAccountId;
+    if (!accountId || accountId === 'all') {
+      setError('Cannot test rule - account not found');
       return;
     }
 
@@ -346,12 +390,15 @@ export function NotificationSettings() {
       setError(null);
       setSuccessMessage(null);
 
-      const result = await notificationsApi.sendTest(selectedAccountId, ruleId);
+      const result = await notificationsApi.sendTest(accountId, ruleId);
 
       if (result.success) {
         setSuccessMessage('Test notification sent successfully');
-        const logsRes = await notificationsApi.getLogs(selectedAccountId, 20);
-        setLogs(logsRes.logs);
+        // Don't reload logs when viewing all accounts
+        if (selectedAccountId !== 'all') {
+          const logsRes = await notificationsApi.getLogs(accountId, 20);
+          setLogs(logsRes.logs);
+        }
       } else {
         setError(result.message || 'Failed to send test notification');
       }
@@ -527,6 +574,7 @@ export function NotificationSettings() {
               value={selectedAccountId}
               onChange={e => setSelectedAccountId(e.target.value)}
             >
+              <option value="all">All Accounts ({accounts.length})</option>
               {accounts.map(acc => (
                 <option key={acc.id} value={acc.id}>
                   {acc.businessName}
@@ -535,7 +583,7 @@ export function NotificationSettings() {
             </select>
             <ChevronDown size={16} />
           </div>
-          <span className="account-count">{accounts.length} account{accounts.length !== 1 ? 's' : ''} connected</span>
+          <span className="account-count">{rules.length} rule{rules.length !== 1 ? 's' : ''}</span>
         </div>
 
         {loading ? (
@@ -544,6 +592,9 @@ export function NotificationSettings() {
           </div>
         ) : (
           <>
+            {/* Account-specific settings - only show when a specific account is selected */}
+            {selectedAccountId !== 'all' && (
+            <>
             {/* Callio Connection Section */}
             <div className="settings-section callio-connection">
               <div className="section-header">
@@ -767,15 +818,17 @@ export function NotificationSettings() {
                 </div>
               </div>
             </div>
+            </>
+            )}
 
-            {/* Notification Rules Section */}
+            {/* Notification Rules Section - always visible */}
             <div className="settings-section rules-section">
               <div className="section-header">
                 <h2>
                   <Zap size={18} />
                   Notification Rules
                 </h2>
-                {!isCreatingRule && !editingRule && (
+                {!isCreatingRule && !editingRule && selectedAccountId !== 'all' && (
                   <button className="btn btn-primary btn-sm" onClick={startCreateRule}>
                     <Plus size={14} />
                     Add Rule
@@ -902,7 +955,7 @@ export function NotificationSettings() {
                           <button
                             className="btn-icon"
                             onClick={() => handleTestRule(rule.id)}
-                            disabled={testing || !callioConnected}
+                            disabled={testing || (selectedAccountId !== 'all' && !callioConnected)}
                             title="Send test SMS"
                           >
                             <Send size={14} />
@@ -915,6 +968,12 @@ export function NotificationSettings() {
                           </button>
                         </div>
                       </div>
+                      {/* Show account name when viewing all accounts */}
+                      {selectedAccountId === 'all' && rule.savedAccount && (
+                        <div className="rule-account">
+                          <span className="account-badge">{rule.savedAccount.businessName}</span>
+                        </div>
+                      )}
                       <div className="rule-template">
                         <MessageSquare size={12} />
                         <span>{rule.template.substring(0, 60)}{rule.template.length > 60 ? '...' : ''}</span>
@@ -930,16 +989,20 @@ export function NotificationSettings() {
                 </div>
               ) : !isCreatingRule && (
                 <div className="empty-rules">
-                  <p>No notification rules yet. Create a rule to send SMS alerts when leads arrive or customers reply.</p>
-                  <button className="btn btn-primary" onClick={startCreateRule}>
-                    <Plus size={16} />
-                    Create Your First Rule
-                  </button>
+                  <p>No notification rules yet. {selectedAccountId === 'all' ? 'Select an account to create a rule.' : 'Create a rule to send SMS alerts when leads arrive or customers reply.'}</p>
+                  {selectedAccountId !== 'all' && (
+                    <button className="btn btn-primary" onClick={startCreateRule}>
+                      <Plus size={16} />
+                      Create Your First Rule
+                    </button>
+                  )}
                 </div>
               )}
             </div>
 
-            {/* General Settings Section */}
+            {/* General Settings Section - only show when specific account selected */}
+            {selectedAccountId !== 'all' && (
+            <>
             <div className="settings-section">
               <div className="section-header">
                 <h2>
@@ -1031,7 +1094,7 @@ export function NotificationSettings() {
               </button>
             </div>
 
-            {/* Notification Logs */}
+            {/* Notification Logs - also account-specific */}
             {logs.length > 0 && (
               <div className="settings-section">
                 <div className="section-header">
@@ -1113,6 +1176,8 @@ export function NotificationSettings() {
                   )}
                 </div>
               </div>
+            )}
+            </>
             )}
           </>
         )}

@@ -135,6 +135,20 @@ export class NotificationsController {
   // ==========================================
 
   /**
+   * Get all notification rules across all accounts for a user
+   */
+  @Get('rules')
+  async getAllRules(@CurrentUser() user: any) {
+    const rules = await this.notificationsService.getAllRules(user.userId);
+
+    return {
+      success: true,
+      count: rules.length,
+      rules,
+    };
+  }
+
+  /**
    * Get notification rules for a saved account
    */
   @Get('rules/:savedAccountId')

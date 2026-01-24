@@ -3282,9 +3282,20 @@ body {
 }
 
 .rule-account {
+  margin: 6px 0;
+}
+
+.rule-account .account-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: var(--bg-secondary);
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
 }
 
 .rule-trigger {

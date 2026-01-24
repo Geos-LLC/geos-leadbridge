@@ -194,4 +194,11 @@ export interface NotificationRule {
   lastTriggeredAt: string | null;
   createdAt: string;
   updatedAt: string;
+  // Account info (included when fetching all rules)
+  savedAccountId?: string;
+  savedAccount?: {
+    id: string;
+    businessId: string;
+    businessName: string;
+  };
 }
