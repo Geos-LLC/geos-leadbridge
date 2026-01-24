@@ -23,9 +23,16 @@ export interface UpdateNotificationSettingsDto {
 export interface CallioPhoneNumber {
   id: string;
   phoneNumber: string;
-  provider: 'twilio' | 'openphone';
+  provider: 'twilio' | 'openphone' | string;
   friendlyName?: string;
   capabilities?: string[];
+  // A2P Compliance fields
+  a2pStatus?: 'pending' | 'approved' | 'rejected' | 'not_required' | string;
+  a2pBrandId?: string;
+  a2pCampaignId?: string;
+  smsEnabled?: boolean;
+  mmsEnabled?: boolean;
+  voiceEnabled?: boolean;
 }
 
 export interface NotificationSettingsResponse {
@@ -518,21 +525,62 @@ export class NotificationsService {
       this.logger.log(`Raw phones array (getPhoneNumbers): ${JSON.stringify(phones)}`);
 
       return phones
-        .map((phone: any) => {
-          const phoneNumber = phone.phoneNumber || phone.phone_number || phone.number || phone.e164;
-          return {
-            id: phone.id || phone._id || phoneNumber || String(Math.random()),
-            phoneNumber: phoneNumber,
-            provider: phone.provider || phone.carrier || phone.type || 'unknown',
-            friendlyName: phone.friendlyName || phone.friendly_name || phone.name || phone.label || '',
-            capabilities: phone.capabilities || [],
-          };
-        })
+        .map((phone: any) => this.mapCallioPhoneNumber(phone))
         .filter((p: any) => p.phoneNumber && p.phoneNumber.length > 5);
     } catch (error: any) {
       this.logger.error('Failed to fetch Callio phone numbers', error);
       throw new Error(error.message || 'Failed to connect to Callio');
     }
+  }
+
+  /**
+   * Map Callio API phone response to CallioPhoneNumber interface
+   */
+  private mapCallioPhoneNumber(phone: any): CallioPhoneNumber {
+    const phoneNumber = phone.phoneNumber || phone.phone_number || phone.number || phone.e164;
+    const a2p = phone.a2pCompliance || phone.a2p || {};
+    const caps = phone.capabilities || {};
+
+    // Map Callio campaignStatus to our a2pStatus
+    let a2pStatus: string | undefined;
+    const campaignStatus = a2p.campaignStatus || a2p.status || a2p.a2pStatus || phone.a2pStatus;
+    if (campaignStatus) {
+      switch (campaignStatus.toUpperCase()) {
+        case 'VERIFIED':
+        case 'APPROVED':
+          a2pStatus = 'approved';
+          break;
+        case 'PENDING':
+        case 'IN_PROGRESS':
+          a2pStatus = 'pending';
+          break;
+        case 'REJECTED':
+        case 'FAILED':
+          a2pStatus = 'rejected';
+          break;
+        case 'NOT_REGISTERED':
+          a2pStatus = a2p.isRegistered === false ? 'not_required' : 'pending';
+          break;
+        default:
+          a2pStatus = campaignStatus.toLowerCase();
+      }
+    }
+
+    return {
+      id: phone.id || phone._id || phoneNumber || String(Math.random()),
+      phoneNumber: phoneNumber,
+      provider: phone.provider || phone.carrier || phone.type || 'unknown',
+      friendlyName: phone.friendlyName || phone.friendly_name || phone.name || phone.label || '',
+      capabilities: Array.isArray(caps) ? caps : Object.keys(caps).filter(k => caps[k]),
+      // A2P Compliance
+      a2pStatus,
+      a2pBrandId: a2p.brandId || a2p.brand_id,
+      a2pCampaignId: a2p.campaignId || a2p.campaign_id || a2p.messagingServiceSid,
+      // Capabilities as booleans
+      smsEnabled: caps.sms ?? caps.SMS ?? phone.smsEnabled ?? true,
+      mmsEnabled: caps.mms ?? caps.MMS ?? phone.mmsEnabled ?? false,
+      voiceEnabled: caps.voice ?? caps.Voice ?? phone.voiceEnabled ?? true,
+    };
   }
 
   /**
@@ -570,15 +618,8 @@ export class NotificationsService {
 
       const phoneNumbers = phones
         .map((phone: any) => {
-          const phoneNumber = phone.phoneNumber || phone.phone_number || phone.number || phone.e164;
-          this.logger.log(`Mapping phone: ${JSON.stringify(phone)} -> phoneNumber: ${phoneNumber}`);
-          return {
-            id: phone.id || phone._id || phoneNumber || String(Math.random()),
-            phoneNumber: phoneNumber,
-            provider: phone.provider || phone.carrier || phone.type || 'unknown',
-            friendlyName: phone.friendlyName || phone.friendly_name || phone.name || phone.label || '',
-            capabilities: phone.capabilities || [],
-          };
+          this.logger.log(`Mapping phone: ${JSON.stringify(phone)}`);
+          return this.mapCallioPhoneNumber(phone);
         })
         .filter((p: any) => {
           const valid = p.phoneNumber && p.phoneNumber.length > 5;
@@ -596,11 +637,11 @@ export class NotificationsService {
   }
 
   /**
-   * Create a webhook in Callio for delivery status updates
+   * Create a webhook subscription in Callio for delivery status updates
    */
   async createCallioWebhook(apiKey: string, webhookUrl: string): Promise<{ webhookId: string | null; error?: string }> {
-    const endpoint = 'https://callio-production-47ac.up.railway.app/api/v1/webhooks';
-    this.logger.log(`[createCallioWebhook] Creating webhook at: ${endpoint}`);
+    const endpoint = 'https://callio-production-47ac.up.railway.app/api/v1/webhook-subscriptions';
+    this.logger.log(`[createCallioWebhook] Creating webhook subscription at: ${endpoint}`);
     this.logger.log(`[createCallioWebhook] Webhook URL: ${webhookUrl}`);
 
     try {
@@ -611,9 +652,9 @@ export class NotificationsService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          url: webhookUrl,
-          events: ['message.delivered', 'message.failed', 'message.sent', 'message.status_update'],
-          active: true,
+          name: 'LeadBridge Delivery Status',
+          webhookUrl: webhookUrl,
+          events: ['message.sent', 'message.delivered', 'message.failed'],
         }),
       });
 
@@ -628,7 +669,7 @@ export class NotificationsService {
       const result = await response.json();
       this.logger.log(`[createCallioWebhook] Result: ${JSON.stringify(result)}`);
 
-      const webhookId = result.data?.id || result.id || result.webhookId;
+      const webhookId = result.data?.id || result.id || result.subscriptionId;
       return { webhookId };
     } catch (error: any) {
       this.logger.error('[createCallioWebhook] Error:', error.message);
@@ -637,11 +678,11 @@ export class NotificationsService {
   }
 
   /**
-   * Delete a webhook from Callio
+   * Delete a webhook subscription from Callio
    */
   async deleteCallioWebhook(apiKey: string, webhookId: string): Promise<{ success: boolean; error?: string }> {
-    const endpoint = `https://callio-production-47ac.up.railway.app/api/v1/webhooks/${webhookId}`;
-    this.logger.log(`[deleteCallioWebhook] Deleting webhook: ${endpoint}`);
+    const endpoint = `https://callio-production-47ac.up.railway.app/api/v1/webhook-subscriptions/${webhookId}`;
+    this.logger.log(`[deleteCallioWebhook] Deleting webhook subscription: ${endpoint}`);
 
     try {
       const response = await fetch(endpoint, {

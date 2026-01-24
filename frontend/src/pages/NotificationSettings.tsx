@@ -1,8 +1,24 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Bell, Save, Loader2, X, ChevronDown, Send, Phone, Clock, MessageSquare, AlertCircle, CheckCircle, XCircle, Link, Unlink, Key } from 'lucide-react';
+import { ArrowLeft, Bell, Save, Loader2, X, ChevronDown, Send, Phone, Clock, MessageSquare, AlertCircle, CheckCircle, XCircle, Link, Unlink, Key, Shield, ShieldCheck, ShieldX, ShieldAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { notificationsApi, thumbtackApi, type CallioPhoneNumber } from '../services/api';
 import type { NotificationLog, SavedAccount } from '../types';
+
+// Helper function to get A2P status display
+function getA2PStatusInfo(status?: string): { icon: React.ReactNode; label: string; className: string } {
+  switch (status) {
+    case 'approved':
+      return { icon: <ShieldCheck size={14} />, label: 'A2P Approved', className: 'status-approved' };
+    case 'pending':
+      return { icon: <ShieldAlert size={14} />, label: 'A2P Pending', className: 'status-pending' };
+    case 'rejected':
+      return { icon: <ShieldX size={14} />, label: 'A2P Rejected', className: 'status-rejected' };
+    case 'not_required':
+      return { icon: <Shield size={14} />, label: 'A2P Not Required', className: 'status-info' };
+    default:
+      return { icon: <Shield size={14} />, label: 'Unknown', className: 'status-unknown' };
+  }
+}
 
 // Available variables for SMS template
 const TEMPLATE_VARIABLES = [
@@ -402,27 +418,69 @@ export function NotificationSettings() {
                   </div>
 
                   {callioPhoneNumbers.length > 0 && (
-                    <div className="form-group">
-                      <label>
-                        <Phone size={14} />
-                        Send From Phone Number
-                      </label>
-                      <div className="select-wrapper">
-                        <select
-                          value={callioFromPhone}
-                          onChange={e => setCallioFromPhone(e.target.value)}
-                        >
-                          <option value="">Auto-select</option>
-                          {callioPhoneNumbers.map(phone => (
-                            <option key={phone.id} value={phone.phoneNumber}>
-                              {phone.phoneNumber} ({phone.provider}{phone.friendlyName ? ` - ${phone.friendlyName}` : ''})
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown size={16} />
+                    <>
+                      <div className="form-group">
+                        <label>
+                          <Phone size={14} />
+                          Send From Phone Number
+                        </label>
+                        <div className="select-wrapper">
+                          <select
+                            value={callioFromPhone}
+                            onChange={e => setCallioFromPhone(e.target.value)}
+                          >
+                            <option value="">Auto-select</option>
+                            {callioPhoneNumbers.map(phone => (
+                              <option key={phone.id} value={phone.phoneNumber}>
+                                {phone.phoneNumber} ({phone.provider}{phone.friendlyName ? ` - ${phone.friendlyName}` : ''})
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={16} />
+                        </div>
+                        <p className="form-hint">Select which of your Callio phone numbers to send SMS from</p>
                       </div>
-                      <p className="form-hint">Select which of your Callio phone numbers to send SMS from</p>
-                    </div>
+
+                      {/* Phone Numbers List with Status */}
+                      <div className="phone-numbers-list">
+                        <label>Available Phone Numbers</label>
+                        <div className="phone-cards">
+                          {callioPhoneNumbers.map(phone => {
+                            const a2pInfo = getA2PStatusInfo(phone.a2pStatus);
+                            const isSelected = callioFromPhone === phone.phoneNumber;
+                            return (
+                              <div
+                                key={phone.id}
+                                className={`phone-card ${isSelected ? 'selected' : ''}`}
+                                onClick={() => setCallioFromPhone(phone.phoneNumber)}
+                              >
+                                <div className="phone-card-header">
+                                  <span className="phone-number">{phone.phoneNumber}</span>
+                                  {isSelected && <CheckCircle size={16} className="selected-icon" />}
+                                </div>
+                                <div className="phone-card-details">
+                                  <span className="provider-badge">{phone.provider}</span>
+                                  {phone.friendlyName && (
+                                    <span className="friendly-name">{phone.friendlyName}</span>
+                                  )}
+                                </div>
+                                <div className="phone-card-status">
+                                  <span className={`a2p-status ${a2pInfo.className}`}>
+                                    {a2pInfo.icon}
+                                    {a2pInfo.label}
+                                  </span>
+                                  <div className="capabilities">
+                                    {phone.smsEnabled && <span className="cap-badge sms">SMS</span>}
+                                    {phone.mmsEnabled && <span className="cap-badge mms">MMS</span>}
+                                    {phone.voiceEnabled && <span className="cap-badge voice">Voice</span>}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </>
                   )}
 
                   {callioPhoneNumbers.length === 0 && (

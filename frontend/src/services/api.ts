@@ -473,9 +473,16 @@ export interface UpdateNotificationSettingsDto {
 export interface CallioPhoneNumber {
   id: string;
   phoneNumber: string;
-  provider: 'twilio' | 'openphone';
+  provider: 'twilio' | 'openphone' | string;
   friendlyName?: string;
   capabilities?: string[];
+  // A2P Compliance fields
+  a2pStatus?: 'pending' | 'approved' | 'rejected' | 'not_required' | string;
+  a2pBrandId?: string;
+  a2pCampaignId?: string;
+  smsEnabled?: boolean;
+  mmsEnabled?: boolean;
+  voiceEnabled?: boolean;
 }
 
 // SMS Notifications (Callio Integration)
