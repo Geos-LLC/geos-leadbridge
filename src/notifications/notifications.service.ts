@@ -510,13 +510,20 @@ export class NotificationsService {
 
       // Handle different response formats from Callio API
       const phones = result.data || result.phoneNumbers || result || [];
-      return phones.map((phone: any) => ({
-        id: phone.id || phone._id || phone.phoneNumber,
-        phoneNumber: phone.phoneNumber || phone.phone_number || phone.number || phone.e164,
-        provider: phone.provider || phone.carrier || phone.type,
-        friendlyName: phone.friendlyName || phone.friendly_name || phone.name || phone.label,
-        capabilities: phone.capabilities || [],
-      }));
+      this.logger.log(`Raw phones array (getPhoneNumbers): ${JSON.stringify(phones)}`);
+
+      return phones
+        .map((phone: any) => {
+          const phoneNumber = phone.phoneNumber || phone.phone_number || phone.number || phone.e164;
+          return {
+            id: phone.id || phone._id || phoneNumber || String(Math.random()),
+            phoneNumber: phoneNumber,
+            provider: phone.provider || phone.carrier || phone.type || 'unknown',
+            friendlyName: phone.friendlyName || phone.friendly_name || phone.name || phone.label || '',
+            capabilities: phone.capabilities || [],
+          };
+        })
+        .filter((p: any) => p.phoneNumber && p.phoneNumber.length > 5);
     } catch (error: any) {
       this.logger.error('Failed to fetch Callio phone numbers', error);
       throw new Error(error.message || 'Failed to connect to Callio');
@@ -548,14 +555,29 @@ export class NotificationsService {
 
       // Handle different response formats from Callio API
       const phones = result.data || result.phoneNumbers || result || [];
-      const phoneNumbers = phones.map((phone: any) => ({
-        id: phone.id || phone._id || phone.phoneNumber,
-        phoneNumber: phone.phoneNumber || phone.phone_number || phone.number || phone.e164,
-        provider: phone.provider || phone.carrier || phone.type,
-        friendlyName: phone.friendlyName || phone.friendly_name || phone.name || phone.label,
-        capabilities: phone.capabilities || [],
-      }));
+      this.logger.log(`Raw phones array: ${JSON.stringify(phones)}`);
 
+      const phoneNumbers = phones
+        .map((phone: any) => {
+          const phoneNumber = phone.phoneNumber || phone.phone_number || phone.number || phone.e164;
+          this.logger.log(`Mapping phone: ${JSON.stringify(phone)} -> phoneNumber: ${phoneNumber}`);
+          return {
+            id: phone.id || phone._id || phoneNumber || String(Math.random()),
+            phoneNumber: phoneNumber,
+            provider: phone.provider || phone.carrier || phone.type || 'unknown',
+            friendlyName: phone.friendlyName || phone.friendly_name || phone.name || phone.label || '',
+            capabilities: phone.capabilities || [],
+          };
+        })
+        .filter((p: any) => {
+          const valid = p.phoneNumber && p.phoneNumber.length > 5;
+          if (!valid) {
+            this.logger.log(`Filtered out invalid phone: ${JSON.stringify(p)}`);
+          }
+          return valid;
+        });
+
+      this.logger.log(`Final phoneNumbers: ${JSON.stringify(phoneNumbers)}`);
       return { valid: true, phoneNumbers };
     } catch {
       return { valid: false, phoneNumbers: [] };
