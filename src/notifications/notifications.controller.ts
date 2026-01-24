@@ -113,4 +113,39 @@ export class NotificationsController {
       message: result.error || 'Failed to send test notification',
     };
   }
+
+  /**
+   * Validate Callio API key and get available phone numbers
+   */
+  @Post('callio/validate')
+  async validateCallioApiKey(@Body() body: { apiKey: string }) {
+    const result = await this.notificationsService.validateCallioApiKey(
+      body.apiKey,
+    );
+
+    return {
+      success: true,
+      valid: result.valid,
+      phoneNumbers: result.phoneNumbers,
+    };
+  }
+
+  /**
+   * Get phone numbers from Callio for a saved account
+   */
+  @Get('callio/phone-numbers/:savedAccountId')
+  async getCallioPhoneNumbers(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    const phoneNumbers = await this.notificationsService.getCallioPhoneNumbers(
+      user.userId,
+      savedAccountId,
+    );
+
+    return {
+      success: true,
+      phoneNumbers,
+    };
+  }
 }

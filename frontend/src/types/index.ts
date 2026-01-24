@@ -137,7 +137,10 @@ export interface NotificationSettings {
   enabled: boolean;
   destinationPhone: string | null;
   senderMode: 'shared' | 'dedicated' | 'openphone';
+  callioApiKey: string | null; // Masked in response
+  callioFromPhone: string | null;
   callioWorkspaceId: string | null;
+  callioConnected: boolean;
   template: string;
   quietHoursStart: string | null;
   quietHoursEnd: string | null;
@@ -145,6 +148,14 @@ export interface NotificationSettings {
   requirePhone: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CallioPhoneNumber {
+  id: string;
+  phoneNumber: string;
+  provider: 'twilio' | 'openphone';
+  friendlyName?: string;
+  capabilities?: string[];
 }
 
 export interface NotificationLog {

@@ -10,6 +10,8 @@ export interface UpdateNotificationSettingsDto {
   enabled?: boolean;
   destinationPhone?: string;
   senderMode?: 'shared' | 'dedicated' | 'openphone';
+  callioApiKey?: string;
+  callioFromPhone?: string;
   callioWorkspaceId?: string;
   template?: string;
   quietHoursStart?: string;
@@ -18,13 +20,24 @@ export interface UpdateNotificationSettingsDto {
   requirePhone?: boolean;
 }
 
+export interface CallioPhoneNumber {
+  id: string;
+  phoneNumber: string;
+  provider: 'twilio' | 'openphone';
+  friendlyName?: string;
+  capabilities?: string[];
+}
+
 export interface NotificationSettingsResponse {
   id: string;
   savedAccountId: string;
   enabled: boolean;
   destinationPhone: string | null;
   senderMode: string;
+  callioApiKey: string | null; // Will be masked in response
+  callioFromPhone: string | null;
   callioWorkspaceId: string | null;
+  callioConnected: boolean; // Whether API key is configured
   template: string;
   quietHoursStart: string | null;
   quietHoursEnd: string | null;
@@ -118,6 +131,8 @@ export class NotificationsService {
         enabled: data.enabled ?? false,
         destinationPhone: data.destinationPhone,
         senderMode: data.senderMode ?? 'shared',
+        callioApiKey: data.callioApiKey,
+        callioFromPhone: data.callioFromPhone,
         callioWorkspaceId: data.callioWorkspaceId,
         template: data.template ?? 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
         quietHoursStart: data.quietHoursStart,
@@ -129,6 +144,8 @@ export class NotificationsService {
         ...(data.enabled !== undefined && { enabled: data.enabled }),
         ...(data.destinationPhone !== undefined && { destinationPhone: data.destinationPhone }),
         ...(data.senderMode !== undefined && { senderMode: data.senderMode }),
+        ...(data.callioApiKey !== undefined && { callioApiKey: data.callioApiKey }),
+        ...(data.callioFromPhone !== undefined && { callioFromPhone: data.callioFromPhone }),
         ...(data.callioWorkspaceId !== undefined && { callioWorkspaceId: data.callioWorkspaceId }),
         ...(data.template !== undefined && { template: data.template }),
         ...(data.quietHoursStart !== undefined && { quietHoursStart: data.quietHoursStart }),
@@ -204,6 +221,11 @@ export class NotificationsService {
       return;
     }
 
+    if (!settings.callioApiKey) {
+      this.logger.warn(`No Callio API key configured for account ${savedAccountId}`);
+      return;
+    }
+
     // Check if lead has phone (if required)
     if (settings.requirePhone && !lead.customerPhone) {
       this.logger.log(`Lead ${leadId} has no phone, skipping notification`);
@@ -225,17 +247,20 @@ export class NotificationsService {
         notificationSettingsId: settings.id,
         leadId,
         toPhone: settings.destinationPhone,
+        fromPhone: settings.callioFromPhone,
         status: 'pending',
         messageBody,
         metadata: JSON.stringify({ userId, savedAccountId }),
       },
     });
 
-    // Send via Callio (or mock for now)
+    // Send via Callio
     try {
       const result = await this.sendViaCallio({
         to: settings.destinationPhone,
         body: messageBody,
+        fromPhone: settings.callioFromPhone,
+        apiKey: settings.callioApiKey,
         senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
         callioWorkspaceId: settings.callioWorkspaceId,
         metadata: {
@@ -279,7 +304,18 @@ export class NotificationsService {
     userId: string,
     savedAccountId: string,
   ): Promise<{ success: boolean; error?: string }> {
-    const settings = await this.getSettings(userId, savedAccountId);
+    // Get full settings from database (not masked response)
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+    });
+
+    if (!account) {
+      return { success: false, error: 'Saved account not found' };
+    }
+
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+    });
 
     if (!settings) {
       return { success: false, error: 'Notification settings not configured' };
@@ -287,6 +323,10 @@ export class NotificationsService {
 
     if (!settings.destinationPhone) {
       return { success: false, error: 'No destination phone configured' };
+    }
+
+    if (!settings.callioApiKey) {
+      return { success: false, error: 'No Callio API key configured. Please connect to Callio first.' };
     }
 
     const testLead = {
@@ -299,10 +339,24 @@ export class NotificationsService {
 
     const messageBody = this.renderTemplate(settings.template, testLead);
 
+    // Create notification log entry
+    const logEntry = await this.prisma.notificationLog.create({
+      data: {
+        notificationSettingsId: settings.id,
+        toPhone: settings.destinationPhone,
+        fromPhone: settings.callioFromPhone,
+        status: 'pending',
+        messageBody: `[TEST] ${messageBody}`,
+        metadata: JSON.stringify({ test: true }),
+      },
+    });
+
     try {
-      await this.sendViaCallio({
+      const result = await this.sendViaCallio({
         to: settings.destinationPhone,
         body: `[TEST] ${messageBody}`,
+        fromPhone: settings.callioFromPhone,
+        apiKey: settings.callioApiKey,
         senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
         callioWorkspaceId: settings.callioWorkspaceId,
         metadata: {
@@ -311,8 +365,30 @@ export class NotificationsService {
         },
       });
 
+      // Update log with success
+      await this.prisma.notificationLog.update({
+        where: { id: logEntry.id },
+        data: {
+          status: result.status,
+          fromPhone: result.fromPhone,
+          provider: result.provider,
+          callioMessageId: result.messageId,
+          callioConversationId: result.conversationId,
+          sentAt: new Date(),
+        },
+      });
+
       return { success: true };
     } catch (error: any) {
+      // Update log with error
+      await this.prisma.notificationLog.update({
+        where: { id: logEntry.id },
+        data: {
+          status: 'failed',
+          error: error.message || 'Unknown error',
+        },
+      });
+
       return { success: false, error: error.message || 'Failed to send test notification' };
     }
   }
@@ -388,12 +464,104 @@ export class NotificationsService {
   }
 
   /**
+   * Fetch phone numbers from Callio API
+   */
+  async getCallioPhoneNumbers(
+    userId: string,
+    savedAccountId: string,
+  ): Promise<CallioPhoneNumber[]> {
+    // Verify the account belongs to the user and get settings
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+    });
+
+    if (!account) {
+      throw new NotFoundException('Saved account not found');
+    }
+
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+    });
+
+    if (!settings?.callioApiKey) {
+      return [];
+    }
+
+    try {
+      const response = await fetch(
+        'https://callio-production-47ac.up.railway.app/api/v1/phone-numbers',
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${settings.callioApiKey}`,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+
+      if (!response.ok) {
+        const error = await response.text();
+        this.logger.error(`Callio API error: ${response.status} - ${error}`);
+        throw new Error(`Failed to fetch phone numbers: ${response.status}`);
+      }
+
+      const result = await response.json();
+      return (result.data || []).map((phone: any) => ({
+        id: phone.id,
+        phoneNumber: phone.phoneNumber,
+        provider: phone.provider,
+        friendlyName: phone.friendlyName,
+        capabilities: phone.capabilities,
+      }));
+    } catch (error: any) {
+      this.logger.error('Failed to fetch Callio phone numbers', error);
+      throw new Error(error.message || 'Failed to connect to Callio');
+    }
+  }
+
+  /**
+   * Validate Callio API key by attempting to fetch phone numbers
+   */
+  async validateCallioApiKey(apiKey: string): Promise<{ valid: boolean; phoneNumbers: CallioPhoneNumber[] }> {
+    try {
+      const response = await fetch(
+        'https://callio-production-47ac.up.railway.app/api/v1/phone-numbers',
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+
+      if (!response.ok) {
+        return { valid: false, phoneNumbers: [] };
+      }
+
+      const result = await response.json();
+      const phoneNumbers = (result.data || []).map((phone: any) => ({
+        id: phone.id,
+        phoneNumber: phone.phoneNumber,
+        provider: phone.provider,
+        friendlyName: phone.friendlyName,
+        capabilities: phone.capabilities,
+      }));
+
+      return { valid: true, phoneNumbers };
+    } catch {
+      return { valid: false, phoneNumbers: [] };
+    }
+  }
+
+  /**
    * Send message via Callio API
-   * TODO: Implement actual Callio API integration
    */
   private async sendViaCallio(params: {
     to: string;
     body: string;
+    fromPhone?: string | null;
+    apiKey: string;
     senderMode: 'shared' | 'dedicated' | 'openphone';
     callioWorkspaceId?: string | null;
     metadata: Record<string, any>;
@@ -404,43 +572,86 @@ export class NotificationsService {
     provider?: string;
     fromPhone?: string;
   }> {
-    this.logger.log(`Sending via Callio: ${params.to}`);
+    this.logger.log(`Sending via Callio to: ${params.to}`);
 
-    // TODO: Replace with actual Callio API call
-    // POST https://api.callio.io/api/v1/messages/send
-    // {
-    //   "to": params.to,
-    //   "body": params.body,
-    //   "sender": {
-    //     "mode": params.senderMode,
-    //     "workspaceId": params.callioWorkspaceId
-    //   },
-    //   "metadata": params.metadata
-    // }
-
-    // For now, just log and return mock success
-    this.logger.log(`[MOCK] Would send SMS to ${params.to}: ${params.body.substring(0, 50)}...`);
-
-    return {
-      status: 'queued',
-      messageId: `mock_${Date.now()}`,
-      conversationId: `mock_conv_${Date.now()}`,
-      provider: 'mock',
-      fromPhone: '+15550000000',
+    const requestBody: any = {
+      to: params.to,
+      body: params.body,
+      channel: 'sms',
+      metadata: params.metadata,
     };
+
+    // Set sender configuration
+    if (params.fromPhone) {
+      requestBody.sender = {
+        mode: 'specific',
+        fromNumber: params.fromPhone,
+      };
+    } else {
+      requestBody.sender = {
+        mode: 'auto',
+      };
+    }
+
+    try {
+      const response = await fetch(
+        'https://callio-production-47ac.up.railway.app/api/v1/leadbridge/send',
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${params.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.logger.error(`Callio API error: ${response.status} - ${errorText}`);
+        throw new Error(`Callio API error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      const data = result.data || {};
+
+      this.logger.log(`SMS sent via Callio: ${data.messageId}`);
+
+      return {
+        status: data.status || 'sent',
+        messageId: data.messageId,
+        conversationId: data.conversationId,
+        provider: data.provider,
+        fromPhone: data.fromNumber,
+      };
+    } catch (error: any) {
+      this.logger.error('Failed to send via Callio', error);
+      throw new Error(error.message || 'Failed to send message via Callio');
+    }
   }
 
   /**
    * Format settings for response
+   * API key is masked for security
    */
   private formatSettings(settings: any): NotificationSettingsResponse {
+    // Mask API key - show only last 4 characters
+    let maskedApiKey: string | null = null;
+    if (settings.callioApiKey) {
+      const key = settings.callioApiKey;
+      maskedApiKey = key.length > 4 ? `****${key.slice(-4)}` : '****';
+    }
+
     return {
       id: settings.id,
       savedAccountId: settings.savedAccountId,
       enabled: settings.enabled,
       destinationPhone: settings.destinationPhone,
       senderMode: settings.senderMode,
+      callioApiKey: maskedApiKey,
+      callioFromPhone: settings.callioFromPhone,
       callioWorkspaceId: settings.callioWorkspaceId,
+      callioConnected: !!settings.callioApiKey,
       template: settings.template,
       quietHoursStart: settings.quietHoursStart,
       quietHoursEnd: settings.quietHoursEnd,

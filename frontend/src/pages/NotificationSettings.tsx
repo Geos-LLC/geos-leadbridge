@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Bell, Save, Loader2, X, ChevronDown, Send, Phone, Clock, MessageSquare, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
+import { ArrowLeft, Bell, Save, Loader2, X, ChevronDown, Send, Phone, Clock, MessageSquare, AlertCircle, CheckCircle, XCircle, Link, Unlink, Key } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { notificationsApi, thumbtackApi } from '../services/api';
+import { notificationsApi, thumbtackApi, type CallioPhoneNumber } from '../services/api';
 import type { NotificationLog, SavedAccount } from '../types';
 
 // Available variables for SMS template
@@ -42,6 +42,14 @@ export function NotificationSettings() {
   const [quietHoursEnd, setQuietHoursEnd] = useState('08:00');
   const [quietHoursTimezone, setQuietHoursTimezone] = useState('America/New_York');
   const [requirePhone, setRequirePhone] = useState(true);
+
+  // Callio connection state
+  const [callioConnected, setCallioConnected] = useState(false);
+  const [callioApiKey, setCallioApiKey] = useState('');
+  const [callioFromPhone, setCallioFromPhone] = useState('');
+  const [callioPhoneNumbers, setCallioPhoneNumbers] = useState<CallioPhoneNumber[]>([]);
+  const [validatingApiKey, setValidatingApiKey] = useState(false);
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
 
   useEffect(() => {
     loadAccounts();
@@ -91,6 +99,14 @@ export function NotificationSettings() {
         setQuietHoursEnd(settingsRes.settings.quietHoursEnd || '08:00');
         setQuietHoursTimezone(settingsRes.settings.quietHoursTimezone || 'America/New_York');
         setRequirePhone(settingsRes.settings.requirePhone);
+        // Callio settings
+        setCallioConnected(settingsRes.settings.callioConnected);
+        setCallioFromPhone(settingsRes.settings.callioFromPhone || '');
+        setShowApiKeyInput(false);
+        // If connected, fetch phone numbers
+        if (settingsRes.settings.callioConnected) {
+          loadPhoneNumbers(accountId);
+        }
       } else {
         // Reset to defaults for new settings
         setEnabled(false);
@@ -102,6 +118,12 @@ export function NotificationSettings() {
         setQuietHoursEnd('08:00');
         setQuietHoursTimezone('America/New_York');
         setRequirePhone(true);
+        // Reset Callio settings
+        setCallioConnected(false);
+        setCallioApiKey('');
+        setCallioFromPhone('');
+        setCallioPhoneNumbers([]);
+        setShowApiKeyInput(false);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load settings');
@@ -122,6 +144,7 @@ export function NotificationSettings() {
         enabled,
         destinationPhone: destinationPhone || undefined,
         senderMode,
+        callioFromPhone: callioFromPhone || undefined,
         template,
         quietHoursStart: quietHoursEnabled ? quietHoursStart : undefined,
         quietHoursEnd: quietHoursEnabled ? quietHoursEnd : undefined,
@@ -172,6 +195,73 @@ export function NotificationSettings() {
 
   function insertVariable(variable: string) {
     setTemplate(prev => prev + variable);
+  }
+
+  async function loadPhoneNumbers(accountId: string) {
+    try {
+      const result = await notificationsApi.getCallioPhoneNumbers(accountId);
+      setCallioPhoneNumbers(result.phoneNumbers);
+    } catch (err) {
+      console.error('Failed to load phone numbers:', err);
+    }
+  }
+
+  async function handleConnectCallio() {
+    if (!callioApiKey.trim()) {
+      setError('Please enter your Callio API key');
+      return;
+    }
+
+    try {
+      setValidatingApiKey(true);
+      setError(null);
+
+      const result = await notificationsApi.validateCallioApiKey(callioApiKey);
+
+      if (!result.valid) {
+        setError('Invalid API key. Please check your Callio API key and try again.');
+        return;
+      }
+
+      // Save the API key
+      await notificationsApi.updateSettings(selectedAccountId, {
+        callioApiKey: callioApiKey,
+      });
+
+      setCallioConnected(true);
+      setCallioPhoneNumbers(result.phoneNumbers);
+      setShowApiKeyInput(false);
+      setSuccessMessage('Connected to Callio successfully');
+      setTimeout(() => setSuccessMessage(null), 3000);
+
+      // Auto-select first phone number if available
+      if (result.phoneNumbers.length > 0 && !callioFromPhone) {
+        setCallioFromPhone(result.phoneNumbers[0].phoneNumber);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to connect to Callio');
+    } finally {
+      setValidatingApiKey(false);
+    }
+  }
+
+  async function handleDisconnectCallio() {
+    try {
+      setError(null);
+      await notificationsApi.updateSettings(selectedAccountId, {
+        callioApiKey: '',
+        callioFromPhone: '',
+      });
+
+      setCallioConnected(false);
+      setCallioApiKey('');
+      setCallioFromPhone('');
+      setCallioPhoneNumbers([]);
+      setSuccessMessage('Disconnected from Callio');
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to disconnect');
+    }
   }
 
   function getStatusIcon(status: string) {
@@ -287,6 +377,123 @@ export function NotificationSettings() {
           </div>
         ) : (
           <>
+            {/* Callio Connection Section */}
+            <div className="settings-section callio-connection">
+              <div className="section-header">
+                <h2>
+                  <Key size={18} />
+                  Callio Connection
+                </h2>
+              </div>
+
+              {callioConnected ? (
+                <div className="callio-connected">
+                  <div className="connection-status">
+                    <CheckCircle size={18} className="status-icon success" />
+                    <span>Connected to Callio</span>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={handleDisconnectCallio}
+                    >
+                      <Unlink size={14} />
+                      Disconnect
+                    </button>
+                  </div>
+
+                  {callioPhoneNumbers.length > 0 && (
+                    <div className="form-group">
+                      <label>
+                        <Phone size={14} />
+                        Send From Phone Number
+                      </label>
+                      <div className="select-wrapper">
+                        <select
+                          value={callioFromPhone}
+                          onChange={e => setCallioFromPhone(e.target.value)}
+                        >
+                          <option value="">Auto-select</option>
+                          {callioPhoneNumbers.map(phone => (
+                            <option key={phone.id} value={phone.phoneNumber}>
+                              {phone.phoneNumber} ({phone.provider}{phone.friendlyName ? ` - ${phone.friendlyName}` : ''})
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown size={16} />
+                      </div>
+                      <p className="form-hint">Select which of your Callio phone numbers to send SMS from</p>
+                    </div>
+                  )}
+
+                  {callioPhoneNumbers.length === 0 && (
+                    <div className="warning-message">
+                      <AlertCircle size={16} />
+                      No phone numbers found in your Callio account. Please add a phone number in Callio first.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="callio-disconnected">
+                  <p className="connection-info">
+                    Connect your Callio account to send SMS notifications. Get your API key from the
+                    Callio settings page.
+                  </p>
+
+                  {showApiKeyInput ? (
+                    <div className="api-key-form">
+                      <div className="form-group">
+                        <label>
+                          <Key size={14} />
+                          Callio API Key
+                        </label>
+                        <input
+                          type="password"
+                          value={callioApiKey}
+                          onChange={e => setCallioApiKey(e.target.value)}
+                          placeholder="Enter your Callio API key"
+                        />
+                      </div>
+                      <div className="form-actions">
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => {
+                            setShowApiKeyInput(false);
+                            setCallioApiKey('');
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          className="btn btn-primary"
+                          onClick={handleConnectCallio}
+                          disabled={validatingApiKey || !callioApiKey.trim()}
+                        >
+                          {validatingApiKey ? (
+                            <>
+                              <Loader2 size={14} className="spinner" />
+                              Connecting...
+                            </>
+                          ) : (
+                            <>
+                              <Link size={14} />
+                              Connect
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => setShowApiKeyInput(true)}
+                    >
+                      <Link size={16} />
+                      Connect to Callio
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Enable Notifications Section */}
             <div className="settings-section">
               <div className="section-header">
@@ -318,56 +525,6 @@ export function NotificationSettings() {
                   placeholder="+1 555 123 4567"
                 />
                 <p className="form-hint">Your company phone number to receive lead notifications</p>
-              </div>
-            </div>
-
-            {/* Sender Mode Section */}
-            <div className="settings-section">
-              <div className="section-header">
-                <h2>Sender Options</h2>
-              </div>
-              <div className="form-group">
-                <label>Sender Mode</label>
-                <div className="radio-group vertical">
-                  <label className="radio-label">
-                    <input
-                      type="radio"
-                      name="senderMode"
-                      checked={senderMode === 'shared'}
-                      onChange={() => setSenderMode('shared')}
-                    />
-                    <span className="radio-content">
-                      <strong>Shared Number</strong>
-                      <span className="radio-description">Use our shared Callio number (free)</span>
-                    </span>
-                  </label>
-                  <label className="radio-label disabled">
-                    <input
-                      type="radio"
-                      name="senderMode"
-                      checked={senderMode === 'dedicated'}
-                      onChange={() => setSenderMode('dedicated')}
-                      disabled
-                    />
-                    <span className="radio-content">
-                      <strong>Dedicated Number</strong>
-                      <span className="radio-description">Get your own dedicated number (Pro plan)</span>
-                    </span>
-                  </label>
-                  <label className="radio-label disabled">
-                    <input
-                      type="radio"
-                      name="senderMode"
-                      checked={senderMode === 'openphone'}
-                      onChange={() => setSenderMode('openphone')}
-                      disabled
-                    />
-                    <span className="radio-content">
-                      <strong>OpenPhone Integration</strong>
-                      <span className="radio-description">Use your OpenPhone number (Premium plan)</span>
-                    </span>
-                  </label>
-                </div>
               </div>
             </div>
 
@@ -478,7 +635,8 @@ export function NotificationSettings() {
               <button
                 className="btn btn-secondary"
                 onClick={handleSendTest}
-                disabled={testing || !destinationPhone}
+                disabled={testing || !destinationPhone || !callioConnected}
+                title={!callioConnected ? 'Connect to Callio first' : ''}
               >
                 {testing ? <Loader2 size={16} className="spinner" /> : <Send size={16} />}
                 Send Test SMS

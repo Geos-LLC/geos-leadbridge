@@ -459,12 +459,23 @@ export interface UpdateNotificationSettingsDto {
   enabled?: boolean;
   destinationPhone?: string;
   senderMode?: 'shared' | 'dedicated' | 'openphone';
+  callioApiKey?: string;
+  callioFromPhone?: string;
   callioWorkspaceId?: string;
   template?: string;
   quietHoursStart?: string;
   quietHoursEnd?: string;
   quietHoursTimezone?: string;
   requirePhone?: boolean;
+}
+
+// Callio phone number type
+export interface CallioPhoneNumber {
+  id: string;
+  phoneNumber: string;
+  provider: 'twilio' | 'openphone';
+  friendlyName?: string;
+  capabilities?: string[];
 }
 
 // SMS Notifications (Callio Integration)
@@ -484,6 +495,15 @@ export const notificationsApi = {
   },
   sendTest: async (savedAccountId: string): Promise<{ success: boolean; message: string }> => {
     const { data } = await api.post(`/v1/notifications/test/${savedAccountId}`);
+    return data;
+  },
+  // Callio integration
+  validateCallioApiKey: async (apiKey: string): Promise<{ success: boolean; valid: boolean; phoneNumbers: CallioPhoneNumber[] }> => {
+    const { data } = await api.post('/v1/notifications/callio/validate', { apiKey });
+    return data;
+  },
+  getCallioPhoneNumbers: async (savedAccountId: string): Promise<{ success: boolean; phoneNumbers: CallioPhoneNumber[] }> => {
+    const { data } = await api.get(`/v1/notifications/callio/phone-numbers/${savedAccountId}`);
     return data;
   },
 };

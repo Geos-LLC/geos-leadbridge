@@ -320,6 +320,8 @@ model NotificationSettings {
   enabled           Boolean  @default(false)
   destinationPhone  String?  // Company phone to send notifications to
   senderMode        String   @default("shared") // "shared" | "dedicated" | "openphone"
+  callioApiKey      String?  // Encrypted Callio API key
+  callioFromPhone   String?  // Selected phone number from Callio to send from
   callioWorkspaceId String?  // Callio workspace ID for this tenant
   template          String   @db.Text @default("New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}")
   quietHoursStart   String?  // e.g., "22:00"
