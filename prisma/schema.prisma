@@ -333,16 +333,46 @@ model NotificationSettings {
   updatedAt         DateTime @updatedAt
 
   // Relationships
-  savedAccount      SavedAccount       @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
+  savedAccount      SavedAccount        @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
   notificationLogs  NotificationLog[]
+  notificationRules NotificationRule[]
 
   @@index([savedAccountId])
   @@map("notification_settings")
 }
 
+// ==========================================
+// SMS Notification Rules
+// ==========================================
+
+model NotificationRule {
+  id                     String   @id @default(uuid())
+  notificationSettingsId String   // Link to parent settings
+  name                   String   // User-friendly rule name (e.g., "New Lead Alert")
+  triggerType            String   // "new_lead" | "customer_reply"
+  replyTriggerMode       String?  // For customer_reply: "first_only" | "every_reply"
+  template               String   @db.Text // SMS template for this specific rule
+  enabled                Boolean  @default(true)
+  triggerCount           Int      @default(0)
+  lastTriggeredAt        DateTime?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  // Relationships
+  notificationSettings NotificationSettings @relation(fields: [notificationSettingsId], references: [id], onDelete: Cascade)
+  notificationLogs     NotificationLog[]
+
+  @@index([notificationSettingsId])
+  @@index([triggerType])
+  @@index([enabled])
+  @@map("notification_rules")
+}
+
 model NotificationLog {
   id                    String    @id @default(uuid())
   notificationSettingsId String
+  notificationRuleId    String?   // Reference to the rule that triggered this
+  ruleName              String?   // Cached rule name for display
   leadId                String?   // Reference to the lead that triggered this
   toPhone               String    // Destination phone number
   fromPhone             String?   // Sender phone number
@@ -359,8 +389,10 @@ model NotificationLog {
 
   // Relationships
   notificationSettings NotificationSettings @relation(fields: [notificationSettingsId], references: [id], onDelete: Cascade)
+  notificationRule     NotificationRule?    @relation(fields: [notificationRuleId], references: [id], onDelete: SetNull)
 
   @@index([notificationSettingsId])
+  @@index([notificationRuleId])
   @@index([leadId])
   @@index([status])
   @@index([createdAt])

@@ -672,14 +672,20 @@ export class WebhooksService {
 
     this.logger.log('Message stored successfully', { messageId, conversationId: conversation.id });
 
-    // Trigger automation rules for customer replies (excludes first message)
+    // Trigger automation rules and SMS notifications for customer replies (excludes first message)
     if (sender === 'customer') {
-      try {
-        // Count customer messages to determine reply position
-        const customerMessageCount = await this.prisma.message.count({
-          where: { conversationId: conversation.id, sender: 'customer' },
-        });
+      // Count customer messages to determine reply position
+      const customerMessageCount = await this.prisma.message.count({
+        where: { conversationId: conversation.id, sender: 'customer' },
+      });
 
+      // Find saved account for this business
+      const savedAccount = await this.prisma.savedAccount.findFirst({
+        where: { userId, platform, businessId },
+      });
+
+      // Trigger automation rules (Thumbtack auto-reply)
+      try {
         await this.automationService.handleCustomerReply({
           userId,
           businessId,
@@ -694,6 +700,28 @@ export class WebhooksService {
         });
       } catch (err: any) {
         this.logger.error('Automation trigger failed for customer reply', err.message);
+      }
+
+      // Trigger SMS notifications for customer replies
+      if (savedAccount) {
+        try {
+          await this.notificationsService.handleCustomerReply({
+            userId,
+            savedAccountId: savedAccount.id,
+            leadId: lead.id,
+            lead: {
+              customerName: lead.customerName,
+              customerPhone: lead.customerPhone,
+              category: lead.category,
+              city: lead.city,
+              state: lead.state,
+            },
+            isFirstCustomerReply: customerMessageCount === 1,
+            isSecondCustomerMessage: customerMessageCount === 2,
+          });
+        } catch (err: any) {
+          this.logger.error('SMS notification trigger failed for customer reply', err.message);
+        }
       }
     }
   }

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Bell, Save, Loader2, X, ChevronDown, Send, Phone, Clock, MessageSquare, AlertCircle, CheckCircle, XCircle, Link, Unlink, Key, Shield, ShieldCheck, ShieldX, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, Bell, Save, Loader2, X, ChevronDown, Send, Phone, Clock, MessageSquare, AlertCircle, CheckCircle, XCircle, Link, Unlink, Key, Shield, ShieldCheck, ShieldX, ShieldAlert, Plus, Edit2, Trash2, Zap } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { notificationsApi, thumbtackApi, type CallioPhoneNumber } from '../services/api';
-import type { NotificationLog, SavedAccount } from '../types';
+import { notificationsApi, thumbtackApi, type CallioPhoneNumber, type CreateNotificationRuleDto, type UpdateNotificationRuleDto } from '../services/api';
+import type { NotificationLog, NotificationRule, SavedAccount } from '../types';
 
 // Helper function to get A2P status display
 function getA2PStatusInfo(status?: string): { icon: React.ReactNode; label: string; className: string } {
@@ -42,11 +42,23 @@ export function NotificationSettings() {
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [logs, setLogs] = useState<NotificationLog[]>([]);
+  const [rules, setRules] = useState<NotificationRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Rule editing state
+  const [isCreatingRule, setIsCreatingRule] = useState(false);
+  const [editingRule, setEditingRule] = useState<NotificationRule | null>(null);
+  const [ruleForm, setRuleForm] = useState({
+    name: '',
+    triggerType: 'new_lead' as 'new_lead' | 'customer_reply',
+    replyTriggerMode: 'first_only' as 'first_only' | 'every_reply',
+    template: 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
+    enabled: true,
+  });
 
   // Form state
   const [enabled, setEnabled] = useState(false);
@@ -97,12 +109,14 @@ export function NotificationSettings() {
       setLoading(true);
       setError(null);
 
-      const [settingsRes, logsRes] = await Promise.all([
+      const [settingsRes, logsRes, rulesRes] = await Promise.all([
         notificationsApi.getSettings(accountId),
         notificationsApi.getLogs(accountId, 20),
+        notificationsApi.getRules(accountId),
       ]);
 
       setLogs(logsRes.logs);
+      setRules(rulesRes.rules);
 
       // Populate form with existing settings
       if (settingsRes.settings) {
@@ -211,6 +225,143 @@ export function NotificationSettings() {
 
   function insertVariable(variable: string) {
     setTemplate(prev => prev + variable);
+  }
+
+  function insertRuleVariable(variable: string) {
+    setRuleForm(prev => ({ ...prev, template: prev.template + variable }));
+  }
+
+  function startCreateRule() {
+    setIsCreatingRule(true);
+    setEditingRule(null);
+    setRuleForm({
+      name: '',
+      triggerType: 'new_lead',
+      replyTriggerMode: 'first_only',
+      template: 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
+      enabled: true,
+    });
+  }
+
+  function startEditRule(rule: NotificationRule) {
+    setEditingRule(rule);
+    setIsCreatingRule(false);
+    setRuleForm({
+      name: rule.name,
+      triggerType: rule.triggerType,
+      replyTriggerMode: rule.replyTriggerMode || 'first_only',
+      template: rule.template,
+      enabled: rule.enabled,
+    });
+  }
+
+  function cancelRuleEdit() {
+    setIsCreatingRule(false);
+    setEditingRule(null);
+  }
+
+  async function handleSaveRule() {
+    if (!selectedAccountId) return;
+    if (!ruleForm.name.trim()) {
+      setError('Please enter a rule name');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError(null);
+
+      if (editingRule) {
+        // Update existing rule
+        const updates: UpdateNotificationRuleDto = {
+          name: ruleForm.name,
+          triggerType: ruleForm.triggerType,
+          replyTriggerMode: ruleForm.triggerType === 'customer_reply' ? ruleForm.replyTriggerMode : undefined,
+          template: ruleForm.template,
+          enabled: ruleForm.enabled,
+        };
+        const result = await notificationsApi.updateRule(selectedAccountId, editingRule.id, updates);
+        setRules(prev => prev.map(r => r.id === editingRule.id ? result.rule : r));
+        setSuccessMessage('Rule updated successfully');
+      } else {
+        // Create new rule
+        const ruleData: CreateNotificationRuleDto = {
+          name: ruleForm.name,
+          triggerType: ruleForm.triggerType,
+          replyTriggerMode: ruleForm.triggerType === 'customer_reply' ? ruleForm.replyTriggerMode : undefined,
+          template: ruleForm.template,
+          enabled: ruleForm.enabled,
+        };
+        const result = await notificationsApi.createRule(selectedAccountId, ruleData);
+        setRules(prev => [result.rule, ...prev]);
+        setSuccessMessage('Rule created successfully');
+      }
+
+      cancelRuleEdit();
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save rule');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeleteRule(ruleId: string) {
+    if (!selectedAccountId) return;
+    if (!confirm('Are you sure you want to delete this rule?')) return;
+
+    try {
+      setError(null);
+      await notificationsApi.deleteRule(selectedAccountId, ruleId);
+      setRules(prev => prev.filter(r => r.id !== ruleId));
+      setSuccessMessage('Rule deleted successfully');
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete rule');
+    }
+  }
+
+  async function handleToggleRule(rule: NotificationRule) {
+    if (!selectedAccountId) return;
+
+    try {
+      const result = await notificationsApi.updateRule(selectedAccountId, rule.id, {
+        enabled: !rule.enabled,
+      });
+      setRules(prev => prev.map(r => r.id === rule.id ? result.rule : r));
+    } catch (err: any) {
+      setError(err.message || 'Failed to update rule');
+    }
+  }
+
+  async function handleTestRule(ruleId: string) {
+    if (!selectedAccountId) return;
+    if (!destinationPhone) {
+      setError('Please enter a destination phone number first');
+      return;
+    }
+
+    try {
+      setTesting(true);
+      setError(null);
+      setSuccessMessage(null);
+
+      const result = await notificationsApi.sendTest(selectedAccountId, ruleId);
+
+      if (result.success) {
+        setSuccessMessage('Test notification sent successfully');
+        const logsRes = await notificationsApi.getLogs(selectedAccountId, 20);
+        setLogs(logsRes.logs);
+      } else {
+        setError(result.message || 'Failed to send test notification');
+      }
+
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to send test notification');
+    } finally {
+      setTesting(false);
+    }
   }
 
   async function loadPhoneNumbers(accountId: string) {
@@ -617,12 +768,183 @@ export function NotificationSettings() {
               </div>
             </div>
 
-            {/* Rules Section */}
+            {/* Notification Rules Section */}
+            <div className="settings-section rules-section">
+              <div className="section-header">
+                <h2>
+                  <Zap size={18} />
+                  Notification Rules
+                </h2>
+                {!isCreatingRule && !editingRule && (
+                  <button className="btn btn-primary btn-sm" onClick={startCreateRule}>
+                    <Plus size={14} />
+                    Add Rule
+                  </button>
+                )}
+              </div>
+
+              {/* Rule Form */}
+              {(isCreatingRule || editingRule) && (
+                <div className="rule-form">
+                  <h3>{editingRule ? 'Edit Rule' : 'Create New Rule'}</h3>
+
+                  <div className="form-group">
+                    <label>Rule Name</label>
+                    <input
+                      type="text"
+                      value={ruleForm.name}
+                      onChange={e => setRuleForm(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="e.g., New Lead Alert, Customer Reply Alert"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Trigger When</label>
+                    <div className="select-wrapper">
+                      <select
+                        value={ruleForm.triggerType}
+                        onChange={e => setRuleForm(prev => ({ ...prev, triggerType: e.target.value as 'new_lead' | 'customer_reply' }))}
+                      >
+                        <option value="new_lead">New Lead Arrives</option>
+                        <option value="customer_reply">Customer Replies</option>
+                      </select>
+                      <ChevronDown size={16} />
+                    </div>
+                  </div>
+
+                  {ruleForm.triggerType === 'customer_reply' && (
+                    <div className="form-group">
+                      <label>Reply Mode</label>
+                      <div className="select-wrapper">
+                        <select
+                          value={ruleForm.replyTriggerMode}
+                          onChange={e => setRuleForm(prev => ({ ...prev, replyTriggerMode: e.target.value as 'first_only' | 'every_reply' }))}
+                        >
+                          <option value="first_only">First Reply Only</option>
+                          <option value="every_reply">Every Reply</option>
+                        </select>
+                        <ChevronDown size={16} />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="form-group">
+                    <label>SMS Template</label>
+                    <textarea
+                      value={ruleForm.template}
+                      onChange={e => setRuleForm(prev => ({ ...prev, template: e.target.value }))}
+                      rows={4}
+                      placeholder="New lead: {{lead.name}}..."
+                    />
+                    <div className="variable-buttons">
+                      {TEMPLATE_VARIABLES.map(v => (
+                        <button
+                          key={v.name}
+                          type="button"
+                          className="variable-btn"
+                          onClick={() => insertRuleVariable(v.name)}
+                          title={v.description}
+                        >
+                          {v.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="form-group checkbox-group">
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={ruleForm.enabled}
+                        onChange={e => setRuleForm(prev => ({ ...prev, enabled: e.target.checked }))}
+                      />
+                      <span className="toggle-slider"></span>
+                      <span className="toggle-label">Enable this rule</span>
+                    </label>
+                  </div>
+
+                  <div className="form-actions">
+                    <button className="btn btn-secondary" onClick={cancelRuleEdit}>
+                      Cancel
+                    </button>
+                    <button className="btn btn-primary" onClick={handleSaveRule} disabled={saving}>
+                      {saving ? <Loader2 size={14} className="spinner" /> : <Save size={14} />}
+                      {editingRule ? 'Update Rule' : 'Create Rule'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Rules List */}
+              {rules.length > 0 ? (
+                <div className="rules-list">
+                  {rules.map(rule => (
+                    <div key={rule.id} className={`rule-card ${!rule.enabled ? 'disabled' : ''}`}>
+                      <div className="rule-header">
+                        <div className="rule-info">
+                          <span className="rule-name">{rule.name}</span>
+                          <span className={`trigger-badge ${rule.triggerType}`}>
+                            {rule.triggerType === 'new_lead' ? 'New Lead' : 'Customer Reply'}
+                            {rule.triggerType === 'customer_reply' && rule.replyTriggerMode && (
+                              <span className="reply-mode">({rule.replyTriggerMode === 'first_only' ? 'First' : 'Every'})</span>
+                            )}
+                          </span>
+                        </div>
+                        <div className="rule-actions">
+                          <label className="toggle-switch small">
+                            <input
+                              type="checkbox"
+                              checked={rule.enabled}
+                              onChange={() => handleToggleRule(rule)}
+                            />
+                            <span className="toggle-slider"></span>
+                          </label>
+                          <button
+                            className="btn-icon"
+                            onClick={() => handleTestRule(rule.id)}
+                            disabled={testing || !callioConnected}
+                            title="Send test SMS"
+                          >
+                            <Send size={14} />
+                          </button>
+                          <button className="btn-icon" onClick={() => startEditRule(rule)} title="Edit rule">
+                            <Edit2 size={14} />
+                          </button>
+                          <button className="btn-icon danger" onClick={() => handleDeleteRule(rule.id)} title="Delete rule">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="rule-template">
+                        <MessageSquare size={12} />
+                        <span>{rule.template.substring(0, 60)}{rule.template.length > 60 ? '...' : ''}</span>
+                      </div>
+                      <div className="rule-stats">
+                        <span>Triggered: {rule.triggerCount} time{rule.triggerCount !== 1 ? 's' : ''}</span>
+                        {rule.lastTriggeredAt && (
+                          <span>Last: {new Date(rule.lastTriggeredAt).toLocaleDateString()}</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : !isCreatingRule && (
+                <div className="empty-rules">
+                  <p>No notification rules yet. Create a rule to send SMS alerts when leads arrive or customers reply.</p>
+                  <button className="btn btn-primary" onClick={startCreateRule}>
+                    <Plus size={16} />
+                    Create Your First Rule
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* General Settings Section */}
             <div className="settings-section">
               <div className="section-header">
                 <h2>
                   <Clock size={18} />
-                  Notification Rules
+                  General Settings
                 </h2>
               </div>
 
@@ -720,6 +1042,7 @@ export function NotificationSettings() {
                     <thead>
                       <tr>
                         <th>Time</th>
+                        <th>Rule</th>
                         <th>To</th>
                         <th>Status</th>
                         <th>Delivery</th>
@@ -731,6 +1054,13 @@ export function NotificationSettings() {
                         <tr key={log.id} className={log.error ? 'has-error' : ''}>
                           <td className="log-time">
                             {new Date(log.createdAt).toLocaleString()}
+                          </td>
+                          <td className="log-rule">
+                            {log.ruleName ? (
+                              <span className="rule-badge">{log.ruleName}</span>
+                            ) : (
+                              <span className="rule-badge legacy">Legacy</span>
+                            )}
                           </td>
                           <td className="log-phone">{log.toPhone}</td>
                           <td className="log-status">

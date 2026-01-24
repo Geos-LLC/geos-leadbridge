@@ -168,6 +168,8 @@ export interface CallioPhoneNumber {
 export interface NotificationLog {
   id: string;
   leadId: string | null;
+  notificationRuleId: string | null;
+  ruleName: string | null;
   toPhone: string;
   fromPhone: string | null;
   provider: string | null;
@@ -177,4 +179,19 @@ export interface NotificationLog {
   createdAt: string;
   sentAt: string | null;
   deliveredAt: string | null;
+}
+
+// SMS Notification Rules
+export interface NotificationRule {
+  id: string;
+  notificationSettingsId: string;
+  name: string;
+  triggerType: 'new_lead' | 'customer_reply';
+  replyTriggerMode?: 'first_only' | 'every_reply' | null;
+  template: string;
+  enabled: boolean;
+  triggerCount: number;
+  lastTriggeredAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }

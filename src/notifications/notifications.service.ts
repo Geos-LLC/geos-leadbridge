@@ -20,6 +20,52 @@ export interface UpdateNotificationSettingsDto {
   requirePhone?: boolean;
 }
 
+// Notification Rule DTOs
+export interface CreateNotificationRuleDto {
+  name: string;
+  triggerType: 'new_lead' | 'customer_reply';
+  replyTriggerMode?: 'first_only' | 'every_reply';
+  template: string;
+  enabled?: boolean;
+}
+
+export interface UpdateNotificationRuleDto {
+  name?: string;
+  triggerType?: 'new_lead' | 'customer_reply';
+  replyTriggerMode?: 'first_only' | 'every_reply';
+  template?: string;
+  enabled?: boolean;
+}
+
+export interface NotificationRuleResponse {
+  id: string;
+  notificationSettingsId: string;
+  name: string;
+  triggerType: string;
+  replyTriggerMode: string | null;
+  template: string;
+  enabled: boolean;
+  triggerCount: number;
+  lastTriggeredAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerReplyContext {
+  userId: string;
+  savedAccountId: string;
+  leadId: string;
+  lead: {
+    customerName: string;
+    customerPhone?: string | null;
+    category?: string | null;
+    city?: string | null;
+    state?: string | null;
+  };
+  isFirstCustomerReply: boolean;
+  isSecondCustomerMessage?: boolean;
+}
+
 export interface CallioPhoneNumber {
   id: string;
   phoneNumber: string;
@@ -57,6 +103,8 @@ export interface NotificationSettingsResponse {
 export interface NotificationLogResponse {
   id: string;
   leadId: string | null;
+  notificationRuleId: string | null;
+  ruleName: string | null;
   toPhone: string;
   fromPhone: string | null;
   provider: string | null;
@@ -199,18 +247,188 @@ export class NotificationsService {
     return logs.map(this.formatLog);
   }
 
+  // ==========================================
+  // Notification Rule CRUD
+  // ==========================================
+
+  /**
+   * Get all notification rules for a saved account
+   */
+  async getRules(
+    userId: string,
+    savedAccountId: string,
+  ): Promise<NotificationRuleResponse[]> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+    });
+
+    if (!account) {
+      throw new NotFoundException('Saved account not found');
+    }
+
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+    });
+
+    if (!settings) {
+      return [];
+    }
+
+    const rules = await this.prisma.notificationRule.findMany({
+      where: { notificationSettingsId: settings.id },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return rules.map(this.formatRule);
+  }
+
+  /**
+   * Create a new notification rule
+   */
+  async createRule(
+    userId: string,
+    savedAccountId: string,
+    data: CreateNotificationRuleDto,
+  ): Promise<NotificationRuleResponse> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+    });
+
+    if (!account) {
+      throw new NotFoundException('Saved account not found');
+    }
+
+    // Ensure settings exist
+    const settings = await this.prisma.notificationSettings.upsert({
+      where: { savedAccountId },
+      create: { savedAccountId },
+      update: {},
+    });
+
+    const rule = await this.prisma.notificationRule.create({
+      data: {
+        notificationSettingsId: settings.id,
+        name: data.name,
+        triggerType: data.triggerType,
+        replyTriggerMode: data.replyTriggerMode,
+        template: data.template,
+        enabled: data.enabled ?? true,
+      },
+    });
+
+    this.logger.log(`Created notification rule: ${rule.id} - ${rule.name}`);
+    return this.formatRule(rule);
+  }
+
+  /**
+   * Update an existing notification rule
+   */
+  async updateRule(
+    userId: string,
+    savedAccountId: string,
+    ruleId: string,
+    data: UpdateNotificationRuleDto,
+  ): Promise<NotificationRuleResponse> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+    });
+
+    if (!account) {
+      throw new NotFoundException('Saved account not found');
+    }
+
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+    });
+
+    if (!settings) {
+      throw new NotFoundException('Settings not found');
+    }
+
+    const existing = await this.prisma.notificationRule.findFirst({
+      where: { id: ruleId, notificationSettingsId: settings.id },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Notification rule not found');
+    }
+
+    const rule = await this.prisma.notificationRule.update({
+      where: { id: ruleId },
+      data: {
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.triggerType !== undefined && { triggerType: data.triggerType }),
+        ...(data.replyTriggerMode !== undefined && { replyTriggerMode: data.replyTriggerMode }),
+        ...(data.template !== undefined && { template: data.template }),
+        ...(data.enabled !== undefined && { enabled: data.enabled }),
+      },
+    });
+
+    this.logger.log(`Updated notification rule: ${rule.id}`);
+    return this.formatRule(rule);
+  }
+
+  /**
+   * Delete a notification rule
+   */
+  async deleteRule(
+    userId: string,
+    savedAccountId: string,
+    ruleId: string,
+  ): Promise<void> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+    });
+
+    if (!account) {
+      throw new NotFoundException('Saved account not found');
+    }
+
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+    });
+
+    if (!settings) {
+      throw new NotFoundException('Settings not found');
+    }
+
+    const existing = await this.prisma.notificationRule.findFirst({
+      where: { id: ruleId, notificationSettingsId: settings.id },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Notification rule not found');
+    }
+
+    await this.prisma.notificationRule.delete({
+      where: { id: ruleId },
+    });
+
+    this.logger.log(`Deleted notification rule: ${ruleId}`);
+  }
+
+  // ==========================================
+  // Notification Triggers
+  // ==========================================
+
   /**
    * Send notification for a new lead
    * Called by webhook handler when a new lead is created
+   * Uses rule-based system - finds all enabled "new_lead" rules and sends SMS for each
    */
   async sendLeadNotification(context: SendNotificationContext): Promise<void> {
     const { userId, savedAccountId, leadId, lead } = context;
 
-    this.logger.log(`Checking notification settings for account ${savedAccountId}`);
+    this.logger.log(`Checking notification rules for account ${savedAccountId}`);
 
     // Get settings for this account
     const settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
+      include: {
+        notificationRules: {
+          where: { triggerType: 'new_lead', enabled: true },
+        },
+      },
     });
 
     if (!settings) {
@@ -245,19 +463,120 @@ export class NotificationsService {
       return;
     }
 
+    // Get enabled new_lead rules
+    const rules = settings.notificationRules;
+
+    // If no rules exist, use the legacy settings template (backward compatibility)
+    if (rules.length === 0) {
+      this.logger.log(`No new_lead rules found, using legacy template`);
+      await this.sendNotificationWithRule(settings, null, context);
+      return;
+    }
+
+    this.logger.log(`Found ${rules.length} new_lead rules`);
+
+    // Send notification for each enabled rule
+    for (const rule of rules) {
+      await this.sendNotificationWithRule(settings, rule, context);
+    }
+  }
+
+  /**
+   * Handle customer reply event - sends SMS for "customer_reply" rules
+   */
+  async handleCustomerReply(context: CustomerReplyContext): Promise<void> {
+    const { userId, savedAccountId, leadId, lead, isFirstCustomerReply, isSecondCustomerMessage } = context;
+
+    this.logger.log(`Checking customer reply notification rules for account ${savedAccountId}`);
+
+    // Skip the first customer message - only trigger on actual replies (2nd+ messages)
+    if (isFirstCustomerReply) {
+      this.logger.log(`Skipping first customer message - notifications only trigger on replies`);
+      return;
+    }
+
+    // Get settings for this account
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      include: {
+        notificationRules: {
+          where: { triggerType: 'customer_reply', enabled: true },
+        },
+      },
+    });
+
+    if (!settings) {
+      this.logger.log(`No notification settings for account ${savedAccountId}`);
+      return;
+    }
+
+    if (!settings.enabled) {
+      this.logger.log(`Notifications disabled for account ${savedAccountId}`);
+      return;
+    }
+
+    if (!settings.destinationPhone) {
+      this.logger.warn(`No destination phone configured for account ${savedAccountId}`);
+      return;
+    }
+
+    if (!settings.callioApiKey) {
+      this.logger.warn(`No Callio API key configured for account ${savedAccountId}`);
+      return;
+    }
+
+    // Check quiet hours
+    if (this.isQuietHours(settings)) {
+      this.logger.log(`Currently in quiet hours for account ${savedAccountId}`);
+      return;
+    }
+
+    const rules = settings.notificationRules;
+    this.logger.log(`Found ${rules.length} customer_reply rules`);
+
+    for (const rule of rules) {
+      // Check reply trigger mode
+      if (rule.replyTriggerMode === 'first_only' && isSecondCustomerMessage !== true) {
+        this.logger.log(`Skipping rule ${rule.id} - only triggers on first reply`);
+        continue;
+      }
+
+      await this.sendNotificationWithRule(settings, rule, { userId, savedAccountId, leadId, lead });
+    }
+  }
+
+  /**
+   * Send a notification using a specific rule (or legacy template)
+   */
+  private async sendNotificationWithRule(
+    settings: any,
+    rule: any | null,
+    context: SendNotificationContext,
+  ): Promise<void> {
+    const { userId, savedAccountId, leadId, lead } = context;
+
+    // Use rule template or fallback to settings template
+    const template = rule?.template || settings.template;
+    const ruleName = rule?.name || 'Legacy Alert';
+    const ruleId = rule?.id || null;
+
     // Render the message template
-    const messageBody = this.renderTemplate(settings.template, lead);
+    const messageBody = this.renderTemplate(template, lead);
+
+    this.logger.log(`Sending notification for rule: ${ruleName}`);
 
     // Create notification log entry
     const logEntry = await this.prisma.notificationLog.create({
       data: {
         notificationSettingsId: settings.id,
+        notificationRuleId: ruleId,
+        ruleName: ruleName,
         leadId,
         toPhone: settings.destinationPhone,
         fromPhone: settings.callioFromPhone,
         status: 'pending',
         messageBody,
-        metadata: JSON.stringify({ userId, savedAccountId }),
+        metadata: JSON.stringify({ userId, savedAccountId, ruleId }),
       },
     });
 
@@ -273,6 +592,8 @@ export class NotificationsService {
         metadata: {
           tenantId: savedAccountId,
           leadId,
+          ruleId,
+          ruleName,
         },
       });
 
@@ -289,7 +610,18 @@ export class NotificationsService {
         },
       });
 
-      this.logger.log(`Notification sent for lead ${leadId} to ${settings.destinationPhone}`);
+      // Update rule stats if applicable
+      if (ruleId) {
+        await this.prisma.notificationRule.update({
+          where: { id: ruleId },
+          data: {
+            triggerCount: { increment: 1 },
+            lastTriggeredAt: new Date(),
+          },
+        });
+      }
+
+      this.logger.log(`Notification sent for rule ${ruleName} to ${settings.destinationPhone}`);
     } catch (error: any) {
       // Update log with error
       await this.prisma.notificationLog.update({
@@ -300,16 +632,17 @@ export class NotificationsService {
         },
       });
 
-      this.logger.error(`Failed to send notification for lead ${leadId}`, error);
+      this.logger.error(`Failed to send notification for rule ${ruleName}`, error);
     }
   }
 
   /**
-   * Send test notification
+   * Send test notification for a specific rule
    */
   async sendTestNotification(
     userId: string,
     savedAccountId: string,
+    ruleId?: string,
   ): Promise<{ success: boolean; error?: string }> {
     // Get full settings from database (not masked response)
     const account = await this.prisma.savedAccount.findFirst({
@@ -336,6 +669,17 @@ export class NotificationsService {
       return { success: false, error: 'No Callio API key configured. Please connect to Callio first.' };
     }
 
+    // Get rule if specified
+    let rule = null;
+    if (ruleId) {
+      rule = await this.prisma.notificationRule.findFirst({
+        where: { id: ruleId, notificationSettingsId: settings.id },
+      });
+      if (!rule) {
+        return { success: false, error: 'Rule not found' };
+      }
+    }
+
     const testLead = {
       customerName: 'Test Customer',
       customerPhone: '+15551234567',
@@ -344,17 +688,21 @@ export class NotificationsService {
       state: 'FL',
     };
 
-    const messageBody = this.renderTemplate(settings.template, testLead);
+    const template = rule?.template || settings.template;
+    const ruleName = rule?.name || 'Test';
+    const messageBody = this.renderTemplate(template, testLead);
 
     // Create notification log entry
     const logEntry = await this.prisma.notificationLog.create({
       data: {
         notificationSettingsId: settings.id,
+        notificationRuleId: rule?.id,
+        ruleName: `[TEST] ${ruleName}`,
         toPhone: settings.destinationPhone,
         fromPhone: settings.callioFromPhone,
         status: 'pending',
         messageBody: `[TEST] ${messageBody}`,
-        metadata: JSON.stringify({ test: true }),
+        metadata: JSON.stringify({ test: true, ruleId: rule?.id }),
       },
     });
 
@@ -369,6 +717,7 @@ export class NotificationsService {
         metadata: {
           tenantId: savedAccountId,
           test: true,
+          ruleId: rule?.id,
         },
       });
 
@@ -906,6 +1255,8 @@ export class NotificationsService {
     return {
       id: log.id,
       leadId: log.leadId,
+      notificationRuleId: log.notificationRuleId,
+      ruleName: log.ruleName,
       toPhone: log.toPhone,
       fromPhone: log.fromPhone,
       provider: log.provider,
@@ -915,6 +1266,25 @@ export class NotificationsService {
       createdAt: log.createdAt.toISOString(),
       sentAt: log.sentAt?.toISOString() || null,
       deliveredAt: log.deliveredAt?.toISOString() || null,
+    };
+  }
+
+  /**
+   * Format rule for response
+   */
+  private formatRule(rule: any): NotificationRuleResponse {
+    return {
+      id: rule.id,
+      notificationSettingsId: rule.notificationSettingsId,
+      name: rule.name,
+      triggerType: rule.triggerType,
+      replyTriggerMode: rule.replyTriggerMode,
+      template: rule.template,
+      enabled: rule.enabled,
+      triggerCount: rule.triggerCount,
+      lastTriggeredAt: rule.lastTriggeredAt?.toISOString() || null,
+      createdAt: rule.createdAt.toISOString(),
+      updatedAt: rule.updatedAt.toISOString(),
     };
   }
 }

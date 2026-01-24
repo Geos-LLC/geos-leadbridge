@@ -4049,3 +4049,235 @@ body {
   color: #dc2626;
   word-break: break-word;
 }
+
+/* ==========================================
+   Notification Rules Management
+   ========================================== */
+
+/* Rules Section */
+.rules-section .section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rules-section .section-header .btn-sm {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+/* Rule Form */
+.rule-form {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.rule-form h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 16px 0;
+}
+
+.rule-form .form-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+/* Rules List */
+.rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rule-card {
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 16px;
+  transition: all 0.2s;
+}
+
+.rule-card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.rule-card.disabled {
+  opacity: 0.6;
+  background: var(--bg-secondary);
+}
+
+.rule-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.rule-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rule-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.trigger-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  border-radius: 12px;
+}
+
+.trigger-badge.new_lead {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.trigger-badge.customer_reply {
+  background: #fae8ff;
+  color: #86198f;
+}
+
+.trigger-badge .reply-mode {
+  font-weight: 400;
+  text-transform: lowercase;
+  margin-left: 4px;
+}
+
+.rule-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rule-actions .toggle-switch.small {
+  margin-right: 8px;
+}
+
+.rule-actions .toggle-switch.small .toggle-slider {
+  width: 36px;
+  height: 20px;
+}
+
+.rule-actions .toggle-switch.small .toggle-slider:before {
+  width: 16px;
+  height: 16px;
+}
+
+.rule-actions .toggle-switch.small input:checked + .toggle-slider:before {
+  transform: translateX(16px);
+}
+
+.rule-actions .btn-icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.rule-actions .btn-icon:hover:not(:disabled) {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.rule-actions .btn-icon.danger:hover:not(:disabled) {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: #fca5a5;
+}
+
+.rule-actions .btn-icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.rule-template {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 10px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+}
+
+.rule-template svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+
+.rule-stats {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Empty Rules */
+.empty-rules {
+  text-align: center;
+  padding: 40px 20px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+}
+
+.empty-rules p {
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  max-width: 360px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Log Rule Badge */
+.notification-logs .log-rule {
+  min-width: 100px;
+}
+
+.notification-logs .rule-badge {
+  display: inline-flex;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  background: #dbeafe;
+  color: #1e40af;
+  border-radius: 4px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notification-logs .rule-badge.legacy {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}

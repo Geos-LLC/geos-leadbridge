@@ -21,6 +21,8 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import {
   NotificationsService,
   UpdateNotificationSettingsDto,
+  CreateNotificationRuleDto,
+  UpdateNotificationRuleDto,
 } from './notifications.service';
 
 @Controller('v1/notifications')
@@ -101,16 +103,18 @@ export class NotificationsController {
   }
 
   /**
-   * Send test notification
+   * Send test notification (optionally for a specific rule)
    */
   @Post('test/:savedAccountId')
   async sendTestNotification(
     @CurrentUser() user: any,
     @Param('savedAccountId') savedAccountId: string,
+    @Body() body?: { ruleId?: string },
   ) {
     const result = await this.notificationsService.sendTestNotification(
       user.userId,
       savedAccountId,
+      body?.ruleId,
     );
 
     if (result.success) {
@@ -123,6 +127,97 @@ export class NotificationsController {
     return {
       success: false,
       message: result.error || 'Failed to send test notification',
+    };
+  }
+
+  // ==========================================
+  // Notification Rules CRUD
+  // ==========================================
+
+  /**
+   * Get notification rules for a saved account
+   */
+  @Get('rules/:savedAccountId')
+  async getRules(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    const rules = await this.notificationsService.getRules(
+      user.userId,
+      savedAccountId,
+    );
+
+    return {
+      success: true,
+      count: rules.length,
+      rules,
+    };
+  }
+
+  /**
+   * Create a new notification rule
+   */
+  @Post('rules/:savedAccountId')
+  async createRule(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+    @Body() body: CreateNotificationRuleDto,
+  ) {
+    const rule = await this.notificationsService.createRule(
+      user.userId,
+      savedAccountId,
+      body,
+    );
+
+    return {
+      success: true,
+      message: 'Notification rule created successfully',
+      rule,
+    };
+  }
+
+  /**
+   * Update an existing notification rule
+   */
+  @Put('rules/:savedAccountId/:ruleId')
+  async updateRule(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+    @Param('ruleId') ruleId: string,
+    @Body() body: UpdateNotificationRuleDto,
+  ) {
+    const rule = await this.notificationsService.updateRule(
+      user.userId,
+      savedAccountId,
+      ruleId,
+      body,
+    );
+
+    return {
+      success: true,
+      message: 'Notification rule updated successfully',
+      rule,
+    };
+  }
+
+  /**
+   * Delete a notification rule
+   */
+  @Delete('rules/:savedAccountId/:ruleId')
+  async deleteRule(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+    @Param('ruleId') ruleId: string,
+  ) {
+    await this.notificationsService.deleteRule(
+      user.userId,
+      savedAccountId,
+      ruleId,
+    );
+
+    return {
+      success: true,
+      message: 'Notification rule deleted successfully',
     };
   }
 

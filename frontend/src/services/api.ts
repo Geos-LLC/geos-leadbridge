@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog } from '../types';
+import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog, NotificationRule } from '../types';
 import { notify } from '../store/notificationStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://thumbtack-bridge-production.up.railway.app/api';
@@ -469,6 +469,23 @@ export interface UpdateNotificationSettingsDto {
   requirePhone?: boolean;
 }
 
+// Notification Rule DTOs
+export interface CreateNotificationRuleDto {
+  name: string;
+  triggerType: 'new_lead' | 'customer_reply';
+  replyTriggerMode?: 'first_only' | 'every_reply';
+  template: string;
+  enabled?: boolean;
+}
+
+export interface UpdateNotificationRuleDto {
+  name?: string;
+  triggerType?: 'new_lead' | 'customer_reply';
+  replyTriggerMode?: 'first_only' | 'every_reply';
+  template?: string;
+  enabled?: boolean;
+}
+
 // Callio phone number type
 export interface CallioPhoneNumber {
   id: string;
@@ -500,8 +517,25 @@ export const notificationsApi = {
     const { data } = await api.get(`/v1/notifications/logs/${savedAccountId}`, { params });
     return data;
   },
-  sendTest: async (savedAccountId: string): Promise<{ success: boolean; message: string }> => {
-    const { data } = await api.post(`/v1/notifications/test/${savedAccountId}`);
+  sendTest: async (savedAccountId: string, ruleId?: string): Promise<{ success: boolean; message: string }> => {
+    const { data } = await api.post(`/v1/notifications/test/${savedAccountId}`, ruleId ? { ruleId } : {});
+    return data;
+  },
+  // Notification Rules
+  getRules: async (savedAccountId: string): Promise<{ success: boolean; count: number; rules: NotificationRule[] }> => {
+    const { data } = await api.get(`/v1/notifications/rules/${savedAccountId}`);
+    return data;
+  },
+  createRule: async (savedAccountId: string, ruleData: CreateNotificationRuleDto): Promise<{ success: boolean; message: string; rule: NotificationRule }> => {
+    const { data } = await api.post(`/v1/notifications/rules/${savedAccountId}`, ruleData);
+    return data;
+  },
+  updateRule: async (savedAccountId: string, ruleId: string, updates: UpdateNotificationRuleDto): Promise<{ success: boolean; message: string; rule: NotificationRule }> => {
+    const { data } = await api.put(`/v1/notifications/rules/${savedAccountId}/${ruleId}`, updates);
+    return data;
+  },
+  deleteRule: async (savedAccountId: string, ruleId: string): Promise<{ success: boolean; message: string }> => {
+    const { data } = await api.delete(`/v1/notifications/rules/${savedAccountId}/${ruleId}`);
     return data;
   },
   // Callio integration
