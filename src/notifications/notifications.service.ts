@@ -581,16 +581,14 @@ export class NotificationsService {
       metadata: params.metadata,
     };
 
-    // Set sender configuration
+    // Set sender configuration - mode must be: shared, dedicated, or openphone
+    requestBody.sender = {
+      mode: params.senderMode || 'shared',
+    };
+
+    // If a specific phone number is selected, include it
     if (params.fromPhone) {
-      requestBody.sender = {
-        mode: 'specific',
-        fromNumber: params.fromPhone,
-      };
-    } else {
-      requestBody.sender = {
-        mode: 'auto',
-      };
+      requestBody.sender.fromNumber = params.fromPhone;
     }
 
     try {
