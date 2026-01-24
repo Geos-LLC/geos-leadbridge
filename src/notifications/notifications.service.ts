@@ -586,10 +586,13 @@ export class NotificationsService {
       mode: params.senderMode || 'shared',
     };
 
-    // If a specific phone number is selected, include it
-    if (params.fromPhone) {
+    // If a specific phone number is selected, include it (must be valid phone number)
+    if (params.fromPhone && params.fromPhone.length > 5 && params.fromPhone.match(/^\+?\d{10,}/)) {
       requestBody.sender.fromNumber = params.fromPhone;
     }
+
+    this.logger.log(`Callio request body: ${JSON.stringify(requestBody)}`);
+
 
     try {
       const response = await fetch(
