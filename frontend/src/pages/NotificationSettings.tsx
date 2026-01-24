@@ -723,12 +723,13 @@ export function NotificationSettings() {
                         <th>Time</th>
                         <th>To</th>
                         <th>Status</th>
+                        <th>Delivery</th>
                         <th>Message</th>
                       </tr>
                     </thead>
                     <tbody>
                       {logs.map(log => (
-                        <tr key={log.id}>
+                        <tr key={log.id} className={log.error ? 'has-error' : ''}>
                           <td className="log-time">
                             {new Date(log.createdAt).toLocaleString()}
                           </td>
@@ -736,9 +737,27 @@ export function NotificationSettings() {
                           <td className="log-status">
                             {getStatusIcon(log.status)}
                             <span>{log.status}</span>
-                            {log.error && (
-                              <span className="log-error" title={log.error}>
-                                !
+                          </td>
+                          <td className="log-delivery">
+                            {log.deliveredAt ? (
+                              <span className="delivery-success">
+                                <CheckCircle size={14} />
+                                {new Date(log.deliveredAt).toLocaleTimeString()}
+                              </span>
+                            ) : log.status === 'failed' ? (
+                              <span className="delivery-failed">
+                                <XCircle size={14} />
+                                Failed
+                              </span>
+                            ) : log.sentAt ? (
+                              <span className="delivery-pending">
+                                <Clock size={14} />
+                                Sent, awaiting
+                              </span>
+                            ) : (
+                              <span className="delivery-pending">
+                                <Clock size={14} />
+                                Pending
                               </span>
                             )}
                           </td>
@@ -750,6 +769,19 @@ export function NotificationSettings() {
                       ))}
                     </tbody>
                   </table>
+                  {/* Show errors in detail below the table */}
+                  {logs.some(log => log.error) && (
+                    <div className="log-errors-section">
+                      <h4><AlertCircle size={14} /> Errors</h4>
+                      {logs.filter(log => log.error).map(log => (
+                        <div key={log.id} className="log-error-detail">
+                          <span className="error-phone">{log.toPhone}</span>
+                          <span className="error-time">{new Date(log.createdAt).toLocaleString()}</span>
+                          <span className="error-message">{log.error}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
