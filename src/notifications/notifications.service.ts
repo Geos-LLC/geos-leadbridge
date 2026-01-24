@@ -506,12 +506,16 @@ export class NotificationsService {
       }
 
       const result = await response.json();
-      return (result.data || []).map((phone: any) => ({
-        id: phone.id,
-        phoneNumber: phone.phoneNumber,
-        provider: phone.provider,
-        friendlyName: phone.friendlyName,
-        capabilities: phone.capabilities,
+      this.logger.log(`Callio phone numbers response: ${JSON.stringify(result)}`);
+
+      // Handle different response formats from Callio API
+      const phones = result.data || result.phoneNumbers || result || [];
+      return phones.map((phone: any) => ({
+        id: phone.id || phone._id || phone.phoneNumber,
+        phoneNumber: phone.phoneNumber || phone.phone_number || phone.number || phone.e164,
+        provider: phone.provider || phone.carrier || phone.type,
+        friendlyName: phone.friendlyName || phone.friendly_name || phone.name || phone.label,
+        capabilities: phone.capabilities || [],
       }));
     } catch (error: any) {
       this.logger.error('Failed to fetch Callio phone numbers', error);
@@ -540,12 +544,16 @@ export class NotificationsService {
       }
 
       const result = await response.json();
-      const phoneNumbers = (result.data || []).map((phone: any) => ({
-        id: phone.id,
-        phoneNumber: phone.phoneNumber,
-        provider: phone.provider,
-        friendlyName: phone.friendlyName,
-        capabilities: phone.capabilities,
+      this.logger.log(`Callio validate response: ${JSON.stringify(result)}`);
+
+      // Handle different response formats from Callio API
+      const phones = result.data || result.phoneNumbers || result || [];
+      const phoneNumbers = phones.map((phone: any) => ({
+        id: phone.id || phone._id || phone.phoneNumber,
+        phoneNumber: phone.phoneNumber || phone.phone_number || phone.number || phone.e164,
+        provider: phone.provider || phone.carrier || phone.type,
+        friendlyName: phone.friendlyName || phone.friendly_name || phone.name || phone.label,
+        capabilities: phone.capabilities || [],
       }));
 
       return { valid: true, phoneNumbers };
