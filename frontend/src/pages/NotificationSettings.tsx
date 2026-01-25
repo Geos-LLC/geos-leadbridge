@@ -65,6 +65,21 @@ export function NotificationSettings() {
     }
   }, [ruleForm.accountId]);
 
+  // Auto-poll logs every 10 seconds to catch delivery status updates
+  useEffect(() => {
+    if (!selectedAccountId) return;
+
+    const pollInterval = setInterval(() => {
+      if (selectedAccountId === 'all') {
+        loadAllLogs();
+      } else {
+        loadLogs(selectedAccountId);
+      }
+    }, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [selectedAccountId]);
+
   async function loadAccounts() {
     try {
       setLoading(true);
@@ -323,6 +338,12 @@ export function NotificationSettings() {
 
       if (result.success) {
         setSuccessMessage('Test notification sent successfully');
+        // Refresh logs to show the new message immediately
+        if (selectedAccountId === 'all') {
+          await loadAllLogs();
+        } else {
+          await loadLogs(selectedAccountId);
+        }
       } else {
         setError(result.message || 'Failed to send test notification');
       }
