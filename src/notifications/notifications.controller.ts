@@ -81,6 +81,26 @@ export class NotificationsController {
   }
 
   /**
+   * Get all notification logs across all accounts for a user
+   */
+  @Get('logs')
+  async getAllLogs(
+    @CurrentUser() user: any,
+    @Query('limit') limit?: string,
+  ) {
+    const logs = await this.notificationsService.getAllLogs(
+      user.userId,
+      limit ? parseInt(limit, 10) : 100,
+    );
+
+    return {
+      success: true,
+      count: logs.length,
+      logs,
+    };
+  }
+
+  /**
    * Get notification logs for a saved account
    */
   @Get('logs/:savedAccountId')

@@ -260,6 +260,52 @@ export class NotificationsService {
     return logs.map(this.formatLog);
   }
 
+  /**
+   * Get all notification logs across all accounts for a user
+   */
+  async getAllLogs(
+    userId: string,
+    limit: number = 100,
+  ): Promise<(NotificationLogResponse & { savedAccountId?: string; savedAccount?: { id: string; businessId: string; businessName: string } })[]> {
+    // Get all saved accounts for this user with their notification settings
+    const accounts = await this.prisma.savedAccount.findMany({
+      where: { userId },
+      include: {
+        notificationSettings: {
+          include: {
+            notificationLogs: {
+              orderBy: { createdAt: 'desc' },
+              take: Math.ceil(limit / 3), // Distribute limit across accounts
+            },
+          },
+        },
+      },
+    });
+
+    const allLogs: (NotificationLogResponse & { savedAccountId?: string; savedAccount?: { id: string; businessId: string; businessName: string } })[] = [];
+
+    for (const account of accounts) {
+      if (account.notificationSettings?.notificationLogs) {
+        for (const log of account.notificationSettings.notificationLogs) {
+          allLogs.push({
+            ...this.formatLog(log),
+            savedAccountId: account.id,
+            savedAccount: {
+              id: account.id,
+              businessId: account.businessId,
+              businessName: account.businessName,
+            },
+          });
+        }
+      }
+    }
+
+    // Sort by creation date (newest first) and limit
+    return allLogs
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, limit);
+  }
+
   // ==========================================
   // Notification Rule CRUD
   // ==========================================

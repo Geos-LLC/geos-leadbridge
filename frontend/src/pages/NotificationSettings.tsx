@@ -51,7 +51,7 @@ export function NotificationSettings() {
   useEffect(() => {
     if (selectedAccountId === 'all') {
       loadAllRules();
-      setLogs([]); // Clear logs when viewing all accounts
+      loadAllLogs();
     } else if (selectedAccountId) {
       loadRulesForAccount(selectedAccountId);
       loadLogs(selectedAccountId);
@@ -128,6 +128,19 @@ export function NotificationSettings() {
       setLogs(result.logs);
     } catch (err) {
       console.error('Failed to load notification logs:', err);
+      setLogs([]);
+    } finally {
+      setLogsLoading(false);
+    }
+  }
+
+  async function loadAllLogs() {
+    try {
+      setLogsLoading(true);
+      const result = await notificationsApi.getAllLogs(100);
+      setLogs(result.logs);
+    } catch (err) {
+      console.error('Failed to load all notification logs:', err);
       setLogs([]);
     } finally {
       setLogsLoading(false);
@@ -685,63 +698,72 @@ export function NotificationSettings() {
             </div>
 
             {/* Notification Logs Section */}
-            {selectedAccountId !== 'all' && (
-              <div className="settings-section notification-logs">
-                <div className="section-header">
-                  <h2>
-                    <MessageSquare size={18} />
-                    Message History
-                  </h2>
-                </div>
+            <div className="settings-section notification-logs">
+              <div className="section-header">
+                <h2>
+                  <MessageSquare size={18} />
+                  Message History
+                </h2>
+              </div>
 
-                {logsLoading ? (
-                  <div className="loading-container">
-                    <Loader2 size={24} className="spinner" />
-                  </div>
-                ) : logs.length > 0 ? (
-                  <div className="logs-table-wrapper">
-                    <table className="logs-table">
-                      <thead>
-                        <tr>
-                          <th>Time</th>
-                          <th>Rule</th>
-                          <th>To</th>
-                          <th>Message</th>
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {logs.map(log => (
-                          <tr key={log.id}>
-                            <td className="log-time">
-                              {new Date(log.createdAt).toLocaleString()}
+              {logsLoading ? (
+                <div className="loading-container">
+                  <Loader2 size={24} className="spinner" />
+                </div>
+              ) : logs.length > 0 ? (
+                <div className="logs-table-wrapper">
+                  <table className="logs-table">
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        {selectedAccountId === 'all' && <th>Account</th>}
+                        <th>Rule</th>
+                        <th>From</th>
+                        <th>To</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {logs.map((log: any) => (
+                        <tr key={log.id} className={log.status === 'failed' ? 'has-error' : ''}>
+                          <td className="log-time">
+                            {new Date(log.createdAt).toLocaleString()}
+                          </td>
+                          {selectedAccountId === 'all' && (
+                            <td className="log-account">
+                              <span className="account-badge">{log.savedAccount?.businessName || 'Unknown'}</span>
                             </td>
-                            <td className="log-rule">
-                              {log.ruleName ? (
-                                <span className="rule-badge">{log.ruleName}</span>
-                              ) : (
-                                <span className="rule-badge legacy">Legacy</span>
-                              )}
-                            </td>
-                            <td className="log-phone">{log.toPhone}</td>
-                            <td className="log-message">
-                              <span title={log.messageBody}>
-                                {log.messageBody.substring(0, 40)}{log.messageBody.length > 40 ? '...' : ''}
+                          )}
+                          <td className="log-rule">
+                            {log.ruleName ? (
+                              <span className="rule-badge">{log.ruleName}</span>
+                            ) : (
+                              <span className="rule-badge legacy">Legacy</span>
+                            )}
+                          </td>
+                          <td className="log-phone">{log.fromPhone || '-'}</td>
+                          <td className="log-phone">{log.toPhone}</td>
+                          <td className="log-status">
+                            {log.status === 'delivered' ? (
+                              <span className="status-badge delivered">
+                                <CheckCircle size={12} />
+                                Delivered
                               </span>
-                            </td>
-                            <td className="log-status">
+                            ) : log.status === 'failed' ? (
+                              <span className="status-badge failed" title={log.error || 'Unknown error'}>
+                                <AlertCircle size={12} />
+                                {log.error ? log.error.substring(0, 30) : 'Failed'}
+                              </span>
+                            ) : log.status === 'sent' ? (
+                              <span className="status-badge sent">
+                                <Send size={12} />
+                                Sent
+                              </span>
+                            ) : (
                               <span className={`status-badge ${log.status}`}>
-                                {log.status === 'delivered' && <CheckCircle size={12} />}
-                                {log.status === 'failed' && <AlertCircle size={12} />}
-                                {log.status === 'sent' && <Send size={12} />}
-                                {log.status === 'pending' && <Loader2 size={12} className="spinner" />}
-                                {log.status === 'queued' && <Loader2 size={12} />}
+                                <Loader2 size={12} className="spinner" />
                                 {log.status}
                               </span>
-                              {log.error && (
-                                <span className="error-hint" title={log.error}>
-                                  <AlertCircle size={12} />
-                                </span>
                               )}
                             </td>
                           </tr>
@@ -754,8 +776,7 @@ export function NotificationSettings() {
                     <p>No messages sent yet. Messages will appear here when notifications are triggered.</p>
                   </div>
                 )}
-              </div>
-            )}
+            </div>
           </>
         )}
       </div>

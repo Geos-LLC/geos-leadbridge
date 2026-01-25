@@ -3750,12 +3750,14 @@ body {
 
 .notification-logs .logs-table {
   width: 100%;
+  min-width: 700px;
   border-collapse: collapse;
   font-size: 13px;
 }
 
 .notification-logs table {
   width: 100%;
+  min-width: 700px;
   border-collapse: collapse;
   font-size: 13px;
 }
@@ -3771,19 +3773,47 @@ body {
   font-weight: 600;
   color: var(--text-secondary);
   background: var(--bg-secondary);
+  white-space: nowrap;
 }
 
 .notification-logs tbody tr:hover {
   background: var(--bg-secondary);
 }
 
+.notification-logs tbody tr.has-error {
+  background: #fef2f2;
+}
+
+.notification-logs tbody tr.has-error:hover {
+  background: #fee2e2;
+}
+
 .notification-logs .log-time {
   white-space: nowrap;
   color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.notification-logs .log-account {
+  max-width: 120px;
+}
+
+.notification-logs .log-account .account-badge {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 6px;
+  font-size: 11px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
 }
 
 .notification-logs .log-phone {
-  font-family: monospace;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .notification-logs .log-status {
@@ -3858,6 +3888,10 @@ body {
 .notification-logs .status-badge.failed {
   background: #fee2e2;
   color: #dc2626;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .notification-logs .error-hint {
