@@ -3739,7 +3739,19 @@ body {
 
 /* Notification Logs Table */
 .notification-logs {
+  margin-top: 16px;
+}
+
+.logs-table-wrapper {
   overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+}
+
+.notification-logs .logs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
 }
 
 .notification-logs table {
@@ -3813,6 +3825,53 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Notification Status Badges */
+.notification-logs .status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  text-transform: capitalize;
+}
+
+.notification-logs .status-badge.delivered {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.notification-logs .status-badge.sent {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.notification-logs .status-badge.pending,
+.notification-logs .status-badge.queued {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.notification-logs .status-badge.failed {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.notification-logs .error-hint {
+  margin-left: 6px;
+  color: #dc2626;
+  cursor: help;
+}
+
+.empty-logs {
+  text-align: center;
+  padding: 32px 20px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
 }
 
 /* Phone Numbers List with Status */
