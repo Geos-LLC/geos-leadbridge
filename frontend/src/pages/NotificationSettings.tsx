@@ -65,16 +65,12 @@ export function NotificationSettings() {
     }
   }, [ruleForm.accountId]);
 
-  // Auto-poll logs every 10 seconds to catch delivery status updates
+  // Auto-poll logs every 10 seconds to catch delivery status updates (silent refresh)
   useEffect(() => {
     if (!selectedAccountId) return;
 
     const pollInterval = setInterval(() => {
-      if (selectedAccountId === 'all') {
-        loadAllLogs();
-      } else {
-        loadLogs(selectedAccountId);
-      }
+      refreshLogs();
     }, 10000); // Poll every 10 seconds
 
     return () => clearInterval(pollInterval);
@@ -136,29 +132,63 @@ export function NotificationSettings() {
     }
   }
 
-  async function loadLogs(accountId: string) {
+  async function loadLogs(accountId: string, showLoading = true) {
     try {
-      setLogsLoading(true);
+      if (showLoading) setLogsLoading(true);
       const result = await notificationsApi.getLogs(accountId, 50);
       setLogs(result.logs);
     } catch (err) {
       console.error('Failed to load notification logs:', err);
-      setLogs([]);
+      if (showLoading) setLogs([]);
     } finally {
-      setLogsLoading(false);
+      if (showLoading) setLogsLoading(false);
     }
   }
 
-  async function loadAllLogs() {
+  async function loadAllLogs(showLoading = true) {
     try {
-      setLogsLoading(true);
+      if (showLoading) setLogsLoading(true);
       const result = await notificationsApi.getAllLogs(100);
       setLogs(result.logs);
     } catch (err) {
       console.error('Failed to load all notification logs:', err);
-      setLogs([]);
+      if (showLoading) setLogs([]);
     } finally {
-      setLogsLoading(false);
+      if (showLoading) setLogsLoading(false);
+    }
+  }
+
+  // Silently refresh logs and merge updates (for polling - no flicker)
+  async function refreshLogs() {
+    try {
+      let newLogs: any[];
+      if (selectedAccountId === 'all') {
+        const result = await notificationsApi.getAllLogs(100);
+        newLogs = result.logs;
+      } else if (selectedAccountId) {
+        const result = await notificationsApi.getLogs(selectedAccountId, 50);
+        newLogs = result.logs;
+      } else {
+        return;
+      }
+
+      // Merge: update existing logs and add new ones
+      setLogs(prevLogs => {
+        // Start with existing logs, excluding temporary optimistic entries
+        const existingLogs = prevLogs.filter(log => !log.id.startsWith('temp-'));
+        const logMap = new Map(existingLogs.map(log => [log.id, log]));
+
+        // Update existing and add new
+        for (const newLog of newLogs) {
+          logMap.set(newLog.id, newLog);
+        }
+
+        // Convert back to array and sort by createdAt (newest first)
+        return Array.from(logMap.values())
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      });
+    } catch (err) {
+      console.error('Failed to refresh logs:', err);
     }
   }
 
@@ -338,12 +368,28 @@ export function NotificationSettings() {
 
       if (result.success) {
         setSuccessMessage('Test notification sent successfully');
-        // Refresh logs to show the new message immediately
-        if (selectedAccountId === 'all') {
-          await loadAllLogs();
-        } else {
-          await loadLogs(selectedAccountId);
-        }
+
+        // Add optimistic log entry immediately (will be updated by next poll)
+        const account = accounts.find(a => a.id === accountId);
+        const optimisticLog: any = {
+          id: `temp-${Date.now()}`, // Temporary ID, will be replaced by real one
+          ruleName: `[TEST] ${rule?.name || 'Unknown'}`,
+          fromPhone: rule?.fromPhone || '',
+          toPhone: rule?.toPhone || '',
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+          deliveredAt: null,
+          savedAccountId: accountId,
+          savedAccount: account ? {
+            id: account.id,
+            businessId: account.businessId,
+            businessName: account.businessName,
+          } : undefined,
+        };
+        setLogs(prev => [optimisticLog, ...prev]);
+
+        // Silently refresh to get the real log entry with correct ID
+        setTimeout(() => refreshLogs(), 1000);
       } else {
         setError(result.message || 'Failed to send test notification');
       }
