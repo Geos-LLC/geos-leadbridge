@@ -4292,3 +4292,52 @@ body {
   background: var(--bg-tertiary);
   color: var(--text-secondary);
 }
+
+/* ==========================================
+   Phone Settings & Rule Form Styles
+   ========================================== */
+.phone-numbers-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.phone-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #e0f2fe;
+  color: #0369a1;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.account-display {
+  padding: 8px 0;
+}
+
+.account-display .account-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-secondary);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.form-hint.warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #b45309;
+  background: #fef3c7;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid #fcd34d;
+}
