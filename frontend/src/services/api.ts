@@ -474,6 +474,8 @@ export interface CreateNotificationRuleDto {
   name: string;
   triggerType: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply';
+  fromPhone: string;  // Callio phone to send FROM
+  toPhone: string;    // Destination phone to send TO
   template: string;
   enabled?: boolean;
 }
@@ -482,6 +484,8 @@ export interface UpdateNotificationRuleDto {
   name?: string;
   triggerType?: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply';
+  fromPhone?: string;
+  toPhone?: string;
   template?: string;
   enabled?: boolean;
 }

@@ -25,6 +25,8 @@ export interface CreateNotificationRuleDto {
   name: string;
   triggerType: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply';
+  fromPhone: string; // Callio phone number to send FROM
+  toPhone: string;   // Destination phone number to send TO
   template: string;
   enabled?: boolean;
 }
@@ -33,6 +35,8 @@ export interface UpdateNotificationRuleDto {
   name?: string;
   triggerType?: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply';
+  fromPhone?: string;
+  toPhone?: string;
   template?: string;
   enabled?: boolean;
 }
@@ -43,6 +47,8 @@ export interface NotificationRuleResponse {
   name: string;
   triggerType: string;
   replyTriggerMode: string | null;
+  fromPhone: string | null;
+  toPhone: string | null;
   template: string;
   enabled: boolean;
   triggerCount: number;
@@ -360,6 +366,8 @@ export class NotificationsService {
         name: data.name,
         triggerType: data.triggerType,
         replyTriggerMode: data.replyTriggerMode,
+        fromPhone: data.fromPhone,
+        toPhone: data.toPhone,
         template: data.template,
         enabled: data.enabled ?? true,
       },
@@ -408,6 +416,8 @@ export class NotificationsService {
         ...(data.name !== undefined && { name: data.name }),
         ...(data.triggerType !== undefined && { triggerType: data.triggerType }),
         ...(data.replyTriggerMode !== undefined && { replyTriggerMode: data.replyTriggerMode }),
+        ...(data.fromPhone !== undefined && { fromPhone: data.fromPhone }),
+        ...(data.toPhone !== undefined && { toPhone: data.toPhone }),
         ...(data.template !== undefined && { template: data.template }),
         ...(data.enabled !== undefined && { enabled: data.enabled }),
       },
@@ -604,15 +614,23 @@ export class NotificationsService {
   ): Promise<void> {
     const { userId, savedAccountId, leadId, lead } = context;
 
-    // Use rule template or fallback to settings template
+    // Use rule's phone numbers (required for new rules) or fallback to settings (legacy)
+    const toPhone = rule?.toPhone || settings.destinationPhone;
+    const fromPhone = rule?.fromPhone || settings.callioFromPhone;
     const template = rule?.template || settings.template;
     const ruleName = rule?.name || 'Legacy Alert';
     const ruleId = rule?.id || null;
 
+    // Validate phone numbers
+    if (!toPhone) {
+      this.logger.warn(`No destination phone for rule ${ruleName}`);
+      return;
+    }
+
     // Render the message template
     const messageBody = this.renderTemplate(template, lead);
 
-    this.logger.log(`Sending notification for rule: ${ruleName}`);
+    this.logger.log(`Sending notification for rule: ${ruleName} from ${fromPhone} to ${toPhone}`);
 
     // Create notification log entry
     const logEntry = await this.prisma.notificationLog.create({
@@ -621,8 +639,8 @@ export class NotificationsService {
         notificationRuleId: ruleId,
         ruleName: ruleName,
         leadId,
-        toPhone: settings.destinationPhone,
-        fromPhone: settings.callioFromPhone,
+        toPhone: toPhone,
+        fromPhone: fromPhone,
         status: 'pending',
         messageBody,
         metadata: JSON.stringify({ userId, savedAccountId, ruleId }),
@@ -632,9 +650,9 @@ export class NotificationsService {
     // Send via Callio
     try {
       const result = await this.sendViaCallio({
-        to: settings.destinationPhone,
+        to: toPhone,
         body: messageBody,
-        fromPhone: settings.callioFromPhone,
+        fromPhone: fromPhone,
         apiKey: settings.callioApiKey,
         senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
         callioWorkspaceId: settings.callioWorkspaceId,
@@ -1328,6 +1346,8 @@ export class NotificationsService {
       name: rule.name,
       triggerType: rule.triggerType,
       replyTriggerMode: rule.replyTriggerMode,
+      fromPhone: rule.fromPhone,
+      toPhone: rule.toPhone,
       template: rule.template,
       enabled: rule.enabled,
       triggerCount: rule.triggerCount,

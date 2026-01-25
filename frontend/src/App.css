@@ -4253,6 +4253,35 @@ body {
   color: var(--text-muted);
 }
 
+/* Rule Phone Display */
+.rule-phones {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.rule-phones .phone-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.rule-phones .phone-value {
+  font-weight: 500;
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Consolas', monospace;
+}
+
+.rule-phones .phone-arrow {
+  color: var(--text-muted);
+}
+
 /* Empty Rules */
 .empty-rules {
   text-align: center;

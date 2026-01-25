@@ -351,6 +351,8 @@ model NotificationRule {
   name                   String   // User-friendly rule name (e.g., "New Lead Alert")
   triggerType            String   // "new_lead" | "customer_reply"
   replyTriggerMode       String?  // For customer_reply: "first_only" | "every_reply"
+  fromPhone              String?  // Callio phone number to send FROM
+  toPhone                String?  // Destination phone number to send TO
   template               String   @db.Text // SMS template for this specific rule
   enabled                Boolean  @default(true)
   triggerCount           Int      @default(0)

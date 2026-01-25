@@ -34,6 +34,8 @@ export function NotificationSettings() {
     name: '',
     triggerType: 'new_lead' as 'new_lead' | 'customer_reply',
     replyTriggerMode: 'first_only' as 'first_only' | 'every_reply',
+    fromPhone: '',
+    toPhone: '',
     template: 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
     enabled: true,
   });
@@ -127,6 +129,8 @@ export function NotificationSettings() {
       name: '',
       triggerType: 'new_lead',
       replyTriggerMode: 'first_only',
+      fromPhone: '',
+      toPhone: '',
       template: 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
       enabled: true,
     });
@@ -145,6 +149,8 @@ export function NotificationSettings() {
       name: rule.name,
       triggerType: rule.triggerType,
       replyTriggerMode: rule.replyTriggerMode || 'first_only',
+      fromPhone: rule.fromPhone || '',
+      toPhone: rule.toPhone || '',
       template: rule.template,
       enabled: rule.enabled,
     });
@@ -168,6 +174,14 @@ export function NotificationSettings() {
       setError('Please enter a rule name');
       return;
     }
+    if (!ruleForm.fromPhone) {
+      setError('Please select a From phone number');
+      return;
+    }
+    if (!ruleForm.toPhone.trim()) {
+      setError('Please enter a destination phone number');
+      return;
+    }
 
     try {
       setSaving(true);
@@ -180,6 +194,8 @@ export function NotificationSettings() {
           name: ruleForm.name,
           triggerType: ruleForm.triggerType,
           replyTriggerMode: ruleForm.triggerType === 'customer_reply' ? ruleForm.replyTriggerMode : undefined,
+          fromPhone: ruleForm.fromPhone,
+          toPhone: ruleForm.toPhone,
           template: ruleForm.template,
           enabled: ruleForm.enabled,
         };
@@ -193,6 +209,8 @@ export function NotificationSettings() {
           name: ruleForm.name,
           triggerType: ruleForm.triggerType,
           replyTriggerMode: ruleForm.triggerType === 'customer_reply' ? ruleForm.replyTriggerMode : undefined,
+          fromPhone: ruleForm.fromPhone,
+          toPhone: ruleForm.toPhone,
           template: ruleForm.template,
           enabled: ruleForm.enabled,
         };
@@ -413,7 +431,7 @@ export function NotificationSettings() {
                       <div className="select-wrapper">
                         <select
                           value={ruleForm.accountId}
-                          onChange={e => setRuleForm(prev => ({ ...prev, accountId: e.target.value }))}
+                          onChange={e => setRuleForm(prev => ({ ...prev, accountId: e.target.value, fromPhone: '' }))}
                         >
                           <option value="">Select account...</option>
                           {accounts.map(acc => (
@@ -437,29 +455,51 @@ export function NotificationSettings() {
                     </div>
                   )}
 
-                  {/* Phone Numbers info - show available numbers for the selected account */}
+                  {/* From Phone - dropdown of Callio numbers */}
                   {ruleForm.accountId && (
                     <div className="form-group">
                       <label>
                         <Phone size={14} />
-                        Available Phone Numbers
+                        From Phone Number (Send From)
                       </label>
                       {formPhoneNumbers.length > 0 ? (
-                        <div className="phone-numbers-info">
-                          {formPhoneNumbers.map(phone => (
-                            <span key={phone.id} className="phone-badge">
-                              {phone.phoneNumber}
-                            </span>
-                          ))}
+                        <div className="select-wrapper">
+                          <select
+                            value={ruleForm.fromPhone}
+                            onChange={e => setRuleForm(prev => ({ ...prev, fromPhone: e.target.value }))}
+                          >
+                            <option value="">Select phone number...</option>
+                            {formPhoneNumbers.map(phone => (
+                              <option key={phone.id} value={phone.phoneNumber}>
+                                {phone.phoneNumber} ({phone.provider}{phone.friendlyName ? ` - ${phone.friendlyName}` : ''})
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={16} />
                         </div>
                       ) : (
                         <p className="form-hint warning">
                           <AlertCircle size={14} />
-                          No phone numbers configured. Go to Phone Settings to connect Callio.
+                          No phone numbers available. Go to Phone Settings to connect Callio first.
                         </p>
                       )}
                     </div>
                   )}
+
+                  {/* To Phone - manual input */}
+                  <div className="form-group">
+                    <label>
+                      <Phone size={14} />
+                      To Phone Number (Send To)
+                    </label>
+                    <input
+                      type="tel"
+                      value={ruleForm.toPhone}
+                      onChange={e => setRuleForm(prev => ({ ...prev, toPhone: e.target.value }))}
+                      placeholder="+1 555 123 4567"
+                    />
+                    <p className="form-hint">The phone number to receive SMS alerts</p>
+                  </div>
 
                   <div className="form-group">
                     <label>Rule Name</label>
@@ -594,6 +634,13 @@ export function NotificationSettings() {
                           <span className="account-badge">{rule.savedAccount.businessName}</span>
                         </div>
                       )}
+                      {/* Show phone numbers */}
+                      <div className="rule-phones">
+                        <span className="phone-info">
+                          <Phone size={12} />
+                          {rule.fromPhone || 'No from'} → {rule.toPhone || 'No to'}
+                        </span>
+                      </div>
                       <div className="rule-template">
                         <MessageSquare size={12} />
                         <span>{rule.template.substring(0, 60)}{rule.template.length > 60 ? '...' : ''}</span>

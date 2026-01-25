@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Phone, Loader2, X, ChevronDown, AlertCircle, CheckCircle, Link, Unlink, Key, Shield, ShieldCheck, ShieldX, ShieldAlert, Clock, Save } from 'lucide-react';
+import { ArrowLeft, Phone, Loader2, X, ChevronDown, AlertCircle, CheckCircle, Link, Unlink, Key, Shield, ShieldCheck, ShieldX, ShieldAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { notificationsApi, thumbtackApi, type CallioPhoneNumber } from '../services/api';
 import type { SavedAccount } from '../types';
@@ -20,37 +20,17 @@ function getA2PStatusInfo(status?: string): { icon: React.ReactNode; label: stri
   }
 }
 
-// Timezone options
-const TIMEZONE_OPTIONS = [
-  { value: 'America/New_York', label: 'Eastern Time (ET)' },
-  { value: 'America/Chicago', label: 'Central Time (CT)' },
-  { value: 'America/Denver', label: 'Mountain Time (MT)' },
-  { value: 'America/Los_Angeles', label: 'Pacific Time (PT)' },
-  { value: 'America/Phoenix', label: 'Arizona (MST)' },
-];
-
 export function PhoneSettings() {
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
-  // Form state
-  const [enabled, setEnabled] = useState(false);
-  const [destinationPhone, setDestinationPhone] = useState('');
-  const [quietHoursEnabled, setQuietHoursEnabled] = useState(false);
-  const [quietHoursStart, setQuietHoursStart] = useState('22:00');
-  const [quietHoursEnd, setQuietHoursEnd] = useState('08:00');
-  const [quietHoursTimezone, setQuietHoursTimezone] = useState('America/New_York');
-  const [requirePhone, setRequirePhone] = useState(true);
 
   // Callio connection state
   const [callioConnected, setCallioConnected] = useState(false);
   const [callioApiKey, setCallioApiKey] = useState('');
-  const [callioFromPhone, setCallioFromPhone] = useState('');
   const [callioPhoneNumbers, setCallioPhoneNumbers] = useState<CallioPhoneNumber[]>([]);
   const [validatingApiKey, setValidatingApiKey] = useState(false);
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
@@ -88,31 +68,17 @@ export function PhoneSettings() {
       const settingsRes = await notificationsApi.getSettings(accountId);
 
       if (settingsRes.settings) {
-        setEnabled(settingsRes.settings.enabled);
-        setDestinationPhone(settingsRes.settings.destinationPhone || '');
-        setQuietHoursEnabled(!!settingsRes.settings.quietHoursStart);
-        setQuietHoursStart(settingsRes.settings.quietHoursStart || '22:00');
-        setQuietHoursEnd(settingsRes.settings.quietHoursEnd || '08:00');
-        setQuietHoursTimezone(settingsRes.settings.quietHoursTimezone || 'America/New_York');
-        setRequirePhone(settingsRes.settings.requirePhone);
         setCallioConnected(settingsRes.settings.callioConnected);
-        setCallioFromPhone(settingsRes.settings.callioFromPhone || '');
         setShowApiKeyInput(false);
         if (settingsRes.settings.callioConnected) {
           loadPhoneNumbers(accountId);
+        } else {
+          setCallioPhoneNumbers([]);
         }
       } else {
         // Reset to defaults
-        setEnabled(false);
-        setDestinationPhone('');
-        setQuietHoursEnabled(false);
-        setQuietHoursStart('22:00');
-        setQuietHoursEnd('08:00');
-        setQuietHoursTimezone('America/New_York');
-        setRequirePhone(true);
         setCallioConnected(false);
         setCallioApiKey('');
-        setCallioFromPhone('');
         setCallioPhoneNumbers([]);
         setShowApiKeyInput(false);
       }
@@ -129,33 +95,6 @@ export function PhoneSettings() {
       setCallioPhoneNumbers(result.phoneNumbers);
     } catch (err) {
       console.error('Failed to load phone numbers:', err);
-    }
-  }
-
-  async function handleSave() {
-    if (!selectedAccountId) return;
-
-    try {
-      setSaving(true);
-      setError(null);
-      setSuccessMessage(null);
-
-      await notificationsApi.updateSettings(selectedAccountId, {
-        enabled,
-        destinationPhone: destinationPhone || undefined,
-        callioFromPhone: callioFromPhone || undefined,
-        quietHoursStart: quietHoursEnabled ? quietHoursStart : undefined,
-        quietHoursEnd: quietHoursEnabled ? quietHoursEnd : undefined,
-        quietHoursTimezone: quietHoursEnabled ? quietHoursTimezone : undefined,
-        requirePhone,
-      });
-
-      setSuccessMessage('Settings saved successfully');
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err: any) {
-      setError(err.message || 'Failed to save settings');
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -182,10 +121,6 @@ export function PhoneSettings() {
       setCallioApiKey('');
       setSuccessMessage('Connected to Callio successfully');
       setTimeout(() => setSuccessMessage(null), 3000);
-
-      if (result.phoneNumbers.length > 0 && !callioFromPhone) {
-        setCallioFromPhone(result.phoneNumbers[0].phoneNumber);
-      }
     } catch (err: any) {
       setError(err.message || 'Failed to connect to Callio');
     } finally {
@@ -206,7 +141,6 @@ export function PhoneSettings() {
 
       setCallioConnected(false);
       setCallioApiKey('');
-      setCallioFromPhone('');
       setCallioPhoneNumbers([]);
       setSuccessMessage('Disconnected from Callio');
       setTimeout(() => setSuccessMessage(null), 3000);
@@ -334,82 +268,52 @@ export function PhoneSettings() {
                     </button>
                   </div>
 
-                  {callioPhoneNumbers.length > 0 && (
-                    <>
-                      <div className="form-group">
-                        <label>
-                          <Phone size={14} />
-                          Default Send From Number
-                        </label>
-                        <div className="select-wrapper">
-                          <select
-                            value={callioFromPhone}
-                            onChange={e => setCallioFromPhone(e.target.value)}
-                          >
-                            <option value="">Auto-select</option>
-                            {callioPhoneNumbers.map(phone => (
-                              <option key={phone.id} value={phone.phoneNumber}>
-                                {phone.phoneNumber} ({phone.provider}{phone.friendlyName ? ` - ${phone.friendlyName}` : ''})
-                              </option>
-                            ))}
-                          </select>
-                          <ChevronDown size={16} />
-                        </div>
-                      </div>
-
-                      {/* Phone Numbers List */}
-                      <div className="phone-numbers-list">
-                        <label>Available Phone Numbers</label>
-                        <div className="phone-cards">
-                          {callioPhoneNumbers.map(phone => {
-                            const a2pInfo = getA2PStatusInfo(phone.a2pStatus);
-                            const isSelected = callioFromPhone === phone.phoneNumber;
-                            return (
-                              <div
-                                key={phone.id}
-                                className={`phone-card ${isSelected ? 'selected' : ''}`}
-                                onClick={() => setCallioFromPhone(phone.phoneNumber)}
-                              >
-                                <div className="phone-card-header">
-                                  <span className="phone-number">{phone.phoneNumber}</span>
-                                  {isSelected && <CheckCircle size={16} className="selected-icon" />}
-                                </div>
-                                <div className="phone-card-details">
-                                  <span className="provider-badge">{phone.provider}</span>
-                                  {phone.friendlyName && (
-                                    <span className="friendly-name">{phone.friendlyName}</span>
-                                  )}
-                                </div>
-                                <div className="phone-card-status">
-                                  <span className={`a2p-status ${a2pInfo.className}`}>
-                                    {a2pInfo.icon}
-                                    {a2pInfo.label}
-                                  </span>
-                                  <div className="capabilities">
-                                    {phone.smsEnabled && <span className="cap-badge sms">SMS</span>}
-                                    {phone.mmsEnabled && <span className="cap-badge mms">MMS</span>}
-                                    {phone.voiceEnabled && <span className="cap-badge voice">Voice</span>}
-                                  </div>
+                  {callioPhoneNumbers.length > 0 ? (
+                    <div className="phone-numbers-list">
+                      <label>Available Phone Numbers ({callioPhoneNumbers.length})</label>
+                      <p className="form-hint">These phone numbers can be used when creating SMS alert rules.</p>
+                      <div className="phone-cards">
+                        {callioPhoneNumbers.map(phone => {
+                          const a2pInfo = getA2PStatusInfo(phone.a2pStatus);
+                          return (
+                            <div key={phone.id} className="phone-card">
+                              <div className="phone-card-header">
+                                <span className="phone-number">{phone.phoneNumber}</span>
+                              </div>
+                              <div className="phone-card-details">
+                                <span className="provider-badge">{phone.provider}</span>
+                                {phone.friendlyName && (
+                                  <span className="friendly-name">{phone.friendlyName}</span>
+                                )}
+                              </div>
+                              <div className="phone-card-status">
+                                <span className={`a2p-status ${a2pInfo.className}`}>
+                                  {a2pInfo.icon}
+                                  {a2pInfo.label}
+                                </span>
+                                <div className="capabilities">
+                                  {phone.smsEnabled && <span className="cap-badge sms">SMS</span>}
+                                  {phone.mmsEnabled && <span className="cap-badge mms">MMS</span>}
+                                  {phone.voiceEnabled && <span className="cap-badge voice">Voice</span>}
                                 </div>
                               </div>
-                            );
-                          })}
-                        </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    </>
-                  )}
-
-                  {callioPhoneNumbers.length === 0 && (
+                    </div>
+                  ) : (
                     <div className="warning-message">
                       <AlertCircle size={16} />
-                      No phone numbers found in your Callio account.
+                      No phone numbers found in your Callio account. Please add a phone number in Callio first.
                     </div>
                   )}
                 </div>
               ) : (
                 <div className="callio-disconnected">
                   <p className="connection-info">
-                    Connect your Callio account to send SMS notifications.
+                    Connect your Callio account to send SMS notifications. Get your API key from the
+                    Callio settings page.
                   </p>
 
                   {showApiKeyInput ? (
@@ -466,124 +370,6 @@ export function PhoneSettings() {
                   )}
                 </div>
               )}
-            </div>
-
-            {/* Notification Settings */}
-            <div className="settings-section">
-              <div className="section-header">
-                <h2>Notification Settings</h2>
-              </div>
-
-              <div className="form-group checkbox-group">
-                <label className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={enabled}
-                    onChange={e => setEnabled(e.target.checked)}
-                  />
-                  <span className="toggle-slider"></span>
-                  <span className="toggle-label">
-                    Enable SMS notifications for this account
-                  </span>
-                </label>
-              </div>
-
-              <div className="form-group">
-                <label>
-                  <Phone size={14} />
-                  Destination Phone Number
-                </label>
-                <input
-                  type="tel"
-                  value={destinationPhone}
-                  onChange={e => setDestinationPhone(e.target.value)}
-                  placeholder="+1 555 123 4567"
-                />
-                <p className="form-hint">Your phone number to receive lead notifications</p>
-              </div>
-            </div>
-
-            {/* General Settings */}
-            <div className="settings-section">
-              <div className="section-header">
-                <h2>
-                  <Clock size={18} />
-                  General Settings
-                </h2>
-              </div>
-
-              <div className="form-group checkbox-group">
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={requirePhone}
-                    onChange={e => setRequirePhone(e.target.checked)}
-                  />
-                  Only send if lead has a phone number
-                </label>
-              </div>
-
-              <div className="form-group checkbox-group">
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={quietHoursEnabled}
-                    onChange={e => setQuietHoursEnabled(e.target.checked)}
-                  />
-                  Enable quiet hours (no notifications during this time)
-                </label>
-              </div>
-
-              {quietHoursEnabled && (
-                <div className="quiet-hours-config">
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label>From</label>
-                      <input
-                        type="time"
-                        value={quietHoursStart}
-                        onChange={e => setQuietHoursStart(e.target.value)}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>To</label>
-                      <input
-                        type="time"
-                        value={quietHoursEnd}
-                        onChange={e => setQuietHoursEnd(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <div className="form-group">
-                    <label>Timezone</label>
-                    <div className="select-wrapper">
-                      <select
-                        value={quietHoursTimezone}
-                        onChange={e => setQuietHoursTimezone(e.target.value)}
-                      >
-                        {TIMEZONE_OPTIONS.map(tz => (
-                          <option key={tz.value} value={tz.value}>
-                            {tz.label}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown size={16} />
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Save Button */}
-            <div className="settings-actions">
-              <button
-                className="btn btn-primary"
-                onClick={handleSave}
-                disabled={saving}
-              >
-                {saving ? <Loader2 size={16} className="spinner" /> : <Save size={16} />}
-                Save Settings
-              </button>
             </div>
           </>
         )}

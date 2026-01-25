@@ -188,6 +188,8 @@ export interface NotificationRule {
   name: string;
   triggerType: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply' | null;
+  fromPhone: string | null;  // Callio phone to send FROM
+  toPhone: string | null;    // Destination phone to send TO
   template: string;
   enabled: boolean;
   triggerCount: number;
