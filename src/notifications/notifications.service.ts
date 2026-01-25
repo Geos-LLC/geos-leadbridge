@@ -500,11 +500,6 @@ export class NotificationsService {
       return;
     }
 
-    if (!settings.destinationPhone) {
-      this.logger.warn(`No destination phone configured for account ${savedAccountId}`);
-      return;
-    }
-
     if (!settings.callioApiKey) {
       this.logger.warn(`No Callio API key configured for account ${savedAccountId}`);
       return;
@@ -525,8 +520,13 @@ export class NotificationsService {
     // Get enabled new_lead rules
     const rules = settings.notificationRules;
 
-    // If no rules exist, use the legacy settings template (backward compatibility)
+    // If no rules exist, check for legacy settings (backward compatibility)
     if (rules.length === 0) {
+      // Only use legacy if destinationPhone is configured
+      if (!settings.destinationPhone) {
+        this.logger.log(`No new_lead rules and no legacy destination phone for account ${savedAccountId}`);
+        return;
+      }
       this.logger.log(`No new_lead rules found, using legacy template`);
       await this.sendNotificationWithRule(settings, null, context);
       return;
@@ -574,11 +574,6 @@ export class NotificationsService {
       return;
     }
 
-    if (!settings.destinationPhone) {
-      this.logger.warn(`No destination phone configured for account ${savedAccountId}`);
-      return;
-    }
-
     if (!settings.callioApiKey) {
       this.logger.warn(`No Callio API key configured for account ${savedAccountId}`);
       return;
@@ -591,6 +586,12 @@ export class NotificationsService {
     }
 
     const rules = settings.notificationRules;
+
+    if (rules.length === 0) {
+      this.logger.log(`No customer_reply rules for account ${savedAccountId}`);
+      return;
+    }
+
     this.logger.log(`Found ${rules.length} customer_reply rules`);
 
     for (const rule of rules) {
@@ -728,10 +729,6 @@ export class NotificationsService {
       return { success: false, error: 'Notification settings not configured' };
     }
 
-    if (!settings.destinationPhone) {
-      return { success: false, error: 'No destination phone configured' };
-    }
-
     if (!settings.callioApiKey) {
       return { success: false, error: 'No Callio API key configured. Please connect to Callio first.' };
     }
@@ -745,6 +742,14 @@ export class NotificationsService {
       if (!rule) {
         return { success: false, error: 'Rule not found' };
       }
+    }
+
+    // Use rule's phone numbers (preferred) or fallback to settings (legacy)
+    const toPhone = rule?.toPhone || settings.destinationPhone;
+    const fromPhone = rule?.fromPhone || settings.callioFromPhone;
+
+    if (!toPhone) {
+      return { success: false, error: 'No destination phone configured for this rule' };
     }
 
     const testLead = {
@@ -765,8 +770,8 @@ export class NotificationsService {
         notificationSettingsId: settings.id,
         notificationRuleId: rule?.id,
         ruleName: `[TEST] ${ruleName}`,
-        toPhone: settings.destinationPhone,
-        fromPhone: settings.callioFromPhone,
+        toPhone: toPhone,
+        fromPhone: fromPhone,
         status: 'pending',
         messageBody: `[TEST] ${messageBody}`,
         metadata: JSON.stringify({ test: true, ruleId: rule?.id }),
@@ -775,9 +780,9 @@ export class NotificationsService {
 
     try {
       const result = await this.sendViaCallio({
-        to: settings.destinationPhone,
+        to: toPhone,
         body: `[TEST] ${messageBody}`,
-        fromPhone: settings.callioFromPhone,
+        fromPhone: fromPhone,
         apiKey: settings.callioApiKey,
         senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
         callioWorkspaceId: settings.callioWorkspaceId,
