@@ -721,6 +721,7 @@ export function NotificationSettings() {
                         <th>From</th>
                         <th>To</th>
                         <th>Status</th>
+                        <th>Delivered</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -766,6 +767,18 @@ export function NotificationSettings() {
                               </span>
                               )}
                             </td>
+                          <td className="log-delivered">
+                            {log.deliveredAt ? (
+                              <span className="delivered-time">
+                                <CheckCircle size={12} />
+                                {new Date(log.deliveredAt).toLocaleString()}
+                              </span>
+                            ) : log.status === 'failed' ? (
+                              <span className="not-delivered">—</span>
+                            ) : (
+                              <span className="pending-delivery">Delivering...</span>
+                            )}
+                          </td>
                           </tr>
                         ))}
                       </tbody>

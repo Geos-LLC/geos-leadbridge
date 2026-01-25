@@ -3909,6 +3909,29 @@ body {
   color: var(--text-secondary);
 }
 
+/* Delivered Column */
+.notification-logs .log-delivered {
+  white-space: nowrap;
+}
+
+.notification-logs .delivered-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--success);
+  font-size: 12px;
+}
+
+.notification-logs .pending-delivery {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.notification-logs .not-delivered {
+  color: var(--text-muted);
+}
+
 /* Phone Numbers List with Status */
 .phone-numbers-list {
   margin-top: 20px;
