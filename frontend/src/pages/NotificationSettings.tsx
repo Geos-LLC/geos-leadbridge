@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { ArrowLeft, Bell, Loader2, X, ChevronDown, Send, Phone, MessageSquare, AlertCircle, CheckCircle, Plus, Edit2, Trash2, Zap, Save } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { notificationsApi, thumbtackApi, type CallioPhoneNumber, type CreateNotificationRuleDto, type UpdateNotificationRuleDto } from '../services/api';
-import type { NotificationRule, SavedAccount } from '../types';
+import type { NotificationRule, NotificationLog, SavedAccount } from '../types';
 
 // Available variables for SMS template
 const TEMPLATE_VARIABLES = [
@@ -26,6 +26,10 @@ export function NotificationSettings() {
   // Phone numbers for each account (for the rule form)
   const [accountPhoneNumbers, setAccountPhoneNumbers] = useState<Record<string, CallioPhoneNumber[]>>({});
 
+  // Notification logs
+  const [logs, setLogs] = useState<NotificationLog[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+
   // Rule editing state
   const [isCreatingRule, setIsCreatingRule] = useState(false);
   const [editingRule, setEditingRule] = useState<NotificationRule | null>(null);
@@ -47,8 +51,10 @@ export function NotificationSettings() {
   useEffect(() => {
     if (selectedAccountId === 'all') {
       loadAllRules();
+      setLogs([]); // Clear logs when viewing all accounts
     } else if (selectedAccountId) {
       loadRulesForAccount(selectedAccountId);
+      loadLogs(selectedAccountId);
     }
   }, [selectedAccountId]);
 
@@ -112,6 +118,19 @@ export function NotificationSettings() {
         ...prev,
         [accountId]: [],
       }));
+    }
+  }
+
+  async function loadLogs(accountId: string) {
+    try {
+      setLogsLoading(true);
+      const result = await notificationsApi.getLogs(accountId, 50);
+      setLogs(result.logs);
+    } catch (err) {
+      console.error('Failed to load notification logs:', err);
+      setLogs([]);
+    } finally {
+      setLogsLoading(false);
     }
   }
 
@@ -664,6 +683,79 @@ export function NotificationSettings() {
                 </div>
               )}
             </div>
+
+            {/* Notification Logs Section */}
+            {selectedAccountId !== 'all' && (
+              <div className="settings-section notification-logs">
+                <div className="section-header">
+                  <h2>
+                    <MessageSquare size={18} />
+                    Message History
+                  </h2>
+                </div>
+
+                {logsLoading ? (
+                  <div className="loading-container">
+                    <Loader2 size={24} className="spinner" />
+                  </div>
+                ) : logs.length > 0 ? (
+                  <div className="logs-table-wrapper">
+                    <table className="logs-table">
+                      <thead>
+                        <tr>
+                          <th>Time</th>
+                          <th>Rule</th>
+                          <th>To</th>
+                          <th>Message</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {logs.map(log => (
+                          <tr key={log.id}>
+                            <td className="log-time">
+                              {new Date(log.createdAt).toLocaleString()}
+                            </td>
+                            <td className="log-rule">
+                              {log.ruleName ? (
+                                <span className="rule-badge">{log.ruleName}</span>
+                              ) : (
+                                <span className="rule-badge legacy">Legacy</span>
+                              )}
+                            </td>
+                            <td className="log-phone">{log.toPhone}</td>
+                            <td className="log-message">
+                              <span title={log.messageBody}>
+                                {log.messageBody.substring(0, 40)}{log.messageBody.length > 40 ? '...' : ''}
+                              </span>
+                            </td>
+                            <td className="log-status">
+                              <span className={`status-badge ${log.status}`}>
+                                {log.status === 'delivered' && <CheckCircle size={12} />}
+                                {log.status === 'failed' && <AlertCircle size={12} />}
+                                {log.status === 'sent' && <Send size={12} />}
+                                {log.status === 'pending' && <Loader2 size={12} className="spinner" />}
+                                {log.status === 'queued' && <Loader2 size={12} />}
+                                {log.status}
+                              </span>
+                              {log.error && (
+                                <span className="error-hint" title={log.error}>
+                                  <AlertCircle size={12} />
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="empty-logs">
+                    <p>No messages sent yet. Messages will appear here when notifications are triggered.</p>
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>
