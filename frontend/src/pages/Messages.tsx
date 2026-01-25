@@ -264,10 +264,23 @@ export function Messages() {
     }
   };
 
+  // Load messages when selected lead changes
   useEffect(() => {
     if (selectedLead) {
       loadMessagesForLead(selectedLead);
     }
+  }, [selectedLead]);
+
+  // Auto-poll messages every 10 seconds when a conversation is open
+  useEffect(() => {
+    if (!selectedLead) return;
+
+    const pollInterval = setInterval(() => {
+      console.log('[Messages] Auto-polling messages for lead:', selectedLead.id);
+      loadMessagesForLead(selectedLead);
+    }, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(pollInterval);
   }, [selectedLead]);
 
   useEffect(() => {
@@ -755,7 +768,16 @@ export function Messages() {
                 <div
                   key={lead.id}
                   className={`lead-item ${selectedLead?.id === lead.id ? 'selected' : ''} ${!isCurrentAccount ? 'other-account' : ''} ${isUpdated ? 'has-updates' : ''} ${isChecked ? 'checked' : ''}`}
-                  onClick={() => multiSelectMode ? toggleLeadSelection(lead.id, { stopPropagation: () => {} } as React.MouseEvent) : setSelectedLead(lead)}
+                  onClick={() => {
+                    if (multiSelectMode) {
+                      toggleLeadSelection(lead.id, { stopPropagation: () => {} } as React.MouseEvent);
+                    } else if (selectedLead?.id === lead.id) {
+                      // Clicking same lead - refresh messages
+                      loadMessagesForLead(lead);
+                    } else {
+                      setSelectedLead(lead);
+                    }
+                  }}
                 >
                   {multiSelectMode && (
                     <div
