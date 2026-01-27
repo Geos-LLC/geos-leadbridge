@@ -843,7 +843,7 @@ export function NotificationSettings() {
                             ) : log.status === 'failed' ? (
                               <span className="not-delivered">—</span>
                             ) : (
-                              <span className="pending-delivery">Delivering...</span>
+                              <span className="pending-delivery">Pending</span>
                             )}
                           </td>
                           </tr>
