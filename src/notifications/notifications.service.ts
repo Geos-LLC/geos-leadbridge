@@ -275,7 +275,7 @@ export class NotificationsService {
           include: {
             notificationLogs: {
               orderBy: { createdAt: 'desc' },
-              take: Math.ceil(limit / 3), // Distribute limit across accounts
+              take: limit, // Fetch full limit per account, will be sorted and limited at the end
             },
           },
         },
