@@ -777,12 +777,21 @@ export class NotificationsService {
       return { success: false, error: 'Saved account not found' };
     }
 
-    const settings = await this.prisma.notificationSettings.findUnique({
+    let settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
     });
 
     if (!settings) {
       return { success: false, error: 'Notification settings not configured' };
+    }
+
+    // Auto-fix legacy records where enabled was incorrectly set to false
+    if (!settings.enabled) {
+      settings = await this.prisma.notificationSettings.update({
+        where: { id: settings.id },
+        data: { enabled: true },
+      });
+      this.logger.log(`[sendTestNotification] Auto-fixed enabled=false for account ${savedAccountId}`);
     }
 
     if (!settings.callioApiKey) {
