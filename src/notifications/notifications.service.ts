@@ -164,12 +164,22 @@ export class NotificationsService {
       throw new NotFoundException('Saved account not found');
     }
 
-    const settings = await this.prisma.notificationSettings.findUnique({
+    let settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
     });
 
     if (!settings) {
       return null;
+    }
+
+    // Auto-fix legacy records where enabled was incorrectly set to false
+    // The global enabled flag should always be true (individual rules have their own toggle)
+    if (!settings.enabled) {
+      settings = await this.prisma.notificationSettings.update({
+        where: { id: settings.id },
+        data: { enabled: true },
+      });
+      this.logger.log(`[getSettings] Auto-fixed enabled=false for account ${savedAccountId}`);
     }
 
     return this.formatSettings(settings);
@@ -196,7 +206,7 @@ export class NotificationsService {
       where: { savedAccountId },
       create: {
         savedAccountId,
-        enabled: data.enabled ?? false,
+        enabled: data.enabled ?? true,  // Default to enabled (rules have their own toggle)
         destinationPhone: data.destinationPhone,
         senderMode: data.senderMode ?? 'shared',
         callioApiKey: data.callioApiKey,
@@ -403,7 +413,7 @@ export class NotificationsService {
     const settings = await this.prisma.notificationSettings.upsert({
       where: { savedAccountId },
       create: { savedAccountId, enabled: true },
-      update: {},
+      update: { enabled: true },  // Auto-fix legacy records with enabled=false
     });
 
     const rule = await this.prisma.notificationRule.create({
