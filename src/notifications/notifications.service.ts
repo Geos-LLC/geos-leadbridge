@@ -399,10 +399,10 @@ export class NotificationsService {
       throw new NotFoundException('Saved account not found');
     }
 
-    // Ensure settings exist
+    // Ensure settings exist (enabled: true since individual rules have their own toggle)
     const settings = await this.prisma.notificationSettings.upsert({
       where: { savedAccountId },
-      create: { savedAccountId },
+      create: { savedAccountId, enabled: true },
       update: {},
     });
 
@@ -1206,11 +1206,13 @@ export class NotificationsService {
       update: {
         callioApiKey: apiKey,
         callioWebhookId: webhookResult.webhookId,
+        enabled: true,  // Ensure notifications are enabled when connecting
       },
       create: {
         savedAccountId,
         callioApiKey: apiKey,
         callioWebhookId: webhookResult.webhookId,
+        enabled: true,
       },
     });
 
