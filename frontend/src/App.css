@@ -3282,7 +3282,7 @@ body {
 }
 
 .rule-account {
-  margin: 6px 0;
+  /* No margin needed - parent uses gap */
 }
 
 .rule-account .account-badge {
@@ -4231,6 +4231,9 @@ body {
   border-radius: var(--radius);
   padding: 16px;
   transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .rule-card:hover {
@@ -4243,17 +4246,23 @@ body {
   background: var(--bg-secondary);
 }
 
+.rule-card.disabled:hover {
+  border-color: var(--border-color);
+}
+
 .rule-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  gap: 12px;
 }
 
 .rule-info {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: 1;
+  min-width: 0;
 }
 
 .rule-name {
@@ -4292,11 +4301,12 @@ body {
 .rule-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .rule-actions .toggle-switch.small {
-  margin-right: 8px;
+  margin-right: 6px;
 }
 
 .rule-actions .toggle-switch.small .toggle-slider {
@@ -4354,7 +4364,7 @@ body {
   padding: 10px;
   background: var(--bg-secondary);
   border-radius: var(--radius-sm);
-  margin-bottom: 10px;
+  line-height: 1.4;
 }
 
 .rule-template svg {
@@ -4375,11 +4385,24 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 8px 0;
   padding: 8px 12px;
   background: var(--bg-secondary);
   border-radius: var(--radius-sm);
   font-size: 13px;
+}
+
+.rule-phones .phone-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-family: 'SF Mono', 'Consolas', monospace;
+  font-size: 12px;
+}
+
+.rule-phones .phone-info svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .rule-phones .phone-label {

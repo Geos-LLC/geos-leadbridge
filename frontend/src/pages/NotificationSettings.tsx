@@ -340,13 +340,21 @@ export function NotificationSettings() {
       return;
     }
 
+    const newEnabled = !rule.enabled;
+
+    // Optimistic update - switch immediately
+    setRules(prev => prev.map(r => r.id === rule.id ? { ...r, enabled: newEnabled } : r));
+
     try {
       const result = await notificationsApi.updateRule(accountId, rule.id, {
-        enabled: !rule.enabled,
+        enabled: newEnabled,
       });
+      // Update with server response (in case of any other field changes)
       const updatedRule = { ...result.rule, savedAccountId: rule.savedAccountId, savedAccount: rule.savedAccount };
       setRules(prev => prev.map(r => r.id === rule.id ? updatedRule : r));
     } catch (err: any) {
+      // Revert on error
+      setRules(prev => prev.map(r => r.id === rule.id ? { ...r, enabled: rule.enabled } : r));
       setError(err.message || 'Failed to update rule');
     }
   }
