@@ -477,6 +477,9 @@ export class NotificationsService {
       throw new NotFoundException('Notification rule not found');
     }
 
+    this.logger.log(`[updateRule] Updating rule ${ruleId} with data: ${JSON.stringify(data)}`);
+    this.logger.log(`[updateRule] Previous enabled value: ${existing.enabled}`);
+
     const rule = await this.prisma.notificationRule.update({
       where: { id: ruleId },
       data: {
@@ -490,7 +493,7 @@ export class NotificationsService {
       },
     });
 
-    this.logger.log(`Updated notification rule: ${rule.id}`);
+    this.logger.log(`[updateRule] Updated rule ${rule.id}, new enabled: ${rule.enabled}`);
     return this.formatRule(rule);
   }
 
