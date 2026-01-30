@@ -338,6 +338,17 @@ export class NotificationsService {
       },
     });
 
+    // Auto-fix any accounts with enabled=false (legacy bug)
+    for (const account of accounts) {
+      if (account.notificationSettings && !account.notificationSettings.enabled) {
+        await this.prisma.notificationSettings.update({
+          where: { id: account.notificationSettings.id },
+          data: { enabled: true },
+        });
+        this.logger.log(`[getAllRules] Auto-fixed enabled=false for account ${account.id}`);
+      }
+    }
+
     const allRules: NotificationRuleResponse[] = [];
 
     for (const account of accounts) {
