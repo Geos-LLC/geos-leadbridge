@@ -570,4 +570,73 @@ export const notificationsApi = {
   },
 };
 
+// Analytics types
+export interface CategoryDistribution {
+  category: string;
+  count: number;
+  percentage: number;
+}
+
+export interface ConnectionTimeMetric {
+  averageMinutes: number;
+  median: number;
+  min: number;
+  max: number;
+  count: number;
+}
+
+export interface ResponseTimeMetric {
+  averageMinutes: number;
+  median: number;
+  count: number;
+}
+
+export interface MessagesPerLeadMetric {
+  average: number;
+  median: number;
+  min: number;
+  max: number;
+}
+
+export interface CustomerEngagementMetric {
+  engagedCount: number;
+  totalCount: number;
+  engagementRate: number;
+}
+
+export interface AnalyticsData {
+  categoryDistribution: CategoryDistribution[];
+  connectionTime: ConnectionTimeMetric;
+  proResponseTime: ResponseTimeMetric;
+  customerResponseTime: ResponseTimeMetric;
+  messagesPerLead: MessagesPerLeadMetric;
+  customerEngagement: CustomerEngagementMetric;
+  totalLeads: number;
+  dateRange: {
+    start: string;
+    end: string;
+  };
+  filters: {
+    businessId?: string;
+    businessName?: string;
+  };
+}
+
+// Analytics API
+export const analyticsApi = {
+  getAnalytics: async (params: {
+    businessId?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<{ success: boolean; data: AnalyticsData }> => {
+    const queryParams = new URLSearchParams();
+    if (params.businessId) queryParams.append('businessId', params.businessId);
+    if (params.startDate) queryParams.append('startDate', params.startDate);
+    if (params.endDate) queryParams.append('endDate', params.endDate);
+
+    const { data } = await api.get(`/v1/analytics?${queryParams.toString()}`);
+    return data;
+  },
+};
+
 export default api;

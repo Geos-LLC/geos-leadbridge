@@ -10,6 +10,7 @@ import { MessageSettings } from './pages/MessageSettings';
 import { AutomationSettings } from './pages/AutomationSettings';
 import { NotificationSettings } from './pages/NotificationSettings';
 import { PhoneSettings } from './pages/PhoneSettings';
+import { Analytics } from './pages/Analytics';
 import { useAuthStore } from './store/authStore';
 import './App.css';
 
@@ -36,6 +37,7 @@ function App() {
           <Route element={<Layout />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/messages" element={<Messages />} />
+            <Route path="/analytics" element={<Analytics />} />
             <Route path="/message-settings" element={<MessageSettings />} />
             <Route path="/automation" element={<AutomationSettings />} />
             <Route path="/notifications" element={<NotificationSettings />} />
