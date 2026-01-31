@@ -363,7 +363,7 @@ export function Messages() {
     setResyncingMessages(true);
     setResyncError(null);
     try {
-      const result = await leadsApi.resyncMessages(selectedLead.id);
+      await leadsApi.resyncMessages(selectedLead.id);
       // Reload messages after resync
       await loadMessagesForLead(selectedLead);
     } catch (err: any) {
