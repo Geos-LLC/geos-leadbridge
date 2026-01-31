@@ -88,6 +88,10 @@ export function Analytics() {
   };
 
   const formatDuration = (minutes: number): string => {
+    if (minutes < 1) {
+      const seconds = Math.round(minutes * 60);
+      return `${seconds}s`;
+    }
     if (minutes < 60) {
       return `${Math.round(minutes)}m`;
     }
