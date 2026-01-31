@@ -66,7 +66,6 @@ function hasNewUpdates(lead: Lead, lastSeenTimestamps: Record<string, string>): 
 }
 
 export function Messages() {
-  console.log('[Messages] Component rendering');
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { leads, setLeads, selectedLead, setSelectedLead, configuredBusinessId, savedAccounts, setSavedAccounts } = useAppStore();
@@ -180,7 +179,6 @@ export function Messages() {
     // Refresh leads when tab becomes visible (background refresh - no loading state)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        console.log('[Messages] Tab became visible, refreshing data in background');
         loadLeadsBackground();
       }
     };
@@ -195,7 +193,6 @@ export function Messages() {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && selectedLead) {
-        console.log('[Messages] Tab visible, refreshing messages for current conversation');
         loadMessagesForLead(selectedLead);
       }
     };
@@ -246,11 +243,9 @@ export function Messages() {
     if (visibleLeads.length > 0) {
       const currentSelectionVisible = selectedLead && visibleLeads.some(l => l.id === selectedLead.id);
       if (!currentSelectionVisible) {
-        console.log('[Messages] Selection invalid, selecting first visible lead:', visibleLeads[0]);
         setSelectedLead(visibleLeads[0]);
       }
     } else {
-      console.log('[Messages] No visible leads, clearing selection');
       setSelectedLead(null);
     }
   }, [accountFilter, savedAccounts, leads]);
@@ -276,7 +271,6 @@ export function Messages() {
     if (!selectedLead) return;
 
     const pollInterval = setInterval(() => {
-      console.log('[Messages] Auto-polling messages for lead:', selectedLead.id);
       loadMessagesForLead(selectedLead);
     }, 10000); // Poll every 10 seconds
 
@@ -293,7 +287,6 @@ export function Messages() {
     try {
       // Load all leads (no limit) to support date filtering across full history
       const { leads: loadedLeads } = await leadsApi.getLeads();
-      console.log('[Messages] Loaded leads:', loadedLeads.length, loadedLeads);
       // Sort leads by lastMessageAt descending (most recent message first)
       // Fall back to createdAt if lastMessageAt is not available
       const sortedLeads = [...loadedLeads].sort((a, b) => {
@@ -320,7 +313,6 @@ export function Messages() {
         return new Date(bTime).getTime() - new Date(aTime).getTime();
       });
       setLeads(sortedLeads);
-      console.log('[Messages] Background refresh complete:', sortedLeads.length, 'leads');
     } catch (err) {
       console.error('[Messages] Background refresh failed:', err);
     }
@@ -336,18 +328,15 @@ export function Messages() {
   const loadMessagesForLead = async (lead: Lead) => {
     setLoadingMessages(true);
     setMessages([]);
-    console.log('[Messages] Loading messages for lead:', lead.id, lead.externalRequestId);
     // Mark this lead as seen when we load its messages
     markLeadAsSeen(lead);
     try {
       // Messages come from local database (stored via webhooks)
       // No API sync needed - webhooks deliver all updates
       const { messages: apiMessages } = await leadsApi.getMessages(lead.id);
-      console.log('[Messages] API returned messages:', apiMessages);
       const convertedMessages: LocalMessage[] = apiMessages.map((msg) => {
         // Normalize sender to lowercase for consistent comparison
         const sender = (msg.sender || '').toLowerCase() as 'pro' | 'customer';
-        console.log('[Messages] Message sender raw:', msg.sender, '-> normalized:', sender);
         return {
           id: msg.id || msg.externalMessageId,
           content: msg.content,
@@ -357,7 +346,6 @@ export function Messages() {
           attachments: msg.attachments,
         };
       });
-      console.log('[Messages] Converted messages:', convertedMessages);
       setMessages(convertedMessages);
     } catch (err) {
       console.error('[Messages] Failed to load messages:', err);
@@ -372,13 +360,10 @@ export function Messages() {
 
   const handleResyncMessages = async () => {
     if (!selectedLead) return;
-    console.log('[Messages] Resync button clicked for lead:', selectedLead.id, selectedLead.customerName);
     setResyncingMessages(true);
     setResyncError(null);
     try {
-      console.log('[Messages] Calling leadsApi.resyncMessages...');
       const result = await leadsApi.resyncMessages(selectedLead.id);
-      console.log('[Messages] Resync result:', result);
       // Reload messages after resync
       await loadMessagesForLead(selectedLead);
     } catch (err: any) {
@@ -775,6 +760,7 @@ export function Messages() {
                       // Clicking same lead - refresh messages
                       loadMessagesForLead(lead);
                     } else {
+                      console.log('[Messages] Negotiation object:', lead);
                       setSelectedLead(lead);
                     }
                   }}
