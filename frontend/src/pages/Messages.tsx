@@ -266,17 +266,6 @@ export function Messages() {
     }
   }, [selectedLead]);
 
-  // Auto-poll messages every 10 seconds when a conversation is open
-  useEffect(() => {
-    if (!selectedLead) return;
-
-    const pollInterval = setInterval(() => {
-      loadMessagesForLead(selectedLead);
-    }, 10000); // Poll every 10 seconds
-
-    return () => clearInterval(pollInterval);
-  }, [selectedLead]);
-
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
