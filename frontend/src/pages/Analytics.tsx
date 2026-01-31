@@ -249,12 +249,12 @@ export function Analytics() {
                       cx="50%"
                       cy="50%"
                       labelLine={false}
-                      label={(entry) => `${entry.category}: ${entry.count}`}
+                      label={(entry: any) => `${entry.category}: ${entry.count}`}
                       outerRadius={80}
                       fill="#8884d8"
                       dataKey="count"
                     >
-                      {analytics.categoryDistribution.map((entry, index) => (
+                      {analytics.categoryDistribution.map((_, index) => (
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
