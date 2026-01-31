@@ -9,7 +9,6 @@ import {
   Clock,
   Users,
   RefreshCw,
-  Loader2,
 } from 'lucide-react';
 import {
   PieChart,
@@ -61,9 +60,15 @@ export function Analytics() {
     }
     try {
       const params = buildQueryParams();
-      const { data } = await analyticsApi.getAnalytics(params);
-      setAnalytics(data);
-      setPreviousAnalytics(data); // Update cache
+
+      // Phase 1: Load basic/fast analytics first (categories, total leads, engagement)
+      const { data: basicData } = await analyticsApi.getBasicAnalytics(params);
+      setAnalytics(basicData as AnalyticsData);
+
+      // Phase 2: Load detailed/slow analytics (connection time, response times, messages per lead)
+      const { data: fullData } = await analyticsApi.getAnalytics(params);
+      setAnalytics(fullData);
+      setPreviousAnalytics(fullData); // Update cache
     } catch (err) {
       console.error('Failed to load analytics:', err);
     } finally {
@@ -115,12 +120,39 @@ export function Analytics() {
     setSearchParams(searchParams);
   };
 
-  // Show full-screen loader only on first load (no previous data)
+  // Show skeleton UI on first load (no previous data)
   if (loading && !previousAnalytics) {
     return (
-      <div className="loading-container">
-        <Loader2 className="spinner" size={48} />
-        <p>Loading analytics...</p>
+      <div className="analytics-page">
+        <div className="analytics-loading-bar" />
+        <div className="analytics-header">
+          <div className="header-left">
+            <BarChart3 size={32} />
+            <h1>Analytics</h1>
+          </div>
+          <div className="skeleton-pulse" style={{ width: '300px', height: '40px', borderRadius: '8px' }} />
+        </div>
+
+        {/* Skeleton Summary Cards */}
+        <div className="metrics-summary">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div key={i} className="metric-card">
+              <div className="skeleton-pulse" style={{ width: '60%', height: '20px', marginBottom: '12px' }} />
+              <div className="skeleton-pulse" style={{ width: '80%', height: '32px', marginBottom: '8px' }} />
+              <div className="skeleton-pulse" style={{ width: '40%', height: '16px' }} />
+            </div>
+          ))}
+        </div>
+
+        {/* Skeleton Charts */}
+        <div className="charts-grid">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="chart-card">
+              <div className="skeleton-pulse" style={{ width: '50%', height: '24px', marginBottom: '16px' }} />
+              <div className="skeleton-pulse" style={{ width: '100%', height: '300px', borderRadius: '8px' }} />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -218,29 +250,43 @@ export function Analytics() {
               </div>
             </div>
 
-            <div className="metric-card">
-              <div className="metric-icon">
-                <Clock size={24} />
+            {displayData.connectionTime ? (
+              <div className="metric-card">
+                <div className="metric-icon">
+                  <Clock size={24} />
+                </div>
+                <div className="metric-details">
+                  <span className="metric-label">Avg Connection Time</span>
+                  <span className="metric-value">
+                    {formatDuration(displayData.connectionTime.averageMinutes)}
+                  </span>
+                </div>
               </div>
-              <div className="metric-details">
-                <span className="metric-label">Avg Connection Time</span>
-                <span className="metric-value">
-                  {formatDuration(displayData.connectionTime.averageMinutes)}
-                </span>
+            ) : (
+              <div className="metric-card">
+                <div className="skeleton-pulse" style={{ width: '60%', height: '20px', marginBottom: '12px' }} />
+                <div className="skeleton-pulse" style={{ width: '80%', height: '32px' }} />
               </div>
-            </div>
+            )}
 
-            <div className="metric-card">
-              <div className="metric-icon">
-                <MessageSquare size={24} />
+            {displayData.messagesPerLead ? (
+              <div className="metric-card">
+                <div className="metric-icon">
+                  <MessageSquare size={24} />
+                </div>
+                <div className="metric-details">
+                  <span className="metric-label">Avg Messages Per Lead</span>
+                  <span className="metric-value">
+                    {displayData.messagesPerLead.average.toFixed(1)}
+                  </span>
+                </div>
               </div>
-              <div className="metric-details">
-                <span className="metric-label">Avg Messages Per Lead</span>
-                <span className="metric-value">
-                  {displayData.messagesPerLead.average.toFixed(1)}
-                </span>
+            ) : (
+              <div className="metric-card">
+                <div className="skeleton-pulse" style={{ width: '60%', height: '20px', marginBottom: '12px' }} />
+                <div className="skeleton-pulse" style={{ width: '80%', height: '32px' }} />
               </div>
-            </div>
+            )}
 
             <div className="metric-card">
               <div className="metric-icon">
@@ -285,95 +331,116 @@ export function Analytics() {
             )}
 
             {/* Response Times - Bar Chart */}
-            <div className="chart-card">
-              <h3>Response Times</h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart
-                  data={[
-                    {
-                      name: 'Pro Response',
-                      average: displayData.proResponseTime.averageMinutes,
-                      median: displayData.proResponseTime.median,
-                    },
-                    {
-                      name: 'Customer Response',
-                      average: displayData.customerResponseTime.averageMinutes,
-                      median: displayData.customerResponseTime.median,
-                    },
-                  ]}
-                >
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" />
-                  <YAxis label={{ value: 'Time', angle: -90, position: 'insideLeft' }} />
-                  <Tooltip formatter={(value) => formatDuration(value as number)} />
-                  <Legend />
-                  <Bar dataKey="average" fill="#0088FE" name="Average" />
-                  <Bar dataKey="median" fill="#00C49F" name="Median" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            {displayData.proResponseTime && displayData.customerResponseTime ? (
+              <div className="chart-card">
+                <h3>Response Times</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart
+                    data={[
+                      {
+                        name: 'Pro Response',
+                        average: displayData.proResponseTime.averageMinutes,
+                        median: displayData.proResponseTime.median,
+                      },
+                      {
+                        name: 'Customer Response',
+                        average: displayData.customerResponseTime.averageMinutes,
+                        median: displayData.customerResponseTime.median,
+                      },
+                    ]}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis label={{ value: 'Time', angle: -90, position: 'insideLeft' }} />
+                    <Tooltip formatter={(value) => formatDuration(value as number)} />
+                    <Legend />
+                    <Bar dataKey="average" fill="#0088FE" name="Average" />
+                    <Bar dataKey="median" fill="#00C49F" name="Median" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="chart-card">
+                <div className="skeleton-pulse" style={{ width: '50%', height: '24px', marginBottom: '16px' }} />
+                <div className="skeleton-pulse" style={{ width: '100%', height: '300px', borderRadius: '8px' }} />
+              </div>
+            )}
 
             {/* Connection Time Details */}
-            <div className="chart-card stats-card">
-              <h3>Connection Time Statistics</h3>
-              <div className="stats-grid">
-                <div className="stat-item">
-                  <span className="stat-label">Average</span>
-                  <span className="stat-value">
-                    {formatDuration(displayData.connectionTime.averageMinutes)}
-                  </span>
-                </div>
-                <div className="stat-item">
-                  <span className="stat-label">Median</span>
-                  <span className="stat-value">
-                    {formatDuration(displayData.connectionTime.median)}
-                  </span>
-                </div>
-                <div className="stat-item">
-                  <span className="stat-label">Fastest</span>
-                  <span className="stat-value">
-                    {formatDuration(displayData.connectionTime.min)}
-                  </span>
-                </div>
-                <div className="stat-item">
-                  <span className="stat-label">Slowest</span>
-                  <span className="stat-value">
-                    {formatDuration(displayData.connectionTime.max)}
-                  </span>
+            {displayData.connectionTime ? (
+              <div className="chart-card stats-card">
+                <h3>Connection Time Statistics</h3>
+                <div className="stats-grid">
+                  <div className="stat-item">
+                    <span className="stat-label">Average</span>
+                    <span className="stat-value">
+                      {formatDuration(displayData.connectionTime.averageMinutes)}
+                    </span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">Median</span>
+                    <span className="stat-value">
+                      {formatDuration(displayData.connectionTime.median)}
+                    </span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">Fastest</span>
+                    <span className="stat-value">
+                      {formatDuration(displayData.connectionTime.min)}
+                    </span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">Slowest</span>
+                    <span className="stat-value">
+                      {formatDuration(displayData.connectionTime.max)}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="chart-card">
+                <div className="skeleton-pulse" style={{ width: '50%', height: '24px', marginBottom: '16px' }} />
+                <div className="skeleton-pulse" style={{ width: '100%', height: '200px', borderRadius: '8px' }} />
+              </div>
+            )}
 
             {/* Messages Per Lead Details */}
-            <div className="chart-card stats-card">
-              <h3>Messages Per Lead</h3>
-              <div className="stats-grid">
-                <div className="stat-item">
-                  <span className="stat-label">Average</span>
-                  <span className="stat-value">
-                    {displayData.messagesPerLead.average.toFixed(1)}
-                  </span>
-                </div>
-                <div className="stat-item">
-                  <span className="stat-label">Median</span>
-                  <span className="stat-value">
-                    {displayData.messagesPerLead.median.toFixed(1)}
-                  </span>
-                </div>
-                <div className="stat-item">
-                  <span className="stat-label">Minimum</span>
-                  <span className="stat-value">
-                    {displayData.messagesPerLead.min}
-                  </span>
-                </div>
-                <div className="stat-item">
-                  <span className="stat-label">Maximum</span>
-                  <span className="stat-value">
-                    {displayData.messagesPerLead.max}
-                  </span>
+            {displayData.messagesPerLead ? (
+              <div className="chart-card stats-card">
+                <h3>Messages Per Lead</h3>
+                <div className="stats-grid">
+                  <div className="stat-item">
+                    <span className="stat-label">Average</span>
+                    <span className="stat-value">
+                      {displayData.messagesPerLead.average.toFixed(1)}
+                    </span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">Median</span>
+                    <span className="stat-value">
+                      {displayData.messagesPerLead.median.toFixed(1)}
+                    </span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">Minimum</span>
+                    <span className="stat-value">
+                      {displayData.messagesPerLead.min}
+                    </span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">Maximum</span>
+                    <span className="stat-value">
+                      {displayData.messagesPerLead.max}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="chart-card">
+                <div className="skeleton-pulse" style={{ width: '50%', height: '24px', marginBottom: '16px' }} />
+                <div className="skeleton-pulse" style={{ width: '100%', height: '200px', borderRadius: '8px' }} />
+              </div>
+            )}
           </div>
         </>
       )}

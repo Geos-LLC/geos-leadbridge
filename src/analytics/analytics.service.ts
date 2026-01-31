@@ -16,6 +16,49 @@ export class AnalyticsService {
 
   constructor(private prisma: PrismaService) {}
 
+  // Basic analytics - Fast metrics only (categories, total leads, engagement)
+  async getBasicAnalytics(
+    userId: string,
+    query: AnalyticsQueryDto,
+  ): Promise<Partial<AnalyticsResponseDto>> {
+    this.logger.log(`Getting basic analytics for user ${userId}`, query);
+
+    // Build date filter
+    const dateFilter = this.buildDateFilter(query);
+
+    // Build base where clause
+    const baseWhere = {
+      userId,
+      ...(query.businessId && { businessId: query.businessId }),
+      ...dateFilter,
+    };
+
+    // Execute only fast metrics in parallel
+    const [categoryDist, engagement, totalLeads, businessInfo] =
+      await Promise.all([
+        this.getCategoryDistribution(baseWhere),
+        this.getCustomerEngagement(baseWhere),
+        this.getTotalLeads(baseWhere),
+        query.businessId
+          ? this.getBusinessInfo(userId, query.businessId)
+          : null,
+      ]);
+
+    return {
+      categoryDistribution: categoryDist,
+      customerEngagement: engagement,
+      totalLeads,
+      dateRange: {
+        start: query.startDate || 'all-time',
+        end: query.endDate || 'now',
+      },
+      filters: {
+        businessId: query.businessId,
+        businessName: businessInfo?.businessName,
+      },
+    };
+  }
+
   async getAnalytics(
     userId: string,
     query: AnalyticsQueryDto,

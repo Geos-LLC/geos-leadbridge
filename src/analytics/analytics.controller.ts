@@ -9,6 +9,22 @@ import { AnalyticsQueryDto } from './dto/analytics-query.dto';
 export class AnalyticsController {
   constructor(private analyticsService: AnalyticsService) {}
 
+  @Get('basic')
+  async getBasicAnalytics(
+    @CurrentUser() user: any,
+    @Query() query: AnalyticsQueryDto,
+  ) {
+    const analytics = await this.analyticsService.getBasicAnalytics(
+      user.userId,
+      query,
+    );
+
+    return {
+      success: true,
+      data: analytics,
+    };
+  }
+
   @Get()
   async getAnalytics(
     @CurrentUser() user: any,
