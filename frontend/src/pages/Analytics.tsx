@@ -33,6 +33,7 @@ export function Analytics() {
 
   const [loading, setLoading] = useState(true);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
+  const [previousAnalytics, setPreviousAnalytics] = useState<AnalyticsData | null>(null);
 
   // Filters from URL params
   const businessId = searchParams.get('businessId') || 'all';
@@ -54,10 +55,15 @@ export function Analytics() {
 
   const loadAnalytics = async () => {
     setLoading(true);
+    // Save current analytics as previous before loading new data
+    if (analytics) {
+      setPreviousAnalytics(analytics);
+    }
     try {
       const params = buildQueryParams();
       const { data } = await analyticsApi.getAnalytics(params);
       setAnalytics(data);
+      setPreviousAnalytics(data); // Update cache
     } catch (err) {
       console.error('Failed to load analytics:', err);
     } finally {
@@ -109,7 +115,8 @@ export function Analytics() {
     setSearchParams(searchParams);
   };
 
-  if (loading) {
+  // Show full-screen loader only on first load (no previous data)
+  if (loading && !previousAnalytics) {
     return (
       <div className="loading-container">
         <Loader2 className="spinner" size={48} />
@@ -120,8 +127,13 @@ export function Analytics() {
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658'];
 
+  // Use previous analytics while loading new data
+  const displayData = analytics || previousAnalytics;
+
   return (
     <div className="analytics-page">
+      {/* Progress bar */}
+      {loading && <div className="analytics-loading-bar" />}
       <div className="analytics-header">
         <div className="header-left">
           <BarChart3 size={32} />
@@ -189,8 +201,11 @@ export function Analytics() {
         )}
       </div>
 
-      {analytics && (
+      {displayData && (
         <>
+          {/* Loading overlay */}
+          {loading && <div className="analytics-loading-overlay" />}
+
           {/* Summary Cards */}
           <div className="metrics-summary">
             <div className="metric-card">
@@ -199,7 +214,7 @@ export function Analytics() {
               </div>
               <div className="metric-details">
                 <span className="metric-label">Total Leads</span>
-                <span className="metric-value">{analytics.totalLeads}</span>
+                <span className="metric-value">{displayData.totalLeads}</span>
               </div>
             </div>
 
@@ -210,7 +225,7 @@ export function Analytics() {
               <div className="metric-details">
                 <span className="metric-label">Avg Connection Time</span>
                 <span className="metric-value">
-                  {formatDuration(analytics.connectionTime.averageMinutes)}
+                  {formatDuration(displayData.connectionTime.averageMinutes)}
                 </span>
               </div>
             </div>
@@ -222,7 +237,7 @@ export function Analytics() {
               <div className="metric-details">
                 <span className="metric-label">Avg Messages Per Lead</span>
                 <span className="metric-value">
-                  {analytics.messagesPerLead.average.toFixed(1)}
+                  {displayData.messagesPerLead.average.toFixed(1)}
                 </span>
               </div>
             </div>
@@ -234,7 +249,7 @@ export function Analytics() {
               <div className="metric-details">
                 <span className="metric-label">Customer Engagement</span>
                 <span className="metric-value">
-                  {analytics.customerEngagement.engagementRate.toFixed(1)}%
+                  {displayData.customerEngagement.engagementRate.toFixed(1)}%
                 </span>
               </div>
             </div>
@@ -243,13 +258,13 @@ export function Analytics() {
           {/* Charts Section */}
           <div className="charts-grid">
             {/* Category Distribution - Pie Chart */}
-            {analytics.categoryDistribution.length > 0 && (
+            {displayData.categoryDistribution.length > 0 && (
               <div className="chart-card">
                 <h3>Service Category Distribution</h3>
                 <ResponsiveContainer width="100%" height={300}>
                   <PieChart>
                     <Pie
-                      data={analytics.categoryDistribution}
+                      data={displayData.categoryDistribution}
                       cx="50%"
                       cy="50%"
                       labelLine={false}
@@ -258,7 +273,7 @@ export function Analytics() {
                       fill="#8884d8"
                       dataKey="count"
                     >
-                      {analytics.categoryDistribution.map((_, index) => (
+                      {displayData.categoryDistribution.map((_, index) => (
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
@@ -277,20 +292,20 @@ export function Analytics() {
                   data={[
                     {
                       name: 'Pro Response',
-                      average: analytics.proResponseTime.averageMinutes,
-                      median: analytics.proResponseTime.median,
+                      average: displayData.proResponseTime.averageMinutes,
+                      median: displayData.proResponseTime.median,
                     },
                     {
                       name: 'Customer Response',
-                      average: analytics.customerResponseTime.averageMinutes,
-                      median: analytics.customerResponseTime.median,
+                      average: displayData.customerResponseTime.averageMinutes,
+                      median: displayData.customerResponseTime.median,
                     },
                   ]}
                 >
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="name" />
-                  <YAxis label={{ value: 'Minutes', angle: -90, position: 'insideLeft' }} />
-                  <Tooltip formatter={(value) => `${Math.round(value as number)} min`} />
+                  <YAxis label={{ value: 'Time', angle: -90, position: 'insideLeft' }} />
+                  <Tooltip formatter={(value) => formatDuration(value as number)} />
                   <Legend />
                   <Bar dataKey="average" fill="#0088FE" name="Average" />
                   <Bar dataKey="median" fill="#00C49F" name="Median" />
@@ -305,25 +320,25 @@ export function Analytics() {
                 <div className="stat-item">
                   <span className="stat-label">Average</span>
                   <span className="stat-value">
-                    {formatDuration(analytics.connectionTime.averageMinutes)}
+                    {formatDuration(displayData.connectionTime.averageMinutes)}
                   </span>
                 </div>
                 <div className="stat-item">
                   <span className="stat-label">Median</span>
                   <span className="stat-value">
-                    {formatDuration(analytics.connectionTime.median)}
+                    {formatDuration(displayData.connectionTime.median)}
                   </span>
                 </div>
                 <div className="stat-item">
                   <span className="stat-label">Fastest</span>
                   <span className="stat-value">
-                    {formatDuration(analytics.connectionTime.min)}
+                    {formatDuration(displayData.connectionTime.min)}
                   </span>
                 </div>
                 <div className="stat-item">
                   <span className="stat-label">Slowest</span>
                   <span className="stat-value">
-                    {formatDuration(analytics.connectionTime.max)}
+                    {formatDuration(displayData.connectionTime.max)}
                   </span>
                 </div>
               </div>
@@ -336,25 +351,25 @@ export function Analytics() {
                 <div className="stat-item">
                   <span className="stat-label">Average</span>
                   <span className="stat-value">
-                    {analytics.messagesPerLead.average.toFixed(1)}
+                    {displayData.messagesPerLead.average.toFixed(1)}
                   </span>
                 </div>
                 <div className="stat-item">
                   <span className="stat-label">Median</span>
                   <span className="stat-value">
-                    {analytics.messagesPerLead.median.toFixed(1)}
+                    {displayData.messagesPerLead.median.toFixed(1)}
                   </span>
                 </div>
                 <div className="stat-item">
                   <span className="stat-label">Minimum</span>
                   <span className="stat-value">
-                    {analytics.messagesPerLead.min}
+                    {displayData.messagesPerLead.min}
                   </span>
                 </div>
                 <div className="stat-item">
                   <span className="stat-label">Maximum</span>
                   <span className="stat-value">
-                    {analytics.messagesPerLead.max}
+                    {displayData.messagesPerLead.max}
                   </span>
                 </div>
               </div>

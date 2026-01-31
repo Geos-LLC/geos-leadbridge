@@ -4666,3 +4666,47 @@ body {
   font-weight: 700;
   color: var(--text-primary);
 }
+
+/* Analytics Loading States */
+.analytics-loading-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--primary-color) 0%,
+    var(--primary-color) 50%,
+    transparent 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: progress-bar 1.5s ease-in-out infinite;
+  z-index: 9999;
+}
+
+@keyframes progress-bar {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.analytics-loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(2px);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.analytics-page {
+  position: relative;
+}
