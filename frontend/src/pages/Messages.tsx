@@ -321,8 +321,16 @@ export function Messages() {
     markLeadAsSeen(lead);
     try {
       // Messages come from local database (stored via webhooks)
-      // No API sync needed - webhooks deliver all updates
-      const { messages: apiMessages } = await leadsApi.getMessages(lead.id);
+      let { messages: apiMessages } = await leadsApi.getMessages(lead.id);
+
+      // Auto-sync if no messages found in database
+      if (apiMessages.length === 0) {
+        console.log('[Messages] No messages found, auto-syncing from Thumbtack...');
+        await leadsApi.resyncMessages(lead.id);
+        const result = await leadsApi.getMessages(lead.id);
+        apiMessages = result.messages;
+      }
+
       const convertedMessages: LocalMessage[] = apiMessages.map((msg) => {
         // Normalize sender to lowercase for consistent comparison
         const sender = (msg.sender || '').toLowerCase() as 'pro' | 'customer';
