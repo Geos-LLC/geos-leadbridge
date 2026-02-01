@@ -2,6 +2,11 @@ export interface User {
   id: string;
   email: string;
   name: string | null;
+  role: 'USER' | 'ADMIN';
+  subscriptionTier?: 'STARTER' | 'PRO' | 'ENTERPRISE';
+  subscriptionStatus?: 'ACTIVE' | 'PAST_DUE' | 'CANCELLED' | 'TRIALING' | 'INCOMPLETE';
+  subscriptionPeriodEnd?: string;
+  hasOwnNumber?: boolean;
 }
 
 export interface AuthResponse {
@@ -202,5 +207,63 @@ export interface NotificationRule {
     id: string;
     businessId: string;
     businessName: string;
+  };
+}
+
+// Billing & Subscription Types
+export interface SubscriptionDetails {
+  tier: 'STARTER' | 'PRO' | 'ENTERPRISE' | null;
+  status: 'ACTIVE' | 'PAST_DUE' | 'CANCELLED' | 'TRIALING' | 'INCOMPLETE' | null;
+  periodEnd: string | null;
+  hasOwnNumber: boolean;
+  features: string[];
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  name: string | null;
+  role: 'USER' | 'ADMIN';
+  subscriptionTier: 'STARTER' | 'PRO' | 'ENTERPRISE' | null;
+  subscriptionStatus: 'ACTIVE' | 'PAST_DUE' | 'CANCELLED' | 'TRIALING' | 'INCOMPLETE' | null;
+  subscriptionPeriodEnd: string | null;
+  hasOwnNumber: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminUserDetails extends AdminUser {
+  leadsCount: number;
+  conversationsCount: number;
+  subscriptionHistory: {
+    id: string;
+    tier: 'STARTER' | 'PRO' | 'ENTERPRISE';
+    status: 'ACTIVE' | 'PAST_DUE' | 'CANCELLED' | 'TRIALING' | 'INCOMPLETE';
+    eventType: string;
+    createdAt: string;
+  }[];
+}
+
+export interface AdminStats {
+  totalUsers: number;
+  activeSubscriptions: number;
+  monthlyRevenue: number;
+  churnRate: number;
+  usersByTier: {
+    tier: 'STARTER' | 'PRO' | 'ENTERPRISE';
+    count: number;
+  }[];
+}
+
+export interface AdminLog {
+  id: string;
+  action: string;
+  targetUserId: string | null;
+  details: any;
+  createdAt: string;
+  admin: {
+    id: string;
+    email: string;
+    name: string | null;
   };
 }

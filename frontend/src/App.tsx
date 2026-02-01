@@ -11,6 +11,10 @@ import { AutomationSettings } from './pages/AutomationSettings';
 import { NotificationSettings } from './pages/NotificationSettings';
 import { PhoneSettings } from './pages/PhoneSettings';
 import { Analytics } from './pages/Analytics';
+import Pricing from './pages/Pricing';
+import BillingSettings from './pages/BillingSettings';
+import AdminDashboard from './pages/admin/AdminDashboard';
+import AdminUserDetails from './pages/admin/AdminUserDetails';
 import { useAuthStore } from './store/authStore';
 import './App.css';
 
@@ -42,6 +46,10 @@ function App() {
             <Route path="/automation" element={<AutomationSettings />} />
             <Route path="/notifications" element={<NotificationSettings />} />
             <Route path="/phone-settings" element={<PhoneSettings />} />
+            <Route path="/pricing" element={<Pricing />} />
+            <Route path="/billing" element={<BillingSettings />} />
+            <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/admin/users/:userId" element={<AdminUserDetails />} />
           </Route>
         </Route>
 

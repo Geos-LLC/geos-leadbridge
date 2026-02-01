@@ -1,5 +1,5 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Home, MessageSquare, BarChart3, Settings, LogOut, Zap, Bell, Phone } from 'lucide-react';
+import { Home, MessageSquare, BarChart3, Settings, LogOut, Zap, Bell, Phone, CreditCard, Shield } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 
 export function Layout() {
@@ -50,6 +50,19 @@ export function Layout() {
             <Phone size={20} />
             <span>Phone Settings</span>
           </Link>
+
+          <div className="nav-separator"></div>
+
+          <Link to="/billing" className={`nav-link ${isActive('/billing') ? 'active' : ''}`}>
+            <CreditCard size={20} />
+            <span>Billing</span>
+          </Link>
+          {user?.role === 'ADMIN' && (
+            <Link to="/admin" className={`nav-link ${isActive('/admin') || location.pathname.startsWith('/admin/') ? 'active' : ''}`}>
+              <Shield size={20} />
+              <span>Admin</span>
+            </Link>
+          )}
         </div>
 
         <div className="nav-footer">

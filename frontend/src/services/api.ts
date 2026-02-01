@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog, NotificationRule } from '../types';
+import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog, NotificationRule, SubscriptionDetails, AdminUser, AdminUserDetails, AdminStats, AdminLog } from '../types';
 import { notify } from '../store/notificationStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://thumbtack-bridge-production.up.railway.app/api';
@@ -674,6 +674,60 @@ export const analyticsApi = {
 
     const { data } = await api.get(`/v1/analytics?${queryParams.toString()}`);
     return data;
+  },
+};
+
+// Billing API (Stripe)
+export const billingApi = {
+  createCheckoutSession: async (tier: 'STARTER' | 'PRO' | 'ENTERPRISE', addOns: string[] = []): Promise<{ sessionUrl: string }> => {
+    const { data } = await api.post('/v1/stripe/create-checkout-session', { tier, addOns });
+    return data;
+  },
+  createPortalSession: async (): Promise<{ portalUrl: string }> => {
+    const { data } = await api.post('/v1/stripe/create-portal-session');
+    return data;
+  },
+  getSubscription: async (): Promise<SubscriptionDetails> => {
+    const { data } = await api.get('/v1/stripe/subscription');
+    return data;
+  },
+};
+
+// Admin API
+export const adminApi = {
+  listUsers: async (params: { search?: string; tier?: string; offset?: number; limit?: number }): Promise<{ users: AdminUser[]; total: number; offset: number; limit: number }> => {
+    const queryParams = new URLSearchParams();
+    if (params.search) queryParams.append('search', params.search);
+    if (params.tier) queryParams.append('tier', params.tier);
+    if (params.offset !== undefined) queryParams.append('offset', params.offset.toString());
+    if (params.limit !== undefined) queryParams.append('limit', params.limit.toString());
+
+    const { data } = await api.get(`/v1/admin/users?${queryParams.toString()}`);
+    return data.data;
+  },
+  getUserDetails: async (userId: string): Promise<AdminUserDetails> => {
+    const { data } = await api.get(`/v1/admin/users/${userId}`);
+    return data.data;
+  },
+  updateUserSubscription: async (userId: string, updates: { tier?: string; status?: string; hasOwnNumber?: boolean }): Promise<AdminUser> => {
+    const { data } = await api.patch(`/v1/admin/users/${userId}/subscription`, updates);
+    return data.data;
+  },
+  deleteUser: async (userId: string): Promise<{ success: boolean }> => {
+    const { data } = await api.delete(`/v1/admin/users/${userId}`);
+    return data.data;
+  },
+  getStats: async (): Promise<AdminStats> => {
+    const { data } = await api.get('/v1/admin/stats');
+    return data.data;
+  },
+  getAdminLogs: async (params: { limit?: number; offset?: number }): Promise<{ logs: AdminLog[]; total: number; offset: number; limit: number }> => {
+    const queryParams = new URLSearchParams();
+    if (params.limit !== undefined) queryParams.append('limit', params.limit.toString());
+    if (params.offset !== undefined) queryParams.append('offset', params.offset.toString());
+
+    const { data } = await api.get(`/v1/admin/logs?${queryParams.toString()}`);
+    return data.data;
   },
 };
 
