@@ -956,31 +956,28 @@ export class NotificationsService {
       try {
         const raw = JSON.parse(lead.rawJson);
         const request = raw.request || {};
-        const details = request.details || {};
+        const details = request.details || [];
 
-        // Service description from request details
-        if (details.serviceDescription || details.description) {
-          serviceDescription = details.serviceDescription || details.description;
+        // Details is an array of {question, answer} objects
+        // Use the description field as service description
+        if (request.description) {
+          serviceDescription = request.description;
         }
 
-        // Add-ons from request details
-        if (details.addOns && Array.isArray(details.addOns)) {
-          addons = details.addOns.join(', ');
-        } else if (details.addons && Array.isArray(details.addons)) {
-          addons = details.addons.join(', ');
-        } else if (details.addOns) {
-          addons = String(details.addOns);
-        } else if (details.addons) {
-          addons = String(details.addons);
+        // Find specific answers from details array
+        const cleaningTypeAnswer = this.findAnswerInDetails(details, ['Cleaning type', 'Type of cleaning', 'Service type']);
+        if (cleaningTypeAnswer) {
+          serviceDescription = cleaningTypeAnswer;
         }
 
-        // Frequency from request details
-        if (details.frequency) {
-          frequency = details.frequency;
-        } else if (details.serviceFrequency) {
-          frequency = details.serviceFrequency;
-        } else if (details.schedule) {
-          frequency = details.schedule;
+        const addOnsAnswer = this.findAnswerInDetails(details, ['Add-ons', 'Additional services', 'Extras']);
+        if (addOnsAnswer) {
+          addons = addOnsAnswer;
+        }
+
+        const frequencyAnswer = this.findAnswerInDetails(details, ['Frequency', 'Service frequency', 'How often']);
+        if (frequencyAnswer) {
+          frequency = frequencyAnswer;
         }
       } catch (err) {
         // Failed to parse rawJson, use defaults
@@ -1509,5 +1506,24 @@ export class NotificationsService {
       createdAt: rule.createdAt.toISOString(),
       updatedAt: rule.updatedAt.toISOString(),
     };
+  }
+
+  /**
+   * Helper to find an answer from details array by question
+   */
+  private findAnswerInDetails(details: any[], questionVariants: string[]): string | null {
+    if (!Array.isArray(details)) return null;
+
+    for (const item of details) {
+      if (item.question && item.answer) {
+        const question = String(item.question).toLowerCase();
+        for (const variant of questionVariants) {
+          if (question.includes(variant.toLowerCase())) {
+            return String(item.answer);
+          }
+        }
+      }
+    }
+    return null;
   }
 }

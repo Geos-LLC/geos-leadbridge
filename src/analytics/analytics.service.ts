@@ -498,12 +498,12 @@ export class AnalyticsService {
     for (const lead of leads) {
       try {
         const raw = JSON.parse(lead.rawJson);
-        const details = raw.request?.details || {};
+        const details = raw.request?.details || [];
 
-        const cleaningType = details.cleaningType || details.serviceType || details.type;
-        if (cleaningType) {
-          const type = String(cleaningType);
-          typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
+        // Details is an array of {question, answer} objects
+        const cleaningTypeAnswer = this.findAnswer(details, ['Cleaning type', 'Type of cleaning', 'Service type']);
+        if (cleaningTypeAnswer) {
+          typeCounts.set(cleaningTypeAnswer, (typeCounts.get(cleaningTypeAnswer) || 0) + 1);
           total++;
         }
       } catch (err) {
@@ -535,14 +535,16 @@ export class AnalyticsService {
     for (const lead of leads) {
       try {
         const raw = JSON.parse(lead.rawJson);
-        const details = raw.request?.details || {};
+        const details = raw.request?.details || [];
 
-        const addOns = details.addOns || details.addons;
-        if (addOns && Array.isArray(addOns) && addOns.length > 0) {
+        // Details is an array of {question, answer} objects
+        const addOnsAnswer = this.findAnswer(details, ['Add-ons', 'Additional services', 'Extras']);
+        if (addOnsAnswer) {
           totalLeadsWithAddons++;
-          for (const addon of addOns) {
-            const addonName = String(addon);
-            addonCounts.set(addonName, (addonCounts.get(addonName) || 0) + 1);
+          // Answer might be comma-separated or a single value
+          const addons = addOnsAnswer.split(/,|\n/).map(a => a.trim()).filter(Boolean);
+          for (const addon of addons) {
+            addonCounts.set(addon, (addonCounts.get(addon) || 0) + 1);
           }
         }
       } catch (err) {
@@ -575,12 +577,12 @@ export class AnalyticsService {
     for (const lead of leads) {
       try {
         const raw = JSON.parse(lead.rawJson);
-        const details = raw.request?.details || {};
+        const details = raw.request?.details || [];
 
-        const frequency = details.frequency || details.serviceFrequency || details.schedule;
-        if (frequency) {
-          const freq = String(frequency);
-          frequencyCounts.set(freq, (frequencyCounts.get(freq) || 0) + 1);
+        // Details is an array of {question, answer} objects
+        const frequencyAnswer = this.findAnswer(details, ['Frequency', 'Service frequency', 'How often']);
+        if (frequencyAnswer) {
+          frequencyCounts.set(frequencyAnswer, (frequencyCounts.get(frequencyAnswer) || 0) + 1);
           total++;
         }
       } catch (err) {
@@ -658,16 +660,21 @@ export class AnalyticsService {
     for (const lead of leads) {
       try {
         const raw = JSON.parse(lead.rawJson);
-        const details = raw.request?.details || {};
+        const details = raw.request?.details || [];
 
-        if (details.bedrooms !== undefined && details.bedrooms !== null) {
-          const beds = Number(details.bedrooms);
-          if (!isNaN(beds)) bedrooms.push(beds);
+        // Details is an array of {question, answer} objects
+        const bedroomsAnswer = this.findAnswer(details, ['Number of bedrooms', 'Bedrooms', 'How many bedrooms']);
+        if (bedroomsAnswer) {
+          // Extract number from answer like "3 bedrooms" or "3"
+          const beds = this.extractNumber(bedroomsAnswer);
+          if (beds !== null) bedrooms.push(beds);
         }
 
-        if (details.bathrooms !== undefined && details.bathrooms !== null) {
-          const baths = Number(details.bathrooms);
-          if (!isNaN(baths)) bathrooms.push(baths);
+        const bathroomsAnswer = this.findAnswer(details, ['Number of bathrooms', 'Bathrooms', 'How many bathrooms']);
+        if (bathroomsAnswer) {
+          // Extract number from answer like "2 bathrooms" or "2"
+          const baths = this.extractNumber(bathroomsAnswer);
+          if (baths !== null) bathrooms.push(baths);
         }
       } catch (err) {
         // Skip invalid JSON
@@ -686,5 +693,36 @@ export class AnalyticsService {
       minBedrooms: bedrooms.length > 0 ? Math.min(...bedrooms) : 0,
       minBathrooms: bathrooms.length > 0 ? Math.min(...bathrooms) : 0,
     };
+  }
+
+  /**
+   * Helper to find an answer from details array by question
+   */
+  private findAnswer(details: any[], questionVariants: string[]): string | null {
+    if (!Array.isArray(details)) return null;
+
+    for (const item of details) {
+      if (item.question && item.answer) {
+        const question = String(item.question).toLowerCase();
+        for (const variant of questionVariants) {
+          if (question.includes(variant.toLowerCase())) {
+            return String(item.answer);
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Helper to extract first number from a string
+   */
+  private extractNumber(text: string): number | null {
+    const match = text.match(/\d+/);
+    if (match) {
+      const num = parseInt(match[0]);
+      return isNaN(num) ? null : num;
+    }
+    return null;
   }
 }
