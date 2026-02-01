@@ -74,6 +74,9 @@ export interface CustomerReplyContext {
     category?: string | null;
     city?: string | null;
     state?: string | null;
+    postcode?: string | null;
+    message?: string | null;
+    rawJson?: string | null;
   };
   isFirstCustomerReply: boolean;
   isSecondCustomerMessage?: boolean;
@@ -139,6 +142,9 @@ export interface SendNotificationContext {
     category?: string | null;
     city?: string | null;
     state?: string | null;
+    postcode?: string | null;
+    message?: string | null;
+    rawJson?: string | null;
   };
 }
 
@@ -837,6 +843,17 @@ export class NotificationsService {
       category: 'House Cleaning',
       city: 'Tampa',
       state: 'FL',
+      postcode: '33602',
+      message: 'I need my house cleaned weekly. Looking for someone reliable.',
+      rawJson: JSON.stringify({
+        request: {
+          details: {
+            serviceDescription: 'Weekly house cleaning service',
+            addOns: ['Deep clean', 'Laundry'],
+            frequency: 'Weekly',
+          },
+        },
+      }),
     };
 
     const template = rule?.template || settings.template;
@@ -911,17 +928,68 @@ export class NotificationsService {
       category?: string | null;
       city?: string | null;
       state?: string | null;
+      postcode?: string | null;
+      message?: string | null;
+      rawJson?: string | null;
     },
   ): string {
     let message = template;
 
-    // Replace variables
+    // Replace basic variables
     message = message.replace(/\{\{lead\.name\}\}/gi, lead.customerName || 'Unknown');
     message = message.replace(/\{\{lead\.phone\}\}/gi, lead.customerPhone || 'Not provided');
     message = message.replace(/\{\{lead\.service\}\}/gi, lead.category || 'Not specified');
 
     const location = [lead.city, lead.state].filter(Boolean).join(', ') || 'Not specified';
     message = message.replace(/\{\{lead\.location\}\}/gi, location);
+
+    // Replace new variables
+    message = message.replace(/\{\{lead\.zip\}\}/gi, lead.postcode || 'Not provided');
+    message = message.replace(/\{\{lead\.message\}\}/gi, lead.message || 'No message');
+
+    // Parse rawJson for additional fields
+    let serviceDescription = 'Not specified';
+    let addons = 'None';
+    let frequency = 'Not specified';
+
+    if (lead.rawJson) {
+      try {
+        const raw = JSON.parse(lead.rawJson);
+        const request = raw.request || {};
+        const details = request.details || {};
+
+        // Service description from request details
+        if (details.serviceDescription || details.description) {
+          serviceDescription = details.serviceDescription || details.description;
+        }
+
+        // Add-ons from request details
+        if (details.addOns && Array.isArray(details.addOns)) {
+          addons = details.addOns.join(', ');
+        } else if (details.addons && Array.isArray(details.addons)) {
+          addons = details.addons.join(', ');
+        } else if (details.addOns) {
+          addons = String(details.addOns);
+        } else if (details.addons) {
+          addons = String(details.addons);
+        }
+
+        // Frequency from request details
+        if (details.frequency) {
+          frequency = details.frequency;
+        } else if (details.serviceFrequency) {
+          frequency = details.serviceFrequency;
+        } else if (details.schedule) {
+          frequency = details.schedule;
+        }
+      } catch (err) {
+        // Failed to parse rawJson, use defaults
+      }
+    }
+
+    message = message.replace(/\{\{lead\.serviceDescription\}\}/gi, serviceDescription);
+    message = message.replace(/\{\{lead\.addons\}\}/gi, addons);
+    message = message.replace(/\{\{lead\.frequency\}\}/gi, frequency);
 
     return message;
   }

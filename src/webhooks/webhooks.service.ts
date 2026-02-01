@@ -407,6 +407,9 @@ export class WebhooksService {
             category: request.category?.name,
             city: location.city,
             state: location.state,
+            postcode: location.zipCode,
+            message: request.description || '',
+            rawJson: JSON.stringify(data),
           },
         });
       } else {
@@ -715,6 +718,9 @@ export class WebhooksService {
               category: lead.category,
               city: lead.city,
               state: lead.state,
+              postcode: lead.postcode,
+              message: lead.message,
+              rawJson: lead.rawJson,
             },
             isFirstCustomerReply: customerMessageCount === 1,
             isSecondCustomerMessage: customerMessageCount === 2,

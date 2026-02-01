@@ -10,6 +10,11 @@ const TEMPLATE_VARIABLES = [
   { name: '{{lead.phone}}', description: 'Customer phone' },
   { name: '{{lead.service}}', description: 'Service category' },
   { name: '{{lead.location}}', description: 'City, State' },
+  { name: '{{lead.zip}}', description: 'Zip code' },
+  { name: '{{lead.message}}', description: 'Customer request message' },
+  { name: '{{lead.serviceDescription}}', description: 'Detailed service description' },
+  { name: '{{lead.addons}}', description: 'Service add-ons' },
+  { name: '{{lead.frequency}}', description: 'Service frequency' },
 ];
 
 export function NotificationSettings() {

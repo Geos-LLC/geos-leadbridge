@@ -23,12 +23,12 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { analyticsApi, type AnalyticsData } from '../services/api';
+import { analyticsApi, thumbtackApi, type AnalyticsData } from '../services/api';
 import { useAppStore } from '../store/appStore';
 
 export function Analytics() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { savedAccounts } = useAppStore();
+  const { savedAccounts, setSavedAccounts } = useAppStore();
 
   const [loading, setLoading] = useState(true);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
@@ -49,8 +49,21 @@ export function Analytics() {
   ];
 
   useEffect(() => {
+    loadSavedAccounts();
+  }, []);
+
+  useEffect(() => {
     loadAnalytics();
   }, [businessId, timeRange, customStart, customEnd]);
+
+  const loadSavedAccounts = async () => {
+    try {
+      const { accounts } = await thumbtackApi.getSavedAccounts();
+      setSavedAccounts(accounts);
+    } catch (err) {
+      console.error('Failed to load saved accounts:', err);
+    }
+  };
 
   const loadAnalytics = async () => {
     setLoading(true);
@@ -64,6 +77,7 @@ export function Analytics() {
       // Phase 1: Load basic/fast analytics first (categories, total leads, engagement)
       const { data: basicData } = await analyticsApi.getBasicAnalytics(params);
       setAnalytics(basicData as AnalyticsData);
+      setLoading(false); // Stop loading after basic data so UI updates immediately
 
       // Phase 2: Load detailed/slow analytics (connection time, response times, messages per lead)
       const { data: fullData } = await analyticsApi.getAnalytics(params);
@@ -71,7 +85,6 @@ export function Analytics() {
       setPreviousAnalytics(fullData); // Update cache
     } catch (err) {
       console.error('Failed to load analytics:', err);
-    } finally {
       setLoading(false);
     }
   };
