@@ -171,9 +171,9 @@ export class AdminService {
 
     let monthlyRevenue = 0;
     const tierPrices = {
-      [SubscriptionTier.STARTER]: 29,
-      [SubscriptionTier.PRO]: 79,
-      [SubscriptionTier.ENTERPRISE]: 149,
+      [SubscriptionTier.STARTER]: 49,
+      [SubscriptionTier.PRO]: 99,
+      [SubscriptionTier.ENTERPRISE]: 129,
     };
 
     for (const sub of subscriptions) {
@@ -181,7 +181,7 @@ export class AdminService {
         monthlyRevenue += tierPrices[sub.subscriptionTier as keyof typeof tierPrices] || 0;
       }
       if (sub.hasOwnNumber) {
-        monthlyRevenue += 10; // Add-on price
+        monthlyRevenue += 29; // Add-on price
       }
     }
 
