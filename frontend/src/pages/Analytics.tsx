@@ -454,6 +454,141 @@ export function Analytics() {
                 <div className="skeleton-pulse" style={{ width: '100%', height: '200px', borderRadius: '8px' }} />
               </div>
             )}
+
+            {/* Cleaning Type Distribution */}
+            {displayData.cleaningTypeDistribution && displayData.cleaningTypeDistribution.length > 0 && (
+              <div className="chart-card">
+                <h3>Cleaning Type Distribution</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie
+                      data={displayData.cleaningTypeDistribution}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={(entry: any) => `${entry.name}: ${entry.count}`}
+                      outerRadius={80}
+                      fill="#8884d8"
+                      dataKey="count"
+                    >
+                      {displayData.cleaningTypeDistribution.map((_, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Add-ons Distribution */}
+            {displayData.addOnsDistribution && displayData.addOnsDistribution.length > 0 && (
+              <div className="chart-card">
+                <h3>Popular Add-ons</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={displayData.addOnsDistribution.slice(0, 10)}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="count" fill="#00C49F" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Frequency Distribution */}
+            {displayData.frequencyDistribution && displayData.frequencyDistribution.length > 0 && (
+              <div className="chart-card">
+                <h3>Service Frequency</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie
+                      data={displayData.frequencyDistribution}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={(entry: any) => `${entry.name}: ${entry.count}`}
+                      outerRadius={80}
+                      fill="#8884d8"
+                      dataKey="count"
+                    >
+                      {displayData.frequencyDistribution.map((_, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Location Distribution */}
+            {displayData.locationDistribution && displayData.locationDistribution.length > 0 && (
+              <div className="chart-card">
+                <h3>Top Locations</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={displayData.locationDistribution.slice(0, 10)}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="count" fill="#0088FE" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Zip Code Distribution */}
+            {displayData.zipCodeDistribution && displayData.zipCodeDistribution.length > 0 && (
+              <div className="chart-card">
+                <h3>Top Zip Codes</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={displayData.zipCodeDistribution.slice(0, 10)}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="count" fill="#FFBB28" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Room Statistics */}
+            {displayData.roomStats && displayData.roomStats.averageBedrooms > 0 && (
+              <div className="chart-card stats-card">
+                <h3>Room Statistics</h3>
+                <div className="stats-grid">
+                  <div className="stat-item">
+                    <span className="stat-label">Avg Bedrooms</span>
+                    <span className="stat-value">
+                      {displayData.roomStats.averageBedrooms.toFixed(1)}
+                    </span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">Avg Bathrooms</span>
+                    <span className="stat-value">
+                      {displayData.roomStats.averageBathrooms.toFixed(1)}
+                    </span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">Max Bedrooms</span>
+                    <span className="stat-value">
+                      {displayData.roomStats.maxBedrooms}
+                    </span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">Max Bathrooms</span>
+                    <span className="stat-value">
+                      {displayData.roomStats.maxBathrooms}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}

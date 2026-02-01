@@ -604,6 +604,21 @@ export interface CustomerEngagementMetric {
   engagementRate: number;
 }
 
+export interface ServiceDetailDistribution {
+  name: string;
+  count: number;
+  percentage: number;
+}
+
+export interface RoomStatsMetric {
+  averageBedrooms: number;
+  averageBathrooms: number;
+  maxBedrooms: number;
+  maxBathrooms: number;
+  minBedrooms: number;
+  minBathrooms: number;
+}
+
 export interface AnalyticsData {
   categoryDistribution: CategoryDistribution[];
   connectionTime: ConnectionTimeMetric;
@@ -612,6 +627,15 @@ export interface AnalyticsData {
   messagesPerLead: MessagesPerLeadMetric;
   customerEngagement: CustomerEngagementMetric;
   totalLeads: number;
+
+  // Service detail analytics
+  cleaningTypeDistribution?: ServiceDetailDistribution[];
+  addOnsDistribution?: ServiceDetailDistribution[];
+  frequencyDistribution?: ServiceDetailDistribution[];
+  locationDistribution?: ServiceDetailDistribution[];
+  zipCodeDistribution?: ServiceDetailDistribution[];
+  roomStats?: RoomStatsMetric;
+
   dateRange: {
     start: string;
     end: string;

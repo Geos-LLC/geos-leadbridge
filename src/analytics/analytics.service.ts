@@ -85,6 +85,12 @@ export class AnalyticsService {
       engagement,
       totalLeads,
       businessInfo,
+      cleaningTypes,
+      addOns,
+      frequencies,
+      locations,
+      zipCodes,
+      roomStats,
     ] = await Promise.all([
       this.getCategoryDistribution(baseWhere),
       this.getConnectionTime(baseWhere),
@@ -96,6 +102,12 @@ export class AnalyticsService {
       query.businessId
         ? this.getBusinessInfo(userId, query.businessId)
         : null,
+      this.getCleaningTypeDistribution(baseWhere),
+      this.getAddOnsDistribution(baseWhere),
+      this.getFrequencyDistribution(baseWhere),
+      this.getLocationDistribution(baseWhere),
+      this.getZipCodeDistribution(baseWhere),
+      this.getRoomStats(baseWhere),
     ]);
 
     return {
@@ -106,6 +118,12 @@ export class AnalyticsService {
       messagesPerLead,
       customerEngagement: engagement,
       totalLeads,
+      cleaningTypeDistribution: cleaningTypes,
+      addOnsDistribution: addOns,
+      frequencyDistribution: frequencies,
+      locationDistribution: locations,
+      zipCodeDistribution: zipCodes,
+      roomStats,
       dateRange: {
         start: query.startDate || 'all-time',
         end: query.endDate || 'now',
@@ -459,5 +477,214 @@ export class AnalyticsService {
       select: { businessName: true },
     });
     return account;
+  }
+
+  // ==========================================
+  // Service Detail Analytics
+  // ==========================================
+
+  /**
+   * Get cleaning type distribution from rawJson
+   */
+  private async getCleaningTypeDistribution(where: any) {
+    const leads = await this.prisma.lead.findMany({
+      where,
+      select: { rawJson: true },
+    });
+
+    const typeCounts = new Map<string, number>();
+    let total = 0;
+
+    for (const lead of leads) {
+      try {
+        const raw = JSON.parse(lead.rawJson);
+        const details = raw.request?.details || {};
+
+        const cleaningType = details.cleaningType || details.serviceType || details.type;
+        if (cleaningType) {
+          const type = String(cleaningType);
+          typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
+          total++;
+        }
+      } catch (err) {
+        // Skip invalid JSON
+      }
+    }
+
+    return Array.from(typeCounts.entries())
+      .map(([name, count]) => ({
+        name,
+        count,
+        percentage: total > 0 ? (count / total) * 100 : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  /**
+   * Get add-ons distribution from rawJson
+   */
+  private async getAddOnsDistribution(where: any) {
+    const leads = await this.prisma.lead.findMany({
+      where,
+      select: { rawJson: true },
+    });
+
+    const addonCounts = new Map<string, number>();
+    let totalLeadsWithAddons = 0;
+
+    for (const lead of leads) {
+      try {
+        const raw = JSON.parse(lead.rawJson);
+        const details = raw.request?.details || {};
+
+        const addOns = details.addOns || details.addons;
+        if (addOns && Array.isArray(addOns) && addOns.length > 0) {
+          totalLeadsWithAddons++;
+          for (const addon of addOns) {
+            const addonName = String(addon);
+            addonCounts.set(addonName, (addonCounts.get(addonName) || 0) + 1);
+          }
+        }
+      } catch (err) {
+        // Skip invalid JSON
+      }
+    }
+
+    const totalLeads = leads.length;
+    return Array.from(addonCounts.entries())
+      .map(([name, count]) => ({
+        name,
+        count,
+        percentage: totalLeads > 0 ? (count / totalLeads) * 100 : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  /**
+   * Get frequency distribution from rawJson
+   */
+  private async getFrequencyDistribution(where: any) {
+    const leads = await this.prisma.lead.findMany({
+      where,
+      select: { rawJson: true },
+    });
+
+    const frequencyCounts = new Map<string, number>();
+    let total = 0;
+
+    for (const lead of leads) {
+      try {
+        const raw = JSON.parse(lead.rawJson);
+        const details = raw.request?.details || {};
+
+        const frequency = details.frequency || details.serviceFrequency || details.schedule;
+        if (frequency) {
+          const freq = String(frequency);
+          frequencyCounts.set(freq, (frequencyCounts.get(freq) || 0) + 1);
+          total++;
+        }
+      } catch (err) {
+        // Skip invalid JSON
+      }
+    }
+
+    return Array.from(frequencyCounts.entries())
+      .map(([name, count]) => ({
+        name,
+        count,
+        percentage: total > 0 ? (count / total) * 100 : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  /**
+   * Get location distribution (city, state)
+   */
+  private async getLocationDistribution(where: any) {
+    const results = await this.prisma.lead.groupBy({
+      by: ['city', 'state'],
+      where,
+      _count: { id: true },
+      orderBy: { _count: { id: 'desc' } },
+    });
+
+    const total = results.reduce((sum, r) => sum + r._count.id, 0);
+
+    return results
+      .filter(r => r.city || r.state)
+      .map((r) => ({
+        name: [r.city, r.state].filter(Boolean).join(', ') || 'Unknown',
+        count: r._count.id,
+        percentage: total > 0 ? (r._count.id / total) * 100 : 0,
+      }));
+  }
+
+  /**
+   * Get zip code distribution
+   */
+  private async getZipCodeDistribution(where: any) {
+    const results = await this.prisma.lead.groupBy({
+      by: ['postcode'],
+      where: {
+        ...where,
+        postcode: { not: null },
+      },
+      _count: { id: true },
+      orderBy: { _count: { id: 'desc' } },
+      take: 20, // Top 20 zip codes
+    });
+
+    const total = results.reduce((sum, r) => sum + r._count.id, 0);
+
+    return results.map((r) => ({
+      name: r.postcode || 'Unknown',
+      count: r._count.id,
+      percentage: total > 0 ? (r._count.id / total) * 100 : 0,
+    }));
+  }
+
+  /**
+   * Get bedroom/bathroom statistics from rawJson
+   */
+  private async getRoomStats(where: any) {
+    const leads = await this.prisma.lead.findMany({
+      where,
+      select: { rawJson: true },
+    });
+
+    const bedrooms: number[] = [];
+    const bathrooms: number[] = [];
+
+    for (const lead of leads) {
+      try {
+        const raw = JSON.parse(lead.rawJson);
+        const details = raw.request?.details || {};
+
+        if (details.bedrooms !== undefined && details.bedrooms !== null) {
+          const beds = Number(details.bedrooms);
+          if (!isNaN(beds)) bedrooms.push(beds);
+        }
+
+        if (details.bathrooms !== undefined && details.bathrooms !== null) {
+          const baths = Number(details.bathrooms);
+          if (!isNaN(baths)) bathrooms.push(baths);
+        }
+      } catch (err) {
+        // Skip invalid JSON
+      }
+    }
+
+    return {
+      averageBedrooms: bedrooms.length > 0
+        ? bedrooms.reduce((a, b) => a + b, 0) / bedrooms.length
+        : 0,
+      averageBathrooms: bathrooms.length > 0
+        ? bathrooms.reduce((a, b) => a + b, 0) / bathrooms.length
+        : 0,
+      maxBedrooms: bedrooms.length > 0 ? Math.max(...bedrooms) : 0,
+      maxBathrooms: bathrooms.length > 0 ? Math.max(...bathrooms) : 0,
+      minBedrooms: bedrooms.length > 0 ? Math.min(...bedrooms) : 0,
+      minBathrooms: bathrooms.length > 0 ? Math.min(...bathrooms) : 0,
+    };
   }
 }
