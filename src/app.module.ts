@@ -14,6 +14,8 @@ import { TemplatesModule } from './templates/templates.module';
 import { AutomationModule } from './automation/automation.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { StripeModule } from './stripe/stripe.module';
+import { AdminModule } from './admin/admin.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PrismaService } from './common/utils/prisma.service';
 
@@ -31,6 +33,8 @@ import { PrismaService } from './common/utils/prisma.service';
     AutomationModule,
     NotificationsModule,
     AnalyticsModule,
+    StripeModule,
+    AdminModule,
   ],
   providers: [
     PrismaService,

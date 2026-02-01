@@ -13,6 +13,29 @@ datasource db {
 }
 
 // ==========================================
+// Enums for Billing & Admin
+// ==========================================
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum SubscriptionTier {
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  TRIALING
+  INCOMPLETE
+}
+
+// ==========================================
 // Core User Management
 // ==========================================
 
@@ -24,14 +47,25 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Role & Subscription fields
+  role                  UserRole            @default(USER)
+  stripeCustomerId      String?             @unique
+  stripeSubscriptionId  String?             @unique
+  subscriptionTier      SubscriptionTier?
+  subscriptionStatus    SubscriptionStatus?
+  subscriptionPeriodEnd DateTime?
+  hasOwnNumber          Boolean             @default(false)
+
   // Relationships
-  platforms        Platform[]
-  leads            Lead[]
-  conversations    Conversation[]
-  messages         Message[]
-  savedAccounts    SavedAccount[]
-  messageTemplates MessageTemplate[]
-  automationRules  AutomationRule[]
+  platforms           Platform[]
+  leads               Lead[]
+  conversations       Conversation[]
+  messages            Message[]
+  savedAccounts       SavedAccount[]
+  messageTemplates    MessageTemplate[]
+  automationRules     AutomationRule[]
+  subscriptionHistory SubscriptionHistory[]
+  adminLogs           AdminLog[]
 
   @@map("users")
 }
@@ -399,4 +433,42 @@ model NotificationLog {
   @@index([status])
   @@index([createdAt])
   @@map("notification_logs")
+}
+
+// ==========================================
+// Subscription & Billing Tracking
+// ==========================================
+
+model SubscriptionHistory {
+  id            String             @id @default(uuid())
+  userId        String
+  tier          SubscriptionTier
+  status        SubscriptionStatus
+  eventType     String // "subscription.created", "subscription.updated", etc.
+  stripeEventId String             @unique
+  metadata      Json? // Store full Stripe event data
+  createdAt     DateTime           @default(now())
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("subscription_history")
+}
+
+model AdminLog {
+  id           String   @id @default(uuid())
+  adminId      String
+  action       String // "UPDATE_USER_SUBSCRIPTION", "DELETE_USER", etc.
+  targetUserId String?
+  details      Json?
+  createdAt    DateTime @default(now())
+
+  // Relationships
+  admin User @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([createdAt])
+  @@map("admin_logs")
 }
