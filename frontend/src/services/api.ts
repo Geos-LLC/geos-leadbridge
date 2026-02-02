@@ -686,15 +686,15 @@ export const analyticsApi = {
 export const billingApi = {
   createCheckoutSession: async (tier: 'STARTER' | 'PRO' | 'ENTERPRISE', addOns: string[] = []): Promise<{ sessionUrl: string }> => {
     const { data } = await api.post('/v1/stripe/create-checkout-session', { tier, addOns });
-    return data;
+    return data.data;
   },
   createPortalSession: async (): Promise<{ portalUrl: string }> => {
     const { data } = await api.post('/v1/stripe/create-portal-session');
-    return data;
+    return data.data;
   },
   getSubscription: async (): Promise<SubscriptionDetails> => {
     const { data } = await api.get('/v1/stripe/subscription');
-    return data;
+    return data.data;
   },
 };
 
