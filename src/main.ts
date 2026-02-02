@@ -39,10 +39,7 @@ async function bootstrap() {
     }),
   );
 
-  // Global prefix for API routes
-  app.setGlobalPrefix('api');
-
-  // Serve frontend static files in production
+  // Serve frontend static files BEFORE setting up API routes
   const frontendPath = path.join(__dirname, '..', 'frontend', 'dist');
   console.log('[Startup] __dirname:', __dirname);
   console.log('[Startup] Attempting to serve frontend from:', frontendPath);
@@ -50,11 +47,16 @@ async function bootstrap() {
 
   if (fs.existsSync(frontendPath)) {
     console.log('[Startup] Setting up static file serving from:', frontendPath);
-    app.useStaticAssets(frontendPath);
+
+    // Use Express directly for static files and SPA fallback
+    const expressApp = app.getHttpAdapter().getInstance();
+    const express = require('express');
+
+    // Serve static files (CSS, JS, images, etc.)
+    expressApp.use(express.static(frontendPath));
+    console.log('[Startup] Static file middleware configured');
 
     // SPA fallback - serve index.html for non-API routes
-    // Using regex pattern to avoid path-to-regexp issues with bare '*'
-    const expressApp = app.getHttpAdapter().getInstance();
     expressApp.get(/^(?!\/api).*/, (req: any, res: any) => {
       console.log('[Static] Serving SPA fallback for:', req.url);
       res.sendFile(path.join(frontendPath, 'index.html'));
@@ -66,6 +68,9 @@ async function bootstrap() {
     console.error('[Startup] Directory contents of __dirname:', fs.readdirSync(__dirname));
     console.error('[Startup] Directory contents of parent:', fs.readdirSync(path.join(__dirname, '..')));
   }
+
+  // Global prefix for API routes (set AFTER static file setup)
+  app.setGlobalPrefix('api');
 
   // Start server
   await app.listen(port);
