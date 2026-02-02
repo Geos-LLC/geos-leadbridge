@@ -15,7 +15,7 @@ export class AnalyticsController {
     @Query() query: AnalyticsQueryDto,
   ) {
     const analytics = await this.analyticsService.getBasicAnalytics(
-      user.userId,
+      user.id,
       query,
     );
 
@@ -31,7 +31,7 @@ export class AnalyticsController {
     @Query() query: AnalyticsQueryDto,
   ) {
     const analytics = await this.analyticsService.getAnalytics(
-      user.userId,
+      user.id,
       query,
     );
 

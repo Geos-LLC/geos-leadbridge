@@ -133,7 +133,7 @@ export class ThumbtackController {
 
   @Get('auth/url')
   async getAuthUrl(@CurrentUser() user: any) {
-    const authUrl = await this.platformService.getAuthUrl(user.userId, PlatformName.THUMBTACK);
+    const authUrl = await this.platformService.getAuthUrl(user.id, PlatformName.THUMBTACK);
     return { authUrl };
   }
 
@@ -200,7 +200,7 @@ export class ThumbtackController {
       throw new BadRequestException('Authorization code is required');
     }
 
-    await this.platformService.handleCallback(user.userId, PlatformName.THUMBTACK, code);
+    await this.platformService.handleCallback(user.id, PlatformName.THUMBTACK, code);
 
     return {
       success: true,
@@ -210,7 +210,7 @@ export class ThumbtackController {
 
   @Post('auth/disconnect')
   async disconnect(@CurrentUser() user: any) {
-    await this.platformService.disconnect(user.userId, PlatformName.THUMBTACK);
+    await this.platformService.disconnect(user.id, PlatformName.THUMBTACK);
 
     return {
       success: true,
@@ -228,7 +228,7 @@ export class ThumbtackController {
    */
   @Get('user')
   async getCurrentUser(@CurrentUser() user: any) {
-    const credentials = await this.platformService.getCredentials(user.userId, PlatformName.THUMBTACK);
+    const credentials = await this.platformService.getCredentials(user.id, PlatformName.THUMBTACK);
     const adapter = this.platformService['platformFactory'].getAdapter(PlatformName.THUMBTACK) as any;
     const thumbtackUser = await adapter.getCurrentUser(credentials);
 
@@ -246,7 +246,7 @@ export class ThumbtackController {
 
   @Get('businesses')
   async getBusinesses(@CurrentUser() user: any) {
-    const businesses = await this.leadsService.getBusinesses(user.userId, PlatformName.THUMBTACK);
+    const businesses = await this.leadsService.getBusinesses(user.id, PlatformName.THUMBTACK);
 
     return {
       platform: PlatformName.THUMBTACK,
@@ -268,12 +268,12 @@ export class ThumbtackController {
     @Body('imageUrl') imageUrl?: string,
     @Body('emailHint') emailHint?: string,
   ) {
-    const result = await this.platformService.setupThumbtackWebhook(user.userId, businessId);
+    const result = await this.platformService.setupThumbtackWebhook(user.id, businessId);
 
     // Auto-save account for multi-account switching
     if (businessName) {
       await this.platformService.saveAccount(
-        user.userId,
+        user.id,
         PlatformName.THUMBTACK,
         businessId,
         businessName,
@@ -297,7 +297,7 @@ export class ThumbtackController {
     @CurrentUser() user: any,
     @Param('businessId') businessId: string,
   ) {
-    const webhooks = await this.platformService.getThumbtackWebhooks(user.userId, businessId);
+    const webhooks = await this.platformService.getThumbtackWebhooks(user.id, businessId);
 
     return {
       platform: PlatformName.THUMBTACK,
@@ -327,7 +327,7 @@ export class ThumbtackController {
       options.since = new Date(since);
     }
 
-    const leads = await this.leadsService.getLeads(user.userId, PlatformName.THUMBTACK, options);
+    const leads = await this.leadsService.getLeads(user.id, PlatformName.THUMBTACK, options);
 
     return {
       platform: PlatformName.THUMBTACK,
@@ -339,7 +339,7 @@ export class ThumbtackController {
 
   @Get('leads/:id')
   async getLead(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.leadsService.getLead(user.userId, id);
+    return this.leadsService.getLead(user.id, id);
   }
 
   /**
@@ -347,9 +347,9 @@ export class ThumbtackController {
    */
   @Get('leads/:id/messages')
   async getMessages(@CurrentUser() user: any, @Param('id') id: string) {
-    console.log(`[ThumbtackController] getMessages called - userId: ${user.userId}, leadId: ${id}`);
+    console.log(`[ThumbtackController] getMessages called - userId: ${user.id}, leadId: ${id}`);
     try {
-      const messages = await this.leadsService.getMessages(user.userId, id);
+      const messages = await this.leadsService.getMessages(user.id, id);
       console.log(`[ThumbtackController] getMessages success - ${messages.length} messages`);
 
       return {
@@ -375,7 +375,7 @@ export class ThumbtackController {
       throw new BadRequestException('Message is required');
     }
 
-    const result = await this.leadsService.sendMessage(user.userId, id, message);
+    const result = await this.leadsService.sendMessage(user.id, id, message);
 
     return {
       success: true,
@@ -395,7 +395,7 @@ export class ThumbtackController {
       throw new BadRequestException('Quote amount is required');
     }
 
-    const result = await this.leadsService.sendQuote(user.userId, id, amount, description);
+    const result = await this.leadsService.sendQuote(user.id, id, amount, description);
 
     return {
       success: true,
@@ -420,7 +420,7 @@ export class ThumbtackController {
     @Body('accountId') accountId?: string,
   ) {
     try {
-      const { lead, isNew } = await this.leadsService.importThumbtackNegotiation(user.userId, negotiationId, accountId);
+      const { lead, isNew } = await this.leadsService.importThumbtackNegotiation(user.id, negotiationId, accountId);
 
       return {
         success: true,
@@ -461,7 +461,7 @@ export class ThumbtackController {
       throw new BadRequestException('negotiationIds array is required');
     }
 
-    const results = await this.leadsService.importThumbtackNegotiations(user.userId, negotiationIds);
+    const results = await this.leadsService.importThumbtackNegotiations(user.id, negotiationIds);
 
     return {
       success: true,
@@ -479,7 +479,7 @@ export class ThumbtackController {
    */
   @Get('saved-accounts')
   async getSavedAccounts(@CurrentUser() user: any) {
-    const accounts = await this.platformService.getSavedAccounts(user.userId, PlatformName.THUMBTACK);
+    const accounts = await this.platformService.getSavedAccounts(user.id, PlatformName.THUMBTACK);
 
     return {
       platform: PlatformName.THUMBTACK,
@@ -494,7 +494,7 @@ export class ThumbtackController {
    */
   @Post('saved-accounts/sync-from-leads')
   async syncSavedAccountsFromLeads(@CurrentUser() user: any) {
-    const { synced } = await this.platformService.syncSavedAccountsFromLeads(user.userId, PlatformName.THUMBTACK);
+    const { synced } = await this.platformService.syncSavedAccountsFromLeads(user.id, PlatformName.THUMBTACK);
 
     return {
       success: true,
@@ -519,7 +519,7 @@ export class ThumbtackController {
     }
 
     await this.platformService.saveAccount(
-      user.userId,
+      user.id,
       PlatformName.THUMBTACK,
       businessId,
       businessName,
@@ -542,7 +542,7 @@ export class ThumbtackController {
     @Param('id') id: string,
     @Body('emailHint') emailHint?: string,
   ) {
-    await this.platformService.updateSavedAccount(user.userId, id, { emailHint });
+    await this.platformService.updateSavedAccount(user.id, id, { emailHint });
 
     return {
       success: true,
@@ -559,7 +559,7 @@ export class ThumbtackController {
     @CurrentUser() user: any,
     @Param('id') id: string,
   ) {
-    const result = await this.platformService.disconnectAccountWebhook(user.userId, id);
+    const result = await this.platformService.disconnectAccountWebhook(user.id, id);
 
     return {
       success: result.success,
@@ -581,7 +581,7 @@ export class ThumbtackController {
     @CurrentUser() user: any,
     @Param('id') id: string,
   ) {
-    const result = await this.platformService.reconnectAccountWebhook(user.userId, id);
+    const result = await this.platformService.reconnectAccountWebhook(user.id, id);
 
     return {
       success: true,
@@ -600,7 +600,7 @@ export class ThumbtackController {
     @Query('deleteLeads') deleteLeads?: string,
   ) {
     const shouldDeleteLeads = deleteLeads === 'true';
-    const result = await this.platformService.removeSavedAccount(user.userId, id, shouldDeleteLeads);
+    const result = await this.platformService.removeSavedAccount(user.id, id, shouldDeleteLeads);
 
     return {
       success: true,
@@ -620,7 +620,7 @@ export class ThumbtackController {
     @CurrentUser() user: any,
     @Param('id') id: string,
   ) {
-    const result = await this.platformService.validateAccountToken(user.userId, id);
+    const result = await this.platformService.validateAccountToken(user.id, id);
 
     return {
       valid: result.valid,

@@ -48,7 +48,7 @@ export class NotificationsController {
     @Param('savedAccountId') savedAccountId: string,
   ) {
     const settings = await this.notificationsService.getSettings(
-      user.userId,
+      user.id,
       savedAccountId,
     );
 
@@ -68,7 +68,7 @@ export class NotificationsController {
     @Body() body: UpdateNotificationSettingsDto,
   ) {
     const settings = await this.notificationsService.upsertSettings(
-      user.userId,
+      user.id,
       savedAccountId,
       body,
     );
@@ -89,7 +89,7 @@ export class NotificationsController {
     @Query('limit') limit?: string,
   ) {
     const logs = await this.notificationsService.getAllLogs(
-      user.userId,
+      user.id,
       limit ? parseInt(limit, 10) : 100,
     );
 
@@ -110,7 +110,7 @@ export class NotificationsController {
     @Query('limit') limit?: string,
   ) {
     const logs = await this.notificationsService.getLogs(
-      user.userId,
+      user.id,
       savedAccountId,
       limit ? parseInt(limit, 10) : 50,
     );
@@ -132,7 +132,7 @@ export class NotificationsController {
     @Body() body?: { ruleId?: string },
   ) {
     const result = await this.notificationsService.sendTestNotification(
-      user.userId,
+      user.id,
       savedAccountId,
       body?.ruleId,
     );
@@ -159,7 +159,7 @@ export class NotificationsController {
    */
   @Get('rules')
   async getAllRules(@CurrentUser() user: any) {
-    const rules = await this.notificationsService.getAllRules(user.userId);
+    const rules = await this.notificationsService.getAllRules(user.id);
 
     return {
       success: true,
@@ -177,7 +177,7 @@ export class NotificationsController {
     @Param('savedAccountId') savedAccountId: string,
   ) {
     const rules = await this.notificationsService.getRules(
-      user.userId,
+      user.id,
       savedAccountId,
     );
 
@@ -198,7 +198,7 @@ export class NotificationsController {
     @Body() body: CreateNotificationRuleDto,
   ) {
     const rule = await this.notificationsService.createRule(
-      user.userId,
+      user.id,
       savedAccountId,
       body,
     );
@@ -221,7 +221,7 @@ export class NotificationsController {
     @Body() body: UpdateNotificationRuleDto,
   ) {
     const rule = await this.notificationsService.updateRule(
-      user.userId,
+      user.id,
       savedAccountId,
       ruleId,
       body,
@@ -244,7 +244,7 @@ export class NotificationsController {
     @Param('ruleId') ruleId: string,
   ) {
     await this.notificationsService.deleteRule(
-      user.userId,
+      user.id,
       savedAccountId,
       ruleId,
     );
@@ -280,7 +280,7 @@ export class NotificationsController {
     @Param('savedAccountId') savedAccountId: string,
   ) {
     const phoneNumbers = await this.notificationsService.getCallioPhoneNumbers(
-      user.userId,
+      user.id,
       savedAccountId,
     );
 
@@ -302,7 +302,7 @@ export class NotificationsController {
   ) {
     // Verify the saved account belongs to the user
     const account = await this.notificationsService['prisma'].savedAccount.findFirst({
-      where: { id: savedAccountId, userId: user.userId },
+      where: { id: savedAccountId, userId: user.id },
     });
 
     if (!account) {
@@ -336,7 +336,7 @@ export class NotificationsController {
   ) {
     // Verify the saved account belongs to the user
     const account = await this.notificationsService['prisma'].savedAccount.findFirst({
-      where: { id: savedAccountId, userId: user.userId },
+      where: { id: savedAccountId, userId: user.id },
     });
 
     if (!account) {

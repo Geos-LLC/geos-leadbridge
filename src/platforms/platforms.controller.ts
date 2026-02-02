@@ -31,7 +31,7 @@ export class PlatformsController {
    */
   @Get('status')
   async getStatus(@CurrentUser() user: any) {
-    const platforms = await this.platformService.getUserPlatforms(user.userId);
+    const platforms = await this.platformService.getUserPlatforms(user.id);
     const supportedPlatforms = this.platformService.getSupportedPlatforms();
 
     // Build status for all supported platforms
@@ -55,7 +55,7 @@ export class PlatformsController {
     const platform = await this.prisma.platform.findUnique({
       where: {
         userId_platformName: {
-          userId: user.userId,
+          userId: user.id,
           platformName: 'thumbtack',
         },
       },
@@ -92,14 +92,14 @@ export class PlatformsController {
   @Get('webhooks/verify')
   async verifyWebhooks(@CurrentUser() user: any) {
     const savedAccounts = await this.prisma.savedAccount.findMany({
-      where: { userId: user.userId, platform: 'thumbtack' },
+      where: { userId: user.id, platform: 'thumbtack' },
     });
 
     const results: any[] = [];
 
     for (const account of savedAccounts) {
       try {
-        const webhooks = await this.platformService.getThumbtackWebhooks(user.userId, account.businessId);
+        const webhooks = await this.platformService.getThumbtackWebhooks(user.id, account.businessId);
         results.push({
           accountId: account.id,
           businessId: account.businessId,
@@ -137,7 +137,7 @@ export class PlatformsController {
   async getRecentWebhookEvents(@CurrentUser() user: any) {
     // Get all saved accounts for this user
     const savedAccounts = await this.prisma.savedAccount.findMany({
-      where: { userId: user.userId, platform: 'thumbtack' },
+      where: { userId: user.id, platform: 'thumbtack' },
     });
     const businessIds = savedAccounts.map(a => a.businessId);
 
@@ -199,7 +199,7 @@ export class PlatformsController {
   @Post('webhooks/cleanup')
   async cleanupDuplicateWebhooks(@CurrentUser() user: any) {
     const savedAccounts = await this.prisma.savedAccount.findMany({
-      where: { userId: user.userId, platform: 'thumbtack' },
+      where: { userId: user.id, platform: 'thumbtack' },
     });
 
     const results: any[] = [];
@@ -216,7 +216,7 @@ export class PlatformsController {
 
       try {
         // Get all webhooks for this account
-        const webhooks = await this.platformService.getThumbtackWebhooks(user.userId, account.businessId);
+        const webhooks = await this.platformService.getThumbtackWebhooks(user.id, account.businessId);
 
         // Find webhooks to delete (all except the current one)
         const webhooksToDelete = webhooks.filter((w: any) => w.webhookID !== account.webhookId);
@@ -227,7 +227,7 @@ export class PlatformsController {
         // Delete each duplicate webhook
         for (const webhook of webhooksToDelete) {
           try {
-            await this.platformService.deleteThumbtackWebhook(user.userId, account.businessId, webhook.webhookID);
+            await this.platformService.deleteThumbtackWebhook(user.id, account.businessId, webhook.webhookID);
             accountResult.deleted.push(webhook.webhookID);
           } catch (err: any) {
             accountResult.errors.push(`${webhook.webhookID}: ${err.message}`);
@@ -267,7 +267,7 @@ export class PlatformsController {
     const platform = await this.prisma.platform.findUnique({
       where: {
         userId_platformName: {
-          userId: user.userId,
+          userId: user.id,
           platformName: 'thumbtack',
         },
       },
@@ -288,7 +288,7 @@ export class PlatformsController {
 
     // Get all saved accounts
     const savedAccounts = await this.prisma.savedAccount.findMany({
-      where: { userId: user.userId, platform: 'thumbtack' },
+      where: { userId: user.id, platform: 'thumbtack' },
     });
 
     // Check 2: Do any saved accounts have webhooks?

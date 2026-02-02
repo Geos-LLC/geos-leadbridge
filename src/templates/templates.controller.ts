@@ -29,7 +29,7 @@ export class TemplatesController {
    */
   @Get()
   async getTemplates(@CurrentUser() user: any) {
-    const templates = await this.templatesService.getTemplates(user.userId);
+    const templates = await this.templatesService.getTemplates(user.id);
     return {
       count: templates.length,
       templates,
@@ -41,7 +41,7 @@ export class TemplatesController {
    */
   @Get(':id')
   async getTemplate(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.templatesService.getTemplate(user.userId, id);
+    return this.templatesService.getTemplate(user.id, id);
   }
 
   /**
@@ -52,7 +52,7 @@ export class TemplatesController {
     @CurrentUser() user: any,
     @Body() body: CreateTemplateDto,
   ) {
-    const template = await this.templatesService.createTemplate(user.userId, body);
+    const template = await this.templatesService.createTemplate(user.id, body);
     return {
       success: true,
       message: 'Template created successfully',
@@ -69,7 +69,7 @@ export class TemplatesController {
     @Param('id') id: string,
     @Body() body: UpdateTemplateDto,
   ) {
-    const template = await this.templatesService.updateTemplate(user.userId, id, body);
+    const template = await this.templatesService.updateTemplate(user.id, id, body);
     return {
       success: true,
       message: 'Template updated successfully',
@@ -83,7 +83,7 @@ export class TemplatesController {
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   async deleteTemplate(@CurrentUser() user: any, @Param('id') id: string) {
-    await this.templatesService.deleteTemplate(user.userId, id);
+    await this.templatesService.deleteTemplate(user.id, id);
     return {
       success: true,
       message: 'Template deleted successfully',

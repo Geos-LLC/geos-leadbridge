@@ -34,11 +34,11 @@ export class LeadsController {
   ) {
     if (platform) {
       // Get leads from specific platform
-      return this.leadsService.getLeads(user.userId, platform);
+      return this.leadsService.getLeads(user.id, platform);
     }
 
     // Get cached leads from database with filters
-    const leads = await this.leadsService.getCachedLeads(user.userId, {
+    const leads = await this.leadsService.getCachedLeads(user.id, {
       platform,
       status,
       limit: limit ? parseInt(limit.toString(), 10) : undefined,
@@ -55,7 +55,7 @@ export class LeadsController {
    */
   @Get(':id')
   async getLead(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.leadsService.getLead(user.userId, id);
+    return this.leadsService.getLead(user.id, id);
   }
 
   /**
@@ -67,7 +67,7 @@ export class LeadsController {
     @Param('id') id: string,
     @Body('status') status: string,
   ) {
-    return this.leadsService.updateLeadStatus(user.userId, id, status);
+    return this.leadsService.updateLeadStatus(user.id, id, status);
   }
 
   /**
@@ -79,7 +79,7 @@ export class LeadsController {
     @Param('id') id: string,
     @Body('message') message: string,
   ) {
-    const result = await this.leadsService.sendMessage(user.userId, id, message);
+    const result = await this.leadsService.sendMessage(user.id, id, message);
 
     return {
       success: true,
@@ -98,7 +98,7 @@ export class LeadsController {
     @Body('amount') amount: number,
     @Body('description') description?: string,
   ) {
-    const result = await this.leadsService.sendQuote(user.userId, id, amount, description);
+    const result = await this.leadsService.sendQuote(user.id, id, amount, description);
 
     return {
       success: true,
@@ -113,7 +113,7 @@ export class LeadsController {
    */
   @Post(':id/sync')
   async syncLead(@CurrentUser() user: any, @Param('id') id: string) {
-    const lead = await this.leadsService.syncLeadStatus(user.userId, id);
+    const lead = await this.leadsService.syncLeadStatus(user.id, id);
 
     return {
       success: true,
@@ -127,8 +127,8 @@ export class LeadsController {
    */
   @Post(':id/resync-messages')
   async resyncMessages(@CurrentUser() user: any, @Param('id') id: string) {
-    console.log(`[LeadsController] POST /resync-messages called - leadId: ${id}, userId: ${user.userId}`);
-    const result = await this.leadsService.resyncMessages(user.userId, id);
+    console.log(`[LeadsController] POST /resync-messages called - leadId: ${id}, userId: ${user.id}`);
+    const result = await this.leadsService.resyncMessages(user.id, id);
 
     return {
       success: true,
@@ -147,7 +147,7 @@ export class LeadsController {
     @Body('leadIds') leadIds: string[],
     @Body('templateContent') templateContent: string,
   ) {
-    console.log(`[LeadsController] POST /bulk-message/preview - userId: ${user.userId}, leads: ${leadIds?.length}`);
+    console.log(`[LeadsController] POST /bulk-message/preview - userId: ${user.id}, leads: ${leadIds?.length}`);
 
     if (!leadIds || leadIds.length === 0) {
       return {
@@ -166,7 +166,7 @@ export class LeadsController {
     }
 
     const previews = await this.leadsService.previewBulkMessage(
-      user.userId,
+      user.id,
       leadIds,
       templateContent,
     );
@@ -187,7 +187,7 @@ export class LeadsController {
     @Body('templateContent') templateContent: string,
     @Body('templateId') templateId?: string,
   ) {
-    console.log(`[LeadsController] POST /bulk-message/send - userId: ${user.userId}, leads: ${leadIds?.length}`);
+    console.log(`[LeadsController] POST /bulk-message/send - userId: ${user.id}, leads: ${leadIds?.length}`);
 
     if (!leadIds || leadIds.length === 0) {
       return {
@@ -212,7 +212,7 @@ export class LeadsController {
     }
 
     const result = await this.leadsService.sendBulkMessages(
-      user.userId,
+      user.id,
       leadIds,
       templateContent,
       templateId,
@@ -231,7 +231,7 @@ export class LeadsController {
    */
   @Post('migrate-dates')
   async migrateDates(@CurrentUser() user: any) {
-    const result = await this.leadsService.migrateLeadDates(user.userId);
+    const result = await this.leadsService.migrateLeadDates(user.id);
     return result;
   }
 }
