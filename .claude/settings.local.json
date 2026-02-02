@@ -19,7 +19,8 @@
       "Bash(node:*)",
       "Bash(npx tsc:*)",
       "Bash(npx prisma migrate:*)",
-      "Bash(npx prisma db push:*)"
+      "Bash(npx prisma db push:*)",
+      "Bash(ls:*)"
     ]
   }
 }

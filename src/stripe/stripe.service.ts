@@ -27,24 +27,32 @@ export class StripeService {
     tier: SubscriptionTier,
     addOns: string[] = [],
   ) {
+    this.logger.log(`[createCheckoutSession] Starting for userId: ${userId}, tier: ${tier}`);
+
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
+      this.logger.error(`[createCheckoutSession] User not found: ${userId}`);
       throw new BadRequestException('User not found');
     }
+    this.logger.log(`[createCheckoutSession] User found: ${user.email}`);
 
     // Get or create Stripe customer
     let customerId = user.stripeCustomerId;
     if (!customerId) {
+      this.logger.log(`[createCheckoutSession] Creating new Stripe customer`);
       const customer = await this.stripe.customers.create({
         email: user.email,
         metadata: { userId: user.id },
       });
       customerId = customer.id;
+      this.logger.log(`[createCheckoutSession] Created customer: ${customerId}`);
 
       await this.prisma.user.update({
         where: { id: userId },
         data: { stripeCustomerId: customerId },
       });
+    } else {
+      this.logger.log(`[createCheckoutSession] Using existing customer: ${customerId}`);
     }
 
     // Build line items
@@ -52,6 +60,7 @@ export class StripeService {
 
     // Add tier price
     const tierPriceId = this.getPriceIdForTier(tier);
+    this.logger.log(`[createCheckoutSession] Tier price ID: ${tierPriceId}`);
     lineItems.push({ price: tierPriceId, quantity: 1 });
 
     // Add add-ons
@@ -59,11 +68,13 @@ export class StripeService {
       const ownNumberPriceId =
         this.configService.get<string>('STRIPE_PRICE_OWN_NUMBER');
       if (ownNumberPriceId) {
+        this.logger.log(`[createCheckoutSession] Adding own number: ${ownNumberPriceId}`);
         lineItems.push({ price: ownNumberPriceId, quantity: 1 });
       }
     }
 
     // Create checkout session
+    this.logger.log(`[createCheckoutSession] Creating checkout session with ${lineItems.length} line items`);
     const session = await this.stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ['card'],
@@ -78,6 +89,7 @@ export class StripeService {
       },
     });
 
+    this.logger.log(`[createCheckoutSession] Session created: ${session.id}, URL: ${session.url}`);
     return { sessionUrl: session.url };
   }
 
@@ -179,19 +191,25 @@ export class StripeService {
 
   private async handleSubscriptionUpdate(subscription: Stripe.Subscription) {
     const customerId = subscription.customer as string;
+    this.logger.log(`[handleSubscriptionUpdate] Processing subscription ${subscription.id} for customer ${customerId}`);
+
     const user = await this.prisma.user.findUnique({
       where: { stripeCustomerId: customerId },
     });
 
     if (!user) {
-      this.logger.warn(`User not found for customer: ${customerId}`);
+      this.logger.warn(`[handleSubscriptionUpdate] User not found for customer: ${customerId}`);
       return;
     }
+
+    this.logger.log(`[handleSubscriptionUpdate] Found user: ${user.email} (${user.id})`);
 
     // Determine tier and add-ons from subscription items
     const tier = this.getTierFromSubscription(subscription);
     const hasOwnNumber = this.hasOwnNumberAddon(subscription);
     const status = this.mapStripeStatus(subscription.status);
+
+    this.logger.log(`[handleSubscriptionUpdate] Subscription details - Tier: ${tier}, Status: ${status}, HasOwnNumber: ${hasOwnNumber}`);
 
     // Update user
     await this.prisma.user.update({
@@ -205,6 +223,8 @@ export class StripeService {
       },
     });
 
+    this.logger.log(`[handleSubscriptionUpdate] User updated in database`);
+
     // Log subscription history
     await this.prisma.subscriptionHistory.create({
       data: {
@@ -217,7 +237,7 @@ export class StripeService {
       },
     });
 
-    this.logger.log(`Updated subscription for user ${user.id}: ${tier} - ${status}`);
+    this.logger.log(`[handleSubscriptionUpdate] Updated subscription for user ${user.id}: ${tier} - ${status}`);
   }
 
   private async handleSubscriptionDeleted(subscription: Stripe.Subscription) {
