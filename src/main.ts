@@ -56,6 +56,13 @@ async function bootstrap() {
     console.log('[Startup] Setting up static file serving from:', frontendPath);
     console.log('[Startup] Frontend files:', fs.readdirSync(frontendPath));
 
+    // Check if assets folder exists
+    const assetsPath = path.join(frontendPath, 'assets');
+    console.log('[Startup] Assets directory exists:', fs.existsSync(assetsPath));
+    if (fs.existsSync(assetsPath)) {
+      console.log('[Startup] Assets files:', fs.readdirSync(assetsPath).slice(0, 10));
+    }
+
     // Log ALL requests
     expressApp.use((req: any, res: any, next: any) => {
       console.log('[Request] Incoming:', {
@@ -67,18 +74,12 @@ async function bootstrap() {
       next();
     });
 
-    // Serve static files (CSS, JS, images, etc.)
-    expressApp.use((req: any, res: any, next: any) => {
-      console.log('[Static] Checking static file for:', req.url);
-      express.static(frontendPath)(req, res, (err: any) => {
-        if (err) {
-          console.log('[Static] Error serving static file:', err);
-        } else {
-          console.log('[Static] Static middleware completed for:', req.url);
-        }
-        next(err);
-      });
-    });
+    // Serve static files (CSS, JS, images, etc.) - use express.static directly
+    console.log('[Startup] Configuring static file middleware');
+    expressApp.use(express.static(frontendPath, {
+      maxAge: '1d',
+      index: false, // Don't serve index.html automatically - we'll handle that in SPA fallback
+    }));
     console.log('[Startup] Static file middleware configured');
 
     // SPA fallback middleware - serve index.html for non-API routes
