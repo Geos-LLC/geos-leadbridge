@@ -44,15 +44,27 @@ async function bootstrap() {
 
   // Serve frontend static files in production
   const frontendPath = path.join(__dirname, '..', 'frontend', 'dist');
+  console.log('[Startup] __dirname:', __dirname);
+  console.log('[Startup] Attempting to serve frontend from:', frontendPath);
+  console.log('[Startup] Frontend directory exists:', fs.existsSync(frontendPath));
+
   if (fs.existsSync(frontendPath)) {
+    console.log('[Startup] Setting up static file serving from:', frontendPath);
     app.useStaticAssets(frontendPath);
 
     // SPA fallback - serve index.html for non-API routes
     // Using regex pattern to avoid path-to-regexp issues with bare '*'
     const expressApp = app.getHttpAdapter().getInstance();
     expressApp.get(/^(?!\/api).*/, (req: any, res: any) => {
+      console.log('[Static] Serving SPA fallback for:', req.url);
       res.sendFile(path.join(frontendPath, 'index.html'));
     });
+    console.log('[Startup] SPA fallback route configured');
+  } else {
+    console.error('[Startup] WARNING: Frontend directory not found! Static files will not be served.');
+    console.error('[Startup] Expected path:', frontendPath);
+    console.error('[Startup] Directory contents of __dirname:', fs.readdirSync(__dirname));
+    console.error('[Startup] Directory contents of parent:', fs.readdirSync(path.join(__dirname, '..')));
   }
 
   // Start server
