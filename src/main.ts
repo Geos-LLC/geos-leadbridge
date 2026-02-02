@@ -63,41 +63,86 @@ async function bootstrap() {
       console.log('[Startup] Assets files:', fs.readdirSync(assetsPath).slice(0, 10));
     }
 
-    // Log ALL requests
+    // Log ALL requests with detailed info
     expressApp.use((req: any, res: any, next: any) => {
-      console.log('[Request] Incoming:', {
-        method: req.method,
-        url: req.url,
-        path: req.path,
-        originalUrl: req.originalUrl,
+      const startTime = Date.now();
+      console.log('[Request] ===== INCOMING REQUEST =====');
+      console.log('[Request] Method:', req.method);
+      console.log('[Request] URL:', req.url);
+      console.log('[Request] Path:', req.path);
+      console.log('[Request] OriginalUrl:', req.originalUrl);
+      console.log('[Request] Headers:', JSON.stringify(req.headers, null, 2));
+
+      // Log when response finishes
+      res.on('finish', () => {
+        const duration = Date.now() - startTime;
+        console.log('[Response] ===== RESPONSE SENT =====');
+        console.log('[Response] Status:', res.statusCode);
+        console.log('[Response] URL:', req.url);
+        console.log('[Response] Duration:', duration + 'ms');
+        console.log('[Response] Headers:', JSON.stringify(res.getHeaders(), null, 2));
       });
+
       next();
     });
 
     // Serve static files (CSS, JS, images, etc.) - use express.static directly
     console.log('[Startup] Configuring static file middleware');
-    expressApp.use(express.static(frontendPath, {
-      maxAge: '1d',
-      index: false, // Don't serve index.html automatically - we'll handle that in SPA fallback
-    }));
+    expressApp.use((req: any, res: any, next: any) => {
+      console.log('[Static] Checking for static file:', req.url);
+
+      // Check if file exists
+      const filePath = path.join(frontendPath, req.url);
+      const fileExists = fs.existsSync(filePath) && fs.statSync(filePath).isFile();
+      console.log('[Static] File path:', filePath);
+      console.log('[Static] File exists:', fileExists);
+
+      if (fileExists) {
+        console.log('[Static] FOUND - Will serve file:', req.url);
+      } else {
+        console.log('[Static] NOT FOUND - Will pass to next middleware');
+      }
+
+      express.static(frontendPath, {
+        maxAge: '1d',
+        index: false,
+      })(req, res, next);
+    });
     console.log('[Startup] Static file middleware configured');
 
     // SPA fallback middleware - serve index.html for non-API routes
     expressApp.use((req: any, res: any, next: any) => {
-      console.log('[SPA] Checking SPA fallback for:', req.url);
+      console.log('[SPA] ===== SPA FALLBACK MIDDLEWARE =====');
+      console.log('[SPA] URL:', req.url);
+      console.log('[SPA] Is API route?', req.url.startsWith('/api'));
 
       // Skip API routes
       if (req.url.startsWith('/api')) {
-        console.log('[SPA] Skipping - API route');
+        console.log('[SPA] Skipping - API route, passing to NestJS');
         return next();
       }
 
       // Serve index.html for all other routes
-      console.log('[SPA] Serving index.html for:', req.url);
       const indexPath = path.join(frontendPath, 'index.html');
+      console.log('[SPA] Serving index.html');
       console.log('[SPA] Index path:', indexPath);
       console.log('[SPA] Index exists:', fs.existsSync(indexPath));
-      res.sendFile(indexPath);
+
+      if (fs.existsSync(indexPath)) {
+        console.log('[SPA] Sending index.html file...');
+        res.sendFile(indexPath, (err: any) => {
+          if (err) {
+            console.error('[SPA] ERROR sending file:', err.message);
+            console.error('[SPA] Error stack:', err.stack);
+            next(err);
+          } else {
+            console.log('[SPA] Successfully sent index.html');
+          }
+        });
+      } else {
+        console.error('[SPA] ERROR: index.html not found!');
+        res.status(404).send('Frontend not found');
+      }
     });
     console.log('[Startup] SPA fallback middleware configured');
   } else {
