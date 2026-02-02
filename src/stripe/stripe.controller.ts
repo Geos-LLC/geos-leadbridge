@@ -23,6 +23,12 @@ export class StripeController {
     @Req() req: any,
     @Body() dto: CreateCheckoutSessionDto,
   ) {
+    console.log('[StripeController] Received checkout request');
+    console.log('[StripeController] User ID:', req.user?.id);
+    console.log('[StripeController] DTO:', JSON.stringify(dto));
+    console.log('[StripeController] Tier:', dto.tier);
+    console.log('[StripeController] AddOns:', dto.addOns);
+
     const userId = req.user.id;
     const result = await this.stripeService.createCheckoutSession(
       userId,
