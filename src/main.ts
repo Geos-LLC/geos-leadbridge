@@ -54,21 +54,49 @@ async function bootstrap() {
 
   if (fs.existsSync(frontendPath)) {
     console.log('[Startup] Setting up static file serving from:', frontendPath);
+    console.log('[Startup] Frontend files:', fs.readdirSync(frontendPath));
+
+    // Log ALL requests
+    expressApp.use((req: any, res: any, next: any) => {
+      console.log('[Request] Incoming:', {
+        method: req.method,
+        url: req.url,
+        path: req.path,
+        originalUrl: req.originalUrl,
+      });
+      next();
+    });
 
     // Serve static files (CSS, JS, images, etc.)
-    expressApp.use(express.static(frontendPath));
+    expressApp.use((req: any, res: any, next: any) => {
+      console.log('[Static] Checking static file for:', req.url);
+      express.static(frontendPath)(req, res, (err: any) => {
+        if (err) {
+          console.log('[Static] Error serving static file:', err);
+        } else {
+          console.log('[Static] Static middleware completed for:', req.url);
+        }
+        next(err);
+      });
+    });
     console.log('[Startup] Static file middleware configured');
 
     // SPA fallback middleware - serve index.html for non-API routes
     expressApp.use((req: any, res: any, next: any) => {
+      console.log('[SPA] Checking SPA fallback for:', req.url);
+
       // Skip API routes
       if (req.url.startsWith('/api')) {
+        console.log('[SPA] Skipping - API route');
         return next();
       }
 
       // Serve index.html for all other routes
-      console.log('[Static] Serving SPA fallback for:', req.url);
-      res.sendFile(path.join(frontendPath, 'index.html'));
+      console.log('[SPA] Serving index.html for:', req.url);
+      const indexPath = path.join(frontendPath, 'index.html');
+      console.log('[SPA] Index path:', indexPath);
+      console.log('[SPA] Index exists:', fs.existsSync(indexPath));
+      res.sendFile(indexPath);
     });
     console.log('[Startup] SPA fallback middleware configured');
   } else {
