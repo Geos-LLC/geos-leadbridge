@@ -48,6 +48,11 @@ export class AuthService {
         id: user.id,
         email: user.email,
         name: user.name,
+        role: user.role,
+        subscriptionTier: user.subscriptionTier,
+        subscriptionStatus: user.subscriptionStatus,
+        subscriptionPeriodEnd: user.subscriptionPeriodEnd,
+        hasOwnNumber: user.hasOwnNumber,
       },
       token,
     };
@@ -81,6 +86,11 @@ export class AuthService {
         id: user.id,
         email: user.email,
         name: user.name,
+        role: user.role,
+        subscriptionTier: user.subscriptionTier,
+        subscriptionStatus: user.subscriptionStatus,
+        subscriptionPeriodEnd: user.subscriptionPeriodEnd,
+        hasOwnNumber: user.hasOwnNumber,
       },
       token,
     };
@@ -96,6 +106,11 @@ export class AuthService {
         id: true,
         email: true,
         name: true,
+        role: true,
+        subscriptionTier: true,
+        subscriptionStatus: true,
+        subscriptionPeriodEnd: true,
+        hasOwnNumber: true,
         createdAt: true,
         platforms: {
           select: {

@@ -143,14 +143,19 @@ api.interceptors.response.use(
 export const authApi = {
   register: async (email: string, password: string, name?: string): Promise<AuthResponse> => {
     const { data } = await api.post('/auth/register', { email, password, name });
+    console.log('[API] Register response:', data);
     return data;
   },
   login: async (email: string, password: string): Promise<AuthResponse> => {
     const { data } = await api.post('/auth/login', { email, password });
+    console.log('[API] Login response:', data);
+    console.log('[API] User from login:', data.user);
+    console.log('[API] User role from login:', data.user?.role);
     return data;
   },
   getProfile: async () => {
     const { data } = await api.get('/auth/profile');
+    console.log('[API] Profile response:', data);
     return data;
   },
 };

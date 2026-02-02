@@ -18,8 +18,14 @@ export default function AdminDashboard() {
   const [offset, setOffset] = useState(0);
 
   useEffect(() => {
+    // Debug logging
+    console.log('[AdminDashboard] Current user:', user);
+    console.log('[AdminDashboard] User role:', user?.role);
+    console.log('[AdminDashboard] Is ADMIN?', user?.role === 'ADMIN');
+
     // Check if user is admin
     if (user?.role !== 'ADMIN') {
+      console.error('[AdminDashboard] Access denied - user role is not ADMIN');
       notify.error('Access Denied', 'You must be an admin to access this page');
       navigate('/');
       return;
