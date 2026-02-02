@@ -52,14 +52,23 @@ export default function Pricing() {
 
   const handleSubscribe = async (tierId: 'STARTER' | 'PRO' | 'ENTERPRISE') => {
     try {
+      console.log('[Pricing] handleSubscribe called with tier:', tierId);
       setLoading(tierId);
       const addOns = ownNumber ? ['ownNumber'] : [];
-      const { sessionUrl } = await billingApi.createCheckoutSession(tierId, addOns);
+      console.log('[Pricing] Calling createCheckoutSession with:', { tierId, addOns });
+
+      const response = await billingApi.createCheckoutSession(tierId, addOns);
+      console.log('[Pricing] Response from createCheckoutSession:', response);
+
+      const { sessionUrl } = response;
+      console.log('[Pricing] Extracted sessionUrl:', sessionUrl);
 
       // Redirect to Stripe checkout
+      console.log('[Pricing] Redirecting to:', sessionUrl);
       window.location.href = sessionUrl;
     } catch (error: any) {
-      console.error('Failed to create checkout session:', error);
+      console.error('[Pricing] Failed to create checkout session:', error);
+      console.error('[Pricing] Error details:', error.response?.data);
       notify.error('Checkout Error', error.response?.data?.message || 'Failed to start checkout process');
       setLoading(null);
     }
