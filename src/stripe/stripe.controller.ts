@@ -11,6 +11,7 @@ import {
 import { StripeService } from './stripe.service';
 import { CreateCheckoutSessionDto } from './dto/create-checkout-session.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { Public } from '../common/decorators/public.decorator';
 import { Request } from 'express';
 
 @Controller('v1/stripe')
@@ -63,6 +64,7 @@ export class StripeController {
     };
   }
 
+  @Public()
   @Post('webhook')
   async handleWebhook(
     @Req() req: RawBodyRequest<Request>,
