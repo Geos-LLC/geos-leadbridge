@@ -114,10 +114,11 @@ async function bootstrap() {
     expressApp.use((req: any, res: any, next: any) => {
       console.log('[SPA] ===== SPA FALLBACK MIDDLEWARE =====');
       console.log('[SPA] URL:', req.url);
-      console.log('[SPA] Is API route?', req.url.startsWith('/api'));
+      const isApiRoute = req.url.startsWith('/api') || req.url.startsWith('/v1/');
+      console.log('[SPA] Is API route?', isApiRoute);
 
-      // Skip API routes
-      if (req.url.startsWith('/api')) {
+      // Skip API routes (both /api/* and /v1/* for backwards compatibility)
+      if (isApiRoute) {
         console.log('[SPA] Skipping - API route, passing to NestJS');
         return next();
       }
