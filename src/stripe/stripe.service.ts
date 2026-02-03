@@ -215,20 +215,19 @@ export class StripeService {
       throw new BadRequestException('User not found');
     }
 
-    // If no active subscription ID or status is CANCELLED, return null values
-    const isActive = user.stripeSubscriptionId && user.subscriptionStatus !== SubscriptionStatus.CANCELLED;
+    // If subscription is cancelled, return the cancelled status (not null)
+    // Only return null if there was never a subscription
+    const tier = user.subscriptionTier;
+    const status = user.subscriptionStatus;
 
-    const tier = isActive ? user.subscriptionTier : null;
-    const status = isActive ? user.subscriptionStatus : null;
-
-    // Get features based on tier
-    const features = this.getFeaturesForTier(tier);
+    // Get features based on tier (null if cancelled or no subscription)
+    const features = status === SubscriptionStatus.CANCELLED || !tier ? [] : this.getFeaturesForTier(tier);
 
     return {
       tier,
       status,
-      periodEnd: isActive ? user.subscriptionPeriodEnd : null,
-      hasOwnNumber: isActive ? user.hasOwnNumber : false,
+      periodEnd: user.subscriptionPeriodEnd,
+      hasOwnNumber: user.hasOwnNumber || false,
       features,
     };
   }

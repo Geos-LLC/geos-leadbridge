@@ -65,7 +65,10 @@ export default function BillingSettings() {
     );
   }
 
-  const hasSubscription = subscription?.tier && subscription?.status && subscription?.status !== 'CANCELLED';
+  // Show subscription card if there's a tier and status (including CANCELLED)
+  // Only show "No Active Subscription" if there was never a subscription
+  const hasSubscription = Boolean(subscription?.tier && subscription?.status);
+  const isCancelled = subscription?.status === 'CANCELLED';
 
   return (
     <div className="billing-page">
@@ -91,7 +94,19 @@ export default function BillingSettings() {
               </div>
             </div>
 
-            {subscription.periodEnd && (
+            {isCancelled && (
+              <div className="subscription-notice cancelled-notice">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9 9h2v5H9V9zm0-4h2v2H9V5z" fill="currentColor"/>
+                </svg>
+                <div>
+                  <strong>Subscription Cancelled</strong>
+                  <p>Your subscription has been cancelled. {subscription.periodEnd && `Access will continue until ${new Date(subscription.periodEnd).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}.`} You can reactivate anytime through the billing portal.</p>
+                </div>
+              </div>
+            )}
+
+            {!isCancelled && subscription.periodEnd && (
               <div className="subscription-detail">
                 <span className="detail-label">Next billing date:</span>
                 <span className="detail-value">
