@@ -144,16 +144,21 @@ export class AuthService {
    * Generates a reset token and stores it with expiry
    */
   async forgotPassword(email: string) {
+    console.log(`[Auth] forgotPassword called for email: ${email}`);
+
     const user = await this.prisma.user.findUnique({
       where: { email },
     });
 
     // Always return success to prevent email enumeration
     if (!user) {
+      console.log(`[Auth] No user found for email: ${email}`);
       return {
         message: 'If an account with that email exists, a password reset link has been sent.',
       };
     }
+
+    console.log(`[Auth] User found: ${user.id}`)
 
     // Generate reset token
     const resetToken = crypto.randomBytes(32).toString('hex');
@@ -172,15 +177,20 @@ export class AuthService {
     // Build reset URL
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
+    console.log(`[Auth] Reset URL generated: ${resetUrl}`);
 
     // Send email via EmailJS
+    console.log(`[Auth] About to send email via EmailJS...`);
+    console.log(`[Auth] EMAILJS_PUBLIC_KEY configured: ${!!process.env.EMAILJS_PUBLIC_KEY}`);
+    console.log(`[Auth] EMAILJS_PRIVATE_KEY configured: ${!!process.env.EMAILJS_PRIVATE_KEY}`);
     try {
       await this.sendPasswordResetEmail(email, user.name || 'User', resetUrl);
-      console.log(`[Auth] Password reset email sent to ${email}`);
+      console.log(`[Auth] Password reset email sent successfully to ${email}`);
     } catch (error) {
       console.error(`[Auth] Failed to send password reset email to ${email}:`, error);
       // Still return success to prevent email enumeration
     }
+    console.log(`[Auth] forgotPassword completed`);
 
     return {
       message: 'If an account with that email exists, a password reset link has been sent.',
@@ -191,14 +201,26 @@ export class AuthService {
    * Send password reset email via EmailJS
    */
   private async sendPasswordResetEmail(toEmail: string, userName: string, resetUrl: string) {
+    console.log(`[Auth] sendPasswordResetEmail called`);
     const publicKey = process.env.EMAILJS_PUBLIC_KEY;
     const privateKey = process.env.EMAILJS_PRIVATE_KEY;
 
+    console.log(`[Auth] Public key length: ${publicKey?.length || 0}`);
+    console.log(`[Auth] Private key length: ${privateKey?.length || 0}`);
+
     if (!publicKey) {
+      console.error(`[Auth] EMAILJS_PUBLIC_KEY is missing!`);
       throw new Error('EMAILJS_PUBLIC_KEY is not configured');
     }
 
-    await emailjs.send(
+    console.log(`[Auth] Calling emailjs.send with:`, {
+      serviceId: 'service_hkfn8t9',
+      templateId: 'template_zk3lz5s',
+      toEmail,
+      userName,
+    });
+
+    const result = await emailjs.send(
       'service_hkfn8t9',
       'template_zk3lz5s',
       {
@@ -211,6 +233,9 @@ export class AuthService {
         privateKey,
       },
     );
+
+    console.log(`[Auth] EmailJS response:`, result);
+    return result;
   }
 
   /**
