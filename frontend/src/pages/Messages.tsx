@@ -205,7 +205,7 @@ export function Messages() {
         if (data.type === 'lead.created') {
           console.log('[Messages] New lead received via SSE:', data.lead);
           // Add the new lead to the beginning of the list
-          setLeads((prevLeads: Lead[]): Lead[] => [data.lead as Lead, ...prevLeads]);
+          setLeads([data.lead as Lead, ...leads]);
         }
       } catch (err) {
         console.error('[Messages] Error parsing SSE event:', err);
