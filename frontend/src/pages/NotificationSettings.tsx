@@ -778,15 +778,30 @@ export function NotificationSettings() {
                         <div className="rule-form inline-edit">
                           <h3>Edit Rule</h3>
 
-                          {/* Show selected account info when editing */}
-                          {editingRule.savedAccount && (
-                            <div className="form-group">
-                              <label>Account</label>
-                              <div className="account-display">
-                                <span className="account-badge">{editingRule.savedAccount.businessName}</span>
-                              </div>
+                          {/* Account Selector - editable when editing */}
+                          <div className="form-group">
+                            <label>
+                              <AlertCircle size={14} />
+                              Business Account
+                            </label>
+                            <div className="select-wrapper">
+                              <select
+                                value={ruleForm.accountId}
+                                onChange={e => setRuleForm(prev => ({ ...prev, accountId: e.target.value, fromPhone: '' }))}
+                              >
+                                <option value="">Select account...</option>
+                                {accounts.map(acc => (
+                                  <option key={acc.id} value={acc.id}>
+                                    {acc.businessName}
+                                  </option>
+                                ))}
+                              </select>
+                              <ChevronDown size={16} />
                             </div>
-                          )}
+                            <p className="form-hint">
+                              This rule will send notifications for leads from the selected account.
+                            </p>
+                          </div>
 
                           {/* From Phone - dropdown of Callio numbers */}
                           {ruleForm.accountId && (
