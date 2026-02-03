@@ -1095,16 +1095,27 @@ export class NotificationsService {
     });
 
     if (!account) {
+      this.logger.error(`[getCallioPhoneNumbers] Saved account ${savedAccountId} not found for user ${userId}`);
       throw new NotFoundException('Saved account not found');
     }
 
+    this.logger.log(`[getCallioPhoneNumbers] Looking up notification settings for account ${savedAccountId}`);
     const settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
     });
 
-    if (!settings?.callioApiKey) {
+    if (!settings) {
+      this.logger.warn(`[getCallioPhoneNumbers] No notification settings found for account ${savedAccountId}`);
       return [];
     }
+
+    if (!settings.callioApiKey) {
+      this.logger.warn(`[getCallioPhoneNumbers] No Callio API key found for account ${savedAccountId}. Please connect Callio in Phone Settings.`);
+      return [];
+    }
+
+    this.logger.log(`[getCallioPhoneNumbers] Found Callio API key for account ${savedAccountId}, fetching phone numbers...`);
+
 
     try {
       const endpoint = 'https://callio-production-47ac.up.railway.app/api/v1/phone-numbers';
