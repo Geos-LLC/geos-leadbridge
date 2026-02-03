@@ -184,8 +184,42 @@ export function Messages() {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
+    // Connect to SSE for real-time lead updates (more efficient than polling)
+    const token = localStorage.getItem('token');
+    if (!token) {
+      console.warn('[Messages] No auth token, skipping SSE connection');
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+    }
+
+    // EventSource doesn't support custom headers, so we need to pass token in query or use cookies
+    // Using Authorization header via JWT guard with cookies
+    const eventSource = new EventSource(`/api/v1/leads/events`, {
+      withCredentials: true,
+    });
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'lead.created') {
+          console.log('[Messages] New lead received via SSE:', data.lead);
+          // Add the new lead to the beginning of the list
+          setLeads(prevLeads => [data.lead, ...prevLeads]);
+        }
+      } catch (err) {
+        console.error('[Messages] Error parsing SSE event:', err);
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error('[Messages] SSE connection error:', error);
+      eventSource.close();
+    };
+
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      eventSource.close();
     };
   }, []);
 

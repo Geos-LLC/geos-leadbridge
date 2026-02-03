@@ -5,6 +5,7 @@
 
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
 import { PrismaService } from '../common/utils/prisma.service';
 import { PlatformFactory } from '../platforms/platform.factory';
@@ -24,6 +25,7 @@ export class WebhooksService {
     private prisma: PrismaService,
     private platformFactory: PlatformFactory,
     private configService: ConfigService,
+    private eventEmitter: EventEmitter2,
     @Inject(forwardRef(() => AutomationService))
     private automationService: AutomationService,
     @Inject(forwardRef(() => NotificationsService))
@@ -359,6 +361,9 @@ export class WebhooksService {
     });
 
     this.logger.log('Lead stored successfully', { negotiationId });
+
+    // Emit SSE event for real-time frontend updates
+    this.eventEmitter.emit(`lead.created.${userId}`, lead);
 
     // Create conversation (messages will arrive via MessageCreatedV4 webhook)
     await this.ensureConversationForLead(

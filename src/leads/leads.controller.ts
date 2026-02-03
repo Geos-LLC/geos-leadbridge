@@ -12,15 +12,39 @@ import {
   Param,
   Body,
   UseGuards,
+  Sse,
+  MessageEvent,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { LeadsService } from './leads.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Observable, fromEvent } from 'rxjs';
+import { map } from 'rxjs/operators';
 
 @Controller('v1/leads')
 @UseGuards(JwtAuthGuard)
 export class LeadsController {
-  constructor(private leadsService: LeadsService) {}
+  constructor(
+    private leadsService: LeadsService,
+    private eventEmitter: EventEmitter2,
+  ) {}
+
+  /**
+   * Server-Sent Events endpoint for real-time lead updates
+   * More efficient than polling for infrequent updates
+   */
+  @Sse('events')
+  leadEvents(@CurrentUser() user: any): Observable<MessageEvent> {
+    const userId = user.id;
+
+    // Listen for lead events for this user
+    return fromEvent(this.eventEmitter, `lead.created.${userId}`).pipe(
+      map((lead) => ({
+        data: { type: 'lead.created', lead },
+      })),
+    );
+  }
 
   /**
    * Get all leads from all connected platforms

@@ -20,7 +20,9 @@
       "Bash(npx tsc:*)",
       "Bash(npx prisma migrate:*)",
       "Bash(npx prisma db push:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(git fetch:*)",
+      "Bash(npx dotenv:*)"
     ]
   }
 }

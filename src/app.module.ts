@@ -5,6 +5,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import configuration from './config/configuration';
 import { AuthModule } from './auth/auth.module';
 import { PlatformsModule } from './platforms/platforms.module';
@@ -25,6 +26,7 @@ import { PrismaService } from './common/utils/prisma.service';
       isGlobal: true,
       load: [configuration],
     }),
+    EventEmitterModule.forRoot(),
     AuthModule,
     PlatformsModule,
     LeadsModule,
