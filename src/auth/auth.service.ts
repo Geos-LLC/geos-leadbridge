@@ -203,7 +203,7 @@ export class AuthService {
       'template_zk3lz5s',
       {
         to_email: toEmail,
-        to_name: userName,
+        name: userName,
         reset_url: resetUrl,
       },
       {
