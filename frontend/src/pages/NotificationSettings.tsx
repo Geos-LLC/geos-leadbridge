@@ -541,7 +541,14 @@ export function NotificationSettings() {
                         <div className="select-wrapper">
                           <select
                             value={ruleForm.accountId}
-                            onChange={e => setRuleForm(prev => ({ ...prev, accountId: e.target.value, fromPhone: '' }))}
+                            onChange={e => {
+                              const newAccountId = e.target.value;
+                              setRuleForm(prev => ({ ...prev, accountId: newAccountId, fromPhone: '' }));
+                              // Force reload phone numbers for the new account (even if cached)
+                              if (newAccountId) {
+                                loadPhoneNumbersForAccount(newAccountId);
+                              }
+                            }}
                             className={!ruleForm.accountId ? 'required' : ''}
                           >
                             <option value="">⚠️ Choose which account this rule applies to...</option>
@@ -797,7 +804,14 @@ export function NotificationSettings() {
                             <div className="select-wrapper">
                               <select
                                 value={ruleForm.accountId}
-                                onChange={e => setRuleForm(prev => ({ ...prev, accountId: e.target.value, fromPhone: '' }))}
+                                onChange={e => {
+                                  const newAccountId = e.target.value;
+                                  setRuleForm(prev => ({ ...prev, accountId: newAccountId, fromPhone: '' }));
+                                  // Force reload phone numbers for the new account (even if cached)
+                                  if (newAccountId) {
+                                    loadPhoneNumbersForAccount(newAccountId);
+                                  }
+                                }}
                               >
                                 <option value="">Select account...</option>
                                 {accounts.map(acc => (
