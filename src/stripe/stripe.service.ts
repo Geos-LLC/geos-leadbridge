@@ -211,6 +211,15 @@ export class StripeService {
 
     this.logger.log(`[handleSubscriptionUpdate] Subscription details - Tier: ${tier}, Status: ${status}, HasOwnNumber: ${hasOwnNumber}`);
 
+    // Get current_period_end from subscription items (newer Stripe API structure)
+    const periodEndTimestamp = subscription.items?.data?.[0]?.current_period_end
+      || (subscription as any).current_period_end;
+    const subscriptionPeriodEnd = periodEndTimestamp
+      ? new Date(periodEndTimestamp * 1000)
+      : null;
+
+    this.logger.log(`[handleSubscriptionUpdate] Period end timestamp: ${periodEndTimestamp}, Date: ${subscriptionPeriodEnd}`);
+
     // Update user
     await this.prisma.user.update({
       where: { id: user.id },
@@ -218,7 +227,7 @@ export class StripeService {
         stripeSubscriptionId: subscription.id,
         subscriptionTier: tier,
         subscriptionStatus: status,
-        subscriptionPeriodEnd: new Date((subscription as any).current_period_end * 1000),
+        subscriptionPeriodEnd,
         hasOwnNumber,
       },
     });
