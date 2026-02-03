@@ -3,11 +3,12 @@
  * Handles user registration, login, and JWT token management
  */
 
-import { Injectable, UnauthorizedException, ConflictException, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../common/utils/prisma.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import * as crypto from 'crypto';
+import emailjs from '@emailjs/nodejs';
 
 @Injectable()
 export class AuthService {
@@ -168,17 +169,48 @@ export class AuthService {
       },
     });
 
-    // In production, send email here
-    // For now, log the reset URL (remove in production)
+    // Build reset URL
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
-    console.log(`[Auth] Password reset URL for ${email}: ${resetUrl}`);
+
+    // Send email via EmailJS
+    try {
+      await this.sendPasswordResetEmail(email, user.name || 'User', resetUrl);
+      console.log(`[Auth] Password reset email sent to ${email}`);
+    } catch (error) {
+      console.error(`[Auth] Failed to send password reset email to ${email}:`, error);
+      // Still return success to prevent email enumeration
+    }
 
     return {
       message: 'If an account with that email exists, a password reset link has been sent.',
-      // Include resetUrl in development for testing (remove in production)
-      ...(process.env.NODE_ENV === 'development' && { resetUrl }),
     };
+  }
+
+  /**
+   * Send password reset email via EmailJS
+   */
+  private async sendPasswordResetEmail(toEmail: string, userName: string, resetUrl: string) {
+    const publicKey = process.env.EMAILJS_PUBLIC_KEY;
+    const privateKey = process.env.EMAILJS_PRIVATE_KEY;
+
+    if (!publicKey) {
+      throw new Error('EMAILJS_PUBLIC_KEY is not configured');
+    }
+
+    await emailjs.send(
+      'service_hkfn8t9',
+      'template_zk3lz5s',
+      {
+        to_email: toEmail,
+        to_name: userName,
+        reset_url: resetUrl,
+      },
+      {
+        publicKey,
+        privateKey,
+      },
+    );
   }
 
   /**

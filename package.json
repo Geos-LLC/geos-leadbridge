@@ -26,6 +26,7 @@
   "license": "MIT",
   "description": "Multi-platform lead integration service for Thumbtack, Yelp, and other platforms",
   "dependencies": {
+    "@emailjs/nodejs": "^5.0.2",
     "@nestjs/common": "^11.1.9",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.1.9",
