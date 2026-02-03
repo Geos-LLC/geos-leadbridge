@@ -250,6 +250,19 @@ body {
   outline: none;
 }
 
+.forgot-password-link {
+  display: block;
+  text-align: right;
+  font-size: 13px;
+  color: var(--primary);
+  text-decoration: none;
+  margin-top: 4px;
+}
+
+.forgot-password-link:hover {
+  text-decoration: underline;
+}
+
 .auth-footer {
   text-align: center;
   margin-top: 24px;

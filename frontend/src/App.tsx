@@ -4,6 +4,8 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { ToastNotifications } from './components/ToastNotifications';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
+import { ForgotPassword } from './pages/ForgotPassword';
+import { ResetPassword } from './pages/ResetPassword';
 import { Dashboard } from './pages/Dashboard';
 import { Messages } from './pages/Messages';
 import { MessageSettings } from './pages/MessageSettings';
@@ -34,6 +36,14 @@ function App() {
         <Route
           path="/register"
           element={isAuthenticated ? <Navigate to="/dashboard" /> : <Register />}
+        />
+        <Route
+          path="/forgot-password"
+          element={isAuthenticated ? <Navigate to="/dashboard" /> : <ForgotPassword />}
+        />
+        <Route
+          path="/reset-password"
+          element={isAuthenticated ? <Navigate to="/dashboard" /> : <ResetPassword />}
         />
 
         {/* Protected routes */}

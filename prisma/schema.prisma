@@ -56,6 +56,10 @@ model User {
   subscriptionPeriodEnd DateTime?
   hasOwnNumber          Boolean             @default(false)
 
+  // Password reset
+  passwordResetToken    String?
+  passwordResetExpires  DateTime?
+
   // Relationships
   platforms           Platform[]
   leads               Lead[]

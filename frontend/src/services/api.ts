@@ -158,6 +158,14 @@ export const authApi = {
     console.log('[API] Profile response:', data);
     return data;
   },
+  forgotPassword: async (email: string): Promise<{ message: string; resetUrl?: string }> => {
+    const { data } = await api.post('/auth/forgot-password', { email });
+    return data;
+  },
+  resetPassword: async (token: string, password: string): Promise<{ message: string }> => {
+    const { data } = await api.post('/auth/reset-password', { token, password });
+    return data;
+  },
 };
 
 // Health issue type from backend

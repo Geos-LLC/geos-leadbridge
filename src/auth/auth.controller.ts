@@ -34,4 +34,19 @@ export class AuthController {
   async getProfile(@CurrentUser() user: any) {
     return this.authService.getProfile(user.id);
   }
+
+  @Public()
+  @Post('forgot-password')
+  async forgotPassword(@Body('email') email: string) {
+    return this.authService.forgotPassword(email);
+  }
+
+  @Public()
+  @Post('reset-password')
+  async resetPassword(
+    @Body('token') token: string,
+    @Body('password') password: string,
+  ) {
+    return this.authService.resetPassword(token, password);
+  }
 }
