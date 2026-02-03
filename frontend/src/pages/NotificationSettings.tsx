@@ -32,6 +32,9 @@ export function NotificationSettings() {
   const [accountPhoneNumbers, setAccountPhoneNumbers] = useState<Record<string, CallioPhoneNumber[]>>({});
   const [loadingPhoneNumbers, setLoadingPhoneNumbers] = useState<Record<string, boolean>>({});
 
+  // Track which accounts have Callio configured
+  const [accountCallioStatus, setAccountCallioStatus] = useState<Record<string, boolean>>({});
+
   // Notification logs
   const [logs, setLogs] = useState<NotificationLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -82,11 +85,33 @@ export function NotificationSettings() {
       setAccounts(accounts);
       setSelectedAccountId('all');
       loadAllRules();
+      // Check Callio status for all accounts
+      checkCallioStatusForAccounts(accounts);
     } catch (err: any) {
       setError(err.message || 'Failed to load accounts');
     } finally {
       setLoading(false);
     }
+  }
+
+  async function checkCallioStatusForAccounts(accountsList: SavedAccount[]) {
+    const statusMap: Record<string, boolean> = {};
+
+    // Check settings for each account in parallel
+    await Promise.all(
+      accountsList.map(async (account) => {
+        try {
+          const result = await notificationsApi.getSettings(account.id);
+          // Account has Callio configured if settings exist and have callioApiKey
+          statusMap[account.id] = !!(result.settings && result.settings.callioApiKey);
+        } catch (err) {
+          // If we can't fetch settings, assume not configured
+          statusMap[account.id] = false;
+        }
+      })
+    );
+
+    setAccountCallioStatus(statusMap);
   }
 
   async function loadAllRules() {
@@ -552,11 +577,14 @@ export function NotificationSettings() {
                             className={!ruleForm.accountId ? 'required' : ''}
                           >
                             <option value="">⚠️ Choose which account this rule applies to...</option>
-                            {accounts.map(acc => (
-                              <option key={acc.id} value={acc.id}>
-                                {acc.businessName}
-                              </option>
-                            ))}
+                            {accounts.map(acc => {
+                              const hasCallio = accountCallioStatus[acc.id];
+                              return (
+                                <option key={acc.id} value={acc.id}>
+                                  {hasCallio ? '✓' : '⚠'} {acc.businessName} {!hasCallio ? '(Not configured)' : ''}
+                                </option>
+                              );
+                            })}
                           </select>
                           <ChevronDown size={16} />
                         </div>
@@ -573,6 +601,17 @@ export function NotificationSettings() {
                           <div>
                             <strong>Account Required</strong>
                             <p>Please select which business account this notification rule applies to before continuing.</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Warning banner if account doesn't have Callio configured */}
+                      {ruleForm.accountId && !accountCallioStatus[ruleForm.accountId] && (
+                        <div className="account-warning-banner" style={{ backgroundColor: '#fff3cd', borderColor: '#ffc107' }}>
+                          <AlertCircle size={18} style={{ color: '#856404' }} />
+                          <div>
+                            <strong>Callio Not Connected</strong>
+                            <p>This account doesn't have Callio configured yet. Go to <a href="/phone-settings" style={{ color: '#0066cc', textDecoration: 'underline' }}>Phone Settings</a> to connect Callio for this account before creating notification rules.</p>
                           </div>
                         </div>
                       )}
@@ -814,11 +853,14 @@ export function NotificationSettings() {
                                 }}
                               >
                                 <option value="">Select account...</option>
-                                {accounts.map(acc => (
-                                  <option key={acc.id} value={acc.id}>
-                                    {acc.businessName}
-                                  </option>
-                                ))}
+                                {accounts.map(acc => {
+                                  const hasCallio = accountCallioStatus[acc.id];
+                                  return (
+                                    <option key={acc.id} value={acc.id}>
+                                      {hasCallio ? '✓' : '⚠'} {acc.businessName} {!hasCallio ? '(Not configured)' : ''}
+                                    </option>
+                                  );
+                                })}
                               </select>
                               <ChevronDown size={16} />
                             </div>
@@ -826,6 +868,17 @@ export function NotificationSettings() {
                               This rule will send notifications for leads from the selected account.
                             </p>
                           </div>
+
+                          {/* Warning banner if account doesn't have Callio configured */}
+                          {ruleForm.accountId && !accountCallioStatus[ruleForm.accountId] && (
+                            <div className="account-warning-banner" style={{ backgroundColor: '#fff3cd', borderColor: '#ffc107' }}>
+                              <AlertCircle size={18} style={{ color: '#856404' }} />
+                              <div>
+                                <strong>Callio Not Connected</strong>
+                                <p>This account doesn't have Callio configured yet. Go to <a href="/phone-settings" style={{ color: '#0066cc', textDecoration: 'underline' }}>Phone Settings</a> to connect Callio for this account before saving this rule.</p>
+                              </div>
+                            </div>
+                          )}
 
                           {/* From Phone - dropdown of Callio numbers */}
                           {ruleForm.accountId && (
