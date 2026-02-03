@@ -30,6 +30,7 @@ export function NotificationSettings() {
 
   // Phone numbers for each account (for the rule form)
   const [accountPhoneNumbers, setAccountPhoneNumbers] = useState<Record<string, CallioPhoneNumber[]>>({});
+  const [loadingPhoneNumbers, setLoadingPhoneNumbers] = useState<Record<string, boolean>>({});
 
   // Notification logs
   const [logs, setLogs] = useState<NotificationLog[]>([]);
@@ -116,6 +117,7 @@ export function NotificationSettings() {
 
   async function loadPhoneNumbersForAccount(accountId: string) {
     try {
+      setLoadingPhoneNumbers(prev => ({ ...prev, [accountId]: true }));
       const result = await notificationsApi.getCallioPhoneNumbers(accountId);
       setAccountPhoneNumbers(prev => ({
         ...prev,
@@ -127,6 +129,8 @@ export function NotificationSettings() {
         ...prev,
         [accountId]: [],
       }));
+    } finally {
+      setLoadingPhoneNumbers(prev => ({ ...prev, [accountId]: false }));
     }
   }
 
@@ -406,6 +410,7 @@ export function NotificationSettings() {
 
   // Get phone numbers for the currently selected account in the form
   const formPhoneNumbers = ruleForm.accountId ? (accountPhoneNumbers[ruleForm.accountId] || []) : [];
+  const formPhoneNumbersLoading = ruleForm.accountId ? (loadingPhoneNumbers[ruleForm.accountId] || false) : false;
 
   if (loading && accounts.length === 0) {
     return (
@@ -574,7 +579,12 @@ export function NotificationSettings() {
                         <Phone size={14} />
                         From Phone Number (Send From)
                       </label>
-                      {formPhoneNumbers.length > 0 ? (
+                      {formPhoneNumbersLoading ? (
+                        <div className="loading-phone-numbers" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '8px', color: '#666' }}>
+                          <Loader2 size={14} className="spinner" />
+                          Loading phone numbers...
+                        </div>
+                      ) : formPhoneNumbers.length > 0 ? (
                         <div className="select-wrapper">
                           <select
                             value={ruleForm.fromPhone}
@@ -810,7 +820,12 @@ export function NotificationSettings() {
                                 <Phone size={14} />
                                 From Phone Number (Send From)
                               </label>
-                              {formPhoneNumbers.length > 0 ? (
+                              {formPhoneNumbersLoading ? (
+                                <div className="loading-phone-numbers" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '8px', color: '#666' }}>
+                                  <Loader2 size={14} className="spinner" />
+                                  Loading phone numbers...
+                                </div>
+                              ) : formPhoneNumbers.length > 0 ? (
                                 <div className="select-wrapper">
                                   <select
                                     value={ruleForm.fromPhone}
