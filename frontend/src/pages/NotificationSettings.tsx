@@ -74,17 +74,6 @@ export function NotificationSettings() {
     }
   }, [ruleForm.accountId]);
 
-  // Auto-poll logs every 10 seconds to catch delivery status updates (silent refresh)
-  useEffect(() => {
-    if (!selectedAccountId) return;
-
-    const pollInterval = setInterval(() => {
-      refreshLogs();
-    }, 10000); // Poll every 10 seconds
-
-    return () => clearInterval(pollInterval);
-  }, [selectedAccountId]);
-
   async function loadAccounts() {
     try {
       setLoading(true);
