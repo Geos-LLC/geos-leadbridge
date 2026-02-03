@@ -1,6 +1,9 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Home, MessageSquare, BarChart3, Settings, LogOut, Zap, Bell, Phone, CreditCard, Shield } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
+import TrialBanner from './TrialBanner';
+import TrialExpiredModal from './TrialExpiredModal';
+import '../styles/TrialBanner.css';
 
 export function Layout() {
   const navigate = useNavigate();
@@ -16,6 +19,7 @@ export function Layout() {
 
   return (
     <div className="app-layout">
+      <TrialExpiredModal />
       <nav className="sidebar-nav">
         <div className="nav-brand">
           <img src="/Thumbtack_Bridge_Logo.png" alt="Thumbtack Bridge" className="nav-logo" />
@@ -82,6 +86,7 @@ export function Layout() {
       </nav>
 
       <main className="main-content">
+        <TrialBanner />
         <Outlet />
       </main>
     </div>

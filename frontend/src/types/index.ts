@@ -7,6 +7,9 @@ export interface User {
   subscriptionStatus?: 'ACTIVE' | 'PAST_DUE' | 'CANCELLED' | 'TRIALING' | 'INCOMPLETE';
   subscriptionPeriodEnd?: string;
   hasOwnNumber?: boolean;
+  trialStartDate?: string;
+  trialEndDate?: string;
+  trialUsed?: boolean;
 }
 
 export interface AuthResponse {
@@ -217,6 +220,12 @@ export interface SubscriptionDetails {
   periodEnd: string | null;
   hasOwnNumber: boolean;
   features: string[];
+  trial: {
+    isOnTrial: boolean;
+    trialDaysRemaining: number;
+    trialExpired: boolean;
+    trialEndDate: string | null;
+  };
 }
 
 export interface AdminUser {

@@ -77,7 +77,7 @@ export default function BillingSettings() {
         <p>Manage your subscription and billing information</p>
       </div>
 
-      {hasSubscription ? (
+      {hasSubscription && subscription ? (
         <div className="billing-content">
           <div className="subscription-card">
             <div className="subscription-header">

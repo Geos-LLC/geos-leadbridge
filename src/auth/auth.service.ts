@@ -33,12 +33,20 @@ export class AuthService {
     // Hash password
     const hashedPassword = await EncryptionUtil.hashPassword(password);
 
-    // Create user
+    // Set 14-day trial period
+    const now = new Date();
+    const trialEndDate = new Date(now);
+    trialEndDate.setDate(trialEndDate.getDate() + 14);
+
+    // Create user with trial
     const user = await this.prisma.user.create({
       data: {
         email,
         password: hashedPassword,
         name,
+        trialStartDate: now,
+        trialEndDate: trialEndDate,
+        trialUsed: false,
       },
     });
 
@@ -55,6 +63,9 @@ export class AuthService {
         subscriptionStatus: user.subscriptionStatus,
         subscriptionPeriodEnd: user.subscriptionPeriodEnd,
         hasOwnNumber: user.hasOwnNumber,
+        trialStartDate: user.trialStartDate,
+        trialEndDate: user.trialEndDate,
+        trialUsed: user.trialUsed,
       },
       token,
     };
@@ -93,6 +104,9 @@ export class AuthService {
         subscriptionStatus: user.subscriptionStatus,
         subscriptionPeriodEnd: user.subscriptionPeriodEnd,
         hasOwnNumber: user.hasOwnNumber,
+        trialStartDate: user.trialStartDate,
+        trialEndDate: user.trialEndDate,
+        trialUsed: user.trialUsed,
       },
       token,
     };

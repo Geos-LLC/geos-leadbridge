@@ -208,6 +208,9 @@ export class StripeService {
         subscriptionPeriodEnd: true,
         hasOwnNumber: true,
         stripeSubscriptionId: true,
+        trialStartDate: true,
+        trialEndDate: true,
+        trialUsed: true,
       },
     });
 
@@ -223,12 +226,26 @@ export class StripeService {
     // Get features based on tier (null if cancelled or no subscription)
     const features = status === SubscriptionStatus.CANCELLED || !tier ? [] : this.getFeaturesForTier(tier);
 
+    // Check trial status
+    const now = new Date();
+    const isOnTrial = user.trialEndDate && now <= user.trialEndDate && !user.subscriptionTier;
+    const trialDaysRemaining = user.trialEndDate
+      ? Math.max(0, Math.ceil((user.trialEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
+      : 0;
+    const trialExpired = user.trialEndDate && now > user.trialEndDate && !user.subscriptionTier;
+
     return {
       tier,
       status,
       periodEnd: user.subscriptionPeriodEnd,
       hasOwnNumber: user.hasOwnNumber || false,
       features,
+      trial: {
+        isOnTrial,
+        trialDaysRemaining,
+        trialExpired,
+        trialEndDate: user.trialEndDate,
+      },
     };
   }
 

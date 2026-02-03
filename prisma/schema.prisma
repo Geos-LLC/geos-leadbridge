@@ -56,6 +56,11 @@ model User {
   subscriptionPeriodEnd DateTime?
   hasOwnNumber          Boolean             @default(false)
 
+  // Trial period
+  trialStartDate        DateTime?
+  trialEndDate          DateTime?
+  trialUsed             Boolean             @default(false)
+
   // Password reset
   passwordResetToken    String?
   passwordResetExpires  DateTime?
