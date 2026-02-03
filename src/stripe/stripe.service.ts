@@ -133,11 +133,11 @@ export class StripeService {
       switch (event.type) {
         case 'customer.subscription.created':
         case 'customer.subscription.updated':
-          await this.handleSubscriptionUpdate(event.data.object as Stripe.Subscription);
+          await this.handleSubscriptionUpdate(event.data.object as Stripe.Subscription, event.id, event.type);
           break;
 
         case 'customer.subscription.deleted':
-          await this.handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
+          await this.handleSubscriptionDeleted(event.data.object as Stripe.Subscription, event.id);
           break;
 
         case 'invoice.payment_succeeded':
@@ -189,9 +189,9 @@ export class StripeService {
 
   // Private helper methods
 
-  private async handleSubscriptionUpdate(subscription: Stripe.Subscription) {
+  private async handleSubscriptionUpdate(subscription: Stripe.Subscription, eventId: string, eventType: string) {
     const customerId = subscription.customer as string;
-    this.logger.log(`[handleSubscriptionUpdate] Processing subscription ${subscription.id} for customer ${customerId}`);
+    this.logger.log(`[handleSubscriptionUpdate] Processing subscription ${subscription.id} for customer ${customerId}, event: ${eventId}`);
 
     const user = await this.prisma.user.findUnique({
       where: { stripeCustomerId: customerId },
@@ -231,8 +231,8 @@ export class StripeService {
         userId: user.id,
         tier,
         status,
-        eventType: subscription.status === 'active' ? 'subscription.created' : 'subscription.updated',
-        stripeEventId: subscription.id,
+        eventType,
+        stripeEventId: eventId,
         metadata: subscription as any,
       },
     });
@@ -240,7 +240,7 @@ export class StripeService {
     this.logger.log(`[handleSubscriptionUpdate] Updated subscription for user ${user.id}: ${tier} - ${status}`);
   }
 
-  private async handleSubscriptionDeleted(subscription: Stripe.Subscription) {
+  private async handleSubscriptionDeleted(subscription: Stripe.Subscription, eventId: string) {
     const customerId = subscription.customer as string;
     const user = await this.prisma.user.findUnique({
       where: { stripeCustomerId: customerId },
@@ -260,8 +260,8 @@ export class StripeService {
         userId: user.id,
         tier: user.subscriptionTier!,
         status: SubscriptionStatus.CANCELLED,
-        eventType: 'subscription.deleted',
-        stripeEventId: subscription.id,
+        eventType: 'customer.subscription.deleted',
+        stripeEventId: eventId,
         metadata: subscription as any,
       },
     });
