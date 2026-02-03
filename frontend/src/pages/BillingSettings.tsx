@@ -65,7 +65,7 @@ export default function BillingSettings() {
     );
   }
 
-  const hasSubscription = subscription?.tier && subscription?.status !== 'CANCELLED';
+  const hasSubscription = subscription?.tier && subscription?.status && subscription?.status !== 'CANCELLED';
 
   return (
     <div className="billing-page">

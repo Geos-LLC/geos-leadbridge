@@ -123,6 +123,19 @@ export class StripeService {
       // Cancel immediately
       await this.stripe.subscriptions.cancel(user.stripeSubscriptionId);
       this.logger.log(`[cancelSubscription] Subscription cancelled immediately`);
+
+      // Clear subscription data immediately (webhook will also run, but this gives instant feedback)
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          stripeSubscriptionId: null,
+          subscriptionTier: null,
+          subscriptionStatus: null,
+          subscriptionPeriodEnd: null,
+          hasOwnNumber: false,
+        },
+      });
+      this.logger.log(`[cancelSubscription] User subscription data cleared`);
     } else {
       // Cancel at period end
       await this.stripe.subscriptions.update(user.stripeSubscriptionId, {
@@ -131,7 +144,6 @@ export class StripeService {
       this.logger.log(`[cancelSubscription] Subscription set to cancel at period end`);
     }
 
-    // The webhook will handle updating the database
     return { success: true, immediate };
   }
 
@@ -285,17 +297,25 @@ export class StripeService {
 
     if (!user) return;
 
+    // Save tier before clearing for history
+    const previousTier = user.subscriptionTier;
+
+    // Clear all subscription data when cancelled
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
-        subscriptionStatus: SubscriptionStatus.CANCELLED,
+        stripeSubscriptionId: null,
+        subscriptionTier: null,
+        subscriptionStatus: null,
+        subscriptionPeriodEnd: null,
+        hasOwnNumber: false,
       },
     });
 
     await this.prisma.subscriptionHistory.create({
       data: {
         userId: user.id,
-        tier: user.subscriptionTier!,
+        tier: previousTier!,
         status: SubscriptionStatus.CANCELLED,
         eventType: 'customer.subscription.deleted',
         stripeEventId: eventId,
@@ -303,7 +323,7 @@ export class StripeService {
       },
     });
 
-    this.logger.log(`Subscription deleted for user ${user.id}`);
+    this.logger.log(`Subscription deleted for user ${user.id}, all subscription data cleared`);
   }
 
   private async handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {

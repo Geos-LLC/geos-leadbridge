@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { billingApi } from '../services/api';
 import { notify } from '../store/notificationStore';
-import { useAuthStore } from '../store/authStore';
+import type { SubscriptionDetails } from '../types';
 
 const tiers = [
   {
@@ -48,7 +48,21 @@ const tiers = [
 export default function Pricing() {
   const [loading, setLoading] = useState<string | null>(null);
   const [ownNumber, setOwnNumber] = useState(false);
-  const user = useAuthStore((state) => state.user);
+  const [subscription, setSubscription] = useState<SubscriptionDetails | null>(null);
+
+  useEffect(() => {
+    // Fetch fresh subscription data to get current tier
+    const loadSubscription = async () => {
+      try {
+        const data = await billingApi.getSubscription();
+        setSubscription(data);
+      } catch (error) {
+        // Ignore errors - user might not have a subscription
+        console.log('No active subscription');
+      }
+    };
+    loadSubscription();
+  }, []);
 
   const handleSubscribe = async (tierId: 'STARTER' | 'PRO' | 'ENTERPRISE') => {
     try {
@@ -74,7 +88,8 @@ export default function Pricing() {
     }
   };
 
-  const currentTier = user?.subscriptionTier;
+  // Get current tier from fresh subscription data, not cached authStore
+  const currentTier = subscription?.tier;
 
   return (
     <div className="pricing-page">
