@@ -54,6 +54,10 @@ export function NotificationSettings() {
   }, []);
 
   useEffect(() => {
+    // Close any open edit/create forms when changing account filter
+    setIsCreatingRule(false);
+    setEditingRule(null);
+
     if (selectedAccountId === 'all') {
       loadAllRules();
       loadAllLogs();
