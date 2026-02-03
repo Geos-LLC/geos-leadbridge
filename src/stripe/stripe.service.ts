@@ -107,6 +107,34 @@ export class StripeService {
     return { portalUrl: session.url };
   }
 
+  async cancelSubscription(userId: string, immediate: boolean = true) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (!user.stripeSubscriptionId) {
+      throw new BadRequestException('User has no active subscription');
+    }
+
+    this.logger.log(`[cancelSubscription] Cancelling subscription ${user.stripeSubscriptionId} for user ${userId}, immediate: ${immediate}`);
+
+    if (immediate) {
+      // Cancel immediately
+      await this.stripe.subscriptions.cancel(user.stripeSubscriptionId);
+      this.logger.log(`[cancelSubscription] Subscription cancelled immediately`);
+    } else {
+      // Cancel at period end
+      await this.stripe.subscriptions.update(user.stripeSubscriptionId, {
+        cancel_at_period_end: true,
+      });
+      this.logger.log(`[cancelSubscription] Subscription set to cancel at period end`);
+    }
+
+    // The webhook will handle updating the database
+    return { success: true, immediate };
+  }
+
   async handleWebhook(rawBody: Buffer, signature: string) {
     const webhookSecret =
       this.configService.get<string>('STRIPE_WEBHOOK_SECRET');

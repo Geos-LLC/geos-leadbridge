@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
+import { StripeService } from '../stripe/stripe.service';
 import { ListUsersDto } from './dto/list-users.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { SubscriptionTier, SubscriptionStatus } from '../../generated/prisma';
@@ -8,7 +9,10 @@ import { SubscriptionTier, SubscriptionStatus } from '../../generated/prisma';
 export class AdminService {
   private readonly logger = new Logger(AdminService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private stripeService: StripeService,
+  ) {}
 
   async listUsers(query: ListUsersDto) {
     const { search, tier, offset = 0, limit = 50 } = query;
@@ -39,6 +43,7 @@ export class AdminService {
           subscriptionTier: true,
           subscriptionStatus: true,
           subscriptionPeriodEnd: true,
+          stripeSubscriptionId: true,
           hasOwnNumber: true,
           createdAt: true,
           updatedAt: true,
@@ -112,6 +117,26 @@ export class AdminService {
     this.logger.log(`Admin ${adminId} updated subscription for user ${userId}`);
 
     return updatedUser;
+  }
+
+  async cancelUserSubscription(adminId: string, userId: string, immediate: boolean = true) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Cancel subscription in Stripe
+    const result = await this.stripeService.cancelSubscription(userId, immediate);
+
+    // Log admin action
+    await this.logAdminAction(adminId, 'CANCEL_USER_SUBSCRIPTION', userId, {
+      immediate,
+      stripeSubscriptionId: user.stripeSubscriptionId,
+    });
+
+    this.logger.log(`Admin ${adminId} cancelled subscription for user ${userId} (immediate: ${immediate})`);
+
+    return result;
   }
 
   async deleteUser(adminId: string, userId: string) {

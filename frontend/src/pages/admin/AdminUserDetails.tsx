@@ -27,6 +27,9 @@ export default function AdminUserDetailsPage() {
     hasOwnNumber: false,
   });
 
+  // Cancel subscription state
+  const [cancelling, setCancelling] = useState(false);
+
   useEffect(() => {
     if (currentUser?.role !== 'ADMIN') {
       notify.error('Access Denied', 'You must be an admin to access this page');
@@ -109,6 +112,33 @@ export default function AdminUserDetailsPage() {
     } finally {
       setDeleting(false);
       closeDeleteModal();
+    }
+  };
+
+  const handleCancelSubscription = async (immediate: boolean) => {
+    if (!user || !user.stripeSubscriptionId) return;
+
+    const confirmMessage = immediate
+      ? 'Cancel this subscription immediately? The user will lose access right away.'
+      : 'Cancel this subscription at period end? The user will keep access until the billing period ends.';
+
+    if (!window.confirm(confirmMessage)) return;
+
+    try {
+      setCancelling(true);
+      await adminApi.cancelUserSubscription(user.id, immediate);
+      notify.success(
+        'Subscription Cancelled',
+        immediate
+          ? 'Subscription cancelled immediately'
+          : 'Subscription will cancel at period end'
+      );
+      loadUser();
+    } catch (error: any) {
+      console.error('Failed to cancel subscription:', error);
+      notify.error('Error', 'Failed to cancel subscription');
+    } finally {
+      setCancelling(false);
     }
   };
 
@@ -260,6 +290,27 @@ export default function AdminUserDetailsPage() {
                 <span className="label">Own Number:</span>
                 <span className="value">{user.hasOwnNumber ? 'Yes' : 'No'}</span>
               </div>
+
+              {user.stripeSubscriptionId && user.subscriptionStatus !== 'CANCELLED' && (
+                <div className="subscription-actions" style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    onClick={() => handleCancelSubscription(true)}
+                    disabled={cancelling}
+                    className="btn-danger"
+                    style={{ fontSize: '0.875rem' }}
+                  >
+                    {cancelling ? 'Cancelling...' : 'Cancel Immediately'}
+                  </button>
+                  <button
+                    onClick={() => handleCancelSubscription(false)}
+                    disabled={cancelling}
+                    className="btn-secondary"
+                    style={{ fontSize: '0.875rem' }}
+                  >
+                    Cancel at Period End
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>

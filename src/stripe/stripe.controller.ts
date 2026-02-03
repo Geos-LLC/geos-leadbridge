@@ -4,6 +4,7 @@ import {
   Get,
   Body,
   Req,
+  Res,
   UseGuards,
   Headers,
   RawBodyRequest,
@@ -12,7 +13,7 @@ import { StripeService } from './stripe.service';
 import { CreateCheckoutSessionDto } from './dto/create-checkout-session.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Public } from '../common/decorators/public.decorator';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 
 @Controller('v1/stripe')
 export class StripeController {
@@ -55,13 +56,19 @@ export class StripeController {
 
   @Get('subscription')
   @UseGuards(JwtAuthGuard)
-  async getSubscription(@Req() req: any) {
+  async getSubscription(@Req() req: any, @Res() res: Response) {
     const userId = req.user.id;
     const result = await this.stripeService.getSubscriptionDetails(userId);
-    return {
+
+    // Prevent caching so subscription changes are reflected immediately
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+
+    return res.json({
       success: true,
       data: result,
-    };
+    });
   }
 
   @Public()

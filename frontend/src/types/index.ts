@@ -227,6 +227,7 @@ export interface AdminUser {
   subscriptionTier: 'STARTER' | 'PRO' | 'ENTERPRISE' | null;
   subscriptionStatus: 'ACTIVE' | 'PAST_DUE' | 'CANCELLED' | 'TRIALING' | 'INCOMPLETE' | null;
   subscriptionPeriodEnd: string | null;
+  stripeSubscriptionId: string | null;
   hasOwnNumber: boolean;
   createdAt: string;
   updatedAt: string;

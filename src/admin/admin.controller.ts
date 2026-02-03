@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Patch,
   Delete,
   Param,
@@ -49,6 +50,25 @@ export class AdminController {
       adminId,
       userId,
       dto,
+    );
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
+  @Post('users/:userId/cancel-subscription')
+  async cancelUserSubscription(
+    @Req() req: any,
+    @Param('userId') userId: string,
+    @Body() body: { immediate?: boolean },
+  ) {
+    const adminId = req.user.id;
+    const immediate = body.immediate !== false; // Default to true
+    const result = await this.adminService.cancelUserSubscription(
+      adminId,
+      userId,
+      immediate,
     );
     return {
       success: true,

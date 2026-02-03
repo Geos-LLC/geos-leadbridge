@@ -730,6 +730,10 @@ export const adminApi = {
     const { data } = await api.delete(`/v1/admin/users/${userId}`);
     return data.data;
   },
+  cancelUserSubscription: async (userId: string, immediate: boolean = true): Promise<{ success: boolean; immediate: boolean }> => {
+    const { data } = await api.post(`/v1/admin/users/${userId}/cancel-subscription`, { immediate });
+    return data.data;
+  },
   getStats: async (): Promise<AdminStats> => {
     const { data } = await api.get('/v1/admin/stats');
     return data.data;
