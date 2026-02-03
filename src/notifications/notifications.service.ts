@@ -550,14 +550,16 @@ export class NotificationsService {
    * Send notification for a new lead
    * Called by webhook handler when a new lead is created
    * Uses rule-based system - finds all enabled "new_lead" rules and sends SMS for each
+   *
+   * Fallback logic: If no account-specific settings exist, uses user-level default settings
    */
   async sendLeadNotification(context: SendNotificationContext): Promise<void> {
     const { userId, savedAccountId, leadId, lead } = context;
 
     this.logger.log(`Checking notification rules for account ${savedAccountId}`);
 
-    // Get settings for this account
-    const settings = await this.prisma.notificationSettings.findUnique({
+    // First try to get account-specific settings
+    let settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
       include: {
         notificationRules: {
@@ -566,8 +568,30 @@ export class NotificationsService {
       },
     });
 
+    // Fallback: If no account-specific settings, try user-level default settings
     if (!settings) {
-      this.logger.log(`No notification settings for account ${savedAccountId}`);
+      this.logger.log(`No account-specific settings for ${savedAccountId}, checking user-level defaults for user ${userId}`);
+      settings = await this.prisma.notificationSettings.findFirst({
+        where: {
+          userId: userId,
+          savedAccountId: null, // User-level default has no savedAccountId
+        },
+        include: {
+          notificationRules: {
+            where: { triggerType: 'new_lead', enabled: true },
+          },
+        },
+      });
+
+      if (settings) {
+        this.logger.log(`Using user-level default settings for user ${userId}`);
+      }
+    } else {
+      this.logger.log(`Using account-specific settings for ${savedAccountId}`);
+    }
+
+    if (!settings) {
+      this.logger.log(`No notification settings (account or user-level) for user ${userId}`);
       return;
     }
 
@@ -618,6 +642,7 @@ export class NotificationsService {
 
   /**
    * Handle customer reply event - sends SMS for "customer_reply" rules
+   * Fallback logic: If no account-specific settings exist, uses user-level default settings
    */
   async handleCustomerReply(context: CustomerReplyContext): Promise<void> {
     const { userId, savedAccountId, leadId, lead, isFirstCustomerReply, isSecondCustomerMessage } = context;
@@ -630,8 +655,8 @@ export class NotificationsService {
       return;
     }
 
-    // Get settings for this account
-    const settings = await this.prisma.notificationSettings.findUnique({
+    // First try to get account-specific settings
+    let settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
       include: {
         notificationRules: {
@@ -640,8 +665,30 @@ export class NotificationsService {
       },
     });
 
+    // Fallback: If no account-specific settings, try user-level default settings
     if (!settings) {
-      this.logger.log(`No notification settings for account ${savedAccountId}`);
+      this.logger.log(`No account-specific settings for ${savedAccountId}, checking user-level defaults for user ${userId}`);
+      settings = await this.prisma.notificationSettings.findFirst({
+        where: {
+          userId: userId,
+          savedAccountId: null, // User-level default has no savedAccountId
+        },
+        include: {
+          notificationRules: {
+            where: { triggerType: 'customer_reply', enabled: true },
+          },
+        },
+      });
+
+      if (settings) {
+        this.logger.log(`Using user-level default settings for user ${userId}`);
+      }
+    } else {
+      this.logger.log(`Using account-specific settings for ${savedAccountId}`);
+    }
+
+    if (!settings) {
+      this.logger.log(`No notification settings (account or user-level) for user ${userId}`);
       return;
     }
 

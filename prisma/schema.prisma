@@ -61,15 +61,16 @@ model User {
   passwordResetExpires  DateTime?
 
   // Relationships
-  platforms           Platform[]
-  leads               Lead[]
-  conversations       Conversation[]
-  messages            Message[]
-  savedAccounts       SavedAccount[]
-  messageTemplates    MessageTemplate[]
-  automationRules     AutomationRule[]
-  subscriptionHistory SubscriptionHistory[]
-  adminLogs           AdminLog[]
+  platforms                Platform[]
+  leads                    Lead[]
+  conversations            Conversation[]
+  messages                 Message[]
+  savedAccounts            SavedAccount[]
+  messageTemplates         MessageTemplate[]
+  automationRules          AutomationRule[]
+  subscriptionHistory      SubscriptionHistory[]
+  adminLogs                AdminLog[]
+  notificationSettings     NotificationSettings[] // Account-specific and user-level default notification settings
 
   @@map("users")
 }
@@ -354,7 +355,8 @@ model PendingAutomatedMessage {
 
 model NotificationSettings {
   id                String   @id @default(uuid())
-  savedAccountId    String   @unique // Per-account settings
+  savedAccountId    String?  @unique // Per-account settings (optional - if null, this is user-level default)
+  userId            String?  // User ID (for account-specific AND user-level settings)
   enabled           Boolean  @default(false)
   destinationPhone  String?  // Company phone to send notifications to
   senderMode        String   @default("shared") // "shared" | "dedicated" | "openphone"
@@ -371,11 +373,13 @@ model NotificationSettings {
   updatedAt         DateTime @updatedAt
 
   // Relationships
-  savedAccount      SavedAccount        @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
+  user              User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  savedAccount      SavedAccount?       @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
   notificationLogs  NotificationLog[]
   notificationRules NotificationRule[]
 
   @@index([savedAccountId])
+  @@index([userId])
   @@map("notification_settings")
 }
 
