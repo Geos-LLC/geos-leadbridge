@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { AlertTriangle, X } from 'lucide-react';
 import { adminApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
@@ -12,6 +13,11 @@ export default function AdminUserDetailsPage() {
   const [user, setUser] = useState<AdminUserDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+
+  // Delete confirmation modal state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   // Edit form state
   const [editMode, setEditMode] = useState(false);
@@ -74,20 +80,35 @@ export default function AdminUserDetailsPage() {
     }
   };
 
+  const openDeleteModal = () => {
+    setDeleteConfirmEmail('');
+    setShowDeleteModal(true);
+  };
+
+  const closeDeleteModal = () => {
+    setShowDeleteModal(false);
+    setDeleteConfirmEmail('');
+  };
+
   const handleDeleteUser = async () => {
     if (!user) return;
 
-    if (!confirm(`Are you sure you want to delete ${user.email}? This action cannot be undone.`)) {
+    if (deleteConfirmEmail !== user.email) {
+      notify.error('Email Mismatch', 'Please type the exact email address to confirm');
       return;
     }
 
     try {
+      setDeleting(true);
       await adminApi.deleteUser(user.id);
-      notify.success('User Deleted', 'User deleted successfully');
+      notify.success('User Deleted', 'User and all associated data deleted permanently');
       navigate('/admin');
     } catch (error: any) {
       console.error('Failed to delete user:', error);
       notify.error('Error', 'Failed to delete user');
+    } finally {
+      setDeleting(false);
+      closeDeleteModal();
     }
   };
 
@@ -110,7 +131,7 @@ export default function AdminUserDetailsPage() {
           </Link>
           <h1>User Details</h1>
         </div>
-        <button onClick={handleDeleteUser} className="btn-danger">
+        <button onClick={openDeleteModal} className="btn-danger">
           Delete User
         </button>
       </div>
@@ -291,6 +312,64 @@ export default function AdminUserDetailsPage() {
           )}
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && user && (
+        <div className="modal-overlay" onClick={closeDeleteModal}>
+          <div className="modal delete-confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={closeDeleteModal}>
+              <X size={20} />
+            </button>
+
+            <div className="delete-warning-header">
+              <AlertTriangle size={48} className="warning-icon" />
+              <h2>Delete User Account</h2>
+            </div>
+
+            <div className="delete-warning-content">
+              <p className="warning-text">
+                <strong>This action is permanent and cannot be undone.</strong>
+              </p>
+              <p>Deleting this user will permanently remove:</p>
+              <ul className="delete-consequences">
+                <li>User account and profile</li>
+                <li>All leads and conversations</li>
+                <li>All message templates</li>
+                <li>All automation rules</li>
+                <li>Subscription and billing history</li>
+              </ul>
+
+              <div className="confirm-email-section">
+                <label>
+                  To confirm, type the user's email address:
+                  <strong> {user.email}</strong>
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmEmail}
+                  onChange={(e) => setDeleteConfirmEmail(e.target.value)}
+                  placeholder="Enter email to confirm"
+                  className="confirm-email-input"
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button onClick={closeDeleteModal} className="btn-secondary">
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteUser}
+                disabled={deleteConfirmEmail !== user.email || deleting}
+                className="btn-danger-solid"
+              >
+                {deleting ? 'Deleting...' : 'Permanently Delete User'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
