@@ -215,14 +215,20 @@ export class StripeService {
       throw new BadRequestException('User not found');
     }
 
+    // If no active subscription ID or status is CANCELLED, return null values
+    const isActive = user.stripeSubscriptionId && user.subscriptionStatus !== SubscriptionStatus.CANCELLED;
+
+    const tier = isActive ? user.subscriptionTier : null;
+    const status = isActive ? user.subscriptionStatus : null;
+
     // Get features based on tier
-    const features = this.getFeaturesForTier(user.subscriptionTier);
+    const features = this.getFeaturesForTier(tier);
 
     return {
-      tier: user.subscriptionTier,
-      status: user.subscriptionStatus,
-      periodEnd: user.subscriptionPeriodEnd,
-      hasOwnNumber: user.hasOwnNumber,
+      tier,
+      status,
+      periodEnd: isActive ? user.subscriptionPeriodEnd : null,
+      hasOwnNumber: isActive ? user.hasOwnNumber : false,
       features,
     };
   }
