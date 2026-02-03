@@ -574,16 +574,6 @@ export function NotificationSettings() {
                     </>
                   )}
 
-                  {/* Show selected account info when editing */}
-                  {editingRule && editingRule.savedAccount && (
-                    <div className="form-group">
-                      <label>Account</label>
-                      <div className="account-display">
-                        <span className="account-badge">{editingRule.savedAccount.businessName}</span>
-                      </div>
-                    </div>
-                  )}
-
                   {/* From Phone - dropdown of Callio numbers */}
                   {ruleForm.accountId && (
                     <div className="form-group">
