@@ -3,6 +3,7 @@ import { Home, MessageSquare, BarChart3, Settings, LogOut, Zap, Bell, Phone, Cre
 import { useAuthStore } from '../store/authStore';
 import TrialBanner from './TrialBanner';
 import TrialExpiredModal from './TrialExpiredModal';
+import CancelledSubscriptionBanner from './CancelledSubscriptionBanner';
 import '../styles/TrialBanner.css';
 
 export function Layout() {
@@ -87,6 +88,7 @@ export function Layout() {
 
       <main className="main-content">
         <TrialBanner />
+        <CancelledSubscriptionBanner />
         <Outlet />
       </main>
     </div>

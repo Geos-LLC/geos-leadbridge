@@ -89,7 +89,10 @@ export default function Pricing() {
   };
 
   // Get current tier from fresh subscription data, not cached authStore
-  const currentTier = subscription?.tier;
+  // Only show as "current" if subscription is active (not cancelled)
+  const hasActiveSubscription = subscription?.tier &&
+    ['ACTIVE', 'TRIALING', 'PAST_DUE'].includes(subscription.status || '');
+  const currentTier = hasActiveSubscription ? subscription?.tier : null;
 
   return (
     <div className="pricing-page">

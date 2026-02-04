@@ -193,11 +193,8 @@ export function Messages() {
       };
     }
 
-    // EventSource doesn't support custom headers, so we need to pass token in query or use cookies
-    // Using Authorization header via JWT guard with cookies
-    const eventSource = new EventSource(`/api/v1/leads/events`, {
-      withCredentials: true,
-    });
+    // EventSource doesn't support custom headers, so pass token as query parameter
+    const eventSource = new EventSource(`/api/v1/leads/events?token=${encodeURIComponent(token)}`);
 
     eventSource.onmessage = (event) => {
       try {

@@ -16,6 +16,7 @@ import {
   MessageEvent,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { JwtSseAuthGuard } from '../common/guards/jwt-sse-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { LeadsService } from './leads.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -33,8 +34,10 @@ export class LeadsController {
   /**
    * Server-Sent Events endpoint for real-time lead updates
    * More efficient than polling for infrequent updates
+   * Uses JwtSseAuthGuard to support token in query parameter
    */
   @Sse('events')
+  @UseGuards(JwtSseAuthGuard)
   leadEvents(@CurrentUser() user: any): Observable<MessageEvent> {
     const userId = user.id;
 
