@@ -900,4 +900,14 @@ export class PlatformService {
 
     return { synced };
   }
+
+  /**
+   * Get user by ID with role information
+   */
+  async getUserById(userId: string): Promise<{ id: string; role: string } | null> {
+    return this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true },
+    });
+  }
 }

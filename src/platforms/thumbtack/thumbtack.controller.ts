@@ -79,6 +79,10 @@ export class ThumbtackController {
       // Setup webhook and save account for each business
       for (const business of businesses) {
         try {
+          // Check if current user is an admin (for testing purposes, admins can connect same business to multiple accounts)
+          const currentUser = await this.platformService.getUserById(userId);
+          const isAdmin = currentUser?.role === 'ADMIN';
+
           // Check if this business already has an active webhook (from any user)
           const existingAccount = await this.platformService.getAccountByBusinessId(
             PlatformName.THUMBTACK,
@@ -88,25 +92,30 @@ export class ThumbtackController {
           if (existingAccount && existingAccount.webhookId) {
             // Check if this account belongs to a DIFFERENT user
             if (existingAccount.userId !== userId) {
-              console.error(`Business ${business.name} (${business.businessID}) already connected to a different user`);
-              throw new BadRequestException(
-                `Thumbtack business "${business.name}" is already connected to another account. ` +
-                `Each Thumbtack business can only be connected to one Thumbtack Bridge account. ` +
-                `Please use a different Thumbtack business or log in with the account that originally connected this business.`
-              );
+              // Block non-admin users from connecting business that belongs to another user
+              if (!isAdmin) {
+                console.error(`Business ${business.name} (${business.businessID}) already connected to a different user`);
+                throw new BadRequestException(
+                  `Thumbtack business "${business.name}" is already connected to another account. ` +
+                  `Each Thumbtack business can only be connected to one Thumbtack Bridge account. ` +
+                  `Please use a different Thumbtack business or log in with the account that originally connected this business.`
+                );
+              }
+              // Admin users can proceed - they'll get a new webhook for testing
+              console.log(`Admin user bypassing webhook conflict for business ${business.name} (${business.businessID})`);
+            } else {
+              // Same user - just update credentials for token refresh
+              console.log(`Business ${business.name} (${business.businessID}) already has active webhook - updating credentials only`);
+              if (credentials) {
+                await this.platformService.updateAccountCredentials(
+                  existingAccount.id,
+                  credentials,
+                );
+                console.log(`Updated credentials for existing account: ${business.name}`);
+              }
+              skippedAlreadyConnected.push(business.name);
+              continue;
             }
-
-            // Same user - just update credentials for token refresh
-            console.log(`Business ${business.name} (${business.businessID}) already has active webhook - updating credentials only`);
-            if (credentials) {
-              await this.platformService.updateAccountCredentials(
-                existingAccount.id,
-                credentials,
-              );
-              console.log(`Updated credentials for existing account: ${business.name}`);
-            }
-            skippedAlreadyConnected.push(business.name);
-            continue;
           }
 
           // First save the account WITH credentials (so setupThumbtackWebhook can update it with webhookId)
