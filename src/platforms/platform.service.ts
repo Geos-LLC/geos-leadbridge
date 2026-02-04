@@ -489,37 +489,49 @@ export class PlatformService {
     credentials?: { accessToken: string; refreshToken?: string; email?: string; expiresAt?: Date },
   ): Promise<void> {
     // Check for trial abuse: If this Thumbtack business has been used before, invalidate trial
+    // Skip this check for admin users to allow testing with same Thumbtack business
     if (platform === 'thumbtack' && businessId) {
-      // Check if this business ID exists on any other user
-      const existingUser = await this.prisma.user.findFirst({
-        where: {
-          thumbtackBusinessId: businessId,
-          id: { not: userId }, // Different user
-        },
-        select: { id: true },
+      // Fetch user's role to check if they're an admin
+      const currentUser = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
       });
 
-      if (existingUser) {
-        // This Thumbtack account has been used before - invalidate current user's trial
+      // Only apply trial restrictions to non-admin users
+      if (currentUser?.role !== 'ADMIN') {
+        // Check if this business ID exists on any other user
+        const existingUser = await this.prisma.user.findFirst({
+          where: {
+            thumbtackBusinessId: businessId,
+            id: { not: userId }, // Different user
+          },
+          select: { id: true },
+        });
+
+        if (existingUser) {
+          // This Thumbtack account has been used before - invalidate current user's trial
+          await this.prisma.user.update({
+            where: { id: userId },
+            data: {
+              trialUsed: true,
+              trialStartDate: null,
+              trialEndDate: null,
+            },
+          });
+          this.logger.warn(`[PlatformService] Trial invalidated for user ${userId} - Thumbtack business ${businessId} already used by another account`);
+        }
+
+        // Store Thumbtack business ID on user to track trial usage
         await this.prisma.user.update({
           where: { id: userId },
           data: {
-            trialUsed: true,
-            trialStartDate: null,
-            trialEndDate: null,
+            thumbtackBusinessId: businessId,
+            thumbtackAccountEmail: emailHint,
           },
         });
-        this.logger.warn(`[PlatformService] Trial invalidated for user ${userId} - Thumbtack business ${businessId} already used by another account`);
+      } else {
+        this.logger.log(`[PlatformService] Admin user ${userId} bypassing trial restrictions for Thumbtack business ${businessId}`);
       }
-
-      // Store Thumbtack business ID on user to track trial usage
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: {
-          thumbtackBusinessId: businessId,
-          thumbtackAccountEmail: emailHint,
-        },
-      });
     }
 
     // Encrypt credentials if provided

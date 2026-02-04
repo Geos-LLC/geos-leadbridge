@@ -86,8 +86,18 @@ export class ThumbtackController {
           );
 
           if (existingAccount && existingAccount.webhookId) {
+            // Check if this account belongs to a DIFFERENT user
+            if (existingAccount.userId !== userId) {
+              console.error(`Business ${business.name} (${business.businessID}) already connected to a different user`);
+              throw new BadRequestException(
+                `Thumbtack business "${business.name}" is already connected to another account. ` +
+                `Each Thumbtack business can only be connected to one Thumbtack Bridge account. ` +
+                `Please use a different Thumbtack business or log in with the account that originally connected this business.`
+              );
+            }
+
+            // Same user - just update credentials for token refresh
             console.log(`Business ${business.name} (${business.businessID}) already has active webhook - updating credentials only`);
-            // Update credentials for the existing account (token refresh for import)
             if (credentials) {
               await this.platformService.updateAccountCredentials(
                 existingAccount.id,
