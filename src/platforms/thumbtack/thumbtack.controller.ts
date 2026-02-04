@@ -134,6 +134,10 @@ export class ThumbtackController {
         }
       }
     } catch (err) {
+      // Re-throw BadRequestException (account conflict) - these should fail the OAuth flow
+      if (err instanceof BadRequestException) {
+        throw err;
+      }
       console.error('Error in autoSetupWebhooks:', err.message);
       // Don't throw - OAuth succeeded, webhooks are just a bonus
     }
