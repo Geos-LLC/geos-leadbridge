@@ -27,6 +27,7 @@
   "description": "Multi-platform lead integration service for Thumbtack, Yelp, and other platforms",
   "dependencies": {
     "@emailjs/nodejs": "^5.0.2",
+    "@nestjs/axios": "^4.0.1",
     "@nestjs/common": "^11.1.9",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.1.9",
@@ -35,7 +36,7 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.1.9",
     "@prisma/client": "^6.19.1",
-    "axios": "^1.13.2",
+    "axios": "^1.13.4",
     "bcryptjs": "^3.0.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",

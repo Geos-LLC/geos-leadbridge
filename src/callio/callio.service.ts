@@ -4,7 +4,7 @@ import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../common/utils/prisma.service';
 import { firstValueFrom } from 'rxjs';
 
-interface CallioPhoneNumber {
+export interface CallioPhoneNumber {
   phoneNumber: string;
   friendlyName: string;
   capabilities: {
@@ -14,7 +14,7 @@ interface CallioPhoneNumber {
   };
 }
 
-interface CallioSearchResult {
+export interface CallioSearchResult {
   phoneNumber: string;
   locality: string;
   region: string;
@@ -47,8 +47,8 @@ interface CallioPurchaseResponse {
 export class CallioService {
   private readonly logger = new Logger(CallioService.name);
   private readonly callioApiUrl: string;
-  private readonly callioApiKey: string;
-  private readonly callioTenantId: string;
+  private readonly callioApiKey: string | undefined;
+  private readonly callioTenantId: string | undefined;
 
   constructor(
     private configService: ConfigService,
@@ -135,7 +135,7 @@ export class CallioService {
     userId: string,
     areaCode?: string,
     specificPhoneNumber?: string,
-  ): Promise<{ phoneNumber: string; allocationId: string }> {
+  ): Promise<{ phoneNumber: string; allocationId: string } | null> {
     if (!this.isConfigured()) {
       this.logger.warn(`Callio not configured - skipping phone provisioning for user ${userId}`);
       return null;

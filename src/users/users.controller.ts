@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Query, Request, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { UsersService } from './users.service';
+import { CallioSearchResult } from '../callio/callio.service';
 
 @Controller('v1/users')
 @UseGuards(JwtAuthGuard)
@@ -12,7 +13,7 @@ export class UsersController {
    * GET /v1/users/me/phone-number
    */
   @Get('me/phone-number')
-  async getMyPhoneNumber(@Request() req) {
+  async getMyPhoneNumber(@Request() req: any) {
     return this.usersService.getUserPhoneNumber(req.user.id);
   }
 
@@ -21,7 +22,7 @@ export class UsersController {
    * POST /v1/users/me/phone-number/provision
    */
   @Post('me/phone-number/provision')
-  async provisionPhoneNumber(@Request() req, @Query('areaCode') areaCode?: string) {
+  async provisionPhoneNumber(@Request() req: any, @Query('areaCode') areaCode?: string) {
     return this.usersService.provisionPhoneNumber(req.user.id, areaCode);
   }
 
@@ -33,7 +34,7 @@ export class UsersController {
   async searchPhoneNumbers(
     @Query('country') country?: string,
     @Query('areaCode') areaCode?: string,
-  ) {
+  ): Promise<CallioSearchResult[]> {
     return this.usersService.searchAvailableNumbers(country || 'US', areaCode);
   }
 }

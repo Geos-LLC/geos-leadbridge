@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
-import { CallioService } from '../callio/callio.service';
+import { CallioService, CallioSearchResult } from '../callio/callio.service';
 
 @Injectable()
 export class UsersService {
@@ -71,7 +71,7 @@ export class UsersService {
   /**
    * Search available phone numbers
    */
-  async searchAvailableNumbers(country: string = 'US', areaCode?: string) {
+  async searchAvailableNumbers(country: string = 'US', areaCode?: string): Promise<CallioSearchResult[]> {
     return this.callioService.searchAvailableNumbers(country, areaCode, 10);
   }
 }
