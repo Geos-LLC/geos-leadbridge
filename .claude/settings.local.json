@@ -22,7 +22,11 @@
       "Bash(npx prisma db push:*)",
       "Bash(ls:*)",
       "Bash(git fetch:*)",
-      "Bash(npx dotenv:*)"
+      "Bash(npx dotenv:*)",
+      "WebFetch(domain:callio-git-api-george-says-projects.vercel.app)",
+      "Bash(railway variables set:*)",
+      "Bash(railway variables --help:*)",
+      "Bash(railway variables:*)"
     ]
   }
 }

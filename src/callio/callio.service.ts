@@ -49,6 +49,7 @@ export class CallioService {
   private readonly callioApiUrl: string;
   private readonly callioApiKey: string | undefined;
   private readonly callioTenantId: string | undefined;
+  private readonly callioBypassSecret: string | undefined;
 
   constructor(
     private configService: ConfigService,
@@ -58,10 +59,31 @@ export class CallioService {
     this.callioApiUrl = this.configService.get<string>('CALLIO_API_URL') || 'https://callio-git-api-george-says-projects.vercel.app';
     this.callioApiKey = this.configService.get<string>('CALLIO_API_KEY');
     this.callioTenantId = this.configService.get<string>('CALLIO_TENANT_ID');
+    this.callioBypassSecret = this.configService.get<string>('CALLIO_BYPASS_SECRET');
 
     if (!this.callioApiKey || !this.callioTenantId) {
       this.logger.warn('Callio API credentials not configured. Phone provisioning will be disabled.');
     }
+
+    if (this.callioBypassSecret) {
+      this.logger.log('Vercel protection bypass configured');
+    }
+  }
+
+  /**
+   * Build headers for Callio API requests with optional Vercel bypass
+   */
+  private buildHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${this.callioApiKey}`,
+      'Content-Type': 'application/json',
+    };
+
+    if (this.callioBypassSecret) {
+      headers['x-vercel-protection-bypass'] = this.callioBypassSecret;
+    }
+
+    return headers;
   }
 
   /**
@@ -87,10 +109,7 @@ export class CallioService {
 
       const response = await firstValueFrom(
         this.httpService.get(`${this.callioApiUrl}/api/v1/tenants/phone-numbers/search`, {
-          headers: {
-            'Authorization': `Bearer ${this.callioApiKey}`,
-            'Content-Type': 'application/json',
-          },
+          headers: this.buildHeaders(),
           params,
         })
       );
@@ -113,10 +132,7 @@ export class CallioService {
     try {
       const response = await firstValueFrom(
         this.httpService.get(`${this.callioApiUrl}/api/v1/tenants/phone-numbers/pricing`, {
-          headers: {
-            'Authorization': `Bearer ${this.callioApiKey}`,
-            'Content-Type': 'application/json',
-          },
+          headers: this.buildHeaders(),
         })
       );
 
@@ -162,10 +178,7 @@ export class CallioService {
           `${this.callioApiUrl}/api/v1/tenants/${this.callioTenantId}/phone-numbers/purchase`,
           requestBody,
           {
-            headers: {
-              'Authorization': `Bearer ${this.callioApiKey}`,
-              'Content-Type': 'application/json',
-            },
+            headers: this.buildHeaders(),
           }
         )
       );
@@ -229,10 +242,7 @@ export class CallioService {
           `${this.callioApiUrl}/api/v1/tenants/${this.callioTenantId}/phone-numbers/${user.callioAllocationId}/release`,
           {},
           {
-            headers: {
-              'Authorization': `Bearer ${this.callioApiKey}`,
-              'Content-Type': 'application/json',
-            },
+            headers: this.buildHeaders(),
           }
         )
       );
@@ -290,10 +300,7 @@ export class CallioService {
         this.httpService.get(
           `${this.callioApiUrl}/api/v1/tenants/${this.callioTenantId}/phone-numbers/orders`,
           {
-            headers: {
-              'Authorization': `Bearer ${this.callioApiKey}`,
-              'Content-Type': 'application/json',
-            },
+            headers: this.buildHeaders(),
             params: { userId },
           }
         )
