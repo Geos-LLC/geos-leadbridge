@@ -69,6 +69,10 @@ model User {
   thumbtackBusinessId   String?
   thumbtackAccountEmail String?
 
+  // Callio phone number provisioning
+  phoneNumber           String?  // User's dedicated Callio/Twilio number
+  callioAllocationId    String?  // Callio's allocation ID for this number
+
   // Password reset
   passwordResetToken    String?
   passwordResetExpires  DateTime?

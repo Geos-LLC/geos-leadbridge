@@ -3,18 +3,22 @@
  * Handles user registration, login, and JWT token management
  */
 
-import { Injectable, UnauthorizedException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../common/utils/prisma.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
+import { CallioService } from '../callio/callio.service';
 import * as crypto from 'crypto';
 import emailjs from '@emailjs/nodejs';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
+    private callioService: CallioService,
   ) {}
 
   /**
@@ -50,6 +54,24 @@ export class AuthService {
       },
     });
 
+    // Auto-provision phone number via Callio
+    try {
+      const phoneProvision = await this.callioService.provisionNumberForUser(user.id);
+      if (phoneProvision) {
+        this.logger.log(`Provisioned phone number ${phoneProvision.phoneNumber} for new user ${user.id}`);
+        // Re-fetch user to get updated phone number
+        const updatedUser = await this.prisma.user.findUnique({
+          where: { id: user.id },
+        });
+        if (updatedUser) {
+          Object.assign(user, updatedUser);
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Failed to provision phone for user ${user.id}:`, error.message);
+      // Don't fail registration - user can get number later
+    }
+
     // Generate JWT token
     const token = this.generateToken(user.id, user.email);
 
@@ -63,6 +85,7 @@ export class AuthService {
         subscriptionStatus: user.subscriptionStatus,
         subscriptionPeriodEnd: user.subscriptionPeriodEnd,
         hasOwnNumber: user.hasOwnNumber,
+        phoneNumber: user.phoneNumber,
         trialStartDate: user.trialStartDate,
         trialEndDate: user.trialEndDate,
         trialUsed: user.trialUsed,
@@ -104,6 +127,7 @@ export class AuthService {
         subscriptionStatus: user.subscriptionStatus,
         subscriptionPeriodEnd: user.subscriptionPeriodEnd,
         hasOwnNumber: user.hasOwnNumber,
+        phoneNumber: user.phoneNumber,
         trialStartDate: user.trialStartDate,
         trialEndDate: user.trialEndDate,
         trialUsed: user.trialUsed,
@@ -127,6 +151,7 @@ export class AuthService {
         subscriptionStatus: true,
         subscriptionPeriodEnd: true,
         hasOwnNumber: true,
+        phoneNumber: true,
         createdAt: true,
         platforms: {
           select: {

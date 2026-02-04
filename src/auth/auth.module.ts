@@ -10,10 +10,12 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
 import { PrismaService } from '../common/utils/prisma.service';
+import { CallioModule } from '../callio/callio.module';
 
 @Module({
   imports: [
     PassportModule,
+    CallioModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({

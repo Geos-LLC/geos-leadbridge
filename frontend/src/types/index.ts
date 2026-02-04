@@ -7,6 +7,7 @@ export interface User {
   subscriptionStatus?: 'ACTIVE' | 'PAST_DUE' | 'CANCELLED' | 'TRIALING' | 'INCOMPLETE';
   subscriptionPeriodEnd?: string;
   hasOwnNumber?: boolean;
+  phoneNumber?: string | null;
   trialStartDate?: string;
   trialEndDate?: string;
   trialUsed?: boolean;

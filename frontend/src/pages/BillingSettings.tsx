@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { billingApi } from '../services/api';
 import { notify } from '../store/notificationStore';
+import { useAuthStore } from '../store/authStore';
 import type { SubscriptionDetails } from '../types';
 import { Link } from 'react-router-dom';
 
@@ -17,6 +18,7 @@ const tierPrices = {
 };
 
 export default function BillingSettings() {
+  const user = useAuthStore(state => state.user);
   const [subscription, setSubscription] = useState<SubscriptionDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [portalLoading, setPortalLoading] = useState(false);
@@ -76,6 +78,23 @@ export default function BillingSettings() {
         <h1>Billing & Subscription</h1>
         <p>Manage your subscription and billing information</p>
       </div>
+
+      {/* Phone Number Info Card */}
+      {user?.phoneNumber && (
+        <div className="billing-content" style={{ marginBottom: '20px' }}>
+          <div className="subscription-card">
+            <div className="subscription-detail">
+              <span className="detail-label">Your Notification Number:</span>
+              <span className="detail-value" style={{ fontFamily: 'monospace', fontSize: '1.1em' }}>
+                {user.phoneNumber}
+              </span>
+            </div>
+            <p style={{ marginTop: '10px', color: '#666', fontSize: '0.9em' }}>
+              This number is automatically provisioned for SMS notifications and calls from your Thumbtack leads.
+            </p>
+          </div>
+        </div>
+      )}
 
       {hasSubscription && subscription ? (
         <div className="billing-content">

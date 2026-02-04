@@ -17,6 +17,8 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { StripeModule } from './stripe/stripe.module';
 import { AdminModule } from './admin/admin.module';
+import { CallioModule } from './callio/callio.module';
+import { UsersModule } from './users/users.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PrismaService } from './common/utils/prisma.service';
 
@@ -37,6 +39,8 @@ import { PrismaService } from './common/utils/prisma.service';
     AnalyticsModule,
     StripeModule,
     AdminModule,
+    CallioModule,
+    UsersModule,
   ],
   providers: [
     PrismaService,
