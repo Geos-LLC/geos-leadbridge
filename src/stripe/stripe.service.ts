@@ -212,6 +212,8 @@ export class StripeService {
         trialStartDate: true,
         trialEndDate: true,
         trialUsed: true,
+        trialLeadsHandled: true,
+        trialLeadsLimit: true,
       },
     });
 
@@ -227,13 +229,23 @@ export class StripeService {
     // Get features based on tier (null if cancelled or no subscription)
     const features = status === SubscriptionStatus.CANCELLED || !tier ? [] : this.getFeaturesForTier(tier);
 
-    // Check trial status
+    // Check trial status - usage-based AND time-based
     const now = new Date();
-    const isOnTrial = user.trialEndDate && now <= user.trialEndDate && !user.subscriptionTier;
+    const timeNotExpired = user.trialEndDate && now <= user.trialEndDate;
+    const usageNotExpired = user.trialLeadsHandled < user.trialLeadsLimit;
+
+    // Trial is active if both time AND usage limits not exceeded
+    const isOnTrial = timeNotExpired && usageNotExpired && !user.subscriptionTier;
+
+    // Trial expired if EITHER time OR usage limit exceeded
+    const trialExpiredByTime = user.trialEndDate && now > user.trialEndDate;
+    const trialExpiredByUsage = user.trialLeadsHandled >= user.trialLeadsLimit;
+    const trialExpired = (trialExpiredByTime || trialExpiredByUsage) && !user.subscriptionTier;
+
     const trialDaysRemaining = user.trialEndDate
       ? Math.max(0, Math.ceil((user.trialEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
       : 0;
-    const trialExpired = user.trialEndDate && now > user.trialEndDate && !user.subscriptionTier;
+    const trialLeadsRemaining = Math.max(0, user.trialLeadsLimit - user.trialLeadsHandled);
 
     return {
       tier,
@@ -246,7 +258,12 @@ export class StripeService {
         isOnTrial,
         trialDaysRemaining,
         trialExpired,
+        trialExpiredByTime,
+        trialExpiredByUsage,
         trialEndDate: user.trialEndDate,
+        trialLeadsHandled: user.trialLeadsHandled,
+        trialLeadsLimit: user.trialLeadsLimit,
+        trialLeadsRemaining,
       },
     };
   }

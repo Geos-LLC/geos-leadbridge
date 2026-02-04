@@ -315,6 +315,38 @@ export class LeadsService {
         where: { id: conversation.id },
         data: { lastMessageAt: new Date() },
       });
+
+      // Track trial usage: Increment counter if this is first reply to this lead
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          trialStartDate: true,
+          trialEndDate: true,
+          subscriptionTier: true,
+          trialLeadsHandled: true,
+        },
+      });
+
+      // Only count if user is on trial (has trial dates, no subscription)
+      if (user && user.trialStartDate && user.trialEndDate && !user.subscriptionTier) {
+        // Check if this is the first message from pro to this lead
+        const previousProMessages = await this.prisma.message.count({
+          where: {
+            conversationId: conversation.id,
+            sender: 'pro',
+            userId: userId,
+          },
+        });
+
+        // If this is the first reply to this lead, increment trial counter
+        if (previousProMessages === 1) {  // === 1 because we just created one above
+          await this.prisma.user.update({
+            where: { id: userId },
+            data: { trialLeadsHandled: { increment: 1 } },
+          });
+          console.log(`[LeadsService] Trial lead tracked: ${user.trialLeadsHandled + 1} leads handled`);
+        }
+      }
     } catch (err) {
       // Log but don't fail - message was sent successfully
       console.error('[LeadsService] Failed to store sent message locally:', err.message);

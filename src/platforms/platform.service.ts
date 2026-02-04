@@ -487,6 +487,40 @@ export class PlatformService {
     emailHint?: string,
     credentials?: { accessToken: string; refreshToken?: string; email?: string; expiresAt?: Date },
   ): Promise<void> {
+    // Check for trial abuse: If this Thumbtack business has been used before, invalidate trial
+    if (platform === 'thumbtack' && businessId) {
+      // Check if this business ID exists on any other user
+      const existingUser = await this.prisma.user.findFirst({
+        where: {
+          thumbtackBusinessId: businessId,
+          id: { not: userId }, // Different user
+        },
+        select: { id: true },
+      });
+
+      if (existingUser) {
+        // This Thumbtack account has been used before - invalidate current user's trial
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: {
+            trialUsed: true,
+            trialStartDate: null,
+            trialEndDate: null,
+          },
+        });
+        this.logger.warn(`[PlatformService] Trial invalidated for user ${userId} - Thumbtack business ${businessId} already used by another account`);
+      }
+
+      // Store Thumbtack business ID on user to track trial usage
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          thumbtackBusinessId: businessId,
+          thumbtackAccountEmail: emailHint,
+        },
+      });
+    }
+
     // Encrypt credentials if provided
     let encryptedCredentials: string | undefined;
     if (credentials) {

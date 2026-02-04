@@ -8,7 +8,12 @@ interface TrialStatus {
   isOnTrial: boolean;
   trialDaysRemaining: number;
   trialExpired: boolean;
+  trialExpiredByTime: boolean;
+  trialExpiredByUsage: boolean;
   trialEndDate: string | null;
+  trialLeadsHandled: number;
+  trialLeadsLimit: number;
+  trialLeadsRemaining: number;
 }
 
 export default function TrialBanner() {
@@ -73,8 +78,16 @@ export default function TrialBanner() {
     );
   }
 
-  // Active trial - show countdown
-  const urgency = trialStatus.trialDaysRemaining <= 3 ? 'urgent' : trialStatus.trialDaysRemaining <= 7 ? 'warning' : 'info';
+  // Active trial - show countdown (both time AND usage)
+  const leadsRemaining = trialStatus.trialLeadsRemaining || 0;
+  const leadsUsed = trialStatus.trialLeadsHandled || 0;
+  const leadsLimit = trialStatus.trialLeadsLimit || 10;
+
+  // Determine urgency based on whichever limit is closer
+  const timeUrgent = trialStatus.trialDaysRemaining <= 3;
+  const usageUrgent = leadsRemaining <= 2;
+  const urgency = (timeUrgent || usageUrgent) ? 'urgent' :
+                  (trialStatus.trialDaysRemaining <= 7 || leadsRemaining <= 5) ? 'warning' : 'info';
 
   return (
     <div className={`trial-banner ${urgency}`}>
@@ -84,11 +97,10 @@ export default function TrialBanner() {
         </div>
         <div className="trial-banner-text">
           <strong>
-            {trialStatus.trialDaysRemaining === 0
-              ? 'Last day of trial'
-              : `${trialStatus.trialDaysRemaining} day${trialStatus.trialDaysRemaining !== 1 ? 's' : ''} left in trial`}
+            {leadsRemaining} of {leadsLimit} trial leads left
+            {trialStatus.trialDaysRemaining > 0 && ` • ${trialStatus.trialDaysRemaining} day${trialStatus.trialDaysRemaining !== 1 ? 's' : ''} remaining`}
           </strong>
-          <span>Subscribe to unlock full access after your trial ends</span>
+          <span>{leadsUsed} leads handled • Upgrade to unlock unlimited leads + premium features</span>
         </div>
         <Link to="/pricing" className="trial-banner-cta">
           <Zap size={16} />

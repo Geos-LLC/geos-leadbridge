@@ -225,7 +225,12 @@ export interface SubscriptionDetails {
     isOnTrial: boolean;
     trialDaysRemaining: number;
     trialExpired: boolean;
+    trialExpiredByTime: boolean;
+    trialExpiredByUsage: boolean;
     trialEndDate: string | null;
+    trialLeadsHandled: number;
+    trialLeadsLimit: number;
+    trialLeadsRemaining: number;
   };
 }
 

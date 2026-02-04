@@ -61,6 +61,13 @@ model User {
   trialStartDate        DateTime?
   trialEndDate          DateTime?
   trialUsed             Boolean             @default(false)
+  trialLeadsHandled     Int                 @default(0)
+  trialLeadsLimit       Int                 @default(10)
+
+  // Track Thumbtack account to prevent trial abuse
+  // Users can't get another trial with same Thumbtack account
+  thumbtackBusinessId   String?
+  thumbtackAccountEmail String?
 
   // Password reset
   passwordResetToken    String?
