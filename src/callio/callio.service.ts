@@ -75,7 +75,7 @@ export class CallioService {
    */
   private buildHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
-      'Authorization': `Bearer ${this.callioApiKey}`,
+      'X-API-Key': this.callioApiKey!,
       'Content-Type': 'application/json',
     };
 
@@ -177,19 +177,35 @@ export class CallioService {
 
     try {
       this.logger.log(`Provisioning phone number for user ${userId} (areaCode: ${areaCode || 'auto'})`);
+
+      // Determine which phone number to purchase
+      let phoneNumberToPurchase = specificPhoneNumber;
+
+      if (!phoneNumberToPurchase) {
+        // Search for available numbers first
+        this.logger.log(`Searching for available numbers (areaCode: ${areaCode || 'any'})...`);
+        const availableNumbers = await this.searchAvailableNumbers('US', areaCode, 1);
+
+        if (!availableNumbers || availableNumbers.length === 0) {
+          const errorMsg = `No phone numbers available${areaCode ? ` in area code ${areaCode}` : ''}`;
+          this.logger.error(errorMsg);
+          if (throwOnError) {
+            throw new BadRequestException(errorMsg);
+          }
+          return null;
+        }
+
+        phoneNumberToPurchase = availableNumbers[0].phoneNumber;
+        this.logger.log(`Found available number: ${phoneNumberToPurchase}`);
+      }
+
       this.logger.log(`Callio API URL: ${this.callioApiUrl}/api/v1/tenants/${this.callioTenantId}/phone-numbers/purchase`);
 
-      // Build request body
+      // Build request body - Callio API requires phoneNumber and optional friendlyName
       const requestBody: any = {
-        country: 'US',
-        userId, // Pass user ID for tracking in Callio
+        phoneNumber: phoneNumberToPurchase,
+        friendlyName: `User ${userId}`,
       };
-
-      if (specificPhoneNumber) {
-        requestBody.phoneNumber = specificPhoneNumber;
-      } else if (areaCode) {
-        requestBody.areaCode = areaCode;
-      }
 
       this.logger.log(`Callio request body: ${JSON.stringify(requestBody)}`);
 
