@@ -34,6 +34,7 @@ export class UsersService {
 
   /**
    * Provision a new phone number for user
+   * This is called manually by users, so we throw errors to show them what went wrong
    */
   async provisionPhoneNumber(userId: string, areaCode?: string) {
     const user = await this.prisma.user.findUnique({
@@ -52,7 +53,8 @@ export class UsersService {
       };
     }
 
-    const result = await this.callioService.provisionNumberForUser(userId, areaCode);
+    // throwOnError=true so users see what went wrong when manually provisioning
+    const result = await this.callioService.provisionNumberForUser(userId, areaCode, undefined, true);
 
     if (!result) {
       return {

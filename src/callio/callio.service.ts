@@ -146,19 +146,26 @@ export class CallioService {
   /**
    * Provision a new phone number for a user
    * This is called automatically during user registration
+   * @param throwOnError - If true, throws errors instead of returning null (for manual provisioning)
    */
   async provisionNumberForUser(
     userId: string,
     areaCode?: string,
     specificPhoneNumber?: string,
+    throwOnError: boolean = false,
   ): Promise<{ phoneNumber: string; allocationId: string } | null> {
     if (!this.isConfigured()) {
-      this.logger.warn(`Callio not configured - skipping phone provisioning for user ${userId}`);
+      const msg = `Callio not configured - skipping phone provisioning for user ${userId}`;
+      this.logger.warn(msg);
+      if (throwOnError) {
+        throw new InternalServerErrorException('Phone provisioning is not configured. Missing CALLIO_API_KEY or CALLIO_TENANT_ID.');
+      }
       return null;
     }
 
     try {
       this.logger.log(`Provisioning phone number for user ${userId} (areaCode: ${areaCode || 'auto'})`);
+      this.logger.log(`Callio API URL: ${this.callioApiUrl}/api/v1/tenants/${this.callioTenantId}/phone-numbers/purchase`);
 
       // Build request body
       const requestBody: any = {
@@ -172,6 +179,8 @@ export class CallioService {
         requestBody.areaCode = areaCode;
       }
 
+      this.logger.log(`Callio request body: ${JSON.stringify(requestBody)}`);
+
       // Purchase phone number via Callio API
       const response = await firstValueFrom(
         this.httpService.post(
@@ -183,10 +192,18 @@ export class CallioService {
         )
       );
 
+      this.logger.log(`Callio response status: ${response.status}`);
+      this.logger.log(`Callio response data: ${JSON.stringify(response.data)}`);
+
       const data: CallioPurchaseResponse = response.data;
 
       if (!data.success || !data.allocation) {
-        throw new Error('Phone number provisioning failed - no allocation returned');
+        const errorMsg = `Phone number provisioning failed - no allocation returned. Response: ${JSON.stringify(data)}`;
+        this.logger.error(errorMsg);
+        if (throwOnError) {
+          throw new BadRequestException(errorMsg);
+        }
+        return null;
       }
 
       const phoneNumber = data.allocation.phoneNumber;
@@ -208,7 +225,18 @@ export class CallioService {
         allocationId,
       };
     } catch (error) {
-      this.logger.error(`Failed to provision phone number for user ${userId}:`, error.response?.data || error.message);
+      const errorDetail = error.response?.data || error.message;
+      const errorStatus = error.response?.status;
+      this.logger.error(`Failed to provision phone number for user ${userId}:`);
+      this.logger.error(`  Status: ${errorStatus}`);
+      this.logger.error(`  Error: ${JSON.stringify(errorDetail)}`);
+
+      if (throwOnError) {
+        const message = typeof errorDetail === 'object'
+          ? errorDetail.message || errorDetail.error || JSON.stringify(errorDetail)
+          : errorDetail;
+        throw new BadRequestException(`Failed to provision phone number: ${message}`);
+      }
       // Don't throw - allow user registration to succeed even if phone provisioning fails
       return null;
     }
