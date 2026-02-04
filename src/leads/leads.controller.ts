@@ -24,7 +24,7 @@ import { Observable, fromEvent } from 'rxjs';
 import { map } from 'rxjs/operators';
 
 @Controller('v1/leads')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtSseAuthGuard)
 export class LeadsController {
   constructor(
     private leadsService: LeadsService,
@@ -34,10 +34,9 @@ export class LeadsController {
   /**
    * Server-Sent Events endpoint for real-time lead updates
    * More efficient than polling for infrequent updates
-   * Uses JwtSseAuthGuard to support token in query parameter
+   * JwtSseAuthGuard (class-level) supports token in query parameter
    */
   @Sse('events')
-  @UseGuards(JwtSseAuthGuard)
   leadEvents(@CurrentUser() user: any): Observable<MessageEvent> {
     const userId = user.id;
 
