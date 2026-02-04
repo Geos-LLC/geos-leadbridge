@@ -3,7 +3,7 @@
  * Manages platform connections and credentials
  */
 
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
@@ -12,6 +12,7 @@ import { PlatformCredentials } from '../common/interfaces/platform.interface';
 
 @Injectable()
 export class PlatformService {
+  private readonly logger = new Logger(PlatformService.name);
   private readonly encryptionKey: string;
   // In-memory state storage (use Redis in production)
   private stateToUserMap: Map<string, { userId: string; expires: number }> = new Map();
