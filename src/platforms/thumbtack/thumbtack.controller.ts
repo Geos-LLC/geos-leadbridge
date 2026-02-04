@@ -125,7 +125,11 @@ export class ThumbtackController {
           await this.platformService.setupThumbtackWebhook(userId, business.businessID);
           console.log(`Webhook setup successfully for business: ${business.name} (${business.businessID})`);
         } catch (err) {
-          // Log but don't fail - webhook might already exist
+          // Re-throw BadRequestException (account conflict) - these should fail the OAuth flow
+          if (err instanceof BadRequestException) {
+            throw err;
+          }
+          // Log but don't fail for other errors - webhook might already exist
           console.warn(`Failed to setup webhook for business ${business.businessID}:`, err.message);
         }
       }
