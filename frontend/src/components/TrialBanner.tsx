@@ -23,6 +23,16 @@ export default function TrialBanner() {
   const loadTrialStatus = async () => {
     try {
       const subscription = await billingApi.getSubscription();
+
+      // Don't show banner if user has an active subscription
+      const hasActiveSubscription = subscription.tier &&
+        ['ACTIVE', 'TRIALING', 'PAST_DUE'].includes(subscription.status || '');
+
+      if (hasActiveSubscription) {
+        setLoading(false);
+        return;
+      }
+
       if (subscription.trial) {
         setTrialStatus(subscription.trial);
       }
@@ -37,7 +47,7 @@ export default function TrialBanner() {
     return null;
   }
 
-  // Don't show if user has a subscription
+  // Don't show if user is not on trial and trial hasn't expired
   if (!trialStatus.isOnTrial && !trialStatus.trialExpired) {
     return null;
   }
