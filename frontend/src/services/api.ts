@@ -706,6 +706,19 @@ export const billingApi = {
   },
 };
 
+// Users API (Phone provisioning, etc)
+export const usersApi = {
+  getMyPhoneNumber: async (): Promise<{ phoneNumber: string | null; allocationId: string | null; hasPhoneNumber: boolean }> => {
+    const { data } = await api.get('/v1/users/me/phone-number');
+    return data;
+  },
+  provisionPhoneNumber: async (areaCode?: string): Promise<{ phoneNumber: string | null; allocationId?: string; message: string }> => {
+    const url = areaCode ? `/v1/users/me/phone-number/provision?areaCode=${areaCode}` : '/v1/users/me/phone-number/provision';
+    const { data } = await api.post(url);
+    return data;
+  },
+};
+
 // Admin API
 export const adminApi = {
   listUsers: async (params: { search?: string; tier?: string; offset?: number; limit?: number }): Promise<{ users: AdminUser[]; total: number; offset: number; limit: number }> => {

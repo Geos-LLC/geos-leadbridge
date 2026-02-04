@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { billingApi } from '../services/api';
+import { billingApi, usersApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 import type { SubscriptionDetails } from '../types';
@@ -19,9 +19,11 @@ const tierPrices = {
 
 export default function BillingSettings() {
   const user = useAuthStore(state => state.user);
+  const setAuth = useAuthStore(state => state.setAuth);
   const [subscription, setSubscription] = useState<SubscriptionDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [provisioningPhone, setProvisioningPhone] = useState(false);
 
   useEffect(() => {
     loadSubscription();
@@ -54,6 +56,32 @@ export default function BillingSettings() {
     }
   };
 
+  const handleProvisionPhone = async () => {
+    try {
+      setProvisioningPhone(true);
+      const result = await usersApi.provisionPhoneNumber();
+
+      if (result.phoneNumber) {
+        notify.success('Success', `Phone number ${result.phoneNumber} provisioned successfully!`);
+
+        // Update user in auth store
+        if (user) {
+          const token = localStorage.getItem('token');
+          if (token) {
+            setAuth({ ...user, phoneNumber: result.phoneNumber }, token);
+          }
+        }
+      } else {
+        notify.error('Error', result.message || 'Failed to provision phone number');
+      }
+    } catch (error: any) {
+      console.error('Failed to provision phone:', error);
+      notify.error('Error', error.response?.data?.message || 'Failed to provision phone number');
+    } finally {
+      setProvisioningPhone(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="billing-page">
@@ -80,21 +108,43 @@ export default function BillingSettings() {
       </div>
 
       {/* Phone Number Info Card */}
-      {user?.phoneNumber && (
-        <div className="billing-content" style={{ marginBottom: '20px' }}>
-          <div className="subscription-card">
-            <div className="subscription-detail">
-              <span className="detail-label">Your Notification Number:</span>
-              <span className="detail-value" style={{ fontFamily: 'monospace', fontSize: '1.1em' }}>
-                {user.phoneNumber}
-              </span>
-            </div>
-            <p style={{ marginTop: '10px', color: '#666', fontSize: '0.9em' }}>
-              This number is automatically provisioned for SMS notifications and calls from your Thumbtack leads.
-            </p>
-          </div>
+      <div className="billing-content" style={{ marginBottom: '20px' }}>
+        <div className="subscription-card">
+          {user?.phoneNumber ? (
+            <>
+              <div className="subscription-detail">
+                <span className="detail-label">Your Notification Number:</span>
+                <span className="detail-value" style={{ fontFamily: 'monospace', fontSize: '1.1em' }}>
+                  {user.phoneNumber}
+                </span>
+              </div>
+              <p style={{ marginTop: '10px', color: '#666', fontSize: '0.9em' }}>
+                This number is automatically provisioned for SMS notifications and calls from your Thumbtack leads.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="subscription-detail">
+                <span className="detail-label">Notification Number:</span>
+                <span className="detail-value" style={{ color: '#999' }}>
+                  Not provisioned
+                </span>
+              </div>
+              <p style={{ marginTop: '10px', color: '#666', fontSize: '0.9em', marginBottom: '15px' }}>
+                Get a dedicated phone number for SMS notifications and calls from your Thumbtack leads.
+              </p>
+              <button
+                className="btn-primary"
+                onClick={handleProvisionPhone}
+                disabled={provisioningPhone}
+                style={{ width: 'auto' }}
+              >
+                {provisioningPhone ? 'Provisioning...' : 'Get Phone Number'}
+              </button>
+            </>
+          )}
         </div>
-      )}
+      </div>
 
       {hasSubscription && subscription ? (
         <div className="billing-content">
