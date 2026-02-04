@@ -218,6 +218,7 @@ export interface SubscriptionDetails {
   tier: 'STARTER' | 'PRO' | 'ENTERPRISE' | null;
   status: 'ACTIVE' | 'PAST_DUE' | 'CANCELLED' | 'TRIALING' | 'INCOMPLETE' | null;
   periodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
   hasOwnNumber: boolean;
   features: string[];
   trial: {

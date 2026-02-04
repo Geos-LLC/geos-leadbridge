@@ -206,6 +206,7 @@ export class StripeService {
         subscriptionTier: true,
         subscriptionStatus: true,
         subscriptionPeriodEnd: true,
+        cancelAtPeriodEnd: true,
         hasOwnNumber: true,
         stripeSubscriptionId: true,
         trialStartDate: true,
@@ -238,6 +239,7 @@ export class StripeService {
       tier,
       status,
       periodEnd: user.subscriptionPeriodEnd,
+      cancelAtPeriodEnd: user.cancelAtPeriodEnd || false,
       hasOwnNumber: user.hasOwnNumber || false,
       features,
       trial: {
@@ -290,6 +292,7 @@ export class StripeService {
         subscriptionTier: tier,
         subscriptionStatus: status,
         subscriptionPeriodEnd,
+        cancelAtPeriodEnd: subscription.cancel_at_period_end || false,
         hasOwnNumber,
       },
     });
@@ -319,18 +322,15 @@ export class StripeService {
 
     if (!user) return;
 
-    // Save tier before clearing for history
+    // Save tier before updating
     const previousTier = user.subscriptionTier;
 
-    // Clear all subscription data when cancelled
+    // Keep subscription info but mark as CANCELLED
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
-        stripeSubscriptionId: null,
-        subscriptionTier: null,
-        subscriptionStatus: null,
-        subscriptionPeriodEnd: null,
-        hasOwnNumber: false,
+        subscriptionStatus: SubscriptionStatus.CANCELLED,
+        cancelAtPeriodEnd: false,
       },
     });
 

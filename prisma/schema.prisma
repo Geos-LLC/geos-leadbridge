@@ -54,6 +54,7 @@ model User {
   subscriptionTier      SubscriptionTier?
   subscriptionStatus    SubscriptionStatus?
   subscriptionPeriodEnd DateTime?
+  cancelAtPeriodEnd     Boolean             @default(false)
   hasOwnNumber          Boolean             @default(false)
 
   // Trial period

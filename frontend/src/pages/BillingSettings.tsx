@@ -106,7 +106,19 @@ export default function BillingSettings() {
               </div>
             )}
 
-            {!isCancelled && subscription.periodEnd && (
+            {!isCancelled && subscription.cancelAtPeriodEnd && subscription.periodEnd && (
+              <div className="subscription-notice cancelled-notice" style={{ backgroundColor: '#fff3cd', borderColor: '#ffc107' }}>
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9 9h2v5H9V9zm0-4h2v2H9V5z" fill="currentColor" style={{ color: '#856404' }}/>
+                </svg>
+                <div>
+                  <strong style={{ color: '#856404' }}>Subscription Ending</strong>
+                  <p style={{ color: '#856404' }}>You've cancelled your subscription. You'll continue to have access until {new Date(subscription.periodEnd).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}. You can reactivate anytime through the billing portal.</p>
+                </div>
+              </div>
+            )}
+
+            {!isCancelled && !subscription.cancelAtPeriodEnd && subscription.periodEnd && (
               <div className="subscription-detail">
                 <span className="detail-label">Next billing date:</span>
                 <span className="detail-value">
