@@ -87,6 +87,18 @@ export class CallioService {
   }
 
   /**
+   * Build URL with optional Vercel bypass query params
+   */
+  private buildUrl(path: string): string {
+    let url = `${this.callioApiUrl}${path}`;
+    if (this.callioBypassSecret) {
+      const separator = url.includes('?') ? '&' : '?';
+      url += `${separator}x-vercel-set-bypass-cookie=true&x-vercel-protection-bypass=${this.callioBypassSecret}`;
+    }
+    return url;
+  }
+
+  /**
    * Check if Callio is properly configured
    */
   isConfigured(): boolean {
@@ -108,7 +120,7 @@ export class CallioService {
       }
 
       const response = await firstValueFrom(
-        this.httpService.get(`${this.callioApiUrl}/api/v1/tenants/phone-numbers/search`, {
+        this.httpService.get(this.buildUrl(`/api/v1/tenants/phone-numbers/search`), {
           headers: this.buildHeaders(),
           params,
         })
@@ -131,7 +143,7 @@ export class CallioService {
 
     try {
       const response = await firstValueFrom(
-        this.httpService.get(`${this.callioApiUrl}/api/v1/tenants/phone-numbers/pricing`, {
+        this.httpService.get(this.buildUrl(`/api/v1/tenants/phone-numbers/pricing`), {
           headers: this.buildHeaders(),
         })
       );
@@ -182,9 +194,12 @@ export class CallioService {
       this.logger.log(`Callio request body: ${JSON.stringify(requestBody)}`);
 
       // Purchase phone number via Callio API
+      const url = this.buildUrl(`/api/v1/tenants/${this.callioTenantId}/phone-numbers/purchase`);
+      this.logger.log(`Full URL with bypass: ${url}`);
+
       const response = await firstValueFrom(
         this.httpService.post(
-          `${this.callioApiUrl}/api/v1/tenants/${this.callioTenantId}/phone-numbers/purchase`,
+          url,
           requestBody,
           {
             headers: this.buildHeaders(),
@@ -267,7 +282,7 @@ export class CallioService {
       // Release number via Callio API
       await firstValueFrom(
         this.httpService.post(
-          `${this.callioApiUrl}/api/v1/tenants/${this.callioTenantId}/phone-numbers/${user.callioAllocationId}/release`,
+          this.buildUrl(`/api/v1/tenants/${this.callioTenantId}/phone-numbers/${user.callioAllocationId}/release`),
           {},
           {
             headers: this.buildHeaders(),
@@ -326,7 +341,7 @@ export class CallioService {
     try {
       const response = await firstValueFrom(
         this.httpService.get(
-          `${this.callioApiUrl}/api/v1/tenants/${this.callioTenantId}/phone-numbers/orders`,
+          this.buildUrl(`/api/v1/tenants/${this.callioTenantId}/phone-numbers/orders`),
           {
             headers: this.buildHeaders(),
             params: { userId },
