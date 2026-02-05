@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Bell, Loader2, X, ChevronDown, Send, Phone, MessageSquare, AlertCircle, CheckCircle, Plus, Edit2, Trash2, Zap, Save } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { notificationsApi, thumbtackApi, type CallioPhoneNumber, type CreateNotificationRuleDto, type UpdateNotificationRuleDto } from '../services/api';
@@ -56,6 +56,9 @@ export function NotificationSettings() {
     template: 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
     enabled: true,
   });
+
+  // Ref for template textarea to insert variables at cursor position
+  const templateTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     loadAccounts();
@@ -224,7 +227,22 @@ export function NotificationSettings() {
   }
 
   function insertRuleVariable(variable: string) {
-    setRuleForm(prev => ({ ...prev, template: prev.template + variable }));
+    const textarea = templateTextareaRef.current;
+    if (textarea) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const currentValue = ruleForm.template;
+      const newValue = currentValue.substring(0, start) + variable + currentValue.substring(end);
+      setRuleForm(prev => ({ ...prev, template: newValue }));
+      // Restore cursor position after the inserted variable
+      setTimeout(() => {
+        textarea.focus();
+        textarea.selectionStart = textarea.selectionEnd = start + variable.length;
+      }, 0);
+    } else {
+      // Fallback: append to end if ref not available
+      setRuleForm(prev => ({ ...prev, template: prev.template + variable }));
+    }
   }
 
   function startCreateRule() {
@@ -720,6 +738,7 @@ export function NotificationSettings() {
                   <div className="form-group">
                     <label>SMS Template</label>
                     <textarea
+                      ref={templateTextareaRef}
                       value={ruleForm.template}
                       onChange={e => setRuleForm(prev => ({ ...prev, template: e.target.value }))}
                       rows={4}
@@ -979,6 +998,7 @@ export function NotificationSettings() {
                           <div className="form-group">
                             <label>SMS Template</label>
                             <textarea
+                              ref={templateTextareaRef}
                               value={ruleForm.template}
                               onChange={e => setRuleForm(prev => ({ ...prev, template: e.target.value }))}
                               rows={4}
