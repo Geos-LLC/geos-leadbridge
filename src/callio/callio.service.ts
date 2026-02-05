@@ -120,7 +120,7 @@ export class CallioService {
       }
 
       const response = await firstValueFrom(
-        this.httpService.get(this.buildUrl(`/api/v1/tenants/phone-numbers/search`), {
+        this.httpService.get(this.buildUrl(`/api/v1/tenants/${this.callioTenantId}/phone-numbers/search`), {
           headers: this.buildHeaders(),
           params,
         })
@@ -146,7 +146,7 @@ export class CallioService {
 
     try {
       const response = await firstValueFrom(
-        this.httpService.get(this.buildUrl(`/api/v1/tenants/phone-numbers/pricing`), {
+        this.httpService.get(this.buildUrl(`/api/v1/tenants/${this.callioTenantId}/phone-numbers/pricing`), {
           headers: this.buildHeaders(),
         })
       );
