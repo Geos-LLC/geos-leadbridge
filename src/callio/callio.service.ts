@@ -126,6 +126,9 @@ export class CallioService {
         })
       );
 
+      this.logger.log(`Search response status: ${response.status}`);
+      this.logger.log(`Search response data: ${JSON.stringify(response.data)}`);
+
       return response.data.numbers || [];
     } catch (error) {
       this.logger.error('Failed to search available numbers:', error.response?.data || error.message);
