@@ -212,6 +212,31 @@ export function Messages() {
     eventSource.onerror = (error) => {
       console.error('[Messages] SSE connection error:', error);
       eventSource.close();
+
+      // Check if this is an authentication error
+      // EventSource doesn't expose HTTP status, but we can check if the token is still valid
+      const currentToken = localStorage.getItem('token');
+      if (!currentToken) {
+        // Token was removed (probably by 401 handler elsewhere), redirect to login
+        console.warn('[Messages] SSE error: No token found, redirecting to login');
+        window.location.href = '/login';
+      } else {
+        // Try to verify token expiration
+        try {
+          const payload = JSON.parse(atob(currentToken.split('.')[1]));
+          const exp = payload.exp * 1000; // Convert to milliseconds
+          if (Date.now() >= exp) {
+            // Token is expired
+            console.warn('[Messages] SSE error: Token expired, redirecting to login');
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            localStorage.removeItem('auth-storage');
+            window.location.href = '/login';
+          }
+        } catch (e) {
+          console.error('[Messages] Failed to parse token:', e);
+        }
+      }
     };
 
     return () => {

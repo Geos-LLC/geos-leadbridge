@@ -288,7 +288,7 @@ export function NotificationSettings() {
       setError(null);
 
       if (editingRule) {
-        // Update existing rule
+        // Update existing rule (account cannot be changed - dropdown is disabled)
         const accountId = editingRule.savedAccountId || ruleForm.accountId;
         const updates: UpdateNotificationRuleDto = {
           name: ruleForm.name,
@@ -834,7 +834,7 @@ export function NotificationSettings() {
                         <div className="rule-form inline-edit">
                           <h3>Edit Rule</h3>
 
-                          {/* Account Selector - editable when editing */}
+                          {/* Account Selector - DISABLED when editing (can't move rules between accounts) */}
                           <div className="form-group">
                             <label>
                               <AlertCircle size={14} />
@@ -851,6 +851,7 @@ export function NotificationSettings() {
                                     loadPhoneNumbersForAccount(newAccountId);
                                   }
                                 }}
+                                disabled={true}
                               >
                                 <option value="">Select account...</option>
                                 {accounts.map(acc => {
@@ -865,7 +866,7 @@ export function NotificationSettings() {
                               <ChevronDown size={16} />
                             </div>
                             <p className="form-hint">
-                              This rule will send notifications for leads from the selected account.
+                              Account cannot be changed after creating a rule. To move this rule to a different account, delete it and create a new one.
                             </p>
                           </div>
 
