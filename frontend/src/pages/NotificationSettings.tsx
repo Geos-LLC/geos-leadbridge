@@ -15,6 +15,10 @@ const TEMPLATE_VARIABLES = [
   { name: '{{lead.serviceDescription}}', description: 'Detailed service description' },
   { name: '{{lead.addons}}', description: 'Service add-ons' },
   { name: '{{lead.frequency}}', description: 'Service frequency' },
+  { name: '{{lead.bedrooms}}', description: 'Number of bedrooms' },
+  { name: '{{lead.bathrooms}}', description: 'Number of bathrooms' },
+  { name: '{{lead.price}}', description: 'Lead price/cost' },
+  { name: '{{lead.pets}}', description: 'Pet information' },
 ];
 
 export function NotificationSettings() {

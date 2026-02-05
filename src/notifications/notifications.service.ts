@@ -998,6 +998,10 @@ export class NotificationsService {
     let serviceDescription = 'Not specified';
     let addons = 'None';
     let frequency = 'Not specified';
+    let bedrooms = 'Not specified';
+    let bathrooms = 'Not specified';
+    let price = 'Not specified';
+    let pets = 'Not specified';
 
     if (lead.rawJson) {
       try {
@@ -1026,6 +1030,29 @@ export class NotificationsService {
         if (frequencyAnswer) {
           frequency = frequencyAnswer;
         }
+
+        // Extract bedrooms
+        const bedroomsAnswer = this.findAnswerInDetails(details, ['Bedrooms', 'Number of bedrooms', 'How many bedrooms', 'Bedroom']);
+        if (bedroomsAnswer) {
+          bedrooms = bedroomsAnswer;
+        }
+
+        // Extract bathrooms
+        const bathroomsAnswer = this.findAnswerInDetails(details, ['Bathrooms', 'Number of bathrooms', 'How many bathrooms', 'Bathroom']);
+        if (bathroomsAnswer) {
+          bathrooms = bathroomsAnswer;
+        }
+
+        // Extract pets
+        const petsAnswer = this.findAnswerInDetails(details, ['Pets', 'Do you have pets', 'Pet', 'Animals']);
+        if (petsAnswer) {
+          pets = petsAnswer;
+        }
+
+        // Extract lead price from raw object
+        if (raw.leadPrice) {
+          price = raw.leadPrice;
+        }
       } catch (err) {
         // Failed to parse rawJson, use defaults
       }
@@ -1034,6 +1061,10 @@ export class NotificationsService {
     message = message.replace(/\{\{lead\.serviceDescription\}\}/gi, serviceDescription);
     message = message.replace(/\{\{lead\.addons\}\}/gi, addons);
     message = message.replace(/\{\{lead\.frequency\}\}/gi, frequency);
+    message = message.replace(/\{\{lead\.bedrooms\}\}/gi, bedrooms);
+    message = message.replace(/\{\{lead\.bathrooms\}\}/gi, bathrooms);
+    message = message.replace(/\{\{lead\.price\}\}/gi, price);
+    message = message.replace(/\{\{lead\.pets\}\}/gi, pets);
 
     return message;
   }
