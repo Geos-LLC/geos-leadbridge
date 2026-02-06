@@ -209,8 +209,8 @@ export function Messages() {
       }
     };
 
-    eventSource.onerror = (error) => {
-      console.error('[Messages] SSE connection error:', error);
+    eventSource.onerror = () => {
+      console.error('[Messages] SSE connection error');
       eventSource.close();
 
       // Check if this is an authentication error
@@ -232,6 +232,10 @@ export function Messages() {
             localStorage.removeItem('user');
             localStorage.removeItem('auth-storage');
             window.location.href = '/login';
+          } else {
+            // Token not expired but SSE still failed - likely JWT_SECRET mismatch or server issue
+            // Don't spam reconnects, just log it once
+            console.warn('[Messages] SSE error: Token valid but connection failed. Real-time updates disabled.');
           }
         } catch (e) {
           console.error('[Messages] Failed to parse token:', e);
