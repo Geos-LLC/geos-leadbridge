@@ -21,6 +21,23 @@ const TEMPLATE_VARIABLES = [
   { name: '{{lead.pets}}', description: 'Pet information' },
 ];
 
+// E.164 phone format validation (+12473462681)
+function isValidE164Phone(phone: string): boolean {
+  // Must start with + followed by country code and number (10-15 digits total)
+  return /^\+[1-9]\d{10,14}$/.test(phone);
+}
+
+// Format phone number to E.164 format
+function formatToE164(phone: string): string {
+  // Remove all non-digit characters except leading +
+  let cleaned = phone.replace(/[^\d+]/g, '');
+  // If starts with digits only (no +), assume US and add +1
+  if (/^\d/.test(cleaned)) {
+    cleaned = '+1' + cleaned.replace(/^\+?1?/, '');
+  }
+  return cleaned;
+}
+
 export function NotificationSettings() {
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
@@ -305,6 +322,13 @@ export function NotificationSettings() {
       return;
     }
 
+    // Validate E.164 phone format
+    const formattedPhone = formatToE164(ruleForm.toPhone);
+    if (!isValidE164Phone(formattedPhone)) {
+      setError('Phone number must be in E.164 format (e.g., +12473462681)');
+      return;
+    }
+
     try {
       setSaving(true);
       setError(null);
@@ -317,7 +341,7 @@ export function NotificationSettings() {
           triggerType: ruleForm.triggerType,
           replyTriggerMode: ruleForm.triggerType === 'customer_reply' ? ruleForm.replyTriggerMode : undefined,
           fromPhone: ruleForm.fromPhone,
-          toPhone: ruleForm.toPhone,
+          toPhone: formattedPhone,
           template: ruleForm.template,
           enabled: ruleForm.enabled,
         };
@@ -332,7 +356,7 @@ export function NotificationSettings() {
           triggerType: ruleForm.triggerType,
           replyTriggerMode: ruleForm.triggerType === 'customer_reply' ? ruleForm.replyTriggerMode : undefined,
           fromPhone: ruleForm.fromPhone,
-          toPhone: ruleForm.toPhone,
+          toPhone: formattedPhone,
           template: ruleForm.template,
           enabled: ruleForm.enabled,
         };
@@ -686,10 +710,10 @@ export function NotificationSettings() {
                       type="tel"
                       value={ruleForm.toPhone}
                       onChange={e => setRuleForm(prev => ({ ...prev, toPhone: e.target.value }))}
-                      placeholder="+1 555 123 4567"
+                      placeholder="+12473462681"
                       disabled={!ruleForm.accountId && !editingRule}
                     />
-                    <p className="form-hint">The phone number to receive SMS alerts</p>
+                    <p className="form-hint">E.164 format required (e.g., +12473462681)</p>
                   </div>
 
                   <div className="form-group">
@@ -950,9 +974,9 @@ export function NotificationSettings() {
                               type="tel"
                               value={ruleForm.toPhone}
                               onChange={e => setRuleForm(prev => ({ ...prev, toPhone: e.target.value }))}
-                              placeholder="+1 555 123 4567"
+                              placeholder="+12473462681"
                             />
-                            <p className="form-hint">The phone number to receive SMS alerts</p>
+                            <p className="form-hint">E.164 format required (e.g., +12473462681)</p>
                           </div>
 
                           <div className="form-group">

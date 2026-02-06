@@ -449,8 +449,8 @@ export function AutomationSettings() {
             )}
           </div>
 
-          {/* Create/Edit Form */}
-          {(isCreating || editingRule) && (
+          {/* Create Form - shown at top only when creating new */}
+          {isCreating && (
             <div className="rule-form">
               <div className="form-group">
                 <label>Rule Name *</label>
@@ -462,24 +462,22 @@ export function AutomationSettings() {
                 />
               </div>
 
-              {isCreating && (
-                <div className="form-group">
-                  <label>Account *</label>
-                  <div className="select-wrapper">
-                    <select
-                      value={formAccountId}
-                      onChange={e => setFormAccountId(e.target.value)}
-                    >
-                      {accounts.map(acc => (
-                        <option key={acc.id} value={acc.id}>
-                          {acc.businessName}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown size={16} />
-                  </div>
+              <div className="form-group">
+                <label>Account *</label>
+                <div className="select-wrapper">
+                  <select
+                    value={formAccountId}
+                    onChange={e => setFormAccountId(e.target.value)}
+                  >
+                    {accounts.map(acc => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.businessName}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} />
                 </div>
-              )}
+              </div>
 
               <div className="form-group">
                 <label>Trigger *</label>
@@ -596,7 +594,7 @@ export function AutomationSettings() {
                   disabled={saving || !formName.trim() || !formTemplateId}
                 >
                   {saving ? <Loader2 size={16} className="spinner" /> : <Save size={16} />}
-                  {isCreating ? 'Create Rule' : 'Save Changes'}
+                  Create Rule
                 </button>
               </div>
             </div>
@@ -614,65 +612,198 @@ export function AutomationSettings() {
           ) : (
             <div className="rules-list">
               {filteredRules.map(rule => (
-                <div
-                  key={rule.id}
-                  className={`rule-card ${rule.enabled ? 'enabled' : 'disabled'}`}
-                >
-                  <div className="rule-status">
-                    <button
-                      className={`toggle-btn ${rule.enabled ? 'on' : 'off'}`}
-                      onClick={() => toggleEnabled(rule)}
-                      title={rule.enabled ? 'Disable rule' : 'Enable rule'}
-                    >
-                      {rule.enabled ? <Play size={14} /> : <Pause size={14} />}
-                    </button>
+                <div key={rule.id} className="rule-card-wrapper">
+                  <div className={`rule-card ${rule.enabled ? 'enabled' : 'disabled'} ${editingRule?.id === rule.id ? 'editing' : ''}`}>
+                    <div className="rule-status">
+                      <button
+                        className={`toggle-btn ${rule.enabled ? 'on' : 'off'}`}
+                        onClick={() => toggleEnabled(rule)}
+                        title={rule.enabled ? 'Disable rule' : 'Enable rule'}
+                      >
+                        {rule.enabled ? <Play size={14} /> : <Pause size={14} />}
+                      </button>
+                    </div>
+
+                    <div className="rule-content">
+                      <div className="rule-header">
+                        <h3>{rule.name}</h3>
+                        <div className="rule-actions">
+                          <button
+                            className="btn-icon"
+                            onClick={() => editingRule?.id === rule.id ? cancelEdit() : startEdit(rule)}
+                            title={editingRule?.id === rule.id ? 'Cancel edit' : 'Edit rule'}
+                          >
+                            {editingRule?.id === rule.id ? <X size={16} /> : <Pencil size={16} />}
+                          </button>
+                          <button
+                            className="btn-icon btn-danger-subtle"
+                            onClick={() => setDeletingId(rule.id)}
+                            title="Delete rule"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="rule-details">
+                        <span className="rule-account">
+                          {rule.savedAccount?.businessName || 'Unknown account'}
+                        </span>
+                        <span className="rule-trigger">{getTriggerLabel(rule)}</span>
+                        <span className="rule-delay">
+                          <Clock size={12} />
+                          {getDelayLabel(rule.delayMinutes)}
+                        </span>
+                      </div>
+
+                      <div className="rule-template">
+                        Template: <strong>{rule.template?.name}</strong>
+                      </div>
+
+                      {rule.triggerCount > 0 && (
+                        <div className="rule-stats">
+                          Triggered {rule.triggerCount} time{rule.triggerCount !== 1 ? 's' : ''}
+                          {rule.lastTriggeredAt && (
+                            <> - Last: {new Date(rule.lastTriggeredAt).toLocaleDateString()}</>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="rule-content">
-                    <div className="rule-header">
-                      <h3>{rule.name}</h3>
-                      <div className="rule-actions">
-                        <button
-                          className="btn-icon"
-                          onClick={() => startEdit(rule)}
-                          title="Edit rule"
-                        >
-                          <Pencil size={16} />
-                        </button>
-                        <button
-                          className="btn-icon btn-danger-subtle"
-                          onClick={() => setDeletingId(rule.id)}
-                          title="Delete rule"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                  {/* Edit Form - shown beneath the rule being edited */}
+                  {editingRule?.id === rule.id && (
+                    <div className="rule-form inline-edit">
+                      <div className="form-group">
+                        <label>Rule Name *</label>
+                        <input
+                          type="text"
+                          value={formName}
+                          onChange={e => setFormName(e.target.value)}
+                          placeholder="e.g., Auto-reply to new leads"
+                        />
                       </div>
-                    </div>
 
-                    <div className="rule-details">
-                      <span className="rule-account">
-                        {rule.savedAccount?.businessName || 'Unknown account'}
-                      </span>
-                      <span className="rule-trigger">{getTriggerLabel(rule)}</span>
-                      <span className="rule-delay">
-                        <Clock size={12} />
-                        {getDelayLabel(rule.delayMinutes)}
-                      </span>
-                    </div>
+                      <div className="form-group">
+                        <label>Trigger *</label>
+                        <div className="select-wrapper">
+                          <select
+                            value={formTriggerType}
+                            onChange={e => setFormTriggerType(e.target.value as 'new_lead' | 'customer_reply')}
+                          >
+                            <option value="new_lead">New Lead Received</option>
+                            <option value="customer_reply">Customer Replies (excludes first message)</option>
+                          </select>
+                          <ChevronDown size={16} />
+                        </div>
+                      </div>
 
-                    <div className="rule-template">
-                      Template: <strong>{rule.template?.name}</strong>
-                    </div>
+                      {formTriggerType === 'customer_reply' && (
+                        <div className="form-group">
+                          <label>When to trigger</label>
+                          <p className="form-hint">The customer's initial message is not counted as a reply.</p>
+                          <div className="radio-group">
+                            <label className="radio-label">
+                              <input
+                                type="radio"
+                                name="replyMode"
+                                checked={formReplyMode === 'first_only'}
+                                onChange={() => setFormReplyMode('first_only')}
+                              />
+                              First reply only
+                            </label>
+                            <label className="radio-label">
+                              <input
+                                type="radio"
+                                name="replyMode"
+                                checked={formReplyMode === 'every_reply'}
+                                onChange={() => setFormReplyMode('every_reply')}
+                              />
+                              Every reply
+                            </label>
+                          </div>
+                        </div>
+                      )}
 
-                    {rule.triggerCount > 0 && (
-                      <div className="rule-stats">
-                        Triggered {rule.triggerCount} time{rule.triggerCount !== 1 ? 's' : ''}
-                        {rule.lastTriggeredAt && (
-                          <> - Last: {new Date(rule.lastTriggeredAt).toLocaleDateString()}</>
+                      <div className="form-group">
+                        <label>Template *</label>
+                        <div className="template-select-row">
+                          <div className="select-wrapper">
+                            <select
+                              value={formTemplateId}
+                              onChange={e => handleTemplateChange(e.target.value)}
+                            >
+                              {templates.map(t => (
+                                <option key={t.id} value={t.id}>
+                                  {t.name}
+                                </option>
+                              ))}
+                              <option value="__new__">+ Create New Template</option>
+                            </select>
+                            <ChevronDown size={16} />
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={openTemplateModal}
+                            title="Create new template"
+                          >
+                            <Plus size={14} />
+                          </button>
+                        </div>
+                        {formTemplateId && (
+                          <div className="template-preview-small">
+                            {templates.find(t => t.id === formTemplateId)?.content.substring(0, 100)}...
+                          </div>
                         )}
                       </div>
-                    )}
-                  </div>
+
+                      <div className="form-group">
+                        <label>
+                          <Clock size={14} />
+                          Delay
+                        </label>
+                        <div className="select-wrapper">
+                          <select
+                            value={formDelayMinutes}
+                            onChange={e => setFormDelayMinutes(parseInt(e.target.value, 10))}
+                          >
+                            {DELAY_OPTIONS.map(opt => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={16} />
+                        </div>
+                      </div>
+
+                      <div className="form-group checkbox-group">
+                        <label className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={formEnabled}
+                            onChange={e => setFormEnabled(e.target.checked)}
+                          />
+                          Enable this rule
+                        </label>
+                      </div>
+
+                      <div className="form-actions">
+                        <button className="btn btn-secondary" onClick={cancelEdit} disabled={saving}>
+                          Cancel
+                        </button>
+                        <button
+                          className="btn btn-primary"
+                          onClick={handleSave}
+                          disabled={saving || !formName.trim() || !formTemplateId}
+                        >
+                          {saving ? <Loader2 size={16} className="spinner" /> : <Save size={16} />}
+                          Save Changes
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
