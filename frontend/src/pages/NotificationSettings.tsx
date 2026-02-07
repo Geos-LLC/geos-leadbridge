@@ -19,6 +19,8 @@ const TEMPLATE_VARIABLES = [
   { name: '{{lead.bathrooms}}', description: 'Number of bathrooms' },
   { name: '{{lead.price}}', description: 'Lead price/cost' },
   { name: '{{lead.pets}}', description: 'Pet information' },
+  { name: '{{lead.estimate}}', description: 'Estimated cost/quote' },
+  { name: '{{lead.dates}}', description: 'Requested date/schedule' },
 ];
 
 // E.164 phone format validation (+12473462681)

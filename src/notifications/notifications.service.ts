@@ -1002,6 +1002,8 @@ export class NotificationsService {
     let bathrooms = 'Not specified';
     let price = 'Not specified';
     let pets = 'Not specified';
+    let estimate = 'Not specified';
+    let dates = 'Not specified';
 
     if (lead.rawJson) {
       try {
@@ -1021,7 +1023,11 @@ export class NotificationsService {
           serviceDescription = cleaningTypeAnswer;
         }
 
-        const addOnsAnswer = this.findAnswerInDetails(details, ['Add-ons', 'Additional services', 'Extras']);
+        // Extract add-ons (expanded search patterns to match Thumbtack's varying question formats)
+        const addOnsAnswer = this.findAnswerInDetails(details, [
+          'Add-on', 'Add on', 'Additional service', 'Extra', 'Include',
+          'Special request', 'Other service', 'Also need',
+        ]);
         if (addOnsAnswer) {
           addons = addOnsAnswer;
         }
@@ -1049,9 +1055,24 @@ export class NotificationsService {
           pets = petsAnswer;
         }
 
+        // Extract dates/schedule
+        const datesAnswer = this.findAnswerInDetails(details, [
+          'Date', 'When', 'Schedule', 'Preferred date', 'Start date',
+          'What day', 'Move date', 'Moving date', 'Event date', 'Project date',
+          'Availability', 'Timeline', 'Time frame', 'Timeframe',
+        ]);
+        if (datesAnswer) {
+          dates = datesAnswer;
+        }
+
         // Extract lead price from raw object
         if (raw.leadPrice) {
           price = raw.leadPrice;
+        }
+
+        // Extract estimate/quote from raw object
+        if (raw.estimate?.total) {
+          estimate = raw.estimate.total;
         }
       } catch (err) {
         // Failed to parse rawJson, use defaults
@@ -1065,6 +1086,8 @@ export class NotificationsService {
     message = message.replace(/\{\{lead\.bathrooms\}\}/gi, bathrooms);
     message = message.replace(/\{\{lead\.price\}\}/gi, price);
     message = message.replace(/\{\{lead\.pets\}\}/gi, pets);
+    message = message.replace(/\{\{lead\.estimate\}\}/gi, estimate);
+    message = message.replace(/\{\{lead\.dates\}\}/gi, dates);
 
     return message;
   }
