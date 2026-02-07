@@ -56,17 +56,16 @@ export class CallioService {
     private httpService: HttpService,
     private prisma: PrismaService,
   ) {
-    this.callioApiUrl = this.configService.get<string>('CALLIO_API_URL') || 'https://callio-git-api-george-says-projects.vercel.app';
+    this.callioApiUrl = this.configService.get<string>('CALLIO_API_URL') || 'https://callio-production-47ac.up.railway.app';
     this.callioApiKey = this.configService.get<string>('CALLIO_API_KEY');
     this.callioTenantId = this.configService.get<string>('CALLIO_TENANT_ID');
     this.callioBypassSecret = this.configService.get<string>('CALLIO_BYPASS_SECRET');
 
+    this.logger.log(`Callio API URL: ${this.callioApiUrl}`);
+    this.logger.log(`Callio Tenant ID: ${this.callioTenantId ? 'configured' : 'NOT SET'}`);
+
     if (!this.callioApiKey || !this.callioTenantId) {
       this.logger.warn('Callio API credentials not configured. Phone provisioning will be disabled.');
-    }
-
-    if (this.callioBypassSecret) {
-      this.logger.log('Vercel protection bypass configured');
     }
   }
 
@@ -119,17 +118,28 @@ export class CallioService {
         params.areaCode = areaCode;
       }
 
+      const url = this.buildUrl(`/api/v1/tenants/${this.callioTenantId}/phone-numbers/search`);
+      this.logger.log(`Searching numbers at: ${url}`);
+
       const response = await firstValueFrom(
-        this.httpService.get(this.buildUrl(`/api/v1/tenants/${this.callioTenantId}/phone-numbers/search`), {
+        this.httpService.get(url, {
           headers: this.buildHeaders(),
           params,
         })
       );
 
       this.logger.log(`Search response status: ${response.status}`);
-      this.logger.log(`Search response data: ${JSON.stringify(response.data)}`);
 
-      return response.data.numbers || [];
+      // Detect HTML response (wrong URL or SPA fallback)
+      const data = response.data;
+      if (typeof data === 'string' && data.includes('<!DOCTYPE html>')) {
+        this.logger.error(`Callio API returned HTML instead of JSON. The API URL is likely incorrect: ${this.callioApiUrl}`);
+        throw new BadRequestException('Callio API returned HTML - check CALLIO_API_URL configuration');
+      }
+
+      this.logger.log(`Search response data: ${JSON.stringify(data)}`);
+
+      return data.numbers || [];
     } catch (error) {
       this.logger.error('Failed to search available numbers:', error.response?.data || error.message);
       throw new BadRequestException('Failed to search available phone numbers');
@@ -145,11 +155,19 @@ export class CallioService {
     }
 
     try {
+      const url = this.buildUrl(`/api/v1/tenants/${this.callioTenantId}/phone-numbers/pricing`);
+      this.logger.log(`Getting pricing at: ${url}`);
+
       const response = await firstValueFrom(
-        this.httpService.get(this.buildUrl(`/api/v1/tenants/${this.callioTenantId}/phone-numbers/pricing`), {
+        this.httpService.get(url, {
           headers: this.buildHeaders(),
         })
       );
+
+      if (typeof response.data === 'string' && response.data.includes('<!DOCTYPE html>')) {
+        this.logger.error(`Callio API returned HTML instead of JSON for pricing endpoint`);
+        throw new BadRequestException('Callio API returned HTML - check CALLIO_API_URL configuration');
+      }
 
       return response.data;
     } catch (error) {
