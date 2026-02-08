@@ -4,7 +4,7 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "npm run build:frontend && prisma generate && tsc",
-    "build:frontend": "cd frontend && npm install && npm run build",
+    "build:frontend": "cd frontend && npm install --include=dev && npm run build",
     "start": "node dist/main.js",
     "start:dev": "ts-node src/main.ts",
     "start:prod": "node dist/main.js",
