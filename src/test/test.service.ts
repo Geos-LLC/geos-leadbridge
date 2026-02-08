@@ -177,16 +177,51 @@ export class TestService {
       },
     });
 
-    // Check recent notification logs
+    // Check recent notification logs (within last 30 seconds to account for processing time)
     const recentLogs = await this.prisma.notificationLog.findMany({
       where: {
         leadId: lead?.id,
-        createdAt: { gte: new Date(Date.now() - 10000) },
+        createdAt: { gte: new Date(Date.now() - 30000) },
       },
-      select: { id: true, status: true, ruleName: true, error: true },
+      select: { id: true, status: true, ruleName: true, error: true, toPhone: true, fromPhone: true },
       orderBy: { createdAt: 'desc' },
-      take: 5,
+      take: 10,
     });
+
+    // Build notification diagnostics - trace exactly what the webhook pipeline would have done
+    const smsSent = recentLogs.length > 0;
+    const smsSuccessCount = recentLogs.filter(l => l.status !== 'failed').length;
+    const smsFailedCount = recentLogs.filter(l => l.status === 'failed').length;
+
+    // Determine why SMS was not sent (if applicable)
+    let smsNotSentReason: string | null = null;
+    if (!smsSent && !webhookError) {
+      if (!notifSettings) {
+        smsNotSentReason = 'No notification settings found for this account. Go to SMS Alerts to configure.';
+      } else if (!notifSettings.enabled) {
+        smsNotSentReason = 'Notification settings are disabled for this account.';
+      } else if (!notifSettings.callioApiKey) {
+        smsNotSentReason = 'No Callio API key configured. Connect Callio in SMS Alerts > Phone Settings.';
+      } else {
+        const newLeadRules = (notifSettings.notificationRules || []).filter(
+          (r: any) => r.triggerType === 'new_lead' && r.enabled,
+        );
+        if (dto.eventType === 'NegotiationCreatedV4' && newLeadRules.length === 0) {
+          smsNotSentReason = 'No enabled "new_lead" SMS rules found. Create a rule in SMS Alerts.';
+        } else if (dto.eventType === 'MessageCreatedV4') {
+          const replyRules = (notifSettings.notificationRules || []).filter(
+            (r: any) => r.triggerType === 'customer_reply' && r.enabled,
+          );
+          if (replyRules.length === 0) {
+            smsNotSentReason = 'No enabled "customer_reply" SMS rules found.';
+          } else {
+            smsNotSentReason = 'Customer reply SMS only triggers on 2nd+ customer message (not first message).';
+          }
+        } else {
+          smsNotSentReason = 'Unknown reason - check Railway logs for details.';
+        }
+      }
+    }
 
     return {
       success: !webhookError,
@@ -207,6 +242,18 @@ export class TestService {
         notificationRules: (notifSettings?.notificationRules || []).map(r => ({ name: r.name, triggerType: r.triggerType })),
         callioConnected: !!notifSettings?.callioApiKey,
         smsLogs: recentLogs,
+        smsSent,
+        smsSuccessCount,
+        smsFailedCount,
+        smsNotSentReason,
+        notificationDiagnostics: {
+          settingsExist: !!notifSettings,
+          settingsEnabled: notifSettings?.enabled ?? false,
+          hasCallioApiKey: !!notifSettings?.callioApiKey,
+          totalRules: notifSettings?.notificationRules?.length || 0,
+          newLeadRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead' && r.enabled).length,
+          customerReplyRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'customer_reply' && r.enabled).length,
+        },
       },
     };
   }

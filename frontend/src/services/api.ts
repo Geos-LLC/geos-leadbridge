@@ -814,7 +814,19 @@ export interface SimulationResult {
     notificationRulesFound: number;
     notificationRules: Array<{ name: string; triggerType: string }>;
     callioConnected: boolean;
-    smsLogs: Array<{ id: string; status: string; ruleName: string | null; error: string | null }>;
+    smsLogs: Array<{ id: string; status: string; ruleName: string | null; error: string | null; toPhone?: string; fromPhone?: string }>;
+    smsSent: boolean;
+    smsSuccessCount: number;
+    smsFailedCount: number;
+    smsNotSentReason: string | null;
+    notificationDiagnostics: {
+      settingsExist: boolean;
+      settingsEnabled: boolean;
+      hasCallioApiKey: boolean;
+      totalRules: number;
+      newLeadRules: number;
+      customerReplyRules: number;
+    };
   };
 }
 

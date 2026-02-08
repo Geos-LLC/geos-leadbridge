@@ -541,10 +541,33 @@ export function ApiTest() {
                       {result.results.sseEventEmitted ? <CheckCircle size={14} className="check" /> : <XCircle size={14} className="cross" />}
                       SSE event emitted
                     </div>
-                    <div className="result-item">
-                      {result.results.callioConnected ? <CheckCircle size={14} className="check" /> : <XCircle size={14} className="cross" />}
-                      Callio connected
+
+                    {/* SMS Status - prominent display */}
+                    <div className="result-item" style={{ fontWeight: 600 }}>
+                      {result.results.smsSent
+                        ? <CheckCircle size={14} className="check" />
+                        : <XCircle size={14} className="cross" />}
+                      {result.results.smsSent
+                        ? `SMS sent (${result.results.smsSuccessCount} ok${result.results.smsFailedCount > 0 ? `, ${result.results.smsFailedCount} failed` : ''})`
+                        : 'SMS NOT sent'}
                     </div>
+
+                    {result.results.smsNotSentReason && (
+                      <div style={{ fontSize: '12px', color: 'var(--warning, #e67e22)', padding: '6px 8px', background: 'rgba(230, 126, 34, 0.08)', borderRadius: 6, marginTop: 2 }}>
+                        <AlertCircle size={12} style={{ verticalAlign: -2, marginRight: 4 }} />
+                        {result.results.smsNotSentReason}
+                      </div>
+                    )}
+
+                    {/* Notification diagnostics */}
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: 4 }}>
+                      Settings: {result.results.notificationDiagnostics?.settingsExist ? 'yes' : 'NO'} |
+                      Enabled: {result.results.notificationDiagnostics?.settingsEnabled ? 'yes' : 'NO'} |
+                      Callio key: {result.results.notificationDiagnostics?.hasCallioApiKey ? 'yes' : 'NO'} |
+                      New lead rules: {result.results.notificationDiagnostics?.newLeadRules ?? 0} |
+                      Reply rules: {result.results.notificationDiagnostics?.customerReplyRules ?? 0}
+                    </div>
+
                     <div className="result-item">
                       <span style={{ fontWeight: 500 }}>{result.results.automationRulesFound}</span> automation rules
                       {result.results.automationRules.length > 0 && (
@@ -568,7 +591,9 @@ export function ApiTest() {
                       <span style={{ fontSize: '12px', fontWeight: 600 }}>SMS Logs:</span>
                       {result.results.smsLogs.map((log, i) => (
                         <div key={i} style={{ fontSize: '12px', marginTop: 2, color: log.status === 'failed' ? 'var(--danger)' : 'var(--success)' }}>
-                          {log.ruleName || 'Unknown'}: {log.status} {log.error && `- ${log.error}`}
+                          {log.ruleName || 'Unknown'}: {log.status}
+                          {log.toPhone && ` → ${log.toPhone}`}
+                          {log.error && ` - ${log.error}`}
                         </div>
                       ))}
                     </div>
