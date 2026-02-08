@@ -4,10 +4,8 @@ import {
   ArrowLeft, FlaskConical, Loader2, AlertCircle, X, CheckCircle, XCircle,
   Send, Plus, Trash2, ChevronDown, ChevronUp, MessageSquare, UserPlus,
 } from 'lucide-react';
-import {
-  thumbtackApi, testApi,
-  SimulateWebhookRequest, SimulationResult, TestLead,
-} from '../services/api';
+import { thumbtackApi, testApi } from '../services/api';
+import type { SimulateWebhookRequest, SimulationResult, TestLead } from '../services/api';
 import type { SavedAccount } from '../types';
 
 const DEFAULT_DETAILS = [
