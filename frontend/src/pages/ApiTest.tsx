@@ -402,12 +402,15 @@ export function ApiTest() {
             </div>
 
             {diagnostics.notifications.rules.length > 0 && (
-              <div style={{ marginTop: 10, fontSize: '12px', color: 'var(--text-secondary)' }}>
-                <strong>SMS Rules:</strong>
+              <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {diagnostics.notifications.rules.map((r, i) => (
-                  <div key={i} style={{ marginLeft: 8, marginTop: 2 }}>
-                    {r.name} ({r.triggerType}) {r.fromPhone && `from ${r.fromPhone}`} {r.toPhone && `to ${r.toPhone}`}
-                  </div>
+                  <span key={i} style={{
+                    fontSize: '12px', padding: '3px 10px', borderRadius: 12,
+                    background: 'var(--bg-secondary, rgba(0,0,0,0.05))',
+                    color: 'var(--text-primary)',
+                  }}>
+                    {r.name}
+                  </span>
                 ))}
               </div>
             )}

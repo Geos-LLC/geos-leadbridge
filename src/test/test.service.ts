@@ -306,7 +306,7 @@ export class TestService {
       take: 5,
     });
 
-    // Build health checks
+    // Build health checks - only flag critical issues that prevent SMS from working
     const issues: string[] = [];
     if (!platformConnection) issues.push('No active Thumbtack connection found for this user');
     if (!account.webhookId) issues.push('No webhook registered for this account');
@@ -315,11 +315,8 @@ export class TestService {
       if (!notifSettings.enabled) issues.push('Notification settings are disabled');
       if (!notifSettings.callioApiKey) issues.push('No Callio API key configured');
       const newLeadRules = notifSettings.notificationRules.filter(r => r.triggerType === 'new_lead');
-      const replyRules = notifSettings.notificationRules.filter(r => r.triggerType === 'customer_reply');
       if (newLeadRules.length === 0) issues.push('No enabled "new_lead" SMS rules');
-      if (replyRules.length === 0) issues.push('No enabled "customer_reply" SMS rules');
     }
-    if (automationRules.length === 0) issues.push('No enabled automation rules');
 
     return {
       account: {
