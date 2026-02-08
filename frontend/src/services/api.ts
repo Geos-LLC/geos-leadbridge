@@ -819,6 +819,9 @@ export interface SimulationResult {
     smsSuccessCount: number;
     smsFailedCount: number;
     smsNotSentReason: string | null;
+    webhookEventId: string | null;
+    webhookEventError: string | null;
+    pipelineTrace: Array<{ step: string; status: 'pass' | 'fail' | 'skip'; detail: string }>;
     notificationDiagnostics: {
       settingsExist: boolean;
       settingsEnabled: boolean;

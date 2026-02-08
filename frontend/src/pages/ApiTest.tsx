@@ -671,14 +671,26 @@ export function ApiTest() {
                       </div>
                     )}
 
-                    {/* Notification diagnostics */}
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: 4 }}>
-                      Settings: {result.results.notificationDiagnostics?.settingsExist ? 'yes' : 'NO'} |
-                      Enabled: {result.results.notificationDiagnostics?.settingsEnabled ? 'yes' : 'NO'} |
-                      Callio key: {result.results.notificationDiagnostics?.hasCallioApiKey ? 'yes' : 'NO'} |
-                      SMS alerts (new lead): {result.results.notificationDiagnostics?.newLeadRules ?? 0} |
-                      SMS alerts (reply): {result.results.notificationDiagnostics?.customerReplyRules ?? 0}
-                    </div>
+                    {/* Pipeline trace - shows exactly where SMS sending passed/failed */}
+                    {result.results.pipelineTrace?.length > 0 && (
+                      <div style={{ marginTop: 6, padding: '8px 10px', background: 'var(--bg-secondary, rgba(0,0,0,0.03))', borderRadius: 6, fontSize: '12px' }}>
+                        <div style={{ fontWeight: 600, marginBottom: 4, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)' }}>
+                          Pipeline Trace
+                        </div>
+                        {result.results.pipelineTrace.map((t, i) => (
+                          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 2 }}>
+                            <span style={{ flexShrink: 0, marginTop: 1 }}>
+                              {t.status === 'pass' ? <CheckCircle size={11} style={{ color: 'var(--success)' }} /> :
+                               t.status === 'fail' ? <XCircle size={11} style={{ color: 'var(--danger)' }} /> :
+                               <span style={{ color: 'var(--text-secondary)', fontSize: '11px' }}>i</span>}
+                            </span>
+                            <span>
+                              <strong>{t.step}</strong>: <span style={{ color: t.status === 'fail' ? 'var(--danger)' : 'var(--text-secondary)' }}>{t.detail}</span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     <div className="result-item">
                       <span style={{ fontWeight: 500 }}>{result.results.automationRulesFound}</span> auto-reply rule{result.results.automationRulesFound !== 1 ? 's' : ''} (Thumbtack)

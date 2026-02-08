@@ -208,41 +208,150 @@ export class TestService {
     const smsSuccessCount = recentLogs.filter(l => l.status !== 'failed').length;
     const smsFailedCount = recentLogs.filter(l => l.status === 'failed').length;
 
-    // Determine why SMS was not sent (if applicable)
-    let smsNotSentReason: string | null = null;
-    if (!smsSent && !webhookError) {
-      if (!notifSettings) {
-        smsNotSentReason = 'No notification settings found for this account. Go to SMS Alerts to configure.';
-      } else if (!notifSettings.enabled) {
-        smsNotSentReason = 'Notification settings are disabled for this account.';
-      } else if (!notifSettings.callioApiKey) {
-        smsNotSentReason = 'No Callio API key configured. Connect Callio in SMS Alerts > Phone Settings.';
+    // === PIPELINE TRACE ===
+    // Mirror the exact logic of handleNegotiationCreated + sendLeadNotification
+    // to show step-by-step what the webhook pipeline did/would do
+    const pipelineTrace: Array<{ step: string; status: 'pass' | 'fail' | 'skip'; detail: string }> = [];
+
+    // Step 1: Platform connection lookup (same as handleNegotiationCreated lines 234-314)
+    const businessId = account.businessId;
+    let traceUserId: string | null = null;
+
+    const platformConn = await this.prisma.platform.findFirst({
+      where: { platformName: 'thumbtack', externalBusinessId: businessId },
+    });
+    if (platformConn) {
+      traceUserId = platformConn.userId;
+      pipelineTrace.push({ step: 'Platform connection (exact match)', status: 'pass', detail: `Found via externalBusinessId=${businessId}` });
+    } else {
+      // Try savedAccount fallback (same as handleNegotiationCreated line 266)
+      const savedAcctLookup = await this.prisma.savedAccount.findFirst({
+        where: { platform: 'thumbtack', businessId },
+      });
+      if (savedAcctLookup) {
+        const fallbackConn = await this.prisma.platform.findFirst({
+          where: { platformName: 'thumbtack', userId: savedAcctLookup.userId, connected: true },
+        });
+        if (fallbackConn) {
+          traceUserId = fallbackConn.userId;
+          pipelineTrace.push({ step: 'Platform connection (SavedAccount fallback)', status: 'pass', detail: `Found via savedAccount userId=${savedAcctLookup.userId}` });
+        } else {
+          pipelineTrace.push({ step: 'Platform connection (SavedAccount fallback)', status: 'fail', detail: `SavedAccount found but no connected platform for userId=${savedAcctLookup.userId}` });
+        }
       } else {
-        // Note: rules are already filtered by enabled: true in the query
-        const newLeadRules = (notifSettings.notificationRules || []).filter(
-          (r: any) => r.triggerType === 'new_lead',
-        );
-        if (dto.eventType === 'NegotiationCreatedV4' && newLeadRules.length === 0) {
-          // Show all rule triggerTypes to help debug
-          const allTypes = (notifSettings.notificationRules || []).map((r: any) => `${r.name} (${r.triggerType})`);
-          smsNotSentReason = allTypes.length > 0
-            ? `No "new_lead" SMS rules found. Your rules: ${allTypes.join(', ')}. Check triggerType.`
-            : 'No enabled SMS rules found. Create a rule in SMS Alerts.';
-        } else if (dto.eventType === 'NegotiationCreatedV4' && newLeadRules.length > 0) {
-          // Rules exist but SMS still not sent - pipeline issue
-          smsNotSentReason = `${newLeadRules.length} new_lead rule(s) found but SMS not sent. Possible: quiet hours, missing phone on rule, or Callio API error. Check webhook event: ${webhookEvent?.processingError || 'no error logged'}`;
-        } else if (dto.eventType === 'MessageCreatedV4') {
-          const replyRules = (notifSettings.notificationRules || []).filter(
-            (r: any) => r.triggerType === 'customer_reply',
-          );
-          if (replyRules.length === 0) {
-            smsNotSentReason = 'No enabled "customer_reply" SMS rules found.';
-          } else {
-            smsNotSentReason = 'Customer reply SMS only triggers on 2nd+ customer message (not first message).';
+        pipelineTrace.push({ step: 'Platform connection', status: 'fail', detail: `No platform or savedAccount found for businessId=${businessId}. Pipeline stops here - lead won't be created.` });
+      }
+    }
+
+    // Step 2: SavedAccount lookup for SMS (same as handleNegotiationCreated line 396)
+    let traceSavedAccount: any = null;
+    if (traceUserId) {
+      traceSavedAccount = await this.prisma.savedAccount.findFirst({
+        where: { platform: 'thumbtack', businessId, userId: traceUserId },
+      });
+      if (traceSavedAccount) {
+        pipelineTrace.push({ step: 'SavedAccount for SMS', status: 'pass', detail: `Found: ${traceSavedAccount.businessName} (${traceSavedAccount.id})` });
+      } else {
+        pipelineTrace.push({ step: 'SavedAccount for SMS', status: 'fail', detail: `No savedAccount with platform=thumbtack, businessId=${businessId}, userId=${traceUserId}. SMS skipped.` });
+      }
+    }
+
+    // Step 3-8: sendLeadNotification checks (same as notifications.service.ts line 602+)
+    if (traceSavedAccount) {
+      // Step 3: NotificationSettings lookup
+      const traceSettings = await this.prisma.notificationSettings.findUnique({
+        where: { savedAccountId: traceSavedAccount.id },
+        include: {
+          notificationRules: {
+            where: { triggerType: dto.eventType === 'NegotiationCreatedV4' ? 'new_lead' : 'customer_reply', enabled: true },
+          },
+        },
+      });
+
+      if (!traceSettings) {
+        pipelineTrace.push({ step: 'NotificationSettings', status: 'fail', detail: `No settings for savedAccountId=${traceSavedAccount.id}. Pipeline checks user-level defaults next.` });
+
+        // Check fallback - user-level defaults
+        const userDefaults = await this.prisma.notificationSettings.findFirst({
+          where: { userId: traceUserId!, savedAccountId: null },
+        });
+        if (userDefaults) {
+          pipelineTrace.push({ step: 'User-level default settings', status: 'pass', detail: 'Found user-level defaults (fallback)' });
+        } else {
+          pipelineTrace.push({ step: 'User-level default settings', status: 'fail', detail: 'No user-level defaults either. SMS cannot be sent.' });
+        }
+      } else {
+        pipelineTrace.push({ step: 'NotificationSettings', status: 'pass', detail: `Found settings (id=${traceSettings.id})` });
+
+        // Step 4: enabled check
+        if (!traceSettings.enabled) {
+          pipelineTrace.push({ step: 'Settings enabled', status: 'fail', detail: 'enabled=false. SMS skipped.' });
+        } else {
+          pipelineTrace.push({ step: 'Settings enabled', status: 'pass', detail: 'enabled=true' });
+        }
+
+        // Step 5: Callio API key
+        if (!traceSettings.callioApiKey) {
+          pipelineTrace.push({ step: 'Callio API key', status: 'fail', detail: 'No API key configured. SMS cannot be sent.' });
+        } else {
+          pipelineTrace.push({ step: 'Callio API key', status: 'pass', detail: 'API key is set' });
+        }
+
+        // Step 6: requirePhone check
+        const leadPhone = dto.customerPhone || '+15555555555';
+        if (traceSettings.requirePhone && !leadPhone) {
+          pipelineTrace.push({ step: 'Lead phone required', status: 'fail', detail: 'requirePhone=true but lead has no phone' });
+        } else {
+          pipelineTrace.push({ step: 'Lead phone required', status: 'pass', detail: `requirePhone=${traceSettings.requirePhone}, phone=${leadPhone ? 'present' : 'missing'}` });
+        }
+
+        // Step 7: Quiet hours
+        const isQuiet = this.checkQuietHours(traceSettings);
+        if (isQuiet) {
+          pipelineTrace.push({ step: 'Quiet hours', status: 'fail', detail: `Currently in quiet hours (${traceSettings.quietHoursStart}-${traceSettings.quietHoursEnd} ${traceSettings.quietHoursTimezone})` });
+        } else {
+          pipelineTrace.push({ step: 'Quiet hours', status: 'pass', detail: traceSettings.quietHoursStart ? `Not in quiet hours (${traceSettings.quietHoursStart}-${traceSettings.quietHoursEnd})` : 'No quiet hours configured' });
+        }
+
+        // Step 8: Rules check
+        const traceRules = traceSettings.notificationRules;
+        if (traceRules.length === 0) {
+          pipelineTrace.push({ step: 'Notification rules', status: 'fail', detail: `No enabled "${dto.eventType === 'NegotiationCreatedV4' ? 'new_lead' : 'customer_reply'}" rules found. SMS skipped.` });
+
+          // Check if there are rules with wrong triggerType
+          const allRules = await this.prisma.notificationRule.findMany({
+            where: { notificationSettingsId: traceSettings.id },
+            select: { name: true, triggerType: true, enabled: true },
+          });
+          if (allRules.length > 0) {
+            const ruleList = allRules.map(r => `"${r.name}" (type=${r.triggerType}, enabled=${r.enabled})`).join('; ');
+            pipelineTrace.push({ step: 'All rules in settings', status: 'skip', detail: ruleList });
           }
         } else {
-          smsNotSentReason = 'Unknown reason - check Railway logs for details.';
+          pipelineTrace.push({ step: 'Notification rules', status: 'pass', detail: `Found ${traceRules.length} rule(s)` });
+
+          // Step 9: Check each rule's phone numbers
+          for (const rule of traceRules) {
+            const ruleToPhone = (rule as any).toPhone;
+            const ruleFromPhone = (rule as any).fromPhone;
+            if (!ruleToPhone) {
+              pipelineTrace.push({ step: `Rule "${(rule as any).name}" phone`, status: 'fail', detail: 'No toPhone set - SMS skipped for this rule' });
+            } else {
+              pipelineTrace.push({ step: `Rule "${(rule as any).name}" phone`, status: 'pass', detail: `from=${ruleFromPhone || 'shared'}, to=${ruleToPhone}` });
+            }
+          }
         }
+      }
+    }
+
+    // Determine why SMS was not sent (if applicable) - now uses pipeline trace
+    let smsNotSentReason: string | null = null;
+    if (!smsSent && !webhookError) {
+      const failedStep = pipelineTrace.find(s => s.status === 'fail');
+      if (failedStep) {
+        smsNotSentReason = `Pipeline stopped at "${failedStep.step}": ${failedStep.detail}`;
+      } else {
+        smsNotSentReason = 'All pipeline checks passed but no SMS log found. Possible Callio API error - check Railway logs.';
       }
     }
 
@@ -271,6 +380,7 @@ export class TestService {
         smsNotSentReason,
         webhookEventId: webhookEvent?.id || null,
         webhookEventError: webhookEvent?.processingError || null,
+        pipelineTrace,
         notificationDiagnostics: {
           settingsExist: !!notifSettings,
           settingsEnabled: notifSettings?.enabled ?? false,
@@ -281,6 +391,31 @@ export class TestService {
         },
       },
     };
+  }
+
+  /**
+   * Check quiet hours (mirrors NotificationsService.isQuietHours)
+   */
+  private checkQuietHours(settings: {
+    quietHoursStart: string | null;
+    quietHoursEnd: string | null;
+    quietHoursTimezone: string | null;
+  }): boolean {
+    if (!settings.quietHoursStart || !settings.quietHoursEnd) return false;
+    try {
+      const tz = settings.quietHoursTimezone || 'America/New_York';
+      const now = new Date();
+      const formatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+      const currentTime = formatter.format(now);
+      const [startH, startM] = settings.quietHoursStart.split(':').map(Number);
+      const [endH, endM] = settings.quietHoursEnd.split(':').map(Number);
+      const [curH, curM] = currentTime.split(':').map(Number);
+      const startMin = startH * 60 + startM;
+      const endMin = endH * 60 + endM;
+      const curMin = curH * 60 + curM;
+      if (startMin > endMin) return curMin >= startMin || curMin < endMin;
+      return curMin >= startMin && curMin < endMin;
+    } catch { return false; }
   }
 
   async getAccountDiagnostics(savedAccountId: string) {
