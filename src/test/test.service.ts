@@ -278,7 +278,31 @@ export class TestService {
         if (userDefaults) {
           pipelineTrace.push({ step: 'User-level default settings', status: 'pass', detail: 'Found user-level defaults (fallback)' });
         } else {
-          pipelineTrace.push({ step: 'User-level default settings', status: 'fail', detail: 'No user-level defaults either. SMS cannot be sent.' });
+          pipelineTrace.push({ step: 'User-level default settings', status: 'fail', detail: 'No user-level defaults either.' });
+
+          // Fallback 2: Check other accounts of same user (same as notifications.service.ts line 639)
+          const otherAccountSettings = await this.prisma.notificationSettings.findFirst({
+            where: {
+              savedAccount: { userId: traceUserId! },
+              callioApiKey: { not: null },
+              enabled: true,
+            },
+            include: {
+              savedAccount: { select: { id: true, businessName: true } },
+              notificationRules: {
+                where: { triggerType: dto.eventType === 'NegotiationCreatedV4' ? 'new_lead' : 'customer_reply', enabled: true },
+              },
+            },
+          });
+          if (otherAccountSettings) {
+            pipelineTrace.push({
+              step: 'Fallback: other account settings',
+              status: 'pass',
+              detail: `Found settings from "${otherAccountSettings.savedAccount?.businessName}" (${otherAccountSettings.savedAccountId}) with ${otherAccountSettings.notificationRules.length} rule(s)`,
+            });
+          } else {
+            pipelineTrace.push({ step: 'Fallback: other account settings', status: 'fail', detail: 'No other account has settings with Callio API key. SMS cannot be sent.' });
+          }
         }
       } else {
         pipelineTrace.push({ step: 'NotificationSettings', status: 'pass', detail: `Found settings (id=${traceSettings.id})` });
