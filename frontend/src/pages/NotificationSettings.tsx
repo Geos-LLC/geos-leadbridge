@@ -827,23 +827,21 @@ export function NotificationSettings() {
                                 <span className="reply-mode">({rule.replyTriggerMode === 'first_only' ? 'First' : 'Every'})</span>
                               )}
                             </span>
-                            {rule.enabled && (
-                              <span className={`sms-status-badge ${
-                                !rule.lastSmsStatus ? 'never' :
-                                rule.lastSmsStatus === 'delivered' || rule.lastSmsStatus === 'sent' || rule.lastSmsStatus === 'queued' ? 'ok' : 'error'
-                              }`} title={
-                                !rule.lastSmsStatus ? 'Never triggered - no SMS sent yet' :
-                                rule.lastSmsStatus === 'failed' ? `Last SMS failed: ${rule.lastSmsError || 'Unknown error'}` :
-                                `Last SMS: ${rule.lastSmsStatus}${rule.lastSmsAt ? ` at ${new Date(rule.lastSmsAt).toLocaleString()}` : ''}`
-                              }>
-                                {!rule.lastSmsStatus ? 'No SMS yet' :
-                                 rule.lastSmsStatus === 'delivered' ? 'Delivered' :
-                                 rule.lastSmsStatus === 'sent' ? 'Sent' :
-                                 rule.lastSmsStatus === 'queued' ? 'Queued' :
-                                 rule.lastSmsStatus === 'failed' ? 'Failed' :
-                                 rule.lastSmsStatus}
-                              </span>
-                            )}
+                            {(() => {
+                              const acctId = rule.savedAccountId || (selectedAccountId !== 'all' ? selectedAccountId : '');
+                              const hasCallio = acctId ? accountCallioStatus[acctId] : false;
+                              const issues: string[] = [];
+                              if (!rule.fromPhone) issues.push('No from phone');
+                              if (!rule.toPhone) issues.push('No to phone');
+                              if (!hasCallio) issues.push('No Callio API key');
+                              const healthy = issues.length === 0;
+                              return (
+                                <span className={`sms-status-badge ${healthy ? 'ok' : 'error'}`}
+                                  title={healthy ? 'Rule is properly configured and ready to send SMS' : issues.join(', ')}>
+                                  {healthy ? 'Ready' : issues[0]}
+                                </span>
+                              );
+                            })()}
                           </div>
                           <div className="rule-actions">
                             <label className="toggle-switch small">
@@ -893,11 +891,6 @@ export function NotificationSettings() {
                             <span>Last: {new Date(rule.lastTriggeredAt).toLocaleDateString()}</span>
                           )}
                         </div>
-                        {rule.lastSmsStatus === 'failed' && rule.lastSmsError && (
-                          <div style={{ fontSize: '12px', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <AlertCircle size={12} /> {rule.lastSmsError}
-                          </div>
-                        )}
                       </div>
 
                       {/* Edit Form - appears directly under the rule being edited */}
