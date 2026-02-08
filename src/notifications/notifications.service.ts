@@ -55,6 +55,10 @@ export interface NotificationRuleResponse {
   lastTriggeredAt: string | null;
   createdAt: string;
   updatedAt: string;
+  // Last SMS delivery status
+  lastSmsStatus: string | null; // 'sent' | 'delivered' | 'failed' | 'pending' | 'queued' | null
+  lastSmsError: string | null;
+  lastSmsAt: string | null;
   // Account info (included when fetching all rules)
   savedAccountId?: string;
   savedAccount?: {
@@ -338,6 +342,12 @@ export class NotificationsService {
           include: {
             notificationRules: {
               orderBy: { createdAt: 'desc' },
+              include: {
+                notificationLogs: {
+                  orderBy: { createdAt: 'desc' },
+                  take: 1,
+                },
+              },
             },
           },
         },
@@ -405,6 +415,12 @@ export class NotificationsService {
     const rules = await this.prisma.notificationRule.findMany({
       where: { notificationSettingsId: settings.id },
       orderBy: { createdAt: 'desc' },
+      include: {
+        notificationLogs: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
     });
 
     return rules.map(this.formatRule);
@@ -1702,6 +1718,8 @@ export class NotificationsService {
    * Format rule for response
    */
   private formatRule(rule: any): NotificationRuleResponse {
+    // Last log is included via notificationLogs relation (take: 1, orderBy: desc)
+    const lastLog = rule.notificationLogs?.[0] || null;
     return {
       id: rule.id,
       notificationSettingsId: rule.notificationSettingsId,
@@ -1716,6 +1734,9 @@ export class NotificationsService {
       lastTriggeredAt: rule.lastTriggeredAt?.toISOString() || null,
       createdAt: rule.createdAt.toISOString(),
       updatedAt: rule.updatedAt.toISOString(),
+      lastSmsStatus: lastLog?.status || null,
+      lastSmsError: lastLog?.error || null,
+      lastSmsAt: lastLog?.createdAt?.toISOString() || null,
     };
   }
 

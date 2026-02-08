@@ -205,6 +205,10 @@ export interface NotificationRule {
   lastTriggeredAt: string | null;
   createdAt: string;
   updatedAt: string;
+  // Last SMS delivery status
+  lastSmsStatus: string | null;
+  lastSmsError: string | null;
+  lastSmsAt: string | null;
   // Account info (included when fetching all rules)
   savedAccountId?: string;
   savedAccount?: {

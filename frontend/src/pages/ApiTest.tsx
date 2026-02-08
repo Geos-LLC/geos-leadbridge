@@ -389,15 +389,15 @@ export function ApiTest() {
               </div>
               <div>
                 {diagnostics.notifications.newLeadRules > 0 ? <CheckCircle size={12} className="check" /> : <XCircle size={12} className="cross" />}
-                {' '}{diagnostics.notifications.newLeadRules} new lead rule{diagnostics.notifications.newLeadRules !== 1 ? 's' : ''}
+                {' '}{diagnostics.notifications.newLeadRules} SMS alert{diagnostics.notifications.newLeadRules !== 1 ? 's' : ''} (new lead)
               </div>
               <div>
-                {diagnostics.notifications.customerReplyRules > 0 ? <CheckCircle size={12} className="check" /> : <XCircle size={12} className="cross" />}
-                {' '}{diagnostics.notifications.customerReplyRules} reply rule{diagnostics.notifications.customerReplyRules !== 1 ? 's' : ''}
+                {diagnostics.notifications.customerReplyRules > 0 ? <CheckCircle size={12} className="check" /> : <span style={{ color: 'var(--text-secondary)' }}>-</span>}
+                {' '}{diagnostics.notifications.customerReplyRules} SMS alert{diagnostics.notifications.customerReplyRules !== 1 ? 's' : ''} (reply)
               </div>
               <div>
                 {diagnostics.automation.totalRules > 0 ? <CheckCircle size={12} className="check" /> : <span style={{ color: 'var(--text-secondary)' }}>-</span>}
-                {' '}{diagnostics.automation.totalRules} automation rule{diagnostics.automation.totalRules !== 1 ? 's' : ''}
+                {' '}{diagnostics.automation.totalRules} auto-reply rule{diagnostics.automation.totalRules !== 1 ? 's' : ''}
               </div>
             </div>
 
@@ -676,12 +676,12 @@ export function ApiTest() {
                       Settings: {result.results.notificationDiagnostics?.settingsExist ? 'yes' : 'NO'} |
                       Enabled: {result.results.notificationDiagnostics?.settingsEnabled ? 'yes' : 'NO'} |
                       Callio key: {result.results.notificationDiagnostics?.hasCallioApiKey ? 'yes' : 'NO'} |
-                      New lead rules: {result.results.notificationDiagnostics?.newLeadRules ?? 0} |
-                      Reply rules: {result.results.notificationDiagnostics?.customerReplyRules ?? 0}
+                      SMS alerts (new lead): {result.results.notificationDiagnostics?.newLeadRules ?? 0} |
+                      SMS alerts (reply): {result.results.notificationDiagnostics?.customerReplyRules ?? 0}
                     </div>
 
                     <div className="result-item">
-                      <span style={{ fontWeight: 500 }}>{result.results.automationRulesFound}</span> automation rules
+                      <span style={{ fontWeight: 500 }}>{result.results.automationRulesFound}</span> auto-reply rule{result.results.automationRulesFound !== 1 ? 's' : ''} (Thumbtack)
                       {result.results.automationRules.length > 0 && (
                         <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
                           ({result.results.automationRules.map(r => r.name).join(', ')})
@@ -689,7 +689,7 @@ export function ApiTest() {
                       )}
                     </div>
                     <div className="result-item">
-                      <span style={{ fontWeight: 500 }}>{result.results.notificationRulesFound}</span> SMS rules
+                      <span style={{ fontWeight: 500 }}>{result.results.notificationRulesFound}</span> SMS alert rule{result.results.notificationRulesFound !== 1 ? 's' : ''}
                       {result.results.notificationRules.length > 0 && (
                         <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
                           ({result.results.notificationRules.map(r => r.name).join(', ')})
