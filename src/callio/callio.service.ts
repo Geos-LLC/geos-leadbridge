@@ -118,7 +118,7 @@ export class CallioService {
         params.areaCode = areaCode;
       }
 
-      const url = this.buildUrl(`/api/v1/tenants/${this.callioTenantId}/phone-numbers/search`);
+      const url = this.buildUrl(`/api/v1/tenants/phone-numbers/search`);
       this.logger.log(`Searching numbers at: ${url}`);
 
       const response = await firstValueFrom(
@@ -155,7 +155,7 @@ export class CallioService {
     }
 
     try {
-      const url = this.buildUrl(`/api/v1/tenants/${this.callioTenantId}/phone-numbers/pricing`);
+      const url = this.buildUrl(`/api/v1/tenants/phone-numbers/pricing`);
       this.logger.log(`Getting pricing at: ${url}`);
 
       const response = await firstValueFrom(
@@ -220,7 +220,7 @@ export class CallioService {
         this.logger.log(`Found available number: ${phoneNumberToPurchase}`);
       }
 
-      this.logger.log(`Callio API URL: ${this.callioApiUrl}/api/v1/tenants/${this.callioTenantId}/phone-numbers/purchase`);
+      this.logger.log(`Callio API URL: ${this.callioApiUrl}/api/v1/tenants/phone-numbers/purchase`);
 
       // Build request body - Callio API requires phoneNumber and optional friendlyName
       const requestBody: any = {
@@ -231,7 +231,7 @@ export class CallioService {
       this.logger.log(`Callio request body: ${JSON.stringify(requestBody)}`);
 
       // Purchase phone number via Callio API
-      const url = this.buildUrl(`/api/v1/tenants/${this.callioTenantId}/phone-numbers/purchase`);
+      const url = this.buildUrl(`/api/v1/tenants/phone-numbers/purchase`);
       this.logger.log(`Full URL with bypass: ${url}`);
 
       const response = await firstValueFrom(
@@ -319,7 +319,7 @@ export class CallioService {
       // Release number via Callio API
       await firstValueFrom(
         this.httpService.post(
-          this.buildUrl(`/api/v1/tenants/${this.callioTenantId}/phone-numbers/${user.callioAllocationId}/release`),
+          this.buildUrl(`/api/v1/tenants/phone-numbers/${user.callioAllocationId}/release`),
           {},
           {
             headers: this.buildHeaders(),
@@ -378,7 +378,7 @@ export class CallioService {
     try {
       const response = await firstValueFrom(
         this.httpService.get(
-          this.buildUrl(`/api/v1/tenants/${this.callioTenantId}/phone-numbers/orders`),
+          this.buildUrl(`/api/v1/tenants/phone-numbers/orders`),
           {
             headers: this.buildHeaders(),
             params: { userId },

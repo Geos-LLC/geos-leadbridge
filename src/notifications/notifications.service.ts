@@ -427,11 +427,41 @@ export class NotificationsService {
     }
 
     // Ensure settings exist (enabled: true since individual rules have their own toggle)
-    const settings = await this.prisma.notificationSettings.upsert({
+    // If creating new settings, auto-copy callioApiKey from user's other accounts
+    let existingSettings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
-      create: { savedAccountId, enabled: true },
-      update: { enabled: true },  // Auto-fix legacy records with enabled=false
     });
+
+    if (!existingSettings) {
+      // Try to copy callioApiKey from another account of the same user
+      const otherSettings = await this.prisma.notificationSettings.findFirst({
+        where: {
+          savedAccount: { userId },
+          callioApiKey: { not: null },
+        },
+        select: { callioApiKey: true, callioWorkspaceId: true },
+      });
+
+      if (otherSettings?.callioApiKey) {
+        this.logger.log(`[createRule] Auto-copying Callio API key from another account for user ${userId}`);
+      }
+
+      existingSettings = await this.prisma.notificationSettings.create({
+        data: {
+          savedAccountId,
+          enabled: true,
+          callioApiKey: otherSettings?.callioApiKey || null,
+          callioWorkspaceId: otherSettings?.callioWorkspaceId || null,
+        },
+      });
+    } else if (!existingSettings.enabled) {
+      existingSettings = await this.prisma.notificationSettings.update({
+        where: { savedAccountId },
+        data: { enabled: true },
+      });
+    }
+
+    const settings = existingSettings;
 
     const rule = await this.prisma.notificationRule.create({
       data: {
@@ -574,7 +604,7 @@ export class NotificationsService {
       settings = await this.prisma.notificationSettings.findFirst({
         where: {
           userId: userId,
-          savedAccountId: null, // User-level default has no savedAccountId
+          savedAccountId: null,
         },
         include: {
           notificationRules: {
@@ -587,11 +617,32 @@ export class NotificationsService {
         this.logger.log(`Using user-level default settings for user ${userId}`);
       }
     } else {
-      this.logger.log(`Using account-specific settings for ${savedAccountId}`);
+      this.logger.log(`Using account-specific settings for ${savedAccountId} (enabled: ${settings.enabled}, callioApiKey: ${settings.callioApiKey ? 'set' : 'NOT SET'}, rules: ${settings.notificationRules.length})`);
+    }
+
+    // Fallback 2: If still no settings, try to use settings from another account of the same user
+    if (!settings) {
+      this.logger.log(`No user-level defaults either. Checking other accounts for user ${userId}...`);
+      settings = await this.prisma.notificationSettings.findFirst({
+        where: {
+          savedAccount: { userId },
+          callioApiKey: { not: null },
+          enabled: true,
+        },
+        include: {
+          notificationRules: {
+            where: { triggerType: 'new_lead', enabled: true },
+          },
+        },
+      });
+
+      if (settings) {
+        this.logger.log(`Using settings from another account (${settings.savedAccountId}) as fallback for ${savedAccountId}`);
+      }
     }
 
     if (!settings) {
-      this.logger.log(`No notification settings (account or user-level) for user ${userId}`);
+      this.logger.warn(`No notification settings found for account ${savedAccountId} or user ${userId}. SMS alerts not configured for this account.`);
       return;
     }
 
@@ -601,7 +652,7 @@ export class NotificationsService {
     }
 
     if (!settings.callioApiKey) {
-      this.logger.warn(`No Callio API key configured for account ${savedAccountId}`);
+      this.logger.warn(`No Callio API key configured for account ${savedAccountId}. Connect Callio in SMS Alerts settings.`);
       return;
     }
 
@@ -671,7 +722,7 @@ export class NotificationsService {
       settings = await this.prisma.notificationSettings.findFirst({
         where: {
           userId: userId,
-          savedAccountId: null, // User-level default has no savedAccountId
+          savedAccountId: null,
         },
         include: {
           notificationRules: {
@@ -684,11 +735,32 @@ export class NotificationsService {
         this.logger.log(`Using user-level default settings for user ${userId}`);
       }
     } else {
-      this.logger.log(`Using account-specific settings for ${savedAccountId}`);
+      this.logger.log(`Using account-specific settings for ${savedAccountId} (enabled: ${settings.enabled}, callioApiKey: ${settings.callioApiKey ? 'set' : 'NOT SET'}, rules: ${settings.notificationRules.length})`);
+    }
+
+    // Fallback 2: If still no settings, try to use settings from another account of the same user
+    if (!settings) {
+      this.logger.log(`No user-level defaults either. Checking other accounts for user ${userId}...`);
+      settings = await this.prisma.notificationSettings.findFirst({
+        where: {
+          savedAccount: { userId },
+          callioApiKey: { not: null },
+          enabled: true,
+        },
+        include: {
+          notificationRules: {
+            where: { triggerType: 'customer_reply', enabled: true },
+          },
+        },
+      });
+
+      if (settings) {
+        this.logger.log(`Using settings from another account (${settings.savedAccountId}) as fallback for ${savedAccountId}`);
+      }
     }
 
     if (!settings) {
-      this.logger.log(`No notification settings (account or user-level) for user ${userId}`);
+      this.logger.warn(`No notification settings found for account ${savedAccountId} or user ${userId}. SMS alerts not configured for this account.`);
       return;
     }
 
@@ -698,7 +770,7 @@ export class NotificationsService {
     }
 
     if (!settings.callioApiKey) {
-      this.logger.warn(`No Callio API key configured for account ${savedAccountId}`);
+      this.logger.warn(`No Callio API key configured for account ${savedAccountId}. Connect Callio in SMS Alerts settings.`);
       return;
     }
 
@@ -1427,6 +1499,33 @@ export class NotificationsService {
     });
 
     this.logger.log(`[connectCallio] Connected successfully. WebhookId: ${webhookResult.webhookId}`);
+
+    // 4. Propagate API key to other accounts of the same user that don't have one
+    const savedAccount = await this.prisma.savedAccount.findUnique({
+      where: { id: savedAccountId },
+      select: { userId: true },
+    });
+
+    if (savedAccount?.userId) {
+      const otherAccounts = await this.prisma.savedAccount.findMany({
+        where: {
+          userId: savedAccount.userId,
+          id: { not: savedAccountId },
+        },
+        include: { notificationSettings: true },
+      });
+
+      for (const otherAccount of otherAccounts) {
+        if (otherAccount.notificationSettings && !otherAccount.notificationSettings.callioApiKey) {
+          await this.prisma.notificationSettings.update({
+            where: { id: otherAccount.notificationSettings.id },
+            data: { callioApiKey: apiKey },
+          });
+          this.logger.log(`[connectCallio] Auto-propagated API key to account ${otherAccount.id} (${otherAccount.businessName})`);
+        }
+      }
+    }
+
     return { success: true, phoneNumbers: validation.phoneNumbers };
   }
 
