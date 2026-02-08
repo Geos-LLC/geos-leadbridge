@@ -1,5 +1,5 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Home, MessageSquare, BarChart3, Settings, LogOut, Zap, Bell, Phone, CreditCard, Shield } from 'lucide-react';
+import { Home, MessageSquare, BarChart3, Settings, LogOut, Zap, Bell, Phone, CreditCard, Shield, FlaskConical } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import TrialBanner from './TrialBanner';
 import TrialExpiredModal from './TrialExpiredModal';
@@ -54,6 +54,10 @@ export function Layout() {
           <Link to="/phone-settings" className={`nav-link ${isActive('/phone-settings') ? 'active' : ''}`}>
             <Phone size={20} />
             <span>Phone Settings</span>
+          </Link>
+          <Link to="/api-test" className={`nav-link ${isActive('/api-test') ? 'active' : ''}`}>
+            <FlaskConical size={20} />
+            <span>API Test</span>
           </Link>
 
           <div className="nav-separator"></div>

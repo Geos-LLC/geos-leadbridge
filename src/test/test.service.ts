@@ -1,0 +1,202 @@
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../common/utils/prisma.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
+
+export interface SimulateWebhookDto {
+  savedAccountId: string;
+  eventType: 'NegotiationCreatedV4' | 'MessageCreatedV4';
+
+  // Common
+  customerFirstName?: string;
+  customerLastName?: string;
+  customerPhone?: string;
+
+  // NegotiationCreatedV4
+  category?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  message?: string;
+  estimateTotal?: string;
+  details?: Array<{ question: string; answer: string }>;
+
+  // MessageCreatedV4
+  messageText?: string;
+  negotiationId?: string;
+  messageSender?: 'Customer' | 'Pro';
+}
+
+@Injectable()
+export class TestService {
+  private readonly logger = new Logger(TestService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private webhooksService: WebhooksService,
+  ) {}
+
+  async simulateWebhook(userId: string, dto: SimulateWebhookDto) {
+    // 1. Validate account belongs to user
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: dto.savedAccountId, userId },
+    });
+
+    if (!account) {
+      throw new NotFoundException('Account not found');
+    }
+
+    this.logger.log(`Simulating ${dto.eventType} for account ${account.businessName} (${account.businessId})`);
+
+    // 2. Generate unique IDs
+    const suffix = Math.random().toString(36).substring(2, 8);
+    const negotiationId = dto.negotiationId || `test-neg-${Date.now()}-${suffix}`;
+    const now = new Date().toISOString();
+
+    // 3. Build webhook payload
+    let payload: any;
+
+    if (dto.eventType === 'NegotiationCreatedV4') {
+      payload = {
+        event: { eventType: 'NegotiationCreatedV4' },
+        data: {
+          negotiationID: negotiationId,
+          createdAt: now,
+          status: 'Open',
+          customer: {
+            firstName: dto.customerFirstName || 'Test',
+            lastName: dto.customerLastName || 'Customer',
+            phone: dto.customerPhone || '+15555555555',
+          },
+          business: { businessID: account.businessId },
+          request: {
+            description: dto.message || 'Test lead from API Test page',
+            category: { name: dto.category || 'House Cleaning' },
+            location: {
+              city: dto.city || 'Tampa',
+              state: dto.state || 'FL',
+              zipCode: dto.zipCode || '33602',
+            },
+            details: dto.details || [],
+          },
+          estimate: dto.estimateTotal ? { total: dto.estimateTotal } : undefined,
+        },
+      };
+    } else {
+      const messageId = `test-msg-${Date.now()}-${suffix}`;
+      payload = {
+        event: { eventType: 'MessageCreatedV4' },
+        data: {
+          messageID: messageId,
+          negotiationID: negotiationId,
+          text: dto.messageText || 'Test message from API Test page',
+          from: dto.messageSender || 'Customer',
+          sentAt: now,
+          customer: {
+            firstName: dto.customerFirstName || 'Test',
+            lastName: dto.customerLastName || 'Customer',
+            phone: dto.customerPhone || '+15555555555',
+          },
+          business: { businessID: account.businessId },
+        },
+      };
+    }
+
+    // 4. Snapshot before counts
+    const beforeLeadCount = await this.prisma.lead.count({ where: { userId } });
+
+    // 5. Process through the real webhook pipeline
+    let webhookError: string | null = null;
+    try {
+      await this.webhooksService.handleThumbtackWebhook(undefined, payload);
+    } catch (error: any) {
+      webhookError = error.message || 'Unknown error';
+      this.logger.error(`Simulation error: ${webhookError}`);
+    }
+
+    // 6. Gather results
+    const afterLeadCount = await this.prisma.lead.count({ where: { userId } });
+
+    const lead = await this.prisma.lead.findFirst({
+      where: { externalRequestId: negotiationId, platform: 'thumbtack' },
+      select: { id: true, status: true, customerName: true, category: true },
+    });
+
+    const automationRules = await this.prisma.automationRule.findMany({
+      where: { savedAccountId: dto.savedAccountId, enabled: true },
+      select: { name: true, triggerType: true },
+    });
+
+    const notifSettings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId: dto.savedAccountId },
+      include: {
+        notificationRules: {
+          where: { enabled: true },
+          select: { name: true, triggerType: true },
+        },
+      },
+    });
+
+    // Check recent notification logs
+    const recentLogs = await this.prisma.notificationLog.findMany({
+      where: {
+        leadId: lead?.id,
+        createdAt: { gte: new Date(Date.now() - 10000) },
+      },
+      select: { id: true, status: true, ruleName: true, error: true },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+    });
+
+    return {
+      success: !webhookError,
+      eventType: dto.eventType,
+      negotiationId,
+      payload,
+      results: {
+        webhookProcessed: !webhookError,
+        webhookError,
+        leadCreated: afterLeadCount > beforeLeadCount,
+        leadId: lead?.id || null,
+        leadStatus: lead?.status || null,
+        leadName: lead?.customerName || null,
+        sseEventEmitted: !webhookError,
+        automationRulesFound: automationRules.length,
+        automationRules: automationRules.map(r => ({ name: r.name, triggerType: r.triggerType })),
+        notificationRulesFound: notifSettings?.notificationRules?.length || 0,
+        notificationRules: (notifSettings?.notificationRules || []).map(r => ({ name: r.name, triggerType: r.triggerType })),
+        callioConnected: !!notifSettings?.callioApiKey,
+        smsLogs: recentLogs,
+      },
+    };
+  }
+
+  async getLeadsForAccount(userId: string, savedAccountId: string) {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+    });
+
+    if (!account) {
+      throw new NotFoundException('Account not found');
+    }
+
+    const leads = await this.prisma.lead.findMany({
+      where: {
+        userId,
+        platform: 'thumbtack',
+        businessId: account.businessId,
+      },
+      select: {
+        id: true,
+        externalRequestId: true,
+        customerName: true,
+        category: true,
+        status: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    return { leads, count: leads.length };
+  }
+}

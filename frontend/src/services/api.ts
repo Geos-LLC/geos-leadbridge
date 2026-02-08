@@ -761,4 +761,65 @@ export const adminApi = {
   },
 };
 
+// API Test / Webhook Simulation
+export interface SimulateWebhookRequest {
+  savedAccountId: string;
+  eventType: 'NegotiationCreatedV4' | 'MessageCreatedV4';
+  customerFirstName?: string;
+  customerLastName?: string;
+  customerPhone?: string;
+  category?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  message?: string;
+  estimateTotal?: string;
+  details?: Array<{ question: string; answer: string }>;
+  messageText?: string;
+  negotiationId?: string;
+  messageSender?: 'Customer' | 'Pro';
+}
+
+export interface SimulationResult {
+  success: boolean;
+  eventType: string;
+  negotiationId: string;
+  payload: any;
+  results: {
+    webhookProcessed: boolean;
+    webhookError: string | null;
+    leadCreated: boolean;
+    leadId: string | null;
+    leadStatus: string | null;
+    leadName: string | null;
+    sseEventEmitted: boolean;
+    automationRulesFound: number;
+    automationRules: Array<{ name: string; triggerType: string }>;
+    notificationRulesFound: number;
+    notificationRules: Array<{ name: string; triggerType: string }>;
+    callioConnected: boolean;
+    smsLogs: Array<{ id: string; status: string; ruleName: string | null; error: string | null }>;
+  };
+}
+
+export interface TestLead {
+  id: string;
+  externalRequestId: string;
+  customerName: string;
+  category: string | null;
+  status: string;
+  createdAt: string;
+}
+
+export const testApi = {
+  simulate: async (request: SimulateWebhookRequest): Promise<SimulationResult> => {
+    const { data } = await api.post('/v1/test/simulate', request);
+    return data;
+  },
+  getLeadsForAccount: async (savedAccountId: string): Promise<{ leads: TestLead[]; count: number }> => {
+    const { data } = await api.get(`/v1/test/leads/${savedAccountId}`);
+    return data;
+  },
+};
+
 export default api;

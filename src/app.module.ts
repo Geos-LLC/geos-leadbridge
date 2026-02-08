@@ -19,6 +19,7 @@ import { StripeModule } from './stripe/stripe.module';
 import { AdminModule } from './admin/admin.module';
 import { CallioModule } from './callio/callio.module';
 import { UsersModule } from './users/users.module';
+import { TestModule } from './test/test.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PrismaService } from './common/utils/prisma.service';
 
@@ -41,6 +42,7 @@ import { PrismaService } from './common/utils/prisma.service';
     AdminModule,
     CallioModule,
     UsersModule,
+    TestModule,
   ],
   providers: [
     PrismaService,
