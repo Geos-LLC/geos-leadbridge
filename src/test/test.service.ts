@@ -258,6 +258,109 @@ export class TestService {
     };
   }
 
+  async getAccountDiagnostics(savedAccountId: string) {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId },
+      select: { id: true, businessId: true, businessName: true, userId: true, webhookId: true },
+    });
+
+    if (!account) {
+      throw new NotFoundException('Account not found');
+    }
+
+    // Platform connection
+    const platformConnection = await this.prisma.platform.findFirst({
+      where: {
+        platformName: 'thumbtack',
+        userId: account.userId,
+        connected: true,
+      },
+      select: { id: true, externalBusinessId: true, connected: true },
+    });
+
+    // Notification settings
+    const notifSettings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      include: {
+        notificationRules: {
+          where: { enabled: true },
+          select: { id: true, name: true, triggerType: true, toPhone: true, fromPhone: true, enabled: true },
+        },
+      },
+    });
+
+    // Automation rules
+    const automationRules = await this.prisma.automationRule.findMany({
+      where: { savedAccountId, enabled: true },
+      select: { id: true, name: true, triggerType: true, enabled: true },
+    });
+
+    // Recent notification logs
+    const recentLogs = await this.prisma.notificationLog.findMany({
+      where: {
+        notificationSettingsId: notifSettings?.id,
+        createdAt: { gte: new Date(Date.now() - 86400000) }, // Last 24h
+      },
+      select: { id: true, status: true, ruleName: true, error: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+    });
+
+    // Build health checks
+    const issues: string[] = [];
+    if (!platformConnection) issues.push('No active Thumbtack connection found for this user');
+    if (!account.webhookId) issues.push('No webhook registered for this account');
+    if (!notifSettings) issues.push('No notification settings configured');
+    else {
+      if (!notifSettings.enabled) issues.push('Notification settings are disabled');
+      if (!notifSettings.callioApiKey) issues.push('No Callio API key configured');
+      const newLeadRules = notifSettings.notificationRules.filter(r => r.triggerType === 'new_lead');
+      const replyRules = notifSettings.notificationRules.filter(r => r.triggerType === 'customer_reply');
+      if (newLeadRules.length === 0) issues.push('No enabled "new_lead" SMS rules');
+      if (replyRules.length === 0) issues.push('No enabled "customer_reply" SMS rules');
+    }
+    if (automationRules.length === 0) issues.push('No enabled automation rules');
+
+    return {
+      account: {
+        id: account.id,
+        businessId: account.businessId,
+        businessName: account.businessName,
+        hasWebhook: !!account.webhookId,
+      },
+      platform: {
+        connected: !!platformConnection,
+        externalBusinessId: platformConnection?.externalBusinessId || null,
+      },
+      notifications: {
+        settingsExist: !!notifSettings,
+        settingsEnabled: notifSettings?.enabled ?? false,
+        hasCallioApiKey: !!notifSettings?.callioApiKey,
+        totalRules: notifSettings?.notificationRules?.length || 0,
+        newLeadRules: (notifSettings?.notificationRules || []).filter(r => r.triggerType === 'new_lead').length,
+        customerReplyRules: (notifSettings?.notificationRules || []).filter(r => r.triggerType === 'customer_reply').length,
+        rules: (notifSettings?.notificationRules || []).map(r => ({
+          name: r.name,
+          triggerType: r.triggerType,
+          toPhone: r.toPhone,
+          fromPhone: r.fromPhone,
+        })),
+      },
+      automation: {
+        totalRules: automationRules.length,
+        rules: automationRules.map(r => ({ name: r.name, triggerType: r.triggerType })),
+      },
+      recentLogs: recentLogs.map(l => ({
+        status: l.status,
+        ruleName: l.ruleName,
+        error: l.error,
+        createdAt: l.createdAt,
+      })),
+      healthy: issues.length === 0,
+      issues,
+    };
+  }
+
   async getLeadsForAccount(userId: string, savedAccountId: string) {
     const account = await this.prisma.savedAccount.findFirst({
       where: { id: savedAccountId },

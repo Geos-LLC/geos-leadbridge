@@ -5,7 +5,7 @@ import {
   Send, Plus, Trash2, ChevronDown, ChevronUp, MessageSquare, UserPlus, Search,
 } from 'lucide-react';
 import { testApi } from '../services/api';
-import type { SimulateWebhookRequest, SimulationResult, TestLead, TestUser, TestAccount } from '../services/api';
+import type { SimulateWebhookRequest, SimulationResult, TestLead, TestUser, TestAccount, AccountDiagnostics } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { notify } from '../store/notificationStore';
 
@@ -40,6 +40,10 @@ export function ApiTest() {
   const [accounts, setAccounts] = useState<TestAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [loadingAccounts, setLoadingAccounts] = useState(false);
+
+  // Account diagnostics
+  const [diagnostics, setDiagnostics] = useState<AccountDiagnostics | null>(null);
+  const [loadingDiagnostics, setLoadingDiagnostics] = useState(false);
 
   const [eventType, setEventType] = useState<'NegotiationCreatedV4' | 'MessageCreatedV4'>('NegotiationCreatedV4');
   const [submitting, setSubmitting] = useState(false);
@@ -129,6 +133,25 @@ export function ApiTest() {
     })();
   }, [selectedUserId]);
 
+  // Load diagnostics when account changes
+  useEffect(() => {
+    if (!selectedAccountId) {
+      setDiagnostics(null);
+      return;
+    }
+    (async () => {
+      try {
+        setLoadingDiagnostics(true);
+        const diag = await testApi.getDiagnostics(selectedAccountId);
+        setDiagnostics(diag);
+      } catch {
+        setDiagnostics(null);
+      } finally {
+        setLoadingDiagnostics(false);
+      }
+    })();
+  }, [selectedAccountId]);
+
   // Load leads when account changes and event type is message
   useEffect(() => {
     if (selectedAccountId && selectedUserId && eventType === 'MessageCreatedV4') {
@@ -191,6 +214,9 @@ export function ApiTest() {
 
       const result = await testApi.simulate(request);
       setResults(prev => [result, ...prev]);
+
+      // Refresh diagnostics after simulation
+      testApi.getDiagnostics(selectedAccountId).then(setDiagnostics).catch(() => {});
 
       if (result.success) {
         setSuccessMessage(`${eventType === 'NegotiationCreatedV4' ? 'New lead' : 'Message'} simulated successfully`);
@@ -318,6 +344,89 @@ export function ApiTest() {
                 <span style={{ fontSize: '12px', color: 'var(--danger)' }}>This client has no saved accounts</span>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Account Diagnostics */}
+        {selectedAccountId && diagnostics && !loadingDiagnostics && (
+          <div className={`settings-section`} style={{
+            borderLeft: `3px solid ${diagnostics.healthy ? 'var(--success)' : 'var(--danger)'}`,
+          }}>
+            <div className="section-header">
+              <h2>
+                {diagnostics.healthy
+                  ? <><CheckCircle size={18} style={{ color: 'var(--success)', verticalAlign: -3, marginRight: 6 }} />Account Healthy</>
+                  : <><AlertCircle size={18} style={{ color: 'var(--danger)', verticalAlign: -3, marginRight: 6 }} />Account Issues</>}
+              </h2>
+            </div>
+
+            {diagnostics.issues.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
+                {diagnostics.issues.map((issue, i) => (
+                  <div key={i} style={{ fontSize: '13px', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <XCircle size={14} style={{ flexShrink: 0 }} /> {issue}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: '13px' }}>
+              <div>
+                {diagnostics.platform.connected ? <CheckCircle size={12} className="check" /> : <XCircle size={12} className="cross" />}
+                {' '}Thumbtack connected
+              </div>
+              <div>
+                {diagnostics.account.hasWebhook ? <CheckCircle size={12} className="check" /> : <XCircle size={12} className="cross" />}
+                {' '}Webhook registered
+              </div>
+              <div>
+                {diagnostics.notifications.settingsExist ? <CheckCircle size={12} className="check" /> : <XCircle size={12} className="cross" />}
+                {' '}Notification settings
+              </div>
+              <div>
+                {diagnostics.notifications.hasCallioApiKey ? <CheckCircle size={12} className="check" /> : <XCircle size={12} className="cross" />}
+                {' '}Callio API key
+              </div>
+              <div>
+                {diagnostics.notifications.newLeadRules > 0 ? <CheckCircle size={12} className="check" /> : <XCircle size={12} className="cross" />}
+                {' '}{diagnostics.notifications.newLeadRules} new lead rule{diagnostics.notifications.newLeadRules !== 1 ? 's' : ''}
+              </div>
+              <div>
+                {diagnostics.notifications.customerReplyRules > 0 ? <CheckCircle size={12} className="check" /> : <XCircle size={12} className="cross" />}
+                {' '}{diagnostics.notifications.customerReplyRules} reply rule{diagnostics.notifications.customerReplyRules !== 1 ? 's' : ''}
+              </div>
+              <div>
+                {diagnostics.automation.totalRules > 0 ? <CheckCircle size={12} className="check" /> : <span style={{ color: 'var(--text-secondary)' }}>-</span>}
+                {' '}{diagnostics.automation.totalRules} automation rule{diagnostics.automation.totalRules !== 1 ? 's' : ''}
+              </div>
+            </div>
+
+            {diagnostics.notifications.rules.length > 0 && (
+              <div style={{ marginTop: 10, fontSize: '12px', color: 'var(--text-secondary)' }}>
+                <strong>SMS Rules:</strong>
+                {diagnostics.notifications.rules.map((r, i) => (
+                  <div key={i} style={{ marginLeft: 8, marginTop: 2 }}>
+                    {r.name} ({r.triggerType}) {r.fromPhone && `from ${r.fromPhone}`} {r.toPhone && `to ${r.toPhone}`}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {diagnostics.recentLogs.length > 0 && (
+              <div style={{ marginTop: 10, fontSize: '12px', color: 'var(--text-secondary)' }}>
+                <strong>Recent SMS Logs (24h):</strong>
+                {diagnostics.recentLogs.map((l, i) => (
+                  <div key={i} style={{ marginLeft: 8, marginTop: 2, color: l.status === 'failed' ? 'var(--danger)' : 'var(--success)' }}>
+                    {l.ruleName || 'Unknown'}: {l.status} {l.error && `- ${l.error}`}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {selectedAccountId && loadingDiagnostics && (
+          <div className="settings-section" style={{ textAlign: 'center', padding: '20px' }}>
+            <Loader2 size={20} className="spinner" /> Loading diagnostics...
           </div>
         )}
 

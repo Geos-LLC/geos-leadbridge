@@ -25,6 +25,13 @@ export class TestController {
     return this.testService.simulateWebhook(body.targetUserId, body);
   }
 
+  @Get('diagnostics/:savedAccountId')
+  async getAccountDiagnostics(
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    return this.testService.getAccountDiagnostics(savedAccountId);
+  }
+
   @Get('leads/:savedAccountId')
   async getLeadsForAccount(
     @Query('userId') userId: string,

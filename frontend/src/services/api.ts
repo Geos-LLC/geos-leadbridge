@@ -839,6 +839,35 @@ export interface TestLead {
   createdAt: string;
 }
 
+export interface AccountDiagnostics {
+  account: {
+    id: string;
+    businessId: string;
+    businessName: string;
+    hasWebhook: boolean;
+  };
+  platform: {
+    connected: boolean;
+    externalBusinessId: string | null;
+  };
+  notifications: {
+    settingsExist: boolean;
+    settingsEnabled: boolean;
+    hasCallioApiKey: boolean;
+    totalRules: number;
+    newLeadRules: number;
+    customerReplyRules: number;
+    rules: Array<{ name: string; triggerType: string; toPhone: string | null; fromPhone: string | null }>;
+  };
+  automation: {
+    totalRules: number;
+    rules: Array<{ name: string; triggerType: string }>;
+  };
+  recentLogs: Array<{ status: string; ruleName: string | null; error: string | null; createdAt: string }>;
+  healthy: boolean;
+  issues: string[];
+}
+
 export const testApi = {
   getUsers: async (search?: string): Promise<{ users: TestUser[] }> => {
     const params = search ? `?search=${encodeURIComponent(search)}` : '';
@@ -851,6 +880,10 @@ export const testApi = {
   },
   simulate: async (request: SimulateWebhookRequest): Promise<SimulationResult> => {
     const { data } = await api.post('/v1/test/simulate', request);
+    return data;
+  },
+  getDiagnostics: async (savedAccountId: string): Promise<AccountDiagnostics> => {
+    const { data } = await api.get(`/v1/test/diagnostics/${savedAccountId}`);
     return data;
   },
   getLeadsForAccount: async (savedAccountId: string, userId: string): Promise<{ leads: TestLead[]; count: number }> => {
