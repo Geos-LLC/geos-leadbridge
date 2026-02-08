@@ -3,6 +3,7 @@ import { PrismaService } from '../common/utils/prisma.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
 
 export interface SimulateWebhookDto {
+  targetUserId: string;
   savedAccountId: string;
   eventType: 'NegotiationCreatedV4' | 'MessageCreatedV4';
 
@@ -35,8 +36,48 @@ export class TestService {
     private webhooksService: WebhooksService,
   ) {}
 
+  async getUsers(search?: string) {
+    const where: any = {};
+    if (search) {
+      where.OR = [
+        { email: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const users = await this.prisma.user.findMany({
+      where,
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        subscriptionTier: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    return { users };
+  }
+
+  async getUserAccounts(userId: string) {
+    const accounts = await this.prisma.savedAccount.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        businessId: true,
+        businessName: true,
+        webhookId: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return { accounts };
+  }
+
   async simulateWebhook(userId: string, dto: SimulateWebhookDto) {
-    // 1. Validate account belongs to user
+    // 1. Validate account belongs to the target user
     const account = await this.prisma.savedAccount.findFirst({
       where: { id: dto.savedAccountId, userId },
     });
@@ -172,7 +213,7 @@ export class TestService {
 
   async getLeadsForAccount(userId: string, savedAccountId: string) {
     const account = await this.prisma.savedAccount.findFirst({
-      where: { id: savedAccountId, userId },
+      where: { id: savedAccountId },
     });
 
     if (!account) {
@@ -181,7 +222,7 @@ export class TestService {
 
     const leads = await this.prisma.lead.findMany({
       where: {
-        userId,
+        userId: account.userId,
         platform: 'thumbtack',
         businessId: account.businessId,
       },

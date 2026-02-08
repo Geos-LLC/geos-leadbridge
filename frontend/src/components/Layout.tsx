@@ -55,11 +55,6 @@ export function Layout() {
             <Phone size={20} />
             <span>Phone Settings</span>
           </Link>
-          <Link to="/api-test" className={`nav-link ${isActive('/api-test') ? 'active' : ''}`}>
-            <FlaskConical size={20} />
-            <span>API Test</span>
-          </Link>
-
           <div className="nav-separator"></div>
 
           <Link to="/billing" className={`nav-link ${isActive('/billing') ? 'active' : ''}`}>
@@ -67,10 +62,16 @@ export function Layout() {
             <span>Billing</span>
           </Link>
           {user?.role === 'ADMIN' && (
-            <Link to="/admin" className={`nav-link ${isActive('/admin') || location.pathname.startsWith('/admin/') ? 'active' : ''}`}>
-              <Shield size={20} />
-              <span>Admin</span>
-            </Link>
+            <>
+              <Link to="/admin" className={`nav-link ${isActive('/admin') || location.pathname.startsWith('/admin/') ? 'active' : ''}`}>
+                <Shield size={20} />
+                <span>Admin</span>
+              </Link>
+              <Link to="/api-test" className={`nav-link ${isActive('/api-test') ? 'active' : ''}`}>
+                <FlaskConical size={20} />
+                <span>API Test</span>
+              </Link>
+            </>
           )}
         </div>
 

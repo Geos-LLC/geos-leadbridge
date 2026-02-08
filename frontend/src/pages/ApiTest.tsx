@@ -1,12 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, FlaskConical, Loader2, AlertCircle, X, CheckCircle, XCircle,
-  Send, Plus, Trash2, ChevronDown, ChevronUp, MessageSquare, UserPlus,
+  Send, Plus, Trash2, ChevronDown, ChevronUp, MessageSquare, UserPlus, Search,
 } from 'lucide-react';
-import { thumbtackApi, testApi } from '../services/api';
-import type { SimulateWebhookRequest, SimulationResult, TestLead } from '../services/api';
-import type { SavedAccount } from '../types';
+import { testApi } from '../services/api';
+import type { SimulateWebhookRequest, SimulationResult, TestLead, TestUser, TestAccount } from '../services/api';
+import { useAuthStore } from '../store/authStore';
+import { notify } from '../store/notificationStore';
 
 const DEFAULT_DETAILS = [
   { question: 'How many bedrooms?', answer: '3' },
@@ -19,10 +20,28 @@ const DEFAULT_DETAILS = [
 
 export function ApiTest() {
   const navigate = useNavigate();
-  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
+  const user = useAuthStore((state) => state.user);
+
+  // Admin check
+  useEffect(() => {
+    if (user?.role !== 'ADMIN') {
+      notify.error('Access Denied', 'You must be an admin to access this page');
+      navigate('/');
+    }
+  }, [user, navigate]);
+
+  // User selection
+  const [users, setUsers] = useState<TestUser[]>([]);
+  const [userSearch, setUserSearch] = useState('');
+  const [selectedUserId, setSelectedUserId] = useState('');
+  const [loadingUsers, setLoadingUsers] = useState(true);
+
+  // Account selection
+  const [accounts, setAccounts] = useState<TestAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
+  const [loadingAccounts, setLoadingAccounts] = useState(false);
+
   const [eventType, setEventType] = useState<'NegotiationCreatedV4' | 'MessageCreatedV4'>('NegotiationCreatedV4');
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -59,35 +78,69 @@ export function ApiTest() {
   const [results, setResults] = useState<SimulationResult[]>([]);
   const [expandedPayload, setExpandedPayload] = useState<number | null>(null);
 
-  useEffect(() => {
-    loadAccounts();
+  // Search debounce
+  const [searchTimeout, setSearchTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
+
+  const loadUsers = useCallback(async (search?: string) => {
+    try {
+      setLoadingUsers(true);
+      const res = await testApi.getUsers(search);
+      setUsers(res.users || []);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load users');
+    } finally {
+      setLoadingUsers(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (selectedAccountId && eventType === 'MessageCreatedV4') {
-      loadLeads();
-    }
-  }, [selectedAccountId, eventType]);
+    loadUsers();
+  }, [loadUsers]);
 
-  async function loadAccounts() {
-    try {
-      setLoading(true);
-      const res = await thumbtackApi.getSavedAccounts();
-      setAccounts(res.accounts || []);
-      if (res.accounts?.length > 0) {
-        setSelectedAccountId(res.accounts[0].id);
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to load accounts');
-    } finally {
-      setLoading(false);
-    }
+  function handleUserSearch(value: string) {
+    setUserSearch(value);
+    if (searchTimeout) clearTimeout(searchTimeout);
+    setSearchTimeout(setTimeout(() => loadUsers(value || undefined), 300));
   }
 
+  // Load accounts when user is selected
+  useEffect(() => {
+    if (!selectedUserId) {
+      setAccounts([]);
+      setSelectedAccountId('');
+      return;
+    }
+    (async () => {
+      try {
+        setLoadingAccounts(true);
+        const res = await testApi.getUserAccounts(selectedUserId);
+        setAccounts(res.accounts || []);
+        if (res.accounts?.length > 0) {
+          setSelectedAccountId(res.accounts[0].id);
+        } else {
+          setSelectedAccountId('');
+        }
+      } catch {
+        setAccounts([]);
+        setSelectedAccountId('');
+      } finally {
+        setLoadingAccounts(false);
+      }
+    })();
+  }, [selectedUserId]);
+
+  // Load leads when account changes and event type is message
+  useEffect(() => {
+    if (selectedAccountId && selectedUserId && eventType === 'MessageCreatedV4') {
+      loadLeads();
+    }
+  }, [selectedAccountId, selectedUserId, eventType]);
+
   async function loadLeads() {
+    if (!selectedAccountId || !selectedUserId) return;
     try {
       setLoadingLeads(true);
-      const res = await testApi.getLeadsForAccount(selectedAccountId);
+      const res = await testApi.getLeadsForAccount(selectedAccountId, selectedUserId);
       setExistingLeads(res.leads || []);
     } catch {
       setExistingLeads([]);
@@ -97,6 +150,10 @@ export function ApiTest() {
   }
 
   async function handleSimulate() {
+    if (!selectedUserId) {
+      setError('Please select a client');
+      return;
+    }
     if (!selectedAccountId) {
       setError('Please select an account');
       return;
@@ -107,6 +164,7 @@ export function ApiTest() {
       setError(null);
 
       const request: SimulateWebhookRequest = {
+        targetUserId: selectedUserId,
         savedAccountId: selectedAccountId,
         eventType,
       };
@@ -137,7 +195,6 @@ export function ApiTest() {
       if (result.success) {
         setSuccessMessage(`${eventType === 'NegotiationCreatedV4' ? 'New lead' : 'Message'} simulated successfully`);
         setTimeout(() => setSuccessMessage(null), 4000);
-        // Refresh leads list for message form
         if (eventType === 'NegotiationCreatedV4') {
           loadLeads();
         }
@@ -172,17 +229,9 @@ export function ApiTest() {
     }));
   }
 
-  if (loading) {
-    return (
-      <div className="api-test">
-        <div className="settings-header">
-          <button className="btn-icon" onClick={() => navigate(-1)}><ArrowLeft size={20} /></button>
-          <h1><FlaskConical size={24} /> API Test</h1>
-        </div>
-        <div className="loading-container"><Loader2 size={32} className="spinner" /><p>Loading...</p></div>
-      </div>
-    );
-  }
+  if (user?.role !== 'ADMIN') return null;
+
+  const selectedUser = users.find(u => u.id === selectedUserId);
 
   return (
     <div className="api-test">
@@ -205,23 +254,72 @@ export function ApiTest() {
       )}
 
       <div className="settings-content">
-        {/* Account Selector */}
+        {/* Client (User) Selector */}
         <div className="settings-section">
+          <div className="section-header"><h2>Select Client</h2></div>
           <div className="form-group">
-            <label>Business Account</label>
+            <label>Search Users</label>
+            <div style={{ position: 'relative' }}>
+              <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
+              <input
+                type="text"
+                placeholder="Search by name or email..."
+                value={userSearch}
+                onChange={e => handleUserSearch(e.target.value)}
+                style={{ paddingLeft: 36 }}
+              />
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Client</label>
             <div className="select-wrapper">
               <select
-                value={selectedAccountId}
-                onChange={e => setSelectedAccountId(e.target.value)}
+                value={selectedUserId}
+                onChange={e => setSelectedUserId(e.target.value)}
+                disabled={loadingUsers}
               >
-                <option value="">Select an account...</option>
-                {accounts.map(acc => (
-                  <option key={acc.id} value={acc.id}>{acc.businessName}</option>
+                <option value="">Select a client...</option>
+                {users.map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.name || u.email} ({u.email}){u.subscriptionTier ? ` - ${u.subscriptionTier}` : ''}
+                  </option>
                 ))}
               </select>
             </div>
+            {loadingUsers && <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Loading users...</span>}
           </div>
         </div>
+
+        {/* Account Selector */}
+        {selectedUserId && (
+          <div className="settings-section">
+            <div className="section-header">
+              <h2>Select Account</h2>
+              {selectedUser && <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>for {selectedUser.name || selectedUser.email}</span>}
+            </div>
+            <div className="form-group">
+              <label>Business Account</label>
+              <div className="select-wrapper">
+                <select
+                  value={selectedAccountId}
+                  onChange={e => setSelectedAccountId(e.target.value)}
+                  disabled={loadingAccounts}
+                >
+                  <option value="">Select an account...</option>
+                  {accounts.map(acc => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.businessName}{!acc.webhookId ? ' (no webhook)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {loadingAccounts && <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Loading accounts...</span>}
+              {!loadingAccounts && accounts.length === 0 && selectedUserId && (
+                <span style={{ fontSize: '12px', color: 'var(--danger)' }}>This client has no saved accounts</span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Event Type Selector */}
         {selectedAccountId && (

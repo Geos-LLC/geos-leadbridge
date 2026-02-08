@@ -763,6 +763,7 @@ export const adminApi = {
 
 // API Test / Webhook Simulation
 export interface SimulateWebhookRequest {
+  targetUserId: string;
   savedAccountId: string;
   eventType: 'NegotiationCreatedV4' | 'MessageCreatedV4';
   customerFirstName?: string;
@@ -778,6 +779,21 @@ export interface SimulateWebhookRequest {
   messageText?: string;
   negotiationId?: string;
   messageSender?: 'Customer' | 'Pro';
+}
+
+export interface TestUser {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  subscriptionTier: string | null;
+}
+
+export interface TestAccount {
+  id: string;
+  businessId: string;
+  businessName: string;
+  webhookId: string | null;
 }
 
 export interface SimulationResult {
@@ -812,12 +828,21 @@ export interface TestLead {
 }
 
 export const testApi = {
+  getUsers: async (search?: string): Promise<{ users: TestUser[] }> => {
+    const params = search ? `?search=${encodeURIComponent(search)}` : '';
+    const { data } = await api.get(`/v1/test/users${params}`);
+    return data;
+  },
+  getUserAccounts: async (userId: string): Promise<{ accounts: TestAccount[] }> => {
+    const { data } = await api.get(`/v1/test/users/${userId}/accounts`);
+    return data;
+  },
   simulate: async (request: SimulateWebhookRequest): Promise<SimulationResult> => {
     const { data } = await api.post('/v1/test/simulate', request);
     return data;
   },
-  getLeadsForAccount: async (savedAccountId: string): Promise<{ leads: TestLead[]; count: number }> => {
-    const { data } = await api.get(`/v1/test/leads/${savedAccountId}`);
+  getLeadsForAccount: async (savedAccountId: string, userId: string): Promise<{ leads: TestLead[]; count: number }> => {
+    const { data } = await api.get(`/v1/test/leads/${savedAccountId}?userId=${userId}`);
     return data;
   },
 };
