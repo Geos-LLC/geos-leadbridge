@@ -162,6 +162,13 @@ export class TestService {
       select: { id: true, status: true, customerName: true, category: true },
     });
 
+    // Check what happened in the webhook pipeline
+    const webhookEvent = await this.prisma.webhookEvent.findFirst({
+      where: { platform: 'thumbtack', receivedAt: { gte: new Date(Date.now() - 30000) } },
+      orderBy: { receivedAt: 'desc' },
+      select: { id: true, processed: true, processingError: true },
+    });
+
     const automationRules = await this.prisma.automationRule.findMany({
       where: { savedAccountId: dto.savedAccountId, enabled: true },
       select: { name: true, triggerType: true },
@@ -177,10 +184,18 @@ export class TestService {
       },
     });
 
-    // Check recent notification logs (within last 30 seconds to account for processing time)
+    // Check recent notification logs - search by leadId OR by notificationSettingsId (in case lead wasn't linked)
+    const notifSettingsForLogs = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId: dto.savedAccountId },
+      select: { id: true },
+    });
+
     const recentLogs = await this.prisma.notificationLog.findMany({
       where: {
-        leadId: lead?.id,
+        OR: [
+          { leadId: lead?.id },
+          { notificationSettingsId: notifSettingsForLogs?.id, createdAt: { gte: new Date(Date.now() - 30000) } },
+        ],
         createdAt: { gte: new Date(Date.now() - 30000) },
       },
       select: { id: true, status: true, ruleName: true, error: true, toPhone: true, fromPhone: true },
@@ -203,14 +218,22 @@ export class TestService {
       } else if (!notifSettings.callioApiKey) {
         smsNotSentReason = 'No Callio API key configured. Connect Callio in SMS Alerts > Phone Settings.';
       } else {
+        // Note: rules are already filtered by enabled: true in the query
         const newLeadRules = (notifSettings.notificationRules || []).filter(
-          (r: any) => r.triggerType === 'new_lead' && r.enabled,
+          (r: any) => r.triggerType === 'new_lead',
         );
         if (dto.eventType === 'NegotiationCreatedV4' && newLeadRules.length === 0) {
-          smsNotSentReason = 'No enabled "new_lead" SMS rules found. Create a rule in SMS Alerts.';
+          // Show all rule triggerTypes to help debug
+          const allTypes = (notifSettings.notificationRules || []).map((r: any) => `${r.name} (${r.triggerType})`);
+          smsNotSentReason = allTypes.length > 0
+            ? `No "new_lead" SMS rules found. Your rules: ${allTypes.join(', ')}. Check triggerType.`
+            : 'No enabled SMS rules found. Create a rule in SMS Alerts.';
+        } else if (dto.eventType === 'NegotiationCreatedV4' && newLeadRules.length > 0) {
+          // Rules exist but SMS still not sent - pipeline issue
+          smsNotSentReason = `${newLeadRules.length} new_lead rule(s) found but SMS not sent. Possible: quiet hours, missing phone on rule, or Callio API error. Check webhook event: ${webhookEvent?.processingError || 'no error logged'}`;
         } else if (dto.eventType === 'MessageCreatedV4') {
           const replyRules = (notifSettings.notificationRules || []).filter(
-            (r: any) => r.triggerType === 'customer_reply' && r.enabled,
+            (r: any) => r.triggerType === 'customer_reply',
           );
           if (replyRules.length === 0) {
             smsNotSentReason = 'No enabled "customer_reply" SMS rules found.';
@@ -246,13 +269,15 @@ export class TestService {
         smsSuccessCount,
         smsFailedCount,
         smsNotSentReason,
+        webhookEventId: webhookEvent?.id || null,
+        webhookEventError: webhookEvent?.processingError || null,
         notificationDiagnostics: {
           settingsExist: !!notifSettings,
           settingsEnabled: notifSettings?.enabled ?? false,
           hasCallioApiKey: !!notifSettings?.callioApiKey,
           totalRules: notifSettings?.notificationRules?.length || 0,
-          newLeadRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead' && r.enabled).length,
-          customerReplyRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'customer_reply' && r.enabled).length,
+          newLeadRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead').length,
+          customerReplyRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'customer_reply').length,
         },
       },
     };
