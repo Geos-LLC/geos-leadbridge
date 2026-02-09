@@ -393,13 +393,19 @@ export class WebhooksService {
     // Send SMS notification to company for new lead
     try {
       // Find the saved account for this business to get notification settings
-      const savedAccount = await this.prisma.savedAccount.findFirst({
+      // Prefer the account that actually has notification settings configured
+      const savedAccounts = await this.prisma.savedAccount.findMany({
         where: {
           platform,
           businessId: business.businessID,
           userId,
         },
+        include: { notificationSettings: { select: { id: true } } },
       });
+      const savedAccount = savedAccounts.find((a: any) => a.notificationSettings) || savedAccounts[0] || null;
+      if (savedAccounts.length > 1) {
+        this.logger.warn(`Multiple savedAccounts for business ${business.businessID}: ${savedAccounts.map(a => a.id).join(', ')}. Using ${savedAccount?.id}`);
+      }
 
       if (savedAccount) {
         await this.notificationsService.sendLeadNotification({
@@ -687,10 +693,12 @@ export class WebhooksService {
         where: { conversationId: conversation.id, sender: 'customer' },
       });
 
-      // Find saved account for this business
-      const savedAccount = await this.prisma.savedAccount.findFirst({
+      // Find saved account for this business (prefer one with notification settings)
+      const msgSavedAccounts = await this.prisma.savedAccount.findMany({
         where: { userId, platform, businessId },
+        include: { notificationSettings: { select: { id: true } } },
       });
+      const savedAccount = msgSavedAccounts.find((a: any) => a.notificationSettings) || msgSavedAccounts[0] || null;
 
       // Trigger automation rules (Thumbtack auto-reply)
       try {

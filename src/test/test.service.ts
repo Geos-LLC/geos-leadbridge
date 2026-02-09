@@ -246,13 +246,32 @@ export class TestService {
     // Step 2: SavedAccount lookup for SMS (same as handleNegotiationCreated line 396)
     let traceSavedAccount: any = null;
     if (traceUserId) {
-      traceSavedAccount = await this.prisma.savedAccount.findFirst({
+      // Find ALL savedAccounts for this business to detect duplicates
+      const allSavedAccounts = await this.prisma.savedAccount.findMany({
         where: { platform: 'thumbtack', businessId, userId: traceUserId },
+        include: { notificationSettings: { select: { id: true, enabled: true, callioApiKey: true } } },
       });
-      if (traceSavedAccount) {
-        pipelineTrace.push({ step: 'SavedAccount for SMS', status: 'pass', detail: `Found: ${traceSavedAccount.businessName} (${traceSavedAccount.id})` });
-      } else {
+
+      if (allSavedAccounts.length === 0) {
         pipelineTrace.push({ step: 'SavedAccount for SMS', status: 'fail', detail: `No savedAccount with platform=thumbtack, businessId=${businessId}, userId=${traceUserId}. SMS skipped.` });
+      } else if (allSavedAccounts.length === 1) {
+        traceSavedAccount = allSavedAccounts[0];
+        const hasSettings = !!traceSavedAccount.notificationSettings;
+        pipelineTrace.push({ step: 'SavedAccount for SMS', status: 'pass', detail: `Found: ${traceSavedAccount.businessName} (${traceSavedAccount.id})${hasSettings ? '' : ' - NO notification settings!'}` });
+      } else {
+        // Multiple accounts for same business - show all and pick the one with settings
+        const withSettings = allSavedAccounts.filter((a: any) => a.notificationSettings);
+        const accountList = allSavedAccounts.map((a: any) => `${a.id.slice(0, 8)}...(settings: ${a.notificationSettings ? 'YES' : 'NO'})`).join(', ');
+        pipelineTrace.push({ step: 'SavedAccount for SMS', status: 'skip', detail: `DUPLICATE: ${allSavedAccounts.length} accounts for same business! [${accountList}]` });
+
+        // Use the one with settings, otherwise first
+        traceSavedAccount = withSettings.length > 0 ? withSettings[0] : allSavedAccounts[0];
+        pipelineTrace.push({ step: 'SavedAccount selected', status: withSettings.length > 0 ? 'pass' : 'fail', detail: `Using ${traceSavedAccount.id} (${withSettings.length > 0 ? 'has settings' : 'no settings'})` });
+      }
+
+      // Also check: does the dto.savedAccountId (selected in dropdown) match?
+      if (traceSavedAccount && traceSavedAccount.id !== dto.savedAccountId) {
+        pipelineTrace.push({ step: 'Account ID mismatch', status: 'fail', detail: `Dropdown selected ${dto.savedAccountId.slice(0, 8)}... but pipeline finds ${traceSavedAccount.id.slice(0, 8)}... They are different savedAccount records!` });
       }
     }
 
