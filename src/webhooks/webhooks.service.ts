@@ -393,18 +393,23 @@ export class WebhooksService {
     // Send SMS notification to company for new lead
     try {
       // Find the saved account for this business to get notification settings
-      // Prefer the account that actually has notification settings configured
+      // Search by businessId across ALL users - the notification settings may be on a
+      // different savedAccount record (e.g., different userId from reconnecting Thumbtack)
       const savedAccounts = await this.prisma.savedAccount.findMany({
         where: {
           platform,
           businessId: business.businessID,
-          userId,
         },
         include: { notificationSettings: { select: { id: true } } },
       });
-      const savedAccount = savedAccounts.find((a: any) => a.notificationSettings) || savedAccounts[0] || null;
+      // Prefer: 1) account with settings matching userId, 2) any account with settings, 3) account matching userId, 4) first
+      const savedAccount =
+        savedAccounts.find((a: any) => a.notificationSettings && a.userId === userId) ||
+        savedAccounts.find((a: any) => a.notificationSettings) ||
+        savedAccounts.find((a: any) => a.userId === userId) ||
+        savedAccounts[0] || null;
       if (savedAccounts.length > 1) {
-        this.logger.warn(`Multiple savedAccounts for business ${business.businessID}: ${savedAccounts.map(a => a.id).join(', ')}. Using ${savedAccount?.id}`);
+        this.logger.warn(`Multiple savedAccounts for business ${business.businessID}: ${savedAccounts.map(a => `${a.id}(user=${a.userId},settings=${!!a.notificationSettings})`).join(', ')}. Using ${savedAccount?.id}`);
       }
 
       if (savedAccount) {
@@ -693,12 +698,16 @@ export class WebhooksService {
         where: { conversationId: conversation.id, sender: 'customer' },
       });
 
-      // Find saved account for this business (prefer one with notification settings)
+      // Find saved account for this business (search all users, prefer one with settings)
       const msgSavedAccounts = await this.prisma.savedAccount.findMany({
-        where: { userId, platform, businessId },
+        where: { platform, businessId },
         include: { notificationSettings: { select: { id: true } } },
       });
-      const savedAccount = msgSavedAccounts.find((a: any) => a.notificationSettings) || msgSavedAccounts[0] || null;
+      const savedAccount =
+        msgSavedAccounts.find((a: any) => a.notificationSettings && a.userId === userId) ||
+        msgSavedAccounts.find((a: any) => a.notificationSettings) ||
+        msgSavedAccounts.find((a: any) => a.userId === userId) ||
+        msgSavedAccounts[0] || null;
 
       // Trigger automation rules (Thumbtack auto-reply)
       try {
