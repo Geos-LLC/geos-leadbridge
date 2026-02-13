@@ -125,8 +125,16 @@ export class SigcoreService {
 
       return data.numbers || [];
     } catch (error) {
-      this.logger.error('Failed to search available numbers:', error.response?.data || error.message);
-      throw new BadRequestException('Failed to search available phone numbers');
+      const errorData = error.response?.data;
+      const errorStatus = error.response?.status;
+      this.logger.error(`Failed to search available numbers: Status ${errorStatus}, Error: ${JSON.stringify(errorData || error.message)}`);
+
+      // Surface the actual Sigcore error message
+      if (errorStatus === 401) {
+        throw new BadRequestException('Sigcore API key is invalid or expired. Update SIGCORE_API_KEY in environment variables.');
+      }
+      const message = errorData?.message || errorData?.error || error.message || 'Unknown error';
+      throw new BadRequestException(`Failed to search available phone numbers: ${message}`);
     }
   }
 
