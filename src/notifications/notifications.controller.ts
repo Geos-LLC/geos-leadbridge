@@ -290,14 +290,35 @@ export class NotificationsController {
   }
 
   /**
-   * Connect provider via Sigcore - validates tenant key, connects provider, creates webhook
+   * Save/update the LeadBridge API key for an account (separate from provider connect)
+   */
+  @Post('sigcore/api-key/:savedAccountId')
+  async saveApiKey(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+    @Body() body: { apiKey: string },
+  ) {
+    const account = await this.notificationsService['prisma'].savedAccount.findFirst({
+      where: { id: savedAccountId, userId: user.id },
+    });
+
+    if (!account) {
+      return { success: false, error: 'Account not found' };
+    }
+
+    const result = await this.notificationsService.saveApiKey(savedAccountId, body.apiKey);
+    return result;
+  }
+
+  /**
+   * Connect provider via Sigcore - uses stored API key, connects provider, creates webhook
    */
   @Post('sigcore/connect/:savedAccountId')
   async connectSigcore(
     @CurrentUser() user: any,
     @Param('savedAccountId') savedAccountId: string,
     @Body() body: {
-      apiKey: string;
+      apiKey?: string;
       provider?: 'openphone' | 'twilio';
       providerCredentials?: {
         apiKey?: string; // OpenPhone API key
@@ -323,7 +344,7 @@ export class NotificationsController {
     const webhookBaseUrl = this.getWebhookBaseUrl(req);
     const result = await this.notificationsService.connectSigcore(
       savedAccountId,
-      body.apiKey,
+      body.apiKey || null,
       webhookBaseUrl,
       body.provider,
       body.providerCredentials,

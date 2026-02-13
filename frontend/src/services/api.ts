@@ -569,11 +569,14 @@ export const notificationsApi = {
     const { data } = await api.get(`/v1/notifications/sigcore/phone-numbers/${savedAccountId}`);
     return data;
   },
+  saveApiKey: async (savedAccountId: string, apiKey: string): Promise<{ success: boolean; error?: string }> => {
+    const { data } = await api.post(`/v1/notifications/sigcore/api-key/${savedAccountId}`, { apiKey });
+    return data;
+  },
   connectSigcore: async (
     savedAccountId: string,
-    apiKey: string,
-    provider?: 'openphone' | 'twilio',
-    providerCredentials?: {
+    provider: 'openphone' | 'twilio',
+    providerCredentials: {
       apiKey?: string;
       accountSid?: string;
       authToken?: string;
@@ -581,7 +584,6 @@ export const notificationsApi = {
     },
   ): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[]; error?: string }> => {
     const { data } = await api.post(`/v1/notifications/sigcore/connect/${savedAccountId}`, {
-      apiKey,
       provider,
       providerCredentials,
     });

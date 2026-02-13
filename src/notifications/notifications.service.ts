@@ -1523,11 +1523,58 @@ export class NotificationsService {
   }
 
   /**
-   * Connect to Sigcore - validates tenant API key, connects provider, creates webhook, stores settings
+   * Save/validate API key separately (one-time setup)
+   */
+  async saveApiKey(
+    savedAccountId: string,
+    apiKey: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    this.logger.log(`[saveApiKey] Saving API key for account ${savedAccountId}`);
+
+    const validation = await this.validateSigcoreApiKey(apiKey);
+    if (!validation.valid) {
+      return { success: false, error: 'Invalid API key. Please check your key and try again.' };
+    }
+
+    // Save to this account
+    await this.prisma.notificationSettings.upsert({
+      where: { savedAccountId },
+      update: { sigcoreApiKey: apiKey, enabled: true },
+      create: { savedAccountId, sigcoreApiKey: apiKey, enabled: true },
+    });
+
+    // Propagate to other accounts of the same user
+    const savedAccount = await this.prisma.savedAccount.findUnique({
+      where: { id: savedAccountId },
+      select: { userId: true },
+    });
+
+    if (savedAccount?.userId) {
+      const otherAccounts = await this.prisma.savedAccount.findMany({
+        where: { userId: savedAccount.userId, id: { not: savedAccountId } },
+        include: { notificationSettings: true },
+      });
+
+      for (const other of otherAccounts) {
+        if (other.notificationSettings && !other.notificationSettings.sigcoreApiKey) {
+          await this.prisma.notificationSettings.update({
+            where: { id: other.notificationSettings.id },
+            data: { sigcoreApiKey: apiKey },
+          });
+          this.logger.log(`[saveApiKey] Propagated API key to account ${other.id}`);
+        }
+      }
+    }
+
+    return { success: true };
+  }
+
+  /**
+   * Connect to Sigcore - uses stored or provided API key, connects provider, creates webhook
    */
   async connectSigcore(
     savedAccountId: string,
-    apiKey: string,
+    apiKey: string | null,
     webhookBaseUrl: string,
     provider?: 'openphone' | 'twilio',
     providerCredentials?: {
@@ -1539,41 +1586,55 @@ export class NotificationsService {
   ): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[]; error?: string }> {
     this.logger.log(`[connectSigcore] Connecting account ${savedAccountId} with provider ${provider || 'none'}`);
 
-    // 1. Validate the tenant API key
-    const validation = await this.validateSigcoreApiKey(apiKey);
-    if (!validation.valid) {
-      return { success: false, phoneNumbers: [], error: 'Invalid API key. Please check your LeadBridge API key.' };
+    // 1. Use provided API key, or fall back to stored one
+    let effectiveApiKey = apiKey;
+    if (!effectiveApiKey) {
+      const settings = await this.prisma.notificationSettings.findUnique({
+        where: { savedAccountId },
+        select: { sigcoreApiKey: true },
+      });
+      effectiveApiKey = settings?.sigcoreApiKey || null;
     }
 
-    // 2. Connect provider if specified
+    if (!effectiveApiKey) {
+      return { success: false, phoneNumbers: [], error: 'No API key configured. Please save your API key first.' };
+    }
+
+    // 2. Validate the API key
+    const validation = await this.validateSigcoreApiKey(effectiveApiKey);
+    if (!validation.valid) {
+      return { success: false, phoneNumbers: [], error: 'Invalid API key. Please check your API key.' };
+    }
+
+    // 3. Connect provider if specified
     if (provider && providerCredentials) {
-      const providerResult = await this.connectProviderViaSigcore(apiKey, provider, providerCredentials);
+      const providerResult = await this.connectProviderViaSigcore(effectiveApiKey, provider, providerCredentials);
       if (!providerResult.success) {
         return { success: false, phoneNumbers: [], error: providerResult.error || `Failed to connect ${provider}` };
       }
     }
 
-    // 3. Create webhook for delivery status
+    // 4. Create webhook for delivery status
     const webhookUrl = `${webhookBaseUrl}/api/webhooks/sigcore/delivery-status`;
-    const webhookResult = await this.createSigcoreWebhook(apiKey, webhookUrl);
+    const webhookResult = await this.createSigcoreWebhook(effectiveApiKey, webhookUrl);
 
     if (webhookResult.error) {
       this.logger.warn(`[connectSigcore] Webhook creation failed: ${webhookResult.error}`);
       // Continue anyway - webhook can be created manually later
     }
 
-    // 4. Store the API key, provider, and webhook ID
+    // 5. Store the provider and webhook ID (API key already saved separately)
     await this.prisma.notificationSettings.upsert({
       where: { savedAccountId },
       update: {
-        sigcoreApiKey: apiKey,
+        sigcoreApiKey: effectiveApiKey,
         sigcoreProvider: provider || null,
         sigcoreWebhookId: webhookResult.webhookId,
         enabled: true,
       },
       create: {
         savedAccountId,
-        sigcoreApiKey: apiKey,
+        sigcoreApiKey: effectiveApiKey,
         sigcoreProvider: provider || null,
         sigcoreWebhookId: webhookResult.webhookId,
         enabled: true,
@@ -1590,39 +1651,10 @@ export class NotificationsService {
 
     this.logger.log(`[connectSigcore] Connected successfully. Provider: ${provider}, WebhookId: ${webhookResult.webhookId}`);
 
-    // 5. Propagate API key to other accounts of the same user that don't have one
-    const savedAccount = await this.prisma.savedAccount.findUnique({
-      where: { id: savedAccountId },
-      select: { userId: true },
-    });
-
-    if (savedAccount?.userId) {
-      const otherAccounts = await this.prisma.savedAccount.findMany({
-        where: {
-          userId: savedAccount.userId,
-          id: { not: savedAccountId },
-        },
-        include: { notificationSettings: true },
-      });
-
-      for (const otherAccount of otherAccounts) {
-        if (otherAccount.notificationSettings && !otherAccount.notificationSettings.sigcoreApiKey) {
-          await this.prisma.notificationSettings.update({
-            where: { id: otherAccount.notificationSettings.id },
-            data: {
-              sigcoreApiKey: apiKey,
-              sigcoreProvider: provider || null,
-            },
-          });
-          this.logger.log(`[connectSigcore] Auto-propagated API key to account ${otherAccount.id} (${otherAccount.businessName})`);
-        }
-      }
-    }
-
     // 6. Fetch phone numbers for the connected provider
     let phoneNumbers: SigcorePhoneNumber[] = [];
     if (provider === 'openphone') {
-      phoneNumbers = await this.fetchOpenPhoneNumbers(apiKey);
+      phoneNumbers = await this.fetchOpenPhoneNumbers(effectiveApiKey);
     } else if (provider === 'twilio' && providerCredentials?.phoneNumber) {
       // For Twilio, return the configured phone number
       phoneNumbers = [{
@@ -1700,11 +1732,10 @@ export class NotificationsService {
       }
     }
 
-    // Clear Sigcore settings
+    // Clear provider/webhook settings but KEEP the API key for re-connection
     await this.prisma.notificationSettings.update({
       where: { savedAccountId },
       data: {
-        sigcoreApiKey: null,
         sigcoreFromPhone: null,
         sigcoreWebhookId: null,
         sigcoreProvider: null,
