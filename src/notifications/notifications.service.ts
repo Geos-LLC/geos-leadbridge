@@ -110,7 +110,7 @@ export interface NotificationSettingsResponse {
   sigcoreApiKey: string | null; // Will be masked in response
   sigcoreFromPhone: string | null;
   sigcoreWorkspaceId: string | null;
-  sigcoreConnected: boolean; // Whether API key is configured
+  sigcoreConnected: boolean; // Whether API key + provider are configured
   sigcoreProvider: string | null; // 'openphone' | 'twilio' | null
   template: string;
   quietHoursStart: string | null;
@@ -1703,7 +1703,12 @@ export class NotificationsService {
       return { success: true }; // Already disconnected
     }
 
-    // Delete webhook if exists
+    // 1. Disconnect provider integration via Sigcore API
+    if (settings.sigcoreApiKey && settings.sigcoreProvider) {
+      await this.disconnectProviderViaSigcore(settings.sigcoreApiKey, settings.sigcoreProvider);
+    }
+
+    // 2. Delete webhook if exists
     if (settings.sigcoreApiKey && settings.sigcoreWebhookId) {
       const deleteResult = await this.deleteSigcoreWebhook(settings.sigcoreApiKey, settings.sigcoreWebhookId);
       if (!deleteResult.success) {
@@ -1711,7 +1716,7 @@ export class NotificationsService {
       }
     }
 
-    // Clear provider/webhook settings but KEEP the API key for re-connection
+    // 3. Clear provider/webhook settings but KEEP the API key for re-connection
     await this.prisma.notificationSettings.update({
       where: { savedAccountId },
       data: {
@@ -1723,6 +1728,37 @@ export class NotificationsService {
 
     this.logger.log(`[disconnectSigcore] Disconnected successfully`);
     return { success: true };
+  }
+
+  /**
+   * Disconnect provider integration via Sigcore API
+   */
+  private async disconnectProviderViaSigcore(tenantApiKey: string, provider: string): Promise<void> {
+    const baseUrl = 'https://sigcore-production.up.railway.app';
+    const endpoint = provider === 'openphone'
+      ? `${baseUrl}/api/integrations/openphone/disconnect`
+      : `${baseUrl}/api/integrations/twilio`;
+
+    this.logger.log(`[disconnectProvider] Calling ${endpoint} for provider ${provider}`);
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'DELETE',
+        headers: {
+          'x-api-key': tenantApiKey,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.logger.warn(`[disconnectProvider] Failed: ${response.status} - ${errorText}`);
+      } else {
+        this.logger.log(`[disconnectProvider] Successfully disconnected ${provider}`);
+      }
+    } catch (error: any) {
+      this.logger.error(`[disconnectProvider] Error: ${error.message}`);
+    }
   }
 
   /**
@@ -1826,7 +1862,7 @@ export class NotificationsService {
       sigcoreApiKey: maskedApiKey,
       sigcoreFromPhone: settings.sigcoreFromPhone,
       sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
-      sigcoreConnected: !!settings.sigcoreApiKey,
+      sigcoreConnected: !!settings.sigcoreApiKey && !!settings.sigcoreProvider,
       sigcoreProvider: settings.sigcoreProvider || null,
       template: settings.template,
       quietHoursStart: settings.quietHoursStart,

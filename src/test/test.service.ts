@@ -421,7 +421,7 @@ export class TestService {
         automationRules: automationRules.map(r => ({ name: r.name, triggerType: r.triggerType })),
         notificationRulesFound: notifSettings?.notificationRules?.length || 0,
         notificationRules: (notifSettings?.notificationRules || []).map(r => ({ name: r.name, triggerType: r.triggerType })),
-        sigcoreConnected: !!notifSettings?.sigcoreApiKey,
+        sigcoreConnected: !!notifSettings?.sigcoreApiKey && !!notifSettings?.sigcoreProvider,
         smsLogs: recentLogs,
         smsSent,
         smsSuccessCount,
