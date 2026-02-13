@@ -1268,7 +1268,7 @@ export class NotificationsService {
         {
           method: 'GET',
           headers: {
-            'X-Sigcore-Key': settings.sigcoreApiKey,
+            'x-api-key': settings.sigcoreApiKey,
             'Content-Type': 'application/json',
           },
         },
@@ -1361,7 +1361,7 @@ export class NotificationsService {
         {
           method: 'GET',
           headers: {
-            'X-Sigcore-Key': apiKey,
+            'x-api-key': apiKey,
             'Content-Type': 'application/json',
           },
         },
@@ -1413,7 +1413,7 @@ export class NotificationsService {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          'X-Sigcore-Key': apiKey,
+          'x-api-key': apiKey,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1453,7 +1453,7 @@ export class NotificationsService {
       const response = await fetch(endpoint, {
         method: 'DELETE',
         headers: {
-          'X-Sigcore-Key': apiKey,
+          'x-api-key': apiKey,
           'Content-Type': 'application/json',
         },
       });
@@ -1628,7 +1628,7 @@ export class NotificationsService {
         {
           method: 'POST',
           headers: {
-            'X-Sigcore-Key': params.apiKey,
+            'x-api-key': params.apiKey,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(requestBody),
