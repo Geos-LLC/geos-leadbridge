@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Phone, Loader2, X, ChevronDown, AlertCircle, CheckCircle, Link, Unlink, Key, Shield, ShieldCheck, ShieldX, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, Phone, Loader2, X, ChevronDown, AlertCircle, CheckCircle, Link, Unlink, Key, Shield, ShieldCheck, ShieldX, ShieldAlert, PhoneCall } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { notificationsApi, thumbtackApi, type SigcorePhoneNumber } from '../services/api';
-import type { SavedAccount } from '../types';
+import { notificationsApi, usersApi, thumbtackApi, type SigcorePhoneNumber } from '../services/api';
+import type { SavedAccount, PhonePoolEntry } from '../types';
 
 // Helper function to get A2P status display
 function getA2PStatusInfo(status?: string): { icon: React.ReactNode; label: string; className: string } {
@@ -20,6 +20,8 @@ function getA2PStatusInfo(status?: string): { icon: React.ReactNode; label: stri
   }
 }
 
+type ProviderTab = 'openphone' | 'twilio';
+
 export function PhoneSettings() {
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
@@ -28,15 +30,21 @@ export function PhoneSettings() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Sigcore connection state
+  // Pool phone state
+  const [poolPhone, setPoolPhone] = useState<PhonePoolEntry | null>(null);
+  const [loadingPoolPhone, setLoadingPoolPhone] = useState(true);
+
+  // Provider connection state
+  const [activeTab, setActiveTab] = useState<ProviderTab>('openphone');
   const [sigcoreConnected, setSigcoreConnected] = useState(false);
-  const [sigcoreApiKey, setSigcoreApiKey] = useState('');
-  const [sigcorePhoneNumbers, setSigcorePhoneNumbers] = useState<SigcorePhoneNumber[]>([]);
+  const [apiKey, setApiKey] = useState('');
+  const [phoneNumbers, setPhoneNumbers] = useState<SigcorePhoneNumber[]>([]);
   const [validatingApiKey, setValidatingApiKey] = useState(false);
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
 
   useEffect(() => {
     loadAccounts();
+    loadPoolPhone();
   }, []);
 
   useEffect(() => {
@@ -44,6 +52,18 @@ export function PhoneSettings() {
       loadSettings(selectedAccountId);
     }
   }, [selectedAccountId]);
+
+  async function loadPoolPhone() {
+    try {
+      setLoadingPoolPhone(true);
+      const result = await usersApi.getMyPoolPhone();
+      setPoolPhone(result.poolPhone);
+    } catch (err) {
+      console.error('Failed to load pool phone:', err);
+    } finally {
+      setLoadingPoolPhone(false);
+    }
+  }
 
   async function loadAccounts() {
     try {
@@ -73,13 +93,12 @@ export function PhoneSettings() {
         if (settingsRes.settings.sigcoreConnected) {
           loadPhoneNumbers(accountId);
         } else {
-          setSigcorePhoneNumbers([]);
+          setPhoneNumbers([]);
         }
       } else {
-        // Reset to defaults
         setSigcoreConnected(false);
-        setSigcoreApiKey('');
-        setSigcorePhoneNumbers([]);
+        setApiKey('');
+        setPhoneNumbers([]);
         setShowApiKeyInput(false);
       }
     } catch (err: any) {
@@ -92,15 +111,15 @@ export function PhoneSettings() {
   async function loadPhoneNumbers(accountId: string) {
     try {
       const result = await notificationsApi.getSigcorePhoneNumbers(accountId);
-      setSigcorePhoneNumbers(result.phoneNumbers);
+      setPhoneNumbers(result.phoneNumbers);
     } catch (err) {
       console.error('Failed to load phone numbers:', err);
     }
   }
 
-  async function handleConnectSigcore() {
-    if (!sigcoreApiKey.trim()) {
-      setError('Please enter your Sigcore API key');
+  async function handleConnect() {
+    if (!apiKey.trim()) {
+      setError('Please enter your API key');
       return;
     }
 
@@ -108,27 +127,27 @@ export function PhoneSettings() {
       setValidatingApiKey(true);
       setError(null);
 
-      const result = await notificationsApi.connectSigcore(selectedAccountId, sigcoreApiKey);
+      const result = await notificationsApi.connectSigcore(selectedAccountId, apiKey);
 
       if (!result.success) {
-        setError(result.error || 'Invalid API key. Please check your Sigcore API key and try again.');
+        setError(result.error || 'Invalid API key. Please check your API key and try again.');
         return;
       }
 
       setSigcoreConnected(true);
-      setSigcorePhoneNumbers(result.phoneNumbers);
+      setPhoneNumbers(result.phoneNumbers);
       setShowApiKeyInput(false);
-      setSigcoreApiKey('');
-      setSuccessMessage('Connected to Sigcore successfully');
+      setApiKey('');
+      setSuccessMessage(`Connected to ${activeTab === 'openphone' ? 'OpenPhone' : 'Twilio'} successfully`);
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err: any) {
-      setError(err.message || 'Failed to connect to Sigcore');
+      setError(err.message || 'Failed to connect');
     } finally {
       setValidatingApiKey(false);
     }
   }
 
-  async function handleDisconnectSigcore() {
+  async function handleDisconnect() {
     try {
       setError(null);
 
@@ -140,14 +159,16 @@ export function PhoneSettings() {
       }
 
       setSigcoreConnected(false);
-      setSigcoreApiKey('');
-      setSigcorePhoneNumbers([]);
-      setSuccessMessage('Disconnected from Sigcore');
+      setApiKey('');
+      setPhoneNumbers([]);
+      setSuccessMessage('Provider disconnected');
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err: any) {
       setError(err.message || 'Failed to disconnect');
     }
   }
+
+  const providerLabel = activeTab === 'openphone' ? 'OpenPhone' : 'Twilio';
 
   if (loading && accounts.length === 0) {
     return (
@@ -221,6 +242,39 @@ export function PhoneSettings() {
       )}
 
       <div className="settings-content">
+        {/* Section 1: Assigned Pool Phone */}
+        {loadingPoolPhone ? (
+          <div className="settings-section">
+            <div className="loading-container">
+              <Loader2 size={20} className="spinner" />
+            </div>
+          </div>
+        ) : poolPhone ? (
+          <div className="settings-section pool-phone-section">
+            <div className="section-header">
+              <h2>
+                <PhoneCall size={18} />
+                Your Assigned Phone
+              </h2>
+            </div>
+            <div className="pool-phone-card">
+              <div className="pool-phone-info">
+                <span className="pool-phone-number">{poolPhone.phoneNumber}</span>
+                <span className="provider-badge">{poolPhone.provider}</span>
+              </div>
+              <div className="pool-phone-meta">
+                {poolPhone.areaCode && <span>Area code: {poolPhone.areaCode}</span>}
+                {poolPhone.assignedAt && (
+                  <span>Assigned: {new Date(poolPhone.assignedAt).toLocaleDateString()}</span>
+                )}
+              </div>
+              <p className="pool-phone-note">
+                Assigned by administrator. Used as default sender for SMS alerts.
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         {/* Account Selector */}
         <div className="account-selector">
           <label>Account:</label>
@@ -245,35 +299,51 @@ export function PhoneSettings() {
           </div>
         ) : (
           <>
-            {/* Sigcore Connection Section */}
-            <div className="settings-section sigcore-connection">
+            {/* Section 2: Connect Your Own Provider */}
+            <div className="settings-section provider-connection">
               <div className="section-header">
                 <h2>
                   <Key size={18} />
-                  Sigcore Connection
+                  Connect Your Own Provider
                 </h2>
+              </div>
+
+              {/* Provider Tabs */}
+              <div className="provider-tabs">
+                <button
+                  className={`provider-tab ${activeTab === 'openphone' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('openphone')}
+                >
+                  OpenPhone
+                </button>
+                <button
+                  className={`provider-tab ${activeTab === 'twilio' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('twilio')}
+                >
+                  Twilio
+                </button>
               </div>
 
               {sigcoreConnected ? (
                 <div className="sigcore-connected">
                   <div className="connection-status">
                     <CheckCircle size={18} className="status-icon success" />
-                    <span>Connected to Sigcore</span>
+                    <span>Connected to {providerLabel}</span>
                     <button
                       className="btn btn-secondary btn-sm"
-                      onClick={handleDisconnectSigcore}
+                      onClick={handleDisconnect}
                     >
                       <Unlink size={14} />
                       Disconnect
                     </button>
                   </div>
 
-                  {sigcorePhoneNumbers.length > 0 ? (
+                  {phoneNumbers.length > 0 ? (
                     <div className="phone-numbers-list">
-                      <label>Available Phone Numbers ({sigcorePhoneNumbers.length})</label>
+                      <label>Available Phone Numbers ({phoneNumbers.length})</label>
                       <p className="form-hint">These phone numbers can be used when creating SMS alert rules.</p>
                       <div className="phone-cards">
-                        {sigcorePhoneNumbers.map(phone => {
+                        {phoneNumbers.map(phone => {
                           const a2pInfo = getA2PStatusInfo(phone.a2pStatus);
                           return (
                             <div key={phone.id} className="phone-card">
@@ -305,15 +375,17 @@ export function PhoneSettings() {
                   ) : (
                     <div className="warning-message">
                       <AlertCircle size={16} />
-                      No phone numbers found in your Sigcore account. Please add a phone number in Sigcore first.
+                      No phone numbers found in your {providerLabel} account. Please add a phone number in {providerLabel} first.
                     </div>
                   )}
                 </div>
               ) : (
                 <div className="sigcore-disconnected">
                   <p className="connection-info">
-                    Connect your Sigcore account to send SMS notifications. Get your API key from the
-                    Sigcore settings page.
+                    Connect your {providerLabel} account to use your own phone numbers for SMS notifications.
+                    {activeTab === 'openphone'
+                      ? ' Get your API key from the OpenPhone settings page.'
+                      : ' Get your API credentials from the Twilio console.'}
                   </p>
 
                   {showApiKeyInput ? (
@@ -321,13 +393,13 @@ export function PhoneSettings() {
                       <div className="form-group">
                         <label>
                           <Key size={14} />
-                          Sigcore API Key
+                          {providerLabel} API Key
                         </label>
                         <input
                           type="password"
-                          value={sigcoreApiKey}
-                          onChange={e => setSigcoreApiKey(e.target.value)}
-                          placeholder="Enter your Sigcore API key"
+                          value={apiKey}
+                          onChange={e => setApiKey(e.target.value)}
+                          placeholder={`Enter your ${providerLabel} API key`}
                         />
                       </div>
                       <div className="form-actions">
@@ -335,15 +407,15 @@ export function PhoneSettings() {
                           className="btn btn-secondary"
                           onClick={() => {
                             setShowApiKeyInput(false);
-                            setSigcoreApiKey('');
+                            setApiKey('');
                           }}
                         >
                           Cancel
                         </button>
                         <button
                           className="btn btn-primary"
-                          onClick={handleConnectSigcore}
-                          disabled={validatingApiKey || !sigcoreApiKey.trim()}
+                          onClick={handleConnect}
+                          disabled={validatingApiKey || !apiKey.trim()}
                         >
                           {validatingApiKey ? (
                             <>
@@ -365,7 +437,7 @@ export function PhoneSettings() {
                       onClick={() => setShowApiKeyInput(true)}
                     >
                       <Link size={16} />
-                      Connect to Sigcore
+                      Connect to {providerLabel}
                     </button>
                   )}
                 </div>

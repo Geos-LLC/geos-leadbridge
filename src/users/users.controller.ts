@@ -37,4 +37,13 @@ export class UsersController {
   ): Promise<SigcoreSearchResult[]> {
     return this.usersService.searchAvailableNumbers(country || 'US', areaCode);
   }
+
+  /**
+   * Get current user's assigned pool phone
+   * GET /v1/users/me/pool-phone
+   */
+  @Get('me/pool-phone')
+  async getMyPoolPhone(@Request() req: any) {
+    return this.usersService.getUserPoolPhone(req.user.id);
+  }
 }

@@ -76,4 +76,14 @@ export class UsersService {
   async searchAvailableNumbers(country: string = 'US', areaCode?: string): Promise<SigcoreSearchResult[]> {
     return this.sigcoreService.searchAvailableNumbers(country, areaCode, 10);
   }
+
+  /**
+   * Get user's assigned pool phone (from admin phone pool)
+   */
+  async getUserPoolPhone(userId: string) {
+    const poolPhone = await this.prisma.phonePool.findFirst({
+      where: { assignedToUserId: userId, status: 'ASSIGNED' },
+    });
+    return { phone: poolPhone };
+  }
 }

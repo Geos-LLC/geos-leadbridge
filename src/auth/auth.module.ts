@@ -11,11 +11,13 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
 import { PrismaService } from '../common/utils/prisma.service';
 import { SigcoreModule } from '../sigcore/sigcore.module';
+import { AdminModule } from '../admin/admin.module';
 
 @Module({
   imports: [
     PassportModule,
     SigcoreModule,
+    AdminModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({

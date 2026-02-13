@@ -288,3 +288,32 @@ export interface AdminLog {
     name: string | null;
   };
 }
+
+// Phone Pool (Admin)
+export interface PhonePoolEntry {
+  id: string;
+  phoneNumber: string;
+  provider: string;
+  areaCode: string | null;
+  state: string | null;
+  friendlyName: string | null;
+  sigcoreAllocationId: string | null;
+  status: 'AVAILABLE' | 'ASSIGNED' | 'RESERVED' | 'RELEASED';
+  assignedToUserId: string | null;
+  assignedToUser?: {
+    id: string;
+    email: string;
+    name: string | null;
+  } | null;
+  assignedAt: string | null;
+  provisionedAt: string;
+  createdAt: string;
+}
+
+export interface PhonePoolStats {
+  total: number;
+  available: number;
+  assigned: number;
+  reserved: number;
+  byAreaCode: { areaCode: string; count: number }[];
+}

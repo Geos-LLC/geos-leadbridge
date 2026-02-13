@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog, NotificationRule, SubscriptionDetails, AdminUser, AdminUserDetails, AdminStats, AdminLog } from '../types';
+import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog, NotificationRule, SubscriptionDetails, AdminUser, AdminUserDetails, AdminStats, AdminLog, PhonePoolEntry, PhonePoolStats } from '../types';
 import { notify } from '../store/notificationStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://thumbtack-bridge-production.up.railway.app/api';
@@ -717,6 +717,10 @@ export const usersApi = {
     const { data } = await api.post(url);
     return data;
   },
+  getMyPoolPhone: async (): Promise<{ success: boolean; poolPhone: PhonePoolEntry | null }> => {
+    const { data } = await api.get('/v1/users/me/pool-phone');
+    return data;
+  },
 };
 
 // Admin API
@@ -758,6 +762,51 @@ export const adminApi = {
 
     const { data } = await api.get(`/v1/admin/logs?${queryParams.toString()}`);
     return data.data;
+  },
+  // Phone Pool
+  getPhonePool: async (params?: { status?: string; areaCode?: string; search?: string; offset?: number; limit?: number }): Promise<{ phones: PhonePoolEntry[]; total: number; offset: number; limit: number }> => {
+    const queryParams = new URLSearchParams();
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.areaCode) queryParams.append('areaCode', params.areaCode);
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.offset !== undefined) queryParams.append('offset', params.offset.toString());
+    if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString());
+
+    const { data } = await api.get(`/v1/admin/phone-pool?${queryParams.toString()}`);
+    return data.data;
+  },
+  getPhonePoolStats: async (): Promise<PhonePoolStats> => {
+    const { data } = await api.get('/v1/admin/phone-pool/stats');
+    return data.data;
+  },
+  searchPhoneNumbers: async (country?: string, areaCode?: string, limit?: number): Promise<{ numbers: any[] }> => {
+    const queryParams = new URLSearchParams();
+    if (country) queryParams.append('country', country);
+    if (areaCode) queryParams.append('areaCode', areaCode);
+    if (limit) queryParams.append('limit', limit.toString());
+
+    const { data } = await api.get(`/v1/admin/phone-pool/search?${queryParams.toString()}`);
+    return data.data;
+  },
+  provisionToPool: async (body: { areaCode?: string; specificPhoneNumber?: string; count?: number }): Promise<{ phones: PhonePoolEntry[] }> => {
+    const { data } = await api.post('/v1/admin/phone-pool/provision', body);
+    return data.data;
+  },
+  assignPhone: async (phonePoolId: string, userId: string): Promise<PhonePoolEntry> => {
+    const { data } = await api.post(`/v1/admin/phone-pool/${phonePoolId}/assign/${userId}`);
+    return data.data;
+  },
+  unassignPhone: async (phonePoolId: string): Promise<PhonePoolEntry> => {
+    const { data } = await api.post(`/v1/admin/phone-pool/${phonePoolId}/unassign`);
+    return data.data;
+  },
+  releasePhone: async (phonePoolId: string): Promise<void> => {
+    await api.delete(`/v1/admin/phone-pool/${phonePoolId}`);
+  },
+  getPhonePoolUsers: async (search?: string): Promise<{ data: { id: string; email: string; name: string | null }[] }> => {
+    const params = search ? `?search=${encodeURIComponent(search)}` : '';
+    const { data } = await api.get(`/v1/admin/phone-pool/users${params}`);
+    return data;
   },
 };
 

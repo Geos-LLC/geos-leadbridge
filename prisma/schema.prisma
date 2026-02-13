@@ -88,6 +88,7 @@ model User {
   subscriptionHistory      SubscriptionHistory[]
   adminLogs                AdminLog[]
   notificationSettings     NotificationSettings[] // Account-specific and user-level default notification settings
+  poolPhones               PhonePool[]            // Phones assigned from admin pool
 
   @@map("users")
 }
@@ -496,4 +497,40 @@ model AdminLog {
   @@index([adminId])
   @@index([createdAt])
   @@map("admin_logs")
+}
+
+// ==========================================
+// Admin Phone Pool
+// ==========================================
+
+enum PhonePoolStatus {
+  AVAILABLE
+  ASSIGNED
+  RESERVED
+  RELEASED
+}
+
+model PhonePool {
+  id                  String          @id @default(uuid())
+  phoneNumber         String          @unique
+  provider            String          @default("twilio") // "twilio" | "openphone"
+  areaCode            String?
+  state               String?         // US state abbreviation
+  friendlyName        String?
+  sigcoreAllocationId String?
+  status              PhonePoolStatus @default(AVAILABLE)
+  assignedToUserId    String?
+  assignedAt          DateTime?
+  provisionedAt       DateTime        @default(now())
+  releasedAt          DateTime?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  // Relationships
+  assignedToUser User? @relation(fields: [assignedToUserId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([areaCode])
+  @@index([assignedToUserId])
+  @@map("phone_pool")
 }

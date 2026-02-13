@@ -63,9 +63,13 @@ export function Layout() {
           </Link>
           {user?.role === 'ADMIN' && (
             <>
-              <Link to="/admin" className={`nav-link ${isActive('/admin') || location.pathname.startsWith('/admin/') ? 'active' : ''}`}>
+              <Link to="/admin" className={`nav-link ${isActive('/admin') || (location.pathname.startsWith('/admin/') && !location.pathname.startsWith('/admin/phone-pool')) ? 'active' : ''}`}>
                 <Shield size={20} />
                 <span>Admin</span>
+              </Link>
+              <Link to="/admin/phone-pool" className={`nav-link ${isActive('/admin/phone-pool') ? 'active' : ''}`}>
+                <Phone size={20} />
+                <span>Phone Pool</span>
               </Link>
               <Link to="/api-test" className={`nav-link ${isActive('/api-test') ? 'active' : ''}`}>
                 <FlaskConical size={20} />

@@ -18,6 +18,7 @@ import Pricing from './pages/Pricing';
 import BillingSettings from './pages/BillingSettings';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminUserDetails from './pages/admin/AdminUserDetails';
+import AdminPhonePool from './pages/admin/AdminPhonePool';
 import { useAuthStore } from './store/authStore';
 import './App.css';
 
@@ -62,6 +63,7 @@ function App() {
             <Route path="/billing" element={<BillingSettings />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/users/:userId" element={<AdminUserDetails />} />
+            <Route path="/admin/phone-pool" element={<AdminPhonePool />} />
           </Route>
         </Route>
 

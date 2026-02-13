@@ -828,7 +828,19 @@ export class NotificationsService {
 
     // Use rule's phone numbers (required for new rules) or fallback to settings (legacy)
     const toPhone = rule?.toPhone || settings.destinationPhone;
-    const fromPhone = rule?.fromPhone || settings.sigcoreFromPhone;
+    let fromPhone = rule?.fromPhone || settings.sigcoreFromPhone;
+
+    // Fallback: use admin-assigned pool phone if no explicit fromPhone configured
+    if (!fromPhone) {
+      const poolPhone = await this.prisma.phonePool.findFirst({
+        where: { assignedToUserId: userId, status: 'ASSIGNED' },
+      });
+      if (poolPhone) {
+        fromPhone = poolPhone.phoneNumber;
+        this.logger.log(`Using pool phone ${fromPhone} as fromPhone for rule`);
+      }
+    }
+
     const template = rule?.template || settings.template;
     const ruleName = rule?.name || 'Legacy Alert';
     const ruleId = rule?.id || null;

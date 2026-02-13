@@ -161,18 +161,17 @@ export class SigcoreService {
   }
 
   /**
-   * Provision a new phone number for a user
-   * This is called automatically during user registration
-   * @param throwOnError - If true, throws errors instead of returning null (for manual provisioning)
+   * Provision a phone number via Sigcore API (does NOT update User model)
+   * Used by phone pool and direct provisioning
    */
-  async provisionNumberForUser(
-    userId: string,
+  async provisionNumber(
     areaCode?: string,
     specificPhoneNumber?: string,
+    friendlyName?: string,
     throwOnError: boolean = false,
   ): Promise<{ phoneNumber: string; allocationId: string } | null> {
     if (!this.isConfigured()) {
-      const msg = `Sigcore not configured - skipping phone provisioning for user ${userId}`;
+      const msg = 'Sigcore not configured - cannot provision phone number';
       this.logger.warn(msg);
       if (throwOnError) {
         throw new InternalServerErrorException('Phone provisioning is not configured. Missing SIGCORE_API_KEY.');
@@ -181,13 +180,9 @@ export class SigcoreService {
     }
 
     try {
-      this.logger.log(`Provisioning phone number for user ${userId} (areaCode: ${areaCode || 'auto'})`);
-
-      // Determine which phone number to provision
       let phoneNumberToProvision = specificPhoneNumber;
 
       if (!phoneNumberToProvision) {
-        // Search for available numbers first
         this.logger.log(`Searching for available numbers (areaCode: ${areaCode || 'any'})...`);
         const availableNumbers = await this.searchAvailableNumbers('US', areaCode, 1);
 
@@ -204,37 +199,24 @@ export class SigcoreService {
         this.logger.log(`Found available number: ${phoneNumberToProvision}`);
       }
 
-      this.logger.log(`Sigcore API URL: ${this.sigcoreApiUrl}/api/v1/phone-numbers/provision`);
-
-      // Build request body
       const requestBody: any = {
         phoneNumber: phoneNumberToProvision,
-        friendlyName: `User ${userId}`,
+        friendlyName: friendlyName || phoneNumberToProvision,
       };
 
-      this.logger.log(`Sigcore request body: ${JSON.stringify(requestBody)}`);
+      this.logger.log(`Provisioning number: ${JSON.stringify(requestBody)}`);
 
-      // Provision phone number via Sigcore API
       const url = this.buildUrl(`/api/v1/phone-numbers/provision`);
-      this.logger.log(`Full URL with bypass: ${url}`);
-
       const response = await firstValueFrom(
-        this.httpService.post(
-          url,
-          requestBody,
-          {
-            headers: this.buildHeaders(),
-          }
-        )
+        this.httpService.post(url, requestBody, { headers: this.buildHeaders() })
       );
 
       this.logger.log(`Sigcore response status: ${response.status}`);
-      this.logger.log(`Sigcore response data: ${JSON.stringify(response.data)}`);
 
       const data: SigcoreProvisionResponse = response.data;
 
       if (!data.success || !data.allocation) {
-        const errorMsg = `Phone number provisioning failed - no allocation returned. Response: ${JSON.stringify(data)}`;
+        const errorMsg = `Provisioning failed - no allocation returned. Response: ${JSON.stringify(data)}`;
         this.logger.error(errorMsg);
         if (throwOnError) {
           throw new BadRequestException(errorMsg);
@@ -242,30 +224,16 @@ export class SigcoreService {
         return null;
       }
 
-      const phoneNumber = data.allocation.phoneNumber;
-      const allocationId = data.allocation.id;
-
-      this.logger.log(`Successfully provisioned ${phoneNumber} for user ${userId} (allocation: ${allocationId})`);
-
-      // Update user record with phone number
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: {
-          phoneNumber,
-          sigcoreAllocationId: allocationId,
-        },
-      });
+      this.logger.log(`Provisioned ${data.allocation.phoneNumber} (allocation: ${data.allocation.id})`);
 
       return {
-        phoneNumber,
-        allocationId,
+        phoneNumber: data.allocation.phoneNumber,
+        allocationId: data.allocation.id,
       };
     } catch (error) {
       const errorDetail = error.response?.data || error.message;
       const errorStatus = error.response?.status;
-      this.logger.error(`Failed to provision phone number for user ${userId}:`);
-      this.logger.error(`  Status: ${errorStatus}`);
-      this.logger.error(`  Error: ${JSON.stringify(errorDetail)}`);
+      this.logger.error(`Failed to provision phone number: Status ${errorStatus}, Error: ${JSON.stringify(errorDetail)}`);
 
       if (throwOnError) {
         const message = typeof errorDetail === 'object'
@@ -273,58 +241,86 @@ export class SigcoreService {
           : errorDetail;
         throw new BadRequestException(`Failed to provision phone number: ${message}`);
       }
-      // Don't throw - allow user registration to succeed even if phone provisioning fails
       return null;
     }
   }
 
   /**
-   * Release a phone number (when user cancels subscription or deletes account)
+   * Release a phone number via Sigcore API (does NOT update User model)
    */
-  async releaseUserNumber(userId: string): Promise<void> {
+  async releaseNumber(allocationId: string): Promise<void> {
     if (!this.isConfigured()) {
       this.logger.warn('Sigcore not configured - skipping phone release');
       return;
     }
 
+    this.logger.log(`Releasing allocation: ${allocationId}`);
+    await firstValueFrom(
+      this.httpService.post(
+        this.buildUrl(`/api/v1/phone-numbers/release`),
+        { allocationId },
+        { headers: this.buildHeaders() }
+      )
+    );
+    this.logger.log(`Released allocation: ${allocationId}`);
+  }
+
+  /**
+   * Provision a new phone number for a user (updates User model)
+   * This is called automatically during user registration
+   */
+  async provisionNumberForUser(
+    userId: string,
+    areaCode?: string,
+    specificPhoneNumber?: string,
+    throwOnError: boolean = false,
+  ): Promise<{ phoneNumber: string; allocationId: string } | null> {
+    this.logger.log(`Provisioning phone number for user ${userId} (areaCode: ${areaCode || 'auto'})`);
+
+    const result = await this.provisionNumber(areaCode, specificPhoneNumber, `User ${userId}`, throwOnError);
+    if (!result) return null;
+
+    // Update user record with phone number
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        phoneNumber: result.phoneNumber,
+        sigcoreAllocationId: result.allocationId,
+      },
+    });
+
+    this.logger.log(`Assigned ${result.phoneNumber} to user ${userId}`);
+    return result;
+  }
+
+  /**
+   * Release a phone number for a user (clears User model fields)
+   */
+  async releaseUserNumber(userId: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { phoneNumber: true, sigcoreAllocationId: true },
+    });
+
+    if (!user?.phoneNumber || !user?.sigcoreAllocationId) {
+      this.logger.warn(`No phone number to release for user ${userId}`);
+      return;
+    }
+
+    this.logger.log(`Releasing phone number ${user.phoneNumber} for user ${userId}`);
+
     try {
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: { phoneNumber: true, sigcoreAllocationId: true },
-      });
-
-      if (!user?.phoneNumber || !user?.sigcoreAllocationId) {
-        this.logger.warn(`No phone number to release for user ${userId}`);
-        return;
-      }
-
-      this.logger.log(`Releasing phone number ${user.phoneNumber} for user ${userId}`);
-
-      // Release number via Sigcore API
-      await firstValueFrom(
-        this.httpService.post(
-          this.buildUrl(`/api/v1/phone-numbers/release`),
-          { allocationId: user.sigcoreAllocationId },
-          {
-            headers: this.buildHeaders(),
-          }
-        )
-      );
-
-      // Update user record
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: {
-          phoneNumber: null,
-          sigcoreAllocationId: null,
-        },
-      });
-
-      this.logger.log(`Successfully released phone number ${user.phoneNumber} for user ${userId}`);
+      await this.releaseNumber(user.sigcoreAllocationId);
     } catch (error) {
       this.logger.error(`Failed to release phone number for user ${userId}:`, error.response?.data || error.message);
-      // Don't throw - log error but continue
     }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { phoneNumber: null, sigcoreAllocationId: null },
+    });
+
+    this.logger.log(`Released phone number ${user.phoneNumber} for user ${userId}`);
   }
 
   /**
