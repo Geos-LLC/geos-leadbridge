@@ -45,9 +45,9 @@ export function Register() {
     <div className="auth-container">
       <div className="auth-card">
         <div className="auth-header">
-          <img src="/Thumbtack_Bridge_Logo.png" alt="Thumbtack Bridge" className="auth-logo" />
+          <img src="/LeadBridge_Logo.png" alt="LeadBridge" className="auth-logo" />
           <h1>Create Account</h1>
-          <p>Get started with Thumbtack Bridge</p>
+          <p>Get started with LeadBridge</p>
         </div>
 
         {error && (

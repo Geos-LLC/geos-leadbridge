@@ -150,6 +150,7 @@ export interface NotificationSettings {
   sigcoreFromPhone: string | null;
   sigcoreWorkspaceId: string | null;
   sigcoreConnected: boolean;
+  sigcoreProvider: string | null;
   template: string;
   quietHoursStart: string | null;
   quietHoursEnd: string | null;

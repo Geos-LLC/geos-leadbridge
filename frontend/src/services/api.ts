@@ -2,7 +2,7 @@ import axios, { AxiosError } from 'axios';
 import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog, NotificationRule, SubscriptionDetails, AdminUser, AdminUserDetails, AdminStats, AdminLog, PhonePoolEntry, PhonePoolStats } from '../types';
 import { notify } from '../store/notificationStore';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://thumbtack-bridge-production.up.railway.app/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://leadbridge-production.up.railway.app/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -564,17 +564,27 @@ export const notificationsApi = {
     const { data } = await api.delete(`/v1/notifications/rules/${savedAccountId}/${ruleId}`);
     return data;
   },
-  // Sigcore integration
-  validateSigcoreApiKey: async (apiKey: string): Promise<{ success: boolean; valid: boolean; phoneNumbers: SigcorePhoneNumber[] }> => {
-    const { data } = await api.post('/v1/notifications/sigcore/validate', { apiKey });
-    return data;
-  },
+  // Provider integration
   getSigcorePhoneNumbers: async (savedAccountId: string): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[] }> => {
     const { data } = await api.get(`/v1/notifications/sigcore/phone-numbers/${savedAccountId}`);
     return data;
   },
-  connectSigcore: async (savedAccountId: string, apiKey: string): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[]; error?: string }> => {
-    const { data } = await api.post(`/v1/notifications/sigcore/connect/${savedAccountId}`, { apiKey });
+  connectSigcore: async (
+    savedAccountId: string,
+    apiKey: string,
+    provider?: 'openphone' | 'twilio',
+    providerCredentials?: {
+      apiKey?: string;
+      accountSid?: string;
+      authToken?: string;
+      phoneNumber?: string;
+    },
+  ): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[]; error?: string }> => {
+    const { data } = await api.post(`/v1/notifications/sigcore/connect/${savedAccountId}`, {
+      apiKey,
+      provider,
+      providerCredentials,
+    });
     return data;
   },
   disconnectSigcore: async (savedAccountId: string): Promise<{ success: boolean; error?: string }> => {

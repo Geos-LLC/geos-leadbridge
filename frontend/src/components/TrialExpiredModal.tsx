@@ -84,7 +84,7 @@ export default function TrialExpiredModal() {
           </>
         ) : (
           <p className="modal-description">
-            Your trial has expired. To continue using Thumbtack Bridge and access all features, please subscribe to one of our plans.
+            Your trial has expired. To continue using LeadBridge and access all features, please subscribe to one of our plans.
           </p>
         )}
 

@@ -1,8 +1,8 @@
-# PowerShell API Testing Script for Thumbtack Bridge
+# PowerShell API Testing Script for LeadBridge
 # This script tests all the main API endpoints
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Thumbtack Bridge API Testing" -ForegroundColor Cyan
+Write-Host "LeadBridge API Testing" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 

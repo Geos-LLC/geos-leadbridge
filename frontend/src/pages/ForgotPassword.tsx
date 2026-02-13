@@ -29,7 +29,7 @@ export function ForgotPassword() {
       <div className="auth-container">
         <div className="auth-card">
           <div className="auth-header">
-            <img src="/Thumbtack_Bridge_Logo.png" alt="Thumbtack Bridge" className="auth-logo" />
+            <img src="/LeadBridge_Logo.png" alt="LeadBridge" className="auth-logo" />
             <h1>Check Your Email</h1>
             <p>We've sent password reset instructions to your email address.</p>
           </div>
@@ -54,7 +54,7 @@ export function ForgotPassword() {
     <div className="auth-container">
       <div className="auth-card">
         <div className="auth-header">
-          <img src="/Thumbtack_Bridge_Logo.png" alt="Thumbtack Bridge" className="auth-logo" />
+          <img src="/LeadBridge_Logo.png" alt="LeadBridge" className="auth-logo" />
           <h1>Forgot Password?</h1>
           <p>Enter your email and we'll send you a reset link</p>
         </div>

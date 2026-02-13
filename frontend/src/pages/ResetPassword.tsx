@@ -54,7 +54,7 @@ export function ResetPassword() {
       <div className="auth-container">
         <div className="auth-card">
           <div className="auth-header">
-            <img src="/Thumbtack_Bridge_Logo.png" alt="Thumbtack Bridge" className="auth-logo" />
+            <img src="/LeadBridge_Logo.png" alt="LeadBridge" className="auth-logo" />
             <h1>Invalid Link</h1>
             <p>This password reset link is invalid or has expired.</p>
           </div>
@@ -77,7 +77,7 @@ export function ResetPassword() {
       <div className="auth-container">
         <div className="auth-card">
           <div className="auth-header">
-            <img src="/Thumbtack_Bridge_Logo.png" alt="Thumbtack Bridge" className="auth-logo" />
+            <img src="/LeadBridge_Logo.png" alt="LeadBridge" className="auth-logo" />
             <h1>Password Reset!</h1>
             <p>Your password has been successfully reset.</p>
           </div>
@@ -99,7 +99,7 @@ export function ResetPassword() {
     <div className="auth-container">
       <div className="auth-card">
         <div className="auth-header">
-          <img src="/Thumbtack_Bridge_Logo.png" alt="Thumbtack Bridge" className="auth-logo" />
+          <img src="/LeadBridge_Logo.png" alt="LeadBridge" className="auth-logo" />
           <h1>Reset Password</h1>
           <p>Enter your new password below</p>
         </div>

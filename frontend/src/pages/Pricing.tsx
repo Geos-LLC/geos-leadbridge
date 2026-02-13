@@ -169,7 +169,7 @@ export default function Pricing() {
 
       <div className="pricing-footer">
         <p>All plans include a 14-day money-back guarantee</p>
-        <p>Need help choosing? <a href="mailto:support@thumbtack-bridge.com">Contact our team</a></p>
+        <p>Need help choosing? <a href="mailto:support@leadbridge.com">Contact our team</a></p>
       </div>
     </div>
   );

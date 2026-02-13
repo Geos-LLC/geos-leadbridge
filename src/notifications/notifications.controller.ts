@@ -267,7 +267,6 @@ export class NotificationsController {
     return {
       success: true,
       valid: result.valid,
-      phoneNumbers: result.phoneNumbers,
     };
   }
 
@@ -291,13 +290,22 @@ export class NotificationsController {
   }
 
   /**
-   * Connect to Sigcore - validates API key, creates webhook, stores settings
+   * Connect provider via Sigcore - validates tenant key, connects provider, creates webhook
    */
   @Post('sigcore/connect/:savedAccountId')
   async connectSigcore(
     @CurrentUser() user: any,
     @Param('savedAccountId') savedAccountId: string,
-    @Body() body: { apiKey: string },
+    @Body() body: {
+      apiKey: string;
+      provider?: 'openphone' | 'twilio';
+      providerCredentials?: {
+        apiKey?: string; // OpenPhone API key
+        accountSid?: string; // Twilio
+        authToken?: string; // Twilio
+        phoneNumber?: string; // Twilio
+      };
+    },
     @Req() req: Request,
   ) {
     // Verify the saved account belongs to the user
@@ -317,6 +325,8 @@ export class NotificationsController {
       savedAccountId,
       body.apiKey,
       webhookBaseUrl,
+      body.provider,
+      body.providerCredentials,
     );
 
     return {

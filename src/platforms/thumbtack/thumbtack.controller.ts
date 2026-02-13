@@ -97,7 +97,7 @@ export class ThumbtackController {
                 console.error(`Business ${business.name} (${business.businessID}) already connected to a different user`);
                 throw new BadRequestException(
                   `Thumbtack business "${business.name}" is already connected to another account. ` +
-                  `Each Thumbtack business can only be connected to one Thumbtack Bridge account. ` +
+                  `Each Thumbtack business can only be connected to one LeadBridge account. ` +
                   `Please use a different Thumbtack business or log in with the account that originally connected this business.`
                 );
               }

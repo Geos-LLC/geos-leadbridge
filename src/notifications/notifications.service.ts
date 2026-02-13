@@ -111,6 +111,7 @@ export interface NotificationSettingsResponse {
   sigcoreFromPhone: string | null;
   sigcoreWorkspaceId: string | null;
   sigcoreConnected: boolean; // Whether API key is configured
+  sigcoreProvider: string | null; // 'openphone' | 'twilio' | null
   template: string;
   quietHoursStart: string | null;
   quietHoursEnd: string | null;
@@ -1237,7 +1238,7 @@ export class NotificationsService {
   }
 
   /**
-   * Fetch phone numbers from Sigcore API
+   * Fetch phone numbers from Sigcore API (provider-aware)
    */
   async getSigcorePhoneNumbers(
     userId: string,
@@ -1264,50 +1265,29 @@ export class NotificationsService {
     }
 
     if (!settings.sigcoreApiKey) {
-      this.logger.warn(`[getSigcorePhoneNumbers] No Sigcore API key found for account ${savedAccountId}. Please connect Sigcore in Phone Settings.`);
+      this.logger.warn(`[getSigcorePhoneNumbers] No API key found for account ${savedAccountId}`);
       return [];
     }
 
-    this.logger.log(`[getSigcorePhoneNumbers] Found Sigcore API key for account ${savedAccountId}, fetching phone numbers...`);
+    const provider = settings.sigcoreProvider || 'openphone';
+    this.logger.log(`[getSigcorePhoneNumbers] Fetching phone numbers for provider: ${provider}`);
 
-
-    try {
-      const endpoint = 'https://sigcore-production.up.railway.app/api/v1/phone-numbers';
-      this.logger.log(`[getPhoneNumbers] Hitting endpoint: ${endpoint}`);
-
-      const response = await fetch(
-        endpoint,
-        {
-          method: 'GET',
-          headers: {
-            'x-api-key': settings.sigcoreApiKey,
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-
-      this.logger.log(`[getPhoneNumbers] Response status: ${response.status}`);
-
-      if (!response.ok) {
-        const error = await response.text();
-        this.logger.error(`[getPhoneNumbers] Sigcore API error: ${response.status} - ${error}`);
-        throw new Error(`Failed to fetch phone numbers: ${response.status}`);
-      }
-
-      const result = await response.json();
-      this.logger.log(`Sigcore phone numbers response: ${JSON.stringify(result)}`);
-
-      // Handle different response formats from Sigcore API
-      const phones = result.data || result.phoneNumbers || result || [];
-      this.logger.log(`Raw phones array (getPhoneNumbers): ${JSON.stringify(phones)}`);
-
-      return phones
-        .map((phone: any) => this.mapSigcorePhoneNumber(phone))
-        .filter((p: any) => p.phoneNumber && p.phoneNumber.length > 5);
-    } catch (error: any) {
-      this.logger.error('Failed to fetch Sigcore phone numbers', error);
-      throw new Error(error.message || 'Failed to connect to Sigcore');
+    if (provider === 'twilio' && settings.sigcoreFromPhone) {
+      // For Twilio, return the configured phone number from settings
+      return [{
+        id: 'twilio-configured',
+        phoneNumber: settings.sigcoreFromPhone,
+        provider: 'twilio',
+        friendlyName: 'Twilio Number',
+        capabilities: ['sms', 'voice'],
+        smsEnabled: true,
+        mmsEnabled: false,
+        voiceEnabled: true,
+      }];
     }
+
+    // For OpenPhone, fetch via conversations endpoint
+    return this.fetchOpenPhoneNumbers(settings.sigcoreApiKey);
   }
 
   /**
@@ -1361,55 +1341,112 @@ export class NotificationsService {
   }
 
   /**
-   * Validate Sigcore API key by attempting to fetch phone numbers
+   * Validate Sigcore tenant API key by attempting to list webhook subscriptions
    */
-  async validateSigcoreApiKey(apiKey: string): Promise<{ valid: boolean; phoneNumbers: SigcorePhoneNumber[] }> {
-    const endpoint = 'https://sigcore-production.up.railway.app/api/v1/phone-numbers';
-    this.logger.log(`[validateSigcoreApiKey] Hitting endpoint: ${endpoint}`);
+  async validateSigcoreApiKey(apiKey: string): Promise<{ valid: boolean }> {
+    const endpoint = 'https://sigcore-production.up.railway.app/api/webhook-subscriptions';
+    this.logger.log(`[validateSigcoreApiKey] Validating key via: ${endpoint}`);
 
     try {
-      const response = await fetch(
-        endpoint,
-        {
-          method: 'GET',
-          headers: {
-            'x-api-key': apiKey,
-            'Content-Type': 'application/json',
-          },
+      const response = await fetch(endpoint, {
+        method: 'GET',
+        headers: {
+          'x-api-key': apiKey,
+          'Content-Type': 'application/json',
         },
-      );
+      });
 
       this.logger.log(`[validateSigcoreApiKey] Response status: ${response.status}`);
 
       if (!response.ok) {
         this.logger.error(`[validateSigcoreApiKey] Failed with status: ${response.status}`);
-        return { valid: false, phoneNumbers: [] };
+        return { valid: false };
       }
 
-      const result = await response.json();
-      this.logger.log(`Sigcore validate response: ${JSON.stringify(result)}`);
+      return { valid: true };
+    } catch {
+      return { valid: false };
+    }
+  }
 
-      // Handle different response formats from Sigcore API
-      const phones = result.data || result.phoneNumbers || result || [];
-      this.logger.log(`Raw phones array: ${JSON.stringify(phones)}`);
+  /**
+   * Connect a provider (OpenPhone or Twilio) via Sigcore integration endpoints
+   */
+  async connectProviderViaSigcore(
+    tenantApiKey: string,
+    provider: 'openphone' | 'twilio',
+    credentials: {
+      apiKey?: string; // OpenPhone API key
+      accountSid?: string; // Twilio
+      authToken?: string; // Twilio
+      phoneNumber?: string; // Twilio
+    },
+  ): Promise<{ success: boolean; error?: string; data?: any }> {
+    const baseUrl = 'https://sigcore-production.up.railway.app';
 
-      const phoneNumbers = phones
-        .map((phone: any) => {
-          this.logger.log(`Mapping phone: ${JSON.stringify(phone)}`);
-          return this.mapSigcorePhoneNumber(phone);
-        })
-        .filter((p: any) => {
-          const valid = p.phoneNumber && p.phoneNumber.length > 5;
-          if (!valid) {
-            this.logger.log(`Filtered out invalid phone: ${JSON.stringify(p)}`);
-          }
-          return valid;
+    if (provider === 'openphone') {
+      const endpoint = `${baseUrl}/api/integrations/openphone/connect`;
+      this.logger.log(`[connectProvider] Connecting OpenPhone via: ${endpoint}`);
+
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'x-api-key': tenantApiKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ apiKey: credentials.apiKey }),
         });
 
-      this.logger.log(`Final phoneNumbers: ${JSON.stringify(phoneNumbers)}`);
-      return { valid: true, phoneNumbers };
-    } catch {
-      return { valid: false, phoneNumbers: [] };
+        this.logger.log(`[connectProvider] OpenPhone response status: ${response.status}`);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          this.logger.error(`[connectProvider] OpenPhone connect failed: ${response.status} - ${errorText}`);
+          return { success: false, error: `Failed to connect OpenPhone: ${response.status}` };
+        }
+
+        const result = await response.json();
+        this.logger.log(`[connectProvider] OpenPhone connected: ${JSON.stringify(result)}`);
+        return { success: true, data: result };
+      } catch (error: any) {
+        this.logger.error(`[connectProvider] OpenPhone error: ${error.message}`);
+        return { success: false, error: error.message };
+      }
+    } else {
+      // Twilio
+      const endpoint = `${baseUrl}/api/integrations/twilio`;
+      this.logger.log(`[connectProvider] Connecting Twilio via: ${endpoint}`);
+
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'x-api-key': tenantApiKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            accountSid: credentials.accountSid,
+            authToken: credentials.authToken,
+            phoneNumber: credentials.phoneNumber,
+          }),
+        });
+
+        this.logger.log(`[connectProvider] Twilio response status: ${response.status}`);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          this.logger.error(`[connectProvider] Twilio connect failed: ${response.status} - ${errorText}`);
+          return { success: false, error: `Failed to connect Twilio: ${response.status}` };
+        }
+
+        const result = await response.json();
+        this.logger.log(`[connectProvider] Twilio connected: ${JSON.stringify(result)}`);
+        return { success: true, data: result };
+      } catch (error: any) {
+        this.logger.error(`[connectProvider] Twilio error: ${error.message}`);
+        return { success: false, error: error.message };
+      }
     }
   }
 
@@ -1417,7 +1454,7 @@ export class NotificationsService {
    * Create a webhook subscription in Sigcore for delivery status updates
    */
   async createSigcoreWebhook(apiKey: string, webhookUrl: string): Promise<{ webhookId: string | null; error?: string }> {
-    const endpoint = 'https://sigcore-production.up.railway.app/api/v1/webhook-subscriptions';
+    const endpoint = 'https://sigcore-production.up.railway.app/api/webhook-subscriptions';
     this.logger.log(`[createSigcoreWebhook] Creating webhook subscription at: ${endpoint}`);
     this.logger.log(`[createSigcoreWebhook] Webhook URL: ${webhookUrl}`);
 
@@ -1458,7 +1495,7 @@ export class NotificationsService {
    * Delete a webhook subscription from Sigcore
    */
   async deleteSigcoreWebhook(apiKey: string, webhookId: string): Promise<{ success: boolean; error?: string }> {
-    const endpoint = `https://sigcore-production.up.railway.app/api/v1/webhook-subscriptions/${webhookId}`;
+    const endpoint = `https://sigcore-production.up.railway.app/api/webhook-subscriptions/${webhookId}`;
     this.logger.log(`[deleteSigcoreWebhook] Deleting webhook subscription: ${endpoint}`);
 
     try {
@@ -1486,22 +1523,37 @@ export class NotificationsService {
   }
 
   /**
-   * Connect to Sigcore - validates API key, creates webhook, and stores settings
+   * Connect to Sigcore - validates tenant API key, connects provider, creates webhook, stores settings
    */
   async connectSigcore(
     savedAccountId: string,
     apiKey: string,
     webhookBaseUrl: string,
+    provider?: 'openphone' | 'twilio',
+    providerCredentials?: {
+      apiKey?: string; // OpenPhone API key
+      accountSid?: string; // Twilio
+      authToken?: string; // Twilio
+      phoneNumber?: string; // Twilio
+    },
   ): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[]; error?: string }> {
-    this.logger.log(`[connectSigcore] Connecting account ${savedAccountId}`);
+    this.logger.log(`[connectSigcore] Connecting account ${savedAccountId} with provider ${provider || 'none'}`);
 
-    // 1. Validate the API key
+    // 1. Validate the tenant API key
     const validation = await this.validateSigcoreApiKey(apiKey);
     if (!validation.valid) {
-      return { success: false, phoneNumbers: [], error: 'Invalid API key' };
+      return { success: false, phoneNumbers: [], error: 'Invalid API key. Please check your LeadBridge API key.' };
     }
 
-    // 2. Create webhook for delivery status
+    // 2. Connect provider if specified
+    if (provider && providerCredentials) {
+      const providerResult = await this.connectProviderViaSigcore(apiKey, provider, providerCredentials);
+      if (!providerResult.success) {
+        return { success: false, phoneNumbers: [], error: providerResult.error || `Failed to connect ${provider}` };
+      }
+    }
+
+    // 3. Create webhook for delivery status
     const webhookUrl = `${webhookBaseUrl}/api/webhooks/sigcore/delivery-status`;
     const webhookResult = await this.createSigcoreWebhook(apiKey, webhookUrl);
 
@@ -1510,25 +1562,35 @@ export class NotificationsService {
       // Continue anyway - webhook can be created manually later
     }
 
-    // 3. Store the API key and webhook ID
+    // 4. Store the API key, provider, and webhook ID
     await this.prisma.notificationSettings.upsert({
       where: { savedAccountId },
       update: {
         sigcoreApiKey: apiKey,
+        sigcoreProvider: provider || null,
         sigcoreWebhookId: webhookResult.webhookId,
-        enabled: true,  // Ensure notifications are enabled when connecting
+        enabled: true,
       },
       create: {
         savedAccountId,
         sigcoreApiKey: apiKey,
+        sigcoreProvider: provider || null,
         sigcoreWebhookId: webhookResult.webhookId,
         enabled: true,
       },
     });
 
-    this.logger.log(`[connectSigcore] Connected successfully. WebhookId: ${webhookResult.webhookId}`);
+    // Store Twilio phone number as fromPhone if provided
+    if (provider === 'twilio' && providerCredentials?.phoneNumber) {
+      await this.prisma.notificationSettings.update({
+        where: { savedAccountId },
+        data: { sigcoreFromPhone: providerCredentials.phoneNumber },
+      });
+    }
 
-    // 4. Propagate API key to other accounts of the same user that don't have one
+    this.logger.log(`[connectSigcore] Connected successfully. Provider: ${provider}, WebhookId: ${webhookResult.webhookId}`);
+
+    // 5. Propagate API key to other accounts of the same user that don't have one
     const savedAccount = await this.prisma.savedAccount.findUnique({
       where: { id: savedAccountId },
       select: { userId: true },
@@ -1547,14 +1609,73 @@ export class NotificationsService {
         if (otherAccount.notificationSettings && !otherAccount.notificationSettings.sigcoreApiKey) {
           await this.prisma.notificationSettings.update({
             where: { id: otherAccount.notificationSettings.id },
-            data: { sigcoreApiKey: apiKey },
+            data: {
+              sigcoreApiKey: apiKey,
+              sigcoreProvider: provider || null,
+            },
           });
           this.logger.log(`[connectSigcore] Auto-propagated API key to account ${otherAccount.id} (${otherAccount.businessName})`);
         }
       }
     }
 
-    return { success: true, phoneNumbers: validation.phoneNumbers };
+    // 6. Fetch phone numbers for the connected provider
+    let phoneNumbers: SigcorePhoneNumber[] = [];
+    if (provider === 'openphone') {
+      phoneNumbers = await this.fetchOpenPhoneNumbers(apiKey);
+    } else if (provider === 'twilio' && providerCredentials?.phoneNumber) {
+      // For Twilio, return the configured phone number
+      phoneNumbers = [{
+        id: 'twilio-configured',
+        phoneNumber: providerCredentials.phoneNumber,
+        provider: 'twilio',
+        friendlyName: 'Twilio Number',
+        capabilities: ['sms', 'voice'],
+        smsEnabled: true,
+        mmsEnabled: false,
+        voiceEnabled: true,
+      }];
+    }
+
+    return { success: true, phoneNumbers };
+  }
+
+  /**
+   * Fetch phone numbers from OpenPhone via Sigcore conversations endpoint
+   */
+  private async fetchOpenPhoneNumbers(tenantApiKey: string): Promise<SigcorePhoneNumber[]> {
+    const endpoint = 'https://sigcore-production.up.railway.app/api/integrations/openphone/conversations?days=1';
+    this.logger.log(`[fetchOpenPhoneNumbers] Fetching from: ${endpoint}`);
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'GET',
+        headers: {
+          'x-api-key': tenantApiKey,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      this.logger.log(`[fetchOpenPhoneNumbers] Response status: ${response.status}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.logger.error(`[fetchOpenPhoneNumbers] Failed: ${response.status} - ${errorText}`);
+        return [];
+      }
+
+      const result = await response.json();
+      this.logger.log(`[fetchOpenPhoneNumbers] Result: ${JSON.stringify(result).substring(0, 500)}`);
+
+      // Extract phone numbers from conversations data
+      const phones = result.data || result.phoneNumbers || result || [];
+      return phones
+        .map((phone: any) => this.mapSigcorePhoneNumber(phone))
+        .filter((p: any) => p.phoneNumber && p.phoneNumber.length > 5);
+    } catch (error: any) {
+      this.logger.error(`[fetchOpenPhoneNumbers] Error: ${error.message}`);
+      return [];
+    }
   }
 
   /**
@@ -1586,6 +1707,7 @@ export class NotificationsService {
         sigcoreApiKey: null,
         sigcoreFromPhone: null,
         sigcoreWebhookId: null,
+        sigcoreProvider: null,
       },
     });
 
@@ -1695,6 +1817,7 @@ export class NotificationsService {
       sigcoreFromPhone: settings.sigcoreFromPhone,
       sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
       sigcoreConnected: !!settings.sigcoreApiKey,
+      sigcoreProvider: settings.sigcoreProvider || null,
       template: settings.template,
       quietHoursStart: settings.quietHoursStart,
       quietHoursEnd: settings.quietHoursEnd,

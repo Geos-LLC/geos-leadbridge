@@ -170,7 +170,7 @@ async function bootstrap() {
   console.log(`
   ╔═══════════════════════════════════════════════════════╗
   ║                                                       ║
-  ║   🌉 Thumbtack Bridge API Server                     ║
+  ║   🌉 LeadBridge API Server                           ║
   ║                                                       ║
   ║   Server running on: http://localhost:${port}        ║
   ║   Environment: ${configService.get('nodeEnv')}                    ║

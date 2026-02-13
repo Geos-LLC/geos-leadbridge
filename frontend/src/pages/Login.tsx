@@ -32,9 +32,9 @@ export function Login() {
     <div className="auth-container">
       <div className="auth-card">
         <div className="auth-header">
-          <img src="/Thumbtack_Bridge_Logo.png" alt="Thumbtack Bridge" className="auth-logo" />
+          <img src="/LeadBridge_Logo.png" alt="LeadBridge" className="auth-logo" />
           <h1>Welcome Back</h1>
-          <p>Sign in to your Thumbtack Bridge account</p>
+          <p>Sign in to your LeadBridge account</p>
         </div>
 
         {error && (
