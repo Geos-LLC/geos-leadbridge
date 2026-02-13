@@ -249,7 +249,7 @@ export class TestService {
     if (traceUserId) {
       const allSavedAccounts = await this.prisma.savedAccount.findMany({
         where: { platform: 'thumbtack', businessId },
-        include: { notificationSettings: { select: { id: true, enabled: true, callioApiKey: true } } },
+        include: { notificationSettings: { select: { id: true, enabled: true, sigcoreApiKey: true } } },
       });
 
       if (allSavedAccounts.length === 0) {
@@ -309,7 +309,7 @@ export class TestService {
           const otherAccountSettings = await this.prisma.notificationSettings.findFirst({
             where: {
               savedAccount: { userId: traceUserId! },
-              callioApiKey: { not: null },
+              sigcoreApiKey: { not: null },
               enabled: true,
             },
             include: {
@@ -326,7 +326,7 @@ export class TestService {
               detail: `Found settings from "${otherAccountSettings.savedAccount?.businessName}" (${otherAccountSettings.savedAccountId}) with ${otherAccountSettings.notificationRules.length} rule(s)`,
             });
           } else {
-            pipelineTrace.push({ step: 'Fallback: other account settings', status: 'fail', detail: 'No other account has settings with Callio API key. SMS cannot be sent.' });
+            pipelineTrace.push({ step: 'Fallback: other account settings', status: 'fail', detail: 'No other account has settings with Sigcore API key. SMS cannot be sent.' });
           }
         }
       } else {
@@ -339,11 +339,11 @@ export class TestService {
           pipelineTrace.push({ step: 'Settings enabled', status: 'pass', detail: 'enabled=true' });
         }
 
-        // Step 5: Callio API key
-        if (!traceSettings.callioApiKey) {
-          pipelineTrace.push({ step: 'Callio API key', status: 'fail', detail: 'No API key configured. SMS cannot be sent.' });
+        // Step 5: Sigcore API key
+        if (!traceSettings.sigcoreApiKey) {
+          pipelineTrace.push({ step: 'Sigcore API key', status: 'fail', detail: 'No API key configured. SMS cannot be sent.' });
         } else {
-          pipelineTrace.push({ step: 'Callio API key', status: 'pass', detail: 'API key is set' });
+          pipelineTrace.push({ step: 'Sigcore API key', status: 'pass', detail: 'API key is set' });
         }
 
         // Step 6: requirePhone check
@@ -400,7 +400,7 @@ export class TestService {
       if (failedStep) {
         smsNotSentReason = `Pipeline stopped at "${failedStep.step}": ${failedStep.detail}`;
       } else {
-        smsNotSentReason = 'All pipeline checks passed but no SMS log found. Possible Callio API error - check Railway logs.';
+        smsNotSentReason = 'All pipeline checks passed but no SMS log found. Possible Sigcore API error - check Railway logs.';
       }
     }
 
@@ -421,7 +421,7 @@ export class TestService {
         automationRules: automationRules.map(r => ({ name: r.name, triggerType: r.triggerType })),
         notificationRulesFound: notifSettings?.notificationRules?.length || 0,
         notificationRules: (notifSettings?.notificationRules || []).map(r => ({ name: r.name, triggerType: r.triggerType })),
-        callioConnected: !!notifSettings?.callioApiKey,
+        sigcoreConnected: !!notifSettings?.sigcoreApiKey,
         smsLogs: recentLogs,
         smsSent,
         smsSuccessCount,
@@ -433,7 +433,7 @@ export class TestService {
         notificationDiagnostics: {
           settingsExist: !!notifSettings,
           settingsEnabled: notifSettings?.enabled ?? false,
-          hasCallioApiKey: !!notifSettings?.callioApiKey,
+          hasSigcoreApiKey: !!notifSettings?.sigcoreApiKey,
           totalRules: notifSettings?.notificationRules?.length || 0,
           newLeadRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead').length,
           customerReplyRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'customer_reply').length,
@@ -522,7 +522,7 @@ export class TestService {
     if (!notifSettings) issues.push('No notification settings configured');
     else {
       if (!notifSettings.enabled) issues.push('Notification settings are disabled');
-      if (!notifSettings.callioApiKey) issues.push('No Callio API key configured');
+      if (!notifSettings.sigcoreApiKey) issues.push('No Sigcore API key configured');
       const newLeadRules = notifSettings.notificationRules.filter(r => r.triggerType === 'new_lead');
       if (newLeadRules.length === 0) issues.push('No enabled "new_lead" SMS rules');
     }
@@ -541,7 +541,7 @@ export class TestService {
       notifications: {
         settingsExist: !!notifSettings,
         settingsEnabled: notifSettings?.enabled ?? false,
-        hasCallioApiKey: !!notifSettings?.callioApiKey,
+        hasSigcoreApiKey: !!notifSettings?.sigcoreApiKey,
         totalRules: notifSettings?.notificationRules?.length || 0,
         newLeadRules: (notifSettings?.notificationRules || []).filter(r => r.triggerType === 'new_lead').length,
         customerReplyRules: (notifSettings?.notificationRules || []).filter(r => r.triggerType === 'customer_reply').length,

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ArrowLeft, Phone, Loader2, X, ChevronDown, AlertCircle, CheckCircle, Link, Unlink, Key, Shield, ShieldCheck, ShieldX, ShieldAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { notificationsApi, thumbtackApi, type CallioPhoneNumber } from '../services/api';
+import { notificationsApi, thumbtackApi, type SigcorePhoneNumber } from '../services/api';
 import type { SavedAccount } from '../types';
 
 // Helper function to get A2P status display
@@ -28,10 +28,10 @@ export function PhoneSettings() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Callio connection state
-  const [callioConnected, setCallioConnected] = useState(false);
-  const [callioApiKey, setCallioApiKey] = useState('');
-  const [callioPhoneNumbers, setCallioPhoneNumbers] = useState<CallioPhoneNumber[]>([]);
+  // Sigcore connection state
+  const [sigcoreConnected, setSigcoreConnected] = useState(false);
+  const [sigcoreApiKey, setSigcoreApiKey] = useState('');
+  const [sigcorePhoneNumbers, setSigcorePhoneNumbers] = useState<SigcorePhoneNumber[]>([]);
   const [validatingApiKey, setValidatingApiKey] = useState(false);
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
 
@@ -68,18 +68,18 @@ export function PhoneSettings() {
       const settingsRes = await notificationsApi.getSettings(accountId);
 
       if (settingsRes.settings) {
-        setCallioConnected(settingsRes.settings.callioConnected);
+        setSigcoreConnected(settingsRes.settings.sigcoreConnected);
         setShowApiKeyInput(false);
-        if (settingsRes.settings.callioConnected) {
+        if (settingsRes.settings.sigcoreConnected) {
           loadPhoneNumbers(accountId);
         } else {
-          setCallioPhoneNumbers([]);
+          setSigcorePhoneNumbers([]);
         }
       } else {
         // Reset to defaults
-        setCallioConnected(false);
-        setCallioApiKey('');
-        setCallioPhoneNumbers([]);
+        setSigcoreConnected(false);
+        setSigcoreApiKey('');
+        setSigcorePhoneNumbers([]);
         setShowApiKeyInput(false);
       }
     } catch (err: any) {
@@ -91,16 +91,16 @@ export function PhoneSettings() {
 
   async function loadPhoneNumbers(accountId: string) {
     try {
-      const result = await notificationsApi.getCallioPhoneNumbers(accountId);
-      setCallioPhoneNumbers(result.phoneNumbers);
+      const result = await notificationsApi.getSigcorePhoneNumbers(accountId);
+      setSigcorePhoneNumbers(result.phoneNumbers);
     } catch (err) {
       console.error('Failed to load phone numbers:', err);
     }
   }
 
-  async function handleConnectCallio() {
-    if (!callioApiKey.trim()) {
-      setError('Please enter your Callio API key');
+  async function handleConnectSigcore() {
+    if (!sigcoreApiKey.trim()) {
+      setError('Please enter your Sigcore API key');
       return;
     }
 
@@ -108,41 +108,41 @@ export function PhoneSettings() {
       setValidatingApiKey(true);
       setError(null);
 
-      const result = await notificationsApi.connectCallio(selectedAccountId, callioApiKey);
+      const result = await notificationsApi.connectSigcore(selectedAccountId, sigcoreApiKey);
 
       if (!result.success) {
-        setError(result.error || 'Invalid API key. Please check your Callio API key and try again.');
+        setError(result.error || 'Invalid API key. Please check your Sigcore API key and try again.');
         return;
       }
 
-      setCallioConnected(true);
-      setCallioPhoneNumbers(result.phoneNumbers);
+      setSigcoreConnected(true);
+      setSigcorePhoneNumbers(result.phoneNumbers);
       setShowApiKeyInput(false);
-      setCallioApiKey('');
-      setSuccessMessage('Connected to Callio successfully');
+      setSigcoreApiKey('');
+      setSuccessMessage('Connected to Sigcore successfully');
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err: any) {
-      setError(err.message || 'Failed to connect to Callio');
+      setError(err.message || 'Failed to connect to Sigcore');
     } finally {
       setValidatingApiKey(false);
     }
   }
 
-  async function handleDisconnectCallio() {
+  async function handleDisconnectSigcore() {
     try {
       setError(null);
 
-      const result = await notificationsApi.disconnectCallio(selectedAccountId);
+      const result = await notificationsApi.disconnectSigcore(selectedAccountId);
 
       if (!result.success) {
         setError(result.error || 'Failed to disconnect');
         return;
       }
 
-      setCallioConnected(false);
-      setCallioApiKey('');
-      setCallioPhoneNumbers([]);
-      setSuccessMessage('Disconnected from Callio');
+      setSigcoreConnected(false);
+      setSigcoreApiKey('');
+      setSigcorePhoneNumbers([]);
+      setSuccessMessage('Disconnected from Sigcore');
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err: any) {
       setError(err.message || 'Failed to disconnect');
@@ -245,35 +245,35 @@ export function PhoneSettings() {
           </div>
         ) : (
           <>
-            {/* Callio Connection Section */}
-            <div className="settings-section callio-connection">
+            {/* Sigcore Connection Section */}
+            <div className="settings-section sigcore-connection">
               <div className="section-header">
                 <h2>
                   <Key size={18} />
-                  Callio Connection
+                  Sigcore Connection
                 </h2>
               </div>
 
-              {callioConnected ? (
-                <div className="callio-connected">
+              {sigcoreConnected ? (
+                <div className="sigcore-connected">
                   <div className="connection-status">
                     <CheckCircle size={18} className="status-icon success" />
-                    <span>Connected to Callio</span>
+                    <span>Connected to Sigcore</span>
                     <button
                       className="btn btn-secondary btn-sm"
-                      onClick={handleDisconnectCallio}
+                      onClick={handleDisconnectSigcore}
                     >
                       <Unlink size={14} />
                       Disconnect
                     </button>
                   </div>
 
-                  {callioPhoneNumbers.length > 0 ? (
+                  {sigcorePhoneNumbers.length > 0 ? (
                     <div className="phone-numbers-list">
-                      <label>Available Phone Numbers ({callioPhoneNumbers.length})</label>
+                      <label>Available Phone Numbers ({sigcorePhoneNumbers.length})</label>
                       <p className="form-hint">These phone numbers can be used when creating SMS alert rules.</p>
                       <div className="phone-cards">
-                        {callioPhoneNumbers.map(phone => {
+                        {sigcorePhoneNumbers.map(phone => {
                           const a2pInfo = getA2PStatusInfo(phone.a2pStatus);
                           return (
                             <div key={phone.id} className="phone-card">
@@ -305,15 +305,15 @@ export function PhoneSettings() {
                   ) : (
                     <div className="warning-message">
                       <AlertCircle size={16} />
-                      No phone numbers found in your Callio account. Please add a phone number in Callio first.
+                      No phone numbers found in your Sigcore account. Please add a phone number in Sigcore first.
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="callio-disconnected">
+                <div className="sigcore-disconnected">
                   <p className="connection-info">
-                    Connect your Callio account to send SMS notifications. Get your API key from the
-                    Callio settings page.
+                    Connect your Sigcore account to send SMS notifications. Get your API key from the
+                    Sigcore settings page.
                   </p>
 
                   {showApiKeyInput ? (
@@ -321,13 +321,13 @@ export function PhoneSettings() {
                       <div className="form-group">
                         <label>
                           <Key size={14} />
-                          Callio API Key
+                          Sigcore API Key
                         </label>
                         <input
                           type="password"
-                          value={callioApiKey}
-                          onChange={e => setCallioApiKey(e.target.value)}
-                          placeholder="Enter your Callio API key"
+                          value={sigcoreApiKey}
+                          onChange={e => setSigcoreApiKey(e.target.value)}
+                          placeholder="Enter your Sigcore API key"
                         />
                       </div>
                       <div className="form-actions">
@@ -335,15 +335,15 @@ export function PhoneSettings() {
                           className="btn btn-secondary"
                           onClick={() => {
                             setShowApiKeyInput(false);
-                            setCallioApiKey('');
+                            setSigcoreApiKey('');
                           }}
                         >
                           Cancel
                         </button>
                         <button
                           className="btn btn-primary"
-                          onClick={handleConnectCallio}
-                          disabled={validatingApiKey || !callioApiKey.trim()}
+                          onClick={handleConnectSigcore}
+                          disabled={validatingApiKey || !sigcoreApiKey.trim()}
                         >
                           {validatingApiKey ? (
                             <>
@@ -365,7 +365,7 @@ export function PhoneSettings() {
                       onClick={() => setShowApiKeyInput(true)}
                     >
                       <Link size={16} />
-                      Connect to Callio
+                      Connect to Sigcore
                     </button>
                   )}
                 </div>

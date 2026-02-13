@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { HttpModule } from '@nestjs/axios';
-import { CallioService } from './callio.service';
+import { SigcoreService } from './sigcore.service';
 import { PrismaService } from '../common/utils/prisma.service';
 
 @Module({
   imports: [ConfigModule, HttpModule],
-  providers: [CallioService, PrismaService],
-  exports: [CallioService],
+  providers: [SigcoreService, PrismaService],
+  exports: [SigcoreService],
 })
-export class CallioModule {}
+export class SigcoreModule {}

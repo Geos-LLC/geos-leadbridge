@@ -1,6 +1,6 @@
 /**
  * Notifications Module
- * Manages SMS notification settings and Callio integration
+ * Manages SMS notification settings and Sigcore integration
  */
 
 import { Module } from '@nestjs/common';

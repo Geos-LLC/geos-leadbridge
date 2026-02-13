@@ -384,8 +384,8 @@ export function ApiTest() {
                 {' '}Notification settings
               </div>
               <div>
-                {diagnostics.notifications.hasCallioApiKey ? <CheckCircle size={12} className="check" /> : <XCircle size={12} className="cross" />}
-                {' '}Callio API key
+                {diagnostics.notifications.hasSigcoreApiKey ? <CheckCircle size={12} className="check" /> : <XCircle size={12} className="cross" />}
+                {' '}Sigcore API key
               </div>
               <div>
                 {diagnostics.notifications.newLeadRules > 0 ? <CheckCircle size={12} className="check" /> : <XCircle size={12} className="cross" />}

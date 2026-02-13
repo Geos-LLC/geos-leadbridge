@@ -7,7 +7,7 @@ import { Injectable, UnauthorizedException, ConflictException, BadRequestExcepti
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../common/utils/prisma.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
-import { CallioService } from '../callio/callio.service';
+import { SigcoreService } from '../sigcore/sigcore.service';
 import * as crypto from 'crypto';
 import emailjs from '@emailjs/nodejs';
 
@@ -18,7 +18,7 @@ export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
-    private callioService: CallioService,
+    private sigcoreService: SigcoreService,
   ) {}
 
   /**
@@ -54,9 +54,9 @@ export class AuthService {
       },
     });
 
-    // Auto-provision phone number via Callio
+    // Auto-provision phone number via Sigcore
     try {
-      const phoneProvision = await this.callioService.provisionNumberForUser(user.id);
+      const phoneProvision = await this.sigcoreService.provisionNumberForUser(user.id);
       if (phoneProvision) {
         this.logger.log(`Provisioned phone number ${phoneProvision.phoneNumber} for new user ${user.id}`);
         // Re-fetch user to get updated phone number

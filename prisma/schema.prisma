@@ -69,9 +69,9 @@ model User {
   thumbtackBusinessId   String?
   thumbtackAccountEmail String?
 
-  // Callio phone number provisioning
-  phoneNumber           String?  // User's dedicated Callio/Twilio number
-  callioAllocationId    String?  // Callio's allocation ID for this number
+  // Sigcore phone number provisioning
+  phoneNumber           String?  // User's dedicated Sigcore/Twilio number
+  sigcoreAllocationId   String?  @map("callioAllocationId") // Sigcore's allocation ID for this number
 
   // Password reset
   passwordResetToken    String?
@@ -367,7 +367,7 @@ model PendingAutomatedMessage {
 }
 
 // ==========================================
-// SMS Notification Settings (Callio Integration)
+// SMS Notification Settings (Sigcore Integration)
 // ==========================================
 
 model NotificationSettings {
@@ -377,10 +377,10 @@ model NotificationSettings {
   enabled           Boolean  @default(false)
   destinationPhone  String?  // Company phone to send notifications to
   senderMode        String   @default("shared") // "shared" | "dedicated" | "openphone"
-  callioApiKey      String?  // Encrypted Callio API key
-  callioFromPhone   String?  // Selected phone number from Callio to send from
-  callioWorkspaceId String?  // Callio workspace ID for this tenant
-  callioWebhookId   String?  // Callio webhook ID for delivery status updates
+  sigcoreApiKey      String?  @map("callioApiKey") // Encrypted Sigcore API key
+  sigcoreFromPhone   String?  @map("callioFromPhone") // Selected phone number from Sigcore to send from
+  sigcoreWorkspaceId String?  @map("callioWorkspaceId") // Sigcore workspace ID for this tenant
+  sigcoreWebhookId   String?  @map("callioWebhookId") // Sigcore webhook ID for delivery status updates
   template          String   @db.Text @default("New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}")
   quietHoursStart   String?  // e.g., "22:00"
   quietHoursEnd     String?  // e.g., "08:00"
@@ -410,7 +410,7 @@ model NotificationRule {
   name                   String   // User-friendly rule name (e.g., "New Lead Alert")
   triggerType            String   // "new_lead" | "customer_reply"
   replyTriggerMode       String?  // For customer_reply: "first_only" | "every_reply"
-  fromPhone              String?  // Callio phone number to send FROM
+  fromPhone              String?  // Sigcore phone number to send FROM
   toPhone                String?  // Destination phone number to send TO
   template               String   @db.Text // SMS template for this specific rule
   enabled                Boolean  @default(true)
@@ -438,8 +438,8 @@ model NotificationLog {
   toPhone               String    // Destination phone number
   fromPhone             String?   // Sender phone number
   provider              String?   // "twilio" | "openphone" | etc.
-  callioMessageId       String?   // Callio's message ID
-  callioConversationId  String?   // Callio's conversation ID
+  sigcoreMessageId       String?   @map("callioMessageId") // Sigcore's message ID
+  sigcoreConversationId  String?   @map("callioConversationId") // Sigcore's conversation ID
   status                String    @default("pending") // "pending" | "queued" | "sent" | "delivered" | "failed"
   error                 String?   @db.Text
   messageBody           String    @db.Text // Rendered message content

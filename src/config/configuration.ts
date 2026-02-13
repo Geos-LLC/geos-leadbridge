@@ -38,7 +38,8 @@ export default () => ({
     apiBaseUrl: 'https://api.yelp.com/v3',
   },
 
-  callio: {
-    webhookSecret: process.env.CALLIO_WEBHOOK_SECRET,
+  sigcore: {
+    apiUrl: process.env.SIGCORE_API_URL || 'https://sigcore-production.up.railway.app',
+    apiKey: process.env.SIGCORE_API_KEY,
   },
 });

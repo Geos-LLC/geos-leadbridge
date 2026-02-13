@@ -472,9 +472,9 @@ export interface UpdateNotificationSettingsDto {
   enabled?: boolean;
   destinationPhone?: string;
   senderMode?: 'shared' | 'dedicated' | 'openphone';
-  callioApiKey?: string;
-  callioFromPhone?: string;
-  callioWorkspaceId?: string;
+  sigcoreApiKey?: string;
+  sigcoreFromPhone?: string;
+  sigcoreWorkspaceId?: string;
   template?: string;
   quietHoursStart?: string;
   quietHoursEnd?: string;
@@ -487,7 +487,7 @@ export interface CreateNotificationRuleDto {
   name: string;
   triggerType: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply';
-  fromPhone: string;  // Callio phone to send FROM
+  fromPhone: string;  // Sigcore phone to send FROM
   toPhone: string;    // Destination phone to send TO
   template: string;
   enabled?: boolean;
@@ -503,8 +503,8 @@ export interface UpdateNotificationRuleDto {
   enabled?: boolean;
 }
 
-// Callio phone number type
-export interface CallioPhoneNumber {
+// Sigcore phone number type
+export interface SigcorePhoneNumber {
   id: string;
   phoneNumber: string;
   provider: 'twilio' | 'openphone' | string;
@@ -519,7 +519,7 @@ export interface CallioPhoneNumber {
   voiceEnabled?: boolean;
 }
 
-// SMS Notifications (Callio Integration)
+// SMS Notifications (Sigcore Integration)
 export const notificationsApi = {
   getSettings: async (savedAccountId: string): Promise<{ success: boolean; settings: NotificationSettings | null }> => {
     const { data } = await api.get(`/v1/notifications/settings/${savedAccountId}`);
@@ -564,21 +564,21 @@ export const notificationsApi = {
     const { data } = await api.delete(`/v1/notifications/rules/${savedAccountId}/${ruleId}`);
     return data;
   },
-  // Callio integration
-  validateCallioApiKey: async (apiKey: string): Promise<{ success: boolean; valid: boolean; phoneNumbers: CallioPhoneNumber[] }> => {
-    const { data } = await api.post('/v1/notifications/callio/validate', { apiKey });
+  // Sigcore integration
+  validateSigcoreApiKey: async (apiKey: string): Promise<{ success: boolean; valid: boolean; phoneNumbers: SigcorePhoneNumber[] }> => {
+    const { data } = await api.post('/v1/notifications/sigcore/validate', { apiKey });
     return data;
   },
-  getCallioPhoneNumbers: async (savedAccountId: string): Promise<{ success: boolean; phoneNumbers: CallioPhoneNumber[] }> => {
-    const { data } = await api.get(`/v1/notifications/callio/phone-numbers/${savedAccountId}`);
+  getSigcorePhoneNumbers: async (savedAccountId: string): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[] }> => {
+    const { data } = await api.get(`/v1/notifications/sigcore/phone-numbers/${savedAccountId}`);
     return data;
   },
-  connectCallio: async (savedAccountId: string, apiKey: string): Promise<{ success: boolean; phoneNumbers: CallioPhoneNumber[]; error?: string }> => {
-    const { data } = await api.post(`/v1/notifications/callio/connect/${savedAccountId}`, { apiKey });
+  connectSigcore: async (savedAccountId: string, apiKey: string): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[]; error?: string }> => {
+    const { data } = await api.post(`/v1/notifications/sigcore/connect/${savedAccountId}`, { apiKey });
     return data;
   },
-  disconnectCallio: async (savedAccountId: string): Promise<{ success: boolean; error?: string }> => {
-    const { data } = await api.delete(`/v1/notifications/callio/disconnect/${savedAccountId}`);
+  disconnectSigcore: async (savedAccountId: string): Promise<{ success: boolean; error?: string }> => {
+    const { data } = await api.delete(`/v1/notifications/sigcore/disconnect/${savedAccountId}`);
     return data;
   },
 };
@@ -813,7 +813,7 @@ export interface SimulationResult {
     automationRules: Array<{ name: string; triggerType: string }>;
     notificationRulesFound: number;
     notificationRules: Array<{ name: string; triggerType: string }>;
-    callioConnected: boolean;
+    sigcoreConnected: boolean;
     smsLogs: Array<{ id: string; status: string; ruleName: string | null; error: string | null; toPhone?: string; fromPhone?: string }>;
     smsSent: boolean;
     smsSuccessCount: number;
@@ -825,7 +825,7 @@ export interface SimulationResult {
     notificationDiagnostics: {
       settingsExist: boolean;
       settingsEnabled: boolean;
-      hasCallioApiKey: boolean;
+      hasSigcoreApiKey: boolean;
       totalRules: number;
       newLeadRules: number;
       customerReplyRules: number;
@@ -856,7 +856,7 @@ export interface AccountDiagnostics {
   notifications: {
     settingsExist: boolean;
     settingsEnabled: boolean;
-    hasCallioApiKey: boolean;
+    hasSigcoreApiKey: boolean;
     totalRules: number;
     newLeadRules: number;
     customerReplyRules: number;

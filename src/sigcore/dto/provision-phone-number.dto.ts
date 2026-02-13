@@ -1,6 +1,6 @@
 import { IsString, IsOptional } from 'class-validator';
 
-export class PurchasePhoneNumberDto {
+export class ProvisionPhoneNumberDto {
   @IsString()
   @IsOptional()
   country?: string = 'US';

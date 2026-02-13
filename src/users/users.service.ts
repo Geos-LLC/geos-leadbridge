@@ -1,12 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
-import { CallioService, CallioSearchResult } from '../callio/callio.service';
+import { SigcoreService, SigcoreSearchResult } from '../sigcore/sigcore.service';
 
 @Injectable()
 export class UsersService {
   constructor(
     private prisma: PrismaService,
-    private callioService: CallioService,
+    private sigcoreService: SigcoreService,
   ) {}
 
   /**
@@ -17,7 +17,7 @@ export class UsersService {
       where: { id: userId },
       select: {
         phoneNumber: true,
-        callioAllocationId: true,
+        sigcoreAllocationId: true,
       },
     });
 
@@ -27,7 +27,7 @@ export class UsersService {
 
     return {
       phoneNumber: user.phoneNumber,
-      allocationId: user.callioAllocationId,
+      allocationId: user.sigcoreAllocationId,
       hasPhoneNumber: !!user.phoneNumber,
     };
   }
@@ -54,7 +54,7 @@ export class UsersService {
     }
 
     // throwOnError=true so users see what went wrong when manually provisioning
-    const result = await this.callioService.provisionNumberForUser(userId, areaCode, undefined, true);
+    const result = await this.sigcoreService.provisionNumberForUser(userId, areaCode, undefined, true);
 
     if (!result) {
       return {
@@ -73,7 +73,7 @@ export class UsersService {
   /**
    * Search available phone numbers
    */
-  async searchAvailableNumbers(country: string = 'US', areaCode?: string): Promise<CallioSearchResult[]> {
-    return this.callioService.searchAvailableNumbers(country, areaCode, 10);
+  async searchAvailableNumbers(country: string = 'US', areaCode?: string): Promise<SigcoreSearchResult[]> {
+    return this.sigcoreService.searchAvailableNumbers(country, areaCode, 10);
   }
 }

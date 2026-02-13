@@ -17,7 +17,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { StripeModule } from './stripe/stripe.module';
 import { AdminModule } from './admin/admin.module';
-import { CallioModule } from './callio/callio.module';
+import { SigcoreModule } from './sigcore/sigcore.module';
 import { UsersModule } from './users/users.module';
 import { TestModule } from './test/test.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -40,7 +40,7 @@ import { PrismaService } from './common/utils/prisma.service';
     AnalyticsModule,
     StripeModule,
     AdminModule,
-    CallioModule,
+    SigcoreModule,
     UsersModule,
     TestModule,
   ],

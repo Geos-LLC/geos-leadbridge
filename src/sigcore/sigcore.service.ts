@@ -4,7 +4,7 @@ import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../common/utils/prisma.service';
 import { firstValueFrom } from 'rxjs';
 
-export interface CallioPhoneNumber {
+export interface SigcorePhoneNumber {
   phoneNumber: string;
   friendlyName: string;
   capabilities: {
@@ -14,7 +14,7 @@ export interface CallioPhoneNumber {
   };
 }
 
-export interface CallioSearchResult {
+export interface SigcoreSearchResult {
   phoneNumber: string;
   locality: string;
   region: string;
@@ -25,7 +25,7 @@ export interface CallioSearchResult {
   };
 }
 
-interface CallioPurchaseResponse {
+interface SigcoreProvisionResponse {
   success: boolean;
   allocation: {
     id: string;
@@ -44,72 +44,56 @@ interface CallioPurchaseResponse {
 }
 
 @Injectable()
-export class CallioService {
-  private readonly logger = new Logger(CallioService.name);
-  private readonly callioApiUrl: string;
-  private readonly callioApiKey: string | undefined;
-  private readonly callioTenantId: string | undefined;
-  private readonly callioBypassSecret: string | undefined;
+export class SigcoreService {
+  private readonly logger = new Logger(SigcoreService.name);
+  private readonly sigcoreApiUrl: string;
+  private readonly sigcoreApiKey: string | undefined;
 
   constructor(
     private configService: ConfigService,
     private httpService: HttpService,
     private prisma: PrismaService,
   ) {
-    this.callioApiUrl = this.configService.get<string>('CALLIO_API_URL') || 'https://callio-production-47ac.up.railway.app';
-    this.callioApiKey = this.configService.get<string>('CALLIO_API_KEY');
-    this.callioTenantId = this.configService.get<string>('CALLIO_TENANT_ID');
-    this.callioBypassSecret = this.configService.get<string>('CALLIO_BYPASS_SECRET');
+    this.sigcoreApiUrl = this.configService.get<string>('SIGCORE_API_URL') || 'https://sigcore-production.up.railway.app';
+    this.sigcoreApiKey = this.configService.get<string>('SIGCORE_API_KEY');
 
-    this.logger.log(`Callio API URL: ${this.callioApiUrl}`);
-    this.logger.log(`Callio Tenant ID: ${this.callioTenantId ? 'configured' : 'NOT SET'}`);
+    this.logger.log(`Sigcore API URL: ${this.sigcoreApiUrl}`);
 
-    if (!this.callioApiKey || !this.callioTenantId) {
-      this.logger.warn('Callio API credentials not configured. Phone provisioning will be disabled.');
+    if (!this.sigcoreApiKey) {
+      this.logger.warn('Sigcore API key not configured. Phone provisioning will be disabled.');
     }
   }
 
   /**
-   * Build headers for Callio API requests with optional Vercel bypass
+   * Build headers for Sigcore API requests
    */
   private buildHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {
-      'X-API-Key': this.callioApiKey!,
+    return {
+      'X-Sigcore-Key': this.sigcoreApiKey!,
       'Content-Type': 'application/json',
     };
-
-    if (this.callioBypassSecret) {
-      headers['x-vercel-protection-bypass'] = this.callioBypassSecret;
-    }
-
-    return headers;
   }
 
   /**
-   * Build URL with optional Vercel bypass query params
+   * Build full API URL
    */
   private buildUrl(path: string): string {
-    let url = `${this.callioApiUrl}${path}`;
-    if (this.callioBypassSecret) {
-      const separator = url.includes('?') ? '&' : '?';
-      url += `${separator}x-vercel-set-bypass-cookie=true&x-vercel-protection-bypass=${this.callioBypassSecret}`;
-    }
-    return url;
+    return `${this.sigcoreApiUrl}${path}`;
   }
 
   /**
-   * Check if Callio is properly configured
+   * Check if Sigcore is properly configured
    */
   isConfigured(): boolean {
-    return !!(this.callioApiKey && this.callioTenantId);
+    return !!this.sigcoreApiKey;
   }
 
   /**
    * Search for available phone numbers
    */
-  async searchAvailableNumbers(country: string = 'US', areaCode?: string, limit: number = 10): Promise<CallioSearchResult[]> {
+  async searchAvailableNumbers(country: string = 'US', areaCode?: string, limit: number = 10): Promise<SigcoreSearchResult[]> {
     if (!this.isConfigured()) {
-      throw new InternalServerErrorException('Callio phone provisioning is not configured');
+      throw new InternalServerErrorException('Sigcore phone provisioning is not configured');
     }
 
     try {
@@ -133,8 +117,8 @@ export class CallioService {
       // Detect HTML response (wrong URL or SPA fallback)
       const data = response.data;
       if (typeof data === 'string' && data.includes('<!DOCTYPE html>')) {
-        this.logger.error(`Callio API returned HTML instead of JSON. The API URL is likely incorrect: ${this.callioApiUrl}`);
-        throw new BadRequestException('Callio API returned HTML - check CALLIO_API_URL configuration');
+        this.logger.error(`Sigcore API returned HTML instead of JSON. The API URL is likely incorrect: ${this.sigcoreApiUrl}`);
+        throw new BadRequestException('Sigcore API returned HTML - check SIGCORE_API_URL configuration');
       }
 
       this.logger.log(`Search response data: ${JSON.stringify(data)}`);
@@ -151,7 +135,7 @@ export class CallioService {
    */
   async getPricing(): Promise<any> {
     if (!this.isConfigured()) {
-      throw new InternalServerErrorException('Callio phone provisioning is not configured');
+      throw new InternalServerErrorException('Sigcore phone provisioning is not configured');
     }
 
     try {
@@ -165,8 +149,8 @@ export class CallioService {
       );
 
       if (typeof response.data === 'string' && response.data.includes('<!DOCTYPE html>')) {
-        this.logger.error(`Callio API returned HTML instead of JSON for pricing endpoint`);
-        throw new BadRequestException('Callio API returned HTML - check CALLIO_API_URL configuration');
+        this.logger.error(`Sigcore API returned HTML instead of JSON for pricing endpoint`);
+        throw new BadRequestException('Sigcore API returned HTML - check SIGCORE_API_URL configuration');
       }
 
       return response.data;
@@ -188,10 +172,10 @@ export class CallioService {
     throwOnError: boolean = false,
   ): Promise<{ phoneNumber: string; allocationId: string } | null> {
     if (!this.isConfigured()) {
-      const msg = `Callio not configured - skipping phone provisioning for user ${userId}`;
+      const msg = `Sigcore not configured - skipping phone provisioning for user ${userId}`;
       this.logger.warn(msg);
       if (throwOnError) {
-        throw new InternalServerErrorException('Phone provisioning is not configured. Missing CALLIO_API_KEY or CALLIO_TENANT_ID.');
+        throw new InternalServerErrorException('Phone provisioning is not configured. Missing SIGCORE_API_KEY.');
       }
       return null;
     }
@@ -199,10 +183,10 @@ export class CallioService {
     try {
       this.logger.log(`Provisioning phone number for user ${userId} (areaCode: ${areaCode || 'auto'})`);
 
-      // Determine which phone number to purchase
-      let phoneNumberToPurchase = specificPhoneNumber;
+      // Determine which phone number to provision
+      let phoneNumberToProvision = specificPhoneNumber;
 
-      if (!phoneNumberToPurchase) {
+      if (!phoneNumberToProvision) {
         // Search for available numbers first
         this.logger.log(`Searching for available numbers (areaCode: ${areaCode || 'any'})...`);
         const availableNumbers = await this.searchAvailableNumbers('US', areaCode, 1);
@@ -216,22 +200,22 @@ export class CallioService {
           return null;
         }
 
-        phoneNumberToPurchase = availableNumbers[0].phoneNumber;
-        this.logger.log(`Found available number: ${phoneNumberToPurchase}`);
+        phoneNumberToProvision = availableNumbers[0].phoneNumber;
+        this.logger.log(`Found available number: ${phoneNumberToProvision}`);
       }
 
-      this.logger.log(`Callio API URL: ${this.callioApiUrl}/api/v1/tenants/phone-numbers/purchase`);
+      this.logger.log(`Sigcore API URL: ${this.sigcoreApiUrl}/api/v1/phone-numbers/provision`);
 
-      // Build request body - Callio API requires phoneNumber and optional friendlyName
+      // Build request body
       const requestBody: any = {
-        phoneNumber: phoneNumberToPurchase,
+        phoneNumber: phoneNumberToProvision,
         friendlyName: `User ${userId}`,
       };
 
-      this.logger.log(`Callio request body: ${JSON.stringify(requestBody)}`);
+      this.logger.log(`Sigcore request body: ${JSON.stringify(requestBody)}`);
 
-      // Purchase phone number via Callio API
-      const url = this.buildUrl(`/api/v1/tenants/phone-numbers/purchase`);
+      // Provision phone number via Sigcore API
+      const url = this.buildUrl(`/api/v1/phone-numbers/provision`);
       this.logger.log(`Full URL with bypass: ${url}`);
 
       const response = await firstValueFrom(
@@ -244,10 +228,10 @@ export class CallioService {
         )
       );
 
-      this.logger.log(`Callio response status: ${response.status}`);
-      this.logger.log(`Callio response data: ${JSON.stringify(response.data)}`);
+      this.logger.log(`Sigcore response status: ${response.status}`);
+      this.logger.log(`Sigcore response data: ${JSON.stringify(response.data)}`);
 
-      const data: CallioPurchaseResponse = response.data;
+      const data: SigcoreProvisionResponse = response.data;
 
       if (!data.success || !data.allocation) {
         const errorMsg = `Phone number provisioning failed - no allocation returned. Response: ${JSON.stringify(data)}`;
@@ -268,7 +252,7 @@ export class CallioService {
         where: { id: userId },
         data: {
           phoneNumber,
-          callioAllocationId: allocationId,
+          sigcoreAllocationId: allocationId,
         },
       });
 
@@ -299,28 +283,28 @@ export class CallioService {
    */
   async releaseUserNumber(userId: string): Promise<void> {
     if (!this.isConfigured()) {
-      this.logger.warn('Callio not configured - skipping phone release');
+      this.logger.warn('Sigcore not configured - skipping phone release');
       return;
     }
 
     try {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
-        select: { phoneNumber: true, callioAllocationId: true },
+        select: { phoneNumber: true, sigcoreAllocationId: true },
       });
 
-      if (!user?.phoneNumber || !user?.callioAllocationId) {
+      if (!user?.phoneNumber || !user?.sigcoreAllocationId) {
         this.logger.warn(`No phone number to release for user ${userId}`);
         return;
       }
 
       this.logger.log(`Releasing phone number ${user.phoneNumber} for user ${userId}`);
 
-      // Release number via Callio API
+      // Release number via Sigcore API
       await firstValueFrom(
         this.httpService.post(
-          this.buildUrl(`/api/v1/tenants/phone-numbers/${user.callioAllocationId}/release`),
-          {},
+          this.buildUrl(`/api/v1/phone-numbers/release`),
+          { allocationId: user.sigcoreAllocationId },
           {
             headers: this.buildHeaders(),
           }
@@ -332,7 +316,7 @@ export class CallioService {
         where: { id: userId },
         data: {
           phoneNumber: null,
-          callioAllocationId: null,
+          sigcoreAllocationId: null,
         },
       });
 
@@ -346,10 +330,10 @@ export class CallioService {
   /**
    * Get user's current phone number
    */
-  async getUserNumber(userId: string): Promise<CallioPhoneNumber | null> {
+  async getUserNumber(userId: string): Promise<SigcorePhoneNumber | null> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { phoneNumber: true, callioAllocationId: true },
+      select: { phoneNumber: true, sigcoreAllocationId: true },
     });
 
     if (!user?.phoneNumber) {

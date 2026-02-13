@@ -256,11 +256,11 @@ export class NotificationsController {
   }
 
   /**
-   * Validate Callio API key and get available phone numbers
+   * Validate Sigcore API key and get available phone numbers
    */
-  @Post('callio/validate')
-  async validateCallioApiKey(@Body() body: { apiKey: string }) {
-    const result = await this.notificationsService.validateCallioApiKey(
+  @Post('sigcore/validate')
+  async validateSigcoreApiKey(@Body() body: { apiKey: string }) {
+    const result = await this.notificationsService.validateSigcoreApiKey(
       body.apiKey,
     );
 
@@ -272,14 +272,14 @@ export class NotificationsController {
   }
 
   /**
-   * Get phone numbers from Callio for a saved account
+   * Get phone numbers from Sigcore for a saved account
    */
-  @Get('callio/phone-numbers/:savedAccountId')
-  async getCallioPhoneNumbers(
+  @Get('sigcore/phone-numbers/:savedAccountId')
+  async getSigcorePhoneNumbers(
     @CurrentUser() user: any,
     @Param('savedAccountId') savedAccountId: string,
   ) {
-    const phoneNumbers = await this.notificationsService.getCallioPhoneNumbers(
+    const phoneNumbers = await this.notificationsService.getSigcorePhoneNumbers(
       user.id,
       savedAccountId,
     );
@@ -291,10 +291,10 @@ export class NotificationsController {
   }
 
   /**
-   * Connect to Callio - validates API key, creates webhook, stores settings
+   * Connect to Sigcore - validates API key, creates webhook, stores settings
    */
-  @Post('callio/connect/:savedAccountId')
-  async connectCallio(
+  @Post('sigcore/connect/:savedAccountId')
+  async connectSigcore(
     @CurrentUser() user: any,
     @Param('savedAccountId') savedAccountId: string,
     @Body() body: { apiKey: string },
@@ -313,7 +313,7 @@ export class NotificationsController {
     }
 
     const webhookBaseUrl = this.getWebhookBaseUrl(req);
-    const result = await this.notificationsService.connectCallio(
+    const result = await this.notificationsService.connectSigcore(
       savedAccountId,
       body.apiKey,
       webhookBaseUrl,
@@ -327,10 +327,10 @@ export class NotificationsController {
   }
 
   /**
-   * Disconnect from Callio - deletes webhook, clears settings
+   * Disconnect from Sigcore - deletes webhook, clears settings
    */
-  @Delete('callio/disconnect/:savedAccountId')
-  async disconnectCallio(
+  @Delete('sigcore/disconnect/:savedAccountId')
+  async disconnectSigcore(
     @CurrentUser() user: any,
     @Param('savedAccountId') savedAccountId: string,
   ) {
@@ -346,7 +346,7 @@ export class NotificationsController {
       };
     }
 
-    const result = await this.notificationsService.disconnectCallio(savedAccountId);
+    const result = await this.notificationsService.disconnectSigcore(savedAccountId);
 
     return {
       success: result.success,

@@ -1,6 +1,6 @@
 /**
  * Notifications Service
- * Manages SMS notification settings and sends notifications via Callio
+ * Manages SMS notification settings and sends notifications via Sigcore
  */
 
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -10,9 +10,9 @@ export interface UpdateNotificationSettingsDto {
   enabled?: boolean;
   destinationPhone?: string;
   senderMode?: 'shared' | 'dedicated' | 'openphone';
-  callioApiKey?: string;
-  callioFromPhone?: string;
-  callioWorkspaceId?: string;
+  sigcoreApiKey?: string;
+  sigcoreFromPhone?: string;
+  sigcoreWorkspaceId?: string;
   template?: string;
   quietHoursStart?: string;
   quietHoursEnd?: string;
@@ -25,7 +25,7 @@ export interface CreateNotificationRuleDto {
   name: string;
   triggerType: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply';
-  fromPhone: string; // Callio phone number to send FROM
+  fromPhone: string; // Sigcore phone number to send FROM
   toPhone: string;   // Destination phone number to send TO
   template: string;
   enabled?: boolean;
@@ -86,7 +86,7 @@ export interface CustomerReplyContext {
   isSecondCustomerMessage?: boolean;
 }
 
-export interface CallioPhoneNumber {
+export interface SigcorePhoneNumber {
   id: string;
   phoneNumber: string;
   provider: 'twilio' | 'openphone' | string;
@@ -107,10 +107,10 @@ export interface NotificationSettingsResponse {
   enabled: boolean;
   destinationPhone: string | null;
   senderMode: string;
-  callioApiKey: string | null; // Will be masked in response
-  callioFromPhone: string | null;
-  callioWorkspaceId: string | null;
-  callioConnected: boolean; // Whether API key is configured
+  sigcoreApiKey: string | null; // Will be masked in response
+  sigcoreFromPhone: string | null;
+  sigcoreWorkspaceId: string | null;
+  sigcoreConnected: boolean; // Whether API key is configured
   template: string;
   quietHoursStart: string | null;
   quietHoursEnd: string | null;
@@ -219,9 +219,9 @@ export class NotificationsService {
         enabled: data.enabled ?? true,  // Default to enabled (rules have their own toggle)
         destinationPhone: data.destinationPhone,
         senderMode: data.senderMode ?? 'shared',
-        callioApiKey: data.callioApiKey,
-        callioFromPhone: data.callioFromPhone,
-        callioWorkspaceId: data.callioWorkspaceId,
+        sigcoreApiKey: data.sigcoreApiKey,
+        sigcoreFromPhone: data.sigcoreFromPhone,
+        sigcoreWorkspaceId: data.sigcoreWorkspaceId,
         template: data.template ?? 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
         quietHoursStart: data.quietHoursStart,
         quietHoursEnd: data.quietHoursEnd,
@@ -232,9 +232,9 @@ export class NotificationsService {
         ...(data.enabled !== undefined && { enabled: data.enabled }),
         ...(data.destinationPhone !== undefined && { destinationPhone: data.destinationPhone }),
         ...(data.senderMode !== undefined && { senderMode: data.senderMode }),
-        ...(data.callioApiKey !== undefined && { callioApiKey: data.callioApiKey }),
-        ...(data.callioFromPhone !== undefined && { callioFromPhone: data.callioFromPhone }),
-        ...(data.callioWorkspaceId !== undefined && { callioWorkspaceId: data.callioWorkspaceId }),
+        ...(data.sigcoreApiKey !== undefined && { sigcoreApiKey: data.sigcoreApiKey }),
+        ...(data.sigcoreFromPhone !== undefined && { sigcoreFromPhone: data.sigcoreFromPhone }),
+        ...(data.sigcoreWorkspaceId !== undefined && { sigcoreWorkspaceId: data.sigcoreWorkspaceId }),
         ...(data.template !== undefined && { template: data.template }),
         ...(data.quietHoursStart !== undefined && { quietHoursStart: data.quietHoursStart }),
         ...(data.quietHoursEnd !== undefined && { quietHoursEnd: data.quietHoursEnd }),
@@ -443,31 +443,31 @@ export class NotificationsService {
     }
 
     // Ensure settings exist (enabled: true since individual rules have their own toggle)
-    // If creating new settings, auto-copy callioApiKey from user's other accounts
+    // If creating new settings, auto-copy sigcoreApiKey from user's other accounts
     let existingSettings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
     });
 
     if (!existingSettings) {
-      // Try to copy callioApiKey from another account of the same user
+      // Try to copy sigcoreApiKey from another account of the same user
       const otherSettings = await this.prisma.notificationSettings.findFirst({
         where: {
           savedAccount: { userId },
-          callioApiKey: { not: null },
+          sigcoreApiKey: { not: null },
         },
-        select: { callioApiKey: true, callioWorkspaceId: true },
+        select: { sigcoreApiKey: true, sigcoreWorkspaceId: true },
       });
 
-      if (otherSettings?.callioApiKey) {
-        this.logger.log(`[createRule] Auto-copying Callio API key from another account for user ${userId}`);
+      if (otherSettings?.sigcoreApiKey) {
+        this.logger.log(`[createRule] Auto-copying Sigcore API key from another account for user ${userId}`);
       }
 
       existingSettings = await this.prisma.notificationSettings.create({
         data: {
           savedAccountId,
           enabled: true,
-          callioApiKey: otherSettings?.callioApiKey || null,
-          callioWorkspaceId: otherSettings?.callioWorkspaceId || null,
+          sigcoreApiKey: otherSettings?.sigcoreApiKey || null,
+          sigcoreWorkspaceId: otherSettings?.sigcoreWorkspaceId || null,
         },
       });
     } else if (!existingSettings.enabled) {
@@ -633,7 +633,7 @@ export class NotificationsService {
         this.logger.log(`Using user-level default settings for user ${userId}`);
       }
     } else {
-      this.logger.log(`Using account-specific settings for ${savedAccountId} (enabled: ${settings.enabled}, callioApiKey: ${settings.callioApiKey ? 'set' : 'NOT SET'}, rules: ${settings.notificationRules.length})`);
+      this.logger.log(`Using account-specific settings for ${savedAccountId} (enabled: ${settings.enabled}, sigcoreApiKey: ${settings.sigcoreApiKey ? 'set' : 'NOT SET'}, rules: ${settings.notificationRules.length})`);
     }
 
     // Fallback 2: If still no settings, try to use settings from another account of the same user
@@ -642,7 +642,7 @@ export class NotificationsService {
       settings = await this.prisma.notificationSettings.findFirst({
         where: {
           savedAccount: { userId },
-          callioApiKey: { not: null },
+          sigcoreApiKey: { not: null },
           enabled: true,
         },
         include: {
@@ -667,8 +667,8 @@ export class NotificationsService {
       return;
     }
 
-    if (!settings.callioApiKey) {
-      this.logger.warn(`No Callio API key configured for account ${savedAccountId}. Connect Callio in SMS Alerts settings.`);
+    if (!settings.sigcoreApiKey) {
+      this.logger.warn(`No Sigcore API key configured for account ${savedAccountId}. Connect Sigcore in SMS Alerts settings.`);
       return;
     }
 
@@ -751,7 +751,7 @@ export class NotificationsService {
         this.logger.log(`Using user-level default settings for user ${userId}`);
       }
     } else {
-      this.logger.log(`Using account-specific settings for ${savedAccountId} (enabled: ${settings.enabled}, callioApiKey: ${settings.callioApiKey ? 'set' : 'NOT SET'}, rules: ${settings.notificationRules.length})`);
+      this.logger.log(`Using account-specific settings for ${savedAccountId} (enabled: ${settings.enabled}, sigcoreApiKey: ${settings.sigcoreApiKey ? 'set' : 'NOT SET'}, rules: ${settings.notificationRules.length})`);
     }
 
     // Fallback 2: If still no settings, try to use settings from another account of the same user
@@ -760,7 +760,7 @@ export class NotificationsService {
       settings = await this.prisma.notificationSettings.findFirst({
         where: {
           savedAccount: { userId },
-          callioApiKey: { not: null },
+          sigcoreApiKey: { not: null },
           enabled: true,
         },
         include: {
@@ -785,8 +785,8 @@ export class NotificationsService {
       return;
     }
 
-    if (!settings.callioApiKey) {
-      this.logger.warn(`No Callio API key configured for account ${savedAccountId}. Connect Callio in SMS Alerts settings.`);
+    if (!settings.sigcoreApiKey) {
+      this.logger.warn(`No Sigcore API key configured for account ${savedAccountId}. Connect Sigcore in SMS Alerts settings.`);
       return;
     }
 
@@ -828,7 +828,7 @@ export class NotificationsService {
 
     // Use rule's phone numbers (required for new rules) or fallback to settings (legacy)
     const toPhone = rule?.toPhone || settings.destinationPhone;
-    const fromPhone = rule?.fromPhone || settings.callioFromPhone;
+    const fromPhone = rule?.fromPhone || settings.sigcoreFromPhone;
     const template = rule?.template || settings.template;
     const ruleName = rule?.name || 'Legacy Alert';
     const ruleId = rule?.id || null;
@@ -859,15 +859,15 @@ export class NotificationsService {
       },
     });
 
-    // Send via Callio
+    // Send via Sigcore
     try {
-      const result = await this.sendViaCallio({
+      const result = await this.sendViaSigcore({
         to: toPhone,
         body: messageBody,
         fromPhone: fromPhone,
-        apiKey: settings.callioApiKey,
+        apiKey: settings.sigcoreApiKey,
         senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
-        callioWorkspaceId: settings.callioWorkspaceId,
+        sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
         metadata: {
           tenantId: savedAccountId,
           leadId,
@@ -883,8 +883,8 @@ export class NotificationsService {
           status: result.status,
           fromPhone: result.fromPhone,
           provider: result.provider,
-          callioMessageId: result.messageId,
-          callioConversationId: result.conversationId,
+          sigcoreMessageId: result.messageId,
+          sigcoreConversationId: result.conversationId,
           sentAt: new Date(),
         },
       });
@@ -949,8 +949,8 @@ export class NotificationsService {
       this.logger.log(`[sendTestNotification] Auto-fixed enabled=false for account ${savedAccountId}`);
     }
 
-    if (!settings.callioApiKey) {
-      return { success: false, error: 'No Callio API key configured. Please connect to Callio first.' };
+    if (!settings.sigcoreApiKey) {
+      return { success: false, error: 'No Sigcore API key configured. Please connect to Sigcore first.' };
     }
 
     // Get rule if specified
@@ -966,7 +966,7 @@ export class NotificationsService {
 
     // Use rule's phone numbers (preferred) or fallback to settings (legacy)
     const toPhone = rule?.toPhone || settings.destinationPhone;
-    const fromPhone = rule?.fromPhone || settings.callioFromPhone;
+    const fromPhone = rule?.fromPhone || settings.sigcoreFromPhone;
 
     if (!toPhone) {
       return { success: false, error: 'No destination phone configured for this rule' };
@@ -1010,13 +1010,13 @@ export class NotificationsService {
     });
 
     try {
-      const result = await this.sendViaCallio({
+      const result = await this.sendViaSigcore({
         to: toPhone,
         body: `[TEST] ${messageBody}`,
         fromPhone: fromPhone,
-        apiKey: settings.callioApiKey,
+        apiKey: settings.sigcoreApiKey,
         senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
-        callioWorkspaceId: settings.callioWorkspaceId,
+        sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
         metadata: {
           tenantId: savedAccountId,
           test: true,
@@ -1031,8 +1031,8 @@ export class NotificationsService {
           status: result.status,
           fromPhone: result.fromPhone,
           provider: result.provider,
-          callioMessageId: result.messageId,
-          callioConversationId: result.conversationId,
+          sigcoreMessageId: result.messageId,
+          sigcoreConversationId: result.conversationId,
           sentAt: new Date(),
         },
       });
@@ -1225,42 +1225,42 @@ export class NotificationsService {
   }
 
   /**
-   * Fetch phone numbers from Callio API
+   * Fetch phone numbers from Sigcore API
    */
-  async getCallioPhoneNumbers(
+  async getSigcorePhoneNumbers(
     userId: string,
     savedAccountId: string,
-  ): Promise<CallioPhoneNumber[]> {
+  ): Promise<SigcorePhoneNumber[]> {
     // Verify the account belongs to the user and get settings
     const account = await this.prisma.savedAccount.findFirst({
       where: { id: savedAccountId, userId },
     });
 
     if (!account) {
-      this.logger.error(`[getCallioPhoneNumbers] Saved account ${savedAccountId} not found for user ${userId}`);
+      this.logger.error(`[getSigcorePhoneNumbers] Saved account ${savedAccountId} not found for user ${userId}`);
       throw new NotFoundException('Saved account not found');
     }
 
-    this.logger.log(`[getCallioPhoneNumbers] Looking up notification settings for account ${savedAccountId}`);
+    this.logger.log(`[getSigcorePhoneNumbers] Looking up notification settings for account ${savedAccountId}`);
     const settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
     });
 
     if (!settings) {
-      this.logger.warn(`[getCallioPhoneNumbers] No notification settings found for account ${savedAccountId}`);
+      this.logger.warn(`[getSigcorePhoneNumbers] No notification settings found for account ${savedAccountId}`);
       return [];
     }
 
-    if (!settings.callioApiKey) {
-      this.logger.warn(`[getCallioPhoneNumbers] No Callio API key found for account ${savedAccountId}. Please connect Callio in Phone Settings.`);
+    if (!settings.sigcoreApiKey) {
+      this.logger.warn(`[getSigcorePhoneNumbers] No Sigcore API key found for account ${savedAccountId}. Please connect Sigcore in Phone Settings.`);
       return [];
     }
 
-    this.logger.log(`[getCallioPhoneNumbers] Found Callio API key for account ${savedAccountId}, fetching phone numbers...`);
+    this.logger.log(`[getSigcorePhoneNumbers] Found Sigcore API key for account ${savedAccountId}, fetching phone numbers...`);
 
 
     try {
-      const endpoint = 'https://callio-production-47ac.up.railway.app/api/v1/phone-numbers';
+      const endpoint = 'https://sigcore-production.up.railway.app/api/v1/phone-numbers';
       this.logger.log(`[getPhoneNumbers] Hitting endpoint: ${endpoint}`);
 
       const response = await fetch(
@@ -1268,7 +1268,7 @@ export class NotificationsService {
         {
           method: 'GET',
           headers: {
-            'Authorization': `Bearer ${settings.callioApiKey}`,
+            'X-Sigcore-Key': settings.sigcoreApiKey,
             'Content-Type': 'application/json',
           },
         },
@@ -1278,35 +1278,35 @@ export class NotificationsService {
 
       if (!response.ok) {
         const error = await response.text();
-        this.logger.error(`[getPhoneNumbers] Callio API error: ${response.status} - ${error}`);
+        this.logger.error(`[getPhoneNumbers] Sigcore API error: ${response.status} - ${error}`);
         throw new Error(`Failed to fetch phone numbers: ${response.status}`);
       }
 
       const result = await response.json();
-      this.logger.log(`Callio phone numbers response: ${JSON.stringify(result)}`);
+      this.logger.log(`Sigcore phone numbers response: ${JSON.stringify(result)}`);
 
-      // Handle different response formats from Callio API
+      // Handle different response formats from Sigcore API
       const phones = result.data || result.phoneNumbers || result || [];
       this.logger.log(`Raw phones array (getPhoneNumbers): ${JSON.stringify(phones)}`);
 
       return phones
-        .map((phone: any) => this.mapCallioPhoneNumber(phone))
+        .map((phone: any) => this.mapSigcorePhoneNumber(phone))
         .filter((p: any) => p.phoneNumber && p.phoneNumber.length > 5);
     } catch (error: any) {
-      this.logger.error('Failed to fetch Callio phone numbers', error);
-      throw new Error(error.message || 'Failed to connect to Callio');
+      this.logger.error('Failed to fetch Sigcore phone numbers', error);
+      throw new Error(error.message || 'Failed to connect to Sigcore');
     }
   }
 
   /**
-   * Map Callio API phone response to CallioPhoneNumber interface
+   * Map Sigcore API phone response to SigcorePhoneNumber interface
    */
-  private mapCallioPhoneNumber(phone: any): CallioPhoneNumber {
+  private mapSigcorePhoneNumber(phone: any): SigcorePhoneNumber {
     const phoneNumber = phone.phoneNumber || phone.phone_number || phone.number || phone.e164;
     const a2p = phone.a2pCompliance || phone.a2p || {};
     const caps = phone.capabilities || {};
 
-    // Map Callio campaignStatus to our a2pStatus
+    // Map Sigcore campaignStatus to our a2pStatus
     let a2pStatus: string | undefined;
     const campaignStatus = a2p.campaignStatus || a2p.status || a2p.a2pStatus || phone.a2pStatus;
     if (campaignStatus) {
@@ -1349,11 +1349,11 @@ export class NotificationsService {
   }
 
   /**
-   * Validate Callio API key by attempting to fetch phone numbers
+   * Validate Sigcore API key by attempting to fetch phone numbers
    */
-  async validateCallioApiKey(apiKey: string): Promise<{ valid: boolean; phoneNumbers: CallioPhoneNumber[] }> {
-    const endpoint = 'https://callio-production-47ac.up.railway.app/api/v1/phone-numbers';
-    this.logger.log(`[validateCallioApiKey] Hitting endpoint: ${endpoint}`);
+  async validateSigcoreApiKey(apiKey: string): Promise<{ valid: boolean; phoneNumbers: SigcorePhoneNumber[] }> {
+    const endpoint = 'https://sigcore-production.up.railway.app/api/v1/phone-numbers';
+    this.logger.log(`[validateSigcoreApiKey] Hitting endpoint: ${endpoint}`);
 
     try {
       const response = await fetch(
@@ -1361,30 +1361,30 @@ export class NotificationsService {
         {
           method: 'GET',
           headers: {
-            'Authorization': `Bearer ${apiKey}`,
+            'X-Sigcore-Key': apiKey,
             'Content-Type': 'application/json',
           },
         },
       );
 
-      this.logger.log(`[validateCallioApiKey] Response status: ${response.status}`);
+      this.logger.log(`[validateSigcoreApiKey] Response status: ${response.status}`);
 
       if (!response.ok) {
-        this.logger.error(`[validateCallioApiKey] Failed with status: ${response.status}`);
+        this.logger.error(`[validateSigcoreApiKey] Failed with status: ${response.status}`);
         return { valid: false, phoneNumbers: [] };
       }
 
       const result = await response.json();
-      this.logger.log(`Callio validate response: ${JSON.stringify(result)}`);
+      this.logger.log(`Sigcore validate response: ${JSON.stringify(result)}`);
 
-      // Handle different response formats from Callio API
+      // Handle different response formats from Sigcore API
       const phones = result.data || result.phoneNumbers || result || [];
       this.logger.log(`Raw phones array: ${JSON.stringify(phones)}`);
 
       const phoneNumbers = phones
         .map((phone: any) => {
           this.logger.log(`Mapping phone: ${JSON.stringify(phone)}`);
-          return this.mapCallioPhoneNumber(phone);
+          return this.mapSigcorePhoneNumber(phone);
         })
         .filter((p: any) => {
           const valid = p.phoneNumber && p.phoneNumber.length > 5;
@@ -1402,18 +1402,18 @@ export class NotificationsService {
   }
 
   /**
-   * Create a webhook subscription in Callio for delivery status updates
+   * Create a webhook subscription in Sigcore for delivery status updates
    */
-  async createCallioWebhook(apiKey: string, webhookUrl: string): Promise<{ webhookId: string | null; error?: string }> {
-    const endpoint = 'https://callio-production-47ac.up.railway.app/api/v1/webhook-subscriptions';
-    this.logger.log(`[createCallioWebhook] Creating webhook subscription at: ${endpoint}`);
-    this.logger.log(`[createCallioWebhook] Webhook URL: ${webhookUrl}`);
+  async createSigcoreWebhook(apiKey: string, webhookUrl: string): Promise<{ webhookId: string | null; error?: string }> {
+    const endpoint = 'https://sigcore-production.up.railway.app/api/v1/webhook-subscriptions';
+    this.logger.log(`[createSigcoreWebhook] Creating webhook subscription at: ${endpoint}`);
+    this.logger.log(`[createSigcoreWebhook] Webhook URL: ${webhookUrl}`);
 
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
+          'X-Sigcore-Key': apiKey,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1423,78 +1423,78 @@ export class NotificationsService {
         }),
       });
 
-      this.logger.log(`[createCallioWebhook] Response status: ${response.status}`);
+      this.logger.log(`[createSigcoreWebhook] Response status: ${response.status}`);
 
       if (!response.ok) {
         const errorText = await response.text();
-        this.logger.error(`[createCallioWebhook] Failed: ${response.status} - ${errorText}`);
+        this.logger.error(`[createSigcoreWebhook] Failed: ${response.status} - ${errorText}`);
         return { webhookId: null, error: `Failed to create webhook: ${response.status}` };
       }
 
       const result = await response.json();
-      this.logger.log(`[createCallioWebhook] Result: ${JSON.stringify(result)}`);
+      this.logger.log(`[createSigcoreWebhook] Result: ${JSON.stringify(result)}`);
 
       const webhookId = result.data?.id || result.id || result.subscriptionId;
       return { webhookId };
     } catch (error: any) {
-      this.logger.error('[createCallioWebhook] Error:', error.message);
+      this.logger.error('[createSigcoreWebhook] Error:', error.message);
       return { webhookId: null, error: error.message };
     }
   }
 
   /**
-   * Delete a webhook subscription from Callio
+   * Delete a webhook subscription from Sigcore
    */
-  async deleteCallioWebhook(apiKey: string, webhookId: string): Promise<{ success: boolean; error?: string }> {
-    const endpoint = `https://callio-production-47ac.up.railway.app/api/v1/webhook-subscriptions/${webhookId}`;
-    this.logger.log(`[deleteCallioWebhook] Deleting webhook subscription: ${endpoint}`);
+  async deleteSigcoreWebhook(apiKey: string, webhookId: string): Promise<{ success: boolean; error?: string }> {
+    const endpoint = `https://sigcore-production.up.railway.app/api/v1/webhook-subscriptions/${webhookId}`;
+    this.logger.log(`[deleteSigcoreWebhook] Deleting webhook subscription: ${endpoint}`);
 
     try {
       const response = await fetch(endpoint, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
+          'X-Sigcore-Key': apiKey,
           'Content-Type': 'application/json',
         },
       });
 
-      this.logger.log(`[deleteCallioWebhook] Response status: ${response.status}`);
+      this.logger.log(`[deleteSigcoreWebhook] Response status: ${response.status}`);
 
       if (!response.ok && response.status !== 404) {
         const errorText = await response.text();
-        this.logger.error(`[deleteCallioWebhook] Failed: ${response.status} - ${errorText}`);
+        this.logger.error(`[deleteSigcoreWebhook] Failed: ${response.status} - ${errorText}`);
         return { success: false, error: `Failed to delete webhook: ${response.status}` };
       }
 
       return { success: true };
     } catch (error: any) {
-      this.logger.error('[deleteCallioWebhook] Error:', error.message);
+      this.logger.error('[deleteSigcoreWebhook] Error:', error.message);
       return { success: false, error: error.message };
     }
   }
 
   /**
-   * Connect to Callio - validates API key, creates webhook, and stores settings
+   * Connect to Sigcore - validates API key, creates webhook, and stores settings
    */
-  async connectCallio(
+  async connectSigcore(
     savedAccountId: string,
     apiKey: string,
     webhookBaseUrl: string,
-  ): Promise<{ success: boolean; phoneNumbers: CallioPhoneNumber[]; error?: string }> {
-    this.logger.log(`[connectCallio] Connecting account ${savedAccountId}`);
+  ): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[]; error?: string }> {
+    this.logger.log(`[connectSigcore] Connecting account ${savedAccountId}`);
 
     // 1. Validate the API key
-    const validation = await this.validateCallioApiKey(apiKey);
+    const validation = await this.validateSigcoreApiKey(apiKey);
     if (!validation.valid) {
       return { success: false, phoneNumbers: [], error: 'Invalid API key' };
     }
 
     // 2. Create webhook for delivery status
-    const webhookUrl = `${webhookBaseUrl}/api/webhooks/callio/delivery-status`;
-    const webhookResult = await this.createCallioWebhook(apiKey, webhookUrl);
+    const webhookUrl = `${webhookBaseUrl}/api/webhooks/sigcore/delivery-status`;
+    const webhookResult = await this.createSigcoreWebhook(apiKey, webhookUrl);
 
     if (webhookResult.error) {
-      this.logger.warn(`[connectCallio] Webhook creation failed: ${webhookResult.error}`);
+      this.logger.warn(`[connectSigcore] Webhook creation failed: ${webhookResult.error}`);
       // Continue anyway - webhook can be created manually later
     }
 
@@ -1502,19 +1502,19 @@ export class NotificationsService {
     await this.prisma.notificationSettings.upsert({
       where: { savedAccountId },
       update: {
-        callioApiKey: apiKey,
-        callioWebhookId: webhookResult.webhookId,
+        sigcoreApiKey: apiKey,
+        sigcoreWebhookId: webhookResult.webhookId,
         enabled: true,  // Ensure notifications are enabled when connecting
       },
       create: {
         savedAccountId,
-        callioApiKey: apiKey,
-        callioWebhookId: webhookResult.webhookId,
+        sigcoreApiKey: apiKey,
+        sigcoreWebhookId: webhookResult.webhookId,
         enabled: true,
       },
     });
 
-    this.logger.log(`[connectCallio] Connected successfully. WebhookId: ${webhookResult.webhookId}`);
+    this.logger.log(`[connectSigcore] Connected successfully. WebhookId: ${webhookResult.webhookId}`);
 
     // 4. Propagate API key to other accounts of the same user that don't have one
     const savedAccount = await this.prisma.savedAccount.findUnique({
@@ -1532,12 +1532,12 @@ export class NotificationsService {
       });
 
       for (const otherAccount of otherAccounts) {
-        if (otherAccount.notificationSettings && !otherAccount.notificationSettings.callioApiKey) {
+        if (otherAccount.notificationSettings && !otherAccount.notificationSettings.sigcoreApiKey) {
           await this.prisma.notificationSettings.update({
             where: { id: otherAccount.notificationSettings.id },
-            data: { callioApiKey: apiKey },
+            data: { sigcoreApiKey: apiKey },
           });
-          this.logger.log(`[connectCallio] Auto-propagated API key to account ${otherAccount.id} (${otherAccount.businessName})`);
+          this.logger.log(`[connectSigcore] Auto-propagated API key to account ${otherAccount.id} (${otherAccount.businessName})`);
         }
       }
     }
@@ -1546,10 +1546,10 @@ export class NotificationsService {
   }
 
   /**
-   * Disconnect from Callio - deletes webhook and clears settings
+   * Disconnect from Sigcore - deletes webhook and clears settings
    */
-  async disconnectCallio(savedAccountId: string): Promise<{ success: boolean; error?: string }> {
-    this.logger.log(`[disconnectCallio] Disconnecting account ${savedAccountId}`);
+  async disconnectSigcore(savedAccountId: string): Promise<{ success: boolean; error?: string }> {
+    this.logger.log(`[disconnectSigcore] Disconnecting account ${savedAccountId}`);
 
     const settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
@@ -1560,37 +1560,37 @@ export class NotificationsService {
     }
 
     // Delete webhook if exists
-    if (settings.callioApiKey && settings.callioWebhookId) {
-      const deleteResult = await this.deleteCallioWebhook(settings.callioApiKey, settings.callioWebhookId);
+    if (settings.sigcoreApiKey && settings.sigcoreWebhookId) {
+      const deleteResult = await this.deleteSigcoreWebhook(settings.sigcoreApiKey, settings.sigcoreWebhookId);
       if (!deleteResult.success) {
-        this.logger.warn(`[disconnectCallio] Failed to delete webhook: ${deleteResult.error}`);
+        this.logger.warn(`[disconnectSigcore] Failed to delete webhook: ${deleteResult.error}`);
       }
     }
 
-    // Clear Callio settings
+    // Clear Sigcore settings
     await this.prisma.notificationSettings.update({
       where: { savedAccountId },
       data: {
-        callioApiKey: null,
-        callioFromPhone: null,
-        callioWebhookId: null,
+        sigcoreApiKey: null,
+        sigcoreFromPhone: null,
+        sigcoreWebhookId: null,
       },
     });
 
-    this.logger.log(`[disconnectCallio] Disconnected successfully`);
+    this.logger.log(`[disconnectSigcore] Disconnected successfully`);
     return { success: true };
   }
 
   /**
-   * Send message via Callio API
+   * Send message via Sigcore API
    */
-  private async sendViaCallio(params: {
+  private async sendViaSigcore(params: {
     to: string;
     body: string;
     fromPhone?: string | null;
     apiKey: string;
     senderMode: 'shared' | 'dedicated' | 'openphone';
-    callioWorkspaceId?: string | null;
+    sigcoreWorkspaceId?: string | null;
     metadata: Record<string, any>;
   }): Promise<{
     status: string;
@@ -1599,7 +1599,7 @@ export class NotificationsService {
     provider?: string;
     fromPhone?: string;
   }> {
-    this.logger.log(`Sending via Callio to: ${params.to}`);
+    this.logger.log(`Sending via Sigcore to: ${params.to}`);
 
     const requestBody: any = {
       to: params.to,
@@ -1618,9 +1618,9 @@ export class NotificationsService {
       requestBody.sender.fromNumber = params.fromPhone;
     }
 
-    const endpoint = 'https://callio-production-47ac.up.railway.app/api/v1/messages/send';
-    this.logger.log(`[sendViaCallio] Hitting endpoint: ${endpoint}`);
-    this.logger.log(`[sendViaCallio] Request body: ${JSON.stringify(requestBody)}`);
+    const endpoint = 'https://sigcore-production.up.railway.app/api/v1/messages';
+    this.logger.log(`[sendViaSigcore] Hitting endpoint: ${endpoint}`);
+    this.logger.log(`[sendViaSigcore] Request body: ${JSON.stringify(requestBody)}`);
 
     try {
       const response = await fetch(
@@ -1628,25 +1628,25 @@ export class NotificationsService {
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${params.apiKey}`,
+            'X-Sigcore-Key': params.apiKey,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(requestBody),
         },
       );
 
-      this.logger.log(`[sendViaCallio] Response status: ${response.status}`);
+      this.logger.log(`[sendViaSigcore] Response status: ${response.status}`);
 
       if (!response.ok) {
         const errorText = await response.text();
-        this.logger.error(`[sendViaCallio] Callio API error: ${response.status} - ${errorText}`);
-        throw new Error(`Callio API error: ${response.status}`);
+        this.logger.error(`[sendViaSigcore] Sigcore API error: ${response.status} - ${errorText}`);
+        throw new Error(`Sigcore API error: ${response.status}`);
       }
 
       const result = await response.json();
       const data = result.data || {};
 
-      this.logger.log(`SMS sent via Callio: ${data.messageId}`);
+      this.logger.log(`SMS sent via Sigcore: ${data.messageId}`);
 
       return {
         status: data.status || 'sent',
@@ -1656,8 +1656,8 @@ export class NotificationsService {
         fromPhone: data.fromNumber,
       };
     } catch (error: any) {
-      this.logger.error('Failed to send via Callio', error);
-      throw new Error(error.message || 'Failed to send message via Callio');
+      this.logger.error('Failed to send via Sigcore', error);
+      throw new Error(error.message || 'Failed to send message via Sigcore');
     }
   }
 
@@ -1668,8 +1668,8 @@ export class NotificationsService {
   private formatSettings(settings: any): NotificationSettingsResponse {
     // Mask API key - show only last 4 characters
     let maskedApiKey: string | null = null;
-    if (settings.callioApiKey) {
-      const key = settings.callioApiKey;
+    if (settings.sigcoreApiKey) {
+      const key = settings.sigcoreApiKey;
       maskedApiKey = key.length > 4 ? `****${key.slice(-4)}` : '****';
     }
 
@@ -1679,10 +1679,10 @@ export class NotificationsService {
       enabled: settings.enabled,
       destinationPhone: settings.destinationPhone,
       senderMode: settings.senderMode,
-      callioApiKey: maskedApiKey,
-      callioFromPhone: settings.callioFromPhone,
-      callioWorkspaceId: settings.callioWorkspaceId,
-      callioConnected: !!settings.callioApiKey,
+      sigcoreApiKey: maskedApiKey,
+      sigcoreFromPhone: settings.sigcoreFromPhone,
+      sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
+      sigcoreConnected: !!settings.sigcoreApiKey,
       template: settings.template,
       quietHoursStart: settings.quietHoursStart,
       quietHoursEnd: settings.quietHoursEnd,

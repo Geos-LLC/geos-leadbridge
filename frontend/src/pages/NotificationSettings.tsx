@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Bell, Loader2, X, ChevronDown, Send, Phone, MessageSquare, AlertCircle, CheckCircle, Plus, Edit2, Trash2, Zap, Save } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { notificationsApi, thumbtackApi, type CallioPhoneNumber, type CreateNotificationRuleDto, type UpdateNotificationRuleDto } from '../services/api';
+import { notificationsApi, thumbtackApi, type SigcorePhoneNumber, type CreateNotificationRuleDto, type UpdateNotificationRuleDto } from '../services/api';
 import type { NotificationRule, NotificationLog, SavedAccount } from '../types';
 
 // Available variables for SMS template
@@ -52,11 +52,11 @@ export function NotificationSettings() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Phone numbers for each account (for the rule form)
-  const [accountPhoneNumbers, setAccountPhoneNumbers] = useState<Record<string, CallioPhoneNumber[]>>({});
+  const [accountPhoneNumbers, setAccountPhoneNumbers] = useState<Record<string, SigcorePhoneNumber[]>>({});
   const [loadingPhoneNumbers, setLoadingPhoneNumbers] = useState<Record<string, boolean>>({});
 
-  // Track which accounts have Callio configured
-  const [accountCallioStatus, setAccountCallioStatus] = useState<Record<string, boolean>>({});
+  // Track which accounts have Sigcore configured
+  const [accountSigcoreStatus, setAccountSigcoreStatus] = useState<Record<string, boolean>>({});
 
   // Notification logs
   const [logs, setLogs] = useState<NotificationLog[]>([]);
@@ -111,8 +111,8 @@ export function NotificationSettings() {
       setAccounts(accounts);
       setSelectedAccountId('all');
       loadAllRules();
-      // Check Callio status for all accounts
-      checkCallioStatusForAccounts(accounts);
+      // Check Sigcore status for all accounts
+      checkSigcoreStatusForAccounts(accounts);
     } catch (err: any) {
       setError(err.message || 'Failed to load accounts');
     } finally {
@@ -120,7 +120,7 @@ export function NotificationSettings() {
     }
   }
 
-  async function checkCallioStatusForAccounts(accountsList: SavedAccount[]) {
+  async function checkSigcoreStatusForAccounts(accountsList: SavedAccount[]) {
     const statusMap: Record<string, boolean> = {};
 
     // Check settings for each account in parallel
@@ -128,8 +128,8 @@ export function NotificationSettings() {
       accountsList.map(async (account) => {
         try {
           const result = await notificationsApi.getSettings(account.id);
-          // Account has Callio configured if settings exist and have callioApiKey
-          statusMap[account.id] = !!(result.settings && result.settings.callioApiKey);
+          // Account has Sigcore configured if settings exist and have sigcoreApiKey
+          statusMap[account.id] = !!(result.settings && result.settings.sigcoreApiKey);
         } catch (err) {
           // If we can't fetch settings, assume not configured
           statusMap[account.id] = false;
@@ -137,7 +137,7 @@ export function NotificationSettings() {
       })
     );
 
-    setAccountCallioStatus(statusMap);
+    setAccountSigcoreStatus(statusMap);
   }
 
   async function loadAllRules() {
@@ -169,7 +169,7 @@ export function NotificationSettings() {
   async function loadPhoneNumbersForAccount(accountId: string) {
     try {
       setLoadingPhoneNumbers(prev => ({ ...prev, [accountId]: true }));
-      const result = await notificationsApi.getCallioPhoneNumbers(accountId);
+      const result = await notificationsApi.getSigcorePhoneNumbers(accountId);
       setAccountPhoneNumbers(prev => ({
         ...prev,
         [accountId]: result.phoneNumbers,
@@ -626,10 +626,10 @@ export function NotificationSettings() {
                           >
                             <option value="">⚠️ Choose which account this rule applies to...</option>
                             {accounts.map(acc => {
-                              const hasCallio = accountCallioStatus[acc.id];
+                              const hasSigcore = accountSigcoreStatus[acc.id];
                               return (
                                 <option key={acc.id} value={acc.id}>
-                                  {hasCallio ? '✓' : '⚠'} {acc.businessName} {!hasCallio ? '(Not configured)' : ''}
+                                  {hasSigcore ? '✓' : '⚠'} {acc.businessName} {!hasSigcore ? '(Not configured)' : ''}
                                 </option>
                               );
                             })}
@@ -653,20 +653,20 @@ export function NotificationSettings() {
                         </div>
                       )}
 
-                      {/* Warning banner if account doesn't have Callio configured */}
-                      {ruleForm.accountId && !accountCallioStatus[ruleForm.accountId] && (
+                      {/* Warning banner if account doesn't have Sigcore configured */}
+                      {ruleForm.accountId && !accountSigcoreStatus[ruleForm.accountId] && (
                         <div className="account-warning-banner" style={{ backgroundColor: '#fff3cd', borderColor: '#ffc107' }}>
                           <AlertCircle size={18} style={{ color: '#856404' }} />
                           <div>
-                            <strong>Callio Not Connected</strong>
-                            <p>This account doesn't have Callio configured yet. Go to <a href="/phone-settings" style={{ color: '#0066cc', textDecoration: 'underline' }}>Phone Settings</a> to connect Callio for this account before creating notification rules.</p>
+                            <strong>Sigcore Not Connected</strong>
+                            <p>This account doesn't have Sigcore configured yet. Go to <a href="/phone-settings" style={{ color: '#0066cc', textDecoration: 'underline' }}>Phone Settings</a> to connect Sigcore for this account before creating notification rules.</p>
                           </div>
                         </div>
                       )}
                     </>
                   )}
 
-                  {/* From Phone - dropdown of Callio numbers */}
+                  {/* From Phone - dropdown of Sigcore numbers */}
                   {ruleForm.accountId && (
                     <div className="form-group">
                       <label>
@@ -696,7 +696,7 @@ export function NotificationSettings() {
                       ) : (
                         <p className="form-hint warning">
                           <AlertCircle size={14} />
-                          No phone numbers available. Go to Phone Settings to connect Callio first.
+                          No phone numbers available. Go to Phone Settings to connect Sigcore first.
                         </p>
                       )}
                     </div>
@@ -829,11 +829,11 @@ export function NotificationSettings() {
                             </span>
                             {(() => {
                               const acctId = rule.savedAccountId || (selectedAccountId !== 'all' ? selectedAccountId : '');
-                              const hasCallio = acctId ? accountCallioStatus[acctId] : false;
+                              const hasSigcore = acctId ? accountSigcoreStatus[acctId] : false;
                               const issues: string[] = [];
                               if (!rule.fromPhone) issues.push('No from phone');
                               if (!rule.toPhone) issues.push('No to phone');
-                              if (!hasCallio) issues.push('No Callio API key');
+                              if (!hasSigcore) issues.push('No Sigcore API key');
                               const healthy = issues.length === 0;
                               return (
                                 <span className={`sms-status-badge ${healthy ? 'ok' : 'error'}`}
@@ -919,10 +919,10 @@ export function NotificationSettings() {
                               >
                                 <option value="">Select account...</option>
                                 {accounts.map(acc => {
-                                  const hasCallio = accountCallioStatus[acc.id];
+                                  const hasSigcore = accountSigcoreStatus[acc.id];
                                   return (
                                     <option key={acc.id} value={acc.id}>
-                                      {hasCallio ? '✓' : '⚠'} {acc.businessName} {!hasCallio ? '(Not configured)' : ''}
+                                      {hasSigcore ? '✓' : '⚠'} {acc.businessName} {!hasSigcore ? '(Not configured)' : ''}
                                     </option>
                                   );
                                 })}
@@ -934,18 +934,18 @@ export function NotificationSettings() {
                             </p>
                           </div>
 
-                          {/* Warning banner if account doesn't have Callio configured */}
-                          {ruleForm.accountId && !accountCallioStatus[ruleForm.accountId] && (
+                          {/* Warning banner if account doesn't have Sigcore configured */}
+                          {ruleForm.accountId && !accountSigcoreStatus[ruleForm.accountId] && (
                             <div className="account-warning-banner" style={{ backgroundColor: '#fff3cd', borderColor: '#ffc107' }}>
                               <AlertCircle size={18} style={{ color: '#856404' }} />
                               <div>
-                                <strong>Callio Not Connected</strong>
-                                <p>This account doesn't have Callio configured yet. Go to <a href="/phone-settings" style={{ color: '#0066cc', textDecoration: 'underline' }}>Phone Settings</a> to connect Callio for this account before saving this rule.</p>
+                                <strong>Sigcore Not Connected</strong>
+                                <p>This account doesn't have Sigcore configured yet. Go to <a href="/phone-settings" style={{ color: '#0066cc', textDecoration: 'underline' }}>Phone Settings</a> to connect Sigcore for this account before saving this rule.</p>
                               </div>
                             </div>
                           )}
 
-                          {/* From Phone - dropdown of Callio numbers */}
+                          {/* From Phone - dropdown of Sigcore numbers */}
                           {ruleForm.accountId && (
                             <div className="form-group">
                               <label>
@@ -975,7 +975,7 @@ export function NotificationSettings() {
                               ) : (
                                 <p className="form-hint warning">
                                   <AlertCircle size={14} />
-                                  No phone numbers available. Go to Phone Settings to connect Callio first.
+                                  No phone numbers available. Go to Phone Settings to connect Sigcore first.
                                 </p>
                               )}
                             </div>

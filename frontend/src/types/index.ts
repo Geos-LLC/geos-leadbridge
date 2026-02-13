@@ -139,17 +139,17 @@ export interface PendingAutomatedMessage {
   };
 }
 
-// SMS Notification Settings (Callio Integration)
+// SMS Notification Settings (Sigcore Integration)
 export interface NotificationSettings {
   id: string;
   savedAccountId: string;
   enabled: boolean;
   destinationPhone: string | null;
   senderMode: 'shared' | 'dedicated' | 'openphone';
-  callioApiKey: string | null; // Masked in response
-  callioFromPhone: string | null;
-  callioWorkspaceId: string | null;
-  callioConnected: boolean;
+  sigcoreApiKey: string | null; // Masked in response
+  sigcoreFromPhone: string | null;
+  sigcoreWorkspaceId: string | null;
+  sigcoreConnected: boolean;
   template: string;
   quietHoursStart: string | null;
   quietHoursEnd: string | null;
@@ -159,7 +159,7 @@ export interface NotificationSettings {
   updatedAt: string;
 }
 
-export interface CallioPhoneNumber {
+export interface SigcorePhoneNumber {
   id: string;
   phoneNumber: string;
   provider: 'twilio' | 'openphone' | string;
@@ -197,7 +197,7 @@ export interface NotificationRule {
   name: string;
   triggerType: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply' | null;
-  fromPhone: string | null;  // Callio phone to send FROM
+  fromPhone: string | null;  // Sigcore phone to send FROM
   toPhone: string | null;    // Destination phone to send TO
   template: string;
   enabled: boolean;

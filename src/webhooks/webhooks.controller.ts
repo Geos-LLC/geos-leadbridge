@@ -53,21 +53,21 @@ export class WebhooksController {
   }
 
   /**
-   * Callio webhook endpoint for SMS delivery status updates
+   * Sigcore webhook endpoint for SMS delivery status updates
    * Receives message.delivered, message.failed, message.status_update events
    */
   @Public()
-  @Post('callio/delivery-status')
+  @Post('sigcore/delivery-status')
   @HttpCode(HttpStatus.OK)
-  async handleCallioDeliveryStatus(
-    @Headers('x-callio-event') eventType: string,
-    @Headers('x-callio-timestamp') timestamp: string,
-    @Headers('x-callio-tenant-id') tenantId: string,
-    @Headers('x-callio-signature') signature: string,
+  async handleSigcoreDeliveryStatus(
+    @Headers('x-sigcore-event') eventType: string,
+    @Headers('x-sigcore-timestamp') timestamp: string,
+    @Headers('x-sigcore-tenant-id') tenantId: string,
+    @Headers('x-sigcore-signature') signature: string,
     @Body() payload: any,
     @Req() req: RawBodyRequest<Request>,
   ) {
-    await this.webhooksService.handleCallioDeliveryStatus({
+    await this.webhooksService.handleSigcoreDeliveryStatus({
       eventType,
       timestamp,
       tenantId,

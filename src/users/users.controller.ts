@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Query, Request, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { UsersService } from './users.service';
-import { CallioSearchResult } from '../callio/callio.service';
+import { SigcoreSearchResult } from '../sigcore/sigcore.service';
 
 @Controller('v1/users')
 @UseGuards(JwtAuthGuard)
@@ -34,7 +34,7 @@ export class UsersController {
   async searchPhoneNumbers(
     @Query('country') country?: string,
     @Query('areaCode') areaCode?: string,
-  ): Promise<CallioSearchResult[]> {
+  ): Promise<SigcoreSearchResult[]> {
     return this.usersService.searchAvailableNumbers(country || 'US', areaCode);
   }
 }
