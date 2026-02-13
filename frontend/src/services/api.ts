@@ -2,7 +2,7 @@ import axios, { AxiosError } from 'axios';
 import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog, NotificationRule, SubscriptionDetails, AdminUser, AdminUserDetails, AdminStats, AdminLog, PhonePoolEntry, PhonePoolStats } from '../types';
 import { notify } from '../store/notificationStore';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://leadbridge-production.up.railway.app/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
