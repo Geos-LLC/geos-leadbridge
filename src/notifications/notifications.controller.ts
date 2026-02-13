@@ -324,6 +324,7 @@ export class NotificationsController {
         apiKey?: string; // OpenPhone API key
         accountSid?: string; // Twilio
         authToken?: string; // Twilio
+        phoneNumber?: string; // Twilio phone number
       };
     },
     @Req() req: Request,

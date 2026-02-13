@@ -1581,6 +1581,7 @@ export class NotificationsService {
       apiKey?: string; // OpenPhone API key
       accountSid?: string; // Twilio
       authToken?: string; // Twilio
+      phoneNumber?: string; // Twilio phone number
     },
   ): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[]; error?: string }> {
     this.logger.log(`[connectSigcore] Connecting account ${savedAccountId} with provider ${provider || 'none'}`);
@@ -1622,13 +1623,15 @@ export class NotificationsService {
       // Continue anyway - webhook can be created manually later
     }
 
-    // 5. Store the provider and webhook ID (API key already saved separately)
+    // 5. Store the provider, webhook ID, and Twilio phone number
+    const fromPhone = (provider === 'twilio' && providerCredentials?.phoneNumber) ? providerCredentials.phoneNumber : null;
     await this.prisma.notificationSettings.upsert({
       where: { savedAccountId },
       update: {
         sigcoreApiKey: effectiveApiKey,
         sigcoreProvider: provider || null,
         sigcoreWebhookId: webhookResult.webhookId,
+        ...(fromPhone && { sigcoreFromPhone: fromPhone }),
         enabled: true,
       },
       create: {
@@ -1636,6 +1639,7 @@ export class NotificationsService {
         sigcoreApiKey: effectiveApiKey,
         sigcoreProvider: provider || null,
         sigcoreWebhookId: webhookResult.webhookId,
+        sigcoreFromPhone: fromPhone,
         enabled: true,
       },
     });
@@ -1646,6 +1650,18 @@ export class NotificationsService {
     let phoneNumbers: SigcorePhoneNumber[] = [];
     if (provider === 'openphone') {
       phoneNumbers = await this.fetchOpenPhoneNumbers(effectiveApiKey);
+    } else if (provider === 'twilio' && fromPhone) {
+      // For Twilio, return the configured phone number
+      phoneNumbers = [{
+        id: 'twilio-configured',
+        phoneNumber: fromPhone,
+        provider: 'twilio',
+        friendlyName: 'Twilio Number',
+        capabilities: ['sms', 'voice'],
+        smsEnabled: true,
+        mmsEnabled: false,
+        voiceEnabled: true,
+      }];
     }
 
     return { success: true, phoneNumbers };

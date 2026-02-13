@@ -46,6 +46,7 @@ export function PhoneSettings() {
   const [openPhoneApiKey, setOpenPhoneApiKey] = useState('');
   const [twilioAccountSid, setTwilioAccountSid] = useState('');
   const [twilioAuthToken, setTwilioAuthToken] = useState('');
+  const [twilioPhoneNumber, setTwilioPhoneNumber] = useState('');
 
   useEffect(() => {
     loadAccounts();
@@ -129,13 +130,14 @@ export function PhoneSettings() {
     setOpenPhoneApiKey('');
     setTwilioAccountSid('');
     setTwilioAuthToken('');
+    setTwilioPhoneNumber('');
   }
 
   function isProviderFormValid(): boolean {
     if (activeTab === 'openphone') {
       return !!openPhoneApiKey.trim();
     } else {
-      return !!twilioAccountSid.trim() && !!twilioAuthToken.trim();
+      return !!twilioAccountSid.trim() && !!twilioAuthToken.trim() && !!twilioPhoneNumber.trim();
     }
   }
 
@@ -151,7 +153,7 @@ export function PhoneSettings() {
 
       const providerCredentials = activeTab === 'openphone'
         ? { apiKey: openPhoneApiKey }
-        : { accountSid: twilioAccountSid, authToken: twilioAuthToken };
+        : { accountSid: twilioAccountSid, authToken: twilioAuthToken, phoneNumber: twilioPhoneNumber };
 
       const result = await notificationsApi.connectSigcore(
         selectedAccountId,
@@ -331,11 +333,12 @@ export function PhoneSettings() {
             <Loader2 size={24} className="spinner" />
           </div>
         ) : (
+          /* Provider Connection Section */
           <div className="settings-section provider-connection">
             <div className="section-header">
               <h2>
                 <Phone size={18} />
-                Connect Your Own Provider
+                Connect Your Provider
               </h2>
             </div>
 
@@ -457,7 +460,19 @@ export function PhoneSettings() {
                             onChange={e => setTwilioAuthToken(e.target.value)}
                             placeholder="Enter your Twilio auth token"
                           />
-                          <p className="form-hint">Get your credentials from the Twilio console.</p>
+                        </div>
+                        <div className="form-group">
+                          <label>
+                            <Phone size={14} />
+                            Twilio Phone Number
+                          </label>
+                          <input
+                            type="text"
+                            value={twilioPhoneNumber}
+                            onChange={e => setTwilioPhoneNumber(e.target.value)}
+                            placeholder="+1234567890"
+                          />
+                          <p className="form-hint">Your Twilio phone number for sending SMS.</p>
                         </div>
                       </>
                     )}
