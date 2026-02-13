@@ -48,6 +48,7 @@ export class SigcoreService {
   private readonly logger = new Logger(SigcoreService.name);
   private readonly sigcoreApiUrl: string;
   private readonly sigcoreApiKey: string | undefined;
+  private readonly sigcoreTenantKey: string | undefined;
 
   constructor(
     private configService: ConfigService,
@@ -56,8 +57,10 @@ export class SigcoreService {
   ) {
     this.sigcoreApiUrl = this.configService.get<string>('SIGCORE_API_URL') || 'https://sigcore-production.up.railway.app';
     this.sigcoreApiKey = this.configService.get<string>('SIGCORE_API_KEY');
+    this.sigcoreTenantKey = this.configService.get<string>('SIGCORE_TENANT_KEY');
 
     this.logger.log(`Sigcore API URL: ${this.sigcoreApiUrl}`);
+    this.logger.log(`Sigcore Tenant Key: ${this.sigcoreTenantKey ? 'configured' : 'NOT SET'}`);
 
     if (!this.sigcoreApiKey) {
       this.logger.warn('Sigcore API key not configured. Phone provisioning will be disabled.');
@@ -378,6 +381,149 @@ export class SigcoreService {
     } catch (error) {
       this.logger.error('Failed to get user orders:', error.response?.data || error.message);
       return [];
+    }
+  }
+
+  // ==========================================
+  // Admin Tenant API (uses SIGCORE_TENANT_KEY)
+  // ==========================================
+
+  /**
+   * Check if admin tenant key is configured
+   */
+  hasTenantKey(): boolean {
+    return !!this.sigcoreTenantKey;
+  }
+
+  /**
+   * Build headers for tenant API requests (x-api-key)
+   */
+  private buildTenantHeaders(): Record<string, string> {
+    if (!this.sigcoreTenantKey) {
+      throw new BadRequestException('SIGCORE_TENANT_KEY not configured. Set it in Railway environment variables.');
+    }
+    return {
+      'x-api-key': this.sigcoreTenantKey,
+      'Content-Type': 'application/json',
+    };
+  }
+
+  /**
+   * Connect admin's provider account via Sigcore integration endpoints
+   */
+  async adminConnectProvider(
+    provider: 'openphone' | 'twilio',
+    credentials: {
+      apiKey?: string;
+      accountSid?: string;
+      authToken?: string;
+      phoneNumber?: string;
+    },
+  ): Promise<{ success: boolean; error?: string; data?: any }> {
+    const headers = this.buildTenantHeaders();
+
+    if (provider === 'openphone') {
+      const url = this.buildUrl('/api/integrations/openphone/connect');
+      this.logger.log(`[adminConnectProvider] Connecting OpenPhone via: ${url}`);
+
+      try {
+        const response = await firstValueFrom(
+          this.httpService.post(url, { apiKey: credentials.apiKey }, { headers })
+        );
+        this.logger.log(`[adminConnectProvider] OpenPhone connected: ${JSON.stringify(response.data)}`);
+        return { success: true, data: response.data };
+      } catch (error: any) {
+        const msg = error.response?.data?.message || error.response?.data?.error || error.message;
+        this.logger.error(`[adminConnectProvider] OpenPhone failed: ${error.response?.status} - ${msg}`);
+        return { success: false, error: `Failed to connect OpenPhone: ${msg}` };
+      }
+    } else {
+      const url = this.buildUrl('/api/integrations/twilio');
+      this.logger.log(`[adminConnectProvider] Connecting Twilio via: ${url}`);
+
+      try {
+        const response = await firstValueFrom(
+          this.httpService.post(url, {
+            accountSid: credentials.accountSid,
+            authToken: credentials.authToken,
+            phoneNumber: credentials.phoneNumber,
+          }, { headers })
+        );
+        this.logger.log(`[adminConnectProvider] Twilio connected: ${JSON.stringify(response.data)}`);
+        return { success: true, data: response.data };
+      } catch (error: any) {
+        const msg = error.response?.data?.message || error.response?.data?.error || error.message;
+        this.logger.error(`[adminConnectProvider] Twilio failed: ${error.response?.status} - ${msg}`);
+        return { success: false, error: `Failed to connect Twilio: ${msg}` };
+      }
+    }
+  }
+
+  /**
+   * Fetch phone numbers from admin's connected OpenPhone account
+   */
+  async adminFetchOpenPhoneNumbers(): Promise<any[]> {
+    const headers = this.buildTenantHeaders();
+    const url = this.buildUrl('/api/integrations/openphone/numbers');
+    this.logger.log(`[adminFetchOpenPhoneNumbers] Fetching from: ${url}`);
+
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(url, { headers })
+      );
+      const data = response.data;
+      this.logger.log(`[adminFetchOpenPhoneNumbers] Response: ${JSON.stringify(data).substring(0, 500)}`);
+      return data?.data || data?.numbers || data?.phoneNumbers || (Array.isArray(data) ? data : []);
+    } catch (error: any) {
+      const msg = error.response?.data?.message || error.message;
+      this.logger.error(`[adminFetchOpenPhoneNumbers] Failed: ${error.response?.status} - ${msg}`);
+      throw new BadRequestException(`Failed to fetch OpenPhone numbers: ${msg}`);
+    }
+  }
+
+  /**
+   * Fetch phone numbers from admin's connected Twilio account
+   */
+  async adminFetchTwilioNumbers(): Promise<any[]> {
+    const headers = this.buildTenantHeaders();
+    const url = this.buildUrl('/api/integrations/twilio/phone-numbers');
+    this.logger.log(`[adminFetchTwilioNumbers] Fetching from: ${url}`);
+
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(url, { headers })
+      );
+      const data = response.data;
+      this.logger.log(`[adminFetchTwilioNumbers] Response: ${JSON.stringify(data).substring(0, 500)}`);
+      return data?.data || data?.phoneNumbers || data?.numbers || (Array.isArray(data) ? data : []);
+    } catch (error: any) {
+      const msg = error.response?.data?.message || error.message;
+      this.logger.error(`[adminFetchTwilioNumbers] Failed: ${error.response?.status} - ${msg}`);
+      throw new BadRequestException(`Failed to fetch Twilio numbers: ${msg}`);
+    }
+  }
+
+  /**
+   * Disconnect admin's provider account via Sigcore
+   */
+  async adminDisconnectProvider(provider: 'openphone' | 'twilio'): Promise<{ success: boolean; error?: string }> {
+    const headers = this.buildTenantHeaders();
+    const url = provider === 'openphone'
+      ? this.buildUrl('/api/integrations/openphone/disconnect')
+      : this.buildUrl('/api/integrations/twilio');
+
+    this.logger.log(`[adminDisconnectProvider] Disconnecting ${provider} via: ${url}`);
+
+    try {
+      await firstValueFrom(
+        this.httpService.delete(url, { headers })
+      );
+      this.logger.log(`[adminDisconnectProvider] ${provider} disconnected`);
+      return { success: true };
+    } catch (error: any) {
+      const msg = error.response?.data?.message || error.message;
+      this.logger.error(`[adminDisconnectProvider] Failed: ${error.response?.status} - ${msg}`);
+      return { success: false, error: msg };
     }
   }
 }

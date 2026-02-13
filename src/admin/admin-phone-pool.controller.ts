@@ -34,18 +34,13 @@ export class AdminPhonePoolController {
     return { success: true, data: stats };
   }
 
-  @Get('search')
-  async searchAvailableNumbers(
-    @Query('country') country?: string,
-    @Query('areaCode') areaCode?: string,
-    @Query('limit') limit?: string,
-  ) {
-    const numbers = await this.phonePoolService.searchAvailableNumbers(
-      country || 'US',
-      areaCode,
-      limit ? parseInt(limit, 10) : 10,
-    );
-    return { success: true, data: { numbers } };
+  /**
+   * Check if SIGCORE_TENANT_KEY is configured
+   */
+  @Get('config')
+  async getConfig() {
+    const status = this.phonePoolService.getTenantKeyStatus();
+    return { success: true, data: status };
   }
 
   /**
@@ -58,13 +53,49 @@ export class AdminPhonePoolController {
     return { success: true, data: users };
   }
 
-  @Post('provision')
-  async provisionToPool(
+  /**
+   * Connect admin's provider (OpenPhone or Twilio) via Sigcore
+   */
+  @Post('connect-provider')
+  async connectProvider(
     @Req() req: any,
-    @Body() body: { areaCode?: string; specificPhoneNumber?: string; count?: number },
+    @Body() body: {
+      provider: 'openphone' | 'twilio';
+      credentials: {
+        apiKey?: string;
+        accountSid?: string;
+        authToken?: string;
+        phoneNumber?: string;
+      };
+    },
   ) {
-    const phones = await this.phonePoolService.provisionToPool(req.user.id, body);
-    return { success: true, data: { phones } };
+    const result = await this.phonePoolService.connectProvider(
+      req.user.id,
+      body.provider,
+      body.credentials,
+    );
+    return { success: result.success, data: result.data, error: result.error };
+  }
+
+  /**
+   * Disconnect admin's provider via Sigcore
+   */
+  @Post('disconnect-provider')
+  async disconnectProvider(
+    @Req() req: any,
+    @Body() body: { provider: 'openphone' | 'twilio' },
+  ) {
+    const result = await this.phonePoolService.disconnectProvider(req.user.id, body.provider);
+    return { success: result.success, error: result.error };
+  }
+
+  /**
+   * Sync numbers from connected providers into the pool
+   */
+  @Post('sync')
+  async syncNumbers(@Req() req: any) {
+    const results = await this.phonePoolService.syncProviderNumbers(req.user.id);
+    return { success: true, data: { results } };
   }
 
   @Post(':phonePoolId/assign/:userId')
@@ -87,11 +118,11 @@ export class AdminPhonePoolController {
   }
 
   @Delete(':phonePoolId')
-  async releaseFromPool(
+  async removeFromPool(
     @Req() req: any,
     @Param('phonePoolId') phonePoolId: string,
   ) {
-    await this.phonePoolService.releaseFromPool(req.user.id, phonePoolId);
-    return { success: true, message: 'Phone released from pool' };
+    await this.phonePoolService.removeFromPool(req.user.id, phonePoolId);
+    return { success: true, message: 'Phone removed from pool' };
   }
 }

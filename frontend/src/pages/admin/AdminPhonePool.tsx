@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, Plus, Search, Loader2, UserPlus, UserMinus, Trash2, RefreshCw, X } from 'lucide-react';
+import { Phone, Search, Loader2, UserPlus, UserMinus, Trash2, RefreshCw, X, Link, Unlink, Download } from 'lucide-react';
 import { adminApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
@@ -17,10 +17,17 @@ export default function AdminPhonePool() {
   const [statusFilter, setStatusFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Provision form
-  const [showProvision, setShowProvision] = useState(false);
-  const [provisionAreaCode, setProvisionAreaCode] = useState('');
-  const [provisioning, setProvisioning] = useState(false);
+  // Config
+  const [tenantKeyConfigured, setTenantKeyConfigured] = useState<boolean | null>(null);
+
+  // Connect provider form
+  const [showConnect, setShowConnect] = useState(false);
+  const [connectProvider, setConnectProvider] = useState<'openphone' | 'twilio'>('openphone');
+  const [connectFields, setConnectFields] = useState({ apiKey: '', accountSid: '', authToken: '', phoneNumber: '' });
+  const [connecting, setConnecting] = useState(false);
+
+  // Sync
+  const [syncing, setSyncing] = useState(false);
 
   // Assign modal
   const [assigningPhoneId, setAssigningPhoneId] = useState<string | null>(null);
@@ -35,7 +42,17 @@ export default function AdminPhonePool() {
       return;
     }
     loadData();
+    loadConfig();
   }, [user, statusFilter, searchQuery]);
+
+  const loadConfig = async () => {
+    try {
+      const config = await adminApi.getPoolConfig();
+      setTenantKeyConfigured(config.configured);
+    } catch {
+      setTenantKeyConfigured(false);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -55,19 +72,67 @@ export default function AdminPhonePool() {
     }
   };
 
-  const handleProvision = async () => {
+  const handleConnect = async () => {
     try {
-      setProvisioning(true);
-      await adminApi.provisionToPool({ areaCode: provisionAreaCode || undefined });
-      notify.success('Provisioned', 'Phone number added to pool');
-      setShowProvision(false);
-      setProvisionAreaCode('');
-      loadData();
+      setConnecting(true);
+      const credentials = connectProvider === 'openphone'
+        ? { apiKey: connectFields.apiKey }
+        : { accountSid: connectFields.accountSid, authToken: connectFields.authToken, phoneNumber: connectFields.phoneNumber };
+
+      const result = await adminApi.connectPoolProvider(connectProvider, credentials);
+      if (result.success) {
+        notify.success('Connected', `${connectProvider === 'openphone' ? 'OpenPhone' : 'Twilio'} connected successfully`);
+        setShowConnect(false);
+        setConnectFields({ apiKey: '', accountSid: '', authToken: '', phoneNumber: '' });
+        // Auto-sync after connecting
+        handleSync();
+      } else {
+        notify.error('Connection Failed', result.error || 'Failed to connect provider');
+      }
     } catch (error: any) {
-      console.error('Failed to provision:', error);
-      notify.error('Error', error.response?.data?.message || 'Failed to provision phone number');
+      console.error('Failed to connect provider:', error);
+      notify.error('Error', error.response?.data?.message || error.response?.data?.error || 'Failed to connect provider');
     } finally {
-      setProvisioning(false);
+      setConnecting(false);
+    }
+  };
+
+  const handleDisconnect = async (provider: 'openphone' | 'twilio') => {
+    if (!confirm(`Disconnect ${provider === 'openphone' ? 'OpenPhone' : 'Twilio'}? All pool numbers from this provider will be released.`)) return;
+    try {
+      const result = await adminApi.disconnectPoolProvider(provider);
+      if (result.success) {
+        notify.success('Disconnected', `${provider === 'openphone' ? 'OpenPhone' : 'Twilio'} disconnected`);
+        loadData();
+      } else {
+        notify.error('Error', result.error || 'Failed to disconnect');
+      }
+    } catch (error: any) {
+      notify.error('Error', error.response?.data?.message || 'Failed to disconnect provider');
+    }
+  };
+
+  const handleSync = async () => {
+    try {
+      setSyncing(true);
+      const result = await adminApi.syncPoolNumbers();
+      if (result.success) {
+        const totalSynced = result.data.results.reduce((sum: number, r: any) => sum + r.synced, 0);
+        const errors = result.data.results.flatMap((r: any) => r.errors);
+        if (totalSynced > 0) {
+          notify.success('Synced', `${totalSynced} number(s) synced to pool`);
+        } else if (errors.length > 0) {
+          notify.error('Sync Issues', errors.join('; '));
+        } else {
+          notify.success('Up to date', 'No new numbers to sync');
+        }
+        loadData();
+      }
+    } catch (error: any) {
+      console.error('Failed to sync:', error);
+      notify.error('Error', error.response?.data?.message || 'Failed to sync numbers');
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -121,13 +186,13 @@ export default function AdminPhonePool() {
   };
 
   const handleRelease = async (phonePoolId: string, phoneNumber: string) => {
-    if (!confirm(`Release ${phoneNumber} from the pool? This will release it back to the carrier.`)) return;
+    if (!confirm(`Remove ${phoneNumber} from the pool?`)) return;
     try {
       await adminApi.releasePhone(phonePoolId);
-      notify.success('Released', 'Phone released from pool');
+      notify.success('Removed', 'Phone removed from pool');
       loadData();
     } catch (error: any) {
-      notify.error('Error', error.response?.data?.message || 'Failed to release phone');
+      notify.error('Error', error.response?.data?.message || 'Failed to remove phone');
     }
   };
 
@@ -158,8 +223,17 @@ export default function AdminPhonePool() {
     <div className="admin-dashboard">
       <div className="admin-header">
         <h1><Phone size={24} /> Phone Pool</h1>
-        <p>Manage provisioned phone numbers and assignments</p>
+        <p>Connect providers, sync numbers, and manage assignments</p>
       </div>
+
+      {/* Tenant Key Warning */}
+      {tenantKeyConfigured === false && (
+        <div className="card" style={{ borderColor: 'var(--warning)', marginBottom: '1rem' }}>
+          <div className="card-body" style={{ color: 'var(--warning)' }}>
+            <strong>SIGCORE_TENANT_KEY not configured.</strong> Set the <code>SIGCORE_TENANT_KEY</code> environment variable with your <code>sc_tenant_...</code> key to enable provider connections.
+          </div>
+        </div>
+      )}
 
       {/* Stats Cards */}
       {stats && (
@@ -211,44 +285,123 @@ export default function AdminPhonePool() {
           <button className="btn btn-secondary" onClick={loadData} title="Refresh">
             <RefreshCw size={16} />
           </button>
-          <button className="btn btn-primary" onClick={() => setShowProvision(true)}>
-            <Plus size={16} />
-            Provision Number
+          <button
+            className="btn btn-secondary"
+            onClick={handleSync}
+            disabled={syncing || tenantKeyConfigured === false}
+            title="Sync numbers from connected providers"
+          >
+            {syncing ? <Loader2 size={16} className="spinner" /> : <Download size={16} />}
+            Sync Numbers
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={() => setShowConnect(true)}
+            disabled={tenantKeyConfigured === false}
+          >
+            <Link size={16} />
+            Connect Provider
           </button>
         </div>
       </div>
 
-      {/* Provision Form */}
-      {showProvision && (
+      {/* Connect Provider Form */}
+      {showConnect && (
         <div className="provision-form card">
           <div className="card-header">
-            <h3>Provision New Number</h3>
-            <button className="btn-icon" onClick={() => setShowProvision(false)}>
+            <h3>Connect Provider</h3>
+            <button className="btn-icon" onClick={() => setShowConnect(false)}>
               <X size={18} />
             </button>
           </div>
           <div className="card-body">
-            <div className="form-row">
+            {/* Provider Tabs */}
+            <div className="provider-tabs" style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+              <button
+                className={`btn btn-sm ${connectProvider === 'openphone' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setConnectProvider('openphone')}
+              >
+                OpenPhone
+              </button>
+              <button
+                className={`btn btn-sm ${connectProvider === 'twilio' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setConnectProvider('twilio')}
+              >
+                Twilio
+              </button>
+            </div>
+
+            {connectProvider === 'openphone' ? (
               <div className="form-group">
-                <label>Area Code (optional)</label>
+                <label>OpenPhone API Key</label>
                 <input
-                  type="text"
-                  placeholder="e.g. 813"
-                  value={provisionAreaCode}
-                  onChange={e => setProvisionAreaCode(e.target.value)}
-                  maxLength={3}
+                  type="password"
+                  placeholder="Enter your OpenPhone API key"
+                  value={connectFields.apiKey}
+                  onChange={e => setConnectFields({ ...connectFields, apiKey: e.target.value })}
                 />
               </div>
+            ) : (
+              <>
+                <div className="form-group">
+                  <label>Account SID</label>
+                  <input
+                    type="text"
+                    placeholder="AC..."
+                    value={connectFields.accountSid}
+                    onChange={e => setConnectFields({ ...connectFields, accountSid: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Auth Token</label>
+                  <input
+                    type="password"
+                    placeholder="Enter your Twilio auth token"
+                    value={connectFields.authToken}
+                    onChange={e => setConnectFields({ ...connectFields, authToken: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Phone Number</label>
+                  <input
+                    type="text"
+                    placeholder="+1234567890"
+                    value={connectFields.phoneNumber}
+                    onChange={e => setConnectFields({ ...connectFields, phoneNumber: e.target.value })}
+                  />
+                </div>
+              </>
+            )}
+
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
               <button
                 className="btn btn-primary"
-                onClick={handleProvision}
-                disabled={provisioning}
+                onClick={handleConnect}
+                disabled={connecting || (connectProvider === 'openphone' ? !connectFields.apiKey : (!connectFields.accountSid || !connectFields.authToken))}
               >
-                {provisioning ? (
-                  <><Loader2 size={16} className="spinner" /> Provisioning...</>
+                {connecting ? (
+                  <><Loader2 size={16} className="spinner" /> Connecting...</>
                 ) : (
-                  <><Plus size={16} /> Provision</>
+                  <><Link size={16} /> Connect {connectProvider === 'openphone' ? 'OpenPhone' : 'Twilio'}</>
                 )}
+              </button>
+              <button className="btn btn-secondary" onClick={() => setShowConnect(false)}>Cancel</button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+              <button
+                className="btn btn-sm btn-danger"
+                onClick={() => handleDisconnect('openphone')}
+                title="Disconnect OpenPhone"
+              >
+                <Unlink size={14} /> Disconnect OpenPhone
+              </button>
+              <button
+                className="btn btn-sm btn-danger"
+                onClick={() => handleDisconnect('twilio')}
+                title="Disconnect Twilio"
+              >
+                <Unlink size={14} /> Disconnect Twilio
               </button>
             </div>
           </div>
@@ -265,7 +418,7 @@ export default function AdminPhonePool() {
               <th>Provider</th>
               <th>Status</th>
               <th>Assigned To</th>
-              <th>Provisioned</th>
+              <th>Added</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -273,7 +426,7 @@ export default function AdminPhonePool() {
             {phones.length === 0 ? (
               <tr>
                 <td colSpan={7} className="empty-cell">
-                  {loading ? 'Loading...' : 'No phone numbers in pool. Provision one to get started.'}
+                  {loading ? 'Loading...' : 'No phone numbers in pool. Connect a provider and sync to get started.'}
                 </td>
               </tr>
             ) : (
@@ -324,7 +477,7 @@ export default function AdminPhonePool() {
                         <button
                           className="btn btn-sm btn-danger"
                           onClick={() => handleRelease(phone.id, phone.phoneNumber)}
-                          title="Release from pool"
+                          title="Remove from pool"
                         >
                           <Trash2 size={14} />
                         </button>

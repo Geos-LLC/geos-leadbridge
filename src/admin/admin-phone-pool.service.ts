@@ -84,55 +84,121 @@ export class AdminPhonePoolService {
   }
 
   /**
-   * Search available phone numbers from Sigcore
+   * Check if SIGCORE_TENANT_KEY is configured
    */
-  async searchAvailableNumbers(country: string = 'US', areaCode?: string, limit: number = 10) {
-    return this.sigcoreService.searchAvailableNumbers(country, areaCode, limit);
+  getTenantKeyStatus(): { configured: boolean } {
+    return { configured: this.sigcoreService.hasTenantKey() };
   }
 
   /**
-   * Provision phone number(s) into the pool
+   * Connect admin's provider account (OpenPhone or Twilio) via Sigcore
    */
-  async provisionToPool(
+  async connectProvider(
     adminId: string,
-    params: { areaCode?: string; specificPhoneNumber?: string; count?: number },
+    provider: 'openphone' | 'twilio',
+    credentials: {
+      apiKey?: string;
+      accountSid?: string;
+      authToken?: string;
+      phoneNumber?: string;
+    },
   ) {
-    const count = params.count || 1;
-    const results: any[] = [];
+    const result = await this.sigcoreService.adminConnectProvider(provider, credentials);
 
-    for (let i = 0; i < count; i++) {
-      const result = await this.sigcoreService.provisionNumber(
-        params.areaCode,
-        i === 0 ? params.specificPhoneNumber : undefined,
-        params.areaCode ? `Pool ${params.areaCode}` : 'Pool Number',
-        true,
-      );
-
-      if (!result) continue;
-
-      // Extract area code from phone number (e.g. +18135551234 -> 813)
-      const extractedAreaCode = this.extractAreaCode(result.phoneNumber);
-
-      const poolEntry = await this.prisma.phonePool.create({
-        data: {
-          phoneNumber: result.phoneNumber,
-          provider: 'twilio',
-          areaCode: extractedAreaCode,
-          sigcoreAllocationId: result.allocationId,
-          status: 'AVAILABLE',
-        },
-      });
-
-      results.push(poolEntry);
+    if (result.success) {
+      await this.adminService.logAdminAction(adminId, 'CONNECT_PROVIDER', null, { provider });
+      this.logger.log(`Admin ${adminId} connected ${provider}`);
     }
 
-    await this.adminService.logAdminAction(adminId, 'PROVISION_POOL_PHONE', null, {
-      count: results.length,
-      areaCode: params.areaCode,
-      phones: results.map((r) => r.phoneNumber),
+    return result;
+  }
+
+  /**
+   * Disconnect admin's provider account via Sigcore
+   */
+  async disconnectProvider(adminId: string, provider: 'openphone' | 'twilio') {
+    const result = await this.sigcoreService.adminDisconnectProvider(provider);
+
+    if (result.success) {
+      // Mark pool phones from this provider as RELEASED
+      await this.prisma.phonePool.updateMany({
+        where: { provider, status: { not: 'RELEASED' } },
+        data: { status: 'RELEASED', assignedToUserId: null, assignedAt: null, releasedAt: new Date() },
+      });
+
+      await this.adminService.logAdminAction(adminId, 'DISCONNECT_PROVIDER', null, { provider });
+      this.logger.log(`Admin ${adminId} disconnected ${provider}`);
+    }
+
+    return result;
+  }
+
+  /**
+   * Sync phone numbers from connected providers into the pool
+   * Fetches numbers from OpenPhone and/or Twilio via Sigcore, upserts into PhonePool
+   */
+  async syncProviderNumbers(adminId: string) {
+    const results: { provider: string; synced: number; errors: string[] }[] = [];
+
+    for (const provider of ['openphone', 'twilio'] as const) {
+      const providerResult = { provider, synced: 0, errors: [] as string[] };
+
+      try {
+        const numbers = provider === 'openphone'
+          ? await this.sigcoreService.adminFetchOpenPhoneNumbers()
+          : await this.sigcoreService.adminFetchTwilioNumbers();
+
+        this.logger.log(`[syncProviderNumbers] Fetched ${numbers.length} numbers from ${provider}`);
+
+        for (const num of numbers) {
+          const phoneNumber = num.phoneNumber || num.phone_number || num.number || num.e164;
+          if (!phoneNumber) continue;
+
+          const friendlyName = num.friendlyName || num.friendly_name || num.name || num.label || null;
+
+          // Upsert: create if new, skip if already exists (don't overwrite assignment)
+          const existing = await this.prisma.phonePool.findUnique({
+            where: { phoneNumber },
+          });
+
+          if (!existing) {
+            await this.prisma.phonePool.create({
+              data: {
+                phoneNumber,
+                provider,
+                areaCode: this.extractAreaCode(phoneNumber),
+                friendlyName,
+                status: 'AVAILABLE',
+              },
+            });
+            providerResult.synced++;
+          } else if (existing.status === 'RELEASED') {
+            // Re-activate released numbers
+            await this.prisma.phonePool.update({
+              where: { id: existing.id },
+              data: { status: 'AVAILABLE', friendlyName, releasedAt: null },
+            });
+            providerResult.synced++;
+          }
+          // If AVAILABLE or ASSIGNED, keep as-is (don't disturb assignments)
+        }
+      } catch (err: any) {
+        const msg = err.message || 'Unknown error';
+        this.logger.warn(`[syncProviderNumbers] Failed to fetch ${provider} numbers: ${msg}`);
+        providerResult.errors.push(msg);
+      }
+
+      results.push(providerResult);
+    }
+
+    const totalSynced = results.reduce((sum, r) => sum + r.synced, 0);
+
+    await this.adminService.logAdminAction(adminId, 'SYNC_POOL_NUMBERS', null, {
+      results,
+      totalSynced,
     });
 
-    this.logger.log(`Provisioned ${results.length} phone(s) to pool`);
+    this.logger.log(`Synced ${totalSynced} phone number(s) to pool`);
     return results;
   }
 
@@ -199,20 +265,11 @@ export class AdminPhonePoolService {
   }
 
   /**
-   * Release a phone from the pool (returns it to Sigcore)
+   * Remove a phone from the pool
    */
-  async releaseFromPool(adminId: string, phonePoolId: string) {
+  async removeFromPool(adminId: string, phonePoolId: string) {
     const phone = await this.prisma.phonePool.findUnique({ where: { id: phonePoolId } });
     if (!phone) throw new NotFoundException('Pool phone not found');
-
-    // Release via Sigcore if we have an allocation ID
-    if (phone.sigcoreAllocationId) {
-      try {
-        await this.sigcoreService.releaseNumber(phone.sigcoreAllocationId);
-      } catch (error) {
-        this.logger.error(`Failed to release via Sigcore: ${error.message}`);
-      }
-    }
 
     await this.prisma.phonePool.update({
       where: { id: phonePoolId },
@@ -224,20 +281,18 @@ export class AdminPhonePoolService {
       },
     });
 
-    await this.adminService.logAdminAction(adminId, 'RELEASE_POOL_PHONE', null, {
+    await this.adminService.logAdminAction(adminId, 'REMOVE_POOL_PHONE', null, {
       phoneNumber: phone.phoneNumber,
       phonePoolId,
     });
 
-    this.logger.log(`Released pool phone ${phone.phoneNumber}`);
+    this.logger.log(`Removed pool phone ${phone.phoneNumber}`);
   }
 
   /**
-   * Auto-assign a phone from the pool to a user
-   * Round-robin with area code preference
+   * Auto-assign a phone from the pool to a user (round-robin with area code preference)
    */
   async autoAssign(userId: string, preferredAreaCode?: string): Promise<any | null> {
-    // Try matching area code first
     let phone = null;
     if (preferredAreaCode) {
       phone = await this.prisma.phonePool.findFirst({
@@ -246,7 +301,6 @@ export class AdminPhonePoolService {
       });
     }
 
-    // Fall back to any available phone
     if (!phone) {
       phone = await this.prisma.phonePool.findFirst({
         where: { status: 'AVAILABLE' },
@@ -296,7 +350,6 @@ export class AdminPhonePoolService {
    * Extract area code from E.164 phone number
    */
   private extractAreaCode(phoneNumber: string): string | null {
-    // +1XXXNNNNNNN -> XXX
     const match = phoneNumber.replace(/\D/g, '').match(/^1?(\d{3})/);
     return match ? match[1] : null;
   }

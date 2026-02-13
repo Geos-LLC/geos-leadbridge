@@ -791,18 +791,26 @@ export const adminApi = {
     const { data } = await api.get('/v1/admin/phone-pool/stats');
     return data.data;
   },
-  searchPhoneNumbers: async (country?: string, areaCode?: string, limit?: number): Promise<{ numbers: any[] }> => {
-    const queryParams = new URLSearchParams();
-    if (country) queryParams.append('country', country);
-    if (areaCode) queryParams.append('areaCode', areaCode);
-    if (limit) queryParams.append('limit', limit.toString());
-
-    const { data } = await api.get(`/v1/admin/phone-pool/search?${queryParams.toString()}`);
+  getPoolConfig: async (): Promise<{ configured: boolean }> => {
+    const { data } = await api.get('/v1/admin/phone-pool/config');
     return data.data;
   },
-  provisionToPool: async (body: { areaCode?: string; specificPhoneNumber?: string; count?: number }): Promise<{ phones: PhonePoolEntry[] }> => {
-    const { data } = await api.post('/v1/admin/phone-pool/provision', body);
-    return data.data;
+  connectPoolProvider: async (provider: 'openphone' | 'twilio', credentials: {
+    apiKey?: string;
+    accountSid?: string;
+    authToken?: string;
+    phoneNumber?: string;
+  }): Promise<{ success: boolean; data?: any; error?: string }> => {
+    const { data } = await api.post('/v1/admin/phone-pool/connect-provider', { provider, credentials });
+    return data;
+  },
+  disconnectPoolProvider: async (provider: 'openphone' | 'twilio'): Promise<{ success: boolean; error?: string }> => {
+    const { data } = await api.post('/v1/admin/phone-pool/disconnect-provider', { provider });
+    return data;
+  },
+  syncPoolNumbers: async (): Promise<{ success: boolean; data: { results: { provider: string; synced: number; errors: string[] }[] } }> => {
+    const { data } = await api.post('/v1/admin/phone-pool/sync');
+    return data;
   },
   assignPhone: async (phonePoolId: string, userId: string): Promise<PhonePoolEntry> => {
     const { data } = await api.post(`/v1/admin/phone-pool/${phonePoolId}/assign/${userId}`);
