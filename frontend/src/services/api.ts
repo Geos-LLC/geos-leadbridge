@@ -580,7 +580,6 @@ export const notificationsApi = {
       apiKey?: string;
       accountSid?: string;
       authToken?: string;
-      phoneNumber?: string;
     },
   ): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[]; error?: string }> => {
     const { data } = await api.post(`/v1/notifications/sigcore/connect/${savedAccountId}`, {

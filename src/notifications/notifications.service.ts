@@ -1581,7 +1581,6 @@ export class NotificationsService {
       apiKey?: string; // OpenPhone API key
       accountSid?: string; // Twilio
       authToken?: string; // Twilio
-      phoneNumber?: string; // Twilio
     },
   ): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[]; error?: string }> {
     this.logger.log(`[connectSigcore] Connecting account ${savedAccountId} with provider ${provider || 'none'}`);
@@ -1641,32 +1640,12 @@ export class NotificationsService {
       },
     });
 
-    // Store Twilio phone number as fromPhone if provided
-    if (provider === 'twilio' && providerCredentials?.phoneNumber) {
-      await this.prisma.notificationSettings.update({
-        where: { savedAccountId },
-        data: { sigcoreFromPhone: providerCredentials.phoneNumber },
-      });
-    }
-
     this.logger.log(`[connectSigcore] Connected successfully. Provider: ${provider}, WebhookId: ${webhookResult.webhookId}`);
 
     // 6. Fetch phone numbers for the connected provider
     let phoneNumbers: SigcorePhoneNumber[] = [];
     if (provider === 'openphone') {
       phoneNumbers = await this.fetchOpenPhoneNumbers(effectiveApiKey);
-    } else if (provider === 'twilio' && providerCredentials?.phoneNumber) {
-      // For Twilio, return the configured phone number
-      phoneNumbers = [{
-        id: 'twilio-configured',
-        phoneNumber: providerCredentials.phoneNumber,
-        provider: 'twilio',
-        friendlyName: 'Twilio Number',
-        capabilities: ['sms', 'voice'],
-        smsEnabled: true,
-        mmsEnabled: false,
-        voiceEnabled: true,
-      }];
     }
 
     return { success: true, phoneNumbers };

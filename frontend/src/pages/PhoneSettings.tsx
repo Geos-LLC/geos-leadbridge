@@ -34,13 +34,6 @@ export function PhoneSettings() {
   const [poolPhone, setPoolPhone] = useState<PhonePoolEntry | null>(null);
   const [loadingPoolPhone, setLoadingPoolPhone] = useState(true);
 
-  // API Key state
-  const [hasApiKey, setHasApiKey] = useState(false);
-  const [maskedApiKey, setMaskedApiKey] = useState<string | null>(null);
-  const [showApiKeyForm, setShowApiKeyForm] = useState(false);
-  const [apiKeyInput, setApiKeyInput] = useState('');
-  const [savingApiKey, setSavingApiKey] = useState(false);
-
   // Provider connection state
   const [activeTab, setActiveTab] = useState<ProviderTab>('openphone');
   const [sigcoreConnected, setSigcoreConnected] = useState(false);
@@ -53,7 +46,6 @@ export function PhoneSettings() {
   const [openPhoneApiKey, setOpenPhoneApiKey] = useState('');
   const [twilioAccountSid, setTwilioAccountSid] = useState('');
   const [twilioAuthToken, setTwilioAuthToken] = useState('');
-  const [twilioPhoneNumber, setTwilioPhoneNumber] = useState('');
 
   useEffect(() => {
     loadAccounts();
@@ -102,26 +94,20 @@ export function PhoneSettings() {
 
       if (settingsRes.settings) {
         const s = settingsRes.settings;
-        setHasApiKey(!!s.sigcoreApiKey);
-        setMaskedApiKey(s.sigcoreApiKey || null);
         setSigcoreConnected(s.sigcoreConnected);
         setConnectedProvider(s.sigcoreProvider || null);
         setShowConnectForm(false);
-        setShowApiKeyForm(false);
         if (s.sigcoreConnected) {
           loadPhoneNumbers(accountId);
         } else {
           setPhoneNumbers([]);
         }
       } else {
-        setHasApiKey(false);
-        setMaskedApiKey(null);
         setSigcoreConnected(false);
         setConnectedProvider(null);
         resetProviderForm();
         setPhoneNumbers([]);
         setShowConnectForm(false);
-        setShowApiKeyForm(false);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load settings');
@@ -143,44 +129,13 @@ export function PhoneSettings() {
     setOpenPhoneApiKey('');
     setTwilioAccountSid('');
     setTwilioAuthToken('');
-    setTwilioPhoneNumber('');
   }
 
   function isProviderFormValid(): boolean {
     if (activeTab === 'openphone') {
       return !!openPhoneApiKey.trim();
     } else {
-      return !!twilioAccountSid.trim() && !!twilioAuthToken.trim() && !!twilioPhoneNumber.trim();
-    }
-  }
-
-  async function handleSaveApiKey() {
-    if (!apiKeyInput.trim()) {
-      setError('Please enter your API key');
-      return;
-    }
-
-    try {
-      setSavingApiKey(true);
-      setError(null);
-
-      const result = await notificationsApi.saveApiKey(selectedAccountId, apiKeyInput);
-
-      if (!result.success) {
-        setError(result.error || 'Failed to save API key');
-        return;
-      }
-
-      setHasApiKey(true);
-      setMaskedApiKey(`****${apiKeyInput.slice(-4)}`);
-      setApiKeyInput('');
-      setShowApiKeyForm(false);
-      setSuccessMessage('API key saved successfully');
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err: any) {
-      setError(err.message || 'Failed to save API key');
-    } finally {
-      setSavingApiKey(false);
+      return !!twilioAccountSid.trim() && !!twilioAuthToken.trim();
     }
   }
 
@@ -196,7 +151,7 @@ export function PhoneSettings() {
 
       const providerCredentials = activeTab === 'openphone'
         ? { apiKey: openPhoneApiKey }
-        : { accountSid: twilioAccountSid, authToken: twilioAuthToken, phoneNumber: twilioPhoneNumber };
+        : { accountSid: twilioAccountSid, authToken: twilioAuthToken };
 
       const result = await notificationsApi.connectSigcore(
         selectedAccountId,
@@ -376,263 +331,178 @@ export function PhoneSettings() {
             <Loader2 size={24} className="spinner" />
           </div>
         ) : (
-          <>
-            {/* Section 2: API Key Configuration */}
-            <div className="settings-section">
-              <div className="section-header">
-                <h2>
-                  <Key size={18} />
-                  API Key
-                </h2>
-              </div>
+          <div className="settings-section provider-connection">
+            <div className="section-header">
+              <h2>
+                <Phone size={18} />
+                Connect Your Own Provider
+              </h2>
+            </div>
 
-              {hasApiKey && !showApiKeyForm ? (
-                <div className="api-key-status">
-                  <div className="connection-status">
-                    <CheckCircle size={18} className="status-icon success" />
-                    <span>API Key configured: {maskedApiKey}</span>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => setShowApiKeyForm(true)}
-                    >
-                      Change
-                    </button>
-                  </div>
+            {/* Provider Tabs */}
+            <div className="provider-tabs">
+              <button
+                className={`provider-tab ${activeTab === 'openphone' ? 'active' : ''}`}
+                onClick={() => { setActiveTab('openphone'); setShowConnectForm(false); resetProviderForm(); }}
+              >
+                OpenPhone
+              </button>
+              <button
+                className={`provider-tab ${activeTab === 'twilio' ? 'active' : ''}`}
+                onClick={() => { setActiveTab('twilio'); setShowConnectForm(false); resetProviderForm(); }}
+              >
+                Twilio
+              </button>
+            </div>
+
+            {sigcoreConnected ? (
+              <div className="sigcore-connected">
+                <div className="connection-status">
+                  <CheckCircle size={18} className="status-icon success" />
+                  <span>Connected to {connectedProviderLabel}</span>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleDisconnect}
+                  >
+                    <Unlink size={14} />
+                    Disconnect
+                  </button>
                 </div>
-              ) : (
-                <div className="api-key-form">
-                  <p className="connection-info">
-                    Enter your LeadBridge API key to enable provider connections.
-                  </p>
-                  <div className="form-group">
-                    <input
-                      type="password"
-                      value={apiKeyInput}
-                      onChange={e => setApiKeyInput(e.target.value)}
-                      placeholder="Enter your API key (sc_tenant_...)"
-                    />
-                    <p className="form-hint">Your tenant API key provided by your administrator.</p>
+
+                {phoneNumbers.length > 0 ? (
+                  <div className="phone-numbers-list">
+                    <label>Available Phone Numbers ({phoneNumbers.length})</label>
+                    <p className="form-hint">These phone numbers can be used when creating SMS alert rules.</p>
+                    <div className="phone-cards">
+                      {phoneNumbers.map(phone => {
+                        const a2pInfo = getA2PStatusInfo(phone.a2pStatus);
+                        return (
+                          <div key={phone.id} className="phone-card">
+                            <div className="phone-card-header">
+                              <span className="phone-number">{phone.phoneNumber}</span>
+                            </div>
+                            <div className="phone-card-details">
+                              <span className="provider-badge">{phone.provider}</span>
+                              {phone.friendlyName && (
+                                <span className="friendly-name">{phone.friendlyName}</span>
+                              )}
+                            </div>
+                            <div className="phone-card-status">
+                              <span className={`a2p-status ${a2pInfo.className}`}>
+                                {a2pInfo.icon}
+                                {a2pInfo.label}
+                              </span>
+                              <div className="capabilities">
+                                {phone.smsEnabled && <span className="cap-badge sms">SMS</span>}
+                                {phone.mmsEnabled && <span className="cap-badge mms">MMS</span>}
+                                {phone.voiceEnabled && <span className="cap-badge voice">Voice</span>}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="form-actions">
-                    {showApiKeyForm && (
+                ) : (
+                  <div className="warning-message">
+                    <AlertCircle size={16} />
+                    No phone numbers found. Please add a phone number in your {connectedProviderLabel} account first.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="sigcore-disconnected">
+                <p className="connection-info">
+                  Connect your {providerLabel} account to use your own phone numbers for SMS notifications.
+                </p>
+
+                {showConnectForm ? (
+                  <div className="api-key-form">
+                    {activeTab === 'openphone' ? (
+                      <div className="form-group">
+                        <label>
+                          <Key size={14} />
+                          OpenPhone API Key
+                        </label>
+                        <input
+                          type="password"
+                          value={openPhoneApiKey}
+                          onChange={e => setOpenPhoneApiKey(e.target.value)}
+                          placeholder="Enter your OpenPhone API key"
+                        />
+                        <p className="form-hint">Get your API key from the OpenPhone settings page.</p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="form-group">
+                          <label>
+                            <Key size={14} />
+                            Twilio Account SID
+                          </label>
+                          <input
+                            type="text"
+                            value={twilioAccountSid}
+                            onChange={e => setTwilioAccountSid(e.target.value)}
+                            placeholder="AC..."
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label>
+                            <Key size={14} />
+                            Twilio Auth Token
+                          </label>
+                          <input
+                            type="password"
+                            value={twilioAuthToken}
+                            onChange={e => setTwilioAuthToken(e.target.value)}
+                            placeholder="Enter your Twilio auth token"
+                          />
+                          <p className="form-hint">Get your credentials from the Twilio console.</p>
+                        </div>
+                      </>
+                    )}
+
+                    <div className="form-actions">
                       <button
                         className="btn btn-secondary"
                         onClick={() => {
-                          setShowApiKeyForm(false);
-                          setApiKeyInput('');
+                          setShowConnectForm(false);
+                          resetProviderForm();
                         }}
                       >
                         Cancel
                       </button>
-                    )}
-                    <button
-                      className="btn btn-primary"
-                      onClick={handleSaveApiKey}
-                      disabled={savingApiKey || !apiKeyInput.trim()}
-                    >
-                      {savingApiKey ? (
-                        <>
-                          <Loader2 size={14} className="spinner" />
-                          Saving...
-                        </>
-                      ) : (
-                        'Save API Key'
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Section 3: Connect Your Own Provider (only if API key is configured) */}
-            {hasApiKey && (
-              <div className="settings-section provider-connection">
-                <div className="section-header">
-                  <h2>
-                    <Phone size={18} />
-                    Connect Your Own Provider
-                  </h2>
-                </div>
-
-                {/* Provider Tabs */}
-                <div className="provider-tabs">
-                  <button
-                    className={`provider-tab ${activeTab === 'openphone' ? 'active' : ''}`}
-                    onClick={() => { setActiveTab('openphone'); setShowConnectForm(false); resetProviderForm(); }}
-                  >
-                    OpenPhone
-                  </button>
-                  <button
-                    className={`provider-tab ${activeTab === 'twilio' ? 'active' : ''}`}
-                    onClick={() => { setActiveTab('twilio'); setShowConnectForm(false); resetProviderForm(); }}
-                  >
-                    Twilio
-                  </button>
-                </div>
-
-                {sigcoreConnected ? (
-                  <div className="sigcore-connected">
-                    <div className="connection-status">
-                      <CheckCircle size={18} className="status-icon success" />
-                      <span>Connected to {connectedProviderLabel}</span>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={handleDisconnect}
-                      >
-                        <Unlink size={14} />
-                        Disconnect
-                      </button>
-                    </div>
-
-                    {phoneNumbers.length > 0 ? (
-                      <div className="phone-numbers-list">
-                        <label>Available Phone Numbers ({phoneNumbers.length})</label>
-                        <p className="form-hint">These phone numbers can be used when creating SMS alert rules.</p>
-                        <div className="phone-cards">
-                          {phoneNumbers.map(phone => {
-                            const a2pInfo = getA2PStatusInfo(phone.a2pStatus);
-                            return (
-                              <div key={phone.id} className="phone-card">
-                                <div className="phone-card-header">
-                                  <span className="phone-number">{phone.phoneNumber}</span>
-                                </div>
-                                <div className="phone-card-details">
-                                  <span className="provider-badge">{phone.provider}</span>
-                                  {phone.friendlyName && (
-                                    <span className="friendly-name">{phone.friendlyName}</span>
-                                  )}
-                                </div>
-                                <div className="phone-card-status">
-                                  <span className={`a2p-status ${a2pInfo.className}`}>
-                                    {a2pInfo.icon}
-                                    {a2pInfo.label}
-                                  </span>
-                                  <div className="capabilities">
-                                    {phone.smsEnabled && <span className="cap-badge sms">SMS</span>}
-                                    {phone.mmsEnabled && <span className="cap-badge mms">MMS</span>}
-                                    {phone.voiceEnabled && <span className="cap-badge voice">Voice</span>}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="warning-message">
-                        <AlertCircle size={16} />
-                        No phone numbers found. Please add a phone number in your {connectedProviderLabel} account first.
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="sigcore-disconnected">
-                    <p className="connection-info">
-                      Connect your {providerLabel} account to use your own phone numbers for SMS notifications.
-                    </p>
-
-                    {showConnectForm ? (
-                      <div className="api-key-form">
-                        {/* Provider-specific fields only */}
-                        {activeTab === 'openphone' ? (
-                          <div className="form-group">
-                            <label>
-                              <Key size={14} />
-                              OpenPhone API Key
-                            </label>
-                            <input
-                              type="password"
-                              value={openPhoneApiKey}
-                              onChange={e => setOpenPhoneApiKey(e.target.value)}
-                              placeholder="Enter your OpenPhone API key"
-                            />
-                            <p className="form-hint">Get your API key from the OpenPhone settings page.</p>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="form-group">
-                              <label>
-                                <Key size={14} />
-                                Twilio Account SID
-                              </label>
-                              <input
-                                type="text"
-                                value={twilioAccountSid}
-                                onChange={e => setTwilioAccountSid(e.target.value)}
-                                placeholder="AC..."
-                              />
-                            </div>
-                            <div className="form-group">
-                              <label>
-                                <Key size={14} />
-                                Twilio Auth Token
-                              </label>
-                              <input
-                                type="password"
-                                value={twilioAuthToken}
-                                onChange={e => setTwilioAuthToken(e.target.value)}
-                                placeholder="Enter your Twilio auth token"
-                              />
-                            </div>
-                            <div className="form-group">
-                              <label>
-                                <Phone size={14} />
-                                Twilio Phone Number
-                              </label>
-                              <input
-                                type="text"
-                                value={twilioPhoneNumber}
-                                onChange={e => setTwilioPhoneNumber(e.target.value)}
-                                placeholder="+1234567890"
-                              />
-                              <p className="form-hint">Get your credentials from the Twilio console.</p>
-                            </div>
-                          </>
-                        )}
-
-                        <div className="form-actions">
-                          <button
-                            className="btn btn-secondary"
-                            onClick={() => {
-                              setShowConnectForm(false);
-                              resetProviderForm();
-                            }}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            className="btn btn-primary"
-                            onClick={handleConnect}
-                            disabled={connecting || !isProviderFormValid()}
-                          >
-                            {connecting ? (
-                              <>
-                                <Loader2 size={14} className="spinner" />
-                                Connecting...
-                              </>
-                            ) : (
-                              <>
-                                <Link size={14} />
-                                Connect
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
                       <button
                         className="btn btn-primary"
-                        onClick={() => setShowConnectForm(true)}
+                        onClick={handleConnect}
+                        disabled={connecting || !isProviderFormValid()}
                       >
-                        <Link size={16} />
-                        Connect to {providerLabel}
+                        {connecting ? (
+                          <>
+                            <Loader2 size={14} className="spinner" />
+                            Connecting...
+                          </>
+                        ) : (
+                          <>
+                            <Link size={14} />
+                            Connect
+                          </>
+                        )}
                       </button>
-                    )}
+                    </div>
                   </div>
+                ) : (
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => setShowConnectForm(true)}
+                  >
+                    <Link size={16} />
+                    Connect to {providerLabel}
+                  </button>
                 )}
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>
