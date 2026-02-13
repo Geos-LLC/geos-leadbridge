@@ -48,6 +48,16 @@ export class AdminPhonePoolController {
     return { success: true, data: { numbers } };
   }
 
+  /**
+   * List users for assignment dropdown
+   * MUST be before parameterized routes to avoid NestJS matching 'users' as :phonePoolId
+   */
+  @Get('users')
+  async listUsers(@Query('search') search?: string) {
+    const users = await this.phonePoolService.listUsersForAssignment(search);
+    return { success: true, data: users };
+  }
+
   @Post('provision')
   async provisionToPool(
     @Req() req: any,
@@ -83,28 +93,5 @@ export class AdminPhonePoolController {
   ) {
     await this.phonePoolService.releaseFromPool(req.user.id, phonePoolId);
     return { success: true, message: 'Phone released from pool' };
-  }
-
-  /**
-   * List users for assignment dropdown
-   */
-  @Get('users')
-  async listUsers(@Query('search') search?: string) {
-    const where: any = {};
-    if (search) {
-      where.OR = [
-        { email: { contains: search, mode: 'insensitive' } },
-        { name: { contains: search, mode: 'insensitive' } },
-      ];
-    }
-
-    const users = await this.phonePoolService['prisma'].user.findMany({
-      where,
-      select: { id: true, email: true, name: true },
-      take: 20,
-      orderBy: { email: 'asc' },
-    });
-
-    return { success: true, data: users };
   }
 }

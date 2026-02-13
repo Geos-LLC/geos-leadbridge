@@ -84,6 +84,6 @@ export class UsersService {
     const poolPhone = await this.prisma.phonePool.findFirst({
       where: { assignedToUserId: userId, status: 'ASSIGNED' },
     });
-    return { phone: poolPhone };
+    return { success: true, poolPhone };
   }
 }

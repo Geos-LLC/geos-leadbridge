@@ -71,16 +71,6 @@ export class AdminPhonePoolService {
       _count: { id: true },
     });
 
-    const availableByAreaCode = await this.prisma.phonePool.groupBy({
-      by: ['areaCode'],
-      where: { status: 'AVAILABLE' },
-      _count: { id: true },
-    });
-
-    const availableMap = new Map(
-      availableByAreaCode.map((a) => [a.areaCode, a._count.id]),
-    );
-
     return {
       total,
       available,
@@ -88,8 +78,7 @@ export class AdminPhonePoolService {
       reserved,
       byAreaCode: byAreaCode.map((a) => ({
         areaCode: a.areaCode || 'unknown',
-        total: a._count.id,
-        available: availableMap.get(a.areaCode) || 0,
+        count: a._count.id,
       })),
     };
   }
@@ -281,6 +270,26 @@ export class AdminPhonePoolService {
 
     this.logger.log(`Auto-assigned pool phone ${assigned.phoneNumber} to user ${userId}`);
     return assigned;
+  }
+
+  /**
+   * List users for assignment dropdown
+   */
+  async listUsersForAssignment(search?: string) {
+    const where: any = {};
+    if (search) {
+      where.OR = [
+        { email: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    return this.prisma.user.findMany({
+      where,
+      select: { id: true, email: true, name: true },
+      take: 20,
+      orderBy: { email: 'asc' },
+    });
   }
 
   /**
