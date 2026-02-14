@@ -491,6 +491,11 @@ export interface CreateNotificationRuleDto {
   toPhone: string;    // Destination phone to send TO
   sendToCustomer?: boolean; // If true, send to lead's phone instead of toPhone
   template: string;
+  templateId?: string;
+  delayMinutes?: number;
+  stopOnCustomerReply?: boolean;
+  stopOnLeadClosed?: boolean;
+  stopOnOptOut?: boolean;
   enabled?: boolean;
 }
 
@@ -502,6 +507,11 @@ export interface UpdateNotificationRuleDto {
   toPhone?: string;
   sendToCustomer?: boolean;
   template?: string;
+  templateId?: string;
+  delayMinutes?: number;
+  stopOnCustomerReply?: boolean;
+  stopOnLeadClosed?: boolean;
+  stopOnOptOut?: boolean;
   enabled?: boolean;
 }
 

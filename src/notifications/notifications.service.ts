@@ -3,7 +3,7 @@
  * Manages SMS notification settings and sends notifications via Sigcore
  */
 
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 
@@ -30,6 +30,11 @@ export interface CreateNotificationRuleDto {
   toPhone: string;   // Destination phone number to send TO
   sendToCustomer?: boolean; // If true, send to lead's phone instead of toPhone
   template: string;
+  templateId?: string; // Optional link to MessageTemplate
+  delayMinutes?: number; // Delay before sending (0 = immediate)
+  stopOnCustomerReply?: boolean;
+  stopOnLeadClosed?: boolean;
+  stopOnOptOut?: boolean;
   enabled?: boolean;
 }
 
@@ -41,6 +46,11 @@ export interface UpdateNotificationRuleDto {
   toPhone?: string;
   sendToCustomer?: boolean;
   template?: string;
+  templateId?: string;
+  delayMinutes?: number;
+  stopOnCustomerReply?: boolean;
+  stopOnLeadClosed?: boolean;
+  stopOnOptOut?: boolean;
   enabled?: boolean;
 }
 
@@ -54,6 +64,12 @@ export interface NotificationRuleResponse {
   toPhone: string | null;
   sendToCustomer: boolean;
   template: string;
+  templateId: string | null;
+  delayMinutes: number;
+  stopOnCustomerReply: boolean;
+  stopOnLeadClosed: boolean;
+  stopOnOptOut: boolean;
+  messageTemplate: { id: string; name: string; content: string } | null;
   enabled: boolean;
   triggerCount: number;
   lastTriggeredAt: string | null;
@@ -158,8 +174,9 @@ export interface SendNotificationContext {
 }
 
 @Injectable()
-export class NotificationsService {
+export class NotificationsService implements OnModuleInit {
   private readonly logger = new Logger(NotificationsService.name);
+  private pendingNotifTimers = new Map<string, NodeJS.Timeout>();
 
   private readonly appSigcoreApiKey: string;
 
@@ -168,6 +185,10 @@ export class NotificationsService {
     private configService: ConfigService,
   ) {
     this.appSigcoreApiKey = this.configService.get<string>('SIGCORE_API_KEY', '');
+  }
+
+  async onModuleInit(): Promise<void> {
+    await this.restorePendingNotificationMessages();
   }
 
   /**
@@ -355,6 +376,7 @@ export class NotificationsService {
             notificationRules: {
               orderBy: { createdAt: 'desc' },
               include: {
+                messageTemplate: true,
                 notificationLogs: {
                   orderBy: { createdAt: 'desc' },
                   take: 1,
@@ -428,6 +450,7 @@ export class NotificationsService {
       where: { notificationSettingsId: settings.id },
       orderBy: { createdAt: 'desc' },
       include: {
+        messageTemplate: true,
         notificationLogs: {
           orderBy: { createdAt: 'desc' },
           take: 1,
@@ -435,7 +458,7 @@ export class NotificationsService {
       },
     });
 
-    return rules.map(this.formatRule);
+    return rules.map(r => this.formatRule(r));
   }
 
   /**
@@ -501,7 +524,19 @@ export class NotificationsService {
         toPhone: data.toPhone,
         sendToCustomer: data.sendToCustomer ?? false,
         template: data.template,
+        templateId: data.templateId || null,
+        delayMinutes: data.delayMinutes ?? 0,
+        stopOnCustomerReply: data.stopOnCustomerReply ?? true,
+        stopOnLeadClosed: data.stopOnLeadClosed ?? true,
+        stopOnOptOut: data.stopOnOptOut ?? true,
         enabled: data.enabled ?? true,
+      },
+      include: {
+        messageTemplate: true,
+        notificationLogs: {
+          orderBy: { createdAt: 'desc' as const },
+          take: 1,
+        },
       },
     });
 
@@ -555,7 +590,19 @@ export class NotificationsService {
         ...(data.toPhone !== undefined && { toPhone: data.toPhone }),
         ...(data.sendToCustomer !== undefined && { sendToCustomer: data.sendToCustomer }),
         ...(data.template !== undefined && { template: data.template }),
+        ...(data.templateId !== undefined && { templateId: data.templateId || null }),
+        ...(data.delayMinutes !== undefined && { delayMinutes: data.delayMinutes }),
+        ...(data.stopOnCustomerReply !== undefined && { stopOnCustomerReply: data.stopOnCustomerReply }),
+        ...(data.stopOnLeadClosed !== undefined && { stopOnLeadClosed: data.stopOnLeadClosed }),
+        ...(data.stopOnOptOut !== undefined && { stopOnOptOut: data.stopOnOptOut }),
         ...(data.enabled !== undefined && { enabled: data.enabled }),
+      },
+      include: {
+        messageTemplate: true,
+        notificationLogs: {
+          orderBy: { createdAt: 'desc' as const },
+          take: 1,
+        },
       },
     });
 
@@ -619,13 +666,16 @@ export class NotificationsService {
     this.logger.log(`Checking notification rules for account ${savedAccountId}`);
 
     // First try to get account-specific settings
+    const notifRuleInclude = {
+      notificationRules: {
+        where: { triggerType: 'new_lead', enabled: true },
+        include: { messageTemplate: true },
+      },
+    };
+
     let settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
-      include: {
-        notificationRules: {
-          where: { triggerType: 'new_lead', enabled: true },
-        },
-      },
+      include: notifRuleInclude,
     });
 
     // Fallback: If no account-specific settings, try user-level default settings
@@ -636,11 +686,7 @@ export class NotificationsService {
           userId: userId,
           savedAccountId: null,
         },
-        include: {
-          notificationRules: {
-            where: { triggerType: 'new_lead', enabled: true },
-          },
-        },
+        include: notifRuleInclude,
       });
 
       if (settings) {
@@ -659,11 +705,7 @@ export class NotificationsService {
           sigcoreApiKey: { not: null },
           enabled: true,
         },
-        include: {
-          notificationRules: {
-            where: { triggerType: 'new_lead', enabled: true },
-          },
-        },
+        include: notifRuleInclude,
       });
 
       if (settings) {
@@ -717,7 +759,13 @@ export class NotificationsService {
 
     // Send notification for each enabled rule
     for (const rule of rules) {
-      await this.sendNotificationWithRule(settings, rule, context);
+      // If rule has a delay, schedule it instead of sending immediately
+      if (rule.delayMinutes > 0 && rule.sendToCustomer) {
+        await this.scheduleNotificationMessage(settings, rule, context);
+      } else {
+        // Send immediately (delayMinutes === 0 or non-customer rules)
+        await this.sendNotificationWithRule(settings, rule, context);
+      }
     }
   }
 
@@ -729,6 +777,48 @@ export class NotificationsService {
     const { userId, savedAccountId, leadId, lead, isFirstCustomerReply, isSecondCustomerMessage } = context;
 
     this.logger.log(`Checking customer reply notification rules for account ${savedAccountId}`);
+
+    // Stop condition: cancel pending customer texting follow-ups if customer replied
+    // Check if any pending notifications for this lead have stopOnCustomerReply enabled
+    const pendingForLead = await this.prisma.pendingNotificationMessage.findMany({
+      where: { leadId, status: 'pending' },
+      include: { notificationRule: true },
+    });
+    for (const p of pendingForLead) {
+      if (p.notificationRule.stopOnCustomerReply) {
+        const timer = this.pendingNotifTimers.get(p.id);
+        if (timer) {
+          clearTimeout(timer);
+          this.pendingNotifTimers.delete(p.id);
+        }
+        await this.prisma.pendingNotificationMessage.update({
+          where: { id: p.id },
+          data: { status: 'cancelled', failureReason: 'Customer replied' },
+        });
+        this.logger.log(`Cancelled pending notification ${p.id}: customer replied`);
+      }
+    }
+
+    // Also check for opt-out (STOP keyword)
+    const replyText = (lead.message || '').trim().toUpperCase();
+    if (['STOP', 'UNSUBSCRIBE', 'CANCEL', 'QUIT'].includes(replyText)) {
+      for (const p of pendingForLead) {
+        if (p.notificationRule.stopOnOptOut && p.status === 'pending') {
+          // Already cancelled above if stopOnCustomerReply was true
+          // This handles the case where stopOnOptOut is true but stopOnCustomerReply is false
+          const timer = this.pendingNotifTimers.get(p.id);
+          if (timer) {
+            clearTimeout(timer);
+            this.pendingNotifTimers.delete(p.id);
+          }
+          await this.prisma.pendingNotificationMessage.update({
+            where: { id: p.id },
+            data: { status: 'cancelled', failureReason: 'Customer opted out (STOP)' },
+          });
+          this.logger.log(`Cancelled pending notification ${p.id}: customer opted out`);
+        }
+      }
+    }
 
     // Skip the first customer message - only trigger on actual replies (2nd+ messages)
     if (isFirstCustomerReply) {
@@ -1090,6 +1180,225 @@ export class NotificationsService {
       });
 
       return { success: false, error: error.message || 'Failed to send test notification' };
+    }
+  }
+
+  // ==========================================
+  // Notification Follow-Up Scheduling
+  // ==========================================
+
+  /**
+   * Schedule a delayed notification message
+   */
+  private async scheduleNotificationMessage(
+    settings: any,
+    rule: any,
+    context: SendNotificationContext,
+  ): Promise<void> {
+    const { savedAccountId, leadId } = context;
+
+    // Check for duplicate (same rule + lead)
+    const existing = await this.prisma.pendingNotificationMessage.findFirst({
+      where: {
+        notificationRuleId: rule.id,
+        leadId,
+        status: 'pending',
+      },
+    });
+
+    if (existing) {
+      this.logger.log(`Skipping duplicate: rule ${rule.id} already has pending notification for lead ${leadId}`);
+      return;
+    }
+
+    const scheduledFor = new Date(Date.now() + rule.delayMinutes * 60 * 1000);
+
+    const pending = await this.prisma.pendingNotificationMessage.create({
+      data: {
+        notificationRuleId: rule.id,
+        leadId,
+        savedAccountId,
+        scheduledFor,
+        status: 'pending',
+      },
+    });
+
+    this.logger.log(`Created pending notification: ${pending.id}, scheduled for ${scheduledFor.toISOString()}`);
+
+    // Schedule execution
+    const delayMs = rule.delayMinutes * 60 * 1000;
+    this.scheduleNotifTimer(pending.id, delayMs, settings, rule, context);
+  }
+
+  /**
+   * Execute a pending notification message (send it via SMS)
+   */
+  private async executePendingNotification(
+    pendingId: string,
+    settings: any,
+    rule: any,
+    context: SendNotificationContext,
+  ): Promise<void> {
+    this.logger.log(`Executing pending notification: ${pendingId}`);
+
+    try {
+      // Re-fetch pending to check it's still valid
+      const pending = await this.prisma.pendingNotificationMessage.findUnique({
+        where: { id: pendingId },
+        include: { notificationRule: true, lead: true },
+      });
+
+      if (!pending || pending.status !== 'pending') {
+        this.logger.log(`Pending notification ${pendingId} no longer pending (status: ${pending?.status})`);
+        return;
+      }
+
+      // Check stop conditions
+      if (pending.notificationRule.stopOnLeadClosed) {
+        const lead = await this.prisma.lead.findUnique({ where: { id: pending.leadId } });
+        if (lead && ['booked', 'lost'].includes(lead.status)) {
+          this.logger.log(`Cancelling notification ${pendingId}: lead ${pending.leadId} is ${lead.status}`);
+          await this.prisma.pendingNotificationMessage.update({
+            where: { id: pendingId },
+            data: { status: 'cancelled', failureReason: `Lead status: ${lead.status}` },
+          });
+          return;
+        }
+      }
+
+      // Check rule still enabled
+      if (!pending.notificationRule.enabled) {
+        this.logger.log(`Cancelling notification ${pendingId}: rule disabled`);
+        await this.prisma.pendingNotificationMessage.update({
+          where: { id: pendingId },
+          data: { status: 'cancelled', failureReason: 'Rule disabled' },
+        });
+        return;
+      }
+
+      // Use template from messageTemplate if available, otherwise fall back to rule.template
+      const templateContent = rule.messageTemplate?.content || rule.template;
+      const ruleForSend = { ...rule, template: templateContent };
+
+      // Send the SMS
+      await this.sendNotificationWithRule(settings, ruleForSend, context);
+
+      // Mark as sent
+      await this.prisma.pendingNotificationMessage.update({
+        where: { id: pendingId },
+        data: { status: 'sent', sentAt: new Date() },
+      });
+
+      this.logger.log(`Successfully sent scheduled notification: ${pendingId}`);
+    } catch (error: any) {
+      this.logger.error(`Failed to send scheduled notification: ${pendingId}`, error.message);
+      await this.prisma.pendingNotificationMessage.update({
+        where: { id: pendingId },
+        data: { status: 'failed', failureReason: error.message },
+      });
+    }
+  }
+
+  /**
+   * Schedule a timer for a pending notification
+   */
+  private scheduleNotifTimer(
+    pendingId: string,
+    delayMs: number,
+    settings: any,
+    rule: any,
+    context: SendNotificationContext,
+  ): void {
+    const timer = setTimeout(async () => {
+      this.pendingNotifTimers.delete(pendingId);
+      await this.executePendingNotification(pendingId, settings, rule, context);
+    }, delayMs);
+
+    this.pendingNotifTimers.set(pendingId, timer);
+    this.logger.log(`Scheduled notification timer for ${pendingId}, delay: ${delayMs}ms`);
+  }
+
+  /**
+   * Cancel pending notification messages for a lead (stop condition triggered)
+   */
+  async cancelPendingNotificationsForLead(leadId: string, reason: string): Promise<number> {
+    const pending = await this.prisma.pendingNotificationMessage.findMany({
+      where: { leadId, status: 'pending' },
+    });
+
+    for (const p of pending) {
+      // Cancel the timer
+      const timer = this.pendingNotifTimers.get(p.id);
+      if (timer) {
+        clearTimeout(timer);
+        this.pendingNotifTimers.delete(p.id);
+      }
+
+      // Update status
+      await this.prisma.pendingNotificationMessage.update({
+        where: { id: p.id },
+        data: { status: 'cancelled', failureReason: reason },
+      });
+    }
+
+    if (pending.length > 0) {
+      this.logger.log(`Cancelled ${pending.length} pending notifications for lead ${leadId}: ${reason}`);
+    }
+
+    return pending.length;
+  }
+
+  /**
+   * Restore pending notification messages on startup
+   */
+  private async restorePendingNotificationMessages(): Promise<void> {
+    this.logger.log('Restoring pending notification messages...');
+
+    const pendingMessages = await this.prisma.pendingNotificationMessage.findMany({
+      where: { status: 'pending' },
+      include: {
+        notificationRule: {
+          include: {
+            messageTemplate: true,
+            notificationSettings: true,
+          },
+        },
+        lead: true,
+      },
+    });
+
+    this.logger.log(`Found ${pendingMessages.length} pending notification messages to restore`);
+
+    const now = Date.now();
+
+    for (const pending of pendingMessages) {
+      const scheduledTime = pending.scheduledFor.getTime();
+      const delayMs = Math.max(0, scheduledTime - now);
+
+      const settings = pending.notificationRule.notificationSettings;
+      const rule = pending.notificationRule;
+
+      const context: SendNotificationContext = {
+        userId: settings.userId || '',
+        savedAccountId: pending.savedAccountId,
+        leadId: pending.leadId,
+        lead: {
+          customerName: pending.lead.customerName,
+          customerPhone: pending.lead.customerPhone,
+          category: pending.lead.category || undefined,
+          city: pending.lead.city || undefined,
+          state: pending.lead.state || undefined,
+          postcode: pending.lead.postcode || undefined,
+          message: pending.lead.message || undefined,
+        },
+      };
+
+      if (delayMs === 0) {
+        this.logger.log(`Executing overdue notification: ${pending.id}`);
+        await this.executePendingNotification(pending.id, settings, rule, context);
+      } else {
+        this.scheduleNotifTimer(pending.id, delayMs, settings, rule, context);
+      }
     }
   }
 
@@ -1963,6 +2272,16 @@ export class NotificationsService {
       toPhone: rule.toPhone,
       sendToCustomer: rule.sendToCustomer ?? false,
       template: rule.template,
+      templateId: rule.templateId || null,
+      delayMinutes: rule.delayMinutes ?? 0,
+      stopOnCustomerReply: rule.stopOnCustomerReply ?? true,
+      stopOnLeadClosed: rule.stopOnLeadClosed ?? true,
+      stopOnOptOut: rule.stopOnOptOut ?? true,
+      messageTemplate: rule.messageTemplate ? {
+        id: rule.messageTemplate.id,
+        name: rule.messageTemplate.name,
+        content: rule.messageTemplate.content,
+      } : null,
       enabled: rule.enabled,
       triggerCount: rule.triggerCount,
       lastTriggeredAt: rule.lastTriggeredAt?.toISOString() || null,

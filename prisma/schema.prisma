@@ -150,9 +150,10 @@ model Lead {
   updatedAt         DateTime @updatedAt
 
   // Relationships
-  user            User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  conversation    Conversation?             @relation(fields: [threadId], references: [id])
-  pendingMessages PendingAutomatedMessage[]
+  user                    User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation            Conversation?                 @relation(fields: [threadId], references: [id])
+  pendingMessages         PendingAutomatedMessage[]
+  pendingNotificationMsgs PendingNotificationMessage[]
 
   @@unique([platform, externalRequestId])
   @@index([userId])
@@ -258,8 +259,9 @@ model MessageTemplate {
   updatedAt   DateTime  @updatedAt
 
   // Relationships
-  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  automationRules AutomationRule[]
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  automationRules   AutomationRule[]
+  notificationRules NotificationRule[]
 
   @@index([userId])
   @@map("message_templates")
@@ -416,7 +418,12 @@ model NotificationRule {
   fromPhone              String?  // Sigcore phone number to send FROM
   toPhone                String?  // Destination phone number to send TO
   sendToCustomer         Boolean  @default(false) // If true, send SMS to lead.customerPhone instead of toPhone
-  template               String   @db.Text // SMS template for this specific rule
+  template               String   @db.Text // SMS template for this specific rule (fallback if no templateId)
+  templateId             String?  // Optional link to MessageTemplate
+  delayMinutes           Int      @default(0) // Delay before sending (0 = immediate)
+  stopOnCustomerReply    Boolean  @default(true) // Cancel pending follow-ups if customer replies
+  stopOnLeadClosed       Boolean  @default(true) // Cancel pending follow-ups if lead closed/won/lost
+  stopOnOptOut           Boolean  @default(true) // Cancel pending follow-ups if customer sends STOP
   enabled                Boolean  @default(true)
   triggerCount           Int      @default(0)
   lastTriggeredAt        DateTime?
@@ -425,12 +432,36 @@ model NotificationRule {
 
   // Relationships
   notificationSettings NotificationSettings @relation(fields: [notificationSettingsId], references: [id], onDelete: Cascade)
+  messageTemplate      MessageTemplate?     @relation(fields: [templateId], references: [id], onDelete: SetNull)
   notificationLogs     NotificationLog[]
+  pendingMessages      PendingNotificationMessage[]
 
   @@index([notificationSettingsId])
   @@index([triggerType])
   @@index([enabled])
   @@map("notification_rules")
+}
+
+model PendingNotificationMessage {
+  id                   String    @id @default(uuid())
+  notificationRuleId   String
+  leadId               String
+  savedAccountId       String    // For quick lookups by account
+  scheduledFor         DateTime  // When to send
+  status               String    @default("pending") // "pending" | "sent" | "cancelled" | "failed"
+  failureReason        String?
+  sentAt               DateTime?
+  createdAt            DateTime  @default(now())
+
+  // Relationships
+  notificationRule NotificationRule @relation(fields: [notificationRuleId], references: [id], onDelete: Cascade)
+  lead             Lead              @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationRuleId, leadId])
+  @@index([status])
+  @@index([scheduledFor])
+  @@index([savedAccountId])
+  @@map("pending_notification_messages")
 }
 
 model NotificationLog {

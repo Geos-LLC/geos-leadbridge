@@ -202,6 +202,12 @@ export interface NotificationRule {
   toPhone: string | null;    // Destination phone to send TO
   sendToCustomer?: boolean;  // If true, send to lead's phone instead of toPhone
   template: string;
+  templateId?: string | null;
+  delayMinutes?: number;
+  stopOnCustomerReply?: boolean;
+  stopOnLeadClosed?: boolean;
+  stopOnOptOut?: boolean;
+  messageTemplate?: { id: string; name: string; content: string } | null;
   enabled: boolean;
   triggerCount: number;
   lastTriggeredAt: string | null;

@@ -116,7 +116,14 @@ export function Services() {
 
   // Other service rules
   const [leadAlertRule, setLeadAlertRule] = useState<NotificationRule | null>(null);
-  const [customerTextingRule, setCustomerTextingRule] = useState<NotificationRule | null>(null);
+
+  // Customer Texting rules (dynamic array — same pattern as Auto Reply)
+  const [customerTextingRules, setCustomerTextingRules] = useState<NotificationRule[]>([]);
+  const customerTextingEnabled = customerTextingRules.some(r => r.enabled);
+  const firstTextingRule = customerTextingRules.find(r => !r.delayMinutes || r.delayMinutes === 0) || null;
+  const textingFollowUpRules = customerTextingRules
+    .filter(r => r.delayMinutes && r.delayMinutes > 0)
+    .sort((a, b) => (a.delayMinutes || 0) - (b.delayMinutes || 0));
 
   // Supporting data
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
@@ -133,7 +140,6 @@ export function Services() {
 
   // Customer Texting form state
   const [textingFromPhone, setTextingFromPhone] = useState('');
-  const [textingTemplate, setTextingTemplate] = useState('Hi {{lead.name}}, thanks for your interest in {{lead.service}}! We received your request and will reach out shortly.');
 
   useEffect(() => {
     loadAccounts();
@@ -177,16 +183,18 @@ export function Services() {
       );
       setAutoReplyRules(allAutoReplies);
 
-      // Find notification rules by sendToCustomer flag
+      // Find lead alert rules (non-customer-facing)
       const leadAlert = notifRes.rules.find(
         (r: NotificationRule) => r.triggerType === 'new_lead' && !r.sendToCustomer
       ) || null;
-      const customerTexting = notifRes.rules.find(
+
+      // Collect ALL customer texting rules (sendToCustomer: true)
+      const customerTextingAll = notifRes.rules.filter(
         (r: NotificationRule) => r.triggerType === 'new_lead' && r.sendToCustomer === true
-      ) || null;
+      );
 
       setLeadAlertRule(leadAlert);
-      setCustomerTextingRule(customerTexting);
+      setCustomerTextingRules(customerTextingAll);
       setTemplates(templatesRes.templates);
       setPoolPhones(poolRes.phoneNumbers);
 
@@ -196,15 +204,15 @@ export function Services() {
         setAlertFromPhone(leadAlert.fromPhone || '');
         setAlertTemplate(leadAlert.template || alertTemplate);
       }
-      if (customerTexting) {
-        setTextingFromPhone(customerTexting.fromPhone || '');
-        setTextingTemplate(customerTexting.template || textingTemplate);
+      const firstTexting = customerTextingAll.find(r => !r.delayMinutes || r.delayMinutes === 0);
+      if (firstTexting) {
+        setTextingFromPhone(firstTexting.fromPhone || '');
       }
 
       // Default from phone to first pool phone
       const defaultFrom = poolRes.phoneNumbers[0]?.phoneNumber || '';
       if (!leadAlert) setAlertFromPhone(defaultFrom);
-      if (!customerTexting) setTextingFromPhone(defaultFrom);
+      if (!firstTexting) setTextingFromPhone(defaultFrom);
 
     } catch (err: any) {
       setError(err.message || 'Failed to load services data');
@@ -299,9 +307,12 @@ export function Services() {
     setSaving(true);
     setError(null);
     try {
-      if (customerTextingRule) {
-        const { rule } = await notificationsApi.updateRule(selectedAccountId, customerTextingRule.id, { enabled });
-        setCustomerTextingRule(rule);
+      if (customerTextingRules.length > 0) {
+        // Toggle all existing rules
+        const updated = await Promise.all(
+          customerTextingRules.map(r => notificationsApi.updateRule(selectedAccountId, r.id, { enabled }))
+        );
+        setCustomerTextingRules(updated.map(u => u.rule));
         showSuccess(enabled ? 'Customer Texting enabled' : 'Customer Texting disabled');
       } else if (enabled) {
         if (!textingFromPhone) {
@@ -310,16 +321,29 @@ export function Services() {
           setSaving(false);
           return;
         }
+        // Find or create a default customer texting template
+        let templateId = templates.find(t => t.name.includes('Customer SMS'))?.id;
+        if (!templateId) {
+          const { template } = await templatesApi.createTemplate(
+            'Customer SMS - Welcome',
+            'Hi {{lead.name}}, thanks for your interest in {{lead.service}}! We received your request and will reach out shortly.',
+          );
+          templateId = template.id;
+          setTemplates(prev => [template, ...prev]);
+        }
+
         const { rule } = await notificationsApi.createRule(selectedAccountId, {
-          name: 'Customer SMS Follow-Up',
+          name: 'Customer SMS - Immediate',
           triggerType: 'new_lead',
           fromPhone: textingFromPhone,
           toPhone: '',
           sendToCustomer: true,
-          template: textingTemplate,
+          template: 'Hi {{lead.name}}, thanks for your interest in {{lead.service}}! We received your request and will reach out shortly.',
+          templateId,
+          delayMinutes: 0,
           enabled: true,
         });
-        setCustomerTextingRule(rule);
+        setCustomerTextingRules([rule]);
         showSuccess('Customer Texting enabled');
       }
     } catch (err: any) {
@@ -421,18 +445,106 @@ export function Services() {
     }
   }
 
-  async function saveCustomerTextingSettings() {
-    if (!customerTextingRule) return;
+  // --- Customer Texting Handlers ---
+
+  async function changeTextingRuleTemplate(ruleId: string, templateId: string) {
     setSaving(true);
     try {
-      const { rule } = await notificationsApi.updateRule(selectedAccountId, customerTextingRule.id, {
-        fromPhone: textingFromPhone,
-        template: textingTemplate,
-      });
-      setCustomerTextingRule(rule);
-      showSuccess('Customer Texting settings saved');
+      const { rule } = await notificationsApi.updateRule(selectedAccountId, ruleId, { templateId });
+      setCustomerTextingRules(prev => prev.map(r => r.id === ruleId ? rule : r));
+      showSuccess('Template updated');
     } catch (err: any) {
-      setError(err.message || 'Failed to save settings');
+      setError(err.message || 'Failed to update template');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changeTextingFollowUpDelay(ruleId: string, delayMinutes: number) {
+    setSaving(true);
+    try {
+      const { rule } = await notificationsApi.updateRule(selectedAccountId, ruleId, { delayMinutes });
+      setCustomerTextingRules(prev => prev.map(r => r.id === ruleId ? rule : r));
+    } catch (err: any) {
+      setError(err.message || 'Failed to update delay');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addTextingFollowUp() {
+    setSaving(true);
+    try {
+      let templateId = templates.find(t => t.name.includes('Customer SMS') && t.name.includes('Follow'))?.id;
+      if (!templateId) {
+        const { template } = await templatesApi.createTemplate(
+          'Customer SMS - Follow Up',
+          'Hi {{lead.name}}, just checking in about your {{lead.service}} request. We\'re still available if you\'d like to proceed!',
+        );
+        templateId = template.id;
+        setTemplates(prev => [template, ...prev]);
+      }
+
+      const followUpNum = textingFollowUpRules.length + 1;
+      const { rule } = await notificationsApi.createRule(selectedAccountId, {
+        name: `Customer Follow-Up ${followUpNum}`,
+        triggerType: 'new_lead',
+        fromPhone: textingFromPhone,
+        toPhone: '',
+        sendToCustomer: true,
+        template: 'Hi {{lead.name}}, just checking in about your {{lead.service}} request. We\'re still available if you\'d like to proceed!',
+        templateId,
+        delayMinutes: 120,
+        enabled: true,
+      });
+      setCustomerTextingRules(prev => [...prev, rule]);
+      showSuccess('Follow-up added');
+    } catch (err: any) {
+      setError(err.message || 'Failed to add follow-up');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteTextingFollowUp(ruleId: string) {
+    setSaving(true);
+    try {
+      await notificationsApi.deleteRule(selectedAccountId, ruleId);
+      setCustomerTextingRules(prev => prev.filter(r => r.id !== ruleId));
+      showSuccess('Follow-up removed');
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete follow-up');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function updateStopCondition(field: 'stopOnCustomerReply' | 'stopOnLeadClosed' | 'stopOnOptOut', value: boolean) {
+    setSaving(true);
+    try {
+      const updated = await Promise.all(
+        customerTextingRules.map(r => notificationsApi.updateRule(selectedAccountId, r.id, { [field]: value }))
+      );
+      setCustomerTextingRules(updated.map(u => u.rule));
+    } catch (err: any) {
+      setError(err.message || 'Failed to update stop condition');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveTextingFromPhone(fromPhone: string) {
+    setTextingFromPhone(fromPhone);
+    if (customerTextingRules.length === 0) return;
+    setSaving(true);
+    try {
+      const updated = await Promise.all(
+        customerTextingRules.map(r => notificationsApi.updateRule(selectedAccountId, r.id, { fromPhone }))
+      );
+      setCustomerTextingRules(updated.map(u => u.rule));
+      showSuccess('Send from number updated');
+    } catch (err: any) {
+      setError(err.message || 'Failed to update from phone');
     } finally {
       setSaving(false);
     }
@@ -757,63 +869,156 @@ export function Services() {
               icon={<MessageSquare size={22} />}
               title="Customer Texting"
               description="Send a direct text to customers to increase response rate."
-              enabled={customerTextingRule?.enabled ?? false}
+              enabled={customerTextingEnabled}
               onToggle={toggleCustomerTexting}
               saving={saving}
               expanded={expandedCard === 'customer-texting'}
               onExpand={() => toggleExpand('customer-texting')}
-              statusText={customerTextingRule?.enabled ? 'SMS sent to customer on new lead' : undefined}
+              statusText={customerTextingEnabled ? `${customerTextingRules.length} message${customerTextingRules.length !== 1 ? 's' : ''} in sequence` : undefined}
             >
               <div className="service-settings-inner">
-                <p className="form-hint">
-                  When a new lead arrives, an SMS is sent directly to the customer's phone number from the lead.
-                </p>
 
-                <div className="form-group">
-                  <label>Send from</label>
-                  <div className="select-wrapper">
-                    <select value={textingFromPhone} onChange={e => setTextingFromPhone(e.target.value)}>
-                      <option value="">Select phone number</option>
-                      {poolPhones.map(p => (
-                        <option key={p.id} value={p.phoneNumber}>
-                          {p.phoneNumber} ({p.provider}){p.assigned ? ' - assigned' : ''}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown size={16} />
+                {/* Send From */}
+                <div className="auto-reply-section">
+                  <h4>Send From</h4>
+                  <div className="form-group">
+                    <div className="select-wrapper">
+                      <select value={textingFromPhone} onChange={e => saveTextingFromPhone(e.target.value)}>
+                        <option value="">Select phone number</option>
+                        {poolPhones.map(p => (
+                          <option key={p.id} value={p.phoneNumber}>
+                            {p.phoneNumber} ({p.provider}){p.assigned ? ' - assigned' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown size={16} />
+                    </div>
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label>SMS Template</label>
-                  <textarea
-                    rows={3}
-                    value={textingTemplate}
-                    onChange={e => setTextingTemplate(e.target.value)}
-                    placeholder="Enter message to customer..."
-                  />
-                  <div className="variable-buttons">
-                    {SMS_VARIABLES.map(v => (
-                      <button
-                        key={v.name}
-                        className="variable-btn"
-                        onClick={() => insertVariable(v.name, setTextingTemplate)}
-                        title={v.desc}
+                {/* First SMS */}
+                <div className="auto-reply-section">
+                  <h4>First SMS</h4>
+                  <div className="form-group">
+                    <label>Template</label>
+                    <div className="select-wrapper">
+                      <select
+                        value={firstTextingRule?.templateId || firstTextingRule?.messageTemplate?.id || ''}
+                        onChange={e => firstTextingRule && changeTextingRuleTemplate(firstTextingRule.id, e.target.value)}
+                        disabled={!firstTextingRule}
                       >
-                        {v.name}
-                      </button>
-                    ))}
+                        <option value="">Select template</option>
+                        {templates.map(t => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={16} />
+                    </div>
+                    {firstTextingRule?.messageTemplate && (
+                      <div className="template-preview">
+                        {firstTextingRule.messageTemplate.content}
+                      </div>
+                    )}
                   </div>
+                  <p className="form-hint"><Clock size={12} /> Sent immediately when lead arrives</p>
                 </div>
 
-                {customerTextingRule && (
-                  <div className="form-actions">
-                    <button className="btn btn-primary btn-sm" onClick={saveCustomerTextingSettings} disabled={saving}>
-                      {saving ? <Loader2 size={14} className="spinner" /> : null}
-                      Save Settings
+                {/* Follow-Up Messages */}
+                <div className="auto-reply-section">
+                  <h4>Follow-Up Messages</h4>
+
+                  {textingFollowUpRules.map((rule, idx) => (
+                    <div key={rule.id} className="followup-item">
+                      <div className="followup-item-header">
+                        <span className="followup-label">Message {idx + 2}</span>
+                        <button
+                          className="btn-delete-followup"
+                          onClick={() => deleteTextingFollowUp(rule.id)}
+                          disabled={saving}
+                          title="Remove follow-up"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+
+                      <div className="form-group">
+                        <label>Send after</label>
+                        <div className="delay-presets">
+                          {DELAY_PRESETS.map(preset => (
+                            <button
+                              key={preset.minutes}
+                              className={`delay-preset ${(rule.delayMinutes || 120) === preset.minutes ? 'active' : ''}`}
+                              onClick={() => changeTextingFollowUpDelay(rule.id, preset.minutes)}
+                              disabled={saving}
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="form-group">
+                        <label>Template</label>
+                        <div className="select-wrapper">
+                          <select
+                            value={rule.templateId || rule.messageTemplate?.id || ''}
+                            onChange={e => changeTextingRuleTemplate(rule.id, e.target.value)}
+                          >
+                            <option value="">Select template</option>
+                            {templates.map(t => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                          </select>
+                          <ChevronDown size={16} />
+                        </div>
+                        {rule.messageTemplate && (
+                          <div className="template-preview">
+                            {rule.messageTemplate.content}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+
+                  {textingFollowUpRules.length < 5 && (
+                    <button className="add-followup-btn" onClick={addTextingFollowUp} disabled={saving}>
+                      <Plus size={16} /> Add Follow-Up
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
+
+                {/* Stop Conditions */}
+                <div className="stop-conditions">
+                  <h4>Stop Conditions</h4>
+                  <label className="stop-condition-item">
+                    <input
+                      type="checkbox"
+                      checked={firstTextingRule?.stopOnCustomerReply ?? true}
+                      onChange={e => updateStopCondition('stopOnCustomerReply', e.target.checked)}
+                      disabled={saving}
+                    />
+                    Stop follow-ups if customer replies
+                  </label>
+                  <label className="stop-condition-item">
+                    <input
+                      type="checkbox"
+                      checked={firstTextingRule?.stopOnLeadClosed ?? true}
+                      onChange={e => updateStopCondition('stopOnLeadClosed', e.target.checked)}
+                      disabled={saving}
+                    />
+                    Stop if lead marked Closed/Won/Lost
+                  </label>
+                  <label className="stop-condition-item">
+                    <input
+                      type="checkbox"
+                      checked={firstTextingRule?.stopOnOptOut ?? true}
+                      onChange={e => updateStopCondition('stopOnOptOut', e.target.checked)}
+                      disabled={saving}
+                    />
+                    Stop if customer opts out (STOP)
+                  </label>
+                </div>
+
               </div>
             </ServiceCard>
 
