@@ -176,7 +176,7 @@ export function NotificationSettings() {
       name: '',
       triggerType: 'new_lead',
       replyTriggerMode: 'first_only',
-      fromPhone: '',
+      fromPhone: poolPhoneNumbers[0]?.phoneNumber || '',
       toPhone: '',
       template: 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
       enabled: true,
@@ -492,7 +492,7 @@ export function NotificationSettings() {
                             value={ruleForm.accountId}
                             onChange={e => {
                               const newAccountId = e.target.value;
-                              setRuleForm(prev => ({ ...prev, accountId: newAccountId, fromPhone: '' }));
+                              setRuleForm(prev => ({ ...prev, accountId: newAccountId, fromPhone: poolPhoneNumbers[0]?.phoneNumber || '' }));
                             }}
                             className={!ruleForm.accountId ? 'required' : ''}
                           >
@@ -546,7 +546,7 @@ export function NotificationSettings() {
                             <option value="">Select phone number...</option>
                             {formPhoneNumbers.map((phone: { id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }) => (
                               <option key={phone.id} value={phone.phoneNumber}>
-                                {phone.phoneNumber} ({phone.provider}{phone.friendlyName ? ` - ${phone.friendlyName}` : ''}{phone.assigned ? ' - assigned to you' : ' - available'})
+                                {phone.phoneNumber} (LeadBridge)
                               </option>
                             ))}
                           </select>
@@ -806,7 +806,7 @@ export function NotificationSettings() {
                                     <option value="">Select phone number...</option>
                                     {formPhoneNumbers.map((phone: { id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }) => (
                                       <option key={phone.id} value={phone.phoneNumber}>
-                                        {phone.phoneNumber} ({phone.provider}{phone.friendlyName ? ` - ${phone.friendlyName}` : ''}{phone.assigned ? ' - assigned to you' : ' - available'})
+                                        {phone.phoneNumber} (LeadBridge)
                                       </option>
                                     ))}
                                   </select>

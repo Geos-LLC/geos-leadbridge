@@ -108,13 +108,6 @@ export function Services() {
   // Other service rules
   const [leadAlertRule, setLeadAlertRule] = useState<NotificationRule | null>(null);
 
-  // Customer Texting rules (dynamic array — same pattern as Auto Reply)
-  const [customerTextingRules, setCustomerTextingRules] = useState<NotificationRule[]>([]);
-  const customerTextingEnabled = customerTextingRules.some(r => r.enabled);
-  const firstTextingRule = customerTextingRules.find(r => !r.delayMinutes || r.delayMinutes === 0) || null;
-  const textingFollowUpRules = customerTextingRules
-    .filter(r => r.delayMinutes && r.delayMinutes > 0)
-    .sort((a, b) => (a.delayMinutes || 0) - (b.delayMinutes || 0));
 
   // Supporting data
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
@@ -130,15 +123,13 @@ export function Services() {
     templateId?: string;
     templateName?: string;
     content: string;
-    type: 'autoReply' | 'texting' | 'alert';
+    type: 'autoReply' | 'alert';
   } | null>(null);
 
   // Lead Alerts form state (needed for first-time creation)
   const [alertToPhone, setAlertToPhone] = useState('');
   const [alertFromPhone, setAlertFromPhone] = useState('');
 
-  // Customer Texting form state
-  const [textingFromPhone, setTextingFromPhone] = useState('');
 
   useEffect(() => {
     loadAccounts();
@@ -187,13 +178,7 @@ export function Services() {
         (r: NotificationRule) => r.triggerType === 'new_lead' && !r.sendToCustomer
       ) || null;
 
-      // Collect ALL customer texting rules (sendToCustomer: true)
-      const customerTextingAll = notifRes.rules.filter(
-        (r: NotificationRule) => r.triggerType === 'new_lead' && r.sendToCustomer === true
-      );
-
       setLeadAlertRule(leadAlert);
-      setCustomerTextingRules(customerTextingAll);
       setTemplates(templatesRes.templates);
       setPoolPhones(poolRes.phoneNumbers);
 
@@ -202,15 +187,9 @@ export function Services() {
         setAlertToPhone(leadAlert.toPhone || '');
         setAlertFromPhone(leadAlert.fromPhone || '');
       }
-      const firstTexting = customerTextingAll.find(r => !r.delayMinutes || r.delayMinutes === 0);
-      if (firstTexting) {
-        setTextingFromPhone(firstTexting.fromPhone || '');
-      }
-
       // Default from phone to first pool phone
       const defaultFrom = poolRes.phoneNumbers[0]?.phoneNumber || '';
       if (!leadAlert) setAlertFromPhone(defaultFrom);
-      if (!firstTexting) setTextingFromPhone(defaultFrom);
 
     } catch (err: any) {
       setError(err.message || 'Failed to load services data');
@@ -310,55 +289,6 @@ export function Services() {
     }
   }
 
-  async function toggleCustomerTexting(enabled: boolean) {
-    setSaving(true);
-    setError(null);
-    try {
-      if (customerTextingRules.length > 0) {
-        // Toggle all existing rules
-        const updated = await Promise.all(
-          customerTextingRules.map(r => notificationsApi.updateRule(selectedAccountId, r.id, { enabled }))
-        );
-        setCustomerTextingRules(updated.map(u => u.rule));
-        showSuccess(enabled ? 'Customer Texting enabled' : 'Customer Texting disabled');
-      } else if (enabled) {
-        if (!textingFromPhone) {
-          setExpandedCard('customer-texting');
-          setError('No phone numbers available. Please configure phone settings first.');
-          setSaving(false);
-          return;
-        }
-        // Find or create a default customer texting template
-        let templateId = templates.find(t => t.name.includes('Customer SMS'))?.id;
-        if (!templateId) {
-          const { template } = await templatesApi.createTemplate(
-            'Customer SMS - Welcome',
-            'Hi {{lead.name}}, thanks for your interest in {{lead.service}}! We received your request and will reach out shortly.',
-          );
-          templateId = template.id;
-          setTemplates(prev => [template, ...prev]);
-        }
-
-        const { rule } = await notificationsApi.createRule(selectedAccountId, {
-          name: 'Customer SMS - Immediate',
-          triggerType: 'new_lead',
-          fromPhone: textingFromPhone,
-          toPhone: '',
-          sendToCustomer: true,
-          template: 'Hi {{lead.name}}, thanks for your interest in {{lead.service}}! We received your request and will reach out shortly.',
-          templateId,
-          delayMinutes: 0,
-          enabled: true,
-        });
-        setCustomerTextingRules([rule]);
-        showSuccess('Customer Texting enabled');
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Failed to toggle Customer Texting');
-    } finally {
-      setSaving(false);
-    }
-  }
 
   // --- Auto Reply Handlers ---
 
@@ -442,37 +372,9 @@ export function Services() {
 
   // --- Customer Texting Handlers ---
 
-  async function changeTextingRuleTemplate(ruleId: string, templateId: string) {
-    setSaving(true);
-    try {
-      const { rule } = await notificationsApi.updateRule(selectedAccountId, ruleId, { templateId });
-      setCustomerTextingRules(prev => prev.map(r => r.id === ruleId ? rule : r));
-      showSuccess('Template updated');
-    } catch (err: any) {
-      setError(err.message || 'Failed to update template');
-    } finally {
-      setSaving(false);
-    }
-  }
 
   // changeTextingFollowUpDelay, addTextingFollowUp, deleteTextingFollowUp, updateStopCondition removed — follow-ups are Coming Soon
 
-  async function saveTextingFromPhone(fromPhone: string) {
-    setTextingFromPhone(fromPhone);
-    if (customerTextingRules.length === 0) return;
-    setSaving(true);
-    try {
-      const updated = await Promise.all(
-        customerTextingRules.map(r => notificationsApi.updateRule(selectedAccountId, r.id, { fromPhone }))
-      );
-      setCustomerTextingRules(updated.map(u => u.rule));
-      showSuccess('Send from number updated');
-    } catch (err: any) {
-      setError(err.message || 'Failed to update from phone');
-    } finally {
-      setSaving(false);
-    }
-  }
 
   function isCustomDelay(minutes: number) {
     return !DELAY_PRESETS.some(p => p.minutes === minutes);
@@ -490,8 +392,6 @@ export function Services() {
         await changeRuleTemplate(templateEditor.ruleId, template.id);
       } else if (templateEditor.type === 'alert') {
         await changeAlertRuleTemplate(templateEditor.ruleId, template.id);
-      } else {
-        await changeTextingRuleTemplate(templateEditor.ruleId, template.id);
       }
       setTemplateEditor(null);
       showSuccess('Template created');
@@ -512,11 +412,6 @@ export function Services() {
       setAutoReplyRules(prev => prev.map(r =>
         r.id === ruleId && r.template?.id === templateId
           ? { ...r, template: { ...r.template!, content: template.content } }
-          : r
-      ));
-      setCustomerTextingRules(prev => prev.map(r =>
-        r.id === ruleId && r.messageTemplate?.id === templateId
-          ? { ...r, messageTemplate: { ...r.messageTemplate!, content: template.content } }
           : r
       ));
       if (leadAlertRule?.id === ruleId && leadAlertRule?.messageTemplate?.id === templateId) {
@@ -541,8 +436,6 @@ export function Services() {
         await changeRuleTemplate(templateEditor.ruleId, template.id);
       } else if (templateEditor.type === 'alert') {
         await changeAlertRuleTemplate(templateEditor.ruleId, template.id);
-      } else {
-        await changeTextingRuleTemplate(templateEditor.ruleId, template.id);
       }
       setTemplateEditor(null);
       showSuccess('Saved as new template');
@@ -867,7 +760,7 @@ export function Services() {
                             <option value="">Select phone number</option>
                             {poolPhones.map(p => (
                               <option key={p.id} value={p.phoneNumber}>
-                                {p.phoneNumber} (Pool Default)
+                                {p.phoneNumber} (LeadBridge)
                               </option>
                             ))}
                           </select>
@@ -992,221 +885,15 @@ export function Services() {
               </div>
             </ServiceCard>
 
-            {/* 3. Customer Texting */}
+            {/* 3. Customer Texting — Coming Soon */}
             <ServiceCard
               icon={<MessageSquare size={22} />}
               title="Customer Texting"
               description="Send a direct text to customers to increase response rate."
-              enabled={customerTextingEnabled}
-              onToggle={toggleCustomerTexting}
-              saving={saving}
-              expanded={expandedCard === 'customer-texting'}
-              onExpand={() => toggleExpand('customer-texting')}
-              statusText={customerTextingEnabled ? `${customerTextingRules.length} message${customerTextingRules.length !== 1 ? 's' : ''} in sequence` : undefined}
-            >
-              <div className="service-settings-inner">
-
-                {/* First SMS — Expandable Sub-Card */}
-                <div className="sub-card">
-                  <div className="sub-card-header" onClick={() => toggleSubCard('texting-first')}>
-                    <div className="sub-card-title">
-                      <MessageSquare size={14} />
-                      <span>First SMS</span>
-                    </div>
-                    <ChevronDown size={14} className={expandedSubCards.has('texting-first') ? 'rotated' : ''} />
-                  </div>
-                  {expandedSubCards.has('texting-first') && (
-                    <div className="sub-card-body">
-                      <p className="form-hint"><Clock size={12} /> Sent immediately when lead arrives</p>
-                      <div className="form-group">
-                        <label>Send from</label>
-                        <div className="select-wrapper">
-                          <select value={textingFromPhone} onChange={e => saveTextingFromPhone(e.target.value)} disabled={saving}>
-                            <option value="">Select phone number</option>
-                            {poolPhones.map(p => (
-                              <option key={p.id} value={p.phoneNumber}>
-                                {p.phoneNumber} (Pool Default)
-                              </option>
-                            ))}
-                          </select>
-                          <ChevronDown size={16} />
-                        </div>
-                        <button className="get-own-number-btn" disabled>
-                          <Phone size={14} />
-                          Get your own number
-                          <span className="coming-soon-badge">Coming Soon</span>
-                        </button>
-                      </div>
-                      {firstTextingRule && (
-                        <div className="form-group">
-                          <label>Template</label>
-                          <div className="select-wrapper">
-                            <select
-                              value={firstTextingRule.templateId || firstTextingRule.messageTemplate?.id || ''}
-                              onChange={e => {
-                                if (e.target.value === '__create_new__') {
-                                  setTemplateEditor({ mode: 'create', ruleId: firstTextingRule.id, content: '', type: 'texting' });
-                                } else {
-                                  changeTextingRuleTemplate(firstTextingRule.id, e.target.value);
-                                }
-                              }}
-                              disabled={saving}
-                            >
-                              <option value="">Select template</option>
-                              {templates.map(t => (
-                                <option key={t.id} value={t.id}>{t.name}</option>
-                              ))}
-                              <option value="__create_new__">+ Create New Template</option>
-                            </select>
-                            <ChevronDown size={16} />
-                          </div>
-                          {firstTextingRule.messageTemplate && (
-                            <div className="template-preview-container">
-                              <div className="template-preview">
-                                {firstTextingRule.messageTemplate.content}
-                              </div>
-                              <button
-                                className="template-edit-btn"
-                                onClick={() => setTemplateEditor({
-                                  mode: 'service-edit',
-                                  ruleId: firstTextingRule.id,
-                                  templateId: firstTextingRule.messageTemplate!.id,
-                                  templateName: templates.find(t => t.id === (firstTextingRule.templateId || firstTextingRule.messageTemplate?.id))?.name || 'template',
-                                  content: firstTextingRule.messageTemplate!.content,
-                                  type: 'texting',
-                                })}
-                              >
-                                <Pencil size={12} /> Edit
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Follow-Up SMS — Expandable Sub-Card (Coming Soon) */}
-                <div className="sub-card sub-card-coming-soon">
-                  <div className="sub-card-header" onClick={() => toggleSubCard('texting-followups')}>
-                    <div className="sub-card-title">
-                      <Clock size={14} />
-                      <span>Follow-Up SMS</span>
-                      <span className="coming-soon-badge">Coming Soon</span>
-                    </div>
-                    <ChevronDown size={14} className={expandedSubCards.has('texting-followups') ? 'rotated' : ''} />
-                  </div>
-                  {expandedSubCards.has('texting-followups') && (
-                    <div className="sub-card-body sub-card-disabled">
-                      <p className="form-hint">Automated follow-up SMS sent after a delay. Configure timing and templates for each follow-up.</p>
-
-                      <div className="form-group">
-                        <label>Send from</label>
-                        <div className="select-wrapper">
-                          <select value={textingFromPhone} disabled>
-                            <option value="">Select phone number</option>
-                            {poolPhones.map(p => (
-                              <option key={p.id} value={p.phoneNumber}>
-                                {p.phoneNumber} (Pool Default)
-                              </option>
-                            ))}
-                          </select>
-                          <ChevronDown size={16} />
-                        </div>
-                        <button className="get-own-number-btn" disabled>
-                          <Phone size={14} />
-                          Get your own number
-                          <span className="coming-soon-badge">Coming Soon</span>
-                        </button>
-                      </div>
-
-                      {textingFollowUpRules.length === 0 && (
-                        <div className="followup-item" style={{ opacity: 0.5 }}>
-                          <div className="followup-item-header">
-                            <span className="followup-label">Message 2</span>
-                          </div>
-                          <div className="form-group">
-                            <label>Send after</label>
-                            <div className="delay-presets">
-                              <button className="delay-preset selected" disabled>2 hours</button>
-                            </div>
-                          </div>
-                          <div className="form-group">
-                            <label>Template</label>
-                            <div className="select-wrapper">
-                              <select disabled><option>Select template...</option></select>
-                              <ChevronDown size={16} />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {textingFollowUpRules.map((rule, idx) => (
-                        <div key={rule.id} className="followup-item">
-                          <div className="followup-item-header">
-                            <span className="followup-label">Message {idx + 2}</span>
-                          </div>
-                          <div className="form-group">
-                            <label>Send after</label>
-                            <div className="delay-presets">
-                              {DELAY_PRESETS.map(preset => (
-                                <button
-                                  key={preset.minutes}
-                                  className={`delay-preset ${(rule.delayMinutes || 120) === preset.minutes ? 'selected' : ''}`}
-                                  disabled
-                                >
-                                  {preset.label}
-                                </button>
-                              ))}
-                              {isCustomDelay(rule.delayMinutes || 120) && (
-                                <button className="delay-preset selected" disabled>{rule.delayMinutes} min</button>
-                              )}
-                            </div>
-                          </div>
-                          <div className="form-group">
-                            <label>Template</label>
-                            <div className="select-wrapper">
-                              <select value={rule.templateId || rule.messageTemplate?.id || ''} disabled>
-                                <option value="">Select template...</option>
-                                {templates.map(t => (
-                                  <option key={t.id} value={t.id}>{t.name}</option>
-                                ))}
-                              </select>
-                              <ChevronDown size={16} />
-                            </div>
-                            {rule.messageTemplate && (
-                              <div className="template-preview">{rule.messageTemplate.content}</div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-
-                      <button className="add-followup-btn" disabled>
-                        <Plus size={16} /> Add Follow-Up
-                      </button>
-
-                      {/* Stop Conditions (visible but disabled) */}
-                      <div className="stop-conditions">
-                        <h4>Stop Conditions</h4>
-                        <label className="stop-condition-item">
-                          <input type="checkbox" checked={true} disabled />
-                          Stop follow-ups if customer replies
-                        </label>
-                        <label className="stop-condition-item">
-                          <input type="checkbox" checked={true} disabled />
-                          Stop if lead marked Closed/Won/Lost
-                        </label>
-                        <label className="stop-condition-item">
-                          <input type="checkbox" checked={true} disabled />
-                          Stop if customer opts out (STOP)
-                        </label>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-              </div>
-            </ServiceCard>
+              enabled={false}
+              onToggle={() => {}}
+              comingSoon={true}
+            />
 
             {/* 4. Instant Call Connect */}
             <ServiceCard
