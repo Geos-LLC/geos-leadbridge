@@ -27,7 +27,16 @@ const SMS_VARIABLES = [
   { name: '{{lead.service}}', desc: 'Service category' },
   { name: '{{lead.location}}', desc: 'City, State' },
   { name: '{{lead.zip}}', desc: 'ZIP code' },
-  { name: '{{lead.message}}', desc: 'Lead message' },
+  { name: '{{lead.message}}', desc: 'Customer request message' },
+  { name: '{{lead.serviceDescription}}', desc: 'Detailed service description' },
+  { name: '{{lead.addons}}', desc: 'Service add-ons' },
+  { name: '{{lead.frequency}}', desc: 'Service frequency' },
+  { name: '{{lead.bedrooms}}', desc: 'Number of bedrooms' },
+  { name: '{{lead.bathrooms}}', desc: 'Number of bathrooms' },
+  { name: '{{lead.price}}', desc: 'Lead price/cost' },
+  { name: '{{lead.pets}}', desc: 'Pet information' },
+  { name: '{{lead.estimate}}', desc: 'Estimated cost/quote' },
+  { name: '{{lead.dates}}', desc: 'Requested date/schedule' },
 ];
 
 // -- ServiceCard sub-component --
@@ -119,9 +128,13 @@ export function Services() {
   const [textingFromPhone, setTextingFromPhone] = useState('');
   const [textingTemplate, setTextingTemplate] = useState('Hi {{lead.name}}, thanks for your interest in {{lead.service}}! We received your request and will reach out shortly.');
 
-  // Auto Reply template editing
+  // Auto Reply template editing (First Reply)
   const [autoReplyTemplateContent, setAutoReplyTemplateContent] = useState('');
   const [editingAutoReplyTemplate, setEditingAutoReplyTemplate] = useState(false);
+
+  // Auto Reply template editing (Follow Up)
+  const [followUpTemplateContent, setFollowUpTemplateContent] = useState('');
+  const [editingFollowUpTemplate, setEditingFollowUpTemplate] = useState(false);
 
   useEffect(() => {
     loadAccounts();
@@ -192,9 +205,13 @@ export function Services() {
         setTextingFromPhone(customerTexting.fromPhone || '');
         setTextingTemplate(customerTexting.template || textingTemplate);
       }
-      if (autoReply?.template) {
+      if (autoReply?.templateId) {
         const tpl = templatesRes.templates.find((t: MessageTemplate) => t.id === autoReply.templateId);
         if (tpl) setAutoReplyTemplateContent(tpl.content);
+      }
+      if (followUp?.templateId) {
+        const fuTpl = templatesRes.templates.find((t: MessageTemplate) => t.id === followUp.templateId);
+        if (fuTpl) setFollowUpTemplateContent(fuTpl.content);
       }
 
       // Default from phone to first pool phone
@@ -261,6 +278,7 @@ export function Services() {
           );
           followUpTemplateId = template.id;
           setTemplates(prev => [template, ...prev]);
+          setFollowUpTemplateContent(template.content);
         }
 
         const { rule: fuRule } = await automationApi.createRule({
@@ -357,7 +375,21 @@ export function Services() {
     try {
       await templatesApi.updateTemplate(autoReplyRule.templateId, { content: autoReplyTemplateContent });
       setEditingAutoReplyTemplate(false);
-      showSuccess('Template saved');
+      showSuccess('First Reply template saved');
+    } catch (err: any) {
+      setError(err.message || 'Failed to save template');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveFollowUpTemplate() {
+    if (!autoReplyFollowUp?.templateId || !followUpTemplateContent.trim()) return;
+    setSaving(true);
+    try {
+      await templatesApi.updateTemplate(autoReplyFollowUp.templateId, { content: followUpTemplateContent });
+      setEditingFollowUpTemplate(false);
+      showSuccess('Follow Up template saved');
     } catch (err: any) {
       setError(err.message || 'Failed to save template');
     } finally {
@@ -498,55 +530,135 @@ export function Services() {
               statusText={autoReplyRule?.enabled ? `Immediate reply${autoReplyFollowUp?.enabled ? ' + 2hr follow-up' : ''}` : undefined}
             >
               <div className="service-settings-inner">
-                <p className="form-hint">
-                  Sends first reply immediately. Follow-up sent after 2 hours if no response.
-                </p>
+                {/* First Reply Section */}
+                <div className="auto-reply-section">
+                  <h4><Zap size={14} /> First Reply</h4>
+                  <p className="form-hint">Sent immediately when a new lead arrives.</p>
 
-                {autoReplyRule && (
-                  <div className="form-group">
-                    <label>Message Template</label>
-                    {editingAutoReplyTemplate ? (
-                      <>
-                        <textarea
-                          rows={4}
-                          value={autoReplyTemplateContent}
-                          onChange={e => setAutoReplyTemplateContent(e.target.value)}
-                          placeholder="Enter your auto-reply message..."
-                        />
-                        <div className="variable-buttons">
-                          {PLATFORM_VARIABLES.map(v => (
-                            <button
-                              key={v.name}
-                              className="variable-btn"
-                              onClick={() => insertVariable(v.name, setAutoReplyTemplateContent)}
-                              title={v.desc}
-                            >
-                              {v.name}
+                  {autoReplyRule && (
+                    <div className="form-group">
+                      <label>Message Template</label>
+                      {editingAutoReplyTemplate ? (
+                        <>
+                          <textarea
+                            rows={4}
+                            value={autoReplyTemplateContent}
+                            onChange={e => setAutoReplyTemplateContent(e.target.value)}
+                            placeholder="Enter your first reply message..."
+                          />
+                          <div className="variable-buttons">
+                            {PLATFORM_VARIABLES.map(v => (
+                              <button
+                                key={v.name}
+                                className="variable-btn"
+                                onClick={() => insertVariable(v.name, setAutoReplyTemplateContent)}
+                                title={v.desc}
+                              >
+                                {v.name}
+                              </button>
+                            ))}
+                            {SMS_VARIABLES.map(v => (
+                              <button
+                                key={v.name}
+                                className="variable-btn"
+                                onClick={() => insertVariable(v.name, setAutoReplyTemplateContent)}
+                                title={v.desc}
+                              >
+                                {v.name}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="form-actions">
+                            <button className="btn btn-secondary btn-sm" onClick={() => setEditingAutoReplyTemplate(false)}>
+                              Cancel
                             </button>
-                          ))}
-                        </div>
-                        <div className="form-actions">
-                          <button className="btn btn-secondary btn-sm" onClick={() => setEditingAutoReplyTemplate(false)}>
-                            Cancel
+                            <button className="btn btn-primary btn-sm" onClick={saveAutoReplyTemplate} disabled={saving}>
+                              {saving ? <Loader2 size={14} className="spinner" /> : null}
+                              Save Template
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="template-preview">
+                            {autoReplyTemplateContent || 'No template set'}
+                          </div>
+                          <button className="btn btn-secondary btn-sm" onClick={() => setEditingAutoReplyTemplate(true)}>
+                            Edit Template
                           </button>
-                          <button className="btn btn-primary btn-sm" onClick={saveAutoReplyTemplate} disabled={saving}>
-                            {saving ? <Loader2 size={14} className="spinner" /> : null}
-                            Save Template
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Follow Up Section */}
+                <div className="auto-reply-section">
+                  <h4><Clock size={14} /> Follow Up</h4>
+                  <p className="form-hint">Sent 2 hours after the first reply if no customer response.</p>
+
+                  {autoReplyFollowUp && (
+                    <div className="form-group">
+                      <label>Message Template</label>
+                      {editingFollowUpTemplate ? (
+                        <>
+                          <textarea
+                            rows={4}
+                            value={followUpTemplateContent}
+                            onChange={e => setFollowUpTemplateContent(e.target.value)}
+                            placeholder="Enter your follow-up message..."
+                          />
+                          <div className="variable-buttons">
+                            {PLATFORM_VARIABLES.map(v => (
+                              <button
+                                key={v.name}
+                                className="variable-btn"
+                                onClick={() => insertVariable(v.name, setFollowUpTemplateContent)}
+                                title={v.desc}
+                              >
+                                {v.name}
+                              </button>
+                            ))}
+                            {SMS_VARIABLES.map(v => (
+                              <button
+                                key={v.name}
+                                className="variable-btn"
+                                onClick={() => insertVariable(v.name, setFollowUpTemplateContent)}
+                                title={v.desc}
+                              >
+                                {v.name}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="form-actions">
+                            <button className="btn btn-secondary btn-sm" onClick={() => setEditingFollowUpTemplate(false)}>
+                              Cancel
+                            </button>
+                            <button className="btn btn-primary btn-sm" onClick={saveFollowUpTemplate} disabled={saving}>
+                              {saving ? <Loader2 size={14} className="spinner" /> : null}
+                              Save Template
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="template-preview">
+                            {followUpTemplateContent || 'No template set'}
+                          </div>
+                          <button className="btn btn-secondary btn-sm" onClick={() => setEditingFollowUpTemplate(true)}>
+                            Edit Template
                           </button>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="template-preview">
-                          {autoReplyTemplateContent || 'No template set'}
-                        </div>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setEditingAutoReplyTemplate(true)}>
-                          Edit Message Template
-                        </button>
-                      </>
-                    )}
-                  </div>
-                )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {!autoReplyFollowUp && autoReplyRule && (
+                    <p className="form-hint" style={{ fontStyle: 'italic' }}>
+                      Follow-up will be created when Auto Reply is enabled.
+                    </p>
+                  )}
+                </div>
               </div>
             </ServiceCard>
 

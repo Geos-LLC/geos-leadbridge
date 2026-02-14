@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, Search, Loader2, UserPlus, UserMinus, Trash2, RefreshCw, X, Link, Unlink, Download } from 'lucide-react';
+import { Phone, Search, Loader2, UserPlus, UserMinus, Trash2, RefreshCw, X, Link, Unlink, Download, Users } from 'lucide-react';
 import { adminApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
@@ -172,6 +172,20 @@ export default function AdminPhonePool() {
       loadData();
     } catch (error: any) {
       notify.error('Error', error.response?.data?.message || 'Failed to assign phone');
+    }
+  };
+
+  const handleAssignAll = async (phonePoolId: string) => {
+    if (!confirm('Assign this phone number to ALL tenants?')) return;
+    try {
+      await adminApi.assignPhoneToAll(phonePoolId);
+      notify.success('Assigned', 'Phone assigned to all tenants');
+      setAssigningPhoneId(null);
+      setUserSearch('');
+      setUserResults([]);
+      loadData();
+    } catch (error: any) {
+      notify.error('Error', error.response?.data?.message || 'Failed to assign phone to all');
     }
   };
 
@@ -511,12 +525,30 @@ export default function AdminPhonePool() {
         <div className="modal-overlay" onClick={() => setAssigningPhoneId(null)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Assign Phone to User</h3>
+              <h3>Assign Phone</h3>
               <button className="btn-icon" onClick={() => setAssigningPhoneId(null)}>
                 <X size={18} />
               </button>
             </div>
             <div className="modal-body">
+              {/* Assign to All */}
+              <button
+                className="btn btn-primary"
+                style={{ width: '100%', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                onClick={() => handleAssignAll(assigningPhoneId)}
+              >
+                <Users size={16} />
+                Assign to All Tenants
+              </button>
+
+              <div style={{ position: 'relative', textAlign: 'center', margin: '12px 0' }}>
+                <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)' }} />
+                <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: 'white', padding: '0 12px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  or assign to a specific tenant
+                </span>
+              </div>
+
+              {/* Search for specific user */}
               <div className="form-group">
                 <label>Search Users</label>
                 <div className="search-box">

@@ -826,6 +826,10 @@ export const adminApi = {
     const { data } = await api.post(`/v1/admin/phone-pool/${phonePoolId}/assign/${userId}`);
     return data.data;
   },
+  assignPhoneToAll: async (phonePoolId: string): Promise<PhonePoolEntry> => {
+    const { data } = await api.post(`/v1/admin/phone-pool/${phonePoolId}/assign-all`);
+    return data.data;
+  },
   unassignPhone: async (phonePoolId: string, userId: string): Promise<PhonePoolEntry> => {
     const { data } = await api.post(`/v1/admin/phone-pool/${phonePoolId}/unassign/${userId}`);
     return data.data;

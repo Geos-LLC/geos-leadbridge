@@ -6506,7 +6506,31 @@ body {
   margin-top: 16px;
 }
 
-.template-preview {
+.auto-reply-section {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.auto-reply-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.auto-reply-section:first-child {
+  padding-top: 0;
+}
+
+.auto-reply-section h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 4px 0;
+}
+
+.service-card-settings .template-preview {
   padding: 12px;
   background: white;
   border: 1px solid var(--border-color);

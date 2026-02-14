@@ -280,6 +280,59 @@ export class AdminPhonePoolService {
   }
 
   /**
+   * Assign a pool phone to ALL users at once
+   */
+  async assignToAllUsers(adminId: string, phonePoolId: string) {
+    const phone = await this.prisma.phonePool.findUnique({ where: { id: phonePoolId } });
+    if (!phone) throw new NotFoundException('Pool phone not found');
+    if (phone.status === 'RELEASED') {
+      throw new BadRequestException('Phone has been released from pool');
+    }
+
+    // Get all users
+    const allUsers = await this.prisma.user.findMany({
+      select: { id: true, email: true },
+    });
+
+    // Get existing assignments for this phone
+    const existingAssignments = await this.prisma.phonePoolAssignment.findMany({
+      where: { phonePoolId },
+      select: { userId: true },
+    });
+    const assignedUserIds = new Set(existingAssignments.map(a => a.userId));
+
+    // Create assignments for users that don't already have one
+    const newAssignments = allUsers
+      .filter(u => !assignedUserIds.has(u.id))
+      .map(u => ({ phonePoolId, userId: u.id }));
+
+    if (newAssignments.length > 0) {
+      await this.prisma.phonePoolAssignment.createMany({ data: newAssignments });
+    }
+
+    // Return the phone with all assignments
+    const updated = await this.prisma.phonePool.findUnique({
+      where: { id: phonePoolId },
+      include: {
+        assignments: {
+          include: { user: { select: { id: true, email: true, name: true } } },
+          orderBy: { assignedAt: 'desc' },
+        },
+      },
+    });
+
+    await this.adminService.logAdminAction(adminId, 'ASSIGN_POOL_PHONE_ALL', null, {
+      phoneNumber: phone.phoneNumber,
+      phonePoolId,
+      newAssignments: newAssignments.length,
+      totalUsers: allUsers.length,
+    });
+
+    this.logger.log(`Assigned pool phone ${phone.phoneNumber} to all ${newAssignments.length} users`);
+    return updated;
+  }
+
+  /**
    * Unassign a pool phone from a specific user
    */
   async unassignFromUser(adminId: string, phonePoolId: string, userId: string) {

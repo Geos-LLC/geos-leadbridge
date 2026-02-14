@@ -107,6 +107,15 @@ export class AdminPhonePoolController {
     return { success: result.success, data: result, error: result.error };
   }
 
+  @Post(':phonePoolId/assign-all')
+  async assignToAllUsers(
+    @Req() req: any,
+    @Param('phonePoolId') phonePoolId: string,
+  ) {
+    const phone = await this.phonePoolService.assignToAllUsers(req.user.id, phonePoolId);
+    return { success: true, data: phone };
+  }
+
   @Post(':phonePoolId/assign/:userId')
   async assignToUser(
     @Req() req: any,
