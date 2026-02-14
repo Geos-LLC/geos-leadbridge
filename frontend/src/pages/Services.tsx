@@ -14,6 +14,9 @@ import type {
 
 // Delay presets for follow-up messages
 const DELAY_PRESETS = [
+  { label: '5 min', minutes: 5 },
+  { label: '15 min', minutes: 15 },
+  { label: '30 min', minutes: 30 },
   { label: '1 hour', minutes: 60 },
   { label: '2 hours', minutes: 120 },
   { label: '6 hours', minutes: 360 },
@@ -131,7 +134,14 @@ export function Services() {
 
   // UI state
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
-  const [aiMode, setAiMode] = useState(false);
+  const [customDelayRuleId, setCustomDelayRuleId] = useState<string | null>(null);
+  const [customDelayValue, setCustomDelayValue] = useState('');
+  const [creatingTemplate, setCreatingTemplate] = useState<string | null>(null); // which dropdown is creating
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [newTemplateContent, setNewTemplateContent] = useState('');
+  const [templateNameError, setTemplateNameError] = useState<string | null>(null);
+  const [editingTemplateRuleId, setEditingTemplateRuleId] = useState<string | null>(null);
+  const [editingTemplateContent, setEditingTemplateContent] = useState('');
 
   // Lead Alerts form state (needed for first-time creation)
   const [alertToPhone, setAlertToPhone] = useState('');
@@ -550,6 +560,80 @@ export function Services() {
     }
   }
 
+  function applyCustomDelay(ruleId: string, type: 'autoReply' | 'texting') {
+    const val = parseInt(customDelayValue, 10);
+    if (!val || val <= 0) return;
+    setCustomDelayRuleId(null);
+    setCustomDelayValue('');
+    if (type === 'autoReply') {
+      changeFollowUpDelay(ruleId, val);
+    } else {
+      changeTextingFollowUpDelay(ruleId, val);
+    }
+  }
+
+  function isCustomDelay(minutes: number) {
+    return !DELAY_PRESETS.some(p => p.minutes === minutes);
+  }
+
+  async function createNewTemplate(_forDropdown: string, ruleId: string, type: 'autoReply' | 'texting') {
+    const trimmedName = newTemplateName.trim();
+    if (!trimmedName) {
+      setTemplateNameError('Template name is required');
+      return;
+    }
+    if (templates.some(t => t.name.toLowerCase() === trimmedName.toLowerCase())) {
+      setTemplateNameError('A template with this name already exists');
+      return;
+    }
+    setSaving(true);
+    setTemplateNameError(null);
+    try {
+      const { template } = await templatesApi.createTemplate(trimmedName, newTemplateContent || 'Hi {{lead.name}}, ');
+      setTemplates(prev => [template, ...prev]);
+      // Assign the new template to the rule
+      if (type === 'autoReply') {
+        await changeRuleTemplate(ruleId, template.id);
+      } else {
+        await changeTextingRuleTemplate(ruleId, template.id);
+      }
+      setCreatingTemplate(null);
+      setNewTemplateName('');
+      setNewTemplateContent('');
+      showSuccess('Template created');
+    } catch (err: any) {
+      setError(err.message || 'Failed to create template');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveTemplateContent(ruleId: string, templateId: string) {
+    setSaving(true);
+    try {
+      const { template } = await templatesApi.updateTemplate(templateId, { content: editingTemplateContent });
+      setTemplates(prev => prev.map(t => t.id === templateId ? { ...t, content: template.content } : t));
+      // Update rule state to reflect new content
+      setAutoReplyRules(prev => prev.map(r =>
+        r.id === ruleId && r.template?.id === templateId
+          ? { ...r, template: { ...r.template!, content: template.content } }
+          : r
+      ));
+      setCustomerTextingRules(prev => prev.map(r =>
+        r.id === ruleId && r.messageTemplate?.id === templateId
+          ? { ...r, messageTemplate: { ...r.messageTemplate!, content: template.content } }
+          : r
+      ));
+      setEditingTemplateRuleId(null);
+      setEditingTemplateContent('');
+      showSuccess('Template saved');
+    } catch (err: any) {
+      setError(err.message || 'Failed to save template');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function insertVariable(variable: string, setter: React.Dispatch<React.SetStateAction<string>>) {
     setter(prev => prev + variable);
   }
@@ -647,32 +731,26 @@ export function Services() {
               onExpand={() => toggleExpand('auto-reply')}
               statusText={autoReplyEnabled ? `${1 + followUpRules.length} message${followUpRules.length > 0 ? 's' : ''} in sequence` : undefined}
             >
-              <div className={`service-settings-inner ${aiMode ? 'ai-disabled' : ''}`}>
-                {/* AI Optimization Banner */}
-                <div className={`ai-optimization-banner ${aiMode ? 'active' : ''}`}>
+              <div className="service-settings-inner">
+                {/* AI Optimization Banner — Coming Soon */}
+                <div className="ai-optimization-banner coming-soon-banner">
                   <div className="ai-banner-info">
                     <Bot size={18} />
                     <div>
                       <strong>AI Optimization</strong>
-                      <span className="pro-badge">Pro</span>
+                      <span className="coming-soon-badge" style={{ marginLeft: 6 }}>Coming Soon</span>
                       <p className="form-hint">AI decides timing, follow-ups, and message variations to maximize response.</p>
                     </div>
                   </div>
                   <label className="toggle-switch">
                     <input
                       type="checkbox"
-                      checked={aiMode}
-                      onChange={e => setAiMode(e.target.checked)}
+                      checked={false}
+                      disabled
                     />
                     <span className="toggle-slider"></span>
                   </label>
                 </div>
-
-                {aiMode && (
-                  <div className="ai-overlay-note">
-                    AI is controlling this sequence.
-                  </div>
-                )}
 
                 {/* First Message Section */}
                 <div className="auto-reply-section first-message-section">
@@ -685,20 +763,68 @@ export function Services() {
                       <div className="select-wrapper">
                         <select
                           value={firstReplyRule.templateId || ''}
-                          onChange={e => changeRuleTemplate(firstReplyRule.id, e.target.value)}
-                          disabled={aiMode || saving}
+                          onChange={e => {
+                            if (e.target.value === '__create_new__') {
+                              setCreatingTemplate(`autoReply-first-${firstReplyRule.id}`);
+                              setNewTemplateName('');
+                              setNewTemplateContent('');
+                              setTemplateNameError(null);
+                            } else {
+                              changeRuleTemplate(firstReplyRule.id, e.target.value);
+                            }
+                          }}
+                          disabled={saving}
                         >
                           <option value="">Select template...</option>
                           {templates.map(t => (
                             <option key={t.id} value={t.id}>{t.name}</option>
                           ))}
+                          <option value="__create_new__">+ Create New Template</option>
                         </select>
                         <ChevronDown size={16} />
                       </div>
-                      {firstReplyRule.template?.content && (
-                        <div className="template-preview">
-                          {firstReplyRule.template.content}
+                      {creatingTemplate === `autoReply-first-${firstReplyRule.id}` && (
+                        <div className="create-template-inline">
+                          <input
+                            type="text"
+                            placeholder="Template name"
+                            value={newTemplateName}
+                            onChange={e => { setNewTemplateName(e.target.value); setTemplateNameError(null); }}
+                          />
+                          {templateNameError && <span className="field-error">{templateNameError}</span>}
+                          <textarea
+                            rows={3}
+                            placeholder="Template content..."
+                            value={newTemplateContent}
+                            onChange={e => setNewTemplateContent(e.target.value)}
+                          />
+                          <div className="create-template-actions">
+                            <button className="btn btn-primary btn-sm" onClick={() => createNewTemplate(`autoReply-first-${firstReplyRule.id}`, firstReplyRule.id, 'autoReply')} disabled={saving}>
+                              Create
+                            </button>
+                            <button className="btn btn-sm" onClick={() => { setCreatingTemplate(null); setTemplateNameError(null); }}>Cancel</button>
+                          </div>
                         </div>
+                      )}
+                      {firstReplyRule.template?.content && (
+                        editingTemplateRuleId === firstReplyRule.id ? (
+                          <div className="template-preview-edit">
+                            <textarea
+                              value={editingTemplateContent}
+                              onChange={e => setEditingTemplateContent(e.target.value)}
+                            />
+                            <div className="template-preview-actions">
+                              <button className="btn btn-primary btn-sm" onClick={() => saveTemplateContent(firstReplyRule.id, firstReplyRule.template!.id)} disabled={saving}>
+                                Save
+                              </button>
+                              <button className="btn btn-sm" onClick={() => setEditingTemplateRuleId(null)}>Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="template-preview" onClick={() => { setEditingTemplateRuleId(firstReplyRule.id); setEditingTemplateContent(firstReplyRule.template!.content); }}>
+                            {firstReplyRule.template.content}
+                          </div>
+                        )
                       )}
                     </div>
                   )}
@@ -721,7 +847,7 @@ export function Services() {
                         <button
                           className="btn-icon btn-delete-followup"
                           onClick={() => deleteFollowUp(rule.id)}
-                          disabled={aiMode || saving}
+                          disabled={saving}
                           title="Delete follow-up"
                         >
                           <Trash2 size={14} />
@@ -736,12 +862,38 @@ export function Services() {
                               key={preset.minutes}
                               className={`delay-preset ${rule.delayMinutes === preset.minutes ? 'selected' : ''}`}
                               onClick={() => changeFollowUpDelay(rule.id, preset.minutes)}
-                              disabled={aiMode || saving}
+                              disabled={saving}
                             >
                               {preset.label}
                             </button>
                           ))}
+                          <button
+                            className={`delay-preset ${isCustomDelay(rule.delayMinutes) ? 'selected' : ''}`}
+                            onClick={() => { setCustomDelayRuleId(rule.id); setCustomDelayValue(isCustomDelay(rule.delayMinutes) ? String(rule.delayMinutes) : ''); }}
+                            disabled={saving}
+                          >
+                            {isCustomDelay(rule.delayMinutes) ? `${rule.delayMinutes} min` : 'Custom'}
+                          </button>
                         </div>
+                        {customDelayRuleId === rule.id && (
+                          <div className="custom-delay-input">
+                            <input
+                              type="number"
+                              min="1"
+                              placeholder="Minutes"
+                              value={customDelayValue}
+                              onChange={e => setCustomDelayValue(e.target.value)}
+                              onKeyDown={e => e.key === 'Enter' && applyCustomDelay(rule.id, 'autoReply')}
+                            />
+                            <span className="custom-delay-label">minutes</span>
+                            <button className="btn btn-primary btn-sm" onClick={() => applyCustomDelay(rule.id, 'autoReply')} disabled={saving}>
+                              Apply
+                            </button>
+                            <button className="btn btn-sm" onClick={() => { setCustomDelayRuleId(null); setCustomDelayValue(''); }}>
+                              Cancel
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       <div className="form-group">
@@ -749,20 +901,68 @@ export function Services() {
                         <div className="select-wrapper">
                           <select
                             value={rule.templateId || ''}
-                            onChange={e => changeRuleTemplate(rule.id, e.target.value)}
-                            disabled={aiMode || saving}
+                            onChange={e => {
+                              if (e.target.value === '__create_new__') {
+                                setCreatingTemplate(`autoReply-followup-${rule.id}`);
+                                setNewTemplateName('');
+                                setNewTemplateContent('');
+                                setTemplateNameError(null);
+                              } else {
+                                changeRuleTemplate(rule.id, e.target.value);
+                              }
+                            }}
+                            disabled={saving}
                           >
                             <option value="">Select template...</option>
                             {templates.map(t => (
                               <option key={t.id} value={t.id}>{t.name}</option>
                             ))}
+                            <option value="__create_new__">+ Create New Template</option>
                           </select>
                           <ChevronDown size={16} />
                         </div>
-                        {rule.template?.content && (
-                          <div className="template-preview">
-                            {rule.template.content}
+                        {creatingTemplate === `autoReply-followup-${rule.id}` && (
+                          <div className="create-template-inline">
+                            <input
+                              type="text"
+                              placeholder="Template name"
+                              value={newTemplateName}
+                              onChange={e => { setNewTemplateName(e.target.value); setTemplateNameError(null); }}
+                            />
+                            {templateNameError && <span className="field-error">{templateNameError}</span>}
+                            <textarea
+                              rows={3}
+                              placeholder="Template content..."
+                              value={newTemplateContent}
+                              onChange={e => setNewTemplateContent(e.target.value)}
+                            />
+                            <div className="create-template-actions">
+                              <button className="btn btn-primary btn-sm" onClick={() => createNewTemplate(`autoReply-followup-${rule.id}`, rule.id, 'autoReply')} disabled={saving}>
+                                Create
+                              </button>
+                              <button className="btn btn-sm" onClick={() => { setCreatingTemplate(null); setTemplateNameError(null); }}>Cancel</button>
+                            </div>
                           </div>
+                        )}
+                        {rule.template?.content && (
+                          editingTemplateRuleId === rule.id ? (
+                            <div className="template-preview-edit">
+                              <textarea
+                                value={editingTemplateContent}
+                                onChange={e => setEditingTemplateContent(e.target.value)}
+                              />
+                              <div className="template-preview-actions">
+                                <button className="btn btn-primary btn-sm" onClick={() => saveTemplateContent(rule.id, rule.template!.id)} disabled={saving}>
+                                  Save
+                                </button>
+                                <button className="btn btn-sm" onClick={() => setEditingTemplateRuleId(null)}>Cancel</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="template-preview" onClick={() => { setEditingTemplateRuleId(rule.id); setEditingTemplateContent(rule.template!.content); }}>
+                              {rule.template.content}
+                            </div>
+                          )
                         )}
                       </div>
                     </div>
@@ -771,7 +971,7 @@ export function Services() {
                   <button
                     className="add-followup-btn"
                     onClick={addFollowUp}
-                    disabled={aiMode || saving}
+                    disabled={saving}
                   >
                     <Plus size={16} />
                     Add Follow-Up
@@ -904,20 +1104,69 @@ export function Services() {
                     <div className="select-wrapper">
                       <select
                         value={firstTextingRule?.templateId || firstTextingRule?.messageTemplate?.id || ''}
-                        onChange={e => firstTextingRule && changeTextingRuleTemplate(firstTextingRule.id, e.target.value)}
+                        onChange={e => {
+                          if (!firstTextingRule) return;
+                          if (e.target.value === '__create_new__') {
+                            setCreatingTemplate(`texting-first-${firstTextingRule.id}`);
+                            setNewTemplateName('');
+                            setNewTemplateContent('');
+                            setTemplateNameError(null);
+                          } else {
+                            changeTextingRuleTemplate(firstTextingRule.id, e.target.value);
+                          }
+                        }}
                         disabled={!firstTextingRule}
                       >
                         <option value="">Select template</option>
                         {templates.map(t => (
                           <option key={t.id} value={t.id}>{t.name}</option>
                         ))}
+                        <option value="__create_new__">+ Create New Template</option>
                       </select>
                       <ChevronDown size={16} />
                     </div>
-                    {firstTextingRule?.messageTemplate && (
-                      <div className="template-preview">
-                        {firstTextingRule.messageTemplate.content}
+                    {firstTextingRule && creatingTemplate === `texting-first-${firstTextingRule.id}` && (
+                      <div className="create-template-inline">
+                        <input
+                          type="text"
+                          placeholder="Template name"
+                          value={newTemplateName}
+                          onChange={e => { setNewTemplateName(e.target.value); setTemplateNameError(null); }}
+                        />
+                        {templateNameError && <span className="field-error">{templateNameError}</span>}
+                        <textarea
+                          rows={3}
+                          placeholder="Template content..."
+                          value={newTemplateContent}
+                          onChange={e => setNewTemplateContent(e.target.value)}
+                        />
+                        <div className="create-template-actions">
+                          <button className="btn btn-primary btn-sm" onClick={() => createNewTemplate(`texting-first-${firstTextingRule.id}`, firstTextingRule.id, 'texting')} disabled={saving}>
+                            Create
+                          </button>
+                          <button className="btn btn-sm" onClick={() => { setCreatingTemplate(null); setTemplateNameError(null); }}>Cancel</button>
+                        </div>
                       </div>
+                    )}
+                    {firstTextingRule?.messageTemplate && (
+                      editingTemplateRuleId === firstTextingRule.id ? (
+                        <div className="template-preview-edit">
+                          <textarea
+                            value={editingTemplateContent}
+                            onChange={e => setEditingTemplateContent(e.target.value)}
+                          />
+                          <div className="template-preview-actions">
+                            <button className="btn btn-primary btn-sm" onClick={() => saveTemplateContent(firstTextingRule.id, firstTextingRule.messageTemplate!.id)} disabled={saving}>
+                              Save
+                            </button>
+                            <button className="btn btn-sm" onClick={() => setEditingTemplateRuleId(null)}>Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="template-preview" onClick={() => { setEditingTemplateRuleId(firstTextingRule.id); setEditingTemplateContent(firstTextingRule.messageTemplate!.content); }}>
+                          {firstTextingRule.messageTemplate.content}
+                        </div>
+                      )
                     )}
                   </div>
                   <p className="form-hint"><Clock size={12} /> Sent immediately when lead arrives</p>
@@ -947,14 +1196,40 @@ export function Services() {
                           {DELAY_PRESETS.map(preset => (
                             <button
                               key={preset.minutes}
-                              className={`delay-preset ${(rule.delayMinutes || 120) === preset.minutes ? 'active' : ''}`}
+                              className={`delay-preset ${(rule.delayMinutes || 120) === preset.minutes ? 'selected' : ''}`}
                               onClick={() => changeTextingFollowUpDelay(rule.id, preset.minutes)}
                               disabled={saving}
                             >
                               {preset.label}
                             </button>
                           ))}
+                          <button
+                            className={`delay-preset ${isCustomDelay(rule.delayMinutes || 120) ? 'selected' : ''}`}
+                            onClick={() => { setCustomDelayRuleId(rule.id); setCustomDelayValue(isCustomDelay(rule.delayMinutes || 120) ? String(rule.delayMinutes) : ''); }}
+                            disabled={saving}
+                          >
+                            {isCustomDelay(rule.delayMinutes || 120) ? `${rule.delayMinutes} min` : 'Custom'}
+                          </button>
                         </div>
+                        {customDelayRuleId === rule.id && (
+                          <div className="custom-delay-input">
+                            <input
+                              type="number"
+                              min="1"
+                              placeholder="Minutes"
+                              value={customDelayValue}
+                              onChange={e => setCustomDelayValue(e.target.value)}
+                              onKeyDown={e => e.key === 'Enter' && applyCustomDelay(rule.id, 'texting')}
+                            />
+                            <span className="custom-delay-label">minutes</span>
+                            <button className="btn btn-primary btn-sm" onClick={() => applyCustomDelay(rule.id, 'texting')} disabled={saving}>
+                              Apply
+                            </button>
+                            <button className="btn btn-sm" onClick={() => { setCustomDelayRuleId(null); setCustomDelayValue(''); }}>
+                              Cancel
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       <div className="form-group">
@@ -962,19 +1237,67 @@ export function Services() {
                         <div className="select-wrapper">
                           <select
                             value={rule.templateId || rule.messageTemplate?.id || ''}
-                            onChange={e => changeTextingRuleTemplate(rule.id, e.target.value)}
+                            onChange={e => {
+                              if (e.target.value === '__create_new__') {
+                                setCreatingTemplate(`texting-followup-${rule.id}`);
+                                setNewTemplateName('');
+                                setNewTemplateContent('');
+                                setTemplateNameError(null);
+                              } else {
+                                changeTextingRuleTemplate(rule.id, e.target.value);
+                              }
+                            }}
                           >
                             <option value="">Select template</option>
                             {templates.map(t => (
                               <option key={t.id} value={t.id}>{t.name}</option>
                             ))}
+                            <option value="__create_new__">+ Create New Template</option>
                           </select>
                           <ChevronDown size={16} />
                         </div>
-                        {rule.messageTemplate && (
-                          <div className="template-preview">
-                            {rule.messageTemplate.content}
+                        {creatingTemplate === `texting-followup-${rule.id}` && (
+                          <div className="create-template-inline">
+                            <input
+                              type="text"
+                              placeholder="Template name"
+                              value={newTemplateName}
+                              onChange={e => { setNewTemplateName(e.target.value); setTemplateNameError(null); }}
+                            />
+                            {templateNameError && <span className="field-error">{templateNameError}</span>}
+                            <textarea
+                              rows={3}
+                              placeholder="Template content..."
+                              value={newTemplateContent}
+                              onChange={e => setNewTemplateContent(e.target.value)}
+                            />
+                            <div className="create-template-actions">
+                              <button className="btn btn-primary btn-sm" onClick={() => createNewTemplate(`texting-followup-${rule.id}`, rule.id, 'texting')} disabled={saving}>
+                                Create
+                              </button>
+                              <button className="btn btn-sm" onClick={() => { setCreatingTemplate(null); setTemplateNameError(null); }}>Cancel</button>
+                            </div>
                           </div>
+                        )}
+                        {rule.messageTemplate && (
+                          editingTemplateRuleId === rule.id ? (
+                            <div className="template-preview-edit">
+                              <textarea
+                                value={editingTemplateContent}
+                                onChange={e => setEditingTemplateContent(e.target.value)}
+                              />
+                              <div className="template-preview-actions">
+                                <button className="btn btn-primary btn-sm" onClick={() => saveTemplateContent(rule.id, rule.messageTemplate!.id)} disabled={saving}>
+                                  Save
+                                </button>
+                                <button className="btn btn-sm" onClick={() => setEditingTemplateRuleId(null)}>Cancel</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="template-preview" onClick={() => { setEditingTemplateRuleId(rule.id); setEditingTemplateContent(rule.messageTemplate!.content); }}>
+                              {rule.messageTemplate.content}
+                            </div>
+                          )
                         )}
                       </div>
                     </div>
