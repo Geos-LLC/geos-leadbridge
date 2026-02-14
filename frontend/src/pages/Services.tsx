@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, CheckCircle, X, Clock,
+  Plus, Trash2, Bot,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -10,6 +11,14 @@ import {
 import type {
   AutomationRule, NotificationRule, SavedAccount, MessageTemplate,
 } from '../types';
+
+// Delay presets for follow-up messages
+const DELAY_PRESETS = [
+  { label: '1 hour', minutes: 60 },
+  { label: '2 hours', minutes: 120 },
+  { label: '6 hours', minutes: 360 },
+  { label: '24 hours', minutes: 1440 },
+];
 
 // Platform template variables (for auto-reply)
 const PLATFORM_VARIABLES = [
@@ -106,9 +115,15 @@ export function Services() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Service rules (derived from backend)
-  const [autoReplyRule, setAutoReplyRule] = useState<AutomationRule | null>(null);
-  const [autoReplyFollowUp, setAutoReplyFollowUp] = useState<AutomationRule | null>(null);
+  // Auto Reply rules (dynamic array of all new_lead automation rules)
+  const [autoReplyRules, setAutoReplyRules] = useState<AutomationRule[]>([]);
+  const autoReplyEnabled = autoReplyRules.some(r => r.enabled);
+  const firstReplyRule = autoReplyRules.find(r => r.delayMinutes === 0 || !r.delayMinutes) || null;
+  const followUpRules = autoReplyRules
+    .filter(r => r.delayMinutes > 0)
+    .sort((a, b) => a.delayMinutes - b.delayMinutes);
+
+  // Other service rules
   const [leadAlertRule, setLeadAlertRule] = useState<NotificationRule | null>(null);
   const [customerTextingRule, setCustomerTextingRule] = useState<NotificationRule | null>(null);
 
@@ -118,6 +133,7 @@ export function Services() {
 
   // UI state
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  const [aiMode, setAiMode] = useState(false);
 
   // Lead Alerts form state (needed for first-time creation)
   const [alertToPhone, setAlertToPhone] = useState('');
@@ -127,14 +143,6 @@ export function Services() {
   // Customer Texting form state
   const [textingFromPhone, setTextingFromPhone] = useState('');
   const [textingTemplate, setTextingTemplate] = useState('Hi {{lead.name}}, thanks for your interest in {{lead.service}}! We received your request and will reach out shortly.');
-
-  // Auto Reply template editing (First Reply)
-  const [autoReplyTemplateContent, setAutoReplyTemplateContent] = useState('');
-  const [editingAutoReplyTemplate, setEditingAutoReplyTemplate] = useState(false);
-
-  // Auto Reply template editing (Follow Up)
-  const [followUpTemplateContent, setFollowUpTemplateContent] = useState('');
-  const [editingFollowUpTemplate, setEditingFollowUpTemplate] = useState(false);
 
   useEffect(() => {
     loadAccounts();
@@ -172,13 +180,11 @@ export function Services() {
         usersApi.getPoolPhonesForSms().catch(() => ({ phoneNumbers: [] })),
       ]);
 
-      // Find Auto Reply rules
-      const autoReply = automationRes.rules.find(
-        (r: AutomationRule) => r.triggerType === 'new_lead' && (r.delayMinutes === 0 || !r.delayMinutes)
-      ) || null;
-      const followUp = automationRes.rules.find(
-        (r: AutomationRule) => r.triggerType === 'new_lead' && r.delayMinutes && r.delayMinutes > 0 && r.id !== autoReply?.id
-      ) || null;
+      // Collect ALL new_lead automation rules
+      const allAutoReplies = automationRes.rules.filter(
+        (r: AutomationRule) => r.triggerType === 'new_lead'
+      );
+      setAutoReplyRules(allAutoReplies);
 
       // Find notification rules by sendToCustomer flag
       const leadAlert = notifRes.rules.find(
@@ -188,8 +194,6 @@ export function Services() {
         (r: NotificationRule) => r.triggerType === 'new_lead' && r.sendToCustomer === true
       ) || null;
 
-      setAutoReplyRule(autoReply);
-      setAutoReplyFollowUp(followUp);
       setLeadAlertRule(leadAlert);
       setCustomerTextingRule(customerTexting);
       setTemplates(templatesRes.templates);
@@ -204,14 +208,6 @@ export function Services() {
       if (customerTexting) {
         setTextingFromPhone(customerTexting.fromPhone || '');
         setTextingTemplate(customerTexting.template || textingTemplate);
-      }
-      if (autoReply?.templateId) {
-        const tpl = templatesRes.templates.find((t: MessageTemplate) => t.id === autoReply.templateId);
-        if (tpl) setAutoReplyTemplateContent(tpl.content);
-      }
-      if (followUp?.templateId) {
-        const fuTpl = templatesRes.templates.find((t: MessageTemplate) => t.id === followUp.templateId);
-        if (fuTpl) setFollowUpTemplateContent(fuTpl.content);
       }
 
       // Default from phone to first pool phone
@@ -237,17 +233,15 @@ export function Services() {
     setSaving(true);
     setError(null);
     try {
-      if (autoReplyRule) {
-        // Toggle existing rules
-        const { rule } = await automationApi.updateRule(autoReplyRule.id, { enabled });
-        setAutoReplyRule(rule);
-        if (autoReplyFollowUp) {
-          const { rule: fu } = await automationApi.updateRule(autoReplyFollowUp.id, { enabled });
-          setAutoReplyFollowUp(fu);
-        }
+      if (autoReplyRules.length > 0) {
+        // Toggle all existing rules
+        const updated = await Promise.all(
+          autoReplyRules.map(r => automationApi.updateRule(r.id, { enabled }))
+        );
+        setAutoReplyRules(updated.map(u => u.rule));
         showSuccess(enabled ? 'Auto Reply enabled' : 'Auto Reply disabled');
       } else if (enabled) {
-        // Create default template + rules
+        // First time: create default template + first message rule only
         let templateId = templates.find(t => t.name.includes('Auto Reply'))?.id;
         if (!templateId) {
           const { template } = await templatesApi.createTemplate(
@@ -256,7 +250,6 @@ export function Services() {
           );
           templateId = template.id;
           setTemplates(prev => [template, ...prev]);
-          setAutoReplyTemplateContent(template.content);
         }
 
         const { rule } = await automationApi.createRule({
@@ -267,30 +260,8 @@ export function Services() {
           delayMinutes: 0,
           enabled: true,
         });
-        setAutoReplyRule(rule);
-
-        // Create follow-up at 2 hours
-        let followUpTemplateId = templates.find(t => t.name.includes('Follow Up'))?.id;
-        if (!followUpTemplateId) {
-          const { template } = await templatesApi.createTemplate(
-            'Auto Reply - Follow Up',
-            'Hi {firstName}, just checking in on your {category} request. I\'m available whenever works for you!',
-          );
-          followUpTemplateId = template.id;
-          setTemplates(prev => [template, ...prev]);
-          setFollowUpTemplateContent(template.content);
-        }
-
-        const { rule: fuRule } = await automationApi.createRule({
-          savedAccountId: selectedAccountId,
-          name: 'Auto Reply - 2hr Follow Up',
-          triggerType: 'new_lead',
-          templateId: followUpTemplateId,
-          delayMinutes: 120,
-          enabled: true,
-        });
-        setAutoReplyFollowUp(fuRule);
-        showSuccess('Auto Reply enabled with immediate reply + 2hr follow-up');
+        setAutoReplyRules([rule]);
+        showSuccess('Auto Reply enabled');
       }
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Failed to toggle Auto Reply');
@@ -367,35 +338,79 @@ export function Services() {
     }
   }
 
+  // --- Auto Reply Handlers ---
+
+  async function changeRuleTemplate(ruleId: string, templateId: string) {
+    setSaving(true);
+    try {
+      const { rule } = await automationApi.updateRule(ruleId, { templateId });
+      setAutoReplyRules(prev => prev.map(r => r.id === ruleId ? rule : r));
+      showSuccess('Template updated');
+    } catch (err: any) {
+      setError(err.message || 'Failed to update template');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changeFollowUpDelay(ruleId: string, delayMinutes: number) {
+    setSaving(true);
+    try {
+      const { rule } = await automationApi.updateRule(ruleId, { delayMinutes });
+      setAutoReplyRules(prev => prev.map(r => r.id === ruleId ? rule : r));
+    } catch (err: any) {
+      setError(err.message || 'Failed to update delay');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addFollowUp() {
+    setSaving(true);
+    try {
+      // Find or create a default follow-up template
+      let templateId = templates.find(t => t.name.includes('Follow Up'))?.id;
+      if (!templateId) {
+        const { template } = await templatesApi.createTemplate(
+          'Auto Reply - Follow Up',
+          'Hi {firstName}, just checking in on your {category} request. I\'m available whenever works for you!',
+        );
+        templateId = template.id;
+        setTemplates(prev => [template, ...prev]);
+      }
+
+      const followUpNum = followUpRules.length + 1;
+      const { rule } = await automationApi.createRule({
+        savedAccountId: selectedAccountId,
+        name: `Follow-Up ${followUpNum}`,
+        triggerType: 'new_lead',
+        templateId,
+        delayMinutes: 120,
+        enabled: true,
+      });
+      setAutoReplyRules(prev => [...prev, rule]);
+      showSuccess('Follow-up added');
+    } catch (err: any) {
+      setError(err.message || 'Failed to add follow-up');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteFollowUp(ruleId: string) {
+    setSaving(true);
+    try {
+      await automationApi.deleteRule(ruleId);
+      setAutoReplyRules(prev => prev.filter(r => r.id !== ruleId));
+      showSuccess('Follow-up removed');
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete follow-up');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   // --- Save Settings Handlers ---
-
-  async function saveAutoReplyTemplate() {
-    if (!autoReplyRule?.templateId || !autoReplyTemplateContent.trim()) return;
-    setSaving(true);
-    try {
-      await templatesApi.updateTemplate(autoReplyRule.templateId, { content: autoReplyTemplateContent });
-      setEditingAutoReplyTemplate(false);
-      showSuccess('First Reply template saved');
-    } catch (err: any) {
-      setError(err.message || 'Failed to save template');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function saveFollowUpTemplate() {
-    if (!autoReplyFollowUp?.templateId || !followUpTemplateContent.trim()) return;
-    setSaving(true);
-    try {
-      await templatesApi.updateTemplate(autoReplyFollowUp.templateId, { content: followUpTemplateContent });
-      setEditingFollowUpTemplate(false);
-      showSuccess('Follow Up template saved');
-    } catch (err: any) {
-      setError(err.message || 'Failed to save template');
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function saveLeadAlertSettings() {
     if (!leadAlertRule) return;
@@ -517,147 +532,147 @@ export function Services() {
         ) : (
           <div className="services-grid">
 
-            {/* 1. Auto Reply */}
+            {/* 1. Auto Reply & Follow-Ups */}
             <ServiceCard
               icon={<Zap size={22} />}
-              title="Auto Reply"
-              description="Automatically respond to new leads on Thumbtack instantly."
-              enabled={autoReplyRule?.enabled ?? false}
+              title="Auto Reply & Follow-Ups"
+              description="Automatically respond and follow up with new leads."
+              enabled={autoReplyEnabled}
               onToggle={toggleAutoReply}
               saving={saving}
               expanded={expandedCard === 'auto-reply'}
               onExpand={() => toggleExpand('auto-reply')}
-              statusText={autoReplyRule?.enabled ? `Immediate reply${autoReplyFollowUp?.enabled ? ' + 2hr follow-up' : ''}` : undefined}
+              statusText={autoReplyEnabled ? `${1 + followUpRules.length} message${followUpRules.length > 0 ? 's' : ''} in sequence` : undefined}
             >
-              <div className="service-settings-inner">
-                {/* First Reply Section */}
-                <div className="auto-reply-section">
-                  <h4><Zap size={14} /> First Reply</h4>
+              <div className={`service-settings-inner ${aiMode ? 'ai-disabled' : ''}`}>
+                {/* AI Optimization Banner */}
+                <div className={`ai-optimization-banner ${aiMode ? 'active' : ''}`}>
+                  <div className="ai-banner-info">
+                    <Bot size={18} />
+                    <div>
+                      <strong>AI Optimization</strong>
+                      <span className="pro-badge">Pro</span>
+                      <p className="form-hint">AI decides timing, follow-ups, and message variations to maximize response.</p>
+                    </div>
+                  </div>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={aiMode}
+                      onChange={e => setAiMode(e.target.checked)}
+                    />
+                    <span className="toggle-slider"></span>
+                  </label>
+                </div>
+
+                {aiMode && (
+                  <div className="ai-overlay-note">
+                    AI is controlling this sequence.
+                  </div>
+                )}
+
+                {/* First Message Section */}
+                <div className="auto-reply-section first-message-section">
+                  <h4><Zap size={14} /> First Message</h4>
                   <p className="form-hint">Sent immediately when a new lead arrives.</p>
 
-                  {autoReplyRule && (
+                  {firstReplyRule && (
                     <div className="form-group">
-                      <label>Message Template</label>
-                      {editingAutoReplyTemplate ? (
-                        <>
-                          <textarea
-                            rows={4}
-                            value={autoReplyTemplateContent}
-                            onChange={e => setAutoReplyTemplateContent(e.target.value)}
-                            placeholder="Enter your first reply message..."
-                          />
-                          <div className="variable-buttons">
-                            {PLATFORM_VARIABLES.map(v => (
-                              <button
-                                key={v.name}
-                                className="variable-btn"
-                                onClick={() => insertVariable(v.name, setAutoReplyTemplateContent)}
-                                title={v.desc}
-                              >
-                                {v.name}
-                              </button>
-                            ))}
-                            {SMS_VARIABLES.map(v => (
-                              <button
-                                key={v.name}
-                                className="variable-btn"
-                                onClick={() => insertVariable(v.name, setAutoReplyTemplateContent)}
-                                title={v.desc}
-                              >
-                                {v.name}
-                              </button>
-                            ))}
-                          </div>
-                          <div className="form-actions">
-                            <button className="btn btn-secondary btn-sm" onClick={() => setEditingAutoReplyTemplate(false)}>
-                              Cancel
-                            </button>
-                            <button className="btn btn-primary btn-sm" onClick={saveAutoReplyTemplate} disabled={saving}>
-                              {saving ? <Loader2 size={14} className="spinner" /> : null}
-                              Save Template
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="template-preview">
-                            {autoReplyTemplateContent || 'No template set'}
-                          </div>
-                          <button className="btn btn-secondary btn-sm" onClick={() => setEditingAutoReplyTemplate(true)}>
-                            Edit Template
-                          </button>
-                        </>
+                      <label>Template</label>
+                      <div className="select-wrapper">
+                        <select
+                          value={firstReplyRule.templateId || ''}
+                          onChange={e => changeRuleTemplate(firstReplyRule.id, e.target.value)}
+                          disabled={aiMode || saving}
+                        >
+                          <option value="">Select template...</option>
+                          {templates.map(t => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                        </select>
+                        <ChevronDown size={16} />
+                      </div>
+                      {firstReplyRule.template?.content && (
+                        <div className="template-preview">
+                          {firstReplyRule.template.content}
+                        </div>
                       )}
                     </div>
                   )}
                 </div>
 
-                {/* Follow Up Section */}
-                <div className="auto-reply-section">
-                  <h4><Clock size={14} /> Follow Up</h4>
-                  <p className="form-hint">Sent 2 hours after the first reply if no customer response.</p>
+                {/* Follow-Up Messages Section */}
+                <div className="auto-reply-section followup-section">
+                  <h4><Clock size={14} /> Follow-Up Messages</h4>
 
-                  {autoReplyFollowUp && (
-                    <div className="form-group">
-                      <label>Message Template</label>
-                      {editingFollowUpTemplate ? (
-                        <>
-                          <textarea
-                            rows={4}
-                            value={followUpTemplateContent}
-                            onChange={e => setFollowUpTemplateContent(e.target.value)}
-                            placeholder="Enter your follow-up message..."
-                          />
-                          <div className="variable-buttons">
-                            {PLATFORM_VARIABLES.map(v => (
-                              <button
-                                key={v.name}
-                                className="variable-btn"
-                                onClick={() => insertVariable(v.name, setFollowUpTemplateContent)}
-                                title={v.desc}
-                              >
-                                {v.name}
-                              </button>
-                            ))}
-                            {SMS_VARIABLES.map(v => (
-                              <button
-                                key={v.name}
-                                className="variable-btn"
-                                onClick={() => insertVariable(v.name, setFollowUpTemplateContent)}
-                                title={v.desc}
-                              >
-                                {v.name}
-                              </button>
-                            ))}
-                          </div>
-                          <div className="form-actions">
-                            <button className="btn btn-secondary btn-sm" onClick={() => setEditingFollowUpTemplate(false)}>
-                              Cancel
-                            </button>
-                            <button className="btn btn-primary btn-sm" onClick={saveFollowUpTemplate} disabled={saving}>
-                              {saving ? <Loader2 size={14} className="spinner" /> : null}
-                              Save Template
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="template-preview">
-                            {followUpTemplateContent || 'No template set'}
-                          </div>
-                          <button className="btn btn-secondary btn-sm" onClick={() => setEditingFollowUpTemplate(true)}>
-                            Edit Template
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {!autoReplyFollowUp && autoReplyRule && (
+                  {followUpRules.length === 0 && (
                     <p className="form-hint" style={{ fontStyle: 'italic' }}>
-                      Follow-up will be created when Auto Reply is enabled.
+                      No follow-ups yet. Add one below.
                     </p>
                   )}
+
+                  {followUpRules.map((rule, idx) => (
+                    <div key={rule.id} className="followup-item">
+                      <div className="followup-item-header">
+                        <span className="followup-label">Message {idx + 2}</span>
+                        <button
+                          className="btn-icon btn-delete-followup"
+                          onClick={() => deleteFollowUp(rule.id)}
+                          disabled={aiMode || saving}
+                          title="Delete follow-up"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+
+                      <div className="form-group">
+                        <label>Send after</label>
+                        <div className="delay-presets">
+                          {DELAY_PRESETS.map(preset => (
+                            <button
+                              key={preset.minutes}
+                              className={`delay-preset ${rule.delayMinutes === preset.minutes ? 'selected' : ''}`}
+                              onClick={() => changeFollowUpDelay(rule.id, preset.minutes)}
+                              disabled={aiMode || saving}
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="form-group">
+                        <label>Template</label>
+                        <div className="select-wrapper">
+                          <select
+                            value={rule.templateId || ''}
+                            onChange={e => changeRuleTemplate(rule.id, e.target.value)}
+                            disabled={aiMode || saving}
+                          >
+                            <option value="">Select template...</option>
+                            {templates.map(t => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                          </select>
+                          <ChevronDown size={16} />
+                        </div>
+                        {rule.template?.content && (
+                          <div className="template-preview">
+                            {rule.template.content}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+
+                  <button
+                    className="add-followup-btn"
+                    onClick={addFollowUp}
+                    disabled={aiMode || saving}
+                  >
+                    <Plus size={16} />
+                    Add Follow-Up
+                  </button>
                 </div>
               </div>
             </ServiceCard>
