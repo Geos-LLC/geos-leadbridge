@@ -6531,6 +6531,77 @@ body {
   margin: 0 0 4px 0;
 }
 
+/* Sub-cards (expandable sections inside service cards) */
+.sub-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.sub-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: white;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s;
+}
+
+.sub-card-header:hover {
+  background: #f8f9fa;
+}
+
+.sub-card-header svg:last-child {
+  color: var(--text-secondary);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+.sub-card-header svg:last-child.rotated {
+  transform: rotate(180deg);
+}
+
+.sub-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sub-card-title svg {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.sub-card-body {
+  padding: 16px;
+  border-top: 1px solid var(--border-color);
+  background: #fafbfc;
+}
+
+/* Coming Soon sub-card */
+.sub-card-coming-soon {
+  border-color: #e0e4ea;
+}
+
+.sub-card-coming-soon .sub-card-header {
+  background: linear-gradient(135deg, #f8f9fa, #f0f1f5);
+}
+
+.sub-card-coming-soon .sub-card-title svg {
+  color: var(--text-muted);
+}
+
+.sub-card-disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 /* AI Optimization Banner */
 .ai-optimization-banner {
   display: flex;
