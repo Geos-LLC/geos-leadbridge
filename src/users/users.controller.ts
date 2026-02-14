@@ -46,4 +46,13 @@ export class UsersController {
   async getMyPoolPhone(@Request() req: any) {
     return this.usersService.getUserPoolPhone(req.user.id);
   }
+
+  /**
+   * Get pool phones available for SMS (assigned to user + available)
+   * GET /v1/users/me/pool-phones-for-sms
+   */
+  @Get('me/pool-phones-for-sms')
+  async getPoolPhonesForSms(@Request() req: any) {
+    return this.usersService.getPoolPhonesForSms(req.user.id);
+  }
 }

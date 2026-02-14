@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Bell, Loader2, X, ChevronDown, Send, Phone, MessageSquare, AlertCircle, CheckCircle, Plus, Edit2, Trash2, Zap, Save } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { notificationsApi, thumbtackApi, type SigcorePhoneNumber, type CreateNotificationRuleDto, type UpdateNotificationRuleDto } from '../services/api';
+import { notificationsApi, thumbtackApi, usersApi, type CreateNotificationRuleDto, type UpdateNotificationRuleDto } from '../services/api';
 import type { NotificationRule, NotificationLog, SavedAccount } from '../types';
 
 // Available variables for SMS template
@@ -51,12 +51,9 @@ export function NotificationSettings() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Phone numbers for each account (for the rule form)
-  const [accountPhoneNumbers, setAccountPhoneNumbers] = useState<Record<string, SigcorePhoneNumber[]>>({});
-  const [loadingPhoneNumbers, setLoadingPhoneNumbers] = useState<Record<string, boolean>>({});
-
-  // Track which accounts have Sigcore configured
-  const [accountSigcoreStatus, setAccountSigcoreStatus] = useState<Record<string, boolean>>({});
+  // Pool phone numbers for the fromPhone dropdown
+  const [poolPhoneNumbers, setPoolPhoneNumbers] = useState<{ id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }[]>([]);
+  const [loadingPhoneNumbers, setLoadingPhoneNumbers] = useState(false);
 
   // Notification logs
   const [logs, setLogs] = useState<NotificationLog[]>([]);
@@ -97,12 +94,10 @@ export function NotificationSettings() {
     }
   }, [selectedAccountId]);
 
-  // Load phone numbers when rule form account changes
+  // Load pool phone numbers on mount
   useEffect(() => {
-    if (ruleForm.accountId && !accountPhoneNumbers[ruleForm.accountId]) {
-      loadPhoneNumbersForAccount(ruleForm.accountId);
-    }
-  }, [ruleForm.accountId]);
+    loadPoolPhones();
+  }, []);
 
   async function loadAccounts() {
     try {
@@ -111,8 +106,6 @@ export function NotificationSettings() {
       setAccounts(accounts);
       setSelectedAccountId('all');
       loadAllRules();
-      // Check Sigcore status for all accounts
-      checkSigcoreStatusForAccounts(accounts);
     } catch (err: any) {
       setError(err.message || 'Failed to load accounts');
     } finally {
@@ -120,24 +113,17 @@ export function NotificationSettings() {
     }
   }
 
-  async function checkSigcoreStatusForAccounts(accountsList: SavedAccount[]) {
-    const statusMap: Record<string, boolean> = {};
-
-    // Check settings for each account in parallel
-    await Promise.all(
-      accountsList.map(async (account) => {
-        try {
-          const result = await notificationsApi.getSettings(account.id);
-          // Account has Sigcore configured if settings exist and have sigcoreApiKey
-          statusMap[account.id] = !!(result.settings && result.settings.sigcoreApiKey);
-        } catch (err) {
-          // If we can't fetch settings, assume not configured
-          statusMap[account.id] = false;
-        }
-      })
-    );
-
-    setAccountSigcoreStatus(statusMap);
+  async function loadPoolPhones() {
+    try {
+      setLoadingPhoneNumbers(true);
+      const result = await usersApi.getPoolPhonesForSms();
+      setPoolPhoneNumbers(result.phoneNumbers);
+    } catch (err) {
+      console.error('Failed to load pool phone numbers:', err);
+      setPoolPhoneNumbers([]);
+    } finally {
+      setLoadingPhoneNumbers(false);
+    }
   }
 
   async function loadAllRules() {
@@ -166,24 +152,6 @@ export function NotificationSettings() {
     }
   }
 
-  async function loadPhoneNumbersForAccount(accountId: string) {
-    try {
-      setLoadingPhoneNumbers(prev => ({ ...prev, [accountId]: true }));
-      const result = await notificationsApi.getSigcorePhoneNumbers(accountId);
-      setAccountPhoneNumbers(prev => ({
-        ...prev,
-        [accountId]: result.phoneNumbers,
-      }));
-    } catch (err) {
-      console.error('Failed to load phone numbers:', err);
-      setAccountPhoneNumbers(prev => ({
-        ...prev,
-        [accountId]: [],
-      }));
-    } finally {
-      setLoadingPhoneNumbers(prev => ({ ...prev, [accountId]: false }));
-    }
-  }
 
   async function loadLogs(accountId: string, showLoading = true) {
     try {
@@ -295,10 +263,6 @@ export function NotificationSettings() {
       template: rule.template,
       enabled: rule.enabled,
     });
-    // Load phone numbers for this account if not already loaded
-    if (rule.savedAccountId && !accountPhoneNumbers[rule.savedAccountId]) {
-      loadPhoneNumbersForAccount(rule.savedAccountId);
-    }
   }
 
   function cancelRuleEdit() {
@@ -481,9 +445,9 @@ export function NotificationSettings() {
     }
   }
 
-  // Get phone numbers for the currently selected account in the form
-  const formPhoneNumbers = ruleForm.accountId ? (accountPhoneNumbers[ruleForm.accountId] || []) : [];
-  const formPhoneNumbersLoading = ruleForm.accountId ? (loadingPhoneNumbers[ruleForm.accountId] || false) : false;
+  // Pool phone numbers are global (not per-account)
+  const formPhoneNumbers = poolPhoneNumbers;
+  const formPhoneNumbersLoading = loadingPhoneNumbers;
 
   if (loading && accounts.length === 0) {
     return (
@@ -617,22 +581,15 @@ export function NotificationSettings() {
                             onChange={e => {
                               const newAccountId = e.target.value;
                               setRuleForm(prev => ({ ...prev, accountId: newAccountId, fromPhone: '' }));
-                              // Force reload phone numbers for the new account (even if cached)
-                              if (newAccountId) {
-                                loadPhoneNumbersForAccount(newAccountId);
-                              }
                             }}
                             className={!ruleForm.accountId ? 'required' : ''}
                           >
-                            <option value="">⚠️ Choose which account this rule applies to...</option>
-                            {accounts.map(acc => {
-                              const hasSigcore = accountSigcoreStatus[acc.id];
-                              return (
-                                <option key={acc.id} value={acc.id}>
-                                  {hasSigcore ? '✓' : '⚠'} {acc.businessName} {!hasSigcore ? '(Not configured)' : ''}
-                                </option>
-                              );
-                            })}
+                            <option value="">Choose which account this rule applies to...</option>
+                            {accounts.map(acc => (
+                              <option key={acc.id} value={acc.id}>
+                                {acc.businessName}
+                              </option>
+                            ))}
                           </select>
                           <ChevronDown size={16} />
                         </div>
@@ -653,20 +610,10 @@ export function NotificationSettings() {
                         </div>
                       )}
 
-                      {/* Warning banner if account doesn't have Sigcore configured */}
-                      {ruleForm.accountId && !accountSigcoreStatus[ruleForm.accountId] && (
-                        <div className="account-warning-banner" style={{ backgroundColor: '#fff3cd', borderColor: '#ffc107' }}>
-                          <AlertCircle size={18} style={{ color: '#856404' }} />
-                          <div>
-                            <strong>Sigcore Not Connected</strong>
-                            <p>This account doesn't have Sigcore configured yet. Go to <a href="/phone-settings" style={{ color: '#0066cc', textDecoration: 'underline' }}>Phone Settings</a> to connect Sigcore for this account before creating notification rules.</p>
-                          </div>
-                        </div>
-                      )}
                     </>
                   )}
 
-                  {/* From Phone - dropdown of Sigcore numbers */}
+                  {/* From Phone - dropdown of pool numbers */}
                   {ruleForm.accountId && (
                     <div className="form-group">
                       <label>
@@ -685,19 +632,25 @@ export function NotificationSettings() {
                             onChange={e => setRuleForm(prev => ({ ...prev, fromPhone: e.target.value }))}
                           >
                             <option value="">Select phone number...</option>
-                            {formPhoneNumbers.map(phone => (
+                            {formPhoneNumbers.map((phone: { id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }) => (
                               <option key={phone.id} value={phone.phoneNumber}>
-                                {phone.phoneNumber} ({phone.provider}{phone.friendlyName ? ` - ${phone.friendlyName}` : ''})
+                                {phone.phoneNumber} ({phone.provider}{phone.friendlyName ? ` - ${phone.friendlyName}` : ''}{phone.assigned ? ' - assigned to you' : ' - available'})
                               </option>
                             ))}
                           </select>
                           <ChevronDown size={16} />
                         </div>
                       ) : (
-                        <p className="form-hint warning">
-                          <AlertCircle size={14} />
-                          No phone numbers available. Go to Phone Settings to connect Sigcore first.
-                        </p>
+                        <div>
+                          <p className="form-hint warning">
+                            <AlertCircle size={14} />
+                            No phone numbers available in the pool.
+                          </p>
+                          <button className="btn btn-secondary btn-sm" style={{ marginTop: '8px' }} onClick={() => navigate('/phone-settings')}>
+                            <Phone size={14} />
+                            Connect Own Number
+                          </button>
+                        </div>
                       )}
                     </div>
                   )}
@@ -828,12 +781,9 @@ export function NotificationSettings() {
                               )}
                             </span>
                             {(() => {
-                              const acctId = rule.savedAccountId || (selectedAccountId !== 'all' ? selectedAccountId : '');
-                              const hasSigcore = acctId ? accountSigcoreStatus[acctId] : false;
                               const issues: string[] = [];
                               if (!rule.fromPhone) issues.push('No from phone');
                               if (!rule.toPhone) issues.push('No to phone');
-                              if (!hasSigcore) issues.push('No Sigcore API key');
                               const healthy = issues.length === 0;
                               return (
                                 <span className={`sms-status-badge ${healthy ? 'ok' : 'error'}`}
@@ -907,25 +857,14 @@ export function NotificationSettings() {
                             <div className="select-wrapper">
                               <select
                                 value={ruleForm.accountId}
-                                onChange={e => {
-                                  const newAccountId = e.target.value;
-                                  setRuleForm(prev => ({ ...prev, accountId: newAccountId, fromPhone: '' }));
-                                  // Force reload phone numbers for the new account (even if cached)
-                                  if (newAccountId) {
-                                    loadPhoneNumbersForAccount(newAccountId);
-                                  }
-                                }}
                                 disabled={true}
                               >
                                 <option value="">Select account...</option>
-                                {accounts.map(acc => {
-                                  const hasSigcore = accountSigcoreStatus[acc.id];
-                                  return (
-                                    <option key={acc.id} value={acc.id}>
-                                      {hasSigcore ? '✓' : '⚠'} {acc.businessName} {!hasSigcore ? '(Not configured)' : ''}
-                                    </option>
-                                  );
-                                })}
+                                {accounts.map(acc => (
+                                  <option key={acc.id} value={acc.id}>
+                                    {acc.businessName}
+                                  </option>
+                                ))}
                               </select>
                               <ChevronDown size={16} />
                             </div>
@@ -934,18 +873,7 @@ export function NotificationSettings() {
                             </p>
                           </div>
 
-                          {/* Warning banner if account doesn't have Sigcore configured */}
-                          {ruleForm.accountId && !accountSigcoreStatus[ruleForm.accountId] && (
-                            <div className="account-warning-banner" style={{ backgroundColor: '#fff3cd', borderColor: '#ffc107' }}>
-                              <AlertCircle size={18} style={{ color: '#856404' }} />
-                              <div>
-                                <strong>Sigcore Not Connected</strong>
-                                <p>This account doesn't have Sigcore configured yet. Go to <a href="/phone-settings" style={{ color: '#0066cc', textDecoration: 'underline' }}>Phone Settings</a> to connect Sigcore for this account before saving this rule.</p>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* From Phone - dropdown of Sigcore numbers */}
+                          {/* From Phone - dropdown of pool numbers */}
                           {ruleForm.accountId && (
                             <div className="form-group">
                               <label>
@@ -964,19 +892,25 @@ export function NotificationSettings() {
                                     onChange={e => setRuleForm(prev => ({ ...prev, fromPhone: e.target.value }))}
                                   >
                                     <option value="">Select phone number...</option>
-                                    {formPhoneNumbers.map(phone => (
+                                    {formPhoneNumbers.map((phone: { id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }) => (
                                       <option key={phone.id} value={phone.phoneNumber}>
-                                        {phone.phoneNumber} ({phone.provider}{phone.friendlyName ? ` - ${phone.friendlyName}` : ''})
+                                        {phone.phoneNumber} ({phone.provider}{phone.friendlyName ? ` - ${phone.friendlyName}` : ''}{phone.assigned ? ' - assigned to you' : ' - available'})
                                       </option>
                                     ))}
                                   </select>
                                   <ChevronDown size={16} />
                                 </div>
                               ) : (
-                                <p className="form-hint warning">
-                                  <AlertCircle size={14} />
-                                  No phone numbers available. Go to Phone Settings to connect Sigcore first.
-                                </p>
+                                <div>
+                                  <p className="form-hint warning">
+                                    <AlertCircle size={14} />
+                                    No phone numbers available in the pool.
+                                  </p>
+                                  <button className="btn btn-secondary btn-sm" style={{ marginTop: '8px' }} onClick={() => navigate('/phone-settings')}>
+                                    <Phone size={14} />
+                                    Connect Own Number
+                                  </button>
+                                </div>
                               )}
                             </div>
                           )}

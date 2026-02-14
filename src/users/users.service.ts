@@ -86,4 +86,29 @@ export class UsersService {
     });
     return { success: true, poolPhone };
   }
+
+  /**
+   * Get pool phones available for SMS sending
+   * Returns: user's assigned phones first, then all available pool phones
+   */
+  async getPoolPhonesForSms(userId: string) {
+    const [assigned, available] = await Promise.all([
+      this.prisma.phonePool.findMany({
+        where: { assignedToUserId: userId, status: 'ASSIGNED' },
+        orderBy: { assignedAt: 'desc' },
+      }),
+      this.prisma.phonePool.findMany({
+        where: { status: 'AVAILABLE' },
+        orderBy: { provisionedAt: 'desc' },
+      }),
+    ]);
+
+    return {
+      success: true,
+      phoneNumbers: [
+        ...assigned.map(p => ({ id: p.id, phoneNumber: p.phoneNumber, provider: p.provider, friendlyName: p.friendlyName, assigned: true })),
+        ...available.map(p => ({ id: p.id, phoneNumber: p.phoneNumber, provider: p.provider, friendlyName: p.friendlyName, assigned: false })),
+      ],
+    };
+  }
 }
