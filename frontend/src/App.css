@@ -7050,7 +7050,7 @@ body {
   margin-bottom: 8px;
 }
 
-/* Template preview — auto-height, read-only */
+/* Template preview — auto-height, resizable, scrollable */
 .service-card-settings .template-preview {
   padding: 12px;
   padding-right: 56px;
@@ -7061,6 +7061,9 @@ body {
   color: var(--text-primary);
   white-space: pre-wrap;
   min-height: 40px;
+  max-height: 300px;
+  overflow-y: auto;
+  resize: vertical;
   cursor: default;
   transition: border-color 0.2s;
 }

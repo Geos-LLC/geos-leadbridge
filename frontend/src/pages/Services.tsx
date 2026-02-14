@@ -13,6 +13,11 @@ import type {
 } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
 
+// Combined variables — same set for all card types (matches Templates page)
+const ALL_VARIABLES = [...AUTO_REPLY_VARIABLES, ...SMS_VARIABLES.filter(
+  v => !AUTO_REPLY_VARIABLES.some(a => a.desc === v.desc)
+)];
+
 // Delay presets for follow-up messages
 const DELAY_PRESETS = [
   { label: '5 min', minutes: 5 },
@@ -1169,7 +1174,7 @@ export function Services() {
         initialContent={templateEditor?.content || ''}
         templateName={templateEditor?.templateName}
         saving={saving}
-        variables={templateEditor?.type === 'autoReply' ? AUTO_REPLY_VARIABLES : SMS_VARIABLES}
+        variables={ALL_VARIABLES}
         existingNames={templates.map(t => t.name)}
         onSave={templateEditor?.mode === 'create' ? handleEditorCreate : handleEditorUpdate}
         onSaveAsNew={handleEditorSaveAsNew}
