@@ -882,10 +882,10 @@ export class NotificationsService {
 
     // Send via Sigcore
     try {
-      // Resolve API key: prefer tenant's own key, fall back to app-level SIGCORE_API_KEY
-      const apiKey = settings.sigcoreApiKey || this.appSigcoreApiKey;
+      // Resolve API key: use app-level SIGCORE_API_KEY (pool phones), fall back to tenant's own key
+      const apiKey = this.appSigcoreApiKey || settings.sigcoreApiKey;
       if (!apiKey) {
-        this.logger.error(`No Sigcore API key for rule ${ruleName} - neither tenant nor app key configured`);
+        this.logger.error(`No Sigcore API key for rule ${ruleName} - neither app nor tenant key configured`);
         throw new Error('No Sigcore API key configured');
       }
 
@@ -977,8 +977,9 @@ export class NotificationsService {
       this.logger.log(`[sendTestNotification] Auto-fixed enabled=false for account ${savedAccountId}`);
     }
 
-    // Resolve API key: prefer tenant's own key, fall back to app-level SIGCORE_API_KEY
-    const sigcoreApiKey = settings.sigcoreApiKey || this.appSigcoreApiKey;
+    // Resolve API key: use app-level SIGCORE_API_KEY (pool phones), fall back to tenant's own key
+    const sigcoreApiKey = this.appSigcoreApiKey || settings.sigcoreApiKey;
+    this.logger.log(`[sendTestNotification] Using ${this.appSigcoreApiKey ? 'app-level' : 'tenant'} Sigcore API key (key starts: ${sigcoreApiKey?.substring(0, 8)}...)`);
     if (!sigcoreApiKey) {
       return { success: false, error: 'No Sigcore API key configured. Contact your administrator.' };
     }
@@ -1831,7 +1832,8 @@ export class NotificationsService {
       requestBody.sender.fromNumber = params.fromPhone;
     }
 
-    const endpoint = 'https://sigcore-production.up.railway.app/api/v1/messages';
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    const endpoint = `${sigcoreUrl}/v1/messages`;
     this.logger.log(`[sendViaSigcore] Hitting endpoint: ${endpoint}`);
     this.logger.log(`[sendViaSigcore] Request body: ${JSON.stringify(requestBody)}`);
 
