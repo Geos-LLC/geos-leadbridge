@@ -4,6 +4,7 @@
  */
 
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 
 export interface UpdateNotificationSettingsDto {
@@ -157,7 +158,14 @@ export interface SendNotificationContext {
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  constructor(private prisma: PrismaService) {}
+  private readonly appSigcoreApiKey: string;
+
+  constructor(
+    private prisma: PrismaService,
+    private configService: ConfigService,
+  ) {
+    this.appSigcoreApiKey = this.configService.get<string>('SIGCORE_API_KEY', '');
+  }
 
   /**
    * Get notification settings for a saved account
@@ -874,11 +882,18 @@ export class NotificationsService {
 
     // Send via Sigcore
     try {
+      // Resolve API key: prefer tenant's own key, fall back to app-level SIGCORE_API_KEY
+      const apiKey = settings.sigcoreApiKey || this.appSigcoreApiKey;
+      if (!apiKey) {
+        this.logger.error(`No Sigcore API key for rule ${ruleName} - neither tenant nor app key configured`);
+        throw new Error('No Sigcore API key configured');
+      }
+
       const result = await this.sendViaSigcore({
         to: toPhone,
         body: messageBody,
         fromPhone: fromPhone,
-        apiKey: settings.sigcoreApiKey,
+        apiKey,
         senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
         sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
         metadata: {
@@ -962,8 +977,10 @@ export class NotificationsService {
       this.logger.log(`[sendTestNotification] Auto-fixed enabled=false for account ${savedAccountId}`);
     }
 
-    if (!settings.sigcoreApiKey) {
-      return { success: false, error: 'No Sigcore API key configured. Please connect to Sigcore first.' };
+    // Resolve API key: prefer tenant's own key, fall back to app-level SIGCORE_API_KEY
+    const sigcoreApiKey = settings.sigcoreApiKey || this.appSigcoreApiKey;
+    if (!sigcoreApiKey) {
+      return { success: false, error: 'No Sigcore API key configured. Contact your administrator.' };
     }
 
     // Get rule if specified
@@ -1027,7 +1044,7 @@ export class NotificationsService {
         to: toPhone,
         body: `[TEST] ${messageBody}`,
         fromPhone: fromPhone,
-        apiKey: settings.sigcoreApiKey,
+        apiKey: sigcoreApiKey,
         senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
         sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
         metadata: {
