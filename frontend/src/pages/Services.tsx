@@ -973,24 +973,6 @@ export function Services() {
             >
               <div className="service-settings-inner">
 
-                {/* Send From */}
-                <div className="auto-reply-section">
-                  <h4>Send From</h4>
-                  <div className="form-group">
-                    <div className="select-wrapper">
-                      <select value={textingFromPhone} onChange={e => saveTextingFromPhone(e.target.value)}>
-                        <option value="">Select phone number</option>
-                        {poolPhones.map(p => (
-                          <option key={p.id} value={p.phoneNumber}>
-                            {p.phoneNumber} ({p.provider}){p.assigned ? ' - assigned' : ''}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown size={16} />
-                    </div>
-                  </div>
-                </div>
-
                 {/* First SMS — Expandable Sub-Card */}
                 <div className="sub-card">
                   <div className="sub-card-header" onClick={() => toggleSubCard('texting-first')}>
@@ -1003,6 +985,20 @@ export function Services() {
                   {expandedSubCards.has('texting-first') && (
                     <div className="sub-card-body">
                       <p className="form-hint"><Clock size={12} /> Sent immediately when lead arrives</p>
+                      <div className="form-group">
+                        <label>Send from</label>
+                        <div className="select-wrapper">
+                          <select value={textingFromPhone} onChange={e => saveTextingFromPhone(e.target.value)} disabled={saving}>
+                            <option value="">Select phone number</option>
+                            {poolPhones.map(p => (
+                              <option key={p.id} value={p.phoneNumber}>
+                                {p.phoneNumber} (LeadBridge)
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={16} />
+                        </div>
+                      </div>
                       {firstTextingRule && (
                         <div className="form-group">
                           <label>Template</label>
@@ -1124,19 +1120,34 @@ export function Services() {
                   )}
                 </div>
 
-                {/* Follow-Up Messages — Expandable Sub-Card (Coming Soon) */}
+                {/* Follow-Up SMS — Expandable Sub-Card (Coming Soon) */}
                 <div className="sub-card sub-card-coming-soon">
                   <div className="sub-card-header" onClick={() => toggleSubCard('texting-followups')}>
                     <div className="sub-card-title">
                       <Clock size={14} />
-                      <span>Follow-Up Messages</span>
+                      <span>Follow-Up SMS</span>
                       <span className="coming-soon-badge">Coming Soon</span>
                     </div>
                     <ChevronDown size={14} className={expandedSubCards.has('texting-followups') ? 'rotated' : ''} />
                   </div>
                   {expandedSubCards.has('texting-followups') && (
                     <div className="sub-card-body sub-card-disabled">
-                      <p className="form-hint">Automated follow-up SMS messages sent after a delay. Configure timing and templates for each follow-up.</p>
+                      <p className="form-hint">Automated follow-up SMS sent after a delay. Configure timing and templates for each follow-up.</p>
+
+                      <div className="form-group">
+                        <label>Send from</label>
+                        <div className="select-wrapper">
+                          <select value={textingFromPhone} disabled>
+                            <option value="">Select phone number</option>
+                            {poolPhones.map(p => (
+                              <option key={p.id} value={p.phoneNumber}>
+                                {p.phoneNumber} (LeadBridge)
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={16} />
+                        </div>
+                      </div>
 
                       {textingFollowUpRules.length === 0 && (
                         <div className="followup-item" style={{ opacity: 0.5 }}>
