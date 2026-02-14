@@ -1816,20 +1816,14 @@ export class NotificationsService {
     this.logger.log(`Sending via Sigcore to: ${params.to}`);
 
     const requestBody: any = {
-      to: params.to,
+      toNumber: params.to,
       body: params.body,
       channel: 'sms',
-      metadata: params.metadata,
     };
 
-    // Set sender configuration - mode must be: shared, dedicated, or openphone
-    requestBody.sender = {
-      mode: params.senderMode || 'shared',
-    };
-
-    // If a specific phone number is selected, include it (must be valid phone number)
+    // If a specific phone number is selected, include it (must be valid E.164 phone number)
     if (params.fromPhone && params.fromPhone.length > 5 && params.fromPhone.match(/^\+?\d{10,}/)) {
-      requestBody.sender.fromNumber = params.fromPhone;
+      requestBody.fromNumber = params.fromPhone;
     }
 
     const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
@@ -1859,13 +1853,13 @@ export class NotificationsService {
       }
 
       const result = await response.json();
-      const data = result.data || {};
+      const data = result.data || result;
 
-      this.logger.log(`SMS sent via Sigcore: ${data.messageId}`);
+      this.logger.log(`SMS sent via Sigcore: ${JSON.stringify(data).substring(0, 500)}`);
 
       return {
         status: data.status || 'sent',
-        messageId: data.messageId,
+        messageId: data.id || data.providerMessageId,
         conversationId: data.conversationId,
         provider: data.provider,
         fromPhone: data.fromNumber,
