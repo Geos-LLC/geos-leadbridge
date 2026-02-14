@@ -7119,6 +7119,27 @@ body {
   margin-left: 4px;
 }
 
+/* Alert test section — Send Test + trigger stats */
+.alert-test-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.alert-test-section .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trigger-stats {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 /* Template Editor Modal */
 .template-editor-modal {
   background: white;

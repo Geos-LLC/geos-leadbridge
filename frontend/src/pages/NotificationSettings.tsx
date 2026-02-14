@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Bell, Loader2, X, ChevronDown, Send, Phone, MessageSquare, AlertCircle, CheckCircle, Plus, Edit2, Trash2, Zap, Save } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { notificationsApi, thumbtackApi, usersApi, type CreateNotificationRuleDto, type UpdateNotificationRuleDto } from '../services/api';
-import type { NotificationRule, NotificationLog, SavedAccount } from '../types';
+import type { NotificationRule, SavedAccount } from '../types';
 
 // Available variables for SMS template
 const TEMPLATE_VARIABLES = [
@@ -55,10 +55,6 @@ export function NotificationSettings() {
   const [poolPhoneNumbers, setPoolPhoneNumbers] = useState<{ id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }[]>([]);
   const [loadingPhoneNumbers, setLoadingPhoneNumbers] = useState(false);
 
-  // Notification logs
-  const [logs, setLogs] = useState<NotificationLog[]>([]);
-  const [logsLoading, setLogsLoading] = useState(false);
-
   // Rule editing state
   const [isCreatingRule, setIsCreatingRule] = useState(false);
   const [editingRule, setEditingRule] = useState<NotificationRule | null>(null);
@@ -87,10 +83,8 @@ export function NotificationSettings() {
 
     if (selectedAccountId === 'all') {
       loadAllRules();
-      loadAllLogs();
     } else if (selectedAccountId) {
       loadRulesForAccount(selectedAccountId);
-      loadLogs(selectedAccountId);
     }
   }, [selectedAccountId]);
 
@@ -152,66 +146,6 @@ export function NotificationSettings() {
     }
   }
 
-
-  async function loadLogs(accountId: string, showLoading = true) {
-    try {
-      if (showLoading) setLogsLoading(true);
-      const result = await notificationsApi.getLogs(accountId, 50);
-      setLogs(result.logs);
-    } catch (err) {
-      console.error('Failed to load notification logs:', err);
-      if (showLoading) setLogs([]);
-    } finally {
-      if (showLoading) setLogsLoading(false);
-    }
-  }
-
-  async function loadAllLogs(showLoading = true) {
-    try {
-      if (showLoading) setLogsLoading(true);
-      const result = await notificationsApi.getAllLogs(100);
-      setLogs(result.logs);
-    } catch (err) {
-      console.error('Failed to load all notification logs:', err);
-      if (showLoading) setLogs([]);
-    } finally {
-      if (showLoading) setLogsLoading(false);
-    }
-  }
-
-  // Silently refresh logs and merge updates (for polling - no flicker)
-  async function refreshLogs() {
-    try {
-      let newLogs: any[];
-      if (selectedAccountId === 'all') {
-        const result = await notificationsApi.getAllLogs(100);
-        newLogs = result.logs;
-      } else if (selectedAccountId) {
-        const result = await notificationsApi.getLogs(selectedAccountId, 50);
-        newLogs = result.logs;
-      } else {
-        return;
-      }
-
-      // Merge: update existing logs and add new ones
-      setLogs(prevLogs => {
-        // Start with existing logs, excluding temporary optimistic entries
-        const existingLogs = prevLogs.filter(log => !log.id.startsWith('temp-'));
-        const logMap = new Map(existingLogs.map(log => [log.id, log]));
-
-        // Update existing and add new
-        for (const newLog of newLogs) {
-          logMap.set(newLog.id, newLog);
-        }
-
-        // Convert back to array and sort by createdAt (newest first)
-        return Array.from(logMap.values())
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      });
-    } catch (err) {
-      console.error('Failed to refresh logs:', err);
-    }
-  }
 
   function insertRuleVariable(variable: string) {
     const textarea = templateTextareaRef.current;
@@ -411,28 +345,6 @@ export function NotificationSettings() {
 
       if (result.success) {
         setSuccessMessage('Test notification sent successfully');
-
-        // Add optimistic log entry immediately (will be updated by next poll)
-        const account = accounts.find(a => a.id === accountId);
-        const optimisticLog: any = {
-          id: `temp-${Date.now()}`, // Temporary ID, will be replaced by real one
-          ruleName: `[TEST] ${rule?.name || 'Unknown'}`,
-          fromPhone: rule?.fromPhone || '',
-          toPhone: rule?.toPhone || '',
-          status: 'pending',
-          createdAt: new Date().toISOString(),
-          deliveredAt: null,
-          savedAccountId: accountId,
-          savedAccount: account ? {
-            id: account.id,
-            businessId: account.businessId,
-            businessName: account.businessName,
-          } : undefined,
-        };
-        setLogs(prev => [optimisticLog, ...prev]);
-
-        // Silently refresh to get the real log entry with correct ID
-        setTimeout(() => refreshLogs(), 1000);
       } else {
         setError(result.message || 'Failed to send test notification');
       }
@@ -1031,99 +943,6 @@ export function NotificationSettings() {
               )}
             </div>
 
-            {/* Notification Logs Section */}
-            <div className="settings-section notification-logs">
-              <div className="section-header">
-                <h2>
-                  <MessageSquare size={18} />
-                  Message History
-                </h2>
-              </div>
-
-              {logsLoading ? (
-                <div className="loading-container">
-                  <Loader2 size={24} className="spinner" />
-                </div>
-              ) : logs.length > 0 ? (
-                <div className="logs-table-wrapper">
-                  <table className="logs-table">
-                    <thead>
-                      <tr>
-                        <th>Time</th>
-                        {selectedAccountId === 'all' && <th>Account</th>}
-                        <th>Rule</th>
-                        <th>From</th>
-                        <th>To</th>
-                        <th>Status</th>
-                        <th>Delivered</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {logs.map((log: any) => (
-                        <tr key={log.id} className={log.status === 'failed' ? 'has-error' : ''}>
-                          <td className="log-time">
-                            {new Date(log.createdAt).toLocaleString()}
-                          </td>
-                          {selectedAccountId === 'all' && (
-                            <td className="log-account">
-                              <span className="account-badge">{log.savedAccount?.businessName || 'Unknown'}</span>
-                            </td>
-                          )}
-                          <td className="log-rule">
-                            {log.ruleName ? (
-                              <span className="rule-badge">{log.ruleName}</span>
-                            ) : (
-                              <span className="rule-badge legacy">Legacy</span>
-                            )}
-                          </td>
-                          <td className="log-phone">{log.fromPhone || '-'}</td>
-                          <td className="log-phone">{log.toPhone}</td>
-                          <td className="log-status">
-                            {log.status === 'delivered' ? (
-                              <span className="status-badge delivered">
-                                <CheckCircle size={12} />
-                                Delivered
-                              </span>
-                            ) : log.status === 'failed' ? (
-                              <span className="status-badge failed" title={log.error || 'Unknown error'}>
-                                <AlertCircle size={12} />
-                                {log.error ? log.error.substring(0, 30) : 'Failed'}
-                              </span>
-                            ) : log.status === 'sent' ? (
-                              <span className="status-badge sent">
-                                <Send size={12} />
-                                Sent
-                              </span>
-                            ) : (
-                              <span className={`status-badge ${log.status}`}>
-                                <Loader2 size={12} className="spinner" />
-                                {log.status}
-                              </span>
-                              )}
-                            </td>
-                          <td className="log-delivered">
-                            {log.deliveredAt ? (
-                              <span className="delivered-time">
-                                <CheckCircle size={12} />
-                                {new Date(log.deliveredAt).toLocaleString()}
-                              </span>
-                            ) : log.status === 'failed' ? (
-                              <span className="not-delivered">—</span>
-                            ) : (
-                              <span className="pending-delivery">Pending</span>
-                            )}
-                          </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="empty-logs">
-                    <p>No messages sent yet. Messages will appear here when notifications are triggered.</p>
-                  </div>
-                )}
-            </div>
           </>
         )}
       </div>

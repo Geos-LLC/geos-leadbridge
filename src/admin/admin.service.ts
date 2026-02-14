@@ -281,4 +281,37 @@ export class AdminService {
       limit,
     };
   }
+
+  async getNotificationLogs(query: { limit?: number }) {
+    const limit = query.limit ? Number(query.limit) : 100;
+
+    const logs = await this.prisma.notificationLog.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: {
+        notificationSettings: {
+          select: {
+            savedAccount: {
+              select: {
+                id: true,
+                businessId: true,
+                businessName: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Flatten savedAccount from notificationSettings for easier frontend consumption
+    const flatLogs = logs.map(log => {
+      const { notificationSettings, ...rest } = log;
+      return {
+        ...rest,
+        savedAccount: notificationSettings?.savedAccount || null,
+      };
+    });
+
+    return { count: flatLogs.length, logs: flatLogs };
+  }
 }

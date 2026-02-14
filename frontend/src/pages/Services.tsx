@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, CheckCircle, X, Clock,
-  Plus, Bot, Pencil, Phone,
+  Plus, Bot, Pencil, Phone, Send,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -95,6 +95,7 @@ export function Services() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
 
   // Auto Reply rules (dynamic array of all new_lead automation rules)
   const [autoReplyRules, setAutoReplyRules] = useState<AutomationRule[]>([]);
@@ -418,6 +419,24 @@ export function Services() {
       setError(err.message || 'Failed to update from phone');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function sendTestAlert() {
+    if (!leadAlertRule || !selectedAccountId) return;
+    setTesting(true);
+    setError(null);
+    try {
+      const result = await notificationsApi.sendTest(selectedAccountId, leadAlertRule.id);
+      if (result.success) {
+        showSuccess('Test SMS sent!');
+      } else {
+        setError(result.message || 'Failed to send test');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'Failed to send test SMS');
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -903,6 +922,29 @@ export function Services() {
                                 <Pencil size={12} /> Edit
                               </button>
                             </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Send Test + Trigger Stats */}
+                      {leadAlertRule && (
+                        <div className="alert-test-section">
+                          <button
+                            className="btn btn-sm btn-secondary"
+                            onClick={sendTestAlert}
+                            disabled={testing || saving || !leadAlertRule.toPhone || !alertFromPhone}
+                            title={!leadAlertRule.toPhone ? 'Set a destination phone first' : !alertFromPhone ? 'Set a send-from phone first' : 'Send a test SMS'}
+                          >
+                            {testing ? <Loader2 size={14} className="spinner" /> : <Send size={14} />}
+                            Send Test SMS
+                          </button>
+                          {leadAlertRule.triggerCount > 0 && (
+                            <span className="trigger-stats">
+                              Triggered {leadAlertRule.triggerCount} time{leadAlertRule.triggerCount !== 1 ? 's' : ''}
+                              {leadAlertRule.lastTriggeredAt && (
+                                <> — last {new Date(leadAlertRule.lastTriggeredAt).toLocaleDateString()}</>
+                              )}
+                            </span>
                           )}
                         </div>
                       )}

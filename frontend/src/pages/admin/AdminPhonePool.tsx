@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, Search, Loader2, UserPlus, UserMinus, Trash2, RefreshCw, X, Link, Unlink, Download, Users } from 'lucide-react';
+import { Phone, Search, Loader2, UserPlus, UserMinus, Trash2, RefreshCw, X, Link, Unlink, Download, Users, MessageSquare, CheckCircle, AlertCircle, Send } from 'lucide-react';
 import { adminApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
-import type { PhonePoolEntry, PhonePoolStats } from '../../types';
+import type { PhonePoolEntry, PhonePoolStats, NotificationLog } from '../../types';
 
 export default function AdminPhonePool() {
   const user = useAuthStore((state) => state.user);
@@ -35,6 +35,10 @@ export default function AdminPhonePool() {
   const [userResults, setUserResults] = useState<{ id: string; email: string; name: string | null }[]>([]);
   const [searchingUsers, setSearchingUsers] = useState(false);
 
+  // Notification logs
+  const [smsLogs, setSmsLogs] = useState<NotificationLog[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+
   useEffect(() => {
     if (user?.role !== 'ADMIN') {
       notify.error('Access Denied', 'You must be an admin to access this page');
@@ -43,6 +47,7 @@ export default function AdminPhonePool() {
     }
     loadData();
     loadConfig();
+    loadNotificationLogs();
   }, [user, statusFilter, searchQuery]);
 
   const loadConfig = async () => {
@@ -69,6 +74,18 @@ export default function AdminPhonePool() {
       notify.error('Error', 'Failed to load phone pool');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadNotificationLogs = async () => {
+    try {
+      setLogsLoading(true);
+      const { logs } = await adminApi.getNotificationLogs(100);
+      setSmsLogs(logs);
+    } catch (error) {
+      console.error('Failed to load notification logs:', error);
+    } finally {
+      setLogsLoading(false);
     }
   };
 
@@ -516,6 +533,91 @@ export default function AdminPhonePool() {
         {total > 0 && (
           <div className="table-footer">
             Showing {phones.length} of {total} numbers
+          </div>
+        )}
+      </div>
+
+      {/* SMS Message History */}
+      <div className="admin-table-container" style={{ marginTop: '2rem' }}>
+        <div className="admin-header" style={{ marginBottom: '1rem' }}>
+          <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '18px' }}>
+            <MessageSquare size={20} />
+            SMS Message History
+          </h2>
+          <button className="btn btn-secondary btn-sm" onClick={loadNotificationLogs} disabled={logsLoading}>
+            {logsLoading ? <Loader2 size={14} className="spinner" /> : <RefreshCw size={14} />}
+          </button>
+        </div>
+
+        {logsLoading && smsLogs.length === 0 ? (
+          <div className="loading-state"><Loader2 size={20} className="spinner" /></div>
+        ) : smsLogs.length > 0 ? (
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Account</th>
+                <th>Rule</th>
+                <th>From</th>
+                <th>To</th>
+                <th>Status</th>
+                <th>Delivered</th>
+              </tr>
+            </thead>
+            <tbody>
+              {smsLogs.map((log: any) => (
+                <tr key={log.id} className={log.status === 'failed' ? 'has-error' : ''}>
+                  <td>{new Date(log.createdAt).toLocaleString()}</td>
+                  <td>
+                    <span className="provider-badge">{log.savedAccount?.businessName || 'Unknown'}</span>
+                  </td>
+                  <td>
+                    {log.ruleName ? (
+                      <span className="provider-badge">{log.ruleName}</span>
+                    ) : (
+                      <span className="provider-badge" style={{ opacity: 0.5 }}>Legacy</span>
+                    )}
+                  </td>
+                  <td className="font-mono">{log.fromPhone || '-'}</td>
+                  <td className="font-mono">{log.toPhone}</td>
+                  <td>
+                    {log.status === 'delivered' ? (
+                      <span className="status-badge badge-success">
+                        <CheckCircle size={12} /> Delivered
+                      </span>
+                    ) : log.status === 'failed' ? (
+                      <span className="status-badge badge-danger" title={log.error || 'Unknown error'}>
+                        <AlertCircle size={12} /> {log.error ? log.error.substring(0, 30) : 'Failed'}
+                      </span>
+                    ) : log.status === 'sent' ? (
+                      <span className="status-badge badge-primary">
+                        <Send size={12} /> Sent
+                      </span>
+                    ) : (
+                      <span className="status-badge badge-warning">
+                        <Loader2 size={12} className="spinner" /> {log.status}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    {log.deliveredAt ? (
+                      <span style={{ color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <CheckCircle size={12} />
+                        {new Date(log.deliveredAt).toLocaleString()}
+                      </span>
+                    ) : log.status === 'failed' ? (
+                      <span style={{ color: 'var(--text-muted)' }}>—</span>
+                    ) : (
+                      <span style={{ color: 'var(--text-secondary)' }}>Pending</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="empty-cell" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+            No SMS messages sent yet. Messages will appear here when notifications are triggered.
           </div>
         )}
       </div>

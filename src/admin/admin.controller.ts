@@ -103,4 +103,13 @@ export class AdminController {
       data: result,
     };
   }
+
+  @Get('notification-logs')
+  async getNotificationLogs(@Query() query: { limit?: number }) {
+    const result = await this.adminService.getNotificationLogs(query);
+    return {
+      success: true,
+      ...result,
+    };
+  }
 }

@@ -800,6 +800,11 @@ export const adminApi = {
     const { data } = await api.get(`/v1/admin/logs?${queryParams.toString()}`);
     return data.data;
   },
+  getNotificationLogs: async (limit?: number): Promise<{ count: number; logs: NotificationLog[] }> => {
+    const params = limit ? { limit } : {};
+    const { data } = await api.get('/v1/admin/notification-logs', { params });
+    return data;
+  },
   // Phone Pool
   getPhonePool: async (params?: { status?: string; areaCode?: string; search?: string; offset?: number; limit?: number }): Promise<{ phones: PhonePoolEntry[]; total: number; offset: number; limit: number }> => {
     const queryParams = new URLSearchParams();
