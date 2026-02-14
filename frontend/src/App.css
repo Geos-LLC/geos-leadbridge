@@ -7296,3 +7296,396 @@ body {
 .alert-option.disabled-option {
   opacity: 0.5;
 }
+
+/* ==========================================
+   Dashboard Overview - Account Selector
+   ========================================== */
+.account-selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: white;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-color);
+  margin-bottom: 20px;
+}
+
+.account-selector .account-name {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.account-selector .account-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.account-badge.connected {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.account-selector-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.account-dropdown-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.account-dropdown {
+  appearance: none;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 6px 32px 6px 12px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.account-dropdown:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.dropdown-chevron {
+  position: absolute;
+  right: 8px;
+  pointer-events: none;
+  color: var(--text-secondary);
+}
+
+/* ==========================================
+   Dashboard Overview - System Health Grid
+   ========================================== */
+.health-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+.health-status-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-color);
+  background: white;
+  transition: box-shadow 0.2s;
+}
+
+.health-status-card:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+.health-status-card.on {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.health-status-card.off {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.health-status-card.coming-soon {
+  border-style: dashed;
+  border-color: var(--border-color);
+  background: var(--bg-secondary);
+  opacity: 0.7;
+}
+
+.health-card-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.health-status-card.on .health-card-icon {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.health-status-card.off .health-card-icon {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.health-status-card.coming-soon .health-card-icon {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+}
+
+.health-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.health-card-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.status-indicator {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  width: fit-content;
+}
+
+.status-indicator.on {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-indicator.off {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-indicator.coming-soon {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 11px;
+}
+
+/* ==========================================
+   Dashboard Overview - Today's Activity metric overrides
+   ========================================== */
+.metric-card .metric-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.metric-card .metric-subtext {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.metric-card.blue .metric-icon { background: #dbeafe; color: #2563eb; }
+.metric-card.green .metric-icon { background: #dcfce7; color: #16a34a; }
+.metric-card.gray .metric-icon { background: var(--bg-tertiary); color: var(--text-muted); }
+.metric-card.purple .metric-icon { background: #f3e8ff; color: #9333ea; }
+
+.metric-card.coming-soon {
+  opacity: 0.6;
+  border-style: dashed;
+}
+
+/* ==========================================
+   Dashboard Overview - Attention Needed
+   ========================================== */
+.attention-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.attention-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  border-radius: var(--radius);
+  background: white;
+  border: 1px solid var(--border-color);
+  border-left: 4px solid transparent;
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.15s;
+}
+
+.attention-card:hover {
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.attention-card.urgent {
+  border-left-color: #ef4444;
+  background: #fef2f2;
+}
+
+.attention-card.warning {
+  border-left-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.attention-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.attention-card.urgent .attention-icon {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.attention-card.warning .attention-icon {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.attention-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.attention-count {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.1;
+}
+
+.attention-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.attention-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ==========================================
+   Dashboard Overview - Conversion Snapshot
+   ========================================== */
+.conversion-snapshot {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.snapshot-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  border-radius: var(--radius);
+  background: white;
+  border: 1px solid var(--border-color);
+}
+
+.snapshot-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.snapshot-icon.blue { background: #dbeafe; color: #2563eb; }
+.snapshot-icon.green { background: #dcfce7; color: #16a34a; }
+.snapshot-icon.purple { background: #f3e8ff; color: #9333ea; }
+.snapshot-icon.orange { background: #ffedd5; color: #ea580c; }
+
+.snapshot-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.snapshot-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.snapshot-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* ==========================================
+   Dashboard Overview - Manage Accounts Section
+   ========================================== */
+.manage-accounts-section {
+  margin-top: 20px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: white;
+  overflow: hidden;
+}
+
+.manage-accounts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.manage-accounts-header:hover {
+  background: var(--bg-secondary);
+}
+
+.manage-accounts-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.manage-accounts-content {
+  padding: 0 20px 20px;
+  transition: max-height 0.3s ease, opacity 0.2s ease;
+  overflow: hidden;
+}
+
+.manage-accounts-content.collapsed {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+}
+
+/* ==========================================
+   Dashboard Overview - Responsive
+   ========================================== */
+@media (max-width: 900px) {
+  .health-status-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 500px) {
+  .health-status-grid {
+    grid-template-columns: 1fr;
+  }
+  .conversion-snapshot {
+    grid-template-columns: 1fr;
+  }
+}

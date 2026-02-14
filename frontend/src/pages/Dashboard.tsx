@@ -1,10 +1,17 @@
 import { useEffect, useState, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Building2, Link2, CheckCircle, AlertCircle, Loader2, ExternalLink, Download, X, Unlink, Trash2, Mail, Pencil, Check, RefreshCw } from 'lucide-react';
-import { platformsApi, thumbtackApi, leadsApi, type HealthIssue } from '../services/api';
+import { useSearchParams } from 'react-router-dom';
+import { AlertCircle, CheckCircle, Loader2, RefreshCw, ExternalLink } from 'lucide-react';
+import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import { notify } from '../store/notificationStore';
+import { useDashboardData } from '../hooks/useDashboardData';
+import AccountSelector from '../components/dashboard/AccountSelector';
+import SystemHealth from '../components/dashboard/SystemHealth';
+import TodaysActivity from '../components/dashboard/TodaysActivity';
+import AttentionNeeded from '../components/dashboard/AttentionNeeded';
+import ConversionSnapshot from '../components/dashboard/ConversionSnapshot';
+import AccountManagement from '../components/dashboard/AccountManagement';
 
 interface ImportResult {
   id: string;
@@ -15,11 +22,12 @@ interface ImportResult {
 
 // Keys for persisting import state across OAuth redirects
 const IMPORT_STATE_KEY = 'pending_import_state';
+const SELECTED_ACCOUNT_KEY = 'dashboard_selected_account';
 
 interface PendingImportState {
   accountId: string;
   importIds: string;
-  businessId: string; // To match account after reload
+  businessId: string;
 }
 
 function savePendingImportState(state: PendingImportState): void {
@@ -40,14 +48,29 @@ function clearPendingImportState(): void {
 }
 
 export function Dashboard() {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuthStore();
   const {
     setPlatforms,
-    savedAccounts, setSavedAccounts, removeSavedAccount: removeFromStore
+    savedAccounts: storeAccounts, setSavedAccounts, removeSavedAccount: removeFromStore,
   } = useAppStore();
-  const [loading, setLoading] = useState(true);
+
+  // Selected account (persisted)
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(SELECTED_ACCOUNT_KEY);
+    } catch {
+      return null;
+    }
+  });
+
+  // Dashboard data hook
+  const dashboardData = useDashboardData(selectedAccountId);
+  const savedAccounts = dashboardData.savedAccounts.length > 0
+    ? dashboardData.savedAccounts
+    : storeAccounts;
+
+  // Connection / loading state
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -58,40 +81,43 @@ export function Dashboard() {
   const [importResults, setImportResults] = useState<ImportResult[]>([]);
   const [showImportResults, setShowImportResults] = useState(false);
   const [selectedImportAccountId, setSelectedImportAccountId] = useState<string | null>(null);
-  const [importTotal, setImportTotal] = useState(0); // Total IDs to import
+  const [importTotal, setImportTotal] = useState(0);
 
   // Account management state
   const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
   const [confirmRemoveAccount, setConfirmRemoveAccount] = useState<{ id: string; name: string } | null>(null);
   const [deleteLeadsOnRemove, setDeleteLeadsOnRemove] = useState(false);
-
-  // Email editing state
-  const [editingEmailId, setEditingEmailId] = useState<string | null>(null);
-  const [editEmailValue, setEditEmailValue] = useState('');
-  const [savingEmail, setSavingEmail] = useState(false);
-
-  // Webhook disconnect/reconnect state
   const [togglingWebhookId, setTogglingWebhookId] = useState<string | null>(null);
 
-  // Disconnect warning modal state
+  // Modals
   const [disconnectWarning, setDisconnectWarning] = useState<{
-    accountId: string;
-    accountName: string;
-    errorCode: string;
-    errorMessage: string;
-    warning: string;
+    accountId: string; accountName: string; errorCode: string; errorMessage: string; warning: string;
+  } | null>(null);
+  const [sessionExpiredAccount, setSessionExpiredAccount] = useState<{
+    id: string; businessName: string; emailHint?: string;
   } | null>(null);
 
-  // Health check state - track issues and whether we've shown notifications
-  const [healthIssues, setHealthIssues] = useState<HealthIssue[]>([]);
+  // Health check — toast once per session
   const healthCheckDone = useRef(false);
 
-  // Session expired state - track which account needs reconnection
-  const [sessionExpiredAccount, setSessionExpiredAccount] = useState<{
-    id: string;
-    businessName: string;
-    emailHint?: string;
-  } | null>(null);
+  // Auto-select first account if none selected
+  useEffect(() => {
+    if (!selectedAccountId && savedAccounts.length > 0) {
+      const id = savedAccounts[0].id;
+      setSelectedAccountId(id);
+      localStorage.setItem(SELECTED_ACCOUNT_KEY, id);
+    }
+  }, [savedAccounts, selectedAccountId]);
+
+  // Persist account selection
+  const handleSelectAccount = (id: string | null) => {
+    setSelectedAccountId(id);
+    if (id) {
+      localStorage.setItem(SELECTED_ACCOUNT_KEY, id);
+    } else {
+      localStorage.removeItem(SELECTED_ACCOUNT_KEY);
+    }
+  };
 
   // Handle OAuth callback params
   useEffect(() => {
@@ -102,19 +128,15 @@ export function Dashboard() {
     const skippedAccounts = searchParams.get('skipped_accounts');
 
     if (connected === 'thumbtack') {
-      // Check if any accounts were skipped because they're already connected
       if (warning === 'already_connected' && skippedAccounts) {
-        // Tokens were refreshed, only webhook setup was skipped
         setSuccess(`Login refreshed for ${skippedAccounts}. You can now import leads.`);
-        // Clear the session expired banner since we just logged in
         setSessionExpiredAccount(null);
       } else {
         setSuccess('Thumbtack account connected successfully!');
       }
-      // Reload platform status and saved accounts to reflect the new connection
       loadPlatformStatus();
       loadSavedAccounts();
-      // Clear the URL params
+      dashboardData.refresh();
       setSearchParams({});
     } else if (oauthError) {
       setError(errorDescription || `OAuth error: ${oauthError}`);
@@ -122,30 +144,39 @@ export function Dashboard() {
     }
   }, [searchParams, setSearchParams]);
 
-  // Restore pending import state after OAuth redirect (once savedAccounts are loaded)
+  // Restore pending import state after OAuth redirect
   useEffect(() => {
     if (savedAccounts.length === 0) return;
-
     const pendingState = getPendingImportState();
     if (!pendingState) return;
 
-    // Find the account by businessId (account IDs may change, but businessId is stable)
     const account = savedAccounts.find(a => a.businessId === pendingState.businessId);
     if (account) {
-      console.log('[Dashboard] Restoring pending import state:', pendingState);
       setSelectedImportAccountId(account.id);
       setImportIds(pendingState.importIds);
     }
-
-    // Clear the pending state after restoring
     clearPendingImportState();
   }, [savedAccounts]);
 
+  // Initial loads
   useEffect(() => {
     loadPlatformStatus();
     loadSavedAccounts();
     runHealthCheck();
   }, []);
+
+  // Health check toast
+  useEffect(() => {
+    if (healthCheckDone.current || dashboardData.healthIssues.length === 0) return;
+    healthCheckDone.current = true;
+    for (const issue of dashboardData.healthIssues) {
+      if (issue.severity === 'error') {
+        notify.error(issue.title, issue.message, 3000);
+      } else {
+        notify.warning(issue.title, issue.message, 3000);
+      }
+    }
+  }, [dashboardData.healthIssues]);
 
   const loadSavedAccounts = async () => {
     try {
@@ -162,28 +193,19 @@ export function Dashboard() {
       setPlatforms(platforms);
     } catch (err) {
       console.error('Failed to load platform status:', err);
-    } finally {
-      setLoading(false);
     }
   };
 
-  // Run health check and show toast notifications for any issues
   const runHealthCheck = async () => {
-    // Only run once per session to avoid spamming notifications
     if (healthCheckDone.current) return;
-
     try {
       const { issues } = await platformsApi.getHealth();
-      setHealthIssues(issues);
-
-      // Show toast notifications for each issue (only once)
       healthCheckDone.current = true;
-
       for (const issue of issues) {
         if (issue.severity === 'error') {
-          notify.error(issue.title, issue.message, 3000); // auto-dismiss after 3 seconds
+          notify.error(issue.title, issue.message, 3000);
         } else {
-          notify.warning(issue.title, issue.message, 3000); // auto-dismiss after 3 seconds
+          notify.warning(issue.title, issue.message, 3000);
         }
       }
     } catch (err) {
@@ -192,15 +214,9 @@ export function Dashboard() {
   };
 
   const handleConnectThumbtack = async () => {
-    // Open Thumbtack logout in a new window first to clear any existing session
     const logoutWindow = window.open('https://www.thumbtack.com/logout', '_blank', 'width=600,height=400');
-
-    // Wait a moment for logout to process, then close popup and redirect to OAuth
     setTimeout(async () => {
-      if (logoutWindow) {
-        logoutWindow.close();
-      }
-
+      if (logoutWindow) logoutWindow.close();
       setConnecting(true);
       setError('');
       try {
@@ -210,60 +226,7 @@ export function Dashboard() {
         setError(err.response?.data?.message || 'Failed to get auth URL');
         setConnecting(false);
       }
-    }, 2000); // 2 second delay to allow logout to complete
-  };
-
-  const handleRemoveSavedAccount = async () => {
-    if (!confirmRemoveAccount) return;
-
-    setRemovingAccountId(confirmRemoveAccount.id);
-    try {
-      const result = await thumbtackApi.removeSavedAccount(confirmRemoveAccount.id, deleteLeadsOnRemove);
-      removeFromStore(confirmRemoveAccount.id);
-      if (deleteLeadsOnRemove && result.deletedLeads > 0) {
-        setSuccess(`Account removed along with ${result.deletedLeads} leads`);
-      } else {
-        setSuccess('Account removed');
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to remove saved account');
-    } finally {
-      setRemovingAccountId(null);
-      setConfirmRemoveAccount(null);
-      setDeleteLeadsOnRemove(false);
-    }
-  };
-
-  const openRemoveConfirmation = (account: { id: string; businessName: string }) => {
-    setConfirmRemoveAccount({ id: account.id, name: account.businessName });
-    setDeleteLeadsOnRemove(false);
-  };
-
-  const startEditingEmail = (account: { id: string; emailHint?: string }) => {
-    setEditingEmailId(account.id);
-    setEditEmailValue(account.emailHint || '');
-  };
-
-  const cancelEditingEmail = () => {
-    setEditingEmailId(null);
-    setEditEmailValue('');
-  };
-
-  const saveEmail = async (accountId: string) => {
-    setSavingEmail(true);
-    try {
-      await thumbtackApi.updateSavedAccount(accountId, { emailHint: editEmailValue });
-      // Update local state
-      setSavedAccounts(savedAccounts.map(a =>
-        a.id === accountId ? { ...a, emailHint: editEmailValue } : a
-      ));
-      setEditingEmailId(null);
-      setEditEmailValue('');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to update email');
-    } finally {
-      setSavingEmail(false);
-    }
+    }, 2000);
   };
 
   const handleDisconnectWebhook = async (account: { id: string; businessName: string }) => {
@@ -271,18 +234,12 @@ export function Dashboard() {
     setError('');
     try {
       const result = await thumbtackApi.disconnectAccount(account.id);
-
-      // Update local state regardless of API result
       setSavedAccounts(savedAccounts.map(a =>
         a.id === account.id ? { ...a, webhookId: null } : a
       ));
-
-      // Check if there was a warning (webhook not fully deleted from Thumbtack)
       if (!result.webhookDeleted && result.errorCode && result.errorCode !== 'webhook_not_found') {
-        // Show warning modal with details and solutions
         setDisconnectWarning({
-          accountId: account.id,
-          accountName: account.businessName,
+          accountId: account.id, accountName: account.businessName,
           errorCode: result.errorCode,
           errorMessage: result.errorMessage || 'Could not remove webhook from Thumbtack.',
           warning: result.warning || 'Thumbtack may continue sending messages.',
@@ -298,20 +255,11 @@ export function Dashboard() {
   };
 
   const handleReconnectWebhook = async (account: { id: string; businessName: string; emailHint?: string }) => {
-    // Reconnect uses the same OAuth flow as "Add Another Account"
-    // Show which email to use if we have it
     const emailHint = account.emailHint ? ` with ${account.emailHint}` : '';
     setSuccess(`Reconnecting ${account.businessName}${emailHint}. Please log in when prompted.`);
-
-    // Open Thumbtack logout in a new window first to clear any existing session
     const logoutWindow = window.open('https://www.thumbtack.com/logout', '_blank', 'width=600,height=400');
-
-    // Wait a moment for logout to process, then close popup and redirect to OAuth
     setTimeout(async () => {
-      if (logoutWindow) {
-        logoutWindow.close();
-      }
-
+      if (logoutWindow) logoutWindow.close();
       setConnecting(true);
       setError('');
       try {
@@ -324,131 +272,94 @@ export function Dashboard() {
     }, 2000);
   };
 
-  const handleImportNegotiations = async () => {
-    console.log('[Dashboard] handleImportNegotiations called');
-    console.log('[Dashboard] importIds value:', importIds);
-    console.log('[Dashboard] selectedImportAccountId:', selectedImportAccountId);
-
-    if (!selectedImportAccountId) {
-      setError('Please select an account to import from');
-      return;
+  const handleRemoveSavedAccount = async () => {
+    if (!confirmRemoveAccount) return;
+    setRemovingAccountId(confirmRemoveAccount.id);
+    try {
+      const result = await thumbtackApi.removeSavedAccount(confirmRemoveAccount.id, deleteLeadsOnRemove);
+      removeFromStore(confirmRemoveAccount.id);
+      if (deleteLeadsOnRemove && result.deletedLeads > 0) {
+        setSuccess(`Account removed along with ${result.deletedLeads} leads`);
+      } else {
+        setSuccess('Account removed');
+      }
+      dashboardData.refresh();
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to remove saved account');
+    } finally {
+      setRemovingAccountId(null);
+      setConfirmRemoveAccount(null);
+      setDeleteLeadsOnRemove(false);
     }
+  };
 
-    // Parse IDs - split by comma, newline, tab, or space
-    const ids = importIds
-      .split(/[,\n\t\s]+/)
-      .map(id => id.trim())
-      .filter(id => id.length > 0);
+  const handleUpdateEmail = async (accountId: string, email: string) => {
+    await thumbtackApi.updateSavedAccount(accountId, { emailHint: email });
+    setSavedAccounts(savedAccounts.map(a =>
+      a.id === accountId ? { ...a, emailHint: email } : a
+    ));
+  };
 
-    console.log('[Dashboard] Parsed IDs:', ids);
-
-    if (ids.length === 0) {
-      setError('Please enter at least one negotiation ID');
-      return;
-    }
+  const handleImportNegotiations = async (accountId: string, idsText: string) => {
+    const ids = idsText.split(/[,\n\t\s]+/).map(id => id.trim()).filter(id => id.length > 0);
+    if (ids.length === 0) { setError('Please enter at least one negotiation ID'); return; }
 
     setImporting(true);
     setError('');
     setSuccess('');
     setImportResults([]);
 
-    // FIRST: Validate token before attempting any imports
-    console.log('[Dashboard] Validating token for account:', selectedImportAccountId);
+    // Validate token first
     try {
-      const validation = await thumbtackApi.validateToken(selectedImportAccountId);
-      console.log('[Dashboard] Token validation result:', validation);
-
+      const validation = await thumbtackApi.validateToken(accountId);
       if (!validation.valid) {
-        console.log('[Dashboard] Token invalid, showing login banner');
-        // Token is invalid - show the login required banner immediately
-        const account = savedAccounts.find(a => a.id === selectedImportAccountId);
+        const account = savedAccounts.find(a => a.id === accountId);
         setSessionExpiredAccount(account || null);
         setImporting(false);
         return;
       }
-    } catch (err: any) {
-      console.error('[Dashboard] Token validation failed:', err);
-      // If validation call itself fails, assume token is invalid
-      const account = savedAccounts.find(a => a.id === selectedImportAccountId);
+    } catch {
+      const account = savedAccounts.find(a => a.id === accountId);
       setSessionExpiredAccount(account || null);
       setImporting(false);
       return;
     }
 
-    // Token is valid, proceed with imports
-    console.log('[Dashboard] Token valid, proceeding with imports');
-
-    // Set total for progress tracking
     setImportTotal(ids.length);
     setShowImportResults(true);
 
     const results: ImportResult[] = [];
-
     let sessionExpired = false;
     let wrongAccount = false;
 
     for (const id of ids) {
-      console.log('[Dashboard] Importing negotiation:', id, 'for account:', selectedImportAccountId);
       try {
-        const result = await leadsApi.importNegotiation(id, selectedImportAccountId);
-        console.log('[Dashboard] Import success for', id, result);
+        const result = await leadsApi.importNegotiation(id, accountId);
         results.push({ id, success: true, isNew: result.isNew });
       } catch (err: any) {
-        console.error('[Dashboard] Import failed for', id, err);
-        console.log('[Dashboard] err.response?.data:', err.response?.data);
-        console.log('[Dashboard] err.message:', err.message);
-        // NestJS BadRequestException returns { message: "...", statusCode: 400, error: "Bad Request" }
-        // Also check err.message for cases where backend threw an error that wasn't converted to response
         const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to import';
-        console.log('[Dashboard] Extracted errorMsg:', errorMsg);
-
-        // Check if it's a login required error (token expired)
         const lowerErrorMsg = errorMsg.toLowerCase();
-        if (lowerErrorMsg.includes('session') ||
-            lowerErrorMsg.includes('reconnect') ||
-            lowerErrorMsg.includes('expired') ||
-            lowerErrorMsg.includes('login required') ||
-            lowerErrorMsg.includes('token') ||
-            lowerErrorMsg.includes('unauthorized')) {
-          console.log('[Dashboard] Detected login required error!');
+        if (['session', 'reconnect', 'expired', 'login required', 'token', 'unauthorized'].some(k => lowerErrorMsg.includes(k))) {
           sessionExpired = true;
         }
-
-        // Check if it's a wrong account error
-        if (lowerErrorMsg.includes('wrong account') ||
-            lowerErrorMsg.includes('different thumbtack business')) {
-          console.log('[Dashboard] Detected wrong account error!');
+        if (lowerErrorMsg.includes('wrong account') || lowerErrorMsg.includes('different thumbtack business')) {
           wrongAccount = true;
         }
-
-        results.push({
-          id,
-          success: false,
-          error: errorMsg,
-        });
+        results.push({ id, success: false, error: errorMsg });
       }
-      // Update results as we go
       setImportResults([...results]);
     }
 
     setImporting(false);
-
     const newCount = results.filter(r => r.success && r.isNew).length;
     const updatedCount = results.filter(r => r.success && !r.isNew).length;
     const failCount = results.filter(r => !r.success).length;
 
-    console.log('[Dashboard] Import complete - sessionExpired:', sessionExpired, 'wrongAccount:', wrongAccount);
-    console.log('[Dashboard] selectedImportAccountId:', selectedImportAccountId);
-    console.log('[Dashboard] savedAccounts:', savedAccounts);
-
     if (sessionExpired) {
-      // Show session expired error with reconnect option - handled by sessionExpiredAccount state
-      const account = savedAccounts.find(a => a.id === selectedImportAccountId);
-      console.log('[Dashboard] Found account for banner:', account);
+      const account = savedAccounts.find(a => a.id === accountId);
       setSessionExpiredAccount(account || null);
     } else if (wrongAccount) {
-      // Show clear error about wrong account selection
-      setError('Wrong account selected. These leads belong to a different Thumbtack business. Please select the correct account from the dropdown.');
+      setError('Wrong account selected. These leads belong to a different Thumbtack business.');
     } else if (newCount > 0 && updatedCount === 0 && failCount === 0) {
       setSuccess(`Successfully imported ${newCount} new negotiation(s)`);
       setImportIds('');
@@ -464,7 +375,20 @@ export function Dashboard() {
     }
   };
 
-  if (loading) {
+  const scrollToManageAccounts = () => {
+    const el = document.getElementById('manage-accounts');
+    if (el) {
+      // Expand if collapsed
+      const content = el.querySelector('.manage-accounts-content');
+      if (content?.classList.contains('collapsed')) {
+        const header = el.querySelector('.manage-accounts-header') as HTMLElement;
+        header?.click();
+      }
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  if (dashboardData.loading && savedAccounts.length === 0) {
     return (
       <div className="loading-container">
         <Loader2 className="spinner" size={48} />
@@ -488,7 +412,6 @@ export function Dashboard() {
           <span>{error}</span>
         </div>
       )}
-
       {success && (
         <div className="success-message">
           <CheckCircle size={18} />
@@ -496,28 +419,19 @@ export function Dashboard() {
         </div>
       )}
 
-
-      {/* Health Issues Banner - persistent warning for critical issues */}
-      {healthIssues.filter(i => i.severity === 'error').map((issue, index) => (
+      {/* Health Issues Banner */}
+      {dashboardData.healthIssues.filter(i => i.severity === 'error').map((issue, index) => (
         <div
           key={`${issue.code}-${index}`}
           className="health-issue-banner"
           style={{
-            background: '#fef2f2',
-            border: '2px solid #f87171',
-            borderRadius: '8px',
-            padding: '16px 20px',
-            marginBottom: '20px',
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: '12px',
+            background: '#fef2f2', border: '2px solid #f87171', borderRadius: '8px',
+            padding: '16px 20px', marginBottom: '20px',
+            display: 'flex', alignItems: 'flex-start', gap: '12px',
             boxShadow: '0 2px 8px rgba(239, 68, 68, 0.15)',
           }}
         >
-          <AlertCircle
-            size={24}
-            style={{ color: '#dc2626', flexShrink: 0, marginTop: '2px' }}
-          />
+          <AlertCircle size={24} style={{ color: '#dc2626', flexShrink: 0, marginTop: '2px' }} />
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 600, fontSize: '16px', color: '#991b1b', marginBottom: '6px' }}>
               {issue.title}
@@ -531,7 +445,7 @@ export function Dashboard() {
               </div>
             )}
           </div>
-          {issue.action === 'connect' && (
+          {(issue.action === 'connect' || issue.action === 'reconnect') && (
             <button
               className="btn btn-primary"
               onClick={handleConnectThumbtack}
@@ -539,406 +453,82 @@ export function Dashboard() {
               style={{ whiteSpace: 'nowrap' }}
             >
               {connecting ? (
-                <>
-                  <Loader2 className="spinner" size={16} />
-                  Connecting...
-                </>
+                <><Loader2 className="spinner" size={16} /> {issue.action === 'reconnect' ? 'Reconnecting...' : 'Connecting...'}</>
+              ) : issue.action === 'reconnect' ? (
+                <><RefreshCw size={16} style={{ marginRight: '6px' }} /> {issue.actionLabel || 'Reconnect'}</>
               ) : (
                 issue.actionLabel || 'Connect'
-              )}
-            </button>
-          )}
-          {issue.action === 'reconnect' && (
-            <button
-              className="btn btn-primary"
-              onClick={handleConnectThumbtack}
-              disabled={connecting}
-              style={{ whiteSpace: 'nowrap' }}
-            >
-              {connecting ? (
-                <>
-                  <Loader2 className="spinner" size={16} />
-                  Reconnecting...
-                </>
-              ) : (
-                <>
-                  <RefreshCw size={16} style={{ marginRight: '6px' }} />
-                  {issue.actionLabel || 'Reconnect'}
-                </>
               )}
             </button>
           )}
         </div>
       ))}
 
+      <AccountSelector
+        accounts={savedAccounts}
+        selectedAccountId={selectedAccountId}
+        onSelectAccount={handleSelectAccount}
+        onViewAllAccounts={scrollToManageAccounts}
+      />
+
       <section className="dashboard-section">
-        <h2>Platform Connections</h2>
-
-        <div className="platform-card">
-          <div className="platform-info">
-            <div className="platform-logo thumbtack-logo">TT</div>
-            <div>
-              <h3>Thumbtack</h3>
-              <p>Connect your Thumbtack Pro accounts to receive and manage leads</p>
-            </div>
-          </div>
-
-          <div className="platform-actions">
-            <button
-              className="btn btn-primary"
-              onClick={handleConnectThumbtack}
-              disabled={connecting}
-            >
-              {connecting ? (
-                <>
-                  <Loader2 className="spinner" size={18} />
-                  Connecting...
-                </>
-              ) : (
-                <>
-                  <Link2 size={18} />
-                  {savedAccounts.length > 0 ? 'Add Another Account' : 'Connect Thumbtack'}
-                </>
-              )}
-            </button>
-          </div>
-        </div>
+        <h2>System Health</h2>
+        <SystemHealth
+          autoReplyEnabled={dashboardData.autoReplyEnabled}
+          customerSmsEnabled={dashboardData.customerSmsEnabled}
+          leadAlertsEnabled={dashboardData.leadAlertsEnabled}
+        />
       </section>
 
-      {/* Accounts Section - shows all saved accounts */}
-      {savedAccounts.length > 0 && (
-        <section className="dashboard-section">
-          <h2>Your Accounts</h2>
-          <p className="section-description">
-            All accounts are receiving leads via webhooks. Click "View Leads" to see messages.
-          </p>
+      <section className="dashboard-section">
+        <h2>Today's Activity</h2>
+        <TodaysActivity
+          leadsToday={dashboardData.leadsToday}
+          smsSentToday={dashboardData.smsSentToday}
+          avgResponseTime={dashboardData.avgResponseTime}
+        />
+      </section>
 
-          <div className="businesses-grid">
-            {savedAccounts.map((account) => (
-              <div key={account.id} className="business-card">
-                {/* Status badge based on webhookId */}
-                <div className={`account-status-badge ${account.webhookId ? 'connected' : 'disconnected'}`}>
-                  {account.webhookId ? (
-                    <>
-                      <CheckCircle size={12} />
-                      Connected
-                    </>
-                  ) : (
-                    <>
-                      <AlertCircle size={12} />
-                      Disconnected
-                    </>
-                  )}
-                </div>
-                {account.imageUrl ? (
-                  <img
-                    src={account.imageUrl}
-                    alt={account.businessName}
-                    className="business-image"
-                  />
-                ) : (
-                  <div className="business-image-placeholder">
-                    <Building2 size={32} />
-                  </div>
-                )}
-                <div className="business-info">
-                  <h3>{account.businessName}</h3>
-                  <p className="business-id">ID: {account.businessId}</p>
-                  {editingEmailId === account.id ? (
-                    <div className="email-edit-row">
-                      <Mail size={14} />
-                      <input
-                        type="email"
-                        value={editEmailValue}
-                        onChange={(e) => setEditEmailValue(e.target.value)}
-                        placeholder="account@email.com"
-                        className="email-input"
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') saveEmail(account.id);
-                          if (e.key === 'Escape') cancelEditingEmail();
-                        }}
-                      />
-                      <button
-                        className="btn-icon btn-success-subtle"
-                        onClick={() => saveEmail(account.id)}
-                        disabled={savingEmail}
-                        title="Save"
-                      >
-                        {savingEmail ? <Loader2 className="spinner" size={14} /> : <Check size={14} />}
-                      </button>
-                      <button
-                        className="btn-icon btn-secondary-subtle"
-                        onClick={cancelEditingEmail}
-                        title="Cancel"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="email-display-row" onClick={() => startEditingEmail(account)}>
-                      <Mail size={14} />
-                      <span className="email-hint">
-                        {account.emailHint || 'Add email...'}
-                      </span>
-                      <Pencil size={12} className="edit-icon" />
-                    </div>
-                  )}
-                </div>
-                <div className="business-actions">
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => navigate(`/messages?account=${account.businessId}`)}
-                  >
-                    <ExternalLink size={16} />
-                    View Leads
-                  </button>
-                  <button
-                    className={`btn-icon ${account.webhookId ? 'btn-secondary-subtle' : 'btn-success-subtle'}`}
-                    onClick={() => account.webhookId
-                      ? handleDisconnectWebhook(account)
-                      : handleReconnectWebhook(account)
-                    }
-                    disabled={togglingWebhookId === account.id || connecting}
-                    title={account.webhookId ? 'Disconnect webhooks' : 'Reconnect (re-authenticate with Thumbtack)'}
-                  >
-                    {togglingWebhookId === account.id ? (
-                      <Loader2 className="spinner" size={16} />
-                    ) : account.webhookId ? (
-                      <Unlink size={16} />
-                    ) : (
-                      <RefreshCw size={16} />
-                    )}
-                  </button>
-                  <button
-                    className="btn-icon btn-danger-subtle"
-                    onClick={() => openRemoveConfirmation(account)}
-                    disabled={removingAccountId === account.id}
-                    title="Delete account"
-                  >
-                    {removingAccountId === account.id ? (
-                      <Loader2 className="spinner" size={16} />
-                    ) : (
-                      <Trash2 size={16} />
-                    )}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      <AttentionNeeded
+        unrepliedLeadCount={dashboardData.unrepliedLeadCount}
+        failedSmsCount={dashboardData.failedSmsCount}
+        healthIssues={dashboardData.healthIssues}
+        onScrollToManage={scrollToManageAccounts}
+      />
 
-      {/* Import Negotiations Section */}
-      {savedAccounts.length > 0 && (
-        <section className="dashboard-section">
-          <h2>Import Negotiations</h2>
-          <p className="section-description">
-            Select an account and import existing negotiations by ID.
-          </p>
+      <ConversionSnapshot
+        leadsLast7Days={dashboardData.leadsLast7Days}
+        customerEngagementRate7d={dashboardData.customerEngagementRate7d}
+        totalAutoRepliesSent={dashboardData.totalAutoRepliesSent}
+        totalSmsSent={dashboardData.totalSmsSent}
+      />
 
-          <div className="import-section">
-            {/* Account Selection for Import */}
-            <div className="import-account-selection" style={{ marginBottom: '16px' }}>
-              <label style={{ fontWeight: 500, marginBottom: '8px', display: 'block' }}>
-                Select account to import from:
-              </label>
-              <div className="import-account-cards" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                {savedAccounts.map((account) => {
-                  const isSelected = selectedImportAccountId === account.id;
-                  return (
-                    <div
-                      key={account.id}
-                      onClick={() => setSelectedImportAccountId(account.id)}
-                      style={{
-                        padding: '12px 16px',
-                        border: isSelected ? '2px solid var(--primary)' : '1px solid var(--border)',
-                        borderRadius: '8px',
-                        cursor: 'pointer',
-                        background: isSelected ? 'var(--primary-light, #f0f7ff)' : 'var(--surface)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '10px',
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      {account.imageUrl ? (
-                        <img
-                          src={account.imageUrl}
-                          alt=""
-                          style={{ width: '28px', height: '28px', borderRadius: '4px', objectFit: 'cover' }}
-                        />
-                      ) : (
-                        <Building2 size={28} style={{ color: 'var(--text-secondary)' }} />
-                      )}
-                      <div>
-                        <div style={{ fontWeight: 500, fontSize: '14px' }}>{account.businessName}</div>
-                        {account.emailHint && (
-                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{account.emailHint}</div>
-                        )}
-                      </div>
-                      {isSelected && (
-                        <CheckCircle size={18} style={{ color: 'var(--primary)', marginLeft: 'auto' }} />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+      <AccountManagement
+        savedAccounts={savedAccounts}
+        connecting={connecting}
+        onConnectThumbtack={handleConnectThumbtack}
+        onDisconnectWebhook={handleDisconnectWebhook}
+        onReconnectWebhook={handleReconnectWebhook}
+        onRemoveAccount={(account) => {
+          setConfirmRemoveAccount({ id: account.id, name: account.businessName });
+          setDeleteLeadsOnRemove(false);
+        }}
+        onUpdateEmail={handleUpdateEmail}
+        onImportNegotiations={handleImportNegotiations}
+        importing={importing}
+        importResults={importResults}
+        importTotal={importTotal}
+        showImportResults={showImportResults}
+        selectedImportAccountId={selectedImportAccountId}
+        onSelectImportAccount={setSelectedImportAccountId}
+        importIds={importIds}
+        onImportIdsChange={setImportIds}
+        onClearImport={() => { setImportIds(''); setImportResults([]); setShowImportResults(false); }}
+        togglingWebhookId={togglingWebhookId}
+        removingAccountId={removingAccountId}
+      />
 
-            {/* Warning if no account selected */}
-            {!selectedImportAccountId && (
-              <div
-                style={{
-                  background: '#fef3c7',
-                  border: '1px solid #fde68a',
-                  borderRadius: '8px',
-                  padding: '12px',
-                  marginBottom: '16px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                }}
-              >
-                <AlertCircle size={18} style={{ color: '#d97706', flexShrink: 0 }} />
-                <span style={{ fontSize: '14px', color: '#92400e' }}>
-                  Please select an account above before importing negotiations.
-                </span>
-              </div>
-            )}
-
-            {/* Selected account confirmation */}
-            {selectedImportAccountId && (
-              <div
-                style={{
-                  background: '#ecfdf5',
-                  border: '1px solid #a7f3d0',
-                  borderRadius: '8px',
-                  padding: '12px',
-                  marginBottom: '16px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                }}
-              >
-                <CheckCircle size={18} style={{ color: '#059669', flexShrink: 0 }} />
-                <span style={{ fontSize: '14px', color: '#065f46' }}>
-                  Importing for: <strong>{savedAccounts.find(a => a.id === selectedImportAccountId)?.businessName}</strong>
-                </span>
-              </div>
-            )}
-
-            <textarea
-              className="import-textarea"
-              placeholder="Paste negotiation IDs here...&#10;&#10;Example:&#10;abc123&#10;def456&#10;ghi789&#10;&#10;Or: abc123, def456, ghi789"
-              value={importIds}
-              onChange={(e) => setImportIds(e.target.value)}
-              disabled={importing || !selectedImportAccountId}
-              rows={6}
-            />
-
-            <div className="import-actions">
-              <button
-                className="btn btn-primary"
-                onClick={handleImportNegotiations}
-                disabled={importing || !importIds.trim() || !selectedImportAccountId}
-              >
-                {importing ? (
-                  <>
-                    <Loader2 className="spinner" size={18} />
-                    Importing...
-                  </>
-                ) : (
-                  <>
-                    <Download size={18} />
-                    Import Negotiations
-                  </>
-                )}
-              </button>
-
-              {importIds && !importing && (
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => {
-                    setImportIds('');
-                    setImportResults([]);
-                    setShowImportResults(false);
-                  }}
-                >
-                  <X size={18} />
-                  Clear
-                </button>
-              )}
-            </div>
-
-            {/* Import Progress Bar - shown during import */}
-            {importing && importTotal > 0 && (
-              <div style={{ marginTop: '16px', marginBottom: '16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '14px', fontWeight: 500 }}>
-                    Importing leads...
-                  </span>
-                  <span style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
-                    {importResults.length} / {importTotal}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    width: '100%',
-                    height: '8px',
-                    background: 'var(--border, #e5e7eb)',
-                    borderRadius: '4px',
-                    overflow: 'hidden',
-                  }}
-                >
-                  <div
-                    style={{
-                      width: `${(importResults.length / importTotal) * 100}%`,
-                      height: '100%',
-                      background: 'var(--primary, #3b82f6)',
-                      borderRadius: '4px',
-                      transition: 'width 0.3s ease',
-                    }}
-                  />
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                  {importResults.filter(r => r.success).length} successful, {importResults.filter(r => !r.success).length} failed
-                </div>
-              </div>
-            )}
-
-            {/* Import Results */}
-            {showImportResults && importResults.length > 0 && !importing && (
-              <div className="import-results">
-                <h4>Import Results ({importResults.length} / {importTotal} processed)</h4>
-                <div className="results-list">
-                  {importResults.map((result, idx) => (
-                    <div
-                      key={idx}
-                      className={`result-item ${result.success ? (result.isNew ? 'success' : 'duplicate') : 'failed'}`}
-                    >
-                      <span className="result-id">{result.id}</span>
-                      {result.success ? (
-                        <span className="result-status">
-                          <CheckCircle size={16} className={`result-icon ${result.isNew ? 'success' : 'duplicate'}`} />
-                          {result.isNew ? 'New' : 'Already exists'}
-                        </span>
-                      ) : (
-                        <span className="result-error">
-                          <AlertCircle size={16} className="result-icon failed" />
-                          {result.error}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-      )}
-
-      {/* Login Required Modal - shows when import fails due to expired token */}
+      {/* Session Expired Modal */}
       {sessionExpiredAccount && (
         <div className="modal-overlay" onClick={() => setSessionExpiredAccount(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -947,7 +537,6 @@ export function Dashboard() {
               Login Required to Import
             </h3>
             <p><strong>{sessionExpiredAccount.businessName}</strong></p>
-
             <div style={{ background: '#f0f9ff', padding: '12px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #bae6fd' }}>
               <p style={{ margin: '0 0 8px 0', color: '#0369a1' }}>
                 To import old leads, you need to log in to Thumbtack again.
@@ -961,18 +550,11 @@ export function Dashboard() {
                 Note: New leads will still arrive automatically via webhooks. This login is only needed for importing old leads.
               </p>
             </div>
-
             <div className="modal-actions">
-              <button
-                className="btn btn-secondary"
-                onClick={() => setSessionExpiredAccount(null)}
-              >
-                Cancel
-              </button>
+              <button className="btn btn-secondary" onClick={() => setSessionExpiredAccount(null)}>Cancel</button>
               <button
                 className="btn btn-primary"
                 onClick={() => {
-                  // Save import state before redirecting to OAuth
                   const account = savedAccounts.find(a => a.id === sessionExpiredAccount.id);
                   if (account && importIds.trim()) {
                     savePendingImportState({
@@ -980,7 +562,6 @@ export function Dashboard() {
                       importIds: importIds,
                       businessId: account.businessId,
                     });
-                    console.log('[Dashboard] Saved pending import state before OAuth redirect');
                   }
                   setSessionExpiredAccount(null);
                   handleReconnectWebhook(sessionExpiredAccount);
@@ -988,15 +569,9 @@ export function Dashboard() {
                 disabled={connecting}
               >
                 {connecting ? (
-                  <>
-                    <Loader2 className="spinner" size={16} />
-                    Logging in...
-                  </>
+                  <><Loader2 className="spinner" size={16} /> Logging in...</>
                 ) : (
-                  <>
-                    <ExternalLink size={16} style={{ marginRight: '6px' }} />
-                    Log In to Thumbtack
-                  </>
+                  <><ExternalLink size={16} style={{ marginRight: '6px' }} /> Log In to Thumbtack</>
                 )}
               </button>
             </div>
@@ -1013,17 +588,11 @@ export function Dashboard() {
               Webhook Disconnect Warning
             </h3>
             <p><strong>{disconnectWarning.accountName}</strong></p>
-
-            <div className="warning-details" style={{ background: '#fef3c7', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
-              <p style={{ margin: '0 0 8px 0', fontWeight: 500, color: '#92400e' }}>
-                {disconnectWarning.errorMessage}
-              </p>
-              <p style={{ margin: 0, fontSize: '13px', color: '#a16207' }}>
-                {disconnectWarning.warning}
-              </p>
+            <div style={{ background: '#fef3c7', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
+              <p style={{ margin: '0 0 8px 0', fontWeight: 500, color: '#92400e' }}>{disconnectWarning.errorMessage}</p>
+              <p style={{ margin: 0, fontSize: '13px', color: '#a16207' }}>{disconnectWarning.warning}</p>
             </div>
-
-            <div className="warning-solution" style={{ marginBottom: '16px' }}>
+            <div style={{ marginBottom: '16px' }}>
               <p style={{ fontWeight: 500, marginBottom: '8px' }}>How to fix:</p>
               {disconnectWarning.errorCode === 'token_expired' && (
                 <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '14px', color: 'var(--text-secondary)' }}>
@@ -1035,7 +604,6 @@ export function Dashboard() {
                 <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '14px', color: 'var(--text-secondary)' }}>
                   <li>Your Thumbtack permissions may have changed</li>
                   <li>Click "Reconnect" to re-authorize access</li>
-                  <li>Or manually remove the webhook from your Thumbtack account settings</li>
                 </ul>
               )}
               {disconnectWarning.errorCode === 'network_error' && (
@@ -1051,27 +619,16 @@ export function Dashboard() {
                 </ul>
               )}
             </div>
-
             <div className="modal-actions">
-              <button
-                className="btn btn-secondary"
-                onClick={() => setDisconnectWarning(null)}
-              >
-                Close
-              </button>
+              <button className="btn btn-secondary" onClick={() => setDisconnectWarning(null)}>Close</button>
               <button
                 className="btn btn-primary"
                 onClick={() => {
-                  // Find the account and trigger reconnect
                   const account = savedAccounts.find(a => a.id === disconnectWarning.accountId);
-                  if (account) {
-                    setDisconnectWarning(null);
-                    handleReconnectWebhook(account);
-                  }
+                  if (account) { setDisconnectWarning(null); handleReconnectWebhook(account); }
                 }}
               >
-                <RefreshCw size={16} style={{ marginRight: '6px' }} />
-                Reconnect Account
+                <RefreshCw size={16} style={{ marginRight: '6px' }} /> Reconnect Account
               </button>
             </div>
           </div>
@@ -1084,7 +641,6 @@ export function Dashboard() {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>Remove Account</h3>
             <p>Are you sure you want to remove <strong>{confirmRemoveAccount.name}</strong>?</p>
-
             <label className="checkbox-label">
               <input
                 type="checkbox"
@@ -1093,30 +649,20 @@ export function Dashboard() {
               />
               Also delete all leads and messages from this account
             </label>
-
             <p className="modal-hint">
               {deleteLeadsOnRemove
                 ? 'This will permanently delete all leads and conversations from this account.'
                 : 'Leads will be kept but hidden from the Messages page.'}
             </p>
-
             <div className="modal-actions">
-              <button
-                className="btn btn-secondary"
-                onClick={() => setConfirmRemoveAccount(null)}
-              >
-                Cancel
-              </button>
+              <button className="btn btn-secondary" onClick={() => setConfirmRemoveAccount(null)}>Cancel</button>
               <button
                 className="btn btn-danger"
                 onClick={handleRemoveSavedAccount}
                 disabled={removingAccountId === confirmRemoveAccount.id}
               >
                 {removingAccountId === confirmRemoveAccount.id ? (
-                  <>
-                    <Loader2 className="spinner" size={16} />
-                    Removing...
-                  </>
+                  <><Loader2 className="spinner" size={16} /> Removing...</>
                 ) : (
                   'Remove Account'
                 )}
@@ -1125,7 +671,6 @@ export function Dashboard() {
           </div>
         </div>
       )}
-
     </div>
   );
 }
