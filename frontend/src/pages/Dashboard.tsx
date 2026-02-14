@@ -80,7 +80,6 @@ export function Dashboard() {
   const [importing, setImporting] = useState(false);
   const [importResults, setImportResults] = useState<ImportResult[]>([]);
   const [showImportResults, setShowImportResults] = useState(false);
-  const [selectedImportAccountId, setSelectedImportAccountId] = useState<string | null>(null);
   const [importTotal, setImportTotal] = useState(0);
 
   // Account management state
@@ -152,7 +151,7 @@ export function Dashboard() {
 
     const account = savedAccounts.find(a => a.businessId === pendingState.businessId);
     if (account) {
-      setSelectedImportAccountId(account.id);
+      handleSelectAccount(account.id);
       setImportIds(pendingState.importIds);
     }
     clearPendingImportState();
@@ -375,19 +374,6 @@ export function Dashboard() {
     }
   };
 
-  const scrollToManageAccounts = () => {
-    const el = document.getElementById('manage-accounts');
-    if (el) {
-      // Expand if collapsed
-      const content = el.querySelector('.manage-accounts-content');
-      if (content?.classList.contains('collapsed')) {
-        const header = el.querySelector('.manage-accounts-header') as HTMLElement;
-        header?.click();
-      }
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
   if (dashboardData.loading && savedAccounts.length === 0) {
     return (
       <div className="loading-container">
@@ -468,7 +454,30 @@ export function Dashboard() {
         accounts={savedAccounts}
         selectedAccountId={selectedAccountId}
         onSelectAccount={handleSelectAccount}
-        onViewAllAccounts={scrollToManageAccounts}
+      />
+
+      <AccountManagement
+        savedAccounts={savedAccounts}
+        selectedAccountId={selectedAccountId}
+        connecting={connecting}
+        onConnectThumbtack={handleConnectThumbtack}
+        onDisconnectWebhook={handleDisconnectWebhook}
+        onReconnectWebhook={handleReconnectWebhook}
+        onRemoveAccount={(account) => {
+          setConfirmRemoveAccount({ id: account.id, name: account.businessName });
+          setDeleteLeadsOnRemove(false);
+        }}
+        onUpdateEmail={handleUpdateEmail}
+        onImportNegotiations={handleImportNegotiations}
+        importing={importing}
+        importResults={importResults}
+        importTotal={importTotal}
+        showImportResults={showImportResults}
+        importIds={importIds}
+        onImportIdsChange={setImportIds}
+        onClearImport={() => { setImportIds(''); setImportResults([]); setShowImportResults(false); }}
+        togglingWebhookId={togglingWebhookId}
+        removingAccountId={removingAccountId}
       />
 
       <section className="dashboard-section">
@@ -493,7 +502,9 @@ export function Dashboard() {
         unrepliedLeadCount={dashboardData.unrepliedLeadCount}
         failedSmsCount={dashboardData.failedSmsCount}
         healthIssues={dashboardData.healthIssues}
-        onScrollToManage={scrollToManageAccounts}
+        onScrollToManage={() => {
+          document.getElementById('manage-accounts')?.scrollIntoView({ behavior: 'smooth' });
+        }}
       />
 
       <ConversionSnapshot
@@ -501,31 +512,6 @@ export function Dashboard() {
         customerEngagementRate7d={dashboardData.customerEngagementRate7d}
         totalAutoRepliesSent={dashboardData.totalAutoRepliesSent}
         totalSmsSent={dashboardData.totalSmsSent}
-      />
-
-      <AccountManagement
-        savedAccounts={savedAccounts}
-        connecting={connecting}
-        onConnectThumbtack={handleConnectThumbtack}
-        onDisconnectWebhook={handleDisconnectWebhook}
-        onReconnectWebhook={handleReconnectWebhook}
-        onRemoveAccount={(account) => {
-          setConfirmRemoveAccount({ id: account.id, name: account.businessName });
-          setDeleteLeadsOnRemove(false);
-        }}
-        onUpdateEmail={handleUpdateEmail}
-        onImportNegotiations={handleImportNegotiations}
-        importing={importing}
-        importResults={importResults}
-        importTotal={importTotal}
-        showImportResults={showImportResults}
-        selectedImportAccountId={selectedImportAccountId}
-        onSelectImportAccount={setSelectedImportAccountId}
-        importIds={importIds}
-        onImportIdsChange={setImportIds}
-        onClearImport={() => { setImportIds(''); setImportResults([]); setShowImportResults(false); }}
-        togglingWebhookId={togglingWebhookId}
-        removingAccountId={removingAccountId}
       />
 
       {/* Session Expired Modal */}

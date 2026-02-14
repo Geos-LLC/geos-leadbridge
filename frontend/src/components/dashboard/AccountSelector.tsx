@@ -5,14 +5,12 @@ interface AccountSelectorProps {
   accounts: SavedAccount[];
   selectedAccountId: string | null;
   onSelectAccount: (id: string | null) => void;
-  onViewAllAccounts: () => void;
 }
 
 export default function AccountSelector({
   accounts,
   selectedAccountId,
   onSelectAccount,
-  onViewAllAccounts,
 }: AccountSelectorProps) {
   if (accounts.length === 0) return null;
 
@@ -42,14 +40,10 @@ export default function AccountSelector({
       <div className="account-dropdown-wrapper">
         <select
           className="account-dropdown"
-          value={selectedAccountId || ''}
+          value={selectedAccountId || '__all__'}
           onChange={(e) => {
             const val = e.target.value;
-            if (val === '__all__') {
-              onViewAllAccounts();
-            } else {
-              onSelectAccount(val || null);
-            }
+            onSelectAccount(val === '__all__' ? null : val);
           }}
         >
           {accounts.map(account => (
@@ -57,7 +51,7 @@ export default function AccountSelector({
               {account.businessName}
             </option>
           ))}
-          <option value="__all__">View All Accounts</option>
+          <option value="__all__">All Accounts</option>
         </select>
         <ChevronDown size={16} className="dropdown-chevron" />
       </div>
