@@ -1,5 +1,5 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Home, MessageSquare, BarChart3, Settings, LogOut, Bell, Phone, CreditCard, Shield, FlaskConical, Briefcase } from 'lucide-react';
+import { Home, MessageSquare, BarChart3, Settings, LogOut, Phone, CreditCard, Shield, FlaskConical, Briefcase } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import TrialBanner from './TrialBanner';
 import TrialExpiredModal from './TrialExpiredModal';
@@ -31,14 +31,6 @@ export function Layout() {
             <Home size={20} />
             <span>Overview</span>
           </Link>
-          <Link to="/messages" className={`nav-link ${isActive('/messages') ? 'active' : ''}`}>
-            <MessageSquare size={20} />
-            <span>Lead Activity</span>
-          </Link>
-          <Link to="/analytics" className={`nav-link ${isActive('/analytics') ? 'active' : ''}`}>
-            <BarChart3 size={20} />
-            <span>Insights</span>
-          </Link>
           <Link to="/services" className={`nav-link ${isActive('/services') ? 'active' : ''}`}>
             <Briefcase size={20} />
             <span>Automation</span>
@@ -47,13 +39,17 @@ export function Layout() {
             <Settings size={20} />
             <span>Templates</span>
           </Link>
-          <Link to="/notifications" className={`nav-link ${isActive('/notifications') ? 'active' : ''}`}>
-            <Bell size={20} />
-            <span>SMS Alerts</span>
+          <Link to="/messages" className={`nav-link ${isActive('/messages') ? 'active' : ''}`}>
+            <MessageSquare size={20} />
+            <span>Lead Activity</span>
           </Link>
           <Link to="/phone-settings" className={`nav-link ${isActive('/phone-settings') ? 'active' : ''}`}>
             <Phone size={20} />
             <span>Business Line</span>
+          </Link>
+          <Link to="/analytics" className={`nav-link ${isActive('/analytics') ? 'active' : ''}`}>
+            <BarChart3 size={20} />
+            <span>Insights</span>
           </Link>
 
           <div className="nav-separator"></div>
