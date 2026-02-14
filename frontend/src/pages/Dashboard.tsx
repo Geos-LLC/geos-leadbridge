@@ -477,7 +477,7 @@ export function Dashboard() {
     <div className="dashboard">
       <header className="dashboard-header">
         <div>
-          <h1>Dashboard</h1>
+          <h1>Overview</h1>
           <p>Welcome back, {user?.name || user?.email}</p>
         </div>
       </header>

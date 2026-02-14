@@ -414,7 +414,7 @@ export function Services() {
     return (
       <div className="services-page">
         <div className="settings-header">
-          <h1><Briefcase size={24} /> Services</h1>
+          <h1><Briefcase size={24} /> Automation</h1>
         </div>
         <div className="loading-container">
           <Loader2 size={32} className="spinner" />
@@ -428,7 +428,7 @@ export function Services() {
     return (
       <div className="services-page">
         <div className="settings-header">
-          <h1><Briefcase size={24} /> Services</h1>
+          <h1><Briefcase size={24} /> Automation</h1>
         </div>
         <div className="empty-state">
           <p>You need to connect an account first.</p>
@@ -443,7 +443,7 @@ export function Services() {
   return (
     <div className="services-page">
       <div className="settings-header">
-        <h1><Briefcase size={24} /> Services</h1>
+        <h1><Briefcase size={24} /> Automation</h1>
       </div>
 
       {error && (

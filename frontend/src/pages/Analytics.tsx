@@ -141,7 +141,7 @@ export function Analytics() {
         <div className="analytics-header">
           <div className="header-left">
             <BarChart3 size={32} />
-            <h1>Analytics</h1>
+            <h1>Insights</h1>
           </div>
           <div className="skeleton-pulse" style={{ width: '300px', height: '40px', borderRadius: '8px' }} />
         </div>

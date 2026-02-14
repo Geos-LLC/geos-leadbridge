@@ -1,5 +1,5 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Home, MessageSquare, BarChart3, Settings, LogOut, Zap, Bell, Phone, CreditCard, Shield, FlaskConical, Briefcase } from 'lucide-react';
+import { Home, MessageSquare, BarChart3, Settings, LogOut, Bell, Phone, CreditCard, Shield, FlaskConical, Briefcase } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import TrialBanner from './TrialBanner';
 import TrialExpiredModal from './TrialExpiredModal';
@@ -29,27 +29,23 @@ export function Layout() {
         <div className="nav-links">
           <Link to="/dashboard" className={`nav-link ${isActive('/dashboard') ? 'active' : ''}`}>
             <Home size={20} />
-            <span>Dashboard</span>
+            <span>Overview</span>
           </Link>
           <Link to="/messages" className={`nav-link ${isActive('/messages') ? 'active' : ''}`}>
             <MessageSquare size={20} />
-            <span>Messages</span>
+            <span>Lead Activity</span>
           </Link>
           <Link to="/analytics" className={`nav-link ${isActive('/analytics') ? 'active' : ''}`}>
             <BarChart3 size={20} />
-            <span>Analytics</span>
+            <span>Insights</span>
           </Link>
           <Link to="/services" className={`nav-link ${isActive('/services') ? 'active' : ''}`}>
             <Briefcase size={20} />
-            <span>Services</span>
+            <span>Automation</span>
           </Link>
           <Link to="/message-settings" className={`nav-link ${isActive('/message-settings') ? 'active' : ''}`}>
             <Settings size={20} />
             <span>Templates</span>
-          </Link>
-          <Link to="/automation" className={`nav-link ${isActive('/automation') ? 'active' : ''}`}>
-            <Zap size={20} />
-            <span>Automations</span>
           </Link>
           <Link to="/notifications" className={`nav-link ${isActive('/notifications') ? 'active' : ''}`}>
             <Bell size={20} />
@@ -57,16 +53,20 @@ export function Layout() {
           </Link>
           <Link to="/phone-settings" className={`nav-link ${isActive('/phone-settings') ? 'active' : ''}`}>
             <Phone size={20} />
-            <span>Phone Settings</span>
+            <span>Business Line</span>
           </Link>
+
           <div className="nav-separator"></div>
 
+          <div className="nav-section-label">Account</div>
           <Link to="/billing" className={`nav-link ${isActive('/billing') ? 'active' : ''}`}>
             <CreditCard size={20} />
             <span>Billing</span>
           </Link>
+
           {user?.role === 'ADMIN' && (
             <>
+              <div className="nav-separator"></div>
               <Link to="/admin" className={`nav-link ${isActive('/admin') || (location.pathname.startsWith('/admin/') && !location.pathname.startsWith('/admin/phone-pool')) ? 'active' : ''}`}>
                 <Shield size={20} />
                 <span>Admin</span>

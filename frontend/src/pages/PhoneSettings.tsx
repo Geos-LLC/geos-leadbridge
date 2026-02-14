@@ -214,7 +214,7 @@ export function PhoneSettings() {
           </button>
           <h1>
             <Phone size={24} />
-            Phone Settings
+            Business Line
           </h1>
         </div>
         <div className="loading-container">
@@ -234,7 +234,7 @@ export function PhoneSettings() {
           </button>
           <h1>
             <Phone size={24} />
-            Phone Settings
+            Business Line
           </h1>
         </div>
         <div className="empty-state">
