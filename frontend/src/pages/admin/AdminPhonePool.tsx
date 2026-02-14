@@ -119,20 +119,21 @@ export default function AdminPhonePool() {
       if (result.success) {
         const totalSynced = result.data.results.reduce((sum: number, r: any) => sum + r.synced, 0);
         const errors = result.data.results.flatMap((r: any) => r.errors);
+        const details = result.data.results.map((r: any) => `${r.provider}: ${r.synced} synced${r.errors.length ? ` (${r.errors.join(', ')})` : ''}`).join(' | ');
         if (totalSynced > 0) {
-          notify.success('Synced', `${totalSynced} number(s) synced to pool`);
+          notify.success('Synced', `${totalSynced} number(s) synced to pool. ${details}`);
         } else if (errors.length > 0) {
-          notify.error('Sync Issues', errors.join('; '));
+          notify.error('Sync Issues', details);
         } else {
-          notify.success('Up to date', 'No new numbers to sync');
+          notify.success('Up to date', `No new numbers to sync. ${details}`);
         }
-        await loadData();
       }
     } catch (error: any) {
       console.error('Failed to sync:', error);
       notify.error('Error', error.response?.data?.message || 'Failed to sync numbers');
     } finally {
       setSyncing(false);
+      await loadData();
     }
   };
 

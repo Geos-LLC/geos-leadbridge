@@ -149,10 +149,17 @@ export class AdminPhonePoolService {
           : await this.sigcoreService.adminFetchTwilioNumbers();
 
         this.logger.log(`[syncProviderNumbers] Fetched ${numbers.length} numbers from ${provider}`);
+        if (numbers.length > 0) {
+          this.logger.log(`[syncProviderNumbers] Sample number object keys: ${JSON.stringify(Object.keys(numbers[0]))}`);
+          this.logger.log(`[syncProviderNumbers] Sample number object: ${JSON.stringify(numbers[0]).substring(0, 500)}`);
+        }
 
         for (const num of numbers) {
-          const phoneNumber = num.phoneNumber || num.phone_number || num.number || num.e164;
-          if (!phoneNumber) continue;
+          const phoneNumber = num.phoneNumber || num.phone_number || num.number || num.e164 || num.phone;
+          if (!phoneNumber) {
+            this.logger.warn(`[syncProviderNumbers] Skipping number with no recognized phone field: ${JSON.stringify(num).substring(0, 200)}`);
+            continue;
+          }
 
           const friendlyName = num.friendlyName || num.friendly_name || num.name || num.label || null;
 

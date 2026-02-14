@@ -470,8 +470,11 @@ export class SigcoreService {
         this.httpService.get(url, { headers })
       );
       const data = response.data;
-      this.logger.log(`[adminFetchOpenPhoneNumbers] Response: ${JSON.stringify(data).substring(0, 500)}`);
-      return data?.data || data?.numbers || data?.phoneNumbers || (Array.isArray(data) ? data : []);
+      this.logger.log(`[adminFetchOpenPhoneNumbers] Raw response type: ${typeof data}, keys: ${data ? Object.keys(data) : 'null'}`);
+      this.logger.log(`[adminFetchOpenPhoneNumbers] Raw response: ${JSON.stringify(data).substring(0, 1000)}`);
+      const result = data?.data || data?.numbers || data?.phoneNumbers || (Array.isArray(data) ? data : []);
+      this.logger.log(`[adminFetchOpenPhoneNumbers] Parsed ${Array.isArray(result) ? result.length : 0} numbers`);
+      return result;
     } catch (error: any) {
       const msg = error.response?.data?.message || error.message;
       this.logger.error(`[adminFetchOpenPhoneNumbers] Failed: ${error.response?.status} - ${msg}`);
@@ -492,8 +495,11 @@ export class SigcoreService {
         this.httpService.get(url, { headers })
       );
       const data = response.data;
-      this.logger.log(`[adminFetchTwilioNumbers] Response: ${JSON.stringify(data).substring(0, 500)}`);
-      return data?.data || data?.phoneNumbers || data?.numbers || (Array.isArray(data) ? data : []);
+      this.logger.log(`[adminFetchTwilioNumbers] Raw response type: ${typeof data}, keys: ${data ? Object.keys(data) : 'null'}`);
+      this.logger.log(`[adminFetchTwilioNumbers] Raw response: ${JSON.stringify(data).substring(0, 1000)}`);
+      const result = data?.data || data?.phoneNumbers || data?.numbers || (Array.isArray(data) ? data : []);
+      this.logger.log(`[adminFetchTwilioNumbers] Parsed ${Array.isArray(result) ? result.length : 0} numbers`);
+      return result;
     } catch (error: any) {
       const msg = error.response?.data?.message || error.message;
       this.logger.error(`[adminFetchTwilioNumbers] Failed: ${error.response?.status} - ${msg}`);
