@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, CheckCircle, X, Clock,
-  Plus, Bot, Pencil,
+  Plus, Bot, Pencil, Phone,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -848,12 +848,17 @@ export function Services() {
                             <option value="">Select phone number</option>
                             {poolPhones.map(p => (
                               <option key={p.id} value={p.phoneNumber}>
-                                {p.phoneNumber} (LeadBridge)
+                                {p.phoneNumber} (Pool Default)
                               </option>
                             ))}
                           </select>
                           <ChevronDown size={16} />
                         </div>
+                        <button className="get-own-number-btn" disabled>
+                          <Phone size={14} />
+                          Get your own number
+                          <span className="coming-soon-badge">Coming Soon</span>
+                        </button>
                       </div>
 
                       {leadAlertRule && (
@@ -978,12 +983,17 @@ export function Services() {
                             <option value="">Select phone number</option>
                             {poolPhones.map(p => (
                               <option key={p.id} value={p.phoneNumber}>
-                                {p.phoneNumber} (LeadBridge)
+                                {p.phoneNumber} (Pool Default)
                               </option>
                             ))}
                           </select>
                           <ChevronDown size={16} />
                         </div>
+                        <button className="get-own-number-btn" disabled>
+                          <Phone size={14} />
+                          Get your own number
+                          <span className="coming-soon-badge">Coming Soon</span>
+                        </button>
                       </div>
                       {firstTextingRule && (
                         <div className="form-group">
@@ -1055,12 +1065,17 @@ export function Services() {
                             <option value="">Select phone number</option>
                             {poolPhones.map(p => (
                               <option key={p.id} value={p.phoneNumber}>
-                                {p.phoneNumber} (LeadBridge)
+                                {p.phoneNumber} (Pool Default)
                               </option>
                             ))}
                           </select>
                           <ChevronDown size={16} />
                         </div>
+                        <button className="get-own-number-btn" disabled>
+                          <Phone size={14} />
+                          Get your own number
+                          <span className="coming-soon-badge">Coming Soon</span>
+                        </button>
                       </div>
 
                       {textingFollowUpRules.length === 0 && (

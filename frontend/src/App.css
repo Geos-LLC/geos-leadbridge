@@ -7098,6 +7098,27 @@ body {
   box-shadow: 0 1px 4px rgba(99, 102, 241, 0.3);
 }
 
+/* "Get your own number" button */
+.get-own-number-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-secondary, #f9fafb);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: not-allowed;
+  opacity: 0.8;
+}
+
+.get-own-number-btn .coming-soon-badge {
+  margin-left: 4px;
+}
+
 /* Template Editor Modal */
 .template-editor-modal {
   background: white;
