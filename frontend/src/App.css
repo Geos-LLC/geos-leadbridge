@@ -7297,6 +7297,13 @@ body {
   opacity: 0.5;
 }
 
+/* Coming Soon card (Business Line Option 2) */
+.coming-soon-card {
+  border-style: dashed !important;
+  border-color: var(--border-color) !important;
+  background: var(--bg-secondary) !important;
+}
+
 /* ==========================================
    Dashboard Overview - Account Selector
    ========================================== */
