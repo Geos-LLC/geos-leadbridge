@@ -6312,3 +6312,220 @@ body {
   color: var(--text-secondary);
   font-style: italic;
 }
+
+/* ==========================================
+   Services Page
+   ========================================== */
+.services-page {
+  padding: 32px;
+  max-width: 900px;
+  width: 100%;
+}
+
+.services-page .settings-header h1 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.services-page .settings-header h1 svg {
+  color: var(--primary);
+}
+
+.services-page .settings-content {
+  margin-top: 24px;
+}
+
+.services-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.service-card {
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.service-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.service-card.enabled {
+  border-left: 4px solid var(--success);
+}
+
+.service-card.disabled {
+  border-left: 4px solid var(--border-color);
+}
+
+.service-card.coming-soon {
+  opacity: 0.65;
+  border-left: 4px solid var(--warning);
+}
+
+.service-card-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 24px;
+}
+
+.service-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.service-card-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.service-card-info h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.service-card-info p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 2px 0 0;
+}
+
+.service-status-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  display: block;
+}
+
+.service-card-toggle {
+  flex-shrink: 0;
+}
+
+.coming-soon-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.service-card-expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 24px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--primary);
+  background: var(--bg-secondary);
+  border: none;
+  border-top: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.service-card-expand:hover {
+  background: var(--bg-tertiary);
+}
+
+.service-card-expand svg {
+  transition: transform 0.2s;
+}
+
+.service-card-expand svg.rotated {
+  transform: rotate(180deg);
+}
+
+.service-card-settings {
+  padding: 20px 24px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.service-settings-inner .form-group {
+  margin-bottom: 16px;
+}
+
+.service-settings-inner .form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.service-settings-inner input,
+.service-settings-inner select,
+.service-settings-inner textarea {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: 14px;
+  background: white;
+  font-family: inherit;
+}
+
+.service-settings-inner textarea {
+  resize: vertical;
+}
+
+.service-settings-inner .form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.template-preview {
+  padding: 12px;
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  margin-bottom: 8px;
+}
+
+.alert-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.alert-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+
+.alert-option.disabled-option {
+  opacity: 0.5;
+}

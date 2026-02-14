@@ -28,6 +28,7 @@ export interface CreateNotificationRuleDto {
   replyTriggerMode?: 'first_only' | 'every_reply';
   fromPhone: string; // Sigcore phone number to send FROM
   toPhone: string;   // Destination phone number to send TO
+  sendToCustomer?: boolean; // If true, send to lead's phone instead of toPhone
   template: string;
   enabled?: boolean;
 }
@@ -38,6 +39,7 @@ export interface UpdateNotificationRuleDto {
   replyTriggerMode?: 'first_only' | 'every_reply';
   fromPhone?: string;
   toPhone?: string;
+  sendToCustomer?: boolean;
   template?: string;
   enabled?: boolean;
 }
@@ -50,6 +52,7 @@ export interface NotificationRuleResponse {
   replyTriggerMode: string | null;
   fromPhone: string | null;
   toPhone: string | null;
+  sendToCustomer: boolean;
   template: string;
   enabled: boolean;
   triggerCount: number;
@@ -496,6 +499,7 @@ export class NotificationsService {
         replyTriggerMode: data.replyTriggerMode,
         fromPhone: data.fromPhone,
         toPhone: data.toPhone,
+        sendToCustomer: data.sendToCustomer ?? false,
         template: data.template,
         enabled: data.enabled ?? true,
       },
@@ -549,6 +553,7 @@ export class NotificationsService {
         ...(data.replyTriggerMode !== undefined && { replyTriggerMode: data.replyTriggerMode }),
         ...(data.fromPhone !== undefined && { fromPhone: data.fromPhone }),
         ...(data.toPhone !== undefined && { toPhone: data.toPhone }),
+        ...(data.sendToCustomer !== undefined && { sendToCustomer: data.sendToCustomer }),
         ...(data.template !== undefined && { template: data.template }),
         ...(data.enabled !== undefined && { enabled: data.enabled }),
       },
@@ -836,7 +841,10 @@ export class NotificationsService {
     const { userId, savedAccountId, leadId, lead } = context;
 
     // Use rule's phone numbers (required for new rules) or fallback to settings (legacy)
-    const toPhone = rule?.toPhone || settings.destinationPhone;
+    // If sendToCustomer is true, send SMS to the lead's phone instead of the configured toPhone
+    const toPhone = rule?.sendToCustomer
+      ? (lead?.customerPhone || null)
+      : (rule?.toPhone || settings.destinationPhone);
     let fromPhone = rule?.fromPhone || settings.sigcoreFromPhone;
 
     // Fallback: use admin-assigned pool phone if no explicit fromPhone configured
@@ -1953,6 +1961,7 @@ export class NotificationsService {
       replyTriggerMode: rule.replyTriggerMode,
       fromPhone: rule.fromPhone,
       toPhone: rule.toPhone,
+      sendToCustomer: rule.sendToCustomer ?? false,
       template: rule.template,
       enabled: rule.enabled,
       triggerCount: rule.triggerCount,

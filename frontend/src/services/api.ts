@@ -489,6 +489,7 @@ export interface CreateNotificationRuleDto {
   replyTriggerMode?: 'first_only' | 'every_reply';
   fromPhone: string;  // Sigcore phone to send FROM
   toPhone: string;    // Destination phone to send TO
+  sendToCustomer?: boolean; // If true, send to lead's phone instead of toPhone
   template: string;
   enabled?: boolean;
 }
@@ -499,6 +500,7 @@ export interface UpdateNotificationRuleDto {
   replyTriggerMode?: 'first_only' | 'every_reply';
   fromPhone?: string;
   toPhone?: string;
+  sendToCustomer?: boolean;
   template?: string;
   enabled?: boolean;
 }

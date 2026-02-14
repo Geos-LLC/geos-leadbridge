@@ -200,6 +200,7 @@ export interface NotificationRule {
   replyTriggerMode?: 'first_only' | 'every_reply' | null;
   fromPhone: string | null;  // Sigcore phone to send FROM
   toPhone: string | null;    // Destination phone to send TO
+  sendToCustomer?: boolean;  // If true, send to lead's phone instead of toPhone
   template: string;
   enabled: boolean;
   triggerCount: number;

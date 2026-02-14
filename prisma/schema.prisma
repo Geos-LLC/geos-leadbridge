@@ -415,6 +415,7 @@ model NotificationRule {
   replyTriggerMode       String?  // For customer_reply: "first_only" | "every_reply"
   fromPhone              String?  // Sigcore phone number to send FROM
   toPhone                String?  // Destination phone number to send TO
+  sendToCustomer         Boolean  @default(false) // If true, send SMS to lead.customerPhone instead of toPhone
   template               String   @db.Text // SMS template for this specific rule
   enabled                Boolean  @default(true)
   triggerCount           Int      @default(0)
