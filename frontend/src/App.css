@@ -1537,6 +1537,215 @@ body {
   text-align: right;
 }
 
+/* ==========================================
+   Unified Timeline
+   ========================================== */
+
+/* Channel Filter Bar */
+.timeline-filter-bar {
+  display: flex;
+  gap: 4px;
+  padding: 8px 24px;
+  background: white;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.timeline-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.timeline-filter-btn:hover {
+  background: var(--bg-secondary);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.timeline-filter-btn.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
+/* Channel Badge on Messages */
+.message-channel-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.channel-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: 3px;
+}
+
+.channel-badge.platform {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.channel-badge.sms {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.channel-badge.call {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.channel-badge.automation {
+  background: #f3e8ff;
+  color: #7c3aed;
+}
+
+.channel-rule-name {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* SMS-specific message styling */
+.message.channel-sms.sent {
+  background: #fbbf24;
+  color: #78350f;
+}
+
+.message.channel-sms.sent .message-time {
+  color: #92400e;
+}
+
+/* Message Footer with delivery status */
+.message-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.message-footer .message-time {
+  margin-top: 0;
+}
+
+.sms-delivery-status {
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.sms-delivery-status.status-delivered {
+  color: #15803d;
+}
+
+.sms-delivery-status.status-sent {
+  color: #b45309;
+}
+
+.sms-delivery-status.status-pending,
+.sms-delivery-status.status-queued {
+  color: var(--text-muted);
+}
+
+.sms-delivery-status.status-failed {
+  color: var(--danger);
+}
+
+.sms-error-hint {
+  color: var(--danger);
+  cursor: help;
+  display: flex;
+  align-items: center;
+}
+
+/* Channel Selector in Message Input */
+.channel-selector {
+  flex-shrink: 0;
+}
+
+.channel-select {
+  padding: 10px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--bg-secondary);
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+.channel-select:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+/* SMS send button variant */
+.send-btn.btn-sms {
+  background: #f59e0b;
+  color: #78350f;
+}
+
+.send-btn.btn-sms:hover:not(:disabled) {
+  background: #d97706;
+}
+
+/* Communication Summary in right panel */
+.comm-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.comm-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+
+.comm-summary-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+.comm-summary-label.delivered {
+  color: #15803d;
+}
+
+.comm-summary-label.failed {
+  color: var(--danger);
+}
+
+.comm-summary-value {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.comm-summary-value.muted {
+  color: var(--text-muted);
+}
+
+.comm-summary-value.text-danger {
+  color: var(--danger);
+}
+
 /* Message Input */
 .message-input-container {
   display: flex;

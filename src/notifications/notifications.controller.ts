@@ -101,6 +101,28 @@ export class NotificationsController {
   }
 
   /**
+   * Get notification logs for a specific lead (used by unified timeline)
+   */
+  @Get('logs/lead/:leadId')
+  async getLogsByLead(
+    @CurrentUser() user: any,
+    @Param('leadId') leadId: string,
+    @Query('limit') limit?: string,
+  ) {
+    const logs = await this.notificationsService.getLogsByLead(
+      user.id,
+      leadId,
+      limit ? parseInt(limit, 10) : 50,
+    );
+
+    return {
+      success: true,
+      count: logs.length,
+      logs,
+    };
+  }
+
+  /**
    * Get notification logs for a saved account
    */
   @Get('logs/:savedAccountId')
@@ -147,6 +169,29 @@ export class NotificationsController {
     return {
       success: false,
       message: result.error || 'Failed to send test notification',
+    };
+  }
+
+  /**
+   * Send an ad-hoc SMS to a lead's customer phone
+   * Used by the Messages page channel dropdown when SMS is selected
+   */
+  @Post('send-sms')
+  async sendAdHocSms(
+    @CurrentUser() user: any,
+    @Body() body: { leadId: string; message: string; savedAccountId: string },
+  ) {
+    const result = await this.notificationsService.sendAdHocSms(
+      user.id,
+      body.savedAccountId,
+      body.leadId,
+      body.message,
+    );
+
+    return {
+      success: result.success,
+      message: result.success ? 'SMS sent successfully' : (result.error || 'Failed to send SMS'),
+      logId: result.logId,
     };
   }
 

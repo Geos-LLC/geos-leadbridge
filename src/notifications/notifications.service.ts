@@ -359,6 +359,151 @@ export class NotificationsService implements OnModuleInit {
       .slice(0, limit);
   }
 
+  /**
+   * Get notification logs for a specific lead across all accounts
+   * Used by the unified timeline in Messages page
+   */
+  async getLogsByLead(
+    userId: string,
+    leadId: string,
+    limit: number = 50,
+  ): Promise<NotificationLogResponse[]> {
+    // Verify the lead belongs to the user
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, userId },
+    });
+
+    if (!lead) {
+      throw new NotFoundException('Lead not found');
+    }
+
+    const logs = await this.prisma.notificationLog.findMany({
+      where: { leadId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+
+    return logs.map(this.formatLog);
+  }
+
+  /**
+   * Send an ad-hoc SMS message to a lead's customer
+   * Called from Messages page when user selects SMS channel
+   */
+  async sendAdHocSms(
+    userId: string,
+    savedAccountId: string,
+    leadId: string,
+    messageBody: string,
+  ): Promise<{ success: boolean; error?: string; logId?: string }> {
+    // 1. Verify account belongs to user
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+    });
+    if (!account) {
+      return { success: false, error: 'Account not found' };
+    }
+
+    // 2. Get the lead and verify it belongs to user
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, userId },
+    });
+    if (!lead) {
+      return { success: false, error: 'Lead not found' };
+    }
+    if (!lead.customerPhone) {
+      return { success: false, error: 'Lead has no phone number' };
+    }
+
+    // 3. Get notification settings for this account (need API key and fromPhone)
+    let settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+    });
+
+    // Fallback: try other accounts of the same user
+    if (!settings || !settings.sigcoreApiKey) {
+      const fallback = await this.prisma.notificationSettings.findFirst({
+        where: {
+          savedAccount: { userId },
+          sigcoreApiKey: { not: null },
+        },
+      });
+      if (fallback) settings = fallback;
+    }
+
+    if (!settings) {
+      return { success: false, error: 'No SMS settings configured. Set up SMS in Notification Settings.' };
+    }
+
+    const apiKey = this.appSigcoreApiKey || settings.sigcoreApiKey;
+    if (!apiKey) {
+      return { success: false, error: 'No Sigcore API key configured' };
+    }
+
+    // Resolve fromPhone: settings phone or pool phone
+    let fromPhone = settings.sigcoreFromPhone;
+    if (!fromPhone) {
+      const assignment = await this.prisma.phonePoolAssignment.findFirst({
+        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
+        include: { phonePool: true },
+        orderBy: { assignedAt: 'desc' },
+      });
+      if (assignment) fromPhone = assignment.phonePool.phoneNumber;
+    }
+
+    // 4. Create log entry
+    const logEntry = await this.prisma.notificationLog.create({
+      data: {
+        notificationSettingsId: settings.id,
+        notificationRuleId: null,
+        ruleName: 'Manual SMS',
+        leadId,
+        toPhone: lead.customerPhone,
+        fromPhone,
+        status: 'pending',
+        messageBody,
+        metadata: JSON.stringify({ userId, savedAccountId, manual: true }),
+      },
+    });
+
+    // 5. Send via Sigcore
+    try {
+      const result = await this.sendViaSigcore({
+        to: lead.customerPhone,
+        body: messageBody,
+        fromPhone,
+        apiKey,
+        senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
+        sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
+        metadata: {
+          tenantId: savedAccountId,
+          leadId,
+          manual: true,
+        },
+      });
+
+      await this.prisma.notificationLog.update({
+        where: { id: logEntry.id },
+        data: {
+          status: result.status,
+          fromPhone: result.fromPhone,
+          provider: result.provider,
+          sigcoreMessageId: result.messageId,
+          sigcoreConversationId: result.conversationId,
+          sentAt: new Date(),
+        },
+      });
+
+      return { success: true, logId: logEntry.id };
+    } catch (error: any) {
+      await this.prisma.notificationLog.update({
+        where: { id: logEntry.id },
+        data: { status: 'failed', error: error.message || 'Unknown error' },
+      });
+      return { success: false, error: error.message, logId: logEntry.id };
+    }
+  }
+
   // ==========================================
   // Notification Rule CRUD
   // ==========================================

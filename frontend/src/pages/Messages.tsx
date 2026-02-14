@@ -21,10 +21,12 @@ import {
   Mail,
   FileText,
   ChevronDown,
+  Smartphone,
+  MessageCircle,
 } from 'lucide-react';
-import { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, type MessageAttachment } from '../services/api';
+import { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, type MessageAttachment } from '../services/api';
 import { useAppStore } from '../store/appStore';
-import type { Lead, MessageTemplate, BulkMessagePreview } from '../types';
+import type { Lead, MessageTemplate, BulkMessagePreview, NotificationLog, TimelineEvent, TimelineChannel, CommunicationSummary } from '../types';
 
 interface LocalMessage {
   id: string;
@@ -65,6 +67,60 @@ function hasNewUpdates(lead: Lead, lastSeenTimestamps: Record<string, string>): 
   return new Date(lastMessageTime) > new Date(lastSeen);
 }
 
+// Merge platform messages and SMS logs into a unified timeline
+function mergeTimeline(
+  platformMessages: LocalMessage[],
+  smsLogs: NotificationLog[],
+): TimelineEvent[] {
+  const events: TimelineEvent[] = [];
+
+  for (const msg of platformMessages) {
+    events.push({
+      id: `platform-${msg.id}`,
+      channel: 'platform',
+      direction: msg.sender === 'pro' ? 'outbound' : 'inbound',
+      content: msg.content,
+      timestamp: msg.sentAt,
+      sender: msg.sender,
+      externalId: msg.externalId,
+      attachments: msg.attachments,
+    });
+  }
+
+  for (const log of smsLogs) {
+    events.push({
+      id: `sms-${log.id}`,
+      channel: 'sms',
+      direction: 'outbound',
+      content: log.messageBody,
+      timestamp: new Date(log.sentAt || log.createdAt),
+      sender: 'system',
+      smsStatus: log.status as TimelineEvent['smsStatus'],
+      smsError: log.error,
+      toPhone: log.toPhone,
+      fromPhone: log.fromPhone,
+      ruleName: log.ruleName,
+      deliveredAt: log.deliveredAt,
+    });
+  }
+
+  events.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  return events;
+}
+
+function computeSummary(
+  platformMessages: LocalMessage[],
+  smsLogs: NotificationLog[],
+): CommunicationSummary {
+  return {
+    platformMessages: platformMessages.length,
+    smsSent: smsLogs.filter(l => ['sent', 'delivered', 'queued'].includes(l.status)).length,
+    smsDelivered: smsLogs.filter(l => l.status === 'delivered').length,
+    smsFailed: smsLogs.filter(l => l.status === 'failed').length,
+    calls: 0,
+  };
+}
+
 export function Messages() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -75,7 +131,7 @@ export function Messages() {
   const [resyncingMessages, setResyncingMessages] = useState(false);
   const [resyncError, setResyncError] = useState<string | null>(null);
   const [messageText, setMessageText] = useState('');
-  const [messages, setMessages] = useState<LocalMessage[]>([]);
+  const [, setMessages] = useState<LocalMessage[]>([]);
   const [lastSeenTimestamps, setLastSeenTimestamps] = useState<Record<string, string>>(() => getLastSeenTimestamps());
   const [searchQuery, setSearchQuery] = useState('');
   // Get account filter from URL params, default to 'all'
@@ -98,6 +154,21 @@ export function Messages() {
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [sendingBulk, setSendingBulk] = useState(false);
   const [bulkSendProgress, setBulkSendProgress] = useState<{ sent: number; total: number } | null>(null);
+
+  // Unified timeline state
+  const [, setSmsLogs] = useState<NotificationLog[]>([]);
+  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
+  const [channelFilter, setChannelFilter] = useState<'all' | TimelineChannel>('all');
+  const [sendChannel, setSendChannel] = useState<'platform' | 'sms'>('platform');
+  const [smsEnabled, setSmsEnabled] = useState(false);
+  const [commSummary, setCommSummary] = useState<CommunicationSummary>({
+    platformMessages: 0, smsSent: 0, smsDelivered: 0, smsFailed: 0, calls: 0,
+  });
+
+  // Filtered timeline
+  const filteredTimeline = channelFilter === 'all'
+    ? timelineEvents
+    : timelineEvents.filter(e => e.channel === channelFilter);
 
   // Update account filter in URL
   const setAccountFilter = (value: string) => {
@@ -328,7 +399,34 @@ export function Messages() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [timelineEvents]);
+
+  // Check if SMS is enabled for the selected lead's account
+  useEffect(() => {
+    if (!selectedLead || !selectedLead.businessId) {
+      setSmsEnabled(false);
+      setSendChannel('platform');
+      return;
+    }
+
+    const checkSmsCapability = async () => {
+      try {
+        const account = savedAccounts.find(a => a.businessId === selectedLead.businessId);
+        if (!account) {
+          setSmsEnabled(false);
+          return;
+        }
+        const { settings } = await notificationsApi.getSettings(account.id);
+        const enabled = !!(settings && settings.enabled && settings.sigcoreApiKey);
+        setSmsEnabled(enabled);
+        if (!enabled) setSendChannel('platform');
+      } catch {
+        setSmsEnabled(false);
+      }
+    };
+
+    checkSmsCapability();
+  }, [selectedLead, savedAccounts]);
 
   const loadLeads = async () => {
     setLoading(true);
@@ -377,6 +475,8 @@ export function Messages() {
   const loadMessagesForLead = async (lead: Lead) => {
     setLoadingMessages(true);
     setMessages([]);
+    setSmsLogs([]);
+    setTimelineEvents([]);
     // Mark this lead as seen when we load its messages
     markLeadAsSeen(lead);
     try {
@@ -404,6 +504,21 @@ export function Messages() {
         };
       });
       setMessages(convertedMessages);
+
+      // Load SMS logs for this lead
+      let leadSmsLogs: NotificationLog[] = [];
+      try {
+        const { logs } = await notificationsApi.getLogsByLead(lead.id);
+        leadSmsLogs = logs;
+        setSmsLogs(logs);
+      } catch (err) {
+        console.warn('[Messages] Failed to load SMS logs for lead:', err);
+      }
+
+      // Merge into unified timeline
+      const timeline = mergeTimeline(convertedMessages, leadSmsLogs);
+      setTimelineEvents(timeline);
+      setCommSummary(computeSummary(convertedMessages, leadSmsLogs));
     } catch (err) {
       console.error('[Messages] Failed to load messages:', err);
     } finally {
@@ -440,25 +555,74 @@ export function Messages() {
     const text = messageText.trim();
     setMessageText('');
 
-    // Optimistically add message to UI
-    const optimisticMessage: LocalMessage = {
-      id: `temp-${Date.now()}`,
-      content: text,
-      sender: 'pro',
-      sentAt: new Date(),
-    };
-    setMessages((prev) => [...prev, optimisticMessage]);
+    if (sendChannel === 'sms') {
+      // Send SMS via ad-hoc endpoint
+      const account = savedAccounts.find(a => a.businessId === selectedLead.businessId);
+      if (!account) {
+        alert('Account not found for this lead.');
+        setSendingMessage(false);
+        setMessageText(text);
+        return;
+      }
 
-    try {
-      await leadsApi.sendMessage(selectedLead.id, text);
-    } catch (err) {
-      console.error('Failed to send message:', err);
-      // Remove optimistic message on failure
-      setMessages((prev) => prev.filter((m) => m.id !== optimisticMessage.id));
-      setMessageText(text); // Restore text
-      alert('Failed to send message. Please try again.');
-    } finally {
-      setSendingMessage(false);
+      // Optimistically add SMS to timeline
+      const optimisticEvent: TimelineEvent = {
+        id: `sms-temp-${Date.now()}`,
+        channel: 'sms',
+        direction: 'outbound',
+        content: text,
+        timestamp: new Date(),
+        sender: 'system',
+        smsStatus: 'pending',
+        toPhone: selectedLead.customerPhone || '',
+        ruleName: 'Manual SMS',
+      };
+      setTimelineEvents(prev => [...prev, optimisticEvent]);
+
+      try {
+        await notificationsApi.sendAdHocSms(account.id, selectedLead.id, text);
+        // Reload to get actual log entry
+        await loadMessagesForLead(selectedLead);
+      } catch (err) {
+        console.error('Failed to send SMS:', err);
+        setTimelineEvents(prev => prev.filter(e => e.id !== optimisticEvent.id));
+        setMessageText(text);
+        alert('Failed to send SMS. Please try again.');
+      } finally {
+        setSendingMessage(false);
+      }
+    } else {
+      // Platform message (existing logic)
+      const optimisticMessage: LocalMessage = {
+        id: `temp-${Date.now()}`,
+        content: text,
+        sender: 'pro',
+        sentAt: new Date(),
+      };
+      setMessages((prev) => [...prev, optimisticMessage]);
+
+      // Also add to timeline
+      const optimisticEvent: TimelineEvent = {
+        id: `platform-temp-${Date.now()}`,
+        channel: 'platform',
+        direction: 'outbound',
+        content: text,
+        timestamp: new Date(),
+        sender: 'pro',
+      };
+      setTimelineEvents(prev => [...prev, optimisticEvent]);
+
+      try {
+        await leadsApi.sendMessage(selectedLead.id, text);
+      } catch (err) {
+        console.error('Failed to send message:', err);
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticMessage.id));
+        setTimelineEvents(prev => prev.filter(e => e.id !== optimisticEvent.id));
+        setMessageText(text);
+        alert('Failed to send message. Please try again.');
+      } finally {
+        setSendingMessage(false);
+      }
     }
   };
 
@@ -925,29 +1089,60 @@ export function Messages() {
               </div>
             )}
 
-            {/* Messages Area */}
+            {/* Channel Filter Bar */}
+            <div className="timeline-filter-bar">
+              {(['all', 'platform', 'sms'] as const).map((filter) => (
+                <button
+                  key={filter}
+                  className={`timeline-filter-btn ${channelFilter === filter ? 'active' : ''}`}
+                  onClick={() => setChannelFilter(filter)}
+                >
+                  {filter === 'all' && 'All'}
+                  {filter === 'platform' && <><MessageCircle size={14} /> Platform</>}
+                  {filter === 'sms' && <><Smartphone size={14} /> SMS</>}
+                </button>
+              ))}
+            </div>
+
+            {/* Activity Timeline */}
             <div className="messages-container">
               {loadingMessages ? (
                 <div className="no-messages">
                   <Loader2 className="spinner" size={32} />
-                  <p>Loading messages...</p>
+                  <p>Loading conversation...</p>
                 </div>
-              ) : messages.length === 0 ? (
+              ) : filteredTimeline.length === 0 ? (
                 <div className="no-messages">
                   <MessageSquare size={32} />
                   <p>No messages yet</p>
                   <small>Send a message to start the conversation</small>
                 </div>
               ) : (
-                messages.map((msg) => (
+                filteredTimeline.map((event) => (
                   <div
-                    key={msg.id}
-                    className={`message ${msg.sender === 'pro' ? 'sent' : 'received'}`}
+                    key={event.id}
+                    className={`message ${event.direction === 'outbound' ? 'sent' : 'received'} channel-${event.channel}`}
                   >
-                    {msg.content && <div className="message-content">{msg.content}</div>}
-                    {msg.attachments && msg.attachments.length > 0 && (
+                    {/* Channel Badge */}
+                    <div className="message-channel-badge">
+                      <span className={`channel-badge ${event.channel}`}>
+                        {event.channel === 'platform' && 'Platform'}
+                        {event.channel === 'sms' && 'SMS'}
+                        {event.channel === 'call' && 'Call'}
+                        {event.channel === 'automation' && 'Auto'}
+                      </span>
+                      {event.ruleName && (
+                        <span className="channel-rule-name">{event.ruleName}</span>
+                      )}
+                    </div>
+
+                    {/* Message Content */}
+                    {event.content && <div className="message-content">{event.content}</div>}
+
+                    {/* Attachments (platform only) */}
+                    {event.attachments && event.attachments.length > 0 && (
                       <div className="message-attachments">
-                        {msg.attachments.map((attachment, idx) => (
+                        {event.attachments.map((attachment, idx) => (
                           attachment.mimeType?.startsWith('image/') ? (
                             <a
                               key={idx}
@@ -976,11 +1171,29 @@ export function Messages() {
                         ))}
                       </div>
                     )}
-                    <div className="message-time">
-                      {msg.sentAt.toLocaleTimeString('en-US', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
+
+                    {/* Message Footer: time + SMS status */}
+                    <div className="message-footer">
+                      <span className="message-time">
+                        {event.timestamp.toLocaleTimeString('en-US', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                      {event.channel === 'sms' && event.smsStatus && (
+                        <span className={`sms-delivery-status status-${event.smsStatus}`}>
+                          {event.smsStatus === 'delivered' && '\u2713\u2713 Delivered'}
+                          {event.smsStatus === 'sent' && '\u2713 Sent'}
+                          {event.smsStatus === 'queued' && '\u231B Queued'}
+                          {event.smsStatus === 'pending' && '\u231B Pending'}
+                          {event.smsStatus === 'failed' && '\u2717 Failed'}
+                        </span>
+                      )}
+                      {event.channel === 'sms' && event.smsError && (
+                        <span className="sms-error-hint" title={event.smsError}>
+                          <AlertCircle size={12} />
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))
@@ -991,6 +1204,20 @@ export function Messages() {
             {/* Message Input */}
             {canSendMessage ? (
               <div className="message-input-container">
+                {/* Channel Selector */}
+                <div className="channel-selector">
+                  <select
+                    value={sendChannel}
+                    onChange={(e) => setSendChannel(e.target.value as 'platform' | 'sms')}
+                    className="channel-select"
+                  >
+                    <option value="platform">Platform</option>
+                    {smsEnabled && selectedLead?.customerPhone && (
+                      <option value="sms">SMS</option>
+                    )}
+                  </select>
+                </div>
+
                 {/* Template Selector Dropdown */}
                 <div className="template-selector">
                   <button
@@ -1028,12 +1255,14 @@ export function Messages() {
                     type="text"
                     value={messageText}
                     onChange={(e) => setMessageText(e.target.value)}
-                    placeholder="Type a message..."
+                    placeholder={sendChannel === 'sms'
+                      ? `SMS to ${formatPhoneNumber(selectedLead?.customerPhone || '')}...`
+                      : 'Type a message...'}
                     disabled={sendingMessage}
                   />
                   <button
                     type="submit"
-                    className="btn btn-primary send-btn"
+                    className={`btn send-btn ${sendChannel === 'sms' ? 'btn-sms' : 'btn-primary'}`}
                     disabled={!messageText.trim() || sendingMessage}
                   >
                     {sendingMessage ? <Loader2 className="spinner" size={20} /> : <Send size={20} />}
@@ -1065,6 +1294,49 @@ export function Messages() {
             <h3>Lead Details</h3>
           </div>
           <div className="details-sidebar-content">
+            {/* Communication Summary */}
+            {(commSummary.platformMessages > 0 || commSummary.smsSent > 0) && (
+              <div className="details-section">
+                <h4>Communication Summary</h4>
+                <div className="comm-summary">
+                  <div className="comm-summary-row">
+                    <span className="comm-summary-label">
+                      <MessageCircle size={14} /> Platform Messages
+                    </span>
+                    <span className="comm-summary-value">{commSummary.platformMessages}</span>
+                  </div>
+                  <div className="comm-summary-row">
+                    <span className="comm-summary-label">
+                      <Smartphone size={14} /> SMS Sent
+                    </span>
+                    <span className="comm-summary-value">{commSummary.smsSent}</span>
+                  </div>
+                  {commSummary.smsDelivered > 0 && (
+                    <div className="comm-summary-row">
+                      <span className="comm-summary-label delivered">
+                        {'\u2713\u2713'} SMS Delivered
+                      </span>
+                      <span className="comm-summary-value">{commSummary.smsDelivered}</span>
+                    </div>
+                  )}
+                  {commSummary.smsFailed > 0 && (
+                    <div className="comm-summary-row">
+                      <span className="comm-summary-label failed">
+                        {'\u2717'} SMS Failed
+                      </span>
+                      <span className="comm-summary-value text-danger">{commSummary.smsFailed}</span>
+                    </div>
+                  )}
+                  <div className="comm-summary-row">
+                    <span className="comm-summary-label">
+                      <Phone size={14} /> Calls
+                    </span>
+                    <span className="comm-summary-value muted">{commSummary.calls}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Lead Cost */}
             {selectedLead.raw?.leadPrice && (
               <div className="details-section">

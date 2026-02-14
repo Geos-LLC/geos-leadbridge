@@ -331,3 +331,31 @@ export interface PhonePoolStats {
   reserved: number;
   byAreaCode: { areaCode: string; count: number }[];
 }
+
+// Unified Timeline (Messages page)
+export type TimelineChannel = 'platform' | 'sms' | 'call' | 'automation';
+
+export interface TimelineEvent {
+  id: string;
+  channel: TimelineChannel;
+  direction: 'outbound' | 'inbound';
+  content: string;
+  timestamp: Date;
+  sender?: 'pro' | 'customer' | 'system';
+  externalId?: string;
+  attachments?: { url: string; mimeType?: string; fileName?: string }[];
+  smsStatus?: 'pending' | 'queued' | 'sent' | 'delivered' | 'failed';
+  smsError?: string | null;
+  toPhone?: string;
+  fromPhone?: string | null;
+  ruleName?: string | null;
+  deliveredAt?: string | null;
+}
+
+export interface CommunicationSummary {
+  platformMessages: number;
+  smsSent: number;
+  smsDelivered: number;
+  smsFailed: number;
+  calls: number;
+}

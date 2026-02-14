@@ -551,6 +551,15 @@ export const notificationsApi = {
     const { data } = await api.get('/v1/notifications/logs', { params });
     return data;
   },
+  getLogsByLead: async (leadId: string, limit?: number): Promise<{ success: boolean; count: number; logs: NotificationLog[] }> => {
+    const params = limit ? { limit } : {};
+    const { data } = await api.get(`/v1/notifications/logs/lead/${leadId}`, { params });
+    return data;
+  },
+  sendAdHocSms: async (savedAccountId: string, leadId: string, message: string): Promise<{ success: boolean; message: string; logId?: string }> => {
+    const { data } = await api.post('/v1/notifications/send-sms', { savedAccountId, leadId, message });
+    return data;
+  },
   sendTest: async (savedAccountId: string, ruleId?: string): Promise<{ success: boolean; message: string }> => {
     const { data } = await api.post(`/v1/notifications/test/${savedAccountId}`, ruleId ? { ruleId } : {});
     return data;
