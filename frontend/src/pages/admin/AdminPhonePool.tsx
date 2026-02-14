@@ -175,11 +175,11 @@ export default function AdminPhonePool() {
     }
   };
 
-  const handleUnassign = async (phonePoolId: string) => {
-    if (!confirm('Unassign this phone from the user?')) return;
+  const handleUnassign = async (phonePoolId: string, userId: string, userEmail: string) => {
+    if (!confirm(`Unassign this phone from ${userEmail}?`)) return;
     try {
-      await adminApi.unassignPhone(phonePoolId);
-      notify.success('Unassigned', 'Phone unassigned from user');
+      await adminApi.unassignPhone(phonePoolId, userId);
+      notify.success('Unassigned', `Phone unassigned from ${userEmail}`);
       loadData();
     } catch (error: any) {
       notify.error('Error', error.response?.data?.message || 'Failed to unassign phone');
@@ -444,15 +444,24 @@ export default function AdminPhonePool() {
                     </span>
                   </td>
                   <td>
-                    {phone.assignedToUser ? (
-                      <div className="assigned-user-cell">
-                        <span className="assigned-user">
-                          {phone.assignedToUser.email}
-                        </span>
-                        {phone.assignedToUser.name && (
-                          <span className="assigned-user-name">{phone.assignedToUser.name}</span>
-                        )}
-                        <span className="assigned-user-note">Private to this tenant</span>
+                    {phone.assignments && phone.assignments.length > 0 ? (
+                      <div className="assigned-users-list">
+                        {phone.assignments.map(assignment => (
+                          <div key={assignment.id} className="assigned-user-cell">
+                            <span className="assigned-user">{assignment.user.email}</span>
+                            {assignment.user.name && (
+                              <span className="assigned-user-name">{assignment.user.name}</span>
+                            )}
+                            <button
+                              className="btn btn-sm btn-secondary"
+                              onClick={() => handleUnassign(phone.id, assignment.user.id, assignment.user.email)}
+                              title={`Unassign from ${assignment.user.email}`}
+                              style={{ marginLeft: '0.25rem', padding: '2px 4px' }}
+                            >
+                              <UserMinus size={12} />
+                            </button>
+                          </div>
+                        ))}
                       </div>
                     ) : (
                       <span className="unassigned-label">Unassigned</span>
@@ -461,7 +470,7 @@ export default function AdminPhonePool() {
                   <td>{new Date(phone.provisionedAt).toLocaleDateString()}</td>
                   <td>
                     <div className="action-buttons">
-                      {phone.status === 'AVAILABLE' && (
+                      {phone.status !== 'RELEASED' && (
                         <button
                           className="btn btn-sm btn-secondary"
                           onClick={() => {
@@ -474,16 +483,7 @@ export default function AdminPhonePool() {
                           <UserPlus size={14} />
                         </button>
                       )}
-                      {phone.status === 'ASSIGNED' && (
-                        <button
-                          className="btn btn-sm btn-secondary"
-                          onClick={() => handleUnassign(phone.id)}
-                          title="Unassign from user"
-                        >
-                          <UserMinus size={14} />
-                        </button>
-                      )}
-                      {(phone.status === 'AVAILABLE' || phone.status === 'ASSIGNED') && (
+                      {phone.status !== 'RELEASED' && (
                         <button
                           className="btn btn-sm btn-danger"
                           onClick={() => handleRelease(phone.id, phone.phoneNumber)}

@@ -117,12 +117,13 @@ export class AdminPhonePoolController {
     return { success: true, data: phone };
   }
 
-  @Post(':phonePoolId/unassign')
+  @Post(':phonePoolId/unassign/:userId')
   async unassignFromUser(
     @Req() req: any,
     @Param('phonePoolId') phonePoolId: string,
+    @Param('userId') userId: string,
   ) {
-    const phone = await this.phonePoolService.unassignFromUser(req.user.id, phonePoolId);
+    const phone = await this.phonePoolService.unassignFromUser(req.user.id, phonePoolId, userId);
     return { success: true, data: phone };
   }
 

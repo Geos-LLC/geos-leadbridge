@@ -31,7 +31,7 @@ export function PhoneSettings() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Pool phone state
-  const [poolPhone, setPoolPhone] = useState<PhonePoolEntry | null>(null);
+  const [poolPhones, setPoolPhones] = useState<PhonePoolEntry[]>([]);
   const [loadingPoolPhone, setLoadingPoolPhone] = useState(true);
 
   // Provider connection state
@@ -63,7 +63,7 @@ export function PhoneSettings() {
     try {
       setLoadingPoolPhone(true);
       const result = await usersApi.getMyPoolPhone();
-      setPoolPhone(result.poolPhone);
+      setPoolPhones(result.poolPhones || (result.poolPhone ? [result.poolPhone] : []));
     } catch (err) {
       console.error('Failed to load pool phone:', err);
     } finally {
@@ -293,18 +293,20 @@ export function PhoneSettings() {
             <div className="loading-container">
               <Loader2 size={20} className="spinner" />
             </div>
-          ) : poolPhone ? (
-            <div className="pool-phone-card">
-              <div className="pool-phone-info">
-                <span className="pool-phone-number">{poolPhone.phoneNumber}</span>
-                <span className="provider-badge">{poolPhone.provider}</span>
-              </div>
-              <div className="pool-phone-meta">
-                {poolPhone.areaCode && <span>Area code: {poolPhone.areaCode}</span>}
-                {poolPhone.assignedAt && (
-                  <span>Assigned: {new Date(poolPhone.assignedAt).toLocaleDateString()}</span>
-                )}
-              </div>
+          ) : poolPhones.length > 0 ? (
+            <div className="pool-phone-cards">
+              {poolPhones.map(phone => (
+                <div key={phone.id} className="pool-phone-card">
+                  <div className="pool-phone-info">
+                    <span className="pool-phone-number">{phone.phoneNumber}</span>
+                    <span className="provider-badge">{phone.provider}</span>
+                  </div>
+                  <div className="pool-phone-meta">
+                    {phone.areaCode && <span>Area code: {phone.areaCode}</span>}
+                    {phone.friendlyName && <span>{phone.friendlyName}</span>}
+                  </div>
+                </div>
+              ))}
               <p className="pool-phone-note">
                 Assigned by administrator. Used as default sender for SMS alerts.
               </p>

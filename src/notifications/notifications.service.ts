@@ -841,11 +841,13 @@ export class NotificationsService {
 
     // Fallback: use admin-assigned pool phone if no explicit fromPhone configured
     if (!fromPhone) {
-      const poolPhone = await this.prisma.phonePool.findFirst({
-        where: { assignedToUserId: userId, status: 'ASSIGNED' },
+      const assignment = await this.prisma.phonePoolAssignment.findFirst({
+        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
+        include: { phonePool: true },
+        orderBy: { assignedAt: 'desc' },
       });
-      if (poolPhone) {
-        fromPhone = poolPhone.phoneNumber;
+      if (assignment) {
+        fromPhone = assignment.phonePool.phoneNumber;
         this.logger.log(`Using pool phone ${fromPhone} as fromPhone for rule`);
       }
     }

@@ -729,7 +729,7 @@ export const usersApi = {
     const { data } = await api.post(url);
     return data;
   },
-  getMyPoolPhone: async (): Promise<{ success: boolean; poolPhone: PhonePoolEntry | null }> => {
+  getMyPoolPhone: async (): Promise<{ success: boolean; poolPhone: PhonePoolEntry | null; poolPhones: PhonePoolEntry[] }> => {
     const { data } = await api.get('/v1/users/me/pool-phone');
     return data;
   },
@@ -824,8 +824,8 @@ export const adminApi = {
     const { data } = await api.post(`/v1/admin/phone-pool/${phonePoolId}/assign/${userId}`);
     return data.data;
   },
-  unassignPhone: async (phonePoolId: string): Promise<PhonePoolEntry> => {
-    const { data } = await api.post(`/v1/admin/phone-pool/${phonePoolId}/unassign`);
+  unassignPhone: async (phonePoolId: string, userId: string): Promise<PhonePoolEntry> => {
+    const { data } = await api.post(`/v1/admin/phone-pool/${phonePoolId}/unassign/${userId}`);
     return data.data;
   },
   releasePhone: async (phonePoolId: string): Promise<void> => {

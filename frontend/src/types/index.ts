@@ -291,6 +291,18 @@ export interface AdminLog {
 }
 
 // Phone Pool (Admin)
+export interface PhonePoolAssignment {
+  id: string;
+  phonePoolId: string;
+  userId: string;
+  assignedAt: string;
+  user: {
+    id: string;
+    email: string;
+    name: string | null;
+  };
+}
+
 export interface PhonePoolEntry {
   id: string;
   phoneNumber: string;
@@ -300,13 +312,7 @@ export interface PhonePoolEntry {
   friendlyName: string | null;
   sigcoreAllocationId: string | null;
   status: 'AVAILABLE' | 'ASSIGNED' | 'RESERVED' | 'RELEASED';
-  assignedToUserId: string | null;
-  assignedToUser?: {
-    id: string;
-    email: string;
-    name: string | null;
-  } | null;
-  assignedAt: string | null;
+  assignments?: PhonePoolAssignment[];
   provisionedAt: string;
   createdAt: string;
 }

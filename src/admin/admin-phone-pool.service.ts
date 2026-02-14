@@ -35,7 +35,7 @@ export class AdminPhonePoolService {
       where.OR = [
         { phoneNumber: { contains: search } },
         { friendlyName: { contains: search, mode: 'insensitive' } },
-        { assignedToUser: { email: { contains: search, mode: 'insensitive' } } },
+        { assignments: { some: { user: { email: { contains: search, mode: 'insensitive' } } } } },
       ];
     }
 
@@ -43,7 +43,10 @@ export class AdminPhonePoolService {
       this.prisma.phonePool.findMany({
         where,
         include: {
-          assignedToUser: { select: { id: true, email: true, name: true } },
+          assignments: {
+            include: { user: { select: { id: true, email: true, name: true } } },
+            orderBy: { assignedAt: 'desc' },
+          },
         },
         orderBy: { provisionedAt: 'desc' },
         skip: offset,
@@ -59,11 +62,12 @@ export class AdminPhonePoolService {
    * Get pool statistics
    */
   async getPoolStats() {
-    const [total, available, assigned, reserved] = await Promise.all([
+    const [total, available, reserved, assignmentCount] = await Promise.all([
       this.prisma.phonePool.count({ where: { status: { not: 'RELEASED' } } }),
       this.prisma.phonePool.count({ where: { status: 'AVAILABLE' } }),
-      this.prisma.phonePool.count({ where: { status: 'ASSIGNED' } }),
       this.prisma.phonePool.count({ where: { status: 'RESERVED' } }),
+      // Count phones that have at least one assignment
+      this.prisma.phonePool.count({ where: { status: { not: 'RELEASED' }, assignments: { some: {} } } }),
     ]);
 
     // Breakdown by area code
@@ -76,7 +80,7 @@ export class AdminPhonePoolService {
     return {
       total,
       available,
-      assigned,
+      assigned: assignmentCount,
       reserved,
       byAreaCode: byAreaCode.map((a) => ({
         areaCode: a.areaCode || 'unknown',
@@ -130,10 +134,20 @@ export class AdminPhonePoolService {
     const result = await this.sigcoreService.adminDisconnectProvider(provider);
 
     if (result.success) {
+      // Delete all assignments for phones from this provider
+      const phonesToRelease = await this.prisma.phonePool.findMany({
+        where: { provider, status: { not: 'RELEASED' } },
+        select: { id: true },
+      });
+      if (phonesToRelease.length > 0) {
+        await this.prisma.phonePoolAssignment.deleteMany({
+          where: { phonePoolId: { in: phonesToRelease.map(p => p.id) } },
+        });
+      }
       // Mark pool phones from this provider as RELEASED
       await this.prisma.phonePool.updateMany({
         where: { provider, status: { not: 'RELEASED' } },
-        data: { status: 'RELEASED', assignedToUserId: null, assignedAt: null, releasedAt: new Date() },
+        data: { status: 'RELEASED', releasedAt: new Date() },
       });
 
       await this.adminService.logAdminAction(adminId, 'DISCONNECT_PROVIDER', null, { provider });
@@ -220,27 +234,39 @@ export class AdminPhonePoolService {
   }
 
   /**
-   * Assign a pool phone to a user
+   * Assign a pool phone to a user (many-to-many: same phone can be assigned to multiple users)
    */
   async assignToUser(adminId: string, phonePoolId: string, userId: string) {
     const phone = await this.prisma.phonePool.findUnique({ where: { id: phonePoolId } });
     if (!phone) throw new NotFoundException('Pool phone not found');
-    if (phone.status !== 'AVAILABLE') {
-      throw new BadRequestException(`Phone is ${phone.status}, not AVAILABLE`);
+    if (phone.status === 'RELEASED') {
+      throw new BadRequestException('Phone has been released from pool');
     }
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    const updated = await this.prisma.phonePool.update({
+    // Check if already assigned to this user
+    const existing = await this.prisma.phonePoolAssignment.findUnique({
+      where: { phonePoolId_userId: { phonePoolId, userId } },
+    });
+    if (existing) {
+      throw new BadRequestException('Phone is already assigned to this user');
+    }
+
+    // Create assignment (phone stays AVAILABLE for other assignments)
+    await this.prisma.phonePoolAssignment.create({
+      data: { phonePoolId, userId },
+    });
+
+    // Return the phone with all assignments
+    const updated = await this.prisma.phonePool.findUnique({
       where: { id: phonePoolId },
-      data: {
-        status: 'ASSIGNED',
-        assignedToUserId: userId,
-        assignedAt: new Date(),
-      },
       include: {
-        assignedToUser: { select: { id: true, email: true, name: true } },
+        assignments: {
+          include: { user: { select: { id: true, email: true, name: true } } },
+          orderBy: { assignedAt: 'desc' },
+        },
       },
     });
 
@@ -254,31 +280,30 @@ export class AdminPhonePoolService {
   }
 
   /**
-   * Unassign a pool phone from a user
+   * Unassign a pool phone from a specific user
    */
-  async unassignFromUser(adminId: string, phonePoolId: string) {
+  async unassignFromUser(adminId: string, phonePoolId: string, userId: string) {
     const phone = await this.prisma.phonePool.findUnique({ where: { id: phonePoolId } });
     if (!phone) throw new NotFoundException('Pool phone not found');
-    if (phone.status !== 'ASSIGNED') {
-      throw new BadRequestException(`Phone is ${phone.status}, not ASSIGNED`);
+
+    const assignment = await this.prisma.phonePoolAssignment.findUnique({
+      where: { phonePoolId_userId: { phonePoolId, userId } },
+    });
+    if (!assignment) {
+      throw new BadRequestException('Phone is not assigned to this user');
     }
 
-    const updated = await this.prisma.phonePool.update({
-      where: { id: phonePoolId },
-      data: {
-        status: 'AVAILABLE',
-        assignedToUserId: null,
-        assignedAt: null,
-      },
+    await this.prisma.phonePoolAssignment.delete({
+      where: { id: assignment.id },
     });
 
-    await this.adminService.logAdminAction(adminId, 'UNASSIGN_POOL_PHONE', phone.assignedToUserId, {
+    await this.adminService.logAdminAction(adminId, 'UNASSIGN_POOL_PHONE', userId, {
       phoneNumber: phone.phoneNumber,
       phonePoolId,
     });
 
-    this.logger.log(`Unassigned pool phone ${phone.phoneNumber}`);
-    return updated;
+    this.logger.log(`Unassigned pool phone ${phone.phoneNumber} from user ${userId}`);
+    return phone;
   }
 
   /**
@@ -288,12 +313,15 @@ export class AdminPhonePoolService {
     const phone = await this.prisma.phonePool.findUnique({ where: { id: phonePoolId } });
     if (!phone) throw new NotFoundException('Pool phone not found');
 
+    // Delete all assignments first
+    await this.prisma.phonePoolAssignment.deleteMany({
+      where: { phonePoolId },
+    });
+
     await this.prisma.phonePool.update({
       where: { id: phonePoolId },
       data: {
         status: 'RELEASED',
-        assignedToUserId: null,
-        assignedAt: null,
         releasedAt: new Date(),
       },
     });
@@ -308,8 +336,10 @@ export class AdminPhonePoolService {
 
   /**
    * Auto-assign a phone from the pool to a user (round-robin with area code preference)
+   * Phone stays AVAILABLE since it can be shared across tenants.
    */
   async autoAssign(userId: string, preferredAreaCode?: string): Promise<any | null> {
+    // Find an available phone (prefer fewest assignments for round-robin)
     let phone = null;
     if (preferredAreaCode) {
       phone = await this.prisma.phonePool.findFirst({
@@ -330,17 +360,13 @@ export class AdminPhonePoolService {
       return null;
     }
 
-    const assigned = await this.prisma.phonePool.update({
-      where: { id: phone.id },
-      data: {
-        status: 'ASSIGNED',
-        assignedToUserId: userId,
-        assignedAt: new Date(),
-      },
+    // Create assignment (phone stays AVAILABLE)
+    await this.prisma.phonePoolAssignment.create({
+      data: { phonePoolId: phone.id, userId },
     });
 
-    this.logger.log(`Auto-assigned pool phone ${assigned.phoneNumber} to user ${userId}`);
-    return assigned;
+    this.logger.log(`Auto-assigned pool phone ${phone.phoneNumber} to user ${userId}`);
+    return phone;
   }
 
   /**

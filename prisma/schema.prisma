@@ -88,7 +88,8 @@ model User {
   subscriptionHistory      SubscriptionHistory[]
   adminLogs                AdminLog[]
   notificationSettings     NotificationSettings[] // Account-specific and user-level default notification settings
-  poolPhones               PhonePool[]            // Phones assigned from admin pool
+  poolPhones               PhonePool[]            // Legacy: single-assignment relation
+  phonePoolAssignments     PhonePoolAssignment[]  // Many-to-many phone pool assignments
 
   @@map("users")
 }
@@ -520,18 +521,34 @@ model PhonePool {
   friendlyName        String?
   sigcoreAllocationId String?
   status              PhonePoolStatus @default(AVAILABLE)
-  assignedToUserId    String?
-  assignedAt          DateTime?
+  assignedToUserId    String?         // Legacy: kept for backward compat
+  assignedAt          DateTime?       // Legacy: kept for backward compat
   provisionedAt       DateTime        @default(now())
   releasedAt          DateTime?
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 
   // Relationships
-  assignedToUser User? @relation(fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  assignedToUser User?               @relation(fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  assignments    PhonePoolAssignment[] // Many-to-many assignments
 
   @@index([status])
   @@index([areaCode])
   @@index([assignedToUserId])
   @@map("phone_pool")
+}
+
+model PhonePoolAssignment {
+  id          String   @id @default(uuid())
+  phonePoolId String
+  userId      String
+  assignedAt  DateTime @default(now())
+
+  phonePool PhonePool @relation(fields: [phonePoolId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([phonePoolId, userId])
+  @@index([userId])
+  @@index([phonePoolId])
+  @@map("phone_pool_assignments")
 }

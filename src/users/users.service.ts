@@ -78,13 +78,20 @@ export class UsersService {
   }
 
   /**
-   * Get user's assigned pool phone (from admin phone pool)
+   * Get user's assigned pool phones (via assignments join table)
    */
   async getUserPoolPhone(userId: string) {
-    const poolPhone = await this.prisma.phonePool.findFirst({
-      where: { assignedToUserId: userId, status: 'ASSIGNED' },
+    const assignments = await this.prisma.phonePoolAssignment.findMany({
+      where: { userId },
+      include: { phonePool: true },
+      orderBy: { assignedAt: 'desc' },
     });
-    return { success: true, poolPhone };
+
+    const poolPhones = assignments
+      .filter(a => a.phonePool.status !== 'RELEASED')
+      .map(a => a.phonePool);
+
+    return { success: true, poolPhone: poolPhones[0] || null, poolPhones };
   }
 
   /**
@@ -92,9 +99,10 @@ export class UsersService {
    * Returns: user's assigned phones first, then all available pool phones
    */
   async getPoolPhonesForSms(userId: string) {
-    const [assigned, available] = await Promise.all([
-      this.prisma.phonePool.findMany({
-        where: { assignedToUserId: userId, status: 'ASSIGNED' },
+    const [assignments, available] = await Promise.all([
+      this.prisma.phonePoolAssignment.findMany({
+        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
+        include: { phonePool: true },
         orderBy: { assignedAt: 'desc' },
       }),
       this.prisma.phonePool.findMany({
@@ -103,11 +111,13 @@ export class UsersService {
       }),
     ]);
 
+    const assignedIds = new Set(assignments.map(a => a.phonePool.id));
+
     return {
       success: true,
       phoneNumbers: [
-        ...assigned.map(p => ({ id: p.id, phoneNumber: p.phoneNumber, provider: p.provider, friendlyName: p.friendlyName, assigned: true })),
-        ...available.map(p => ({ id: p.id, phoneNumber: p.phoneNumber, provider: p.provider, friendlyName: p.friendlyName, assigned: false })),
+        ...assignments.map(a => ({ id: a.phonePool.id, phoneNumber: a.phonePool.phoneNumber, provider: a.phonePool.provider, friendlyName: a.phonePool.friendlyName, assigned: true })),
+        ...available.filter(p => !assignedIds.has(p.id)).map(p => ({ id: p.id, phoneNumber: p.phoneNumber, provider: p.provider, friendlyName: p.friendlyName, assigned: false })),
       ],
     };
   }
