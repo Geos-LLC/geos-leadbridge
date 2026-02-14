@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, CheckCircle, X, Clock,
-  Plus, Bot,
+  Plus, Bot, Pencil,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -142,6 +142,8 @@ export function Services() {
   const [templateNameError, setTemplateNameError] = useState<string | null>(null);
   const [editingTemplateRuleId, setEditingTemplateRuleId] = useState<string | null>(null);
   const [editingTemplateContent, setEditingTemplateContent] = useState('');
+  const [applyMode, setApplyMode] = useState<string | null>(null); // 'choosing-{ruleId}' | 'save-as-new-{ruleId}'
+  const [saveAsNewName, setSaveAsNewName] = useState('');
 
   // Lead Alerts form state (needed for first-time creation)
   const [alertToPhone, setAlertToPhone] = useState('');
@@ -496,6 +498,38 @@ export function Services() {
     }
   }
 
+  async function saveAsNewTemplate(ruleId: string, type: 'autoReply' | 'texting') {
+    const trimmedName = saveAsNewName.trim();
+    if (!trimmedName) {
+      setTemplateNameError('Template name is required');
+      return;
+    }
+    if (templates.some(t => t.name.toLowerCase() === trimmedName.toLowerCase())) {
+      setTemplateNameError('A template with this name already exists');
+      return;
+    }
+    setSaving(true);
+    setTemplateNameError(null);
+    try {
+      const { template } = await templatesApi.createTemplate(trimmedName, editingTemplateContent);
+      setTemplates(prev => [template, ...prev]);
+      if (type === 'autoReply') {
+        await changeRuleTemplate(ruleId, template.id);
+      } else {
+        await changeTextingRuleTemplate(ruleId, template.id);
+      }
+      setEditingTemplateRuleId(null);
+      setEditingTemplateContent('');
+      setApplyMode(null);
+      setSaveAsNewName('');
+      showSuccess('Saved as new template');
+    } catch (err: any) {
+      setError(err.message || 'Failed to save as new template');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function insertVariable(variable: string, setter: React.Dispatch<React.SetStateAction<string>>) {
     setter(prev => prev + variable);
   }
@@ -691,16 +725,62 @@ export function Services() {
                                   value={editingTemplateContent}
                                   onChange={e => setEditingTemplateContent(e.target.value)}
                                 />
-                                <div className="template-preview-actions">
-                                  <button className="btn btn-primary btn-sm" onClick={() => saveTemplateContent(firstReplyRule.id, firstReplyRule.template!.id)} disabled={saving}>
-                                    Save
-                                  </button>
-                                  <button className="btn btn-sm" onClick={() => setEditingTemplateRuleId(null)}>Cancel</button>
-                                </div>
+                                {!applyMode?.startsWith(`choosing-${firstReplyRule.id}`) && !applyMode?.startsWith(`save-as-new-${firstReplyRule.id}`) && (
+                                  <div className="template-preview-actions">
+                                    <button className="btn btn-sm" onClick={() => { setEditingTemplateRuleId(null); setApplyMode(null); }}>Cancel</button>
+                                    <button className="btn btn-primary btn-sm" onClick={() => setApplyMode(`choosing-${firstReplyRule.id}`)} disabled={saving}>
+                                      Apply
+                                    </button>
+                                  </div>
+                                )}
+                                {applyMode === `choosing-${firstReplyRule.id}` && (
+                                  <div className="apply-mode-chooser">
+                                    <span className="apply-mode-label">Save changes as:</span>
+                                    <button
+                                      className="btn btn-primary btn-sm"
+                                      onClick={() => { setApplyMode(null); saveTemplateContent(firstReplyRule.id, firstReplyRule.template!.id); }}
+                                      disabled={saving}
+                                    >
+                                      Update &ldquo;{templates.find(t => t.id === firstReplyRule.templateId)?.name || 'template'}&rdquo;
+                                    </button>
+                                    <button
+                                      className="btn btn-sm"
+                                      onClick={() => { setApplyMode(`save-as-new-${firstReplyRule.id}`); setSaveAsNewName(''); setTemplateNameError(null); }}
+                                    >
+                                      Save as New
+                                    </button>
+                                    <button className="btn btn-sm" onClick={() => setApplyMode(null)}>Cancel</button>
+                                  </div>
+                                )}
+                                {applyMode === `save-as-new-${firstReplyRule.id}` && (
+                                  <div className="save-as-new-form">
+                                    <input
+                                      type="text"
+                                      placeholder="New template name"
+                                      value={saveAsNewName}
+                                      onChange={e => { setSaveAsNewName(e.target.value); setTemplateNameError(null); }}
+                                    />
+                                    {templateNameError && <span className="field-error">{templateNameError}</span>}
+                                    <div className="save-as-new-actions">
+                                      <button className="btn btn-sm" onClick={() => setApplyMode(`choosing-${firstReplyRule.id}`)}>Back</button>
+                                      <button className="btn btn-primary btn-sm" onClick={() => saveAsNewTemplate(firstReplyRule.id, 'autoReply')} disabled={saving}>
+                                        Create &amp; Apply
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             ) : (
-                              <div className="template-preview" onClick={() => { setEditingTemplateRuleId(firstReplyRule.id); setEditingTemplateContent(firstReplyRule.template!.content); }}>
-                                {firstReplyRule.template.content}
+                              <div className="template-preview-container">
+                                <div className="template-preview">
+                                  {firstReplyRule.template.content}
+                                </div>
+                                <button
+                                  className="template-edit-btn"
+                                  onClick={() => { setEditingTemplateRuleId(firstReplyRule.id); setEditingTemplateContent(firstReplyRule.template!.content); setApplyMode(null); }}
+                                >
+                                  <Pencil size={12} /> Edit
+                                </button>
                               </div>
                             )
                           )}
@@ -979,16 +1059,62 @@ export function Services() {
                                   value={editingTemplateContent}
                                   onChange={e => setEditingTemplateContent(e.target.value)}
                                 />
-                                <div className="template-preview-actions">
-                                  <button className="btn btn-primary btn-sm" onClick={() => saveTemplateContent(firstTextingRule.id, firstTextingRule.messageTemplate!.id)} disabled={saving}>
-                                    Save
-                                  </button>
-                                  <button className="btn btn-sm" onClick={() => setEditingTemplateRuleId(null)}>Cancel</button>
-                                </div>
+                                {!applyMode?.startsWith(`choosing-${firstTextingRule.id}`) && !applyMode?.startsWith(`save-as-new-${firstTextingRule.id}`) && (
+                                  <div className="template-preview-actions">
+                                    <button className="btn btn-sm" onClick={() => { setEditingTemplateRuleId(null); setApplyMode(null); }}>Cancel</button>
+                                    <button className="btn btn-primary btn-sm" onClick={() => setApplyMode(`choosing-${firstTextingRule.id}`)} disabled={saving}>
+                                      Apply
+                                    </button>
+                                  </div>
+                                )}
+                                {applyMode === `choosing-${firstTextingRule.id}` && (
+                                  <div className="apply-mode-chooser">
+                                    <span className="apply-mode-label">Save changes as:</span>
+                                    <button
+                                      className="btn btn-primary btn-sm"
+                                      onClick={() => { setApplyMode(null); saveTemplateContent(firstTextingRule.id, firstTextingRule.messageTemplate!.id); }}
+                                      disabled={saving}
+                                    >
+                                      Update &ldquo;{templates.find(t => t.id === (firstTextingRule.templateId || firstTextingRule.messageTemplate?.id))?.name || 'template'}&rdquo;
+                                    </button>
+                                    <button
+                                      className="btn btn-sm"
+                                      onClick={() => { setApplyMode(`save-as-new-${firstTextingRule.id}`); setSaveAsNewName(''); setTemplateNameError(null); }}
+                                    >
+                                      Save as New
+                                    </button>
+                                    <button className="btn btn-sm" onClick={() => setApplyMode(null)}>Cancel</button>
+                                  </div>
+                                )}
+                                {applyMode === `save-as-new-${firstTextingRule.id}` && (
+                                  <div className="save-as-new-form">
+                                    <input
+                                      type="text"
+                                      placeholder="New template name"
+                                      value={saveAsNewName}
+                                      onChange={e => { setSaveAsNewName(e.target.value); setTemplateNameError(null); }}
+                                    />
+                                    {templateNameError && <span className="field-error">{templateNameError}</span>}
+                                    <div className="save-as-new-actions">
+                                      <button className="btn btn-sm" onClick={() => setApplyMode(`choosing-${firstTextingRule.id}`)}>Back</button>
+                                      <button className="btn btn-primary btn-sm" onClick={() => saveAsNewTemplate(firstTextingRule.id, 'texting')} disabled={saving}>
+                                        Create &amp; Apply
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             ) : (
-                              <div className="template-preview" onClick={() => { setEditingTemplateRuleId(firstTextingRule.id); setEditingTemplateContent(firstTextingRule.messageTemplate!.content); }}>
-                                {firstTextingRule.messageTemplate.content}
+                              <div className="template-preview-container">
+                                <div className="template-preview">
+                                  {firstTextingRule.messageTemplate.content}
+                                </div>
+                                <button
+                                  className="template-edit-btn"
+                                  onClick={() => { setEditingTemplateRuleId(firstTextingRule.id); setEditingTemplateContent(firstTextingRule.messageTemplate!.content); setApplyMode(null); }}
+                                >
+                                  <Pencil size={12} /> Edit
+                                </button>
                               </div>
                             )
                           )}

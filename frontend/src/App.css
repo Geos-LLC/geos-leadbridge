@@ -6834,24 +6834,61 @@ body {
   cursor: not-allowed;
 }
 
-/* Template preview — scrollable, resizable, clickable to edit */
+/* Template preview container — wraps preview + edit button */
+.template-preview-container {
+  position: relative;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+/* Template preview — resizable, read-only */
 .service-card-settings .template-preview {
   padding: 12px;
+  padding-right: 36px;
   background: white;
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
   font-size: 13px;
   color: var(--text-primary);
   white-space: pre-wrap;
-  margin-bottom: 8px;
-  margin-top: 8px;
-  max-height: 120px;
-  overflow-y: auto;
-  cursor: pointer;
+  height: 80px;
+  min-height: 48px;
+  overflow: auto;
+  resize: vertical;
+  cursor: default;
   transition: border-color 0.2s;
 }
 
 .service-card-settings .template-preview:hover {
+  border-color: var(--text-muted);
+}
+
+/* Edit button — top-right of preview container */
+.template-edit-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.template-preview-container:hover .template-edit-btn {
+  opacity: 1;
+}
+
+.template-edit-btn:hover {
+  color: var(--primary);
   border-color: var(--primary);
 }
 
@@ -6864,7 +6901,6 @@ body {
 .template-preview-edit textarea {
   width: 100%;
   min-height: 80px;
-  max-height: 300px;
   resize: vertical;
   padding: 12px;
   font-size: 13px;
@@ -6879,6 +6915,49 @@ body {
   display: flex;
   gap: 8px;
   margin-top: 8px;
+}
+
+/* Apply mode chooser — inline save options */
+.apply-mode-chooser {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #f8f9ff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+}
+
+.apply-mode-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Save as new template form */
+.save-as-new-form {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #f8f9ff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+}
+
+.save-as-new-form input[type="text"] {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+
+.save-as-new-actions {
+  display: flex;
+  gap: 8px;
 }
 
 /* Create template inline form */
