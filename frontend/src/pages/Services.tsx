@@ -11,6 +11,7 @@ import {
 import type {
   AutomationRule, NotificationRule, SavedAccount, MessageTemplate,
 } from '../types';
+import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
 
 // Delay presets for follow-up messages
 const DELAY_PRESETS = [
@@ -21,25 +22,6 @@ const DELAY_PRESETS = [
   { label: '2 hours', minutes: 120 },
   { label: '6 hours', minutes: 360 },
   { label: '24 hours', minutes: 1440 },
-];
-
-// SMS template variables (for lead alerts + customer texting)
-const SMS_VARIABLES = [
-  { name: '{{lead.name}}', desc: 'Customer name' },
-  { name: '{{lead.phone}}', desc: 'Customer phone' },
-  { name: '{{lead.service}}', desc: 'Service category' },
-  { name: '{{lead.location}}', desc: 'City, State' },
-  { name: '{{lead.zip}}', desc: 'ZIP code' },
-  { name: '{{lead.message}}', desc: 'Customer request message' },
-  { name: '{{lead.serviceDescription}}', desc: 'Detailed service description' },
-  { name: '{{lead.addons}}', desc: 'Service add-ons' },
-  { name: '{{lead.frequency}}', desc: 'Service frequency' },
-  { name: '{{lead.bedrooms}}', desc: 'Number of bedrooms' },
-  { name: '{{lead.bathrooms}}', desc: 'Number of bathrooms' },
-  { name: '{{lead.price}}', desc: 'Lead price/cost' },
-  { name: '{{lead.pets}}', desc: 'Pet information' },
-  { name: '{{lead.estimate}}', desc: 'Estimated cost/quote' },
-  { name: '{{lead.dates}}', desc: 'Requested date/schedule' },
 ];
 
 // -- ServiceCard sub-component --
@@ -134,21 +116,20 @@ export function Services() {
 
   // UI state
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
-  const [expandedSubCards, setExpandedSubCards] = useState<Set<string>>(new Set(['auto-reply-first', 'texting-first']));
-  // customDelayRuleId/customDelayValue removed — follow-ups are Coming Soon
-  const [creatingTemplate, setCreatingTemplate] = useState<string | null>(null); // which dropdown is creating
-  const [newTemplateName, setNewTemplateName] = useState('');
-  const [newTemplateContent, setNewTemplateContent] = useState('');
-  const [templateNameError, setTemplateNameError] = useState<string | null>(null);
-  const [editingTemplateRuleId, setEditingTemplateRuleId] = useState<string | null>(null);
-  const [editingTemplateContent, setEditingTemplateContent] = useState('');
-  const [applyMode, setApplyMode] = useState<string | null>(null); // 'choosing-{ruleId}' | 'save-as-new-{ruleId}'
-  const [saveAsNewName, setSaveAsNewName] = useState('');
+  const [expandedSubCards, setExpandedSubCards] = useState<Set<string>>(new Set(['auto-reply-first', 'texting-first', 'alerts-sms']));
+  // Template editor modal state
+  const [templateEditor, setTemplateEditor] = useState<{
+    mode: 'create' | 'service-edit';
+    ruleId: string;
+    templateId?: string;
+    templateName?: string;
+    content: string;
+    type: 'autoReply' | 'texting' | 'alert';
+  } | null>(null);
 
   // Lead Alerts form state (needed for first-time creation)
   const [alertToPhone, setAlertToPhone] = useState('');
   const [alertFromPhone, setAlertFromPhone] = useState('');
-  const [alertTemplate, setAlertTemplate] = useState('New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}');
 
   // Customer Texting form state
   const [textingFromPhone, setTextingFromPhone] = useState('');
@@ -214,7 +195,6 @@ export function Services() {
       if (leadAlert) {
         setAlertToPhone(leadAlert.toPhone || '');
         setAlertFromPhone(leadAlert.fromPhone || '');
-        setAlertTemplate(leadAlert.template || alertTemplate);
       }
       const firstTexting = customerTextingAll.find(r => !r.delayMinutes || r.delayMinutes === 0);
       if (firstTexting) {
@@ -290,23 +270,32 @@ export function Services() {
         setLeadAlertRule(rule);
         showSuccess(enabled ? 'Lead Alerts enabled' : 'Lead Alerts disabled');
       } else if (enabled) {
-        if (!alertToPhone) {
-          setExpandedCard('lead-alerts');
-          setError('Please enter a destination phone number first');
-          setSaving(false);
-          return;
+        // Find or create a default Lead Alert template
+        let templateId = templates.find(t => t.name.includes('Lead Alert'))?.id;
+        if (!templateId) {
+          const { template } = await templatesApi.createTemplate(
+            'Lead Alert - SMS',
+            'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
+          );
+          templateId = template.id;
+          setTemplates(prev => [template, ...prev]);
         }
+
+        const defaultFrom = poolPhones[0]?.phoneNumber || '';
         const { rule } = await notificationsApi.createRule(selectedAccountId, {
           name: 'Lead Alert - SMS',
           triggerType: 'new_lead',
-          fromPhone: alertFromPhone,
+          fromPhone: alertFromPhone || defaultFrom,
           toPhone: alertToPhone,
           sendToCustomer: false,
-          template: alertTemplate,
+          template: 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
+          templateId,
           enabled: true,
         });
         setLeadAlertRule(rule);
-        showSuccess('Lead Alerts enabled');
+        if (!alertFromPhone && defaultFrom) setAlertFromPhone(defaultFrom);
+        setExpandedCard('lead-alerts');
+        showSuccess('Lead Alerts enabled — configure your alert phone number');
       }
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Failed to toggle Lead Alerts');
@@ -382,21 +371,46 @@ export function Services() {
 
   // changeFollowUpDelay, addFollowUp, deleteFollowUp removed — follow-ups are Coming Soon
 
-  // --- Save Settings Handlers ---
+  // --- Lead Alert Handlers ---
 
-  async function saveLeadAlertSettings() {
+  async function changeAlertRuleTemplate(ruleId: string, templateId: string) {
+    setSaving(true);
+    try {
+      const { rule } = await notificationsApi.updateRule(selectedAccountId, ruleId, { templateId });
+      setLeadAlertRule(rule);
+      showSuccess('Template updated');
+    } catch (err: any) {
+      setError(err.message || 'Failed to update template');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveAlertToPhone(toPhone: string) {
+    setAlertToPhone(toPhone);
     if (!leadAlertRule) return;
     setSaving(true);
     try {
-      const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, {
-        fromPhone: alertFromPhone,
-        toPhone: alertToPhone,
-        template: alertTemplate,
-      });
+      const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { toPhone });
       setLeadAlertRule(rule);
-      showSuccess('Lead Alert settings saved');
+      showSuccess('Alert destination updated');
     } catch (err: any) {
-      setError(err.message || 'Failed to save settings');
+      setError(err.message || 'Failed to update alert destination');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveAlertFromPhone(fromPhone: string) {
+    setAlertFromPhone(fromPhone);
+    if (!leadAlertRule) return;
+    setSaving(true);
+    try {
+      const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { fromPhone });
+      setLeadAlertRule(rule);
+      showSuccess('Send from number updated');
+    } catch (err: any) {
+      setError(err.message || 'Failed to update from phone');
     } finally {
       setSaving(false);
     }
@@ -440,30 +454,22 @@ export function Services() {
     return !DELAY_PRESETS.some(p => p.minutes === minutes);
   }
 
-  async function createNewTemplate(_forDropdown: string, ruleId: string, type: 'autoReply' | 'texting') {
-    const trimmedName = newTemplateName.trim();
-    if (!trimmedName) {
-      setTemplateNameError('Template name is required');
-      return;
-    }
-    if (templates.some(t => t.name.toLowerCase() === trimmedName.toLowerCase())) {
-      setTemplateNameError('A template with this name already exists');
-      return;
-    }
+  // --- Template Editor Modal Handlers ---
+
+  async function handleEditorCreate({ name, content }: { name: string; content: string }) {
+    if (!templateEditor) return;
     setSaving(true);
-    setTemplateNameError(null);
     try {
-      const { template } = await templatesApi.createTemplate(trimmedName, newTemplateContent || 'Hi {{lead.name}}, ');
+      const { template } = await templatesApi.createTemplate(name, content || 'Hi {{lead.name}}, ');
       setTemplates(prev => [template, ...prev]);
-      // Assign the new template to the rule
-      if (type === 'autoReply') {
-        await changeRuleTemplate(ruleId, template.id);
+      if (templateEditor.type === 'autoReply') {
+        await changeRuleTemplate(templateEditor.ruleId, template.id);
+      } else if (templateEditor.type === 'alert') {
+        await changeAlertRuleTemplate(templateEditor.ruleId, template.id);
       } else {
-        await changeTextingRuleTemplate(ruleId, template.id);
+        await changeTextingRuleTemplate(templateEditor.ruleId, template.id);
       }
-      setCreatingTemplate(null);
-      setNewTemplateName('');
-      setNewTemplateContent('');
+      setTemplateEditor(null);
       showSuccess('Template created');
     } catch (err: any) {
       setError(err.message || 'Failed to create template');
@@ -472,12 +478,13 @@ export function Services() {
     }
   }
 
-  async function saveTemplateContent(ruleId: string, templateId: string) {
+  async function handleEditorUpdate({ content }: { name: string; content: string }) {
+    if (!templateEditor || !templateEditor.templateId) return;
+    const { ruleId, templateId } = templateEditor;
     setSaving(true);
     try {
-      const { template } = await templatesApi.updateTemplate(templateId, { content: editingTemplateContent });
+      const { template } = await templatesApi.updateTemplate(templateId, { content });
       setTemplates(prev => prev.map(t => t.id === templateId ? { ...t, content: template.content } : t));
-      // Update rule state to reflect new content
       setAutoReplyRules(prev => prev.map(r =>
         r.id === ruleId && r.template?.id === templateId
           ? { ...r, template: { ...r.template!, content: template.content } }
@@ -488,8 +495,10 @@ export function Services() {
           ? { ...r, messageTemplate: { ...r.messageTemplate!, content: template.content } }
           : r
       ));
-      setEditingTemplateRuleId(null);
-      setEditingTemplateContent('');
+      if (leadAlertRule?.id === ruleId && leadAlertRule?.messageTemplate?.id === templateId) {
+        setLeadAlertRule({ ...leadAlertRule, messageTemplate: { ...leadAlertRule.messageTemplate!, content: template.content } });
+      }
+      setTemplateEditor(null);
       showSuccess('Template saved');
     } catch (err: any) {
       setError(err.message || 'Failed to save template');
@@ -498,40 +507,26 @@ export function Services() {
     }
   }
 
-  async function saveAsNewTemplate(ruleId: string, type: 'autoReply' | 'texting') {
-    const trimmedName = saveAsNewName.trim();
-    if (!trimmedName) {
-      setTemplateNameError('Template name is required');
-      return;
-    }
-    if (templates.some(t => t.name.toLowerCase() === trimmedName.toLowerCase())) {
-      setTemplateNameError('A template with this name already exists');
-      return;
-    }
+  async function handleEditorSaveAsNew({ name, content }: { name: string; content: string }) {
+    if (!templateEditor) return;
     setSaving(true);
-    setTemplateNameError(null);
     try {
-      const { template } = await templatesApi.createTemplate(trimmedName, editingTemplateContent);
+      const { template } = await templatesApi.createTemplate(name, content);
       setTemplates(prev => [template, ...prev]);
-      if (type === 'autoReply') {
-        await changeRuleTemplate(ruleId, template.id);
+      if (templateEditor.type === 'autoReply') {
+        await changeRuleTemplate(templateEditor.ruleId, template.id);
+      } else if (templateEditor.type === 'alert') {
+        await changeAlertRuleTemplate(templateEditor.ruleId, template.id);
       } else {
-        await changeTextingRuleTemplate(ruleId, template.id);
+        await changeTextingRuleTemplate(templateEditor.ruleId, template.id);
       }
-      setEditingTemplateRuleId(null);
-      setEditingTemplateContent('');
-      setApplyMode(null);
-      setSaveAsNewName('');
+      setTemplateEditor(null);
       showSuccess('Saved as new template');
     } catch (err: any) {
       setError(err.message || 'Failed to save as new template');
     } finally {
       setSaving(false);
     }
-  }
-
-  function insertVariable(variable: string, setter: React.Dispatch<React.SetStateAction<string>>) {
-    setter(prev => prev + variable);
   }
 
   function toggleExpand(card: string) {
@@ -677,10 +672,7 @@ export function Services() {
                               value={firstReplyRule.templateId || ''}
                               onChange={e => {
                                 if (e.target.value === '__create_new__') {
-                                  setCreatingTemplate(`autoReply-first-${firstReplyRule.id}`);
-                                  setNewTemplateName('');
-                                  setNewTemplateContent('');
-                                  setTemplateNameError(null);
+                                  setTemplateEditor({ mode: 'create', ruleId: firstReplyRule.id, content: '', type: 'autoReply' });
                                 } else {
                                   changeRuleTemplate(firstReplyRule.id, e.target.value);
                                 }
@@ -695,94 +687,25 @@ export function Services() {
                             </select>
                             <ChevronDown size={16} />
                           </div>
-                          {creatingTemplate === `autoReply-first-${firstReplyRule.id}` && (
-                            <div className="create-template-inline">
-                              <input
-                                type="text"
-                                placeholder="Template name"
-                                value={newTemplateName}
-                                onChange={e => { setNewTemplateName(e.target.value); setTemplateNameError(null); }}
-                              />
-                              {templateNameError && <span className="field-error">{templateNameError}</span>}
-                              <textarea
-                                rows={3}
-                                placeholder="Template content..."
-                                value={newTemplateContent}
-                                onChange={e => setNewTemplateContent(e.target.value)}
-                              />
-                              <div className="create-template-actions">
-                                <button className="btn btn-primary btn-sm" onClick={() => createNewTemplate(`autoReply-first-${firstReplyRule.id}`, firstReplyRule.id, 'autoReply')} disabled={saving}>
-                                  Create
-                                </button>
-                                <button className="btn btn-sm" onClick={() => { setCreatingTemplate(null); setTemplateNameError(null); }}>Cancel</button>
-                              </div>
-                            </div>
-                          )}
                           {firstReplyRule.template?.content && (
-                            editingTemplateRuleId === firstReplyRule.id ? (
-                              <div className="template-preview-edit">
-                                <textarea
-                                  value={editingTemplateContent}
-                                  onChange={e => setEditingTemplateContent(e.target.value)}
-                                />
-                                {!applyMode?.startsWith(`choosing-${firstReplyRule.id}`) && !applyMode?.startsWith(`save-as-new-${firstReplyRule.id}`) && (
-                                  <div className="template-preview-actions">
-                                    <button className="btn btn-sm" onClick={() => { setEditingTemplateRuleId(null); setApplyMode(null); }}>Cancel</button>
-                                    <button className="btn btn-primary btn-sm" onClick={() => setApplyMode(`choosing-${firstReplyRule.id}`)} disabled={saving}>
-                                      Apply
-                                    </button>
-                                  </div>
-                                )}
-                                {applyMode === `choosing-${firstReplyRule.id}` && (
-                                  <div className="apply-mode-chooser">
-                                    <span className="apply-mode-label">Save changes as:</span>
-                                    <button
-                                      className="btn btn-primary btn-sm"
-                                      onClick={() => { setApplyMode(null); saveTemplateContent(firstReplyRule.id, firstReplyRule.template!.id); }}
-                                      disabled={saving}
-                                    >
-                                      Update &ldquo;{templates.find(t => t.id === firstReplyRule.templateId)?.name || 'template'}&rdquo;
-                                    </button>
-                                    <button
-                                      className="btn btn-sm"
-                                      onClick={() => { setApplyMode(`save-as-new-${firstReplyRule.id}`); setSaveAsNewName(''); setTemplateNameError(null); }}
-                                    >
-                                      Save as New
-                                    </button>
-                                    <button className="btn btn-sm" onClick={() => setApplyMode(null)}>Cancel</button>
-                                  </div>
-                                )}
-                                {applyMode === `save-as-new-${firstReplyRule.id}` && (
-                                  <div className="save-as-new-form">
-                                    <input
-                                      type="text"
-                                      placeholder="New template name"
-                                      value={saveAsNewName}
-                                      onChange={e => { setSaveAsNewName(e.target.value); setTemplateNameError(null); }}
-                                    />
-                                    {templateNameError && <span className="field-error">{templateNameError}</span>}
-                                    <div className="save-as-new-actions">
-                                      <button className="btn btn-sm" onClick={() => setApplyMode(`choosing-${firstReplyRule.id}`)}>Back</button>
-                                      <button className="btn btn-primary btn-sm" onClick={() => saveAsNewTemplate(firstReplyRule.id, 'autoReply')} disabled={saving}>
-                                        Create &amp; Apply
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
+                            <div className="template-preview-container">
+                              <div className="template-preview">
+                                {firstReplyRule.template.content}
                               </div>
-                            ) : (
-                              <div className="template-preview-container">
-                                <div className="template-preview">
-                                  {firstReplyRule.template.content}
-                                </div>
-                                <button
-                                  className="template-edit-btn"
-                                  onClick={() => { setEditingTemplateRuleId(firstReplyRule.id); setEditingTemplateContent(firstReplyRule.template!.content); setApplyMode(null); }}
-                                >
-                                  <Pencil size={12} /> Edit
-                                </button>
-                              </div>
-                            )
+                              <button
+                                className="template-edit-btn"
+                                onClick={() => setTemplateEditor({
+                                  mode: 'service-edit',
+                                  ruleId: firstReplyRule.id,
+                                  templateId: firstReplyRule.template!.id,
+                                  templateName: templates.find(t => t.id === firstReplyRule.templateId)?.name || 'template',
+                                  content: firstReplyRule.template!.content,
+                                  type: 'autoReply',
+                                })}
+                              >
+                                <Pencil size={12} /> Edit
+                              </button>
+                            </div>
                           )}
                         </div>
                       )}
@@ -888,74 +811,132 @@ export function Services() {
               statusText={leadAlertRule?.enabled ? `SMS to ${leadAlertRule.toPhone || 'not set'}` : undefined}
             >
               <div className="service-settings-inner">
-                <div className="alert-options">
-                  <div className="alert-option">
-                    <CheckCircle size={16} className="status-icon success" />
-                    <span>SMS Alert</span>
-                    <span className="badge-success" style={{ marginLeft: 'auto', padding: '2px 8px', borderRadius: '10px', fontSize: '11px' }}>Active</span>
+
+                {/* SMS Alert — Expandable Sub-Card */}
+                <div className="sub-card">
+                  <div className="sub-card-header" onClick={() => toggleSubCard('alerts-sms')}>
+                    <div className="sub-card-title">
+                      <Bell size={14} />
+                      <span>SMS Alert</span>
+                    </div>
+                    <ChevronDown size={14} className={expandedSubCards.has('alerts-sms') ? 'rotated' : ''} />
                   </div>
-                  <div className="alert-option disabled-option">
-                    <Clock size={16} />
-                    <span>Call Alert</span>
-                    <span className="coming-soon-badge" style={{ marginLeft: 'auto' }}>Coming Soon</span>
-                  </div>
+                  {expandedSubCards.has('alerts-sms') && (
+                    <div className="sub-card-body">
+                      <p className="form-hint"><Clock size={12} /> Sends immediately when a new lead arrives</p>
+
+                      <div className="form-group">
+                        <label>Send to (your phone)</label>
+                        <input
+                          type="tel"
+                          value={alertToPhone}
+                          onChange={e => setAlertToPhone(e.target.value)}
+                          onBlur={() => { if (leadAlertRule && alertToPhone !== leadAlertRule.toPhone) saveAlertToPhone(alertToPhone); }}
+                          placeholder="+1234567890"
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label>Send from</label>
+                        <div className="select-wrapper">
+                          <select value={alertFromPhone} onChange={e => saveAlertFromPhone(e.target.value)} disabled={saving}>
+                            <option value="">Select phone number</option>
+                            {poolPhones.map(p => (
+                              <option key={p.id} value={p.phoneNumber}>
+                                {p.phoneNumber} (LeadBridge)
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={16} />
+                        </div>
+                      </div>
+
+                      {leadAlertRule && (
+                        <div className="form-group">
+                          <label>Template</label>
+                          <div className="select-wrapper">
+                            <select
+                              value={leadAlertRule.templateId || leadAlertRule.messageTemplate?.id || ''}
+                              onChange={e => {
+                                if (e.target.value === '__create_new__') {
+                                  setTemplateEditor({ mode: 'create', ruleId: leadAlertRule.id, content: '', type: 'alert' });
+                                } else {
+                                  changeAlertRuleTemplate(leadAlertRule.id, e.target.value);
+                                }
+                              }}
+                              disabled={saving}
+                            >
+                              <option value="">Select template</option>
+                              {templates.map(t => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                              ))}
+                              <option value="__create_new__">+ Create New Template</option>
+                            </select>
+                            <ChevronDown size={16} />
+                          </div>
+                          {leadAlertRule.messageTemplate && (
+                            <div className="template-preview-container">
+                              <div className="template-preview">
+                                {leadAlertRule.messageTemplate.content}
+                              </div>
+                              <button
+                                className="template-edit-btn"
+                                onClick={() => setTemplateEditor({
+                                  mode: 'service-edit',
+                                  ruleId: leadAlertRule.id,
+                                  templateId: leadAlertRule.messageTemplate!.id,
+                                  templateName: templates.find(t => t.id === (leadAlertRule.templateId || leadAlertRule.messageTemplate?.id))?.name || 'template',
+                                  content: leadAlertRule.messageTemplate!.content,
+                                  type: 'alert',
+                                })}
+                              >
+                                <Pencil size={12} /> Edit
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                <div className="form-group">
-                  <label>Send alerts to (your phone)</label>
-                  <input
-                    type="tel"
-                    value={alertToPhone}
-                    onChange={e => setAlertToPhone(e.target.value)}
-                    placeholder="+1234567890"
-                  />
+                {/* Call Alert — Expandable Sub-Card (Coming Soon) */}
+                <div className="sub-card sub-card-coming-soon">
+                  <div className="sub-card-header" onClick={() => toggleSubCard('alerts-call')}>
+                    <div className="sub-card-title">
+                      <PhoneCall size={14} />
+                      <span>Call Alert</span>
+                      <span className="coming-soon-badge">Coming Soon</span>
+                    </div>
+                    <ChevronDown size={14} className={expandedSubCards.has('alerts-call') ? 'rotated' : ''} />
+                  </div>
+                  {expandedSubCards.has('alerts-call') && (
+                    <div className="sub-card-body sub-card-disabled">
+                      <p className="form-hint">Get a phone call when a new lead arrives. We'll connect you directly to the customer.</p>
+
+                      <div className="form-group">
+                        <label>Call to (your phone)</label>
+                        <input type="tel" value="" placeholder="+1234567890" disabled />
+                      </div>
+
+                      <div className="form-group">
+                        <label>Call from</label>
+                        <div className="select-wrapper">
+                          <select disabled>
+                            <option>Select phone number</option>
+                            {poolPhones.map(p => (
+                              <option key={p.id} value={p.phoneNumber}>
+                                {p.phoneNumber} (LeadBridge)
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={16} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <div className="form-group">
-                  <label>Send from</label>
-                  <div className="select-wrapper">
-                    <select value={alertFromPhone} onChange={e => setAlertFromPhone(e.target.value)}>
-                      <option value="">Select phone number</option>
-                      {poolPhones.map(p => (
-                        <option key={p.id} value={p.phoneNumber}>
-                          {p.phoneNumber} ({p.provider}){p.assigned ? ' - assigned' : ''}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown size={16} />
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label>SMS Template</label>
-                  <textarea
-                    rows={3}
-                    value={alertTemplate}
-                    onChange={e => setAlertTemplate(e.target.value)}
-                    placeholder="Enter alert message..."
-                  />
-                  <div className="variable-buttons">
-                    {SMS_VARIABLES.map(v => (
-                      <button
-                        key={v.name}
-                        className="variable-btn"
-                        onClick={() => insertVariable(v.name, setAlertTemplate)}
-                        title={v.desc}
-                      >
-                        {v.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {leadAlertRule && (
-                  <div className="form-actions">
-                    <button className="btn btn-primary btn-sm" onClick={saveLeadAlertSettings} disabled={saving}>
-                      {saving ? <Loader2 size={14} className="spinner" /> : null}
-                      Save Settings
-                    </button>
-                  </div>
-                )}
               </div>
             </ServiceCard>
 
@@ -1007,10 +988,7 @@ export function Services() {
                               value={firstTextingRule.templateId || firstTextingRule.messageTemplate?.id || ''}
                               onChange={e => {
                                 if (e.target.value === '__create_new__') {
-                                  setCreatingTemplate(`texting-first-${firstTextingRule.id}`);
-                                  setNewTemplateName('');
-                                  setNewTemplateContent('');
-                                  setTemplateNameError(null);
+                                  setTemplateEditor({ mode: 'create', ruleId: firstTextingRule.id, content: '', type: 'texting' });
                                 } else {
                                   changeTextingRuleTemplate(firstTextingRule.id, e.target.value);
                                 }
@@ -1025,94 +1003,25 @@ export function Services() {
                             </select>
                             <ChevronDown size={16} />
                           </div>
-                          {creatingTemplate === `texting-first-${firstTextingRule.id}` && (
-                            <div className="create-template-inline">
-                              <input
-                                type="text"
-                                placeholder="Template name"
-                                value={newTemplateName}
-                                onChange={e => { setNewTemplateName(e.target.value); setTemplateNameError(null); }}
-                              />
-                              {templateNameError && <span className="field-error">{templateNameError}</span>}
-                              <textarea
-                                rows={3}
-                                placeholder="Template content..."
-                                value={newTemplateContent}
-                                onChange={e => setNewTemplateContent(e.target.value)}
-                              />
-                              <div className="create-template-actions">
-                                <button className="btn btn-primary btn-sm" onClick={() => createNewTemplate(`texting-first-${firstTextingRule.id}`, firstTextingRule.id, 'texting')} disabled={saving}>
-                                  Create
-                                </button>
-                                <button className="btn btn-sm" onClick={() => { setCreatingTemplate(null); setTemplateNameError(null); }}>Cancel</button>
-                              </div>
-                            </div>
-                          )}
                           {firstTextingRule.messageTemplate && (
-                            editingTemplateRuleId === firstTextingRule.id ? (
-                              <div className="template-preview-edit">
-                                <textarea
-                                  value={editingTemplateContent}
-                                  onChange={e => setEditingTemplateContent(e.target.value)}
-                                />
-                                {!applyMode?.startsWith(`choosing-${firstTextingRule.id}`) && !applyMode?.startsWith(`save-as-new-${firstTextingRule.id}`) && (
-                                  <div className="template-preview-actions">
-                                    <button className="btn btn-sm" onClick={() => { setEditingTemplateRuleId(null); setApplyMode(null); }}>Cancel</button>
-                                    <button className="btn btn-primary btn-sm" onClick={() => setApplyMode(`choosing-${firstTextingRule.id}`)} disabled={saving}>
-                                      Apply
-                                    </button>
-                                  </div>
-                                )}
-                                {applyMode === `choosing-${firstTextingRule.id}` && (
-                                  <div className="apply-mode-chooser">
-                                    <span className="apply-mode-label">Save changes as:</span>
-                                    <button
-                                      className="btn btn-primary btn-sm"
-                                      onClick={() => { setApplyMode(null); saveTemplateContent(firstTextingRule.id, firstTextingRule.messageTemplate!.id); }}
-                                      disabled={saving}
-                                    >
-                                      Update &ldquo;{templates.find(t => t.id === (firstTextingRule.templateId || firstTextingRule.messageTemplate?.id))?.name || 'template'}&rdquo;
-                                    </button>
-                                    <button
-                                      className="btn btn-sm"
-                                      onClick={() => { setApplyMode(`save-as-new-${firstTextingRule.id}`); setSaveAsNewName(''); setTemplateNameError(null); }}
-                                    >
-                                      Save as New
-                                    </button>
-                                    <button className="btn btn-sm" onClick={() => setApplyMode(null)}>Cancel</button>
-                                  </div>
-                                )}
-                                {applyMode === `save-as-new-${firstTextingRule.id}` && (
-                                  <div className="save-as-new-form">
-                                    <input
-                                      type="text"
-                                      placeholder="New template name"
-                                      value={saveAsNewName}
-                                      onChange={e => { setSaveAsNewName(e.target.value); setTemplateNameError(null); }}
-                                    />
-                                    {templateNameError && <span className="field-error">{templateNameError}</span>}
-                                    <div className="save-as-new-actions">
-                                      <button className="btn btn-sm" onClick={() => setApplyMode(`choosing-${firstTextingRule.id}`)}>Back</button>
-                                      <button className="btn btn-primary btn-sm" onClick={() => saveAsNewTemplate(firstTextingRule.id, 'texting')} disabled={saving}>
-                                        Create &amp; Apply
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
+                            <div className="template-preview-container">
+                              <div className="template-preview">
+                                {firstTextingRule.messageTemplate.content}
                               </div>
-                            ) : (
-                              <div className="template-preview-container">
-                                <div className="template-preview">
-                                  {firstTextingRule.messageTemplate.content}
-                                </div>
-                                <button
-                                  className="template-edit-btn"
-                                  onClick={() => { setEditingTemplateRuleId(firstTextingRule.id); setEditingTemplateContent(firstTextingRule.messageTemplate!.content); setApplyMode(null); }}
-                                >
-                                  <Pencil size={12} /> Edit
-                                </button>
-                              </div>
-                            )
+                              <button
+                                className="template-edit-btn"
+                                onClick={() => setTemplateEditor({
+                                  mode: 'service-edit',
+                                  ruleId: firstTextingRule.id,
+                                  templateId: firstTextingRule.messageTemplate!.id,
+                                  templateName: templates.find(t => t.id === (firstTextingRule.templateId || firstTextingRule.messageTemplate?.id))?.name || 'template',
+                                  content: firstTextingRule.messageTemplate!.content,
+                                  type: 'texting',
+                                })}
+                              >
+                                <Pencil size={12} /> Edit
+                              </button>
+                            </div>
                           )}
                         </div>
                       )}
@@ -1250,6 +1159,21 @@ export function Services() {
           </div>
         )}
       </div>
+
+      {/* Template Editor Modal */}
+      <TemplateEditorModal
+        isOpen={!!templateEditor}
+        onClose={() => setTemplateEditor(null)}
+        mode={templateEditor?.mode === 'create' ? 'create' : 'service-edit'}
+        initialName=""
+        initialContent={templateEditor?.content || ''}
+        templateName={templateEditor?.templateName}
+        saving={saving}
+        variables={templateEditor?.type === 'autoReply' ? AUTO_REPLY_VARIABLES : SMS_VARIABLES}
+        existingNames={templates.map(t => t.name)}
+        onSave={templateEditor?.mode === 'create' ? handleEditorCreate : handleEditorUpdate}
+        onSaveAsNew={handleEditorSaveAsNew}
+      />
     </div>
   );
 }

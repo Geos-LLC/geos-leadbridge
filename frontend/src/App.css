@@ -6841,20 +6841,17 @@ body {
   margin-bottom: 8px;
 }
 
-/* Template preview — resizable, read-only */
+/* Template preview — auto-height, read-only */
 .service-card-settings .template-preview {
   padding: 12px;
-  padding-right: 36px;
+  padding-right: 56px;
   background: white;
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
   font-size: 13px;
   color: var(--text-primary);
   white-space: pre-wrap;
-  height: 80px;
-  min-height: 48px;
-  overflow: auto;
-  resize: vertical;
+  min-height: 40px;
   cursor: default;
   transition: border-color 0.2s;
 }
@@ -6863,7 +6860,7 @@ body {
   border-color: var(--text-muted);
 }
 
-/* Edit button — top-right of preview container */
+/* Edit button — always visible, top-right of preview container */
 .template-edit-btn {
   position: absolute;
   top: 6px;
@@ -6871,93 +6868,115 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 8px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  background: white;
-  border: 1px solid var(--border-color);
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-light, #eef2ff);
+  border: 1px solid var(--primary);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, border-color 0.15s, color 0.15s;
-}
-
-.template-preview-container:hover .template-edit-btn {
   opacity: 1;
+  transition: background 0.15s, box-shadow 0.15s;
 }
 
 .template-edit-btn:hover {
-  color: var(--primary);
-  border-color: var(--primary);
+  background: var(--primary);
+  color: white;
+  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.3);
 }
 
-/* Template preview edit mode */
-.template-preview-edit {
-  margin-top: 8px;
-  margin-bottom: 8px;
+/* Template Editor Modal */
+.template-editor-modal {
+  background: white;
+  border-radius: var(--radius-lg, 12px);
+  width: 90%;
+  max-width: 600px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: modalSlideIn 0.2s ease-out;
 }
 
-.template-preview-edit textarea {
+@keyframes modalSlideIn {
+  from { transform: translateY(-20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.template-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.template-editor-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.template-editor-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.template-editor-name-display {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  background: var(--bg-secondary, #f8f9fa);
+  border-radius: var(--radius-sm);
+}
+
+.template-editor-textarea {
   width: 100%;
-  min-height: 80px;
+  min-height: 160px;
   resize: vertical;
   padding: 12px;
   font-size: 13px;
   font-family: inherit;
-  border: 1px solid var(--primary);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius);
   outline: none;
   white-space: pre-wrap;
+  transition: border-color 0.2s;
 }
 
-.template-preview-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
+.template-editor-textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
 }
 
-/* Apply mode chooser — inline save options */
-.apply-mode-chooser {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  padding: 10px 12px;
-  background: #f8f9ff;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
+.template-editor-variables {
+  margin-top: 12px;
 }
 
-.apply-mode-label {
+.template-editor-variables > label {
   font-size: 12px;
-  color: var(--text-secondary);
   font-weight: 500;
-  white-space: nowrap;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  display: block;
 }
 
-/* Save as new template form */
-.save-as-new-form {
-  margin-top: 8px;
-  padding: 10px 12px;
-  background: #f8f9ff;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
+.template-editor-variables .form-hint {
+  font-weight: 400;
+  color: var(--text-muted);
 }
 
-.save-as-new-form input[type="text"] {
-  width: 100%;
-  padding: 8px 10px;
-  font-size: 13px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  margin-bottom: 8px;
-}
-
-.save-as-new-actions {
+.template-editor-footer {
   display: flex;
+  justify-content: flex-end;
   gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary, #f8f9fa);
+  border-radius: 0 0 var(--radius-lg, 12px) var(--radius-lg, 12px);
 }
 
 /* Create template inline form */

@@ -1,17 +1,14 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Plus, Pencil, Trash2, Loader2, Save, X, Info } from 'lucide-react';
+import { ArrowLeft, Plus, Pencil, Trash2, Loader2, X, Info } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { templatesApi } from '../services/api';
 import type { MessageTemplate } from '../types';
+import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
 
-// Available variables for templates
-const TEMPLATE_VARIABLES = [
-  { name: '{customerName}', description: 'Full customer name' },
-  { name: '{firstName}', description: 'First name only' },
-  { name: '{category}', description: 'Service category or "your project"' },
-  { name: '{city}', description: 'Customer city' },
-  { name: '{state}', description: 'Customer state' },
-];
+// Combined variables for template page
+const ALL_VARIABLES = [...AUTO_REPLY_VARIABLES, ...SMS_VARIABLES.filter(
+  v => !AUTO_REPLY_VARIABLES.some(a => a.desc === v.desc)
+)];
 
 export function MessageSettings() {
   const navigate = useNavigate();
@@ -20,12 +17,9 @@ export function MessageSettings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Edit/create mode
+  // Modal state
+  const [editorMode, setEditorMode] = useState<'create' | 'edit' | null>(null);
   const [editingTemplate, setEditingTemplate] = useState<MessageTemplate | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
-  const [formName, setFormName] = useState('');
-  const [formContent, setFormContent] = useState('');
-  const [formIsDefault, setFormIsDefault] = useState(false);
 
   // Delete confirmation
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -47,58 +41,39 @@ export function MessageSettings() {
     }
   }
 
-  function startCreate() {
-    setIsCreating(true);
+  function openCreate() {
+    setEditorMode('create');
     setEditingTemplate(null);
-    setFormName('');
-    setFormContent('');
-    setFormIsDefault(false);
   }
 
-  function startEdit(template: MessageTemplate) {
+  function openEdit(template: MessageTemplate) {
+    setEditorMode('edit');
     setEditingTemplate(template);
-    setIsCreating(false);
-    setFormName(template.name);
-    setFormContent(template.content);
-    setFormIsDefault(template.isDefault);
   }
 
-  function cancelEdit() {
+  function closeEditor() {
+    setEditorMode(null);
     setEditingTemplate(null);
-    setIsCreating(false);
-    setFormName('');
-    setFormContent('');
-    setFormIsDefault(false);
   }
 
-  async function handleSave() {
-    if (!formName.trim() || !formContent.trim()) {
-      return;
-    }
-
+  async function handleSave({ name, content, isDefault }: { name: string; content: string; isDefault?: boolean }) {
     try {
       setSaving(true);
       setError(null);
 
-      if (isCreating) {
-        const { template } = await templatesApi.createTemplate(
-          formName.trim(),
-          formContent.trim(),
-          formIsDefault,
-        );
+      if (editorMode === 'create') {
+        const { template } = await templatesApi.createTemplate(name, content, isDefault);
         setTemplates(prev => [template, ...prev]);
       } else if (editingTemplate) {
         const { template } = await templatesApi.updateTemplate(editingTemplate.id, {
-          name: formName.trim(),
-          content: formContent.trim(),
-          isDefault: formIsDefault,
+          name,
+          content,
+          isDefault,
         });
-        setTemplates(prev =>
-          prev.map(t => (t.id === template.id ? template : t)),
-        );
+        setTemplates(prev => prev.map(t => (t.id === template.id ? template : t)));
       }
 
-      cancelEdit();
+      closeEditor();
     } catch (err: any) {
       setError(err.message || 'Failed to save template');
     } finally {
@@ -117,10 +92,6 @@ export function MessageSettings() {
     } finally {
       setSaving(false);
     }
-  }
-
-  function insertVariable(variable: string) {
-    setFormContent(prev => prev + variable);
   }
 
   if (loading) {
@@ -164,81 +135,13 @@ export function MessageSettings() {
         <div className="templates-section">
           <div className="section-header">
             <h2>Your Templates</h2>
-            {!isCreating && !editingTemplate && (
-              <button className="btn btn-primary" onClick={startCreate}>
-                <Plus size={16} />
-                Create New
-              </button>
-            )}
+            <button className="btn btn-primary" onClick={openCreate}>
+              <Plus size={16} />
+              Create New
+            </button>
           </div>
 
-          {/* Create/Edit Form */}
-          {(isCreating || editingTemplate) && (
-            <div className="template-form">
-              <div className="form-group">
-                <label>Template Name</label>
-                <input
-                  type="text"
-                  value={formName}
-                  onChange={e => setFormName(e.target.value)}
-                  placeholder="e.g., Follow-up Message"
-                  className="template-name-input"
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Message Content</label>
-                <textarea
-                  value={formContent}
-                  onChange={e => setFormContent(e.target.value)}
-                  placeholder="Hi {firstName}, thanks for reaching out about {category}! I wanted to follow up..."
-                  className="template-content-input"
-                  rows={6}
-                />
-                <div className="variable-buttons">
-                  {TEMPLATE_VARIABLES.map(v => (
-                    <button
-                      key={v.name}
-                      type="button"
-                      className="variable-btn"
-                      onClick={() => insertVariable(v.name)}
-                      title={v.description}
-                    >
-                      {v.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="form-group checkbox-group">
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={formIsDefault}
-                    onChange={e => setFormIsDefault(e.target.checked)}
-                  />
-                  Set as default template
-                </label>
-              </div>
-
-              <div className="form-actions">
-                <button className="btn btn-secondary" onClick={cancelEdit} disabled={saving}>
-                  Cancel
-                </button>
-                <button
-                  className="btn btn-primary"
-                  onClick={handleSave}
-                  disabled={saving || !formName.trim() || !formContent.trim()}
-                >
-                  {saving ? <Loader2 size={16} className="spinner" /> : <Save size={16} />}
-                  {isCreating ? 'Create Template' : 'Save Changes'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Template List */}
-          {templates.length === 0 && !isCreating ? (
+          {templates.length === 0 ? (
             <div className="empty-templates">
               <p>You haven't created any templates yet.</p>
               <p className="hint">
@@ -260,7 +163,7 @@ export function MessageSettings() {
                     <div className="template-actions">
                       <button
                         className="btn-icon"
-                        onClick={() => startEdit(template)}
+                        onClick={() => openEdit(template)}
                         title="Edit template"
                       >
                         <Pencil size={16} />
@@ -299,15 +202,30 @@ export function MessageSettings() {
             Use these variables in your templates. They'll be replaced with actual customer data when sending.
           </p>
           <div className="variables-list">
-            {TEMPLATE_VARIABLES.map(v => (
+            {ALL_VARIABLES.map(v => (
               <div key={v.name} className="variable-item">
                 <code>{v.name}</code>
-                <span>{v.description}</span>
+                <span>{v.desc}</span>
               </div>
             ))}
           </div>
         </div>
       </div>
+
+      {/* Template Editor Modal */}
+      <TemplateEditorModal
+        isOpen={!!editorMode}
+        onClose={closeEditor}
+        mode={editorMode || 'create'}
+        initialName={editingTemplate?.name || ''}
+        initialContent={editingTemplate?.content || ''}
+        saving={saving}
+        variables={ALL_VARIABLES}
+        existingNames={templates.filter(t => t.id !== editingTemplate?.id).map(t => t.name)}
+        showDefaultCheckbox={true}
+        initialIsDefault={editingTemplate?.isDefault || false}
+        onSave={handleSave}
+      />
 
       {/* Delete Confirmation Modal */}
       {deletingId && (
