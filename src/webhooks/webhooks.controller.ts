@@ -60,17 +60,15 @@ export class WebhooksController {
   @Post('sigcore/delivery-status')
   @HttpCode(HttpStatus.OK)
   async handleSigcoreDeliveryStatus(
-    @Headers('x-sigcore-event') eventType: string,
-    @Headers('x-sigcore-timestamp') timestamp: string,
-    @Headers('x-sigcore-tenant-id') tenantId: string,
-    @Headers('x-sigcore-signature') signature: string,
+    @Headers('x-callio-event') eventType: string,
+    @Headers('x-callio-timestamp') timestamp: string,
+    @Headers('x-callio-signature') signature: string,
     @Body() payload: any,
     @Req() req: RawBodyRequest<Request>,
   ) {
     await this.webhooksService.handleSigcoreDeliveryStatus({
-      eventType,
+      eventType: eventType || payload?.event,
       timestamp,
-      tenantId,
       signature,
       payload,
       rawBody: req.rawBody?.toString() || JSON.stringify(payload),

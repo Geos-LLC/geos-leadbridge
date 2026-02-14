@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { SigcoreService } from '../sigcore/sigcore.service';
 import { AdminService } from './admin.service';
@@ -12,6 +13,7 @@ export class AdminPhonePoolService {
     private prisma: PrismaService,
     private sigcoreService: SigcoreService,
     private adminService: AdminService,
+    private configService: ConfigService,
   ) {}
 
   /**
@@ -351,6 +353,65 @@ export class AdminPhonePoolService {
       take: 20,
       orderBy: { email: 'asc' },
     });
+  }
+
+  /**
+   * Register webhook subscription with Sigcore for delivery status notifications
+   */
+  async setupDeliveryWebhook(adminId: string): Promise<{ success: boolean; webhookId?: string; error?: string }> {
+    const apiKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (!apiKey) {
+      return { success: false, error: 'SIGCORE_API_KEY not configured' };
+    }
+
+    const appUrl = this.configService.get<string>('FRONTEND_URL', '') || this.configService.get<string>('RAILWAY_PUBLIC_DOMAIN', '');
+    if (!appUrl) {
+      return { success: false, error: 'No public URL configured (FRONTEND_URL or RAILWAY_PUBLIC_DOMAIN)' };
+    }
+
+    // Build webhook URL - the handler is at /api/webhooks/sigcore/delivery-status
+    const baseUrl = appUrl.startsWith('http') ? appUrl : `https://${appUrl}`;
+    const webhookUrl = `${baseUrl}/api/webhooks/sigcore/delivery-status`;
+
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    const endpoint = `${sigcoreUrl}/v1/webhook-subscriptions`;
+
+    this.logger.log(`[setupDeliveryWebhook] Creating subscription at ${endpoint}`);
+    this.logger.log(`[setupDeliveryWebhook] Webhook URL: ${webhookUrl}`);
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: 'LeadBridge Delivery Notifications',
+          webhookUrl,
+          events: ['message.sent', 'message.delivered', 'message.failed'],
+        }),
+      });
+
+      this.logger.log(`[setupDeliveryWebhook] Response status: ${response.status}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.logger.error(`[setupDeliveryWebhook] Failed: ${response.status} - ${errorText}`);
+        return { success: false, error: `Sigcore API error: ${response.status} - ${errorText}` };
+      }
+
+      const result = await response.json();
+      const webhookId = result.data?.id || result.id;
+
+      this.logger.log(`[setupDeliveryWebhook] Created webhook: ${webhookId}`);
+      await this.adminService.logAdminAction(adminId, 'SETUP_DELIVERY_WEBHOOK', null, { webhookId, webhookUrl });
+
+      return { success: true, webhookId };
+    } catch (error: any) {
+      this.logger.error(`[setupDeliveryWebhook] Error: ${error.message}`);
+      return { success: false, error: error.message };
+    }
   }
 
   /**

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { AdminPhonePoolController } from './admin-phone-pool.controller';
@@ -8,7 +9,7 @@ import { StripeModule } from '../stripe/stripe.module';
 import { SigcoreModule } from '../sigcore/sigcore.module';
 
 @Module({
-  imports: [StripeModule, SigcoreModule],
+  imports: [ConfigModule, StripeModule, SigcoreModule],
   controllers: [AdminController, AdminPhonePoolController],
   providers: [AdminService, AdminPhonePoolService, PrismaService],
   exports: [AdminService, AdminPhonePoolService],

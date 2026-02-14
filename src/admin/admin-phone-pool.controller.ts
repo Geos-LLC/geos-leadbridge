@@ -98,6 +98,15 @@ export class AdminPhonePoolController {
     return { success: true, data: { results } };
   }
 
+  /**
+   * Register webhook subscription with Sigcore for delivery notifications
+   */
+  @Post('setup-webhook')
+  async setupWebhook(@Req() req: any) {
+    const result = await this.phonePoolService.setupDeliveryWebhook(req.user.id);
+    return { success: result.success, data: result, error: result.error };
+  }
+
   @Post(':phonePoolId/assign/:userId')
   async assignToUser(
     @Req() req: any,

@@ -1362,7 +1362,8 @@ export class NotificationsService {
    * Validate Sigcore tenant API key by attempting to list webhook subscriptions
    */
   async validateSigcoreApiKey(apiKey: string): Promise<{ valid: boolean }> {
-    const endpoint = 'https://sigcore-production.up.railway.app/api/webhook-subscriptions';
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    const endpoint = `${sigcoreUrl}/v1/webhook-subscriptions`;
     this.logger.log(`[validateSigcoreApiKey] Validating key via: ${endpoint}`);
 
     try {
@@ -1472,7 +1473,8 @@ export class NotificationsService {
    * Create a webhook subscription in Sigcore for delivery status updates
    */
   async createSigcoreWebhook(apiKey: string, webhookUrl: string): Promise<{ webhookId: string | null; error?: string }> {
-    const endpoint = 'https://sigcore-production.up.railway.app/api/webhook-subscriptions';
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    const endpoint = `${sigcoreUrl}/v1/webhook-subscriptions`;
     this.logger.log(`[createSigcoreWebhook] Creating webhook subscription at: ${endpoint}`);
     this.logger.log(`[createSigcoreWebhook] Webhook URL: ${webhookUrl}`);
 
@@ -1484,7 +1486,7 @@ export class NotificationsService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name: 'LeadBridge Delivery Status',
+          name: 'LeadBridge Delivery Notifications',
           webhookUrl: webhookUrl,
           events: ['message.sent', 'message.delivered', 'message.failed'],
         }),
@@ -1513,7 +1515,8 @@ export class NotificationsService {
    * Delete a webhook subscription from Sigcore
    */
   async deleteSigcoreWebhook(apiKey: string, webhookId: string): Promise<{ success: boolean; error?: string }> {
-    const endpoint = `https://sigcore-production.up.railway.app/api/webhook-subscriptions/${webhookId}`;
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    const endpoint = `${sigcoreUrl}/v1/webhook-subscriptions/${webhookId}`;
     this.logger.log(`[deleteSigcoreWebhook] Deleting webhook subscription: ${endpoint}`);
 
     try {

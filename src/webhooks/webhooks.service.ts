@@ -808,16 +808,15 @@ export class WebhooksService {
   async handleSigcoreDeliveryStatus(params: {
     eventType: string;
     timestamp: string;
-    tenantId: string;
     signature: string;
     payload: any;
     rawBody: string;
   }): Promise<void> {
-    const { eventType, timestamp, tenantId, signature, payload, rawBody } = params;
+    const { eventType, timestamp, signature, payload, rawBody } = params;
 
-    this.logger.log('=== SIGCORE WEBHOOK RECEIVED ===');
-    this.logger.log(`Event: ${eventType}, Tenant: ${tenantId}, Timestamp: ${timestamp}`);
-    this.logger.log(`Payload: ${JSON.stringify(payload)}`);
+    this.logger.log('=== SIGCORE DELIVERY WEBHOOK ===');
+    this.logger.log(`Event: ${eventType}, Timestamp: ${timestamp}`);
+    this.logger.log(`Payload: ${JSON.stringify(payload).substring(0, 500)}`);
 
     // Webhook verification: signature is verified by Sigcore at the platform level.
     // We accept all webhooks from Sigcore since the webhook subscription is managed via the API.

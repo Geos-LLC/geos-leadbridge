@@ -816,6 +816,10 @@ export const adminApi = {
     const { data } = await api.post('/v1/admin/phone-pool/sync');
     return data;
   },
+  setupDeliveryWebhook: async (): Promise<{ success: boolean; data?: { webhookId?: string }; error?: string }> => {
+    const { data } = await api.post('/v1/admin/phone-pool/setup-webhook');
+    return data;
+  },
   assignPhone: async (phonePoolId: string, userId: string): Promise<PhonePoolEntry> => {
     const { data } = await api.post(`/v1/admin/phone-pool/${phonePoolId}/assign/${userId}`);
     return data.data;
