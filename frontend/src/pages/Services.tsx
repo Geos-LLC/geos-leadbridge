@@ -20,15 +20,6 @@ const DELAY_PRESETS = [
   { label: '24 hours', minutes: 1440 },
 ];
 
-// Platform template variables (for auto-reply)
-const PLATFORM_VARIABLES = [
-  { name: '{customerName}', desc: 'Full customer name' },
-  { name: '{firstName}', desc: 'First name only' },
-  { name: '{category}', desc: 'Service category' },
-  { name: '{city}', desc: 'Customer city' },
-  { name: '{state}', desc: 'Customer state' },
-];
-
 // SMS template variables (for lead alerts + customer texting)
 const SMS_VARIABLES = [
   { name: '{{lead.name}}', desc: 'Customer name' },
