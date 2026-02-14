@@ -110,6 +110,14 @@ export class AdminPhonePoolService {
     if (result.success) {
       await this.adminService.logAdminAction(adminId, 'CONNECT_PROVIDER', null, { provider });
       this.logger.log(`Admin ${adminId} connected ${provider}`);
+
+      // Auto-setup delivery webhook
+      const webhookResult = await this.setupDeliveryWebhook(adminId);
+      if (webhookResult.success) {
+        this.logger.log(`Auto-created delivery webhook: ${webhookResult.webhookId}`);
+      } else {
+        this.logger.warn(`Failed to auto-create delivery webhook: ${webhookResult.error}`);
+      }
     }
 
     return result;

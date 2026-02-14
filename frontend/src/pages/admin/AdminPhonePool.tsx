@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, Search, Loader2, UserPlus, UserMinus, Trash2, RefreshCw, X, Link, Unlink, Download, Bell } from 'lucide-react';
+import { Phone, Search, Loader2, UserPlus, UserMinus, Trash2, RefreshCw, X, Link, Unlink, Download } from 'lucide-react';
 import { adminApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
@@ -320,26 +320,6 @@ export default function AdminPhonePool() {
           >
             <Unlink size={16} />
             Disconnect Twilio
-          </button>
-          <button
-            className="btn btn-secondary"
-            onClick={async () => {
-              try {
-                const result = await adminApi.setupDeliveryWebhook();
-                if (result.success) {
-                  notify.success('Webhook Created', `Delivery webhook registered with Sigcore (ID: ${result.data?.webhookId})`);
-                } else {
-                  notify.error('Failed', result.error || 'Failed to create webhook');
-                }
-              } catch (error: any) {
-                notify.error('Error', error.response?.data?.error || error.message || 'Failed to setup webhook');
-              }
-            }}
-            disabled={tenantKeyConfigured === false}
-            title="Register delivery status webhook with Sigcore"
-          >
-            <Bell size={16} />
-            Setup Delivery Webhook
           </button>
         </div>
       </div>
