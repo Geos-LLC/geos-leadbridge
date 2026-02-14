@@ -20,6 +20,7 @@ import BillingSettings from './pages/BillingSettings';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminUserDetails from './pages/admin/AdminUserDetails';
 import AdminPhonePool from './pages/admin/AdminPhonePool';
+import { Demo } from './pages/Demo';
 import { useAuthStore } from './store/authStore';
 import './App.css';
 
@@ -48,6 +49,7 @@ function App() {
           path="/reset-password"
           element={isAuthenticated ? <Navigate to="/dashboard" /> : <ResetPassword />}
         />
+        <Route path="/demo" element={<Demo />} />
 
         {/* Protected routes */}
         <Route element={<ProtectedRoute />}>
