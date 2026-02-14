@@ -85,7 +85,7 @@ export default function AdminPhonePool() {
         setShowConnect(false);
         setConnectFields({ apiKey: '', accountSid: '', authToken: '', phoneNumber: '' });
         // Auto-sync after connecting
-        handleSync();
+        await handleSync();
       } else {
         notify.error('Connection Failed', result.error || 'Failed to connect provider');
       }
@@ -126,7 +126,7 @@ export default function AdminPhonePool() {
         } else {
           notify.success('Up to date', 'No new numbers to sync');
         }
-        loadData();
+        await loadData();
       }
     } catch (error: any) {
       console.error('Failed to sync:', error);
@@ -302,6 +302,24 @@ export default function AdminPhonePool() {
             <Link size={16} />
             Connect Provider
           </button>
+          <button
+            className="btn btn-danger"
+            onClick={() => handleDisconnect('openphone')}
+            disabled={tenantKeyConfigured === false}
+            title="Disconnect OpenPhone"
+          >
+            <Unlink size={16} />
+            Disconnect OpenPhone
+          </button>
+          <button
+            className="btn btn-danger"
+            onClick={() => handleDisconnect('twilio')}
+            disabled={tenantKeyConfigured === false}
+            title="Disconnect Twilio"
+          >
+            <Unlink size={16} />
+            Disconnect Twilio
+          </button>
         </div>
       </div>
 
@@ -388,22 +406,6 @@ export default function AdminPhonePool() {
               <button className="btn btn-secondary" onClick={() => setShowConnect(false)}>Cancel</button>
             </div>
 
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
-              <button
-                className="btn btn-sm btn-danger"
-                onClick={() => handleDisconnect('openphone')}
-                title="Disconnect OpenPhone"
-              >
-                <Unlink size={14} /> Disconnect OpenPhone
-              </button>
-              <button
-                className="btn btn-sm btn-danger"
-                onClick={() => handleDisconnect('twilio')}
-                title="Disconnect Twilio"
-              >
-                <Unlink size={14} /> Disconnect Twilio
-              </button>
-            </div>
           </div>
         </div>
       )}
