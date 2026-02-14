@@ -421,7 +421,7 @@ export class SigcoreService {
     const headers = this.buildTenantHeaders();
 
     if (provider === 'openphone') {
-      const url = this.buildUrl('/api/integrations/openphone/connect');
+      const url = this.buildUrl('/integrations/openphone/connect');
       this.logger.log(`[adminConnectProvider] Connecting OpenPhone via: ${url}`);
 
       try {
@@ -436,7 +436,7 @@ export class SigcoreService {
         return { success: false, error: `Failed to connect OpenPhone: ${msg}` };
       }
     } else {
-      const url = this.buildUrl('/api/integrations/twilio');
+      const url = this.buildUrl('/integrations/twilio');
       this.logger.log(`[adminConnectProvider] Connecting Twilio via: ${url}`);
 
       try {
@@ -462,7 +462,7 @@ export class SigcoreService {
    */
   async adminFetchOpenPhoneNumbers(): Promise<any[]> {
     const headers = this.buildTenantHeaders();
-    const url = this.buildUrl('/api/integrations/openphone/numbers');
+    const url = this.buildUrl('/integrations/openphone/numbers');
     this.logger.log(`[adminFetchOpenPhoneNumbers] Fetching from: ${url}`);
 
     try {
@@ -484,7 +484,7 @@ export class SigcoreService {
    */
   async adminFetchTwilioNumbers(): Promise<any[]> {
     const headers = this.buildTenantHeaders();
-    const url = this.buildUrl('/api/integrations/twilio/phone-numbers');
+    const url = this.buildUrl('/integrations/twilio/phone-numbers');
     this.logger.log(`[adminFetchTwilioNumbers] Fetching from: ${url}`);
 
     try {
@@ -507,8 +507,8 @@ export class SigcoreService {
   async adminDisconnectProvider(provider: 'openphone' | 'twilio'): Promise<{ success: boolean; error?: string }> {
     const headers = this.buildTenantHeaders();
     const url = provider === 'openphone'
-      ? this.buildUrl('/api/integrations/openphone/disconnect')
-      : this.buildUrl('/api/integrations/twilio');
+      ? this.buildUrl('/integrations/openphone/disconnect')
+      : this.buildUrl('/integrations/twilio');
 
     this.logger.log(`[adminDisconnectProvider] Disconnecting ${provider} via: ${url}`);
 
