@@ -48,7 +48,6 @@ export class SigcoreService {
   private readonly logger = new Logger(SigcoreService.name);
   private readonly sigcoreApiUrl: string;
   private readonly sigcoreApiKey: string | undefined;
-  private readonly sigcoreTenantKey: string | undefined;
 
   constructor(
     private configService: ConfigService,
@@ -57,10 +56,8 @@ export class SigcoreService {
   ) {
     this.sigcoreApiUrl = this.configService.get<string>('SIGCORE_API_URL') || 'https://sigcore-production.up.railway.app';
     this.sigcoreApiKey = this.configService.get<string>('SIGCORE_API_KEY');
-    this.sigcoreTenantKey = this.configService.get<string>('SIGCORE_TENANT_KEY');
 
     this.logger.log(`Sigcore API URL: ${this.sigcoreApiUrl}`);
-    this.logger.log(`Sigcore Tenant Key: ${this.sigcoreTenantKey ? 'configured' : 'NOT SET'}`);
 
     if (!this.sigcoreApiKey) {
       this.logger.warn('Sigcore API key not configured. Phone provisioning will be disabled.');
@@ -392,18 +389,19 @@ export class SigcoreService {
    * Check if admin tenant key is configured
    */
   hasTenantKey(): boolean {
-    return !!this.sigcoreTenantKey;
+    return !!this.sigcoreApiKey;
   }
 
   /**
    * Build headers for tenant API requests (x-api-key)
+   * Uses the same SIGCORE_API_KEY but with x-api-key header
    */
   private buildTenantHeaders(): Record<string, string> {
-    if (!this.sigcoreTenantKey) {
-      throw new BadRequestException('SIGCORE_TENANT_KEY not configured. Set it in Railway environment variables.');
+    if (!this.sigcoreApiKey) {
+      throw new BadRequestException('SIGCORE_API_KEY not configured. Set it in Railway environment variables.');
     }
     return {
-      'x-api-key': this.sigcoreTenantKey,
+      'x-api-key': this.sigcoreApiKey,
       'Content-Type': 'application/json',
     };
   }

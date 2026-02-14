@@ -230,7 +230,7 @@ export default function AdminPhonePool() {
       {tenantKeyConfigured === false && (
         <div className="card" style={{ borderColor: 'var(--warning)', marginBottom: '1rem' }}>
           <div className="card-body" style={{ color: 'var(--warning)' }}>
-            <strong>SIGCORE_TENANT_KEY not configured.</strong> Set the <code>SIGCORE_TENANT_KEY</code> environment variable with your <code>sc_tenant_...</code> key to enable provider connections.
+            <strong>SIGCORE_API_KEY not configured.</strong> Set the <code>SIGCORE_API_KEY</code> environment variable to enable provider connections.
           </div>
         </div>
       )}
