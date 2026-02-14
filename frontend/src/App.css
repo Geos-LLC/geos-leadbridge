@@ -6082,9 +6082,32 @@ body {
   color: var(--text-secondary);
 }
 
+.assigned-user-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .assigned-user {
   font-size: 13px;
   color: var(--text-primary);
+  font-weight: 500;
+}
+
+.assigned-user-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.assigned-user-note {
+  font-size: 11px;
+  color: var(--primary);
+  font-style: italic;
+}
+
+.unassigned-label {
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 .provision-form.card {
@@ -6242,6 +6265,13 @@ body {
 .provider-tab.active {
   color: var(--primary);
   border-bottom-color: var(--primary);
+}
+
+.settings-description {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin-bottom: 16px;
+  line-height: 1.5;
 }
 
 .pool-phone-section {

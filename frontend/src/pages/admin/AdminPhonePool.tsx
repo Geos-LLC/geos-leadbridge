@@ -445,11 +445,18 @@ export default function AdminPhonePool() {
                   </td>
                   <td>
                     {phone.assignedToUser ? (
-                      <span className="assigned-user">
-                        {phone.assignedToUser.email}
-                        {phone.assignedToUser.name && ` (${phone.assignedToUser.name})`}
-                      </span>
-                    ) : '-'}
+                      <div className="assigned-user-cell">
+                        <span className="assigned-user">
+                          {phone.assignedToUser.email}
+                        </span>
+                        {phone.assignedToUser.name && (
+                          <span className="assigned-user-name">{phone.assignedToUser.name}</span>
+                        )}
+                        <span className="assigned-user-note">Private to this tenant</span>
+                      </div>
+                    ) : (
+                      <span className="unassigned-label">Unassigned</span>
+                    )}
                   </td>
                   <td>{new Date(phone.provisionedAt).toLocaleDateString()}</td>
                   <td>

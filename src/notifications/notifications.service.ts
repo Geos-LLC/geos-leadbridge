@@ -1282,7 +1282,9 @@ export class NotificationsService {
       return [];
     }
 
-    if (!settings.sigcoreApiKey) {
+    // Resolve API key: stored key or app-level fallback
+    const effectiveApiKey = settings.sigcoreApiKey || this.appSigcoreApiKey;
+    if (!effectiveApiKey) {
       this.logger.warn(`[getSigcorePhoneNumbers] No API key found for account ${savedAccountId}`);
       return [];
     }
@@ -1305,7 +1307,7 @@ export class NotificationsService {
     }
 
     // For OpenPhone, fetch via conversations endpoint
-    return this.fetchOpenPhoneNumbers(settings.sigcoreApiKey);
+    return this.fetchOpenPhoneNumbers(effectiveApiKey);
   }
 
   /**
@@ -1607,7 +1609,7 @@ export class NotificationsService {
   ): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[]; error?: string }> {
     this.logger.log(`[connectSigcore] Connecting account ${savedAccountId} with provider ${provider || 'none'}`);
 
-    // 1. Use provided API key, or fall back to stored one
+    // 1. Use provided API key, or fall back to stored one, or fall back to app-level key
     let effectiveApiKey = apiKey;
     if (!effectiveApiKey) {
       const settings = await this.prisma.notificationSettings.findUnique({
@@ -1617,8 +1619,13 @@ export class NotificationsService {
       effectiveApiKey = settings?.sigcoreApiKey || null;
     }
 
+    // Fall back to app-level SIGCORE_API_KEY (same key used by admin for pool phones)
     if (!effectiveApiKey) {
-      return { success: false, phoneNumbers: [], error: 'No API key configured. Please save your API key first.' };
+      effectiveApiKey = this.appSigcoreApiKey || null;
+    }
+
+    if (!effectiveApiKey) {
+      return { success: false, phoneNumbers: [], error: 'No API key configured. Contact your administrator.' };
     }
 
     // 2. Validate the API key
@@ -1740,14 +1747,17 @@ export class NotificationsService {
       return { success: true }; // Already disconnected
     }
 
+    // Resolve API key: stored key or app-level fallback
+    const effectiveApiKey = settings.sigcoreApiKey || this.appSigcoreApiKey;
+
     // 1. Disconnect provider integration via Sigcore API
-    if (settings.sigcoreApiKey && settings.sigcoreProvider) {
-      await this.disconnectProviderViaSigcore(settings.sigcoreApiKey, settings.sigcoreProvider);
+    if (effectiveApiKey && settings.sigcoreProvider) {
+      await this.disconnectProviderViaSigcore(effectiveApiKey, settings.sigcoreProvider);
     }
 
     // 2. Delete webhook if exists
-    if (settings.sigcoreApiKey && settings.sigcoreWebhookId) {
-      const deleteResult = await this.deleteSigcoreWebhook(settings.sigcoreApiKey, settings.sigcoreWebhookId);
+    if (effectiveApiKey && settings.sigcoreWebhookId) {
+      const deleteResult = await this.deleteSigcoreWebhook(effectiveApiKey, settings.sigcoreWebhookId);
       if (!deleteResult.success) {
         this.logger.warn(`[disconnectSigcore] Failed to delete webhook: ${deleteResult.error}`);
       }

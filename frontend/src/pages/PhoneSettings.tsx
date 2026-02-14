@@ -277,21 +277,23 @@ export function PhoneSettings() {
       )}
 
       <div className="settings-content">
-        {/* Section 1: Assigned Pool Phone */}
-        {loadingPoolPhone ? (
-          <div className="settings-section">
+        <p className="settings-description">
+          You have two options for sending SMS: use a phone number assigned by your administrator, or connect your own provider.
+        </p>
+
+        {/* Option 1: Assigned Pool Phone */}
+        <div className="settings-section pool-phone-section">
+          <div className="section-header">
+            <h2>
+              <PhoneCall size={18} />
+              Option 1: Admin-Assigned Phone
+            </h2>
+          </div>
+          {loadingPoolPhone ? (
             <div className="loading-container">
               <Loader2 size={20} className="spinner" />
             </div>
-          </div>
-        ) : poolPhone ? (
-          <div className="settings-section pool-phone-section">
-            <div className="section-header">
-              <h2>
-                <PhoneCall size={18} />
-                Your Assigned Phone
-              </h2>
-            </div>
+          ) : poolPhone ? (
             <div className="pool-phone-card">
               <div className="pool-phone-info">
                 <span className="pool-phone-number">{poolPhone.phoneNumber}</span>
@@ -307,9 +309,14 @@ export function PhoneSettings() {
                 Assigned by administrator. Used as default sender for SMS alerts.
               </p>
             </div>
-          </div>
-        ) : null}
+          ) : (
+            <p className="pool-phone-note">
+              No phone assigned yet. Your administrator can assign a phone number from the pool.
+            </p>
+          )}
+        </div>
 
+        {/* Option 2: Connect Your Own Provider */}
         {/* Account Selector */}
         <div className="account-selector">
           <label>Account:</label>
@@ -333,12 +340,12 @@ export function PhoneSettings() {
             <Loader2 size={24} className="spinner" />
           </div>
         ) : (
-          /* Provider Connection Section */
+          /* Option 2: Connect Your Own Provider */
           <div className="settings-section provider-connection">
             <div className="section-header">
               <h2>
                 <Phone size={18} />
-                Connect Your Provider
+                Option 2: Connect Your Own Provider
               </h2>
             </div>
 
