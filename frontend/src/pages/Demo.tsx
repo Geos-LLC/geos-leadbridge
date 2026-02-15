@@ -144,22 +144,12 @@ export function Demo() {
         </button>
 
         {/* Demo Banner */}
-        <div style={{
-          background: 'linear-gradient(135deg, #dbeafe, #ede9fe)',
-          border: '1px solid #93c5fd',
-          borderRadius: '10px',
-          padding: '14px 18px',
-          margin: '32px 32px 0',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          fontSize: '14px',
-        }}>
-          <AlertCircle size={18} style={{ color: '#3b82f6', flexShrink: 0 }} />
-          <span style={{ color: '#1e40af' }}>
-            This is a <strong>demo page</strong> with mock data — no login required.
-            <RouterLink to="/register" style={{ marginLeft: '8px', color: '#2563eb', fontWeight: 600 }}>
-              Create an account for real data
+        <div className="demo-banner">
+          <AlertCircle size={18} className="demo-banner-icon" />
+          <span className="demo-banner-text">
+            This is a <strong>demo</strong> with mock data — no login required.
+            <RouterLink to="/register" className="demo-banner-link">
+              Create an account
             </RouterLink>
           </span>
         </div>

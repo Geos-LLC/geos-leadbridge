@@ -7818,6 +7818,33 @@ body {
 }
 
 /* ==========================================
+   Demo Banner
+   ========================================== */
+.demo-banner {
+  background: linear-gradient(135deg, #dbeafe, #ede9fe);
+  border: 1px solid #93c5fd;
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin: 32px 32px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+.demo-banner-icon {
+  color: #3b82f6;
+  flex-shrink: 0;
+}
+.demo-banner-text {
+  color: #1e40af;
+}
+.demo-banner-link {
+  margin-left: 8px;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+/* ==========================================
    Mobile Responsive — Global
    ========================================== */
 
@@ -7855,6 +7882,40 @@ body {
    Mobile Responsive — 768px (Tablet / Large Phone)
    ========================================== */
 @media (max-width: 768px) {
+
+  /* --- Demo Banner --- */
+  .demo-banner {
+    margin: 16px 16px 0;
+    padding: 12px 14px;
+    font-size: 13px;
+    flex-wrap: wrap;
+  }
+  .demo-banner-link {
+    display: inline-block;
+    margin-left: 0;
+    margin-top: 4px;
+  }
+
+  /* --- Hamburger & Sidebar (must be AFTER defaults to override display:none) --- */
+  .mobile-menu-btn {
+    display: flex;
+  }
+  .sidebar-nav {
+    width: 280px;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    z-index: 200;
+  }
+  .sidebar-nav.open {
+    transform: translateX(0);
+  }
+  .sidebar-backdrop {
+    display: block;
+  }
+  .main-content {
+    margin-left: 0;
+    padding-top: 56px;
+  }
 
   /* --- Page Padding & Typography --- */
 
@@ -8058,6 +8119,13 @@ body {
    Mobile Responsive — 480px (Small Phone)
    ========================================== */
 @media (max-width: 480px) {
+
+  .demo-banner {
+    margin: 12px 12px 0;
+    padding: 10px 12px;
+    font-size: 12px;
+    gap: 8px;
+  }
 
   .dashboard,
   .notification-settings,
