@@ -26,7 +26,6 @@ import {
   DemoLeadsView, DemoPhoneView, DemoInsightsView, DemoPricingView, DemoSettingsView,
 } from './pages/Demo';
 import { useAuthStore } from './store/authStore';
-import './App.css';
 
 function App() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
