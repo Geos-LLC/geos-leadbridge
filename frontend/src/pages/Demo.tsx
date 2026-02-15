@@ -86,6 +86,7 @@ const NAV_ITEMS: { icon: React.ReactNode; label: string; path: string }[] = [
   { icon: <MessageSquare size={20} />, label: 'Lead Activity', path: '/demo/leads' },
   { icon: <Phone size={20} />, label: 'Business Line', path: '/demo/phone' },
   { icon: <BarChart3 size={20} />, label: 'Insights', path: '/demo/insights' },
+  { icon: <CreditCard size={20} />, label: 'Plans', path: '/demo/pricing' },
 ];
 
 // ─── Main Demo Component ──────────────────────────────────
@@ -1260,6 +1261,127 @@ export function DemoInsightsView() {
             ))}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Pricing View ─────────────────────────────────────────
+
+const DEMO_TIERS = [
+  {
+    name: 'Instant Reply',
+    id: 'STARTER',
+    price: 49,
+    description: 'Perfect for getting started with automated responses',
+    features: [
+      'Custom reply templates',
+      'Unlimited leads',
+      'Email notifications',
+      'Basic analytics',
+    ],
+  },
+  {
+    name: 'Call Assist',
+    id: 'PRO',
+    price: 99,
+    description: 'Everything you need to handle customer calls',
+    features: [
+      'Everything in Instant Reply',
+      'Phone call capability',
+      'SMS notifications',
+      'Advanced analytics',
+      'Priority support',
+    ],
+    popular: true,
+  },
+  {
+    name: 'AI Conversations',
+    id: 'ENTERPRISE',
+    price: 129,
+    description: 'AI-powered conversations for maximum engagement',
+    features: [
+      'Everything in Call Assist',
+      'AI-powered follow-ups',
+      'Smart conversation routing',
+      'Custom integrations',
+      'Dedicated support',
+    ],
+  },
+];
+
+export function DemoPricingView() {
+  const [ownNumber, setOwnNumber] = useState(false);
+
+  return (
+    <div className="pricing-page">
+      <div className="pricing-header">
+        <h1>Choose Your Plan</h1>
+        <p>Select the perfect plan for your business needs</p>
+      </div>
+
+      <div className="own-number-addon">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={ownNumber}
+            onChange={(e) => setOwnNumber(e.target.checked)}
+          />
+          <span>
+            Add Own Business Number <strong>+$29/month</strong>
+          </span>
+          <small>Get a dedicated phone number for your business</small>
+        </label>
+      </div>
+
+      <div className="pricing-tiers">
+        {DEMO_TIERS.map((tier) => {
+          const isCurrentPlan = tier.id === 'PRO';
+          const totalPrice = tier.price + (ownNumber ? 29 : 0);
+
+          return (
+            <div
+              key={tier.id}
+              className={`pricing-tier ${tier.popular ? 'popular' : ''} ${isCurrentPlan ? 'current' : ''}`}
+            >
+              {tier.popular && <div className="popular-badge">Most Popular</div>}
+              {isCurrentPlan && <div className="current-badge">Current Plan</div>}
+
+              <h3>{tier.name}</h3>
+              <div className="tier-price">
+                <span className="price">${totalPrice}</span>
+                <span className="period">/month</span>
+              </div>
+              <p className="tier-description">{tier.description}</p>
+
+              <ul className="tier-features">
+                {tier.features.map((feature, index) => (
+                  <li key={index}>
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                      <path
+                        d="M16.7 5.3a1 1 0 010 1.4l-8 8a1 1 0 01-1.4 0l-4-4a1 1 0 011.4-1.4L8 12.58l7.3-7.3a1 1 0 011.4 0z"
+                        fill="currentColor"
+                      />
+                    </svg>
+                    {feature}
+                  </li>
+                ))}
+              </ul>
+
+              <button
+                className={`tier-button ${isCurrentPlan ? 'current' : ''}`}
+                disabled={isCurrentPlan}
+              >
+                {isCurrentPlan ? 'Current Plan' : 'Get Started'}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="pricing-footer">
+        <p>All plans include a 14-day money-back guarantee</p>
+        <p>Need help choosing? <a href="mailto:support@leadbridge.com">Contact our team</a></p>
       </div>
     </div>
   );

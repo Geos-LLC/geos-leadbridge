@@ -22,7 +22,7 @@ import AdminUserDetails from './pages/admin/AdminUserDetails';
 import AdminPhonePool from './pages/admin/AdminPhonePool';
 import {
   DemoLayout, DemoOverviewView, DemoAutomationView, DemoTemplatesView,
-  DemoLeadsView, DemoPhoneView, DemoInsightsView, DemoSettingsView,
+  DemoLeadsView, DemoPhoneView, DemoInsightsView, DemoPricingView, DemoSettingsView,
 } from './pages/Demo';
 import { useAuthStore } from './store/authStore';
 import './App.css';
@@ -60,6 +60,7 @@ function App() {
           <Route path="leads" element={<DemoLeadsView />} />
           <Route path="phone" element={<DemoPhoneView />} />
           <Route path="insights" element={<DemoInsightsView />} />
+          <Route path="pricing" element={<DemoPricingView />} />
           <Route path="settings" element={<DemoSettingsView />} />
         </Route>
 
