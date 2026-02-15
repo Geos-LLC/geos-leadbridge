@@ -850,56 +850,58 @@ export function Messages() {
 
   if (loading) {
     return (
-      <div className="loading-container">
-        <Loader2 className="spinner" size={48} />
-        <p>Loading leads...</p>
+      <div className="flex flex-col items-center justify-center min-h-screen">
+        <Loader2 className="w-12 h-12 animate-spin text-blue-600" />
+        <p className="mt-4 text-slate-500">Loading leads...</p>
       </div>
     );
   }
 
   return (
-    <div className="messages-page">
+    <div className="flex h-screen bg-slate-50">
       {/* Leads Sidebar */}
-      <aside className="leads-sidebar">
-        <div className="sidebar-header">
-          <button className="btn-icon" onClick={() => navigate('/dashboard')}>
+      <aside className="w-80 bg-white border-r border-slate-100 flex flex-col">
+        <div className="p-4 border-b border-slate-100 flex items-center gap-3">
+          <button className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors" onClick={() => navigate('/dashboard')}>
             <ArrowLeft size={20} />
           </button>
-          <h2>Leads</h2>
+          <h2 className="text-lg font-bold text-slate-900 flex-1">Leads</h2>
           <button
-            className={`btn-icon ${multiSelectMode ? 'active' : ''}`}
+            className={`p-2 rounded-lg transition-colors ${multiSelectMode ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'}`}
             onClick={toggleMultiSelect}
             title={multiSelectMode ? 'Exit selection mode' : 'Select multiple'}
           >
-            <CheckSquare size={20} />
+            <CheckSquare size={18} />
           </button>
-          <button className="btn-icon" onClick={loadLeads} title="Refresh">
-            <RefreshCw size={20} />
+          <button className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors" onClick={loadLeads} title="Refresh">
+            <RefreshCw size={18} />
           </button>
         </div>
 
         {/* Selection Toolbar */}
         {multiSelectMode && (
-          <div className="selection-toolbar">
-            <div className="selection-count">
-              {selectedLeadIds.size} selected
-              {selectedLeadIds.size > 0 && sendableLeadsCount < selectedLeadIds.size && (
-                <span className="selection-warning"> ({sendableLeadsCount} can send)</span>
-              )}
+          <div className="p-4 bg-blue-50 border-b border-blue-100">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-semibold text-blue-900">
+                {selectedLeadIds.size} selected
+                {selectedLeadIds.size > 0 && sendableLeadsCount < selectedLeadIds.size && (
+                  <span className="text-blue-600"> ({sendableLeadsCount} can send)</span>
+                )}
+              </span>
             </div>
-            <div className="selection-actions">
-              <button className="btn-text" onClick={selectAllVisible}>
+            <div className="flex gap-2">
+              <button className="text-xs font-semibold text-blue-600 hover:text-blue-700" onClick={selectAllVisible}>
                 Select All
               </button>
-              <button className="btn-text" onClick={clearSelection} disabled={selectedLeadIds.size === 0}>
+              <button className="text-xs font-semibold text-blue-600 hover:text-blue-700" onClick={clearSelection} disabled={selectedLeadIds.size === 0}>
                 Clear
               </button>
               <button
-                className="btn btn-primary btn-sm"
+                className="ml-auto px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1.5 disabled:opacity-50"
                 onClick={openBulkSendModal}
                 disabled={selectedLeadIds.size === 0}
               >
-                <Mail size={14} />
+                <Mail size={12} />
                 Send Follow-up
               </button>
             </div>
@@ -907,62 +909,70 @@ export function Messages() {
         )}
 
         {/* Search Input */}
-        <div className="leads-search">
-          <Search size={16} />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by name..."
-            className="leads-search-input"
-          />
+        <div className="p-4 border-b border-slate-100">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by name..."
+              className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
         </div>
 
         {/* Account Filter */}
         {accountsInLeads.length > 0 && (
-          <div className="account-filter">
-            <Building2 size={16} />
-            <select
-              value={accountFilter}
-              onChange={(e) => setAccountFilter(e.target.value)}
-              className="account-filter-select"
-            >
-              <option value="all">All Accounts ({leadsFromSavedAccounts.length})</option>
-              {accountsInLeads.map((account) => {
-                const count = leadsFromSavedAccounts.filter(l => l.businessId === account.businessId).length;
-                return (
-                  <option key={account.businessId} value={account.businessId}>
-                    {account.businessName} ({count})
-                  </option>
-                );
-              })}
-            </select>
+          <div className="px-4 py-2 border-b border-slate-100">
+            <div className="relative">
+              <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <select
+                value={accountFilter}
+                onChange={(e) => setAccountFilter(e.target.value)}
+                className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="all">All Accounts ({leadsFromSavedAccounts.length})</option>
+                {accountsInLeads.map((account) => {
+                  const count = leadsFromSavedAccounts.filter(l => l.businessId === account.businessId).length;
+                  return (
+                    <option key={account.businessId} value={account.businessId}>
+                      {account.businessName} ({count})
+                    </option>
+                  );
+                })}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+            </div>
           </div>
         )}
 
         {/* Date Filter */}
-        <div className="account-filter">
-          <Calendar size={16} />
-          <select
-            value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value)}
-            className="account-filter-select"
-          >
-            <option value="all">All Time</option>
-            {monthOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+        <div className="px-4 py-2 border-b border-slate-100">
+          <div className="relative">
+            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <select
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="all">All Time</option>
+              {monthOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+          </div>
         </div>
 
-        <div className="leads-list">
+        <div className="flex-1 overflow-y-auto">
           {filteredLeads.length === 0 ? (
-            <div className="empty-leads">
-              <MessageSquare size={32} />
-              <p>No leads yet</p>
-              <small>New leads will appear here</small>
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <MessageSquare className="w-12 h-12 text-slate-300 mb-3" />
+              <p className="text-slate-600 font-medium">No leads yet</p>
+              <small className="text-slate-400 mt-1">New leads will appear here</small>
             </div>
           ) : (
             filteredLeads.map((lead) => {
@@ -970,15 +980,17 @@ export function Messages() {
               const isCurrentAccount = isLeadFromCurrentAccount(lead);
               const isUpdated = hasNewUpdates(lead, lastSeenTimestamps);
               const isChecked = selectedLeadIds.has(lead.id);
+              const isSelected = selectedLead?.id === lead.id;
               return (
                 <div
                   key={lead.id}
-                  className={`lead-item ${selectedLead?.id === lead.id ? 'selected' : ''} ${!isCurrentAccount ? 'other-account' : ''} ${isUpdated ? 'has-updates' : ''} ${isChecked ? 'checked' : ''}`}
+                  className={`p-4 border-b border-slate-100 cursor-pointer transition-colors flex gap-3 ${
+                    isSelected ? 'bg-blue-50 border-l-4 border-l-blue-600' : 'hover:bg-slate-50'
+                  } ${!isCurrentAccount ? 'opacity-60' : ''} ${isChecked ? 'bg-blue-50' : ''}`}
                   onClick={() => {
                     if (multiSelectMode) {
                       toggleLeadSelection(lead.id, { stopPropagation: () => {} } as React.MouseEvent);
                     } else if (selectedLead?.id === lead.id) {
-                      // Clicking same lead - refresh messages
                       loadMessagesForLead(lead);
                     } else {
                       console.log('[Messages] Negotiation object:', lead);
@@ -988,34 +1000,42 @@ export function Messages() {
                 >
                   {multiSelectMode && (
                     <div
-                      className="lead-checkbox"
+                      className="flex-shrink-0 pt-1"
                       onClick={(e) => toggleLeadSelection(lead.id, e)}
                     >
-                      {isChecked ? <CheckSquare size={20} /> : <Square size={20} />}
+                      {isChecked ? <CheckSquare size={20} className="text-blue-600" /> : <Square size={20} className="text-slate-300" />}
                     </div>
                   )}
-                  <div className="lead-avatar">
-                    <User size={20} />
-                    {isUpdated && <span className="update-indicator" />}
-                  </div>
-                  <div className="lead-preview">
-                    <div className="lead-header">
-                      <span className="lead-name">{lead.customerName}</span>
-                      <span className="lead-time">{formatLeadTime(lead.lastMessageAt || lead.createdAt)}</span>
+                  <div className="flex-shrink-0 relative">
+                    <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
+                      <User size={20} />
                     </div>
-                    <div className="lead-meta">
-                      <span className="lead-category">{lead.category || 'Service Request'}</span>
-                      <span className={`lead-status-badge status-${lead.status?.toLowerCase()}`}>
+                    {isUpdated && <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-600 rounded-full border-2 border-white" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <span className="font-semibold text-slate-900 text-sm truncate">{lead.customerName}</span>
+                      <span className="text-xs text-slate-400 flex-shrink-0">{formatLeadTime(lead.lastMessageAt || lead.createdAt)}</span>
+                    </div>
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span className="text-xs text-slate-600 truncate">{lead.category || 'Service Request'}</span>
+                      <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded uppercase ${
+                        lead.status?.toLowerCase() === 'new' ? 'bg-blue-100 text-blue-700' :
+                        lead.status?.toLowerCase() === 'contacted' ? 'bg-green-100 text-green-700' :
+                        'bg-slate-100 text-slate-600'
+                      }`}>
                         {lead.status}
                       </span>
                     </div>
                     {accountName && (
-                      <span className={`lead-account-badge ${isCurrentAccount ? 'current' : 'other'}`}>
-                        <Building2 size={12} />
+                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded mb-1 ${
+                        isCurrentAccount ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                      }`}>
+                        <Building2 size={10} />
                         {accountName}
                       </span>
                     )}
-                    <p className="lead-snippet">{lead.message?.slice(0, 60)}...</p>
+                    <p className="text-xs text-slate-500 truncate">{lead.message?.slice(0, 60)}...</p>
                   </div>
                 </div>
               );
@@ -1025,76 +1045,86 @@ export function Messages() {
       </aside>
 
       {/* Chat Area */}
-      <main className="chat-area">
+      <main className="flex-1 flex flex-col bg-white">
         {selectedLead ? (
           <>
             {/* Lead Info Header */}
-            <div className="chat-header">
-              <div className="lead-info-header">
-                <div className="lead-avatar large">
-                  <User size={24} />
-                </div>
-                <div>
-                  <div className="lead-name-row">
-                    <h3>{selectedLead.customerName}</h3>
-                    <span className={`status-badge status-${selectedLead.status?.toLowerCase()}`}>
-                      {selectedLead.status}
-                    </span>
+            <div className="p-4 border-b border-slate-100 bg-white">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
+                    <User size={24} />
                   </div>
-                  <p>{selectedLead.category || 'Service Request'}</p>
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="font-bold text-slate-900">{selectedLead.customerName}</h3>
+                      <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase ${
+                        selectedLead.status?.toLowerCase() === 'new' ? 'bg-blue-100 text-blue-700' :
+                        selectedLead.status?.toLowerCase() === 'contacted' ? 'bg-green-100 text-green-700' :
+                        'bg-slate-100 text-slate-600'
+                      }`}>
+                        {selectedLead.status}
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-500">{selectedLead.category || 'Service Request'}</p>
+                  </div>
                 </div>
-              </div>
-              <div className="lead-quick-info">
-                {selectedLead.customerPhone && (
-                  <a href={`tel:${selectedLead.customerPhone}`} className="quick-info-item">
-                    <Phone size={16} />
-                    {formatPhoneNumber(selectedLead.customerPhone)}
-                  </a>
-                )}
-                {selectedLead.city && (
-                  <span className="quick-info-item">
-                    <MapPin size={16} />
-                    {selectedLead.city}, {selectedLead.state} {selectedLead.postcode}
+                <div className="flex items-center gap-3 flex-wrap">
+                  {selectedLead.customerPhone && (
+                    <a href={`tel:${selectedLead.customerPhone}`} className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-blue-600">
+                      <Phone size={14} />
+                      {formatPhoneNumber(selectedLead.customerPhone)}
+                    </a>
+                  )}
+                  {selectedLead.city && (
+                    <span className="flex items-center gap-1.5 text-xs text-slate-600">
+                      <MapPin size={14} />
+                      {selectedLead.city}, {selectedLead.state}
+                    </span>
+                  )}
+                  <span className="flex items-center gap-1.5 text-xs text-slate-600">
+                    <Calendar size={14} />
+                    {formatDate(selectedLead.createdAt)}
                   </span>
-                )}
-                <span className="quick-info-item">
-                  <Calendar size={16} />
-                  {formatDate(selectedLead.createdAt)}
-                </span>
-                {selectedLead.raw?.estimate?.total && (
-                  <span className="quick-info-item">
-                    <DollarSign size={16} />
-                    {selectedLead.raw.estimate.total}
-                  </span>
-                )}
-                <button
-                  className="btn-icon resync-btn"
-                  onClick={handleResyncMessages}
-                  disabled={resyncingMessages}
-                  title="Resync messages from Thumbtack"
-                >
-                  {resyncingMessages ? <Loader2 className="spinner" size={16} /> : <RefreshCw size={16} />}
-                </button>
+                  {selectedLead.raw?.estimate?.total && (
+                    <span className="flex items-center gap-1.5 text-xs text-slate-600">
+                      <DollarSign size={14} />
+                      {selectedLead.raw.estimate.total}
+                    </span>
+                  )}
+                  <button
+                    className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors disabled:opacity-50"
+                    onClick={handleResyncMessages}
+                    disabled={resyncingMessages}
+                    title="Resync messages from Thumbtack"
+                  >
+                    {resyncingMessages ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+                  </button>
+                </div>
               </div>
             </div>
 
             {/* Resync Error Message */}
             {resyncError && (
-              <div className="resync-error">
+              <div className="mx-4 mt-4 p-3 bg-red-50 border border-red-100 rounded-xl flex items-center gap-2 text-red-600 text-sm">
                 <AlertCircle size={16} />
-                <span>{resyncError}</span>
-                <button className="dismiss-btn" onClick={() => setResyncError(null)}>
+                <span className="flex-1">{resyncError}</span>
+                <button className="p-1 hover:bg-red-100 rounded transition-colors" onClick={() => setResyncError(null)}>
                   <X size={14} />
                 </button>
               </div>
             )}
 
             {/* Channel Filter Bar */}
-            <div className="timeline-filter-bar">
+            <div className="flex gap-2 p-4 border-b border-slate-100">
               {(['all', 'platform', 'sms'] as const).map((filter) => (
                 <button
                   key={filter}
-                  className={`timeline-filter-btn ${channelFilter === filter ? 'active' : ''}`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                    channelFilter === filter
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                  }`}
                   onClick={() => setChannelFilter(filter)}
                 >
                   {filter === 'all' && 'All'}
@@ -1105,95 +1135,105 @@ export function Messages() {
             </div>
 
             {/* Activity Timeline */}
-            <div className="messages-container">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {loadingMessages ? (
-                <div className="no-messages">
-                  <Loader2 className="spinner" size={32} />
-                  <p>Loading conversation...</p>
+                <div className="flex flex-col items-center justify-center h-full">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                  <p className="mt-3 text-slate-500 text-sm">Loading messages...</p>
                 </div>
               ) : filteredTimeline.length === 0 ? (
-                <div className="no-messages">
-                  <MessageSquare size={32} />
-                  <p>No messages yet</p>
-                  <small>Send a message to start the conversation</small>
+                <div className="flex flex-col items-center justify-center h-full text-center">
+                  <MessageSquare className="w-12 h-12 text-slate-300 mb-3" />
+                  <p className="text-slate-600 font-medium">No messages yet</p>
+                  <small className="text-slate-400 mt-1">Send a message to start the conversation</small>
                 </div>
               ) : (
                 filteredTimeline.map((event) => (
                   <div
                     key={event.id}
-                    className={`message ${event.direction === 'outbound' ? 'sent' : 'received'} channel-${event.channel}`}
+                    className={`flex ${event.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}
                   >
-                    {/* Channel Badge */}
-                    <div className="message-channel-badge">
-                      <span className={`channel-badge ${event.channel}`}>
-                        {event.channel === 'platform' && 'Platform'}
-                        {event.channel === 'sms' && 'SMS'}
-                        {event.channel === 'call' && 'Call'}
-                        {event.channel === 'automation' && 'Auto'}
-                      </span>
-                      {event.ruleName && (
-                        <span className="channel-rule-name">{event.ruleName}</span>
-                      )}
-                    </div>
-
-                    {/* Message Content */}
-                    {event.content && <div className="message-content">{event.content}</div>}
-
-                    {/* Attachments (platform only) */}
-                    {event.attachments && event.attachments.length > 0 && (
-                      <div className="message-attachments">
-                        {event.attachments.map((attachment, idx) => (
-                          attachment.mimeType?.startsWith('image/') ? (
-                            <a
-                              key={idx}
-                              href={attachment.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="attachment-image-link"
-                            >
-                              <img
-                                src={attachment.url}
-                                alt={attachment.fileName || `Image ${idx + 1}`}
-                                className="attachment-image"
-                              />
-                            </a>
-                          ) : (
-                            <a
-                              key={idx}
-                              href={attachment.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="attachment-link"
-                            >
-                              {attachment.fileName || 'Download attachment'}
-                            </a>
-                          )
-                        ))}
+                    <div className={`max-w-md ${event.direction === 'outbound' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-900'} rounded-2xl px-4 py-2.5`}>
+                      {/* Channel Badge */}
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-[10px] font-bold uppercase ${
+                          event.direction === 'outbound' ? 'text-blue-100' : 'text-blue-600'
+                        }`}>
+                          {event.channel === 'platform' && 'Platform'}
+                          {event.channel === 'sms' && 'SMS'}
+                          {event.channel === 'call' && 'Call'}
+                          {event.channel === 'automation' && 'Auto'}
+                        </span>
+                        {event.ruleName && (
+                          <span className="text-[10px] text-slate-500">{event.ruleName}</span>
+                        )}
                       </div>
-                    )}
 
-                    {/* Message Footer: time + SMS status */}
-                    <div className="message-footer">
-                      <span className="message-time">
-                        {event.timestamp.toLocaleTimeString('en-US', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </span>
-                      {event.channel === 'sms' && event.smsStatus && (
-                        <span className={`sms-delivery-status status-${event.smsStatus}`}>
-                          {event.smsStatus === 'delivered' && '\u2713\u2713 Delivered'}
-                          {event.smsStatus === 'sent' && '\u2713 Sent'}
-                          {event.smsStatus === 'queued' && '\u231B Queued'}
-                          {event.smsStatus === 'pending' && '\u231B Pending'}
-                          {event.smsStatus === 'failed' && '\u2717 Failed'}
-                        </span>
+                      {/* Message Content */}
+                      {event.content && <div className="text-sm leading-relaxed">{event.content}</div>}
+
+                      {/* Attachments (platform only) */}
+                      {event.attachments && event.attachments.length > 0 && (
+                        <div className="mt-2 space-y-2">
+                          {event.attachments.map((attachment, idx) => (
+                            attachment.mimeType?.startsWith('image/') ? (
+                              <a
+                                key={idx}
+                                href={attachment.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block"
+                              >
+                                <img
+                                  src={attachment.url}
+                                  alt={attachment.fileName || `Image ${idx + 1}`}
+                                  className="max-w-full rounded-lg"
+                                />
+                              </a>
+                            ) : (
+                              <a
+                                key={idx}
+                                href={attachment.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs underline"
+                              >
+                                {attachment.fileName || 'Download attachment'}
+                              </a>
+                            )
+                          ))}
+                        </div>
                       )}
-                      {event.channel === 'sms' && event.smsError && (
-                        <span className="sms-error-hint" title={event.smsError}>
-                          <AlertCircle size={12} />
+
+                      {/* Message Footer: time + SMS status */}
+                      <div className={`flex items-center gap-2 mt-1 text-[10px] ${
+                        event.direction === 'outbound' ? 'text-blue-100' : 'text-slate-500'
+                      }`}>
+                        <span>
+                          {event.timestamp.toLocaleTimeString('en-US', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
                         </span>
-                      )}
+                        {event.channel === 'sms' && event.smsStatus && (
+                          <span className={`font-semibold ${
+                            event.smsStatus === 'delivered' ? 'text-green-600' :
+                            event.smsStatus === 'failed' ? 'text-red-600' :
+                            ''
+                          }`}>
+                            {event.smsStatus === 'delivered' && '\u2713\u2713 Delivered'}
+                            {event.smsStatus === 'sent' && '\u2713 Sent'}
+                            {event.smsStatus === 'queued' && '\u231B Queued'}
+                            {event.smsStatus === 'pending' && '\u231B Pending'}
+                            {event.smsStatus === 'failed' && '\u2717 Failed'}
+                          </span>
+                        )}
+                        {event.channel === 'sms' && event.smsError && (
+                          <span title={event.smsError}>
+                            <AlertCircle size={12} />
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))
@@ -1203,135 +1243,135 @@ export function Messages() {
 
             {/* Message Input */}
             {canSendMessage ? (
-              <div className="message-input-container">
-                {/* Channel Selector */}
-                <div className="channel-selector">
+              <div className="p-4 border-t border-slate-100 bg-white">
+                <div className="flex gap-2">
+                  {/* Channel + Template Selector */}
                   <select
                     value={sendChannel}
                     onChange={(e) => setSendChannel(e.target.value as 'platform' | 'sms')}
-                    className="channel-select"
+                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="platform">Platform</option>
                     {smsEnabled && selectedLead?.customerPhone && (
                       <option value="sms">SMS</option>
                     )}
                   </select>
-                </div>
 
-                {/* Template Selector Dropdown */}
-                <div className="template-selector">
-                  <button
-                    type="button"
-                    className="btn-icon template-btn"
-                    onClick={() => setShowTemplateDropdown(!showTemplateDropdown)}
-                    title="Use template"
-                  >
-                    <FileText size={20} />
-                    <ChevronDown size={14} />
-                  </button>
-                  {showTemplateDropdown && singleMessageTemplates.length > 0 && (
-                    <div className="template-dropdown">
-                      <div className="template-dropdown-header">Use Template</div>
-                      {singleMessageTemplates.map((template) => (
-                        <button
-                          key={template.id}
-                          className="template-dropdown-item"
-                          onClick={() => applyTemplateToMessage(template)}
-                        >
-                          <span className="template-name">{template.name}</span>
-                          <span className="template-preview">{template.content.substring(0, 50)}...</span>
-                        </button>
-                      ))}
-                      {singleMessageTemplates.length === 0 && (
-                        <div className="template-dropdown-empty">
-                          No templates yet. Create one in Message Settings.
+                  {/* Template Selector Dropdown */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      className="p-3 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-xl transition-colors flex items-center gap-1"
+                      onClick={() => setShowTemplateDropdown(!showTemplateDropdown)}
+                      title="Use template"
+                    >
+                      <FileText size={20} />
+                      <ChevronDown size={14} />
+                    </button>
+                    {showTemplateDropdown && singleMessageTemplates.length > 0 && (
+                      <div className="absolute bottom-full left-0 mb-2 w-80 bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden z-10">
+                        <div className="p-3 border-b border-slate-100 bg-slate-50">
+                          <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Use Template</span>
                         </div>
-                      )}
-                    </div>
-                  )}
+                        <div className="max-h-60 overflow-y-auto">
+                          {singleMessageTemplates.map((template) => (
+                            <button
+                              key={template.id}
+                              className="w-full text-left p-3 hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-b-0"
+                              onClick={() => applyTemplateToMessage(template)}
+                            >
+                              <div className="font-semibold text-sm text-slate-900 mb-1">{template.name}</div>
+                              <div className="text-xs text-slate-500 truncate">{template.content.substring(0, 50)}...</div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <form className="flex-1 flex gap-2" onSubmit={handleSendMessage}>
+                    <input
+                      type="text"
+                      value={messageText}
+                      onChange={(e) => setMessageText(e.target.value)}
+                      placeholder={sendChannel === 'sms'
+                        ? `SMS to ${formatPhoneNumber(selectedLead?.customerPhone || '')}...`
+                        : 'Type a message...'}
+                      disabled={sendingMessage}
+                      className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+                    />
+                    <button
+                      type="submit"
+                      className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                      disabled={!messageText.trim() || sendingMessage}
+                    >
+                      {sendingMessage ? <Loader2 className="animate-spin" size={20} /> : <Send size={20} />}
+                    </button>
+                  </form>
                 </div>
-                <form className="message-input-form" onSubmit={handleSendMessage}>
-                  <input
-                    type="text"
-                    value={messageText}
-                    onChange={(e) => setMessageText(e.target.value)}
-                    placeholder={sendChannel === 'sms'
-                      ? `SMS to ${formatPhoneNumber(selectedLead?.customerPhone || '')}...`
-                      : 'Type a message...'}
-                    disabled={sendingMessage}
-                  />
-                  <button
-                    type="submit"
-                    className={`btn send-btn ${sendChannel === 'sms' ? 'btn-sms' : 'btn-primary'}`}
-                    disabled={!messageText.trim() || sendingMessage}
-                  >
-                    {sendingMessage ? <Loader2 className="spinner" size={20} /> : <Send size={20} />}
-                  </button>
-                </form>
               </div>
             ) : (
-              <div className="message-input-disabled">
+              <div className="p-4 border-t border-slate-100 bg-amber-50 flex items-center justify-center gap-2 text-amber-700">
                 <AlertCircle size={18} />
-                <span>
+                <span className="text-sm">
                   Switch to <strong>{getAccountNameForLead(selectedLead) || 'this account'}</strong> to send messages
                 </span>
               </div>
             )}
           </>
         ) : (
-          <div className="no-lead-selected">
-            <MessageSquare size={64} />
-            <h3>Select a lead</h3>
-            <p>Choose a lead from the list to view details and send messages</p>
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <MessageSquare className="w-16 h-16 text-slate-300 mb-4" />
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Select a lead</h3>
+            <p className="text-slate-500">Choose a lead from the list to view details and send messages</p>
           </div>
         )}
       </main>
 
       {/* Right Details Panel */}
       {selectedLead && (
-        <aside className="lead-details-sidebar">
-          <div className="details-sidebar-header">
-            <h3>Lead Details</h3>
+        <aside className="w-72 bg-white border-l border-slate-100 overflow-y-auto hidden xl:block">
+          <div className="p-4 border-b border-slate-100">
+            <h3 className="font-bold text-slate-900">Lead Details</h3>
           </div>
-          <div className="details-sidebar-content">
+          <div className="p-4 space-y-6">
             {/* Communication Summary */}
             {(commSummary.platformMessages > 0 || commSummary.smsSent > 0) && (
-              <div className="details-section">
-                <h4>Communication Summary</h4>
-                <div className="comm-summary">
-                  <div className="comm-summary-row">
-                    <span className="comm-summary-label">
+              <div>
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Communication Summary</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center p-2 bg-slate-50 rounded-lg">
+                    <span className="text-xs text-slate-600 flex items-center gap-1.5">
                       <MessageCircle size={14} /> Platform Messages
                     </span>
-                    <span className="comm-summary-value">{commSummary.platformMessages}</span>
+                    <span className="text-xs font-bold text-slate-900">{commSummary.platformMessages}</span>
                   </div>
-                  <div className="comm-summary-row">
-                    <span className="comm-summary-label">
+                  <div className="flex justify-between items-center p-2 bg-slate-50 rounded-lg">
+                    <span className="text-xs text-slate-600 flex items-center gap-1.5">
                       <Smartphone size={14} /> SMS Sent
                     </span>
-                    <span className="comm-summary-value">{commSummary.smsSent}</span>
+                    <span className="text-xs font-bold text-slate-900">{commSummary.smsSent}</span>
                   </div>
                   {commSummary.smsDelivered > 0 && (
-                    <div className="comm-summary-row">
-                      <span className="comm-summary-label delivered">
+                    <div className="flex justify-between items-center p-2 bg-green-50 rounded-lg">
+                      <span className="text-xs text-green-700 flex items-center gap-1.5">
                         {'\u2713\u2713'} SMS Delivered
                       </span>
-                      <span className="comm-summary-value">{commSummary.smsDelivered}</span>
+                      <span className="text-xs font-bold text-green-900">{commSummary.smsDelivered}</span>
                     </div>
                   )}
                   {commSummary.smsFailed > 0 && (
-                    <div className="comm-summary-row">
-                      <span className="comm-summary-label failed">
+                    <div className="flex justify-between items-center p-2 bg-red-50 rounded-lg">
+                      <span className="text-xs text-red-700 flex items-center gap-1.5">
                         {'\u2717'} SMS Failed
                       </span>
-                      <span className="comm-summary-value text-danger">{commSummary.smsFailed}</span>
+                      <span className="text-xs font-bold text-red-900">{commSummary.smsFailed}</span>
                     </div>
                   )}
-                  <div className="comm-summary-row">
-                    <span className="comm-summary-label">
+                  <div className="flex justify-between items-center p-2 bg-slate-50 rounded-lg">
+                    <span className="text-xs text-slate-600 flex items-center gap-1.5">
                       <Phone size={14} /> Calls
                     </span>
-                    <span className="comm-summary-value muted">{commSummary.calls}</span>
+                    <span className="text-xs font-bold text-slate-400">{commSummary.calls}</span>
                   </div>
                 </div>
               </div>
@@ -1339,10 +1379,10 @@ export function Messages() {
 
             {/* Lead Cost */}
             {selectedLead.raw?.leadPrice && (
-              <div className="details-section">
-                <h4>Lead Cost</h4>
-                <p className="detail-value">
-                  <Tag size={14} />
+              <div>
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Lead Cost</h4>
+                <p className="flex items-center gap-2 text-sm text-slate-900 font-semibold">
+                  <Tag size={14} className="text-slate-400" />
                   {selectedLead.raw.leadPrice}
                 </p>
               </div>
@@ -1350,13 +1390,13 @@ export function Messages() {
 
             {/* Request Details */}
             {getLeadDetails(selectedLead).length > 0 && (
-              <div className="details-section">
-                <h4>Request Details</h4>
-                <dl className="request-details-list">
+              <div>
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Request Details</h4>
+                <dl className="space-y-3">
                   {getLeadDetails(selectedLead).map((detail, idx) => (
-                    <div key={idx} className="detail-row">
-                      <dt>{detail.question}</dt>
-                      <dd>{detail.answer}</dd>
+                    <div key={idx}>
+                      <dt className="text-xs font-semibold text-slate-600 mb-1">{detail.question}</dt>
+                      <dd className="text-sm text-slate-900">{detail.answer}</dd>
                     </div>
                   ))}
                 </dl>
@@ -1365,9 +1405,9 @@ export function Messages() {
 
             {/* Original Message */}
             {selectedLead.message && (
-              <div className="details-section">
-                <h4>Customer Message</h4>
-                <p className="customer-message">{selectedLead.message}</p>
+              <div>
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Customer Message</h4>
+                <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-3 rounded-xl">{selectedLead.message}</p>
               </div>
             )}
           </div>
