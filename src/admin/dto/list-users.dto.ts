@@ -1,6 +1,5 @@
-import { IsOptional, IsString, IsEnum, IsInt, Min } from 'class-validator';
+import { IsOptional, IsString, IsIn, IsInt, Min } from 'class-validator';
 import { Type } from 'class-transformer';
-import { SubscriptionTier } from '../../../generated/prisma';
 
 export class ListUsersDto {
   @IsOptional()
@@ -8,8 +7,8 @@ export class ListUsersDto {
   search?: string; // Search by email or name
 
   @IsOptional()
-  @IsEnum(SubscriptionTier)
-  tier?: SubscriptionTier; // Filter by subscription tier
+  @IsIn(['STARTER', 'PRO', 'ENTERPRISE', 'FREE'])
+  tier?: string; // Filter by subscription tier (FREE = no tier, trial users)
 
   @IsOptional()
   @Type(() => Number)

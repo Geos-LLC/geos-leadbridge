@@ -76,6 +76,20 @@ export class AdminController {
     };
   }
 
+  @Patch('users/:userId/trial-leads')
+  async updateTrialLeads(
+    @Req() req: any,
+    @Param('userId') userId: string,
+    @Body() body: { trialLeadsHandled?: number; trialLeadsLimit?: number },
+  ) {
+    const adminId = req.user.id;
+    const result = await this.adminService.updateTrialLeads(adminId, userId, body);
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
   @Delete('users/:userId')
   async deleteUser(@Req() req: any, @Param('userId') userId: string) {
     const adminId = req.user.id;

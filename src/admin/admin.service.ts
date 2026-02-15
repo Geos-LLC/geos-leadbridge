@@ -27,12 +27,15 @@ export class AdminService {
       ];
     }
 
-    if (tier) {
+    if (tier === 'FREE') {
+      where.subscriptionTier = null;
+      where.role = 'USER';
+    } else if (tier) {
       where.subscriptionTier = tier;
     }
 
     // Get users with pagination
-    const [users, total] = await Promise.all([
+    const [rawUsers, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
         select: {
@@ -45,8 +48,14 @@ export class AdminService {
           subscriptionPeriodEnd: true,
           stripeSubscriptionId: true,
           hasOwnNumber: true,
+          trialLeadsHandled: true,
+          trialLeadsLimit: true,
+          trialEndDate: true,
           createdAt: true,
           updatedAt: true,
+          _count: {
+            select: { leads: true },
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip: offset,
@@ -54,6 +63,12 @@ export class AdminService {
       }),
       this.prisma.user.count({ where }),
     ]);
+
+    // Flatten _count into leadsCount
+    const users = rawUsers.map(({ _count, ...user }) => ({
+      ...user,
+      leadsCount: _count.leads,
+    }));
 
     return {
       users,
@@ -235,6 +250,31 @@ export class AdminService {
         count: item._count,
       })),
     };
+  }
+
+  async updateTrialLeads(
+    adminId: string,
+    userId: string,
+    dto: { trialLeadsHandled?: number; trialLeadsLimit?: number },
+  ) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const data: any = {};
+    if (dto.trialLeadsHandled !== undefined) data.trialLeadsHandled = dto.trialLeadsHandled;
+    if (dto.trialLeadsLimit !== undefined) data.trialLeadsLimit = dto.trialLeadsLimit;
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data,
+    });
+
+    await this.logAdminAction(adminId, 'UPDATE_TRIAL_LEADS', userId, dto);
+    this.logger.log(`Admin ${adminId} updated trial leads for user ${userId}: ${JSON.stringify(dto)}`);
+
+    return updatedUser;
   }
 
   async logAdminAction(

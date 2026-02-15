@@ -5674,6 +5674,16 @@ body {
   color: #3730a3;
 }
 
+.tier-badge.tier-free {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.tier-badge.tier-admin {
+  background: #fce7f3;
+  color: #9d174d;
+}
+
 .status-badge {
   display: inline-block;
   padding: 4px 12px;

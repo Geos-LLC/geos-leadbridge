@@ -5,6 +5,25 @@ import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
 import type { AdminUser, AdminStats } from '../../types';
 
+const tierNames: Record<string, string> = {
+  STARTER: 'Instant Reply',
+  PRO: 'Call Assist',
+  ENTERPRISE: 'AI Conversations',
+};
+
+function getTierDisplay(u: AdminUser): { label: string; className: string } {
+  if (u.role === 'ADMIN') {
+    return { label: 'Admin', className: 'tier-badge tier-admin' };
+  }
+  if (u.subscriptionTier) {
+    return {
+      label: tierNames[u.subscriptionTier] || u.subscriptionTier,
+      className: `tier-badge tier-${u.subscriptionTier.toLowerCase()}`,
+    };
+  }
+  return { label: 'Free', className: 'tier-badge tier-free' };
+}
+
 export default function AdminDashboard() {
   const user = useAuthStore((state) => state.user);
   const navigate = useNavigate();
@@ -18,14 +37,7 @@ export default function AdminDashboard() {
   const [offset, setOffset] = useState(0);
 
   useEffect(() => {
-    // Debug logging
-    console.log('[AdminDashboard] Current user:', user);
-    console.log('[AdminDashboard] User role:', user?.role);
-    console.log('[AdminDashboard] Is ADMIN?', user?.role === 'ADMIN');
-
-    // Check if user is admin
     if (user?.role !== 'ADMIN') {
-      console.error('[AdminDashboard] Access denied - user role is not ADMIN');
       notify.error('Access Denied', 'You must be an admin to access this page');
       navigate('/');
       return;
@@ -76,6 +88,31 @@ export default function AdminDashboard() {
       notify.error('Error', 'Failed to delete user');
     }
   };
+
+  const handleAddTrialLeads = async (u: AdminUser, amount: number) => {
+    try {
+      const newCount = Math.max(0, u.trialLeadsHandled + amount);
+      await adminApi.updateTrialLeads(u.id, { trialLeadsHandled: newCount });
+      notify.success('Updated', `Trial leads set to ${newCount}/${u.trialLeadsLimit}`);
+      loadData();
+    } catch (error: any) {
+      console.error('Failed to update trial leads:', error);
+      notify.error('Error', 'Failed to update trial leads');
+    }
+  };
+
+  const handleResetTrialLeads = async (u: AdminUser) => {
+    try {
+      await adminApi.updateTrialLeads(u.id, { trialLeadsHandled: 0 });
+      notify.success('Reset', 'Trial leads reset to 0');
+      loadData();
+    } catch (error: any) {
+      console.error('Failed to reset trial leads:', error);
+      notify.error('Error', 'Failed to reset trial leads');
+    }
+  };
+
+  const isFreeTier = (u: AdminUser) => !u.subscriptionTier && u.role !== 'ADMIN';
 
   if (loading && !stats) {
     return (
@@ -169,6 +206,7 @@ export default function AdminDashboard() {
               className="filter-select"
             >
               <option value="">All Tiers</option>
+              <option value="FREE">Free (Trial)</option>
               <option value="STARTER">Instant Reply</option>
               <option value="PRO">Call Assist</option>
               <option value="ENTERPRISE">AI Conversations</option>
@@ -183,56 +221,98 @@ export default function AdminDashboard() {
                 <th>Email</th>
                 <th>Name</th>
                 <th>Tier</th>
+                <th>Leads</th>
                 <th>Status</th>
                 <th>Created</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => (
-                <tr key={user.id}>
-                  <td>{user.email}</td>
-                  <td>{user.name || '—'}</td>
-                  <td>
-                    {user.subscriptionTier ? (
-                      <span className={`tier-badge tier-${user.subscriptionTier.toLowerCase()}`}>
-                        {user.subscriptionTier}
-                      </span>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                  <td>
-                    {user.subscriptionStatus ? (
-                      <span className={`status-badge status-${user.subscriptionStatus.toLowerCase()}`}>
-                        {user.subscriptionStatus}
-                      </span>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                  <td>{new Date(user.createdAt).toLocaleDateString()}</td>
-                  <td>
-                    <div className="action-buttons">
-                      <Link to={`/admin/users/${user.id}`} className="btn-icon" title="View Details">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" strokeWidth="2" />
-                          <circle cx="12" cy="12" r="3" strokeWidth="2" />
-                        </svg>
-                      </Link>
-                      <button
-                        onClick={() => handleDeleteUser(user.id, user.email)}
-                        className="btn-icon btn-danger"
-                        title="Delete User"
-                      >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                          <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" strokeWidth="2" strokeLinecap="round" />
-                        </svg>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {users.map((u) => {
+                const tier = getTierDisplay(u);
+                const free = isFreeTier(u);
+                return (
+                  <tr key={u.id}>
+                    <td>{u.email}</td>
+                    <td>{u.name || '—'}</td>
+                    <td>
+                      <span className={tier.className}>{tier.label}</span>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontWeight: 600, fontSize: '13px' }}>{u.leadsCount}</span>
+                        {free && (
+                          <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                            ({u.trialLeadsHandled}/{u.trialLeadsLimit})
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      {u.role === 'ADMIN' ? (
+                        <span className="status-badge status-active">ADMIN</span>
+                      ) : u.subscriptionStatus ? (
+                        <span className={`status-badge status-${u.subscriptionStatus.toLowerCase()}`}>
+                          {u.subscriptionStatus}
+                        </span>
+                      ) : free ? (
+                        <span className="status-badge status-trialing">FREE TRIAL</span>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td>{new Date(u.createdAt).toLocaleDateString()}</td>
+                    <td>
+                      <div className="action-buttons">
+                        {free && (
+                          <>
+                            <button
+                              onClick={() => handleAddTrialLeads(u, -1)}
+                              className="btn-icon"
+                              title="Remove 1 trial lead"
+                              disabled={u.trialLeadsHandled <= 0}
+                              style={{ fontSize: '16px', fontWeight: 700, color: '#ef4444' }}
+                            >
+                              &minus;
+                            </button>
+                            <button
+                              onClick={() => handleAddTrialLeads(u, 1)}
+                              className="btn-icon"
+                              title="Add 1 trial lead"
+                              style={{ fontSize: '16px', fontWeight: 700, color: '#059669' }}
+                            >
+                              +
+                            </button>
+                            <button
+                              onClick={() => handleResetTrialLeads(u)}
+                              className="btn-icon"
+                              title="Reset trial leads to 0"
+                              style={{ fontSize: '11px', color: '#6366f1' }}
+                            >
+                              Reset
+                            </button>
+                          </>
+                        )}
+                        <Link to={`/admin/users/${u.id}`} className="btn-icon" title="View Details">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" strokeWidth="2" />
+                            <circle cx="12" cy="12" r="3" strokeWidth="2" />
+                          </svg>
+                        </Link>
+                        <button
+                          onClick={() => handleDeleteUser(u.id, u.email)}
+                          className="btn-icon btn-danger"
+                          title="Delete User"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" strokeWidth="2" strokeLinecap="round" />
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
 

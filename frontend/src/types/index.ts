@@ -257,6 +257,10 @@ export interface AdminUser {
   subscriptionPeriodEnd: string | null;
   stripeSubscriptionId: string | null;
   hasOwnNumber: boolean;
+  trialLeadsHandled: number;
+  trialLeadsLimit: number;
+  trialEndDate: string | null;
+  leadsCount: number;
   createdAt: string;
   updatedAt: string;
 }

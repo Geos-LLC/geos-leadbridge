@@ -788,6 +788,10 @@ export const adminApi = {
     const { data } = await api.post(`/v1/admin/users/${userId}/cancel-subscription`, { immediate });
     return data.data;
   },
+  updateTrialLeads: async (userId: string, updates: { trialLeadsHandled?: number; trialLeadsLimit?: number }): Promise<any> => {
+    const { data } = await api.patch(`/v1/admin/users/${userId}/trial-leads`, updates);
+    return data.data;
+  },
   getStats: async (): Promise<AdminStats> => {
     const { data } = await api.get('/v1/admin/stats');
     return data.data;
