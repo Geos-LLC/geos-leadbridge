@@ -7,8 +7,20 @@ import {
   Send, MapPin, Calendar, DollarSign, Tag, Search,
   Bot, RefreshCw,
 } from 'lucide-react';
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, NavLink, Outlet, useOutletContext } from 'react-router-dom';
 import '../App.css';
+
+// ─── Outlet context type ─────────────────────────────────
+export interface DemoContext {
+  accounts: typeof MOCK_ACCOUNTS;
+  selectedAccountId: string | null;
+  setSelectedAccountId: (id: string | null) => void;
+  selectedAccount: typeof MOCK_ACCOUNTS[0] | undefined;
+}
+
+export function useDemoContext() {
+  return useOutletContext<DemoContext>();
+}
 
 // ─── Mock Data ────────────────────────────────────────────
 
@@ -67,29 +79,28 @@ const VARIABLES = [
   { key: '{{business.name}}', desc: 'Your business name' },
 ];
 
-type DemoView = 'overview' | 'automation' | 'templates' | 'leads' | 'phone' | 'insights' | 'settings';
-
-const NAV_ITEMS: { icon: React.ReactNode; label: string; view: DemoView }[] = [
-  { icon: <Home size={20} />, label: 'Overview', view: 'overview' },
-  { icon: <Briefcase size={20} />, label: 'Automation', view: 'automation' },
-  { icon: <Settings size={20} />, label: 'Templates', view: 'templates' },
-  { icon: <MessageSquare size={20} />, label: 'Lead Activity', view: 'leads' },
-  { icon: <Phone size={20} />, label: 'Business Line', view: 'phone' },
-  { icon: <BarChart3 size={20} />, label: 'Insights', view: 'insights' },
+const NAV_ITEMS: { icon: React.ReactNode; label: string; path: string }[] = [
+  { icon: <Home size={20} />, label: 'Overview', path: '/demo/overview' },
+  { icon: <Briefcase size={20} />, label: 'Automation', path: '/demo/automation' },
+  { icon: <Settings size={20} />, label: 'Templates', path: '/demo/templates' },
+  { icon: <MessageSquare size={20} />, label: 'Lead Activity', path: '/demo/leads' },
+  { icon: <Phone size={20} />, label: 'Business Line', path: '/demo/phone' },
+  { icon: <BarChart3 size={20} />, label: 'Insights', path: '/demo/insights' },
 ];
 
 // ─── Main Demo Component ──────────────────────────────────
 
-export function Demo() {
+export function DemoLayout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [activeView, setActiveView] = useState<DemoView>('overview');
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(MOCK_ACCOUNTS[0].id);
 
   const selectedAccount = MOCK_ACCOUNTS.find(a => a.id === selectedAccountId);
 
-  const navigateTo = (view: DemoView) => {
-    setActiveView(view);
-    setMobileMenuOpen(false);
+  const context: DemoContext = {
+    accounts: MOCK_ACCOUNTS,
+    selectedAccountId,
+    setSelectedAccountId,
+    selectedAccount,
   };
 
   return (
@@ -101,26 +112,26 @@ export function Demo() {
         </div>
         <div className="nav-links">
           {NAV_ITEMS.map((item) => (
-            <a
-              key={item.view}
-              className={`nav-link ${activeView === item.view ? 'active' : ''}`}
-              href="#"
-              onClick={(e) => { e.preventDefault(); navigateTo(item.view); }}
+            <NavLink
+              key={item.path}
+              to={item.path}
+              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+              onClick={() => setMobileMenuOpen(false)}
             >
               {item.icon}
               <span>{item.label}</span>
-            </a>
+            </NavLink>
           ))}
           <div className="nav-separator"></div>
           <div className="nav-section-label">Account</div>
-          <a
-            className={`nav-link ${activeView === 'settings' ? 'active' : ''}`}
-            href="#"
-            onClick={(e) => { e.preventDefault(); navigateTo('settings'); }}
+          <NavLink
+            to="/demo/settings"
+            className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+            onClick={() => setMobileMenuOpen(false)}
           >
             <Settings size={20} />
             <span>Settings</span>
-          </a>
+          </NavLink>
         </div>
         <div className="nav-footer">
           <div className="user-info">
@@ -160,44 +171,7 @@ export function Demo() {
           </span>
         </div>
 
-        {activeView === 'overview' && (
-          <OverviewView
-            accounts={MOCK_ACCOUNTS}
-            selectedAccountId={selectedAccountId}
-            setSelectedAccountId={setSelectedAccountId}
-            selectedAccount={selectedAccount}
-          />
-        )}
-        {activeView === 'automation' && (
-          <AutomationView
-            accounts={MOCK_ACCOUNTS}
-            selectedAccountId={selectedAccountId}
-            setSelectedAccountId={setSelectedAccountId}
-          />
-        )}
-        {activeView === 'templates' && <TemplatesView />}
-        {activeView === 'leads' && (
-          <LeadsView
-            accounts={MOCK_ACCOUNTS}
-            selectedAccountId={selectedAccountId}
-            setSelectedAccountId={setSelectedAccountId}
-          />
-        )}
-        {activeView === 'phone' && (
-          <PhoneView
-            accounts={MOCK_ACCOUNTS}
-            selectedAccountId={selectedAccountId}
-            setSelectedAccountId={setSelectedAccountId}
-          />
-        )}
-        {activeView === 'insights' && (
-          <InsightsView
-            accounts={MOCK_ACCOUNTS}
-            selectedAccountId={selectedAccountId}
-            setSelectedAccountId={setSelectedAccountId}
-          />
-        )}
-        {activeView === 'settings' && <SettingsView />}
+        <Outlet context={context} />
       </main>
     </div>
   );
@@ -239,12 +213,8 @@ function AccountSelector({ accounts, selectedAccountId, setSelectedAccountId, sh
 
 // ─── Overview View ────────────────────────────────────────
 
-function OverviewView({ accounts }: {
-  accounts: typeof MOCK_ACCOUNTS;
-  selectedAccountId: string | null;
-  setSelectedAccountId: (id: string | null) => void;
-  selectedAccount: typeof MOCK_ACCOUNTS[0] | undefined;
-}) {
+export function DemoOverviewView() {
+  const { accounts } = useDemoContext();
   const [healthToggles] = useState({ autoReply: true, customerSms: true, leadAlerts: true });
   const [selectedIdx, setSelectedIdx] = useState(0);
   const account = accounts[selectedIdx];
@@ -403,11 +373,8 @@ function OverviewView({ accounts }: {
 
 // ─── Automation View ──────────────────────────────────────
 
-function AutomationView({ accounts, selectedAccountId, setSelectedAccountId }: {
-  accounts: typeof MOCK_ACCOUNTS;
-  selectedAccountId: string | null;
-  setSelectedAccountId: (id: string | null) => void;
-}) {
+export function DemoAutomationView() {
+  const { accounts, selectedAccountId, setSelectedAccountId } = useDemoContext();
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(true);
   const [leadAlertsEnabled, setLeadAlertsEnabled] = useState(true);
   const [expandedCard, setExpandedCard] = useState<string | null>('auto-reply');
@@ -706,7 +673,7 @@ function AutomationView({ accounts, selectedAccountId, setSelectedAccountId }: {
 
 // ─── Templates View ───────────────────────────────────────
 
-function TemplatesView() {
+export function DemoTemplatesView() {
   const [templates, setTemplates] = useState(MOCK_TEMPLATES);
   const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
 
@@ -818,11 +785,8 @@ function TemplatesView() {
 
 // ─── Leads View ───────────────────────────────────────────
 
-function LeadsView({ accounts, selectedAccountId, setSelectedAccountId }: {
-  accounts: typeof MOCK_ACCOUNTS;
-  selectedAccountId: string | null;
-  setSelectedAccountId: (id: string | null) => void;
-}) {
+export function DemoLeadsView() {
+  const { accounts, selectedAccountId, setSelectedAccountId } = useDemoContext();
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>('l1');
   const [searchQuery, setSearchQuery] = useState('');
   const [messageText, setMessageText] = useState('');
@@ -1091,11 +1055,8 @@ function LeadsView({ accounts, selectedAccountId, setSelectedAccountId }: {
 
 // ─── Phone View ───────────────────────────────────────────
 
-function PhoneView({ accounts, selectedAccountId, setSelectedAccountId }: {
-  accounts: typeof MOCK_ACCOUNTS;
-  selectedAccountId: string | null;
-  setSelectedAccountId: (id: string | null) => void;
-}) {
+export function DemoPhoneView() {
+  const { accounts, selectedAccountId, setSelectedAccountId } = useDemoContext();
   return (
     <div className="notification-settings">
       <div className="settings-header">
@@ -1171,11 +1132,8 @@ function PhoneView({ accounts, selectedAccountId, setSelectedAccountId }: {
 
 // ─── Insights View ────────────────────────────────────────
 
-function InsightsView({ accounts, selectedAccountId, setSelectedAccountId }: {
-  accounts: typeof MOCK_ACCOUNTS;
-  selectedAccountId: string | null;
-  setSelectedAccountId: (id: string | null) => void;
-}) {
+export function DemoInsightsView() {
+  const { accounts, selectedAccountId, setSelectedAccountId } = useDemoContext();
   const [timeRange, setTimeRange] = useState('30d');
 
   return (
@@ -1309,7 +1267,7 @@ function InsightsView({ accounts, selectedAccountId, setSelectedAccountId }: {
 
 // ─── Settings View ────────────────────────────────────────
 
-function SettingsView() {
+export function DemoSettingsView() {
   return (
     <div className="settings-page">
       <div className="settings-page-header">

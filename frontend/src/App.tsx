@@ -20,7 +20,10 @@ import SettingsPage from './pages/SettingsPage';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminUserDetails from './pages/admin/AdminUserDetails';
 import AdminPhonePool from './pages/admin/AdminPhonePool';
-import { Demo } from './pages/Demo';
+import {
+  DemoLayout, DemoOverviewView, DemoAutomationView, DemoTemplatesView,
+  DemoLeadsView, DemoPhoneView, DemoInsightsView, DemoSettingsView,
+} from './pages/Demo';
 import { useAuthStore } from './store/authStore';
 import './App.css';
 
@@ -49,7 +52,16 @@ function App() {
           path="/reset-password"
           element={isAuthenticated ? <Navigate to="/dashboard" /> : <ResetPassword />}
         />
-        <Route path="/demo" element={<Demo />} />
+        <Route path="/demo" element={<DemoLayout />}>
+          <Route index element={<Navigate to="/demo/overview" replace />} />
+          <Route path="overview" element={<DemoOverviewView />} />
+          <Route path="automation" element={<DemoAutomationView />} />
+          <Route path="templates" element={<DemoTemplatesView />} />
+          <Route path="leads" element={<DemoLeadsView />} />
+          <Route path="phone" element={<DemoPhoneView />} />
+          <Route path="insights" element={<DemoInsightsView />} />
+          <Route path="settings" element={<DemoSettingsView />} />
+        </Route>
 
         {/* Protected routes */}
         <Route element={<ProtectedRoute />}>
