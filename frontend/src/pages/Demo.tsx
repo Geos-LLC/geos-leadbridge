@@ -4,7 +4,7 @@ import {
   CreditCard, LogOut, Menu, Bell, Zap, ChevronRight,
   Plus, Pencil, Trash2, Send, Check, AlertCircle,
   Smartphone, Sparkles, Users, Clock, TrendingUp, Workflow,
-  LayoutGrid, Search, Info, Calendar
+  LayoutGrid, Search, Info, Calendar, Tag
 } from 'lucide-react';
 import { NavLink, Outlet, useOutletContext, Link as RouterLink } from 'react-router-dom';
 
@@ -642,6 +642,55 @@ export function DemoLeadsView() {
           </>
         )}
       </div>
+
+      {/* Details Sidebar */}
+      {selectedLead && (
+        <aside className="w-72 border-l border-slate-100 bg-white p-6 hidden xl:block overflow-y-auto">
+          <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-6">Lead Intelligence</h4>
+
+          <div className="space-y-8">
+            {/* Communication */}
+            <div>
+              <p className="text-[11px] font-bold text-slate-900 mb-3 uppercase">Communication</p>
+              <div className="space-y-3">
+                <div className="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
+                  <span className="text-xs text-slate-500">Platform Msgs</span>
+                  <span className="text-xs font-bold text-slate-900">{selectedLead.messages.length}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
+                  <span className="text-xs text-slate-500">SMS Sent</span>
+                  <span className="text-xs font-bold text-slate-900">0</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Customer Info */}
+            <div>
+              <p className="text-[11px] font-bold text-slate-900 mb-3 uppercase">Customer Info</p>
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                    <Phone className="w-4 h-4" />
+                  </div>
+                  <span className="text-sm font-medium text-slate-700">{selectedLead.phone}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                    <Tag className="w-4 h-4" />
+                  </div>
+                  <span className="text-sm font-medium text-slate-700">{selectedLead.category}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Original Request */}
+            <div className="p-4 bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl text-white">
+              <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Original Request</p>
+              <p className="text-xs leading-relaxed italic opacity-90">"{selectedLead.snippet}"</p>
+            </div>
+          </div>
+        </aside>
+      )}
     </div>
   );
 }
