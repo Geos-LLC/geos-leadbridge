@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Settings, CheckCircle, AlertCircle, CreditCard, Rocket, Zap, Lock, MessageSquare, PhoneCall, Reply } from 'lucide-react';
-import { billingApi, thumbtackApi, usersApi } from '../services/api';
+import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, MessageSquare, PhoneCall, Reply, Download, ChevronDown, ChevronUp, Loader2, X } from 'lucide-react';
+import { billingApi, thumbtackApi, leadsApi, usersApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 import type { SubscriptionDetails, SavedAccount } from '../types';
@@ -26,6 +26,16 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [portalLoading, setPortalLoading] = useState(false);
   const [provisioningPhone, setProvisioningPhone] = useState(false);
+
+  // Import negotiations state
+  const [importCollapsed, setImportCollapsed] = useState(true);
+  const [importAccountId, setImportAccountId] = useState<string | null>(null);
+  const [importIds, setImportIds] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState<{ id: string; success: boolean; isNew?: boolean; error?: string }[]>([]);
+  const [importTotal, setImportTotal] = useState(0);
+  const [showImportResults, setShowImportResults] = useState(false);
+  const [importError, setImportError] = useState('');
 
   useEffect(() => {
     loadData();
@@ -80,6 +90,57 @@ export default function SettingsPage() {
       notify.error('Error', error.response?.data?.message || 'Failed to provision phone number');
     } finally {
       setProvisioningPhone(false);
+    }
+  };
+
+  const handleImportNegotiations = async () => {
+    if (!importAccountId) { setImportError('Select an account first'); return; }
+    const ids = importIds.split(/[,\n\t\s]+/).map(id => id.trim()).filter(id => id.length > 0);
+    if (ids.length === 0) { setImportError('Enter at least one negotiation ID'); return; }
+
+    setImporting(true);
+    setImportError('');
+    setImportResults([]);
+
+    // Validate token first
+    try {
+      const validation = await thumbtackApi.validateToken(importAccountId);
+      if (!validation.valid) {
+        setImportError('Session expired. Please reconnect this account from the Overview page, then try again.');
+        setImporting(false);
+        return;
+      }
+    } catch {
+      setImportError('Session expired. Please reconnect this account from the Overview page, then try again.');
+      setImporting(false);
+      return;
+    }
+
+    setImportTotal(ids.length);
+    setShowImportResults(true);
+
+    const results: typeof importResults = [];
+    for (const id of ids) {
+      try {
+        const result = await leadsApi.importNegotiation(id, importAccountId);
+        results.push({ id, success: true, isNew: result.isNew });
+      } catch (err: any) {
+        const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to import';
+        results.push({ id, success: false, error: errorMsg });
+      }
+      setImportResults([...results]);
+    }
+
+    setImporting(false);
+    const newCount = results.filter(r => r.success && r.isNew).length;
+    const failCount = results.filter(r => !r.success).length;
+    if (newCount > 0 && failCount === 0) {
+      notify.success('Import Complete', `Successfully imported ${newCount} negotiation(s)`);
+      setImportIds('');
+    } else if (failCount > 0 && newCount > 0) {
+      notify.warning('Import Partial', `${newCount} imported, ${failCount} failed`);
+    } else if (failCount > 0) {
+      setImportError(`Failed to import all ${failCount} negotiation(s)`);
     }
   };
 
@@ -187,6 +248,134 @@ export default function SettingsPage() {
           ) : (
             <div style={{ padding: '12px 16px', background: '#f8fafc', borderRadius: '8px', fontSize: '13px', color: '#94a3b8' }}>
               No accounts connected. Connect from the Overview page.
+            </div>
+          )}
+
+          {/* Import Negotiations - collapsible */}
+          {accounts.length > 0 && (
+            <div className="import-section-collapsible" style={{ marginTop: '12px' }}>
+              <div className="import-section-header" onClick={() => setImportCollapsed(!importCollapsed)}>
+                <h3>
+                  <Download size={16} />
+                  Import Negotiations
+                </h3>
+                {importCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+              </div>
+
+              <div className={`import-section-content ${importCollapsed ? 'collapsed' : ''}`}>
+                {importError && (
+                  <div style={{
+                    background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px',
+                    padding: '10px 12px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px',
+                    fontSize: '13px', color: '#991b1b',
+                  }}>
+                    <AlertCircle size={14} style={{ flexShrink: 0 }} />
+                    <span>{importError}</span>
+                    <button
+                      className="btn-icon"
+                      onClick={() => setImportError('')}
+                      style={{ marginLeft: 'auto', padding: '2px' }}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                )}
+
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 500, color: '#475569', display: 'block', marginBottom: '6px' }}>
+                    Account
+                  </label>
+                  <select
+                    className="account-dropdown"
+                    value={importAccountId || ''}
+                    onChange={(e) => setImportAccountId(e.target.value || null)}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '14px' }}
+                  >
+                    <option value="">Select account...</option>
+                    {accounts.map(a => (
+                      <option key={a.id} value={a.id}>{a.businessName}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <textarea
+                  className="import-textarea"
+                  placeholder={'Paste negotiation IDs here...\n\nExample: abc123, def456, ghi789'}
+                  value={importIds}
+                  onChange={(e) => setImportIds(e.target.value)}
+                  disabled={importing}
+                  rows={4}
+                />
+
+                <div className="import-actions">
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={handleImportNegotiations}
+                    disabled={importing || !importIds.trim() || !importAccountId}
+                  >
+                    {importing ? (
+                      <><Loader2 className="spinner" size={14} /> Importing...</>
+                    ) : (
+                      <><Download size={14} /> Import</>
+                    )}
+                  </button>
+                  {importIds && !importing && (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => { setImportIds(''); setImportResults([]); setShowImportResults(false); setImportError(''); }}
+                    >
+                      <X size={14} /> Clear
+                    </button>
+                  )}
+                </div>
+
+                {/* Import Progress */}
+                {importing && importTotal > 0 && (
+                  <div style={{ marginTop: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <span style={{ fontSize: '13px', fontWeight: 500 }}>Importing...</span>
+                      <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                        {importResults.length} / {importTotal}
+                      </span>
+                    </div>
+                    <div style={{
+                      width: '100%', height: '6px', background: 'var(--border, #e5e7eb)',
+                      borderRadius: '3px', overflow: 'hidden',
+                    }}>
+                      <div style={{
+                        width: `${(importResults.length / importTotal) * 100}%`,
+                        height: '100%', background: 'var(--primary, #3b82f6)',
+                        borderRadius: '3px', transition: 'width 0.3s ease',
+                      }} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Import Results */}
+                {showImportResults && importResults.length > 0 && !importing && (
+                  <div className="import-results" style={{ marginTop: '12px' }}>
+                    <h4 style={{ fontSize: '13px' }}>Results ({importResults.length} / {importTotal})</h4>
+                    <div className="results-list">
+                      {importResults.map((result, idx) => (
+                        <div key={idx} className={`result-item ${result.success ? (result.isNew ? 'success' : 'duplicate') : 'failed'}`}>
+                          <span className="result-id">{result.id}</span>
+                          {result.success ? (
+                            <span className="result-status">
+                              <CheckCircle size={14} className={`result-icon ${result.isNew ? 'success' : 'duplicate'}`} />
+                              {result.isNew ? 'New' : 'Exists'}
+                            </span>
+                          ) : (
+                            <span className="result-error">
+                              <AlertCircle size={14} className="result-icon failed" />
+                              {result.error}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

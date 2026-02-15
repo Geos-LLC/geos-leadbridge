@@ -8088,6 +8088,20 @@ body {
   margin-bottom: 12px;
 }
 
+.account-cards-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.account-cards-header h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-primary);
+}
+
 .account-card-compact {
   display: flex;
   align-items: center;

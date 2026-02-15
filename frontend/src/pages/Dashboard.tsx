@@ -1,51 +1,18 @@
 import { useEffect, useState, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
-import { AlertCircle, CheckCircle, Loader2, RefreshCw, ExternalLink, Settings, X, Rocket, Link2 } from 'lucide-react';
-import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
+import { AlertCircle, CheckCircle, Loader2, RefreshCw, Settings, X, Rocket, Link2 } from 'lucide-react';
+import { platformsApi, thumbtackApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import { notify } from '../store/notificationStore';
 import { useDashboardData } from '../hooks/useDashboardData';
-import AccountSelector from '../components/dashboard/AccountSelector';
 import SystemHealth from '../components/dashboard/SystemHealth';
 import TodaysActivity from '../components/dashboard/TodaysActivity';
 import AttentionNeeded from '../components/dashboard/AttentionNeeded';
 import ConversionSnapshot from '../components/dashboard/ConversionSnapshot';
 import AccountManagement from '../components/dashboard/AccountManagement';
 
-interface ImportResult {
-  id: string;
-  success: boolean;
-  isNew?: boolean;
-  error?: string;
-}
-
-// Keys for persisting import state across OAuth redirects
-const IMPORT_STATE_KEY = 'pending_import_state';
 const SELECTED_ACCOUNT_KEY = 'dashboard_selected_account';
-
-interface PendingImportState {
-  accountId: string;
-  importIds: string;
-  businessId: string;
-}
-
-function savePendingImportState(state: PendingImportState): void {
-  localStorage.setItem(IMPORT_STATE_KEY, JSON.stringify(state));
-}
-
-function getPendingImportState(): PendingImportState | null {
-  try {
-    const stored = localStorage.getItem(IMPORT_STATE_KEY);
-    return stored ? JSON.parse(stored) : null;
-  } catch {
-    return null;
-  }
-}
-
-function clearPendingImportState(): void {
-  localStorage.removeItem(IMPORT_STATE_KEY);
-}
 
 export function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -55,7 +22,7 @@ export function Dashboard() {
     savedAccounts: storeAccounts, setSavedAccounts, removeSavedAccount: removeFromStore,
   } = useAppStore();
 
-  // Selected account (persisted)
+  // Selected account (persisted) for dashboard data filtering
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(() => {
     try {
       return localStorage.getItem(SELECTED_ACCOUNT_KEY);
@@ -75,13 +42,6 @@ export function Dashboard() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Import negotiations state
-  const [importIds, setImportIds] = useState('');
-  const [importing, setImporting] = useState(false);
-  const [importResults, setImportResults] = useState<ImportResult[]>([]);
-  const [showImportResults, setShowImportResults] = useState(false);
-  const [importTotal, setImportTotal] = useState(0);
-
   // Account management state
   const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
   const [confirmRemoveAccount, setConfirmRemoveAccount] = useState<{ id: string; name: string } | null>(null);
@@ -94,9 +54,6 @@ export function Dashboard() {
   // Modals
   const [disconnectWarning, setDisconnectWarning] = useState<{
     accountId: string; accountName: string; errorCode: string; errorMessage: string; warning: string;
-  } | null>(null);
-  const [sessionExpiredAccount, setSessionExpiredAccount] = useState<{
-    id: string; businessName: string; emailHint?: string;
   } | null>(null);
 
   // Health check — toast once per session
@@ -111,16 +68,6 @@ export function Dashboard() {
     }
   }, [savedAccounts, selectedAccountId]);
 
-  // Persist account selection
-  const handleSelectAccount = (id: string | null) => {
-    setSelectedAccountId(id);
-    if (id) {
-      localStorage.setItem(SELECTED_ACCOUNT_KEY, id);
-    } else {
-      localStorage.removeItem(SELECTED_ACCOUNT_KEY);
-    }
-  };
-
   // Handle OAuth callback params
   useEffect(() => {
     const connected = searchParams.get('connected');
@@ -131,8 +78,7 @@ export function Dashboard() {
 
     if (connected === 'thumbtack') {
       if (warning === 'already_connected' && skippedAccounts) {
-        setSuccess(`Login refreshed for ${skippedAccounts}. You can now import leads.`);
-        setSessionExpiredAccount(null);
+        setSuccess(`Login refreshed for ${skippedAccounts}.`);
       } else {
         setSuccess('Thumbtack account connected successfully!');
       }
@@ -145,20 +91,6 @@ export function Dashboard() {
       setSearchParams({});
     }
   }, [searchParams, setSearchParams]);
-
-  // Restore pending import state after OAuth redirect
-  useEffect(() => {
-    if (savedAccounts.length === 0) return;
-    const pendingState = getPendingImportState();
-    if (!pendingState) return;
-
-    const account = savedAccounts.find(a => a.businessId === pendingState.businessId);
-    if (account) {
-      handleSelectAccount(account.id);
-      setImportIds(pendingState.importIds);
-    }
-    clearPendingImportState();
-  }, [savedAccounts]);
 
   // Initial loads
   useEffect(() => {
@@ -302,81 +234,6 @@ export function Dashboard() {
     ));
   };
 
-  const handleImportNegotiations = async (accountId: string, idsText: string) => {
-    const ids = idsText.split(/[,\n\t\s]+/).map(id => id.trim()).filter(id => id.length > 0);
-    if (ids.length === 0) { setError('Please enter at least one negotiation ID'); return; }
-
-    setImporting(true);
-    setError('');
-    setSuccess('');
-    setImportResults([]);
-
-    // Validate token first
-    try {
-      const validation = await thumbtackApi.validateToken(accountId);
-      if (!validation.valid) {
-        const account = savedAccounts.find(a => a.id === accountId);
-        setSessionExpiredAccount(account || null);
-        setImporting(false);
-        return;
-      }
-    } catch {
-      const account = savedAccounts.find(a => a.id === accountId);
-      setSessionExpiredAccount(account || null);
-      setImporting(false);
-      return;
-    }
-
-    setImportTotal(ids.length);
-    setShowImportResults(true);
-
-    const results: ImportResult[] = [];
-    let sessionExpired = false;
-    let wrongAccount = false;
-
-    for (const id of ids) {
-      try {
-        const result = await leadsApi.importNegotiation(id, accountId);
-        results.push({ id, success: true, isNew: result.isNew });
-      } catch (err: any) {
-        const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to import';
-        const lowerErrorMsg = errorMsg.toLowerCase();
-        if (['session', 'reconnect', 'expired', 'login required', 'token', 'unauthorized'].some(k => lowerErrorMsg.includes(k))) {
-          sessionExpired = true;
-        }
-        if (lowerErrorMsg.includes('wrong account') || lowerErrorMsg.includes('different thumbtack business')) {
-          wrongAccount = true;
-        }
-        results.push({ id, success: false, error: errorMsg });
-      }
-      setImportResults([...results]);
-    }
-
-    setImporting(false);
-    const newCount = results.filter(r => r.success && r.isNew).length;
-    const updatedCount = results.filter(r => r.success && !r.isNew).length;
-    const failCount = results.filter(r => !r.success).length;
-
-    if (sessionExpired) {
-      const account = savedAccounts.find(a => a.id === accountId);
-      setSessionExpiredAccount(account || null);
-    } else if (wrongAccount) {
-      setError('Wrong account selected. These leads belong to a different Thumbtack business.');
-    } else if (newCount > 0 && updatedCount === 0 && failCount === 0) {
-      setSuccess(`Successfully imported ${newCount} new negotiation(s)`);
-      setImportIds('');
-    } else if (newCount > 0 || updatedCount > 0) {
-      const parts = [];
-      if (newCount > 0) parts.push(`${newCount} new`);
-      if (updatedCount > 0) parts.push(`${updatedCount} already existed (updated)`);
-      if (failCount > 0) parts.push(`${failCount} failed`);
-      setSuccess(parts.join(', '));
-      if (failCount === 0) setImportIds('');
-    } else {
-      setError(`Failed to import all ${failCount} negotiation(s)`);
-    }
-  };
-
   if (dashboardData.loading && savedAccounts.length === 0) {
     return (
       <div className="loading-container">
@@ -387,23 +244,6 @@ export function Dashboard() {
   }
 
   const hasAccounts = savedAccounts.length > 0;
-  const connectedAccounts = savedAccounts.filter(a => a.webhookId);
-
-  // Find the most recently used account for "Last Sync"
-  const lastSyncAccount = savedAccounts.length > 0
-    ? savedAccounts.reduce((latest, a) => new Date(a.lastUsedAt) > new Date(latest.lastUsedAt) ? a : latest)
-    : null;
-
-  const formatTimeAgo = (dateStr: string) => {
-    const diff = Date.now() - new Date(dateStr).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins} min${mins !== 1 ? 's' : ''} ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs} hour${hrs !== 1 ? 's' : ''} ago`;
-    const days = Math.floor(hrs / 24);
-    return `${days} day${days !== 1 ? 's' : ''} ago`;
-  };
 
   return (
     <div className="dashboard">
@@ -487,34 +327,9 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* ========== CONNECTED: Status Badge + Dashboard ========== */}
+      {/* ========== CONNECTED: Dashboard ========== */}
       {hasAccounts && (
         <>
-          {/* Connection status badge */}
-          <div className="connection-status-bar">
-            <div className="connection-status-left">
-              <div className="platform-logo thumbtack-logo" style={{ width: '24px', height: '24px', fontSize: '9px' }}>TT</div>
-              <span className="connection-status-label">Thumbtack</span>
-              {connectedAccounts.length > 0 ? (
-                <span className="connection-badge-inline connected">
-                  <CheckCircle size={12} /> Connected
-                </span>
-              ) : (
-                <span className="connection-badge-inline disconnected">
-                  <AlertCircle size={12} /> Disconnected
-                </span>
-              )}
-              {lastSyncAccount && (
-                <span className="connection-sync-time">Last sync: {formatTimeAgo(lastSyncAccount.lastUsedAt)}</span>
-              )}
-            </div>
-            {savedAccounts.length > 1 && (
-              <span className="connection-account-count">
-                {connectedAccounts.length}/{savedAccounts.length} accounts
-              </span>
-            )}
-          </div>
-
           {/* Health Issues Banner */}
           {dashboardData.healthIssues.filter(i => i.severity === 'error').map((issue, index) => (
             <div
@@ -560,15 +375,8 @@ export function Dashboard() {
             </div>
           ))}
 
-          <AccountSelector
-            accounts={savedAccounts}
-            selectedAccountId={selectedAccountId}
-            onSelectAccount={handleSelectAccount}
-          />
-
           <AccountManagement
             savedAccounts={savedAccounts}
-            selectedAccountId={selectedAccountId}
             connecting={connecting}
             onConnectThumbtack={handleConnectThumbtack}
             onDisconnectWebhook={handleDisconnectWebhook}
@@ -578,14 +386,6 @@ export function Dashboard() {
               setDeleteLeadsOnRemove(false);
             }}
             onUpdateEmail={handleUpdateEmail}
-            onImportNegotiations={handleImportNegotiations}
-            importing={importing}
-            importResults={importResults}
-            importTotal={importTotal}
-            showImportResults={showImportResults}
-            importIds={importIds}
-            onImportIdsChange={setImportIds}
-            onClearImport={() => { setImportIds(''); setImportResults([]); setShowImportResults(false); }}
             togglingWebhookId={togglingWebhookId}
             removingAccountId={removingAccountId}
           />
@@ -624,57 +424,6 @@ export function Dashboard() {
             totalSmsSent={dashboardData.totalSmsSent}
           />
         </>
-      )}
-
-      {/* Session Expired Modal */}
-      {sessionExpiredAccount && (
-        <div className="modal-overlay" onClick={() => setSessionExpiredAccount(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>
-              <RefreshCw size={20} style={{ color: '#0284c7', marginRight: '8px', verticalAlign: 'middle' }} />
-              Login Required to Import
-            </h3>
-            <p><strong>{sessionExpiredAccount.businessName}</strong></p>
-            <div style={{ background: '#f0f9ff', padding: '12px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #bae6fd' }}>
-              <p style={{ margin: '0 0 8px 0', color: '#0369a1' }}>
-                To import old leads, you need to log in to Thumbtack again.
-                {sessionExpiredAccount.emailHint && (
-                  <span style={{ display: 'block', marginTop: '4px', fontWeight: 500 }}>
-                    Use: {sessionExpiredAccount.emailHint}
-                  </span>
-                )}
-              </p>
-              <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
-                Note: New leads will still arrive automatically via webhooks. This login is only needed for importing old leads.
-              </p>
-            </div>
-            <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => setSessionExpiredAccount(null)}>Cancel</button>
-              <button
-                className="btn btn-primary"
-                onClick={() => {
-                  const account = savedAccounts.find(a => a.id === sessionExpiredAccount.id);
-                  if (account && importIds.trim()) {
-                    savePendingImportState({
-                      accountId: sessionExpiredAccount.id,
-                      importIds: importIds,
-                      businessId: account.businessId,
-                    });
-                  }
-                  setSessionExpiredAccount(null);
-                  handleReconnectWebhook(sessionExpiredAccount);
-                }}
-                disabled={connecting}
-              >
-                {connecting ? (
-                  <><Loader2 className="spinner" size={16} /> Logging in...</>
-                ) : (
-                  <><ExternalLink size={16} style={{ marginRight: '6px' }} /> Log In to Thumbtack</>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Disconnect Warning Modal */}
