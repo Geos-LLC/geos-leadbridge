@@ -4,7 +4,7 @@ import {
   CreditCard, LogOut, Menu, Bell, Zap, ChevronRight,
   Plus, Pencil, Trash2, Send, Check, AlertCircle,
   Smartphone, Sparkles, Users, Clock, TrendingUp, Workflow,
-  LayoutGrid, Search, Info
+  LayoutGrid, Search, Info, Calendar
 } from 'lucide-react';
 import { NavLink, Outlet, useOutletContext, Link as RouterLink } from 'react-router-dom';
 
@@ -713,108 +713,172 @@ export function DemoInsightsView() {
     <div className="p-6 lg:p-10 max-w-7xl mx-auto space-y-10">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
-          <h2 className="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight mb-2">Business <span className="gradient-text">Insights</span></h2>
-          <p className="text-slate-500 text-lg">Performance metrics across all your accounts</p>
+          <p className="text-blue-600 font-semibold mb-1 uppercase tracking-wider text-xs">Performance Reports</p>
+          <h2 className="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">Business <span className="gradient-text">Insights.</span></h2>
+          <p className="text-slate-500 mt-2 text-lg">Track your leads, engagement, and response metrics.</p>
         </div>
-        <div className="flex gap-3">
-          <select className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-medium">
-            <option>All Accounts</option>
-            <option>ABC Cleaning</option>
-            <option>XYZ Home Repairs</option>
-          </select>
-          <select className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-medium">
-            <option>Last 30 Days</option>
-            <option>Last 7 Days</option>
-            <option>Last 90 Days</option>
-          </select>
+        <div className="flex flex-wrap gap-3">
+          <div className="relative">
+            <select className="appearance-none pl-10 pr-10 py-3 bg-white border border-slate-200 rounded-xl font-medium text-slate-700 hover:border-blue-300 focus:ring-2 focus:ring-blue-100 transition-all cursor-pointer">
+              <option>All Accounts</option>
+              <option>ABC Cleaning Services</option>
+              <option>XYZ Home Repairs</option>
+            </select>
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+              <Briefcase className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="relative">
+            <select className="appearance-none pl-10 pr-10 py-3 bg-white border border-slate-200 rounded-xl font-medium text-slate-700 hover:border-blue-300 focus:ring-2 focus:ring-blue-100 transition-all cursor-pointer">
+              <option>Last 7 days</option>
+              <option>Last 30 days</option>
+              <option>All time</option>
+            </select>
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+              <Calendar className="w-4 h-4" />
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-          <p className="text-slate-500 text-sm font-medium uppercase tracking-wide mb-1">Total Leads</p>
-          <h3 className="text-3xl font-bold text-slate-900">34</h3>
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+          <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
+            <Users className="w-6 h-6" />
+          </div>
+          <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Total Leads</p>
+          <h3 className="text-3xl font-bold text-slate-900 mt-1">127</h3>
         </div>
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-          <p className="text-slate-500 text-sm font-medium uppercase tracking-wide mb-1">Avg Connection</p>
-          <h3 className="text-3xl font-bold text-slate-900">2.2m</h3>
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+          <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-4">
+            <Clock className="w-6 h-6" />
+          </div>
+          <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Avg Connection</p>
+          <h3 className="text-3xl font-bold text-slate-900 mt-1">2m 15s</h3>
         </div>
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-          <p className="text-slate-500 text-sm font-medium uppercase tracking-wide mb-1">Messages/Lead</p>
-          <h3 className="text-3xl font-bold text-slate-900">4.2</h3>
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+          <div className="w-12 h-12 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center mb-4">
+            <MessageSquare className="w-6 h-6" />
+          </div>
+          <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Messages/Lead</p>
+          <h3 className="text-3xl font-bold text-slate-900 mt-1">4.2</h3>
         </div>
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-          <p className="text-slate-500 text-sm font-medium uppercase tracking-wide mb-1">Engagement</p>
-          <h3 className="text-3xl font-bold text-slate-900">67%</h3>
+        <div className="bg-indigo-600 p-6 rounded-3xl shadow-xl shadow-indigo-100 text-white">
+          <div className="w-12 h-12 bg-white/20 text-white rounded-2xl flex items-center justify-center mb-4">
+            <TrendingUp className="w-6 h-6" />
+          </div>
+          <p className="text-indigo-100 text-sm font-medium uppercase tracking-wide">Engagement</p>
+          <div className="flex items-baseline gap-2 mt-1">
+            <h3 className="text-3xl font-bold">67%</h3>
+            <span className="text-indigo-200 text-sm">Target Met</span>
+          </div>
         </div>
       </div>
 
       {/* Analytics Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white border border-slate-100 rounded-3xl p-8 shadow-sm">
-          <h3 className="font-bold text-slate-900 mb-6">Service Categories</h3>
-          <div className="space-y-4">
+        <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm">
+          <div className="flex items-center justify-between mb-8">
+            <h3 className="text-xl font-bold text-slate-900">Service Categories</h3>
+            <BarChart3 className="w-5 h-5 text-slate-400" />
+          </div>
+          <div className="space-y-6">
             {[
-              { name: 'House Cleaning', pct: 45, color: 'bg-blue-500' },
-              { name: 'Plumbing', pct: 30, color: 'bg-emerald-500' },
-              { name: 'Handyman', pct: 15, color: 'bg-orange-500' },
-              { name: 'Other', pct: 10, color: 'bg-slate-300' },
+              { name: 'House Cleaning', pct: 42, color: 'bg-blue-600' },
+              { name: 'Office Cleaning', pct: 25, color: 'bg-indigo-500' },
+              { name: 'Move-Out Cleaning', pct: 18, color: 'bg-purple-500' },
+              { name: 'Deep Cleaning', pct: 15, color: 'bg-slate-400' },
             ].map((cat) => (
-              <div key={cat.name}>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-slate-700">{cat.name}</span>
-                  <span className="text-sm font-bold text-slate-900">{cat.pct}%</span>
+              <div key={cat.name} className="space-y-2">
+                <div className="flex justify-between text-sm font-bold text-slate-700">
+                  <span>{cat.name}</span>
+                  <span>{cat.pct}%</span>
                 </div>
-                <div className="w-full bg-slate-100 rounded-full h-2">
-                  <div className={`${cat.color} h-2 rounded-full transition-all`} style={{ width: `${cat.pct}%` }}></div>
+                <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                  <div className={`h-full ${cat.color} rounded-full`} style={{ width: `${cat.pct}%` }}></div>
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="bg-white border border-slate-100 rounded-3xl p-8 shadow-sm">
-          <h3 className="font-bold text-slate-900 mb-6">Response Speed</h3>
+        <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm">
+          <div className="flex items-center justify-between mb-8">
+            <h3 className="text-xl font-bold text-slate-900">Response Speed</h3>
+            <Clock className="w-5 h-5 text-slate-400" />
+          </div>
           <div className="grid grid-cols-2 gap-4">
-            {[
-              { label: '< 5 min', count: 12, color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-              { label: '5-30 min', count: 8, color: 'bg-blue-50 text-blue-700 border-blue-200' },
-              { label: '30min-1h', count: 4, color: 'bg-orange-50 text-orange-700 border-orange-200' },
-              { label: '> 1 hour', count: 2, color: 'bg-slate-50 text-slate-700 border-slate-200' },
-            ].map((bucket) => (
-              <div key={bucket.label} className={`${bucket.color} border rounded-2xl p-4 text-center`}>
-                <p className="text-2xl font-bold">{bucket.count}</p>
-                <p className="text-xs font-medium mt-1">{bucket.label}</p>
-              </div>
-            ))}
+            <div className="p-5 bg-slate-50 rounded-3xl border border-slate-100 text-center group hover:bg-white hover:border-blue-200 transition-all">
+              <div className="text-2xl font-bold text-slate-900">2m 15s</div>
+              <div className="text-xs font-bold text-blue-600 uppercase tracking-tight mt-1">Your Avg</div>
+              <p className="text-[10px] text-slate-400 mt-2 leading-tight">Auto-reply bridge speed</p>
+            </div>
+            <div className="p-5 bg-slate-50 rounded-3xl border border-slate-100 text-center group hover:bg-white hover:border-blue-200 transition-all">
+              <div className="text-2xl font-bold text-slate-900">47m</div>
+              <div className="text-xs font-bold text-slate-500 uppercase tracking-tight mt-1">Customer Avg</div>
+              <p className="text-[10px] text-slate-400 mt-2 leading-tight">Human response time</p>
+            </div>
+            <div className="p-5 bg-emerald-50 rounded-3xl border border-emerald-100 text-center">
+              <div className="text-2xl font-bold text-emerald-700">&lt; 1m</div>
+              <div className="text-xs font-bold text-emerald-600 uppercase tracking-tight mt-1">Fastest</div>
+              <p className="text-[10px] text-emerald-600/60 mt-2 leading-tight">Peak performance</p>
+            </div>
+            <div className="p-5 bg-rose-50 rounded-3xl border border-rose-100 text-center">
+              <div className="text-2xl font-bold text-rose-700">4h 12m</div>
+              <div className="text-xs font-bold text-rose-600 uppercase tracking-tight mt-1">Slowest</div>
+              <p className="text-[10px] text-rose-600/60 mt-2 leading-tight">Needs attention</p>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Locations */}
-      <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white">
-        <h3 className="text-2xl font-bold mb-6">Top Service Locations</h3>
-        <div className="space-y-4">
-          {[
-            { city: 'Tampa, FL', leads: 18 },
-            { city: 'St. Petersburg, FL', leads: 12 },
-            { city: 'Brandon, FL', leads: 8 },
-            { city: 'Sarasota, FL', leads: 5 },
-            { city: 'Clearwater, FL', leads: 3 },
-          ].map((loc) => (
-            <div key={loc.city}>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium">{loc.city}</span>
-                <span className="text-sm font-bold">{loc.leads} leads</span>
-              </div>
-              <div className="w-full bg-white/10 rounded-full h-2">
-                <div className="bg-white h-2 rounded-full" style={{ width: `${(loc.leads / 18) * 100}%` }}></div>
+      <section className="space-y-6">
+        <div className="flex items-center justify-between px-2">
+          <h3 className="text-xl font-bold text-slate-900">Top Service Locations</h3>
+        </div>
+        <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white relative overflow-hidden shadow-xl">
+          <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8 items-center">
+            <div className="space-y-2">
+              <p className="text-3xl font-bold">45</p>
+              <p className="text-sm font-medium text-blue-400">Tampa, FL</p>
+              <div className="h-1 bg-white/20 rounded-full w-full overflow-hidden">
+                <div className="h-full bg-blue-500 w-full"></div>
               </div>
             </div>
-          ))}
+            <div className="space-y-2 opacity-80">
+              <p className="text-2xl font-bold">32</p>
+              <p className="text-sm font-medium text-slate-400">St. Petersburg, FL</p>
+              <div className="h-1 bg-white/20 rounded-full w-full overflow-hidden">
+                <div className="h-full bg-blue-400" style={{ width: '71%' }}></div>
+              </div>
+            </div>
+            <div className="space-y-2 opacity-80">
+              <p className="text-2xl font-bold">24</p>
+              <p className="text-sm font-medium text-slate-400">Brandon, FL</p>
+              <div className="h-1 bg-white/20 rounded-full w-full overflow-hidden">
+                <div className="h-full bg-blue-400" style={{ width: '53%' }}></div>
+              </div>
+            </div>
+            <div className="space-y-2 opacity-80">
+              <p className="text-2xl font-bold">18</p>
+              <p className="text-sm font-medium text-slate-400">Sarasota, FL</p>
+              <div className="h-1 bg-white/20 rounded-full w-full overflow-hidden">
+                <div className="h-full bg-blue-400" style={{ width: '40%' }}></div>
+              </div>
+            </div>
+            <div className="space-y-2 opacity-80">
+              <p className="text-2xl font-bold">8</p>
+              <p className="text-sm font-medium text-slate-400">Clearwater, FL</p>
+              <div className="h-1 bg-white/20 rounded-full w-full overflow-hidden">
+                <div className="h-full bg-blue-400" style={{ width: '18%' }}></div>
+              </div>
+            </div>
+          </div>
+          <div className="absolute -right-20 -top-20 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl"></div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }
