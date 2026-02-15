@@ -114,7 +114,7 @@ export function DemoLayout() {
   };
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden">
+    <div className="flex min-h-screen">
       {/* Sidebar */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-slate-100 transform transition-transform duration-300 ease-in-out ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
         <div className="flex flex-col h-full p-6">
@@ -175,7 +175,7 @@ export function DemoLayout() {
       )}
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col lg:ml-72 overflow-hidden">
+      <div className="flex-1 flex flex-col lg:ml-72">
         {/* Top Navbar */}
         <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-100 px-6 py-4">
           <div className="flex items-center justify-between">

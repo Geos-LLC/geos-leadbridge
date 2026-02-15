@@ -1,5 +1,19 @@
 @import "tailwindcss";
 
+/* Configure theme */
+@theme {
+  --font-family-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+}
+
+/* Base styles to match HTML mockups */
+body {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  background-color: #fcfcfd;
+  color: #1a1a1e;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 /* Custom utility classes for Demo pages */
 @utility glass-card {
   background: rgba(255, 255, 255, 0.8);
