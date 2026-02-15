@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, CheckCircle, AlertCircle, CreditCard } from 'lucide-react';
+import { Settings, CheckCircle, AlertCircle, CreditCard, Rocket, Zap, Lock, MessageSquare, PhoneCall, Reply } from 'lucide-react';
 import { billingApi, thumbtackApi, usersApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
@@ -101,6 +101,10 @@ export default function SettingsPage() {
 
   const hasSubscription = Boolean(subscription?.tier && subscription?.status);
   const isCancelled = subscription?.status === 'CANCELLED';
+  const isActivePaid = hasSubscription && !isCancelled && subscription?.status !== 'TRIALING';
+  const trial = subscription?.trial;
+  const isTrialActive = trial?.isOnTrial && !trial?.trialExpired;
+  const isTrialExpired = trial?.trialExpired;
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   return (
@@ -201,7 +205,114 @@ export default function SettingsPage() {
       <div className="settings-section-card">
         <h2 className="settings-section-title">Subscription & Billing</h2>
 
-        {hasSubscription && subscription ? (
+        {/* STATE 1: Free Trial Active */}
+        {isTrialActive && !isActivePaid && trial && (
+          <div className="billing-state-trial">
+            <div className="billing-trial-header">
+              <div className="billing-trial-badge">
+                <Rocket size={18} />
+                <span>Free Trial Active</span>
+              </div>
+            </div>
+            <div className="billing-trial-details">
+              <div className="billing-trial-stat">
+                <span className="billing-trial-stat-label">Days Remaining</span>
+                <span className="billing-trial-stat-value">{trial.trialDaysRemaining}</span>
+              </div>
+              <div className="billing-trial-stat">
+                <span className="billing-trial-stat-label">Leads Used</span>
+                <span className="billing-trial-stat-value">{trial.trialLeadsHandled} / {trial.trialLeadsLimit}</span>
+              </div>
+              {trial.trialEndDate && (
+                <div className="billing-trial-stat">
+                  <span className="billing-trial-stat-label">Trial Ends</span>
+                  <span className="billing-trial-stat-value">
+                    {new Date(trial.trialEndDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
+                  </span>
+                </div>
+              )}
+            </div>
+            <p className="billing-trial-note">
+              After your trial, choose a plan starting at ${tierPrices.STARTER}/month.
+            </p>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+              <Link to="/pricing" className="btn btn-primary btn-sm">
+                <Zap size={14} /> Choose a Plan
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {/* STATE 2: Trial Expired / No Plan */}
+        {isTrialExpired && !isActivePaid && (
+          <div className="billing-state-expired">
+            <div className="billing-expired-header">
+              <AlertCircle size={22} />
+              <h3>Subscription Required</h3>
+            </div>
+            <p className="billing-expired-text">Your trial has ended. Upgrade to continue using automation.</p>
+            <div className="billing-feature-locks">
+              <div className="billing-feature-lock">
+                <Lock size={14} />
+                <Reply size={14} />
+                <span>Auto Reply</span>
+              </div>
+              <div className="billing-feature-lock">
+                <Lock size={14} />
+                <MessageSquare size={14} />
+                <span>Follow-Ups</span>
+              </div>
+              <div className="billing-feature-lock">
+                <Lock size={14} />
+                <MessageSquare size={14} />
+                <span>Customer SMS</span>
+              </div>
+              <div className="billing-feature-lock">
+                <Lock size={14} />
+                <PhoneCall size={14} />
+                <span>Call Connect</span>
+              </div>
+            </div>
+            <Link to="/pricing" className="btn btn-primary btn-sm" style={{ marginTop: '16px' }}>
+              <Zap size={14} /> View Plans
+            </Link>
+          </div>
+        )}
+
+        {/* STATE 2b: No trial data at all, no subscription */}
+        {!isTrialActive && !isTrialExpired && !isActivePaid && !isCancelled && (
+          <div className="billing-state-expired">
+            <div className="billing-expired-header">
+              <Rocket size={22} />
+              <h3>Start Your Plan</h3>
+            </div>
+            <p className="billing-expired-text">Unlock powerful features for lead management and automation.</p>
+            <div className="billing-feature-locks" style={{ borderColor: '#e0e7ff' }}>
+              <div className="billing-feature-lock" style={{ color: '#4f46e5' }}>
+                <CheckCircle size={14} />
+                <span>Auto Reply</span>
+              </div>
+              <div className="billing-feature-lock" style={{ color: '#4f46e5' }}>
+                <CheckCircle size={14} />
+                <span>Follow-Ups</span>
+              </div>
+              <div className="billing-feature-lock" style={{ color: '#4f46e5' }}>
+                <CheckCircle size={14} />
+                <span>Customer SMS</span>
+              </div>
+              <div className="billing-feature-lock" style={{ color: '#4f46e5' }}>
+                <CheckCircle size={14} />
+                <span>Call Connect</span>
+              </div>
+            </div>
+            <Link to="/pricing" className="btn btn-primary btn-sm" style={{ marginTop: '16px' }}>
+              <Zap size={14} /> View Plans
+            </Link>
+          </div>
+        )}
+
+        {/* STATE 3: Active Paid Subscription */}
+        {isActivePaid && subscription && (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
               <div>
@@ -215,37 +326,24 @@ export default function SettingsPage() {
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '28px', fontWeight: 700, color: '#1e293b' }}>
                   ${subscription.tier ? tierPrices[subscription.tier] : 0}
-                  {subscription.hasOwnNumber && ' + $29'}
                 </div>
                 <div style={{ fontSize: '13px', color: '#94a3b8' }}>/month</div>
               </div>
             </div>
 
-            {isCancelled && (
-              <div className="subscription-notice cancelled-notice">
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                  <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9 9h2v5H9V9zm0-4h2v2H9V5z" fill="currentColor"/>
-                </svg>
-                <div>
-                  <strong>Subscription Cancelled</strong>
-                  <p>Your subscription has been cancelled. {subscription.periodEnd && `Access will continue until ${new Date(subscription.periodEnd).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}.`} You can reactivate anytime through the billing portal.</p>
-                </div>
-              </div>
-            )}
-
-            {!isCancelled && subscription.cancelAtPeriodEnd && subscription.periodEnd && (
+            {subscription.cancelAtPeriodEnd && subscription.periodEnd && (
               <div className="subscription-notice cancelled-notice" style={{ backgroundColor: '#fff3cd', borderColor: '#ffc107' }}>
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
                   <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9 9h2v5H9V9zm0-4h2v2H9V5z" fill="currentColor" style={{ color: '#856404' }}/>
                 </svg>
                 <div>
                   <strong style={{ color: '#856404' }}>Subscription Ending</strong>
-                  <p style={{ color: '#856404' }}>You've cancelled your subscription. You'll continue to have access until {new Date(subscription.periodEnd).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}. You can reactivate anytime through the billing portal.</p>
+                  <p style={{ color: '#856404' }}>You'll continue to have access until {new Date(subscription.periodEnd).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}. Reactivate anytime through the billing portal.</p>
                 </div>
               </div>
             )}
 
-            {!isCancelled && !subscription.cancelAtPeriodEnd && subscription.periodEnd && (
+            {!subscription.cancelAtPeriodEnd && subscription.periodEnd && (
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#475569', marginBottom: '12px' }}>
                 <span>Next billing date</span>
                 <span style={{ fontWeight: 600 }}>
@@ -278,17 +376,33 @@ export default function SettingsPage() {
               </Link>
             </div>
           </>
-        ) : (
-          <div style={{ textAlign: 'center', padding: '24px 0' }}>
-            <CreditCard size={40} style={{ color: '#cbd5e1', marginBottom: '12px' }} />
-            <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 8px' }}>No Active Subscription</h3>
-            <p style={{ fontSize: '14px', color: '#94a3b8', marginBottom: '16px' }}>
-              Subscribe to unlock powerful features for lead management and automation
-            </p>
-            <Link to="/pricing" className="btn btn-primary btn-sm">
-              View Pricing Plans
-            </Link>
-          </div>
+        )}
+
+        {/* STATE 3b: Cancelled subscription */}
+        {isCancelled && subscription && (
+          <>
+            <div className="subscription-notice cancelled-notice">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9 9h2v5H9V9zm0-4h2v2H9V5z" fill="currentColor"/>
+              </svg>
+              <div>
+                <strong>Subscription Cancelled</strong>
+                <p>Your subscription has been cancelled. {subscription.periodEnd && `Access continues until ${new Date(subscription.periodEnd).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}.`} Reactivate anytime.</p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={handleManageSubscription}
+                disabled={portalLoading}
+              >
+                {portalLoading ? 'Opening...' : 'Reactivate'}
+              </button>
+              <Link to="/pricing" className="btn btn-secondary btn-sm">
+                View Plans
+              </Link>
+            </div>
+          </>
         )}
       </div>
     </div>
