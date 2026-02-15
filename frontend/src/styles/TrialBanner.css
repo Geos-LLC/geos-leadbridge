@@ -38,20 +38,13 @@
   color: white;
 }
 
+/* Desktop: single horizontal row */
 .trial-banner-content {
   max-width: 1200px;
   margin: 0 auto;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-}
-
-.trial-banner-row {
-  display: flex;
   align-items: center;
   gap: 12px;
-  width: 100%;
 }
 
 .trial-banner-icon {
@@ -66,7 +59,6 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  text-align: center;
 }
 
 .trial-banner-text strong {
@@ -81,7 +73,7 @@
 
 .trial-banner-cta {
   flex-shrink: 0;
-  padding: 8px 24px;
+  padding: 8px 20px;
   background: rgba(255, 255, 255, 0.95);
   border-radius: 6px;
   font-weight: 600;
@@ -92,6 +84,7 @@
   gap: 8px;
   text-decoration: none;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  white-space: nowrap;
 }
 
 .trial-banner.info .trial-banner-cta {
@@ -112,6 +105,7 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
+/* Dismiss button — desktop: inline after CTA */
 .trial-banner-dismiss {
   flex-shrink: 0;
   background: none;
@@ -124,6 +118,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  margin-left: 4px;
 }
 
 .trial-banner.info .trial-banner-dismiss,
@@ -141,17 +136,27 @@
   background: rgba(255, 255, 255, 0.15);
 }
 
+/* Mobile: stacked layout, dismiss at top-right corner */
 @media (max-width: 768px) {
   .trial-banner {
-    padding: 10px 16px;
+    position: relative;
+    padding: 12px 16px;
+    padding-top: 14px;
   }
 
-  .trial-banner-row {
+  .trial-banner-content {
+    flex-direction: column;
+    align-items: stretch;
     gap: 10px;
   }
 
+  .trial-banner-icon {
+    display: none;
+  }
+
   .trial-banner-text {
-    font-size: 13px;
+    text-align: center;
+    padding-right: 24px;
   }
 
   .trial-banner-text strong {
@@ -163,7 +168,18 @@
   }
 
   .trial-banner-cta {
-    padding: 6px 14px;
+    align-self: center;
+    padding: 8px 20px;
     font-size: 13px;
+  }
+
+  /* Position dismiss X at top-right corner */
+  .trial-banner-dismiss {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    margin-left: 0;
+    padding: 4px;
+    z-index: 1;
   }
 }

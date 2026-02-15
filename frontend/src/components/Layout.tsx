@@ -114,13 +114,13 @@ export function Layout() {
 
       <main className="main-content">
         <div className="mobile-header">
-          <button className="mobile-menu-btn" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
-            {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
-          </button>
           <div className="mobile-header-brand">
             <img src="/LeadBridge_Logo.png" alt="LeadBridge" className="mobile-header-logo" />
             <span className="mobile-header-name">LeadBridge</span>
           </div>
+          <button className="mobile-menu-btn" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
+            {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+          </button>
         </div>
         {(allDisconnected || someDisconnected) && (
           <div className={`disconnect-banner ${allDisconnected ? 'all' : 'some'}`}>
