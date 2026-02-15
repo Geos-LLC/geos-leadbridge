@@ -42,8 +42,16 @@
   max-width: 1200px;
   margin: 0 auto;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
+}
+
+.trial-banner-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
 }
 
 .trial-banner-icon {
@@ -58,6 +66,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  text-align: center;
 }
 
 .trial-banner-text strong {
@@ -72,13 +81,13 @@
 
 .trial-banner-cta {
   flex-shrink: 0;
-  padding: 8px 20px;
+  padding: 8px 24px;
   background: rgba(255, 255, 255, 0.95);
   border-radius: 6px;
   font-weight: 600;
   font-size: 14px;
   transition: all 0.2s;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
   text-decoration: none;
@@ -137,8 +146,8 @@
     padding: 10px 16px;
   }
 
-  .trial-banner-content {
-    gap: 12px;
+  .trial-banner-row {
+    gap: 10px;
   }
 
   .trial-banner-text {

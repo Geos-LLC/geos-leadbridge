@@ -106,9 +106,15 @@ export function Layout() {
       {mobileMenuOpen && <div className="sidebar-backdrop" onClick={closeMenu} />}
 
       <main className="main-content">
-        <button className="mobile-menu-btn" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
-          {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
-        </button>
+        <div className="mobile-header">
+          <button className="mobile-menu-btn" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
+            {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+          </button>
+          <div className="mobile-header-brand">
+            <img src="/LeadBridge_Logo.png" alt="LeadBridge" className="mobile-header-logo" />
+            <span className="mobile-header-name">LeadBridge</span>
+          </div>
+        </div>
         <TrialBanner />
         <CancelledSubscriptionBanner />
         <Outlet />

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { AlertCircle, CheckCircle, Loader2, RefreshCw, ExternalLink } from 'lucide-react';
+import { useSearchParams, Link } from 'react-router-dom';
+import { AlertCircle, CheckCircle, Loader2, RefreshCw, ExternalLink, Settings, X } from 'lucide-react';
 import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
@@ -87,6 +87,9 @@ export function Dashboard() {
   const [confirmRemoveAccount, setConfirmRemoveAccount] = useState<{ id: string; name: string } | null>(null);
   const [deleteLeadsOnRemove, setDeleteLeadsOnRemove] = useState(false);
   const [togglingWebhookId, setTogglingWebhookId] = useState<string | null>(null);
+
+  // Inline settings card
+  const [settingsExpanded, setSettingsExpanded] = useState(false);
 
   // Modals
   const [disconnectWarning, setDisconnectWarning] = useState<{
@@ -385,11 +388,49 @@ export function Dashboard() {
 
   return (
     <div className="dashboard">
-      <header className="dashboard-header">
-        <div>
-          <h1>Overview</h1>
-          <p>Welcome back, {user?.name || user?.email}</p>
+      <header className="dashboard-header-card">
+        <div className="dashboard-header-top">
+          <div>
+            <h1>Overview</h1>
+            <p>Welcome back, {user?.name || user?.email}</p>
+          </div>
+          <button
+            className={`dashboard-settings-toggle ${settingsExpanded ? 'active' : ''}`}
+            onClick={() => setSettingsExpanded(!settingsExpanded)}
+            title="Quick Settings"
+          >
+            {settingsExpanded ? <X size={20} /> : <Settings size={20} />}
+          </button>
         </div>
+
+        {settingsExpanded && (
+          <div className="dashboard-settings-panel">
+            <div className="dashboard-settings-grid">
+              <div className="dashboard-settings-field">
+                <label>Name</label>
+                <span>{user?.name || 'Not set'}</span>
+              </div>
+              <div className="dashboard-settings-field">
+                <label>Email</label>
+                <span>{user?.email || 'Not set'}</span>
+              </div>
+              <div className="dashboard-settings-field">
+                <label>Time Zone</label>
+                <span>{Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
+              </div>
+              {user?.phoneNumber && (
+                <div className="dashboard-settings-field">
+                  <label>Phone</label>
+                  <span style={{ fontFamily: 'monospace' }}>{user.phoneNumber}</span>
+                </div>
+              )}
+            </div>
+            <Link to="/settings" className="dashboard-settings-link">
+              <Settings size={14} />
+              All Settings
+            </Link>
+          </div>
+        )}
       </header>
 
       {error && (

@@ -62,12 +62,14 @@ export default function TrialBanner() {
     return (
       <div className="trial-banner expired">
         <div className="trial-banner-content">
-          <div className="trial-banner-icon">
-            <AlertCircle size={20} />
-          </div>
-          <div className="trial-banner-text">
-            <strong>Your trial has expired</strong>
-            <span>Subscribe now to continue using all features</span>
+          <div className="trial-banner-row">
+            <div className="trial-banner-icon">
+              <AlertCircle size={20} />
+            </div>
+            <div className="trial-banner-text">
+              <strong>Your trial has expired</strong>
+              <span>Subscribe now to continue using all features</span>
+            </div>
           </div>
           <Link to="/pricing" className="trial-banner-cta">
             <Zap size={16} />
@@ -92,23 +94,25 @@ export default function TrialBanner() {
   return (
     <div className={`trial-banner ${urgency}`}>
       <div className="trial-banner-content">
-        <div className="trial-banner-icon">
-          {urgency === 'urgent' ? <AlertCircle size={20} /> : <Zap size={20} />}
-        </div>
-        <div className="trial-banner-text">
-          <strong>
-            {leadsRemaining} of {leadsLimit} trial leads left
-            {trialStatus.trialDaysRemaining > 0 && ` • ${trialStatus.trialDaysRemaining} day${trialStatus.trialDaysRemaining !== 1 ? 's' : ''} remaining`}
-          </strong>
-          <span>{leadsUsed} leads handled • Upgrade to unlock unlimited leads + premium features</span>
+        <div className="trial-banner-row">
+          <div className="trial-banner-icon">
+            {urgency === 'urgent' ? <AlertCircle size={20} /> : <Zap size={20} />}
+          </div>
+          <div className="trial-banner-text">
+            <strong>
+              {leadsRemaining} of {leadsLimit} trial leads left
+              {trialStatus.trialDaysRemaining > 0 && ` • ${trialStatus.trialDaysRemaining} day${trialStatus.trialDaysRemaining !== 1 ? 's' : ''} remaining`}
+            </strong>
+            <span>{leadsUsed} leads handled • Upgrade to unlock unlimited leads + premium features</span>
+          </div>
+          <button className="trial-banner-dismiss" onClick={() => setDismissed(true)} aria-label="Dismiss">
+            <X size={16} />
+          </button>
         </div>
         <Link to="/pricing" className="trial-banner-cta">
           <Zap size={16} />
           Upgrade Now
         </Link>
-        <button className="trial-banner-dismiss" onClick={() => setDismissed(true)} aria-label="Dismiss">
-          <X size={16} />
-        </button>
       </div>
     </div>
   );
