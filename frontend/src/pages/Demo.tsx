@@ -67,7 +67,7 @@ const VARIABLES = [
   { key: '{{business.name}}', desc: 'Your business name' },
 ];
 
-type DemoView = 'overview' | 'automation' | 'templates' | 'leads' | 'phone' | 'insights' | 'billing';
+type DemoView = 'overview' | 'automation' | 'templates' | 'leads' | 'phone' | 'insights' | 'settings';
 
 const NAV_ITEMS: { icon: React.ReactNode; label: string; view: DemoView }[] = [
   { icon: <Home size={20} />, label: 'Overview', view: 'overview' },
@@ -114,12 +114,12 @@ export function Demo() {
           <div className="nav-separator"></div>
           <div className="nav-section-label">Account</div>
           <a
-            className={`nav-link ${activeView === 'billing' ? 'active' : ''}`}
+            className={`nav-link ${activeView === 'settings' ? 'active' : ''}`}
             href="#"
-            onClick={(e) => { e.preventDefault(); navigateTo('billing'); }}
+            onClick={(e) => { e.preventDefault(); navigateTo('settings'); }}
           >
-            <CreditCard size={20} />
-            <span>Billing</span>
+            <Settings size={20} />
+            <span>Settings</span>
           </a>
         </div>
         <div className="nav-footer">
@@ -191,7 +191,7 @@ export function Demo() {
             setSelectedAccountId={setSelectedAccountId}
           />
         )}
-        {activeView === 'billing' && <BillingView />}
+        {activeView === 'settings' && <SettingsView />}
       </main>
     </div>
   );
@@ -1275,24 +1275,85 @@ function InsightsView({ accounts, selectedAccountId, setSelectedAccountId }: {
   );
 }
 
-// ─── Billing View ─────────────────────────────────────────
+// ─── Settings View ────────────────────────────────────────
 
-function BillingView() {
+function SettingsView() {
   return (
-    <div style={{ padding: '32px' }}>
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0 }}>Billing</h1>
-        <p style={{ fontSize: '14px', color: '#64748b', marginTop: '4px' }}>Manage your subscription and payment methods</p>
+    <div className="settings-page">
+      <div className="settings-page-header">
+        <Settings size={24} />
+        <div>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0 }}>Settings</h1>
+          <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>Account, connections & subscription</p>
+        </div>
       </div>
 
-      {/* Active Subscription */}
-      <div style={{
-        border: '1px solid #e2e8f0',
-        borderRadius: '12px',
-        padding: '24px',
-        background: 'white',
-        marginBottom: '16px',
-      }}>
+      {/* Section 1: Account Info */}
+      <div className="settings-section-card">
+        <h2 className="settings-section-title">Account Info</h2>
+        <div className="settings-field-grid">
+          <div className="settings-field">
+            <label>Business Name</label>
+            <div className="settings-field-value">ABC Cleaning Services</div>
+          </div>
+          <div className="settings-field">
+            <label>Email</label>
+            <div className="settings-field-value">demo@leadbridge.app</div>
+          </div>
+          <div className="settings-field">
+            <label>Phone</label>
+            <div className="settings-field-value">(813) 555-0100</div>
+          </div>
+          <div className="settings-field">
+            <label>Time Zone</label>
+            <div className="settings-field-value">Eastern (ET)</div>
+          </div>
+          <div className="settings-field">
+            <label>Business Hours</label>
+            <div className="settings-field-value">Mon–Fri, 8 AM – 6 PM</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Section 2: Marketplace Connections */}
+      <div className="settings-section-card">
+        <h2 className="settings-section-title">Marketplace Connections</h2>
+
+        {/* Thumbtack */}
+        <div className="settings-connection-group">
+          <div className="settings-connection-group-header">
+            <div className="platform-logo thumbtack-logo" style={{ width: '28px', height: '28px', fontSize: '11px' }}>TT</div>
+            <span style={{ fontWeight: 600, fontSize: '15px' }}>Thumbtack</span>
+          </div>
+          <div className="settings-connections-list">
+            {MOCK_ACCOUNTS.map(account => (
+              <div key={account.id} className="settings-connection-row">
+                <div className="settings-connection-info">
+                  <span className="settings-connection-name">{account.businessName}</span>
+                  <span className="settings-connection-meta">ID: {account.businessId}</span>
+                </div>
+                <span className="connection-badge connected">
+                  <CheckCircle size={12} /> Connected
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Yelp */}
+        <div className="settings-connection-group" style={{ marginTop: '16px' }}>
+          <div className="settings-connection-group-header">
+            <div className="platform-logo yelp-logo" style={{ width: '28px', height: '28px', fontSize: '12px', fontWeight: 700 }}>Y</div>
+            <span style={{ fontWeight: 600, fontSize: '15px' }}>Yelp</span>
+            <span className="connection-badge coming-soon">Coming Soon</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Section 3: Subscription & Billing */}
+      <div className="settings-section-card">
+        <h2 className="settings-section-title">Subscription & Billing</h2>
+
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
           <div>
             <h3 style={{ fontSize: '18px', fontWeight: 700, margin: 0 }}>Pro Plan</h3>
@@ -1324,55 +1385,30 @@ function BillingView() {
           </div>
         </div>
 
-        <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
-          <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '10px' }}>Plan Features</h4>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            {[
-              'Up to 5 Thumbtack accounts',
-              'Unlimited auto replies',
-              'SMS lead alerts',
-              'Message templates',
-              'Analytics dashboard',
-              'Priority support',
-            ].map((feature, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#475569' }}>
-                <CheckCircle size={14} style={{ color: '#059669', flexShrink: 0 }} />
-                <span>{feature}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ marginTop: '20px', display: 'flex', gap: '10px' }}>
+        <div style={{ marginBottom: '20px', display: 'flex', gap: '10px' }}>
           <button className="btn btn-secondary btn-sm">Manage Subscription</button>
           <button className="btn btn-secondary btn-sm" style={{ color: '#ef4444' }}>Cancel Plan</button>
         </div>
-      </div>
 
-      {/* Payment Method */}
-      <div style={{
-        border: '1px solid #e2e8f0',
-        borderRadius: '12px',
-        padding: '24px',
-        background: 'white',
-      }}>
-        <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>Payment Method</h3>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          padding: '12px 16px',
-          background: '#f8fafc',
-          borderRadius: '8px',
-          border: '1px solid #e2e8f0',
-        }}>
-          <CreditCard size={20} style={{ color: '#6366f1' }} />
-          <div>
-            <div style={{ fontSize: '14px', fontWeight: 600 }}>Visa ending in 4242</div>
-            <div style={{ fontSize: '12px', color: '#94a3b8' }}>Expires 12/2027</div>
+        {/* Payment Method */}
+        <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
+          <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '10px' }}>Payment Method</h4>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            padding: '12px 16px',
+            background: '#f8fafc',
+            borderRadius: '8px',
+            border: '1px solid #e2e8f0',
+          }}>
+            <CreditCard size={20} style={{ color: '#6366f1' }} />
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 600 }}>Visa ending in 4242</div>
+              <div style={{ fontSize: '12px', color: '#94a3b8' }}>Expires 12/2027</div>
+            </div>
           </div>
         </div>
-        <button className="btn btn-secondary btn-sm" style={{ marginTop: '12px' }}>Update Payment Method</button>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Home, MessageSquare, BarChart3, Settings, LogOut, Phone, CreditCard, Shield, FlaskConical, Briefcase, Menu, X } from 'lucide-react';
+import { Home, MessageSquare, BarChart3, Settings, LogOut, Phone, Shield, FlaskConical, Briefcase, Menu, X } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import TrialBanner from './TrialBanner';
 import TrialExpiredModal from './TrialExpiredModal';
@@ -63,9 +63,9 @@ export function Layout() {
           <div className="nav-separator"></div>
 
           <div className="nav-section-label">Account</div>
-          <Link to="/billing" className={`nav-link ${isActive('/billing') ? 'active' : ''}`} onClick={closeMenu}>
-            <CreditCard size={20} />
-            <span>Billing</span>
+          <Link to="/settings" className={`nav-link ${isActive('/settings') ? 'active' : ''}`} onClick={closeMenu}>
+            <Settings size={20} />
+            <span>Settings</span>
           </Link>
 
           {user?.role === 'ADMIN' && (

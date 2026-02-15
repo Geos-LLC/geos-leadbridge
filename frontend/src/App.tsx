@@ -16,7 +16,7 @@ import { Services } from './pages/Services';
 import { ApiTest } from './pages/ApiTest';
 import { Analytics } from './pages/Analytics';
 import Pricing from './pages/Pricing';
-import BillingSettings from './pages/BillingSettings';
+import SettingsPage from './pages/SettingsPage';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminUserDetails from './pages/admin/AdminUserDetails';
 import AdminPhonePool from './pages/admin/AdminPhonePool';
@@ -64,7 +64,8 @@ function App() {
             <Route path="/services" element={<Services />} />
             <Route path="/api-test" element={<ApiTest />} />
             <Route path="/pricing" element={<Pricing />} />
-            <Route path="/billing" element={<BillingSettings />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/billing" element={<Navigate to="/settings" />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/users/:userId" element={<AdminUserDetails />} />
             <Route path="/admin/phone-pool" element={<AdminPhonePool />} />

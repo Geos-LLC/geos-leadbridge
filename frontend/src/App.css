@@ -7879,6 +7879,137 @@ body {
 }
 
 /* ==========================================
+   Settings Page
+   ========================================== */
+.settings-page {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 40px 20px;
+}
+
+.settings-page-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.settings-section-card {
+  background: white;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 20px;
+}
+
+.settings-section-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+
+.settings-field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.settings-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.settings-field-value {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary, #1e293b);
+}
+
+.settings-connection-group {
+  margin-bottom: 0;
+}
+
+.settings-connection-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.settings-connections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-connection-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--bg-secondary, #f8fafc);
+  border-radius: 8px;
+}
+
+.settings-connection-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-connection-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #1e293b);
+}
+
+.settings-connection-meta {
+  font-size: 12px;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.connection-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 10px;
+}
+
+.connection-badge.connected {
+  background: #dcfce7;
+  color: #059669;
+}
+
+.connection-badge.disconnected {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.connection-badge.coming-soon {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.platform-logo.yelp-logo {
+  background: #d32323;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+
+/* ==========================================
    Mobile Responsive — 768px (Tablet / Large Phone)
    ========================================== */
 @media (max-width: 768px) {
@@ -8176,5 +8307,24 @@ body {
   .health-status-card {
     padding: 12px;
     gap: 10px;
+  }
+
+  /* --- Settings Page --- */
+  .settings-page {
+    padding: 16px;
+  }
+
+  .settings-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-connection-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .settings-section-card {
+    padding: 16px;
   }
 }
