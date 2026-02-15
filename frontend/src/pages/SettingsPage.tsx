@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, MessageSquare, PhoneCall, Reply, Download, ChevronDown, ChevronUp, Loader2, X } from 'lucide-react';
+import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, MessageSquare, PhoneCall, Reply, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check } from 'lucide-react';
 import { billingApi, thumbtackApi, leadsApi, usersApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
@@ -25,7 +25,11 @@ export default function SettingsPage() {
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [portalLoading, setPortalLoading] = useState(false);
-  const [provisioningPhone, setProvisioningPhone] = useState(false);
+
+  // Name editing
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState('');
+  const [savingName, setSavingName] = useState(false);
 
   // Import negotiations state
   const [importCollapsed, setImportCollapsed] = useState(true);
@@ -69,27 +73,26 @@ export default function SettingsPage() {
     }
   };
 
-  const handleProvisionPhone = async () => {
+  const handleSaveName = async () => {
+    if (!nameValue.trim() || nameValue === user?.name) {
+      setEditingName(false);
+      return;
+    }
+    setSavingName(true);
     try {
-      setProvisioningPhone(true);
-      const result = await usersApi.provisionPhoneNumber();
-
-      if (result.phoneNumber) {
-        notify.success('Success', `Phone number ${result.phoneNumber} provisioned successfully!`);
-        if (user) {
-          const token = localStorage.getItem('token');
-          if (token) {
-            setAuth({ ...user, phoneNumber: result.phoneNumber }, token);
-          }
+      await usersApi.updateProfile({ name: nameValue.trim() });
+      if (user) {
+        const token = localStorage.getItem('token');
+        if (token) {
+          setAuth({ ...user, name: nameValue.trim() }, token);
         }
-      } else {
-        notify.error('Error', result.message || 'Failed to provision phone number');
       }
+      notify.success('Updated', 'Name updated successfully');
+      setEditingName(false);
     } catch (error: any) {
-      console.error('Failed to provision phone:', error);
-      notify.error('Error', error.response?.data?.message || 'Failed to provision phone number');
+      notify.error('Error', error.response?.data?.message || 'Failed to update name');
     } finally {
-      setProvisioningPhone(false);
+      setSavingName(false);
     }
   };
 
@@ -184,7 +187,32 @@ export default function SettingsPage() {
         <div className="settings-field-grid">
           <div className="settings-field">
             <label>Name</label>
-            <div className="settings-field-value">{user?.name || 'Not set'}</div>
+            {editingName ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="text"
+                  value={nameValue}
+                  onChange={(e) => setNameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveName();
+                    if (e.key === 'Escape') setEditingName(false);
+                  }}
+                  autoFocus
+                  style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '14px', flex: 1 }}
+                />
+                <button className="btn-icon btn-success-subtle" onClick={handleSaveName} disabled={savingName} title="Save">
+                  {savingName ? <Loader2 className="spinner" size={14} /> : <Check size={14} />}
+                </button>
+                <button className="btn-icon btn-secondary-subtle" onClick={() => setEditingName(false)} title="Cancel">
+                  <X size={14} />
+                </button>
+              </div>
+            ) : (
+              <div className="settings-field-value" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => { setNameValue(user?.name || ''); setEditingName(true); }}>
+                {user?.name || 'Not set'}
+                <Pencil size={12} style={{ color: 'var(--text-secondary)' }} />
+              </div>
+            )}
           </div>
           <div className="settings-field">
             <label>Email</label>
@@ -201,20 +229,6 @@ export default function SettingsPage() {
             <div className="settings-field-value">{timeZone}</div>
           </div>
         </div>
-        {!user?.phoneNumber && (
-          <div style={{ marginTop: '16px', padding: '12px 16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-            <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '10px' }}>
-              Get a dedicated phone number for SMS notifications from your leads.
-            </div>
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={handleProvisionPhone}
-              disabled={provisioningPhone}
-            >
-              {provisioningPhone ? 'Provisioning...' : 'Get Phone Number'}
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Section 2: Marketplace Connections */}
@@ -592,6 +606,70 @@ export default function SettingsPage() {
               </Link>
             </div>
           </>
+        )}
+      </div>
+
+      {/* Section 4: Payment Method */}
+      <div className="settings-section-card">
+        <h2 className="settings-section-title">Payment Method</h2>
+        <div className="payment-card-placeholder">
+          <div className="payment-card-icon">
+            <svg width="40" height="26" viewBox="0 0 40 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="40" height="26" rx="4" fill="#635BFF"/>
+              <text x="20" y="16" textAnchor="middle" fill="white" fontSize="10" fontWeight="600">STRIPE</text>
+            </svg>
+          </div>
+          <div className="payment-card-info">
+            <p style={{ fontSize: '14px', color: '#475569', margin: 0 }}>
+              {isActivePaid ? 'Manage your payment method through the billing portal.' : 'Add a payment method to subscribe to a plan.'}
+            </p>
+          </div>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={handleManageSubscription}
+            disabled={portalLoading}
+          >
+            {portalLoading ? 'Opening...' : isActivePaid ? 'Update Card' : 'Add Card'}
+          </button>
+        </div>
+      </div>
+
+      {/* Section 5: Invoices */}
+      <div className="settings-section-card">
+        <h2 className="settings-section-title">Invoices</h2>
+        {isActivePaid || isCancelled ? (
+          <>
+            <table className="invoices-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Description</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colSpan={4} style={{ textAlign: 'center', color: '#94a3b8', padding: '24px' }}>
+                    View and manage invoices through the billing portal.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div style={{ marginTop: '12px' }}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={handleManageSubscription}
+                disabled={portalLoading}
+              >
+                {portalLoading ? 'Opening...' : 'View Invoices in Stripe'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <p style={{ fontSize: '14px', color: '#94a3b8', margin: 0 }}>
+            No invoices yet. Invoices will appear here once you subscribe to a plan.
+          </p>
         )}
       </div>
     </div>

@@ -758,6 +758,10 @@ export const usersApi = {
     const { data } = await api.get('/v1/users/me/pool-phones-for-sms');
     return data;
   },
+  updateProfile: async (updates: { name?: string }): Promise<{ success: boolean; user: { id: string; name: string; email: string } }> => {
+    const { data } = await api.patch('/v1/users/me', updates);
+    return data;
+  },
 };
 
 // Admin API

@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
 import { billingApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import type { SubscriptionDetails } from '../types';
@@ -46,6 +48,7 @@ const tiers = [
 ];
 
 export default function Pricing() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState<string | null>(null);
   const [ownNumber, setOwnNumber] = useState(false);
   const [subscription, setSubscription] = useState<SubscriptionDetails | null>(null);
@@ -96,6 +99,11 @@ export default function Pricing() {
 
   return (
     <div className="pricing-page">
+      <div className="pricing-back">
+        <button className="btn btn-secondary btn-sm" onClick={() => navigate('/settings')}>
+          <ArrowLeft size={16} /> Back to Settings
+        </button>
+      </div>
       <div className="pricing-header">
         <h1>Choose Your Plan</h1>
         <p>Select the perfect plan for your business needs</p>

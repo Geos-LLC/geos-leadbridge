@@ -41,13 +41,12 @@ interface ServiceCardProps {
   onExpand?: () => void;
   statusText?: string;
   children?: React.ReactNode;
-  saving?: boolean;
 }
 
-function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, expanded, onExpand, statusText, children, saving }: ServiceCardProps) {
+function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, expanded, onExpand, statusText, children }: ServiceCardProps) {
   return (
     <div className={`service-card ${enabled ? 'enabled' : 'disabled'} ${comingSoon ? 'coming-soon' : ''}`}>
-      <div className="service-card-header">
+      <div className="service-card-header" onClick={onExpand && !comingSoon ? onExpand : undefined} style={onExpand && !comingSoon ? { cursor: 'pointer' } : undefined}>
         <div className="service-card-icon">{icon}</div>
         <div className="service-card-info">
           <h3>
@@ -57,13 +56,18 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
           <p>{description}</p>
           {statusText && <span className="service-status-text">{statusText}</span>}
         </div>
-        <div className="service-card-toggle">
+        {onExpand && !comingSoon && (
+          <button className="service-card-expand-icon" onClick={(e) => { e.stopPropagation(); onExpand(); }}>
+            <ChevronDown size={18} className={expanded ? 'rotated' : ''} />
+          </button>
+        )}
+        <div className="service-card-toggle" onClick={(e) => e.stopPropagation()}>
           <label className="toggle-switch">
             <input
               type="checkbox"
               checked={enabled}
               onChange={(e) => onToggle(e.target.checked)}
-              disabled={comingSoon || saving}
+              disabled={comingSoon}
             />
             <span className="toggle-slider"></span>
           </label>
@@ -73,12 +77,6 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
         <div className="service-card-settings">
           {children}
         </div>
-      )}
-      {onExpand && !comingSoon && (
-        <button className="service-card-expand" onClick={onExpand}>
-          {expanded ? 'Hide Settings' : 'Settings'}
-          <ChevronDown size={14} className={expanded ? 'rotated' : ''} />
-        </button>
       )}
     </div>
   );
@@ -206,8 +204,13 @@ export function Services() {
   // --- Toggle Handlers ---
 
   async function toggleAutoReply(enabled: boolean) {
-    setSaving(true);
     setError(null);
+    // Optimistic: update UI immediately
+    const prevRules = [...autoReplyRules];
+    if (autoReplyRules.length > 0) {
+      setAutoReplyRules(prev => prev.map(r => ({ ...r, enabled })));
+    }
+    setSaving(true);
     try {
       if (autoReplyRules.length > 0) {
         // Toggle all existing rules
@@ -240,6 +243,8 @@ export function Services() {
         showSuccess('Auto Reply enabled');
       }
     } catch (err: any) {
+      // Rollback on error
+      setAutoReplyRules(prevRules);
       setError(err.response?.data?.message || err.message || 'Failed to toggle Auto Reply');
     } finally {
       setSaving(false);
@@ -247,8 +252,13 @@ export function Services() {
   }
 
   async function toggleLeadAlerts(enabled: boolean) {
-    setSaving(true);
     setError(null);
+    // Optimistic: update UI immediately
+    const prevAlertRule = leadAlertRule ? { ...leadAlertRule } : null;
+    if (leadAlertRule) {
+      setLeadAlertRule({ ...leadAlertRule, enabled });
+    }
+    setSaving(true);
     try {
       if (leadAlertRule) {
         const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { enabled });
@@ -283,6 +293,8 @@ export function Services() {
         showSuccess('Lead Alerts enabled — configure your alert phone number');
       }
     } catch (err: any) {
+      // Rollback on error
+      setLeadAlertRule(prevAlertRule);
       setError(err.response?.data?.message || err.message || 'Failed to toggle Lead Alerts');
     } finally {
       setSaving(false);
@@ -543,7 +555,6 @@ export function Services() {
               description="Automatically respond and follow up with new leads."
               enabled={autoReplyEnabled}
               onToggle={toggleAutoReply}
-              saving={saving}
               expanded={expandedCard === 'auto-reply'}
               onExpand={() => toggleExpand('auto-reply')}
               statusText={autoReplyEnabled ? `${1 + followUpRules.length} message${followUpRules.length > 0 ? 's' : ''} in sequence` : undefined}
@@ -722,7 +733,6 @@ export function Services() {
               description="Get notified immediately via SMS when a new lead arrives."
               enabled={leadAlertRule?.enabled ?? false}
               onToggle={toggleLeadAlerts}
-              saving={saving}
               expanded={expandedCard === 'lead-alerts'}
               onExpand={() => toggleExpand('lead-alerts')}
               statusText={leadAlertRule?.enabled ? `SMS to ${leadAlertRule.toPhone || 'not set'}` : undefined}

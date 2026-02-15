@@ -160,7 +160,7 @@ export function PhoneSettings() {
                 <div key={phone.id} className="pool-phone-card">
                   <div className="pool-phone-info">
                     <span className="pool-phone-number">{phone.phoneNumber}</span>
-                    <span className="provider-badge">{phone.provider}</span>
+                    <span className="provider-badge">LeadBridge</span>
                   </div>
                   <div className="pool-phone-meta">
                     {phone.areaCode && <span>Area code: {phone.areaCode}</span>}
@@ -198,7 +198,7 @@ export function PhoneSettings() {
             </div>
           </div>
           <p style={{ fontSize: '14px', color: 'var(--text-muted)', margin: 0 }}>
-            Connect your own OpenPhone or Twilio account to use your own phone numbers for SMS notifications.
+            Connect your own OpenPhone or LeadBridge account to use your own phone numbers for SMS notifications.
           </p>
         </div>
       </div>

@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { Zap, MessageSquare, Phone, Bell } from 'lucide-react';
 
 interface SystemHealthProps {
@@ -11,6 +12,7 @@ interface HealthCard {
   icon: React.ReactNode;
   enabled: boolean;
   comingSoon?: boolean;
+  serviceId?: string;
 }
 
 export default function SystemHealth({
@@ -18,27 +20,33 @@ export default function SystemHealth({
   customerSmsEnabled,
   leadAlertsEnabled,
 }: SystemHealthProps) {
+  const navigate = useNavigate();
+
   const cards: HealthCard[] = [
     {
       label: 'Auto Reply',
       icon: <Zap size={20} />,
       enabled: autoReplyEnabled,
+      serviceId: 'auto-reply',
     },
     {
       label: 'Customer SMS',
       icon: <MessageSquare size={20} />,
       enabled: customerSmsEnabled,
+      serviceId: 'customer-sms',
     },
     {
       label: 'Call Connect',
       icon: <Phone size={20} />,
       enabled: false,
       comingSoon: true,
+      serviceId: 'call-connect',
     },
     {
       label: 'Lead Alerts',
       icon: <Bell size={20} />,
       enabled: leadAlertsEnabled,
+      serviceId: 'lead-alerts',
     },
   ];
 
@@ -47,7 +55,9 @@ export default function SystemHealth({
       {cards.map(card => (
         <div
           key={card.label}
-          className={`health-status-card ${card.comingSoon ? 'coming-soon' : card.enabled ? 'on' : 'off'}`}
+          className={`health-status-card clickable ${card.comingSoon ? 'coming-soon' : card.enabled ? 'on' : 'off'}`}
+          onClick={() => navigate('/services')}
+          style={{ cursor: 'pointer' }}
         >
           <div className="health-card-icon">{card.icon}</div>
           <div className="health-card-info">

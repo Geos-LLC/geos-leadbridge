@@ -245,20 +245,13 @@ function OverviewView({ accounts }: {
   setSelectedAccountId: (id: string | null) => void;
   selectedAccount: typeof MOCK_ACCOUNTS[0] | undefined;
 }) {
-  const [healthToggles, setHealthToggles] = useState({ autoReply: true, customerSms: true, leadAlerts: true });
+  const [healthToggles] = useState({ autoReply: true, customerSms: true, leadAlerts: true });
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const account = accounts[selectedIdx];
 
   return (
     <div className="dashboard">
-      <header className="dashboard-header-card">
-        <div className="dashboard-header-top">
-          <div>
-            <h1>Overview</h1>
-            <p>Welcome back, Demo User</p>
-          </div>
-        </div>
-      </header>
-
-      {/* Account Cards */}
+      {/* Account Card with Dropdown */}
       <section className="manage-accounts-section" id="manage-accounts">
         <div className="account-cards-compact">
           <div className="account-cards-header">
@@ -267,31 +260,47 @@ function OverviewView({ accounts }: {
               <Link2 size={14} /> Add Account
             </button>
           </div>
-          {accounts.map((account) => (
-            <div key={account.id} className="account-card-compact">
-              <div className="account-card-left">
-                <div className="account-card-avatar placeholder"><Building2 size={20} /></div>
-                <div className="account-card-details">
-                  <div className="account-card-name">{account.businessName}</div>
-                  <div className="account-card-meta">
-                    <span className="account-card-id">ID: {account.businessId}</span>
-                    <span className="account-card-status connected">
-                      <CheckCircle size={10} /> Connected
-                    </span>
+          <div className="account-card-compact">
+            <div className="account-card-left">
+              <div className="account-card-avatar placeholder"><Building2 size={20} /></div>
+              <div className="account-card-details">
+                {accounts.length > 1 ? (
+                  <div className="account-card-dropdown">
+                    <select
+                      value={selectedIdx}
+                      onChange={(e) => setSelectedIdx(Number(e.target.value))}
+                      className="account-name-select"
+                    >
+                      {accounts.map((acc, idx) => (
+                        <option key={acc.id} value={idx}>{acc.businessName}</option>
+                      ))}
+                    </select>
+                    <ChevronDown size={14} className="dropdown-chevron" />
                   </div>
+                ) : (
+                  <div className="account-card-name">{account.businessName}</div>
+                )}
+                <div className="account-card-meta">
+                  <span className="account-card-id">ID: {account.businessId}</span>
+                  <span className="account-card-status connected">
+                    <CheckCircle size={10} /> Connected
+                  </span>
+                </div>
+                <div className="email-display-row compact">
+                  <span className="email-hint">{account.emailHint}</span>
                 </div>
               </div>
-              <div className="account-card-actions">
-                <button className="btn btn-primary btn-sm" disabled>
-                  <ExternalLink size={14} /> Leads
-                </button>
-              </div>
             </div>
-          ))}
+            <div className="account-card-actions">
+              <button className="btn btn-primary btn-sm" disabled>
+                <ExternalLink size={14} /> Leads
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 
-      {/* System Health */}
+      {/* System Health - Clickable */}
       <section className="dashboard-section">
         <h2>System Health</h2>
         <div className="health-status-grid">
@@ -305,25 +314,20 @@ function OverviewView({ accounts }: {
             return (
               <div
                 key={i}
-                className={`health-status-card ${card.comingSoon ? 'coming-soon' : enabled ? 'on' : 'off'}`}
-                onClick={() => {
-                  if (card.key && !card.comingSoon) {
-                    setHealthToggles(prev => ({ ...prev, [card.key!]: !prev[card.key!] }));
-                  }
-                }}
-                style={{ cursor: card.comingSoon ? 'default' : 'pointer' }}
+                className={`health-status-card clickable ${card.comingSoon ? 'coming-soon' : enabled ? 'on' : 'off'}`}
+                style={{ cursor: 'pointer' }}
               >
-                <div className={`health-card-icon ${card.comingSoon ? '' : enabled ? 'on' : 'off'}`}>
-                  {card.icon}
+                <div className="health-card-icon">{card.icon}</div>
+                <div className="health-card-info">
+                  <span className="health-card-label">{card.label}</span>
+                  {card.comingSoon ? (
+                    <span className="status-indicator coming-soon">Coming Soon</span>
+                  ) : (
+                    <span className={`status-indicator ${enabled ? 'on' : 'off'}`}>
+                      {enabled ? 'ON' : 'OFF'}
+                    </span>
+                  )}
                 </div>
-                <span className="health-card-label">{card.label}</span>
-                {card.comingSoon ? (
-                  <span className="status-indicator coming-soon">Coming Soon</span>
-                ) : (
-                  <span className={`status-indicator ${enabled ? 'on' : 'off'}`}>
-                    {enabled ? 'ON' : 'OFF'}
-                  </span>
-                )}
               </div>
             );
           })}
@@ -453,14 +457,17 @@ function AutomationView({ accounts, selectedAccountId, setSelectedAccountId }: {
         <div className="services-grid">
           {/* 1. Auto Reply & Follow-Ups */}
           <div className={`service-card ${autoReplyEnabled ? 'enabled' : 'disabled'}`}>
-            <div className="service-card-header">
+            <div className="service-card-header" onClick={() => setExpandedCard(expandedCard === 'auto-reply' ? null : 'auto-reply')} style={{ cursor: 'pointer' }}>
               <div className="service-card-icon"><Zap size={22} /></div>
               <div className="service-card-info">
                 <h3>Auto Reply & Follow-Ups</h3>
                 <p>Automatically respond to new leads</p>
                 {autoReplyEnabled && <span className="service-status-text">1 message in sequence</span>}
               </div>
-              <div className="service-card-toggle">
+              <button className="service-card-expand-icon" onClick={(e) => { e.stopPropagation(); setExpandedCard(expandedCard === 'auto-reply' ? null : 'auto-reply'); }}>
+                <ChevronDown size={18} className={expandedCard === 'auto-reply' ? 'rotated' : ''} />
+              </button>
+              <div className="service-card-toggle" onClick={(e) => e.stopPropagation()}>
                 <label className="toggle-switch">
                   <input type="checkbox" checked={autoReplyEnabled} onChange={() => setAutoReplyEnabled(!autoReplyEnabled)} />
                   <span className="toggle-slider"></span>
@@ -540,22 +547,21 @@ function AutomationView({ accounts, selectedAccountId, setSelectedAccountId }: {
                 </div>
               </div>
             )}
-            <button className="service-card-expand" onClick={() => setExpandedCard(expandedCard === 'auto-reply' ? null : 'auto-reply')}>
-              {expandedCard === 'auto-reply' ? 'Hide Settings' : 'Settings'}
-              <ChevronDown size={14} className={expandedCard === 'auto-reply' ? 'rotated' : ''} />
-            </button>
           </div>
 
           {/* 2. Lead Alerts */}
           <div className={`service-card ${leadAlertsEnabled ? 'enabled' : 'disabled'}`}>
-            <div className="service-card-header">
+            <div className="service-card-header" onClick={() => setExpandedCard(expandedCard === 'alerts' ? null : 'alerts')} style={{ cursor: 'pointer' }}>
               <div className="service-card-icon"><Bell size={22} /></div>
               <div className="service-card-info">
                 <h3>Lead Alerts</h3>
                 <p>Get notified immediately via SMS when a new lead arrives.</p>
                 {leadAlertsEnabled && <span className="service-status-text">SMS to {alertToPhone}</span>}
               </div>
-              <div className="service-card-toggle">
+              <button className="service-card-expand-icon" onClick={(e) => { e.stopPropagation(); setExpandedCard(expandedCard === 'alerts' ? null : 'alerts'); }}>
+                <ChevronDown size={18} className={expandedCard === 'alerts' ? 'rotated' : ''} />
+              </button>
+              <div className="service-card-toggle" onClick={(e) => e.stopPropagation()}>
                 <label className="toggle-switch">
                   <input type="checkbox" checked={leadAlertsEnabled} onChange={() => setLeadAlertsEnabled(!leadAlertsEnabled)} />
                   <span className="toggle-slider"></span>
@@ -657,10 +663,6 @@ function AutomationView({ accounts, selectedAccountId, setSelectedAccountId }: {
                 </div>
               </div>
             )}
-            <button className="service-card-expand" onClick={() => setExpandedCard(expandedCard === 'alerts' ? null : 'alerts')}>
-              {expandedCard === 'alerts' ? 'Hide Settings' : 'Settings'}
-              <ChevronDown size={14} className={expandedCard === 'alerts' ? 'rotated' : ''} />
-            </button>
           </div>
 
           {/* 3. Customer Texting — Coming Soon */}

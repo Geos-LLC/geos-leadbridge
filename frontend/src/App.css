@@ -5366,6 +5366,16 @@ body {
   padding: 40px 20px;
 }
 
+.pricing-back {
+  margin-bottom: 16px;
+}
+
+.pricing-back .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .pricing-header {
   text-align: center;
   margin-bottom: 40px;
@@ -7065,32 +7075,31 @@ body {
   color: #92400e;
 }
 
-.service-card-expand {
+.service-card-expand-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  width: 100%;
-  padding: 10px 24px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--primary);
-  background: var(--bg-secondary);
+  width: 32px;
+  height: 32px;
   border: none;
-  border-top: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: background 0.2s;
+  border-radius: 6px;
+  transition: background 0.2s, color 0.2s;
+  flex-shrink: 0;
 }
 
-.service-card-expand:hover {
+.service-card-expand-icon:hover {
   background: var(--bg-tertiary);
+  color: var(--primary);
 }
 
-.service-card-expand svg {
+.service-card-expand-icon svg {
   transition: transform 0.2s;
 }
 
-.service-card-expand svg.rotated {
+.service-card-expand-icon svg.rotated {
   transform: rotate(180deg);
 }
 
@@ -7817,6 +7826,16 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
+.health-status-card.clickable {
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.15s;
+}
+
+.health-status-card.clickable:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md, 0 4px 6px -1px rgba(0,0,0,.1));
+}
+
 .health-status-card.on {
   border-color: #86efac;
   background: #f0fdf4;
@@ -8142,6 +8161,38 @@ body {
   flex: 1;
 }
 
+.account-card-dropdown {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.account-card-dropdown .dropdown-chevron {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--text-secondary);
+}
+
+.account-name-select {
+  appearance: none;
+  background: transparent;
+  border: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  padding: 2px 22px 2px 0;
+  cursor: pointer;
+  outline: none;
+  max-width: 200px;
+}
+
+.account-name-select:hover {
+  color: var(--primary);
+}
+
 .account-card-name {
   font-size: 14px;
   font-weight: 600;
@@ -8381,6 +8432,45 @@ body {
   font-size: 15px;
   font-weight: 500;
   color: var(--text-primary, #1e293b);
+}
+
+.payment-card-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.payment-card-icon {
+  flex-shrink: 0;
+}
+
+.payment-card-info {
+  flex: 1;
+}
+
+.invoices-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.invoices-table th {
+  text-align: left;
+  padding: 10px 12px;
+  font-weight: 600;
+  color: #475569;
+  border-bottom: 2px solid #e2e8f0;
+  font-size: 13px;
+}
+
+.invoices-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #64748b;
 }
 
 .settings-connection-group {
