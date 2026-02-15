@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="LeadBridge - Win More Thumbtack & Yelp Jobs Automatically.">
+    <title>LeadBridge | AI Lead Automation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #ffffff; color: #1a1a1e; }
+        .glass-card { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(12px); border: 1px solid rgba(226, 232, 240, 0.8); }
+        .gradient-text { background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .hero-glow { position: absolute; top: -10%; right: -10%; width: 500px; height: 500px; background: radial-gradient(circle, rgba(37, 99, 235, 0.1) 0%, rgba(255, 255, 255, 0) 70%); z-index: -1; }
+        .check-list-item::before { content: '✓'; color: #10b981; font-weight: bold; margin-right: 0.75rem; }
+    </style>
+</head>
+<body class="antialiased">
+
+    <!-- Navigation -->
+    <nav class="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-md border-b border-slate-100">
+        <div class="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+                    <i data-lucide="zap" class="w-6 h-6"></i>
+                </div>
+                <span class="text-xl font-bold tracking-tight">LeadBridge</span>
+            </div>
+            <div class="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-600">
+                <a href="#problem" class="hover:text-blue-600">Why Us</a>
+                <a href="#how-it-works" class="hover:text-blue-600">How it Works</a>
+                <a href="#pricing" class="hover:text-blue-600">Pricing</a>
+            </div>
+            <div class="flex items-center gap-4">
+                <a href="/login" class="text-sm font-semibold text-slate-600 hover:text-blue-600">Login</a>
+                <a href="#cta" class="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-md">Get Started</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- First Screen: Clear Benefit -->
+    <header class="relative pt-32 pb-20 lg:pt-48 lg:pb-32 overflow-hidden">
+        <div class="hero-glow"></div>
+        <div class="max-w-7xl mx-auto px-6 grid lg:grid-cols-2 gap-16 items-center">
+            <div>
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-xs font-bold uppercase tracking-wider mb-6">
+                    <span class="relative flex h-2 w-2">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                    </span>
+                    New: AI-Powered Responses for 2024
+                </div>
+                <h1 class="text-5xl lg:text-7xl font-extrabold text-slate-900 leading-[1.1] mb-6">
+                    Win More Thumbtack & <span class="gradient-text">Yelp Jobs</span> — Automatically.
+                </h1>
+                <p class="text-xl text-slate-600 mb-8 leading-relaxed max-w-xl">
+                    Instant AI replies. Smart follow-ups. No missed leads. LeadBridge responds to every new lead in seconds — even at night.
+                </p>
+                <div class="flex flex-wrap gap-4 mb-10">
+                    <div class="flex items-center gap-2 text-slate-700 font-medium">
+                        <i data-lucide="arrow-up-right" class="w-5 h-5 text-emerald-500"></i> Increase response speed
+                    </div>
+                    <div class="flex items-center gap-2 text-slate-700 font-medium">
+                        <i data-lucide="arrow-up-right" class="w-5 h-5 text-emerald-500"></i> Increase close rate
+                    </div>
+                    <div class="flex items-center gap-2 text-slate-700 font-medium">
+                        <i data-lucide="arrow-up-right" class="w-5 h-5 text-emerald-500"></i> Increase revenue
+                    </div>
+                </div>
+                <a href="#cta" class="inline-flex items-center gap-3 px-8 py-4 bg-blue-600 text-white rounded-2xl text-lg font-bold hover:bg-blue-700 transition-all shadow-xl shadow-blue-200 group">
+                    Get More Jobs Automatically
+                    <i data-lucide="arrow-right" class="w-5 h-5 group-hover:translate-x-1 transition-transform"></i>
+                </a>
+
+                <!-- Proof Circles -->
+                <div class="mt-12 flex items-center gap-4">
+                    <div class="flex -space-x-3">
+                        <div class="w-12 h-12 rounded-full border-4 border-white overflow-hidden bg-slate-200">
+                            <img src="https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&q=80&w=100&h=100" alt="Cleaner" class="w-full h-full object-cover">
+                        </div>
+                        <div class="w-12 h-12 rounded-full border-4 border-white overflow-hidden bg-slate-200">
+                            <img src="https://images.unsplash.com/photo-1621905252507-b354bcadcabc?auto=format&fit=crop&q=80&w=100&h=100" alt="Plumber" class="w-full h-full object-cover">
+                        </div>
+                        <div class="w-12 h-12 rounded-full border-4 border-white overflow-hidden bg-slate-200">
+                            <img src="https://images.unsplash.com/photo-1581578731548-c64695ce6958?auto=format&fit=crop&q=80&w=100&h=100" alt="HVAC" class="w-full h-full object-cover">
+                        </div>
+                        <div class="w-12 h-12 rounded-full border-4 border-white overflow-hidden bg-slate-200 flex items-center justify-center bg-blue-600 text-white text-xs font-bold">
+                            +500
+                        </div>
+                    </div>
+                    <p class="text-sm text-slate-500 font-medium">Trusted by 500+ home service pros</p>
+                </div>
+            </div>
+            
+            <div class="relative">
+                <div class="rounded-3xl overflow-hidden shadow-2xl shadow-slate-200 border-8 border-white bg-slate-100">
+                    <img src="https://images.unsplash.com/photo-1581578731548-c64695ce6958?auto=format&fit=crop&q=80&w=800" alt="Home Service Professional" class="w-full h-full object-cover">
+                </div>
+                <!-- Floating Illustration Element -->
+                <div class="absolute -bottom-10 -left-10 glass-card p-6 rounded-2xl shadow-xl max-w-xs animate-float">
+                    <div class="flex items-center gap-4 mb-3">
+                        <div class="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">
+                            <i data-lucide="check" class="w-6 h-6"></i>
+                        </div>
+                        <div>
+                            <p class="text-xs text-slate-500 font-bold uppercase">New Lead Captured</p>
+                            <p class="font-bold text-slate-900">AI Response Sent</p>
+                        </div>
+                    </div>
+                    <p class="text-sm text-slate-600">"Hey! I'd love to help with your plumbing issue. Are you free at 2pm?"</p>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Problem Section: Sound Familiar? -->
+    <section id="problem" class="py-24 bg-amber-50/50">
+        <div class="max-w-4xl mx-auto px-6">
+            <div class="text-center mb-16">
+                <span class="text-amber-600 font-bold tracking-widest uppercase text-sm">🟨 WHEN IS THIS NEEDED?</span>
+                <h2 class="text-4xl font-extrabold text-slate-900 mt-4">Does This Sound Familiar?</h2>
+            </div>
+            <div class="grid gap-4">
+                <div class="bg-white p-6 rounded-2xl border border-amber-100 shadow-sm flex items-start gap-4">
+                    <div class="w-6 h-6 rounded bg-amber-100 flex-shrink-0 flex items-center justify-center mt-1">
+                        <i data-lucide="x" class="w-4 h-4 text-amber-600"></i>
+                    </div>
+                    <p class="text-lg text-slate-700">You’re driving, cleaning, on a job — and miss a new lead.</p>
+                </div>
+                <div class="bg-white p-6 rounded-2xl border border-amber-100 shadow-sm flex items-start gap-4">
+                    <div class="w-6 h-6 rounded bg-amber-100 flex-shrink-0 flex items-center justify-center mt-1">
+                        <i data-lucide="clock" class="w-4 h-4 text-amber-600"></i>
+                    </div>
+                    <p class="text-lg text-slate-700">You respond 20–40 minutes later… and the job is gone.</p>
+                </div>
+                <div class="bg-white p-6 rounded-2xl border border-amber-100 shadow-sm flex items-start gap-4">
+                    <div class="w-6 h-6 rounded bg-amber-100 flex-shrink-0 flex items-center justify-center mt-1">
+                        <i data-lucide="dollar-sign" class="w-4 h-4 text-amber-600"></i>
+                    </div>
+                    <p class="text-lg text-slate-700">You pay for leads but don’t win enough of them.</p>
+                </div>
+                <div class="bg-white p-6 rounded-2xl border border-amber-100 shadow-sm flex items-start gap-4">
+                    <div class="w-6 h-6 rounded bg-amber-100 flex-shrink-0 flex items-center justify-center mt-1">
+                        <i data-lucide="users" class="w-4 h-4 text-amber-600"></i>
+                    </div>
+                    <p class="text-lg text-slate-700">Customers message multiple pros — fastest reply wins.</p>
+                </div>
+                <div class="bg-white p-6 rounded-2xl border border-amber-100 shadow-sm flex items-start gap-4">
+                    <div class="w-6 h-6 rounded bg-amber-100 flex-shrink-0 flex items-center justify-center mt-1">
+                        <i data-lucide="alert-circle" class="w-4 h-4 text-amber-600"></i>
+                    </div>
+                    <p class="text-lg text-slate-700 font-bold italic">Or worse… You reply manually all day and feel chained to your phone.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Agitation Section: The Real Problem -->
+    <section class="py-24 bg-white border-y border-slate-100">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="grid lg:grid-cols-2 gap-20 items-center">
+                <div class="order-2 lg:order-1">
+                    <div class="rounded-3xl overflow-hidden shadow-2xl relative">
+                        <img src="https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&q=80&w=800" alt="Frustrated Business Owner" class="w-full h-full object-cover">
+                        <div class="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent"></div>
+                        <div class="absolute bottom-6 left-6 text-white">
+                            <p class="text-sm font-bold uppercase tracking-widest mb-1 text-rose-400">The Hidden Cost</p>
+                            <p class="text-lg font-medium italic">"Every minute of delay costs you dollars in booked jobs."</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="order-1 lg:order-2">
+                    <span class="text-rose-600 font-bold tracking-widest uppercase text-sm">🟥 WHAT CAUSES THIS?</span>
+                    <h2 class="text-4xl font-extrabold text-slate-900 mt-4 mb-6">The Real Problem Isn’t the Leads. It’s Response Speed.</h2>
+                    <p class="text-lg text-slate-600 mb-8 leading-relaxed">
+                        On platforms like Thumbtack and Yelp, customers contact 3–5 professionals at once. The first helpful response usually wins.
+                    </p>
+                    <ul class="space-y-4">
+                        <li class="flex items-center gap-3 text-slate-700 font-medium"><i data-lucide="alert-triangle" class="w-5 h-5 text-rose-500"></i> Home service owners work in the field</li>
+                        <li class="flex items-center gap-3 text-slate-700 font-medium"><i data-lucide="alert-triangle" class="w-5 h-5 text-rose-500"></i> Don’t have office staff</li>
+                        <li class="flex items-center gap-3 text-slate-700 font-medium"><i data-lucide="alert-triangle" class="w-5 h-5 text-rose-500"></i> Can’t answer instantly</li>
+                        <li class="flex items-center gap-3 text-slate-700 font-bold text-rose-600"><i data-lucide="x-circle" class="w-5 h-5"></i> Manual response = lost money.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Risk Section: If you don't fix this -->
+    <section class="py-24 bg-slate-900 text-white relative overflow-hidden">
+        <div class="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_30%_50%,rgba(225,29,72,0.1),transparent)]"></div>
+        <div class="max-w-4xl mx-auto px-6 relative z-10">
+            <div class="text-center mb-16">
+                <span class="text-rose-500 font-bold tracking-widest uppercase text-sm">⚠️ WHAT HAPPENS IF YOU DON’T FIX THIS?</span>
+                <h2 class="text-4xl font-extrabold mt-4">You Keep Paying for Leads — Without Winning Them.</h2>
+            </div>
+            <div class="grid md:grid-cols-2 gap-8 mb-12">
+                <div class="bg-white/5 p-6 rounded-2xl border border-white/10">
+                    <p class="text-slate-400 mb-2">Platform Impact</p>
+                    <h4 class="text-xl font-bold text-rose-400">Lower close rate & Bad response score</h4>
+                </div>
+                <div class="bg-white/5 p-6 rounded-2xl border border-white/10">
+                    <p class="text-slate-400 mb-2">Financial Impact</p>
+                    <h4 class="text-xl font-bold text-rose-400">Wasted marketing spend & Higher cost per job</h4>
+                </div>
+            </div>
+            <div class="text-center p-8 bg-rose-500/10 border border-rose-500/20 rounded-3xl">
+                <p class="text-lg font-bold">And here’s the hidden risk: When your response rate drops, your visibility can drop too. You pay more. You win less. You work harder.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Solution Section: Meet LeadBridge -->
+    <section class="py-24 bg-white">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="flex flex-col lg:flex-row gap-16 items-center">
+                <div class="flex-1">
+                    <span class="text-emerald-600 font-bold tracking-widest uppercase text-sm">🟩 NOW — THE SOLUTION</span>
+                    <h2 class="text-5xl font-extrabold text-slate-900 mt-4 mb-6">Meet LeadBridge.</h2>
+                    <p class="text-xl text-slate-600 font-semibold mb-8">AI-Powered Lead Response System Built Specifically for Home Service Businesses.</p>
+                    <div class="grid md:grid-cols-2 gap-6">
+                        <div class="flex items-start gap-3">
+                            <i data-lucide="check-circle-2" class="w-6 h-6 text-emerald-500 shrink-0"></i>
+                            <p class="font-medium text-slate-700">Connects to Thumbtack & Yelp</p>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <i data-lucide="check-circle-2" class="w-6 h-6 text-emerald-500 shrink-0"></i>
+                            <p class="font-medium text-slate-700">Replies instantly (within seconds)</p>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <i data-lucide="check-circle-2" class="w-6 h-6 text-emerald-500 shrink-0"></i>
+                            <p class="font-medium text-slate-700">Sends structured AI first messages</p>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <i data-lucide="check-circle-2" class="w-6 h-6 text-emerald-500 shrink-0"></i>
+                            <p class="font-medium text-slate-700">Automatically follows up</p>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <i data-lucide="check-circle-2" class="w-6 h-6 text-emerald-500 shrink-0"></i>
+                            <p class="font-medium text-slate-700">Routes conversations to your phone</p>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <i data-lucide="check-circle-2" class="w-6 h-6 text-emerald-500 shrink-0"></i>
+                            <p class="font-medium text-slate-700">Works 24/7 Even while you sleep</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex-1">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="rounded-2xl overflow-hidden h-40">
+                            <img src="https://images.unsplash.com/photo-1558976825-6b1b03a03719?auto=format&fit=crop&q=80&w=400" alt="Contractor" class="w-full h-full object-cover">
+                        </div>
+                        <div class="rounded-2xl overflow-hidden h-40 mt-8">
+                            <img src="https://images.unsplash.com/photo-1595841055112-588327c5270c?auto=format&fit=crop&q=80&w=400" alt="Kitchen" class="w-full h-full object-cover">
+                        </div>
+                        <div class="rounded-2xl overflow-hidden h-40 -mt-8">
+                            <img src="https://images.unsplash.com/photo-1517646287270-a5a9ca602e5c?auto=format&fit=crop&q=80&w=400" alt="Plumbing" class="w-full h-full object-cover">
+                        </div>
+                        <div class="rounded-2xl overflow-hidden h-40">
+                            <img src="https://images.unsplash.com/photo-1527515637462-cff94eecc1ac?auto=format&fit=crop&q=80&w=400" alt="Cleaning" class="w-full h-full object-cover">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How it Works -->
+    <section id="how-it-works" class="py-24 bg-slate-50">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="text-center mb-16">
+                <span class="text-blue-600 font-bold tracking-widest uppercase text-sm">⚙️ HOW IT WORKS</span>
+                <h2 class="text-4xl font-extrabold text-slate-900 mt-4">Simple, Powerful, Automated.</h2>
+            </div>
+            <div class="grid md:grid-cols-5 gap-4">
+                <div class="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                    <div class="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center font-bold text-slate-900 mb-4">1</div>
+                    <p class="font-bold text-slate-900">New lead comes in</p>
+                </div>
+                <div class="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                    <div class="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center font-bold text-slate-900 mb-4">2</div>
+                    <p class="font-bold text-slate-900">LeadBridge detects it instantly</p>
+                </div>
+                <div class="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                    <div class="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center font-bold text-slate-900 mb-4">3</div>
+                    <p class="font-bold text-slate-900">AI sends optimized first reply</p>
+                </div>
+                <div class="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                    <div class="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center font-bold text-slate-900 mb-4">4</div>
+                    <p class="font-bold text-slate-900">Follow-ups are triggered automatically</p>
+                </div>
+                <div class="bg-blue-600 p-6 rounded-3xl text-white shadow-lg">
+                    <div class="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center font-bold text-white mb-4">5</div>
+                    <p class="font-bold">You jump in when the customer responds</p>
+                </div>
+            </div>
+            <div class="text-center mt-12">
+                <p class="text-xl font-bold text-slate-900">You stay in control. But you’re never slow again.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Why Better -->
+    <section class="py-24 bg-white">
+        <div class="max-w-4xl mx-auto px-6">
+            <div class="bg-slate-900 rounded-[3rem] p-12 text-white relative overflow-hidden">
+                <div class="relative z-10">
+                    <span class="text-blue-400 font-bold tracking-widest uppercase text-sm">🧠 WHY THIS WORKS BETTER</span>
+                    <h2 class="text-4xl font-extrabold mt-4 mb-8">Better Than Simple Auto-Replies</h2>
+                    <p class="text-slate-400 mb-10 leading-relaxed">Unlike basic templates in LeadWinner or Thumbtack, LeadBridge uses AI-optimized conversation structure, adjusts tone, encourages booking, and handles objections.</p>
+                    <div class="grid md:grid-cols-2 gap-6 mb-12">
+                        <div class="flex items-center gap-3">
+                            <i data-lucide="check" class="w-5 h-5 text-emerald-400"></i>
+                            <span class="text-slate-200">AI-optimized conversation</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <i data-lucide="check" class="w-5 h-5 text-emerald-400"></i>
+                            <span class="text-slate-200">Handles objections</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <i data-lucide="check" class="w-5 h-5 text-emerald-400"></i>
+                            <span class="text-slate-200">Encourages booking</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <i data-lucide="check" class="w-5 h-5 text-emerald-400"></i>
+                            <span class="text-slate-200">Connect to phone via Callio</span>
+                        </div>
+                    </div>
+                    <div class="p-6 bg-white/5 border border-white/10 rounded-2xl text-center">
+                        <p class="text-xl font-bold">This isn’t just “auto reply”. It’s automated sales assistance.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing -->
+    <section id="pricing" class="py-24 bg-slate-50">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="text-center mb-16">
+                <span class="text-blue-600 font-bold tracking-widest uppercase text-sm">💰 PRICING</span>
+                <h2 class="text-4xl font-extrabold text-slate-900 mt-4">Transparent Growth Plans</h2>
+            </div>
+            <div class="grid lg:grid-cols-3 gap-8">
+                <!-- Starter -->
+                <div class="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all">
+                    <h3 class="text-xl font-bold mb-2">Starter</h3>
+                    <div class="flex items-baseline gap-1 mb-6">
+                        <span class="text-4xl font-extrabold">$79</span>
+                        <span class="text-slate-500">/month</span>
+                    </div>
+                    <ul class="space-y-4 mb-10">
+                        <li class="flex items-center gap-3 text-slate-600"><i data-lucide="check" class="w-5 h-5 text-blue-500"></i> Instant first reply</li>
+                        <li class="flex items-center gap-3 text-slate-600"><i data-lucide="check" class="w-5 h-5 text-blue-500"></i> 1 follow-up sequence</li>
+                        <li class="flex items-center gap-3 text-slate-600 font-bold"><i data-lucide="check" class="w-5 h-5 text-blue-500"></i> Up to 50 leads</li>
+                    </ul>
+                    <a href="#" class="block w-full py-4 text-center bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800">Start Free Trial</a>
+                </div>
+                <!-- Pro -->
+                <div class="bg-white p-10 rounded-[2.5rem] border-4 border-blue-600 shadow-xl relative scale-105 z-10">
+                    <div class="absolute -top-5 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest">Most Popular</div>
+                    <h3 class="text-xl font-bold mb-2 text-blue-600">Pro</h3>
+                    <div class="flex items-baseline gap-1 mb-6">
+                        <span class="text-4xl font-extrabold">$149</span>
+                        <span class="text-slate-500">/month</span>
+                    </div>
+                    <ul class="space-y-4 mb-10">
+                        <li class="flex items-center gap-3 text-slate-700 font-medium"><i data-lucide="check" class="w-5 h-5 text-blue-500"></i> AI first reply</li>
+                        <li class="flex items-center gap-3 text-slate-700 font-medium"><i data-lucide="check" class="w-5 h-5 text-blue-500"></i> Multi-step follow-ups</li>
+                        <li class="flex items-center gap-3 text-slate-700 font-medium"><i data-lucide="check" class="w-5 h-5 text-blue-500"></i> Performance tracking</li>
+                        <li class="flex items-center gap-3 text-slate-700 font-bold"><i data-lucide="check" class="w-5 h-5 text-blue-500"></i> Up to 150 leads</li>
+                    </ul>
+                    <a href="#" class="block w-full py-4 text-center bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-200">Start Free Trial</a>
+                </div>
+                <!-- Elite -->
+                <div class="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all">
+                    <h3 class="text-xl font-bold mb-2">Elite</h3>
+                    <div class="flex items-baseline gap-1 mb-6">
+                        <span class="text-4xl font-extrabold">$249</span>
+                        <span class="text-slate-500">/month</span>
+                    </div>
+                    <ul class="space-y-4 mb-10">
+                        <li class="flex items-center gap-3 text-slate-600"><i data-lucide="check" class="w-5 h-5 text-blue-500"></i> AI optimization</li>
+                        <li class="flex items-center gap-3 text-slate-600"><i data-lucide="check" class="w-5 h-5 text-blue-500"></i> Custom message logic</li>
+                        <li class="flex items-center gap-3 text-slate-600"><i data-lucide="check" class="w-5 h-5 text-blue-500"></i> Dedicated phone number</li>
+                        <li class="flex items-center gap-3 text-slate-600 font-bold"><i data-lucide="check" class="w-5 h-5 text-blue-500"></i> Unlimited leads</li>
+                    </ul>
+                    <a href="#" class="block w-full py-4 text-center bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800">Contact Sales</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Final CTA -->
+    <section id="cta" class="py-24 bg-white">
+        <div class="max-w-5xl mx-auto px-6">
+            <div class="bg-gradient-to-tr from-blue-600 to-indigo-700 rounded-[3rem] p-16 text-white text-center shadow-2xl shadow-blue-200 relative overflow-hidden">
+                <div class="relative z-10">
+                    <h2 class="text-4xl lg:text-5xl font-extrabold mb-8">Stop Losing Jobs to Faster Competitors.</h2>
+                    <p class="text-xl text-blue-100 mb-10 max-w-2xl mx-auto">Your competitors aren’t better. They’re just faster. Let AI respond first.</p>
+                    <a href="#" class="inline-flex items-center gap-3 px-10 py-5 bg-white text-blue-600 rounded-2xl text-xl font-bold hover:bg-blue-50 transition-all shadow-xl">
+                        Start Winning More Leads
+                        <i data-lucide="zap" class="w-6 h-6"></i>
+                    </a>
+                </div>
+                <!-- Decorative Circle -->
+                <div class="absolute -bottom-20 -right-20 w-80 h-80 bg-white/10 rounded-full blur-3xl"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-12 border-t border-slate-100">
+        <div class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-8">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
+                    <i data-lucide="zap" class="w-5 h-5"></i>
+                </div>
+                <span class="text-lg font-bold">LeadBridge</span>
+            </div>
+            <p class="text-slate-400 text-sm">© 2024 LeadBridge AI. Built for the Home Service Industry.</p>
+            <div class="flex gap-6 text-slate-400">
+                <a href="#" class="hover:text-blue-600 transition-colors"><i data-lucide="twitter" class="w-5 h-5"></i></a>
+                <a href="#" class="hover:text-blue-600 transition-colors"><i data-lucide="linkedin" class="w-5 h-5"></i></a>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+</html>

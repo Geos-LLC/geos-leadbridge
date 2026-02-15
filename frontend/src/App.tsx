@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { ToastNotifications } from './components/ToastNotifications';
+import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { ForgotPassword } from './pages/ForgotPassword';
@@ -36,6 +37,7 @@ function App() {
       <ToastNotifications />
       <Routes>
         {/* Public routes */}
+        <Route path="/" element={<Landing />} />
         <Route
           path="/login"
           element={isAuthenticated ? <Navigate to="/dashboard" /> : <Login />}
@@ -86,7 +88,7 @@ function App() {
         </Route>
 
         {/* Default redirect */}
-        <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} />} />
+        <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/'} />} />
       </Routes>
     </BrowserRouter>
   );

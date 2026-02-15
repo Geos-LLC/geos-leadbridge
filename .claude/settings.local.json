@@ -26,7 +26,19 @@
       "WebFetch(domain:callio-git-api-george-says-projects.vercel.app)",
       "Bash(railway variables set:*)",
       "Bash(railway variables --help:*)",
-      "Bash(railway variables:*)"
+      "Bash(railway variables:*)",
+      "Bash(git status:*)",
+      "WebFetch(domain:sigcore.vercel.app)",
+      "WebFetch(domain:sigcore-production.up.railway.app)",
+      "Bash(curl:*)",
+      "Bash(copy:*)",
+      "Bash(npx nest build:*)",
+      "Bash(npx vite build)",
+      "Bash(find:*)",
+      "Bash(xargs:*)",
+      "Bash(Accounts\" is chosen. Simplify AccountSelector to use null for all accounts.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(grep:*)",
+      "Bash(del NUL)"
     ]
   }
 }

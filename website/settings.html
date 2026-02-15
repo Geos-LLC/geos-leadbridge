@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="LeadBridge - Account settings and connections management.">
+    <title>Settings | LeadBridge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #fcfcfd;
+            color: #1a1a1e;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .nav-item-active {
+            background: #eff6ff;
+            color: #2563eb;
+            font-weight: 600;
+        }
+        .sidebar-scroll::-webkit-scrollbar { width: 4px; }
+        .sidebar-scroll::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 10px; }
+    </style>
+</head>
+<body class="antialiased">
+
+    <!-- Mobile Navigation Overlay -->
+    <div id="mobile-overlay" class="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 hidden lg:hidden"></div>
+
+    <div class="flex min-h-screen">
+        <!-- Sidebar Navigation -->
+        <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-slate-100 transform -translate-x-full lg:translate-x-0 transition-transform duration-300 ease-in-out">
+            <div class="flex flex-col h-full p-6">
+                <!-- Brand -->
+                <div class="flex items-center gap-3 mb-10 px-2">
+                    <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
+                        <i data-lucide="zap" class="w-6 h-6"></i>
+                    </div>
+                    <span class="text-xl font-bold tracking-tight">LeadBridge</span>
+                </div>
+
+                <!-- Navigation Links -->
+                <nav class="flex-1 space-y-1 sidebar-scroll overflow-y-auto">
+                    <div class="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 px-2">Main Menu</div>
+                    <a href="#" class="flex items-center gap-3 px-4 py-3 rounded-xl text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-all">
+                        <i data-lucide="layout-grid" class="w-5 h-5"></i>
+                        <span>Dashboard</span>
+                    </a>
+                    <a href="#" class="flex items-center gap-3 px-4 py-3 rounded-xl text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-all">
+                        <i data-lucide="message-square" class="w-5 h-5"></i>
+                        <span>Conversations</span>
+                    </a>
+                    <a href="#" class="flex items-center gap-3 px-4 py-3 rounded-xl text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-all">
+                        <i data-lucide="workflow" class="w-5 h-5"></i>
+                        <span>Automations</span>
+                    </a>
+                    <a href="#" class="flex items-center gap-3 px-4 py-3 rounded-xl text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-all">
+                        <i data-lucide="users" class="w-5 h-5"></i>
+                        <span>Lead Pipeline</span>
+                    </a>
+                    
+                    <div class="pt-8 mb-4 px-2 text-[11px] font-bold text-slate-400 uppercase tracking-widest">Configuration</div>
+                    <a href="#" class="flex items-center gap-3 px-4 py-3 rounded-xl text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-all">
+                        <i data-lucide="link-2" class="w-5 h-5"></i>
+                        <span>Integrations</span>
+                    </a>
+                    <a href="#" class="flex items-center gap-3 px-4 py-3 rounded-xl nav-item-active transition-all group">
+                        <i data-lucide="settings" class="w-5 h-5"></i>
+                        <span>Account Settings</span>
+                    </a>
+                </nav>
+
+                <!-- Profile Footer -->
+                <div class="mt-auto pt-6 border-t border-slate-100">
+                    <div class="flex items-center gap-4 px-2">
+                        <div class="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-100 to-indigo-100 flex items-center justify-center text-blue-700 font-bold border-2 border-white shadow-sm">
+                            DU
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-semibold text-slate-900 truncate">Demo User</p>
+                            <p class="text-xs text-slate-500 truncate">Pro Plan • Active</p>
+                        </div>
+                        <button class="text-slate-400 hover:text-red-500 transition-colors">
+                            <i data-lucide="log-out" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 lg:ml-72 min-h-screen">
+            
+            <!-- Top Navbar -->
+            <header class="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-100 px-6 py-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-4">
+                        <button id="mobile-menu-toggle" class="lg:hidden p-2 text-slate-600">
+                            <i data-lucide="menu" class="w-6 h-6"></i>
+                        </button>
+                        <h1 class="text-xl font-bold text-slate-900 lg:block hidden">Settings</h1>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <div class="flex items-center bg-blue-50 text-blue-700 px-4 py-1.5 rounded-full text-sm font-medium border border-blue-100">
+                            <i data-lucide="info" class="w-4 h-4 mr-2"></i>
+                            Demo Mode
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Dashboard Content -->
+            <div class="p-6 lg:p-10 max-w-5xl mx-auto space-y-10">
+                
+                <!-- Welcome Section -->
+                <section>
+                    <div class="flex items-center gap-4 mb-2">
+                        <div class="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-600">
+                            <i data-lucide="settings" class="w-6 h-6"></i>
+                        </div>
+                        <div>
+                            <h2 class="text-3xl font-extrabold text-slate-900 tracking-tight">Account <span class="gradient-text">Settings</span></h2>
+                            <p class="text-slate-500">Manage your business profile, marketplace connections, and billing.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <div class="grid grid-cols-1 gap-8">
+                    
+                    <!-- Account Info Card -->
+                    <div class="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+                        <div class="px-8 py-6 border-b border-slate-50">
+                            <h3 class="text-lg font-bold text-slate-900">Business Profile</h3>
+                        </div>
+                        <div class="p-8">
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                                <div class="space-y-1">
+                                    <p class="text-xs font-bold text-slate-400 uppercase tracking-widest">Business Name</p>
+                                    <p class="text-slate-900 font-semibold text-lg">ABC Cleaning Services</p>
+                                </div>
+                                <div class="space-y-1">
+                                    <p class="text-xs font-bold text-slate-400 uppercase tracking-widest">Email Address</p>
+                                    <p class="text-slate-900 font-semibold text-lg">demo@leadbridge.app</p>
+                                </div>
+                                <div class="space-y-1">
+                                    <p class="text-xs font-bold text-slate-400 uppercase tracking-widest">Phone Number</p>
+                                    <p class="text-slate-900 font-semibold text-lg">(813) 555-0100</p>
+                                </div>
+                                <div class="space-y-1">
+                                    <p class="text-xs font-bold text-slate-400 uppercase tracking-widest">Time Zone</p>
+                                    <p class="text-slate-900 font-semibold text-lg">Eastern Time (ET)</p>
+                                </div>
+                                <div class="space-y-1 md:col-span-2">
+                                    <p class="text-xs font-bold text-slate-400 uppercase tracking-widest">Business Hours</p>
+                                    <p class="text-slate-900 font-semibold text-lg">Mon–Fri, 8 AM – 6 PM</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Marketplace Connections -->
+                    <div class="space-y-4">
+                        <h3 class="text-xl font-bold text-slate-900 px-2">Marketplace Connections</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <!-- Thumbtack Group -->
+                            <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 space-y-4">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-xs shadow-lg shadow-blue-100">TT</div>
+                                        <span class="font-bold text-slate-900">Thumbtack</span>
+                                    </div>
+                                    <span class="bg-emerald-50 text-emerald-600 text-[10px] font-bold px-2 py-1 rounded-full border border-emerald-100 uppercase tracking-tighter">Active</span>
+                                </div>
+                                <div class="space-y-3">
+                                    <div class="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
+                                        <div class="min-w-0">
+                                            <p class="text-sm font-bold text-slate-900 truncate">ABC Cleaning Services</p>
+                                            <p class="text-[10px] text-slate-400 font-medium uppercase">ID: biz_abc123</p>
+                                        </div>
+                                        <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-500"></i>
+                                    </div>
+                                    <div class="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
+                                        <div class="min-w-0">
+                                            <p class="text-sm font-bold text-slate-900 truncate">XYZ Home Repairs</p>
+                                            <p class="text-[10px] text-slate-400 font-medium uppercase">ID: biz_xyz456</p>
+                                        </div>
+                                        <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-500"></i>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Yelp Group -->
+                            <div class="bg-slate-50 rounded-[2rem] border border-slate-200 border-dashed p-6 flex flex-col items-center justify-center text-center">
+                                <div class="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-300 font-bold mb-3 border border-slate-100">Y</div>
+                                <h4 class="font-bold text-slate-400">Yelp Integration</h4>
+                                <p class="text-xs text-slate-400 mb-4">Coming very soon to LeadBridge</p>
+                                <span class="px-4 py-1.5 bg-white text-slate-400 text-[10px] font-bold rounded-full border border-slate-200 uppercase tracking-widest">Waitlist Only</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Subscription Section -->
+                    <div class="bg-slate-900 rounded-[2.5rem] p-8 text-white relative overflow-hidden">
+                        <div class="relative z-10">
+                            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8 pb-8 border-b border-white/10">
+                                <div>
+                                    <div class="flex items-center gap-3 mb-2">
+                                        <h3 class="text-2xl font-bold">Pro Plan</h3>
+                                        <span class="px-3 py-1 bg-emerald-500/20 text-emerald-400 text-xs font-bold rounded-full border border-emerald-500/30">Active</span>
+                                    </div>
+                                    <p class="text-slate-400 text-sm">Automating your lead workflow since Jan 2024.</p>
+                                </div>
+                                <div class="text-left md:text-right">
+                                    <div class="text-4xl font-black">$29<span class="text-lg text-slate-500 font-medium">/mo</span></div>
+                                    <p class="text-slate-400 text-xs mt-1">Next billing: March 15, 2026</p>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <div class="space-y-6">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-sm font-medium text-slate-300">Connected Accounts</span>
+                                        <span class="text-sm font-bold text-white">2 of 5</span>
+                                    </div>
+                                    <div class="w-full bg-white/10 h-2 rounded-full overflow-hidden">
+                                        <div class="bg-blue-500 h-full w-[40%] rounded-full shadow-[0_0_12px_rgba(59,130,246,0.5)]"></div>
+                                    </div>
+                                    <div class="flex gap-3">
+                                        <button class="flex-1 py-3 bg-white text-slate-900 rounded-xl font-bold text-sm hover:bg-slate-100 transition-colors">
+                                            Manage Subscription
+                                        </button>
+                                        <button class="px-4 py-3 bg-red-500/10 text-red-400 rounded-xl font-bold text-sm hover:bg-red-500/20 transition-colors">
+                                            Cancel
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="bg-white/5 rounded-3xl p-6 border border-white/10">
+                                    <h4 class="text-sm font-bold text-slate-300 mb-4 uppercase tracking-widest">Payment Method</h4>
+                                    <div class="flex items-center gap-4">
+                                        <div class="w-12 h-10 bg-indigo-600/20 rounded-lg flex items-center justify-center text-indigo-400 border border-indigo-600/30">
+                                            <i data-lucide="credit-card" class="w-6 h-6"></i>
+                                        </div>
+                                        <div>
+                                            <p class="font-bold text-white text-sm">Visa ending in 4242</p>
+                                            <p class="text-xs text-slate-400">Expires 12/2027</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Background decoration -->
+                        <div class="absolute -right-20 -bottom-20 w-80 h-80 bg-blue-600/10 rounded-full blur-[100px]"></div>
+                    </div>
+
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        lucide.createIcons();
+
+        // Mobile Sidebar Toggle
+        const menuBtn = document.getElementById('mobile-menu-toggle');
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('mobile-overlay');
+
+        function toggleMenu() {
+            sidebar.classList.toggle('-translate-x-full');
+            overlay.classList.toggle('hidden');
+            document.body.classList.toggle('overflow-hidden');
+        }
+
+        menuBtn.addEventListener('click', toggleMenu);
+        overlay.addEventListener('click', toggleMenu);
+    </script>
+</body>
+</html>

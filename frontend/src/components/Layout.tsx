@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
-import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Home, MessageSquare, BarChart3, Settings, LogOut, Phone, Shield, FlaskConical, Briefcase, Menu, X, AlertTriangle } from 'lucide-react';
+import { Outlet, Link as RouterLink, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import {
+  MessageSquare, BarChart3, Settings, LogOut, Phone, Shield, FlaskConical,
+  Menu, Bell, Zap, AlertTriangle, Workflow, LayoutGrid
+} from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
 import TrialBanner from './TrialBanner';
 import TrialExpiredModal from './TrialExpiredModal';
 import CancelledSubscriptionBanner from './CancelledSubscriptionBanner';
-import '../styles/TrialBanner.css';
 
 export function Layout() {
   const navigate = useNavigate();
@@ -15,12 +17,10 @@ export function Layout() {
   const savedAccounts = useAppStore(state => state.savedAccounts);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // App-wide disconnection check
   const hasAccounts = savedAccounts.length > 0;
   const allDisconnected = hasAccounts && savedAccounts.every(a => !a.webhookId);
   const someDisconnected = hasAccounts && !allDisconnected && savedAccounts.some(a => !a.webhookId);
 
-  // Close mobile menu on route change
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [location.pathname]);
@@ -30,113 +30,148 @@ export function Layout() {
     navigate('/login');
   };
 
-  const isActive = (path: string) => location.pathname === path;
-  const closeMenu = () => setMobileMenuOpen(false);
+  const NAV_ITEMS = [
+    { icon: <LayoutGrid size={20} />, label: 'Overview', path: '/dashboard' },
+    { icon: <Workflow size={20} />, label: 'Automation', path: '/services' },
+    { icon: <Settings size={20} />, label: 'Templates', path: '/message-settings' },
+    { icon: <MessageSquare size={20} />, label: 'Lead Activity', path: '/messages' },
+    { icon: <Phone size={20} />, label: 'Business Line', path: '/phone-settings' },
+    { icon: <BarChart3 size={20} />, label: 'Insights', path: '/analytics' },
+  ];
 
   return (
-    <div className="app-layout">
+    <div className="flex min-h-screen">
       <TrialExpiredModal />
-      <nav className={`sidebar-nav ${mobileMenuOpen ? 'open' : ''}`}>
-        <div className="nav-brand">
-          <img src="/LeadBridge_Logo.png" alt="LeadBridge" className="nav-logo" />
-        </div>
 
-        <div className="nav-links">
-          <Link to="/dashboard" className={`nav-link ${isActive('/dashboard') ? 'active' : ''}`} onClick={closeMenu}>
-            <Home size={20} />
-            <span>Overview</span>
-          </Link>
-          <Link to="/services" className={`nav-link ${isActive('/services') ? 'active' : ''}`} onClick={closeMenu}>
-            <Briefcase size={20} />
-            <span>Automation</span>
-          </Link>
-          <Link to="/message-settings" className={`nav-link ${isActive('/message-settings') ? 'active' : ''}`} onClick={closeMenu}>
-            <Settings size={20} />
-            <span>Templates</span>
-          </Link>
-          <Link to="/messages" className={`nav-link ${isActive('/messages') ? 'active' : ''}`} onClick={closeMenu}>
-            <MessageSquare size={20} />
-            <span>Lead Activity</span>
-          </Link>
-          <Link to="/phone-settings" className={`nav-link ${isActive('/phone-settings') ? 'active' : ''}`} onClick={closeMenu}>
-            <Phone size={20} />
-            <span>Business Line</span>
-          </Link>
-          <Link to="/analytics" className={`nav-link ${isActive('/analytics') ? 'active' : ''}`} onClick={closeMenu}>
-            <BarChart3 size={20} />
-            <span>Insights</span>
-          </Link>
+      {/* Mobile Navigation Overlay */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 lg:hidden" onClick={() => setMobileMenuOpen(false)} />
+      )}
 
-          <div className="nav-separator"></div>
-
-          <div className="nav-section-label">Account</div>
-          <Link to="/settings" className={`nav-link ${isActive('/settings') ? 'active' : ''}`} onClick={closeMenu}>
-            <Settings size={20} />
-            <span>Settings</span>
-          </Link>
-
-          {user?.role === 'ADMIN' && (
-            <>
-              <div className="nav-separator"></div>
-              <Link to="/admin" className={`nav-link ${isActive('/admin') || (location.pathname.startsWith('/admin/') && !location.pathname.startsWith('/admin/phone-pool')) ? 'active' : ''}`} onClick={closeMenu}>
-                <Shield size={20} />
-                <span>Admin</span>
-              </Link>
-              <Link to="/admin/phone-pool" className={`nav-link ${isActive('/admin/phone-pool') ? 'active' : ''}`} onClick={closeMenu}>
-                <Phone size={20} />
-                <span>Phone Pool</span>
-              </Link>
-              <Link to="/api-test" className={`nav-link ${isActive('/api-test') ? 'active' : ''}`} onClick={closeMenu}>
-                <FlaskConical size={20} />
-                <span>API Test</span>
-              </Link>
-            </>
-          )}
-        </div>
-
-        <div className="nav-footer">
-          <div className="user-info">
-            <div className="user-avatar">
-              {(user?.name?.[0] || user?.email?.[0] || 'U').toUpperCase()}
+      {/* Sidebar */}
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-slate-100 transform transition-transform duration-300 ease-in-out ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
+        <div className="flex flex-col h-full p-6">
+          {/* Brand */}
+          <div className="flex items-center gap-3 mb-10 px-2">
+            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
+              <Zap className="w-6 h-6" />
             </div>
-            <div className="user-details">
-              <span className="user-name">{user?.name || 'User'}</span>
-              <span className="user-email">{user?.email}</span>
+            <span className="text-xl font-bold tracking-tight">LeadBridge</span>
+          </div>
+
+          {/* Navigation Links */}
+          <nav className="flex-1 space-y-1 sidebar-scroll overflow-y-auto">
+            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 px-2">Main Menu</div>
+            {NAV_ITEMS.map((item) => (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </NavLink>
+            ))}
+
+            <div className="pt-8 mb-4 px-2 text-[11px] font-bold text-slate-400 uppercase tracking-widest">Account</div>
+            <NavLink
+              to="/settings"
+              className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              <Settings size={20} />
+              <span>Settings</span>
+            </NavLink>
+
+            {user?.role === 'ADMIN' && (
+              <>
+                <div className="pt-8 mb-4 px-2 text-[11px] font-bold text-slate-400 uppercase tracking-widest">Admin</div>
+                <NavLink
+                  to="/admin"
+                  className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <Shield size={20} />
+                  <span>Admin Dashboard</span>
+                </NavLink>
+                <NavLink
+                  to="/admin/phone-pool"
+                  className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <Phone size={20} />
+                  <span>Phone Pool</span>
+                </NavLink>
+                <NavLink
+                  to="/api-test"
+                  className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <FlaskConical size={20} />
+                  <span>API Test</span>
+                </NavLink>
+              </>
+            )}
+          </nav>
+
+          {/* Profile Footer */}
+          <div className="mt-auto pt-6 border-t border-slate-100">
+            <div className="flex items-center gap-4 px-2">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-100 to-indigo-100 flex items-center justify-center text-blue-700 font-bold border-2 border-white shadow-sm">
+                {(user?.name?.[0] || user?.email?.[0] || 'U').toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-slate-900 truncate">{user?.name || 'User'}</p>
+                <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+              </div>
+              <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors" title="Logout">
+                <LogOut className="w-5 h-5" />
+              </button>
             </div>
           </div>
-          <button className="btn-icon logout-btn" onClick={handleLogout} title="Logout">
-            <LogOut size={20} />
-          </button>
         </div>
-      </nav>
+      </aside>
 
-      {mobileMenuOpen && <div className="sidebar-backdrop" onClick={closeMenu} />}
-
-      <main className="main-content">
-        <div className="mobile-header">
-          <div className="mobile-header-brand">
-            <img src="/LeadBridge_Logo.png" alt="LeadBridge" className="mobile-header-logo" />
-            <span className="mobile-header-name">LeadBridge</span>
+      {/* Main Content */}
+      <main className="flex-1 lg:ml-72 min-h-screen">
+        {/* Top Navbar */}
+        <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-100 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden p-2 text-slate-600">
+                <Menu className="w-6 h-6" />
+              </button>
+              <h1 className="text-xl font-bold text-slate-900 lg:block hidden">LeadBridge</h1>
+            </div>
+            <div className="flex items-center gap-3">
+              <button className="relative p-2 text-slate-400 hover:text-slate-600 transition-colors">
+                <Bell className="w-6 h-6" />
+              </button>
+            </div>
           </div>
-          <button className="mobile-menu-btn" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
-            {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
-          </button>
-        </div>
+        </header>
+
+        {/* Banners */}
         {(allDisconnected || someDisconnected) && (
-          <div className={`disconnect-banner ${allDisconnected ? 'all' : 'some'}`}>
-            <div className="disconnect-banner-content">
-              <AlertTriangle size={18} />
-              <span>
+          <div className={`px-6 py-3 ${allDisconnected ? 'bg-red-50 border-b border-red-100' : 'bg-amber-50 border-b border-amber-100'}`}>
+            <div className="flex items-center gap-3">
+              <AlertTriangle className={`w-5 h-5 ${allDisconnected ? 'text-red-600' : 'text-amber-600'}`} />
+              <span className={`text-sm font-semibold ${allDisconnected ? 'text-red-900' : 'text-amber-900'}`}>
                 {allDisconnected
-                  ? 'Thumbtack Disconnected \u2013 Automation Paused'
+                  ? 'Thumbtack Disconnected – Automation Paused'
                   : `${savedAccounts.filter(a => !a.webhookId).length} account${savedAccounts.filter(a => !a.webhookId).length > 1 ? 's' : ''} disconnected`}
               </span>
-              <Link to="/dashboard" className="disconnect-banner-action">Reconnect Now</Link>
+              <RouterLink to="/dashboard" className={`ml-auto text-sm font-bold ${allDisconnected ? 'text-red-600 hover:text-red-700' : 'text-amber-600 hover:text-amber-700'}`}>
+                Reconnect Now →
+              </RouterLink>
             </div>
           </div>
         )}
         <TrialBanner />
         <CancelledSubscriptionBanner />
+
+        {/* Page Content */}
         <Outlet />
       </main>
     </div>
