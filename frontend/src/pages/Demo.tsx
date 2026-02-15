@@ -3,7 +3,7 @@ import {
   Home, MessageSquare, BarChart3, Settings, Phone, Briefcase,
   CreditCard, LogOut, Menu, X, Building2, CheckCircle, AlertCircle,
   Users, TrendingUp, Clock, Zap, Bell, PhoneCall, Link2, ExternalLink,
-  Download, ChevronDown, ChevronUp, Plus, Pencil, Trash2, Info,
+  ChevronDown, ChevronUp, Plus, Pencil, Trash2, Info,
   Send, MapPin, Calendar, DollarSign, Tag, Search,
   Bot, RefreshCw,
 } from 'lucide-react';
@@ -139,9 +139,15 @@ export function Demo() {
       {mobileMenuOpen && <div className="sidebar-backdrop" onClick={() => setMobileMenuOpen(false)} />}
 
       <main className="main-content">
-        <button className="mobile-menu-btn" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
-          {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
-        </button>
+        <div className="mobile-header">
+          <div className="mobile-header-brand">
+            <img src="/LeadBridge_Logo.png" alt="LeadBridge" className="mobile-header-logo" />
+            <span className="mobile-header-name">LeadBridge</span>
+          </div>
+          <button className="mobile-menu-btn" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
+            {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+          </button>
+        </div>
 
         {/* Demo Banner */}
         <div className="demo-banner">
@@ -233,48 +239,35 @@ function AccountSelector({ accounts, selectedAccountId, setSelectedAccountId, sh
 
 // ─── Overview View ────────────────────────────────────────
 
-function OverviewView({ accounts, selectedAccountId, setSelectedAccountId, selectedAccount }: {
+function OverviewView({ accounts }: {
   accounts: typeof MOCK_ACCOUNTS;
   selectedAccountId: string | null;
   setSelectedAccountId: (id: string | null) => void;
   selectedAccount: typeof MOCK_ACCOUNTS[0] | undefined;
 }) {
-  const [importCollapsed, setImportCollapsed] = useState(true);
-  const [importText, setImportText] = useState('');
   const [healthToggles, setHealthToggles] = useState({ autoReply: true, customerSms: true, leadAlerts: true });
-
-  const displayAccounts = selectedAccountId
-    ? accounts.filter(a => a.id === selectedAccountId)
-    : accounts;
 
   return (
     <div className="dashboard">
-      <div className="dashboard-header">
-        <h1>Overview</h1>
-        <p>Welcome back, Demo User</p>
-      </div>
-
-      <AccountSelector accounts={accounts} selectedAccountId={selectedAccountId} setSelectedAccountId={setSelectedAccountId} />
-
-      {/* Account Management */}
-      <section className="manage-accounts-section" id="manage-accounts">
-        <div className="platform-card compact">
-          <div className="platform-info">
-            <div className="platform-logo thumbtack-logo">TT</div>
-            <div>
-              <h3>Thumbtack</h3>
-              <p>Connect your Thumbtack Pro accounts</p>
-            </div>
+      <header className="dashboard-header-card">
+        <div className="dashboard-header-top">
+          <div>
+            <h1>Overview</h1>
+            <p>Welcome back, Demo User</p>
           </div>
-          <div className="platform-actions">
+        </div>
+      </header>
+
+      {/* Account Cards */}
+      <section className="manage-accounts-section" id="manage-accounts">
+        <div className="account-cards-compact">
+          <div className="account-cards-header">
+            <h3>Your Accounts</h3>
             <button className="btn btn-primary btn-sm" disabled>
               <Link2 size={14} /> Add Account
             </button>
           </div>
-        </div>
-
-        <div className="account-cards-compact">
-          {displayAccounts.map((account) => (
+          {accounts.map((account) => (
             <div key={account.id} className="account-card-compact">
               <div className="account-card-left">
                 <div className="account-card-avatar placeholder"><Building2 size={20} /></div>
@@ -295,51 +288,6 @@ function OverviewView({ accounts, selectedAccountId, setSelectedAccountId, selec
               </div>
             </div>
           ))}
-        </div>
-
-        {/* Import Negotiations - collapsible */}
-        <div className="import-section-collapsible">
-          <div className="import-section-header" onClick={() => setImportCollapsed(!importCollapsed)}>
-            <h3><Download size={16} /> Import Negotiations</h3>
-            {importCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
-          </div>
-          <div className={`import-section-content ${importCollapsed ? 'collapsed' : ''}`}>
-            {selectedAccountId ? (
-              <>
-                <div style={{
-                  background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px',
-                  padding: '10px 12px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px',
-                }}>
-                  <CheckCircle size={14} style={{ color: '#059669', flexShrink: 0 }} />
-                  <span style={{ color: '#065f46' }}>
-                    Importing for: <strong>{selectedAccount?.businessName}</strong>
-                  </span>
-                </div>
-                <textarea
-                  className="import-textarea"
-                  placeholder="Paste negotiation IDs here..."
-                  rows={3}
-                  value={importText}
-                  onChange={(e) => setImportText(e.target.value)}
-                />
-                <div className="import-actions">
-                  <button className="btn btn-primary btn-sm" disabled={!importText.trim()}>
-                    <Download size={14} /> Import
-                  </button>
-                </div>
-              </>
-            ) : (
-              <div style={{
-                background: '#fef3c7', border: '1px solid #fde68a', borderRadius: '8px',
-                padding: '12px', display: 'flex', alignItems: 'center', gap: '10px',
-              }}>
-                <AlertCircle size={18} style={{ color: '#d97706', flexShrink: 0 }} />
-                <span style={{ fontSize: '14px', color: '#92400e' }}>
-                  Select a specific account from the dropdown above to import negotiations.
-                </span>
-              </div>
-            )}
-          </div>
         </div>
       </section>
 
@@ -482,247 +430,271 @@ function AutomationView({ accounts, selectedAccountId, setSelectedAccountId }: {
   return (
     <div className="services-page">
       <div className="settings-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Briefcase size={24} />
-          <div>
-            <h1>Automation</h1>
-            <p>Configure your automated services</p>
-          </div>
-        </div>
+        <h1><Briefcase size={24} /> Automation</h1>
       </div>
 
-      <AccountSelector accounts={accounts} selectedAccountId={selectedAccountId} setSelectedAccountId={setSelectedAccountId} showAllOption={false} />
+      <div className="settings-content">
+        {/* Account Selector */}
+        <div className="account-selector">
+          <label>Account:</label>
+          <div className="select-wrapper">
+            <select
+              value={selectedAccountId || ''}
+              onChange={(e) => setSelectedAccountId(e.target.value || null)}
+            >
+              {accounts.map(a => (
+                <option key={a.id} value={a.id}>{a.businessName}</option>
+              ))}
+            </select>
+            <ChevronDown size={16} />
+          </div>
+        </div>
 
-      <div className="services-grid">
-        {/* 1. Auto Reply & Follow-Ups */}
-        <div className={`service-card ${autoReplyEnabled ? 'enabled' : 'disabled'}`}>
-          <div className="service-card-header" onClick={() => setExpandedCard(expandedCard === 'auto-reply' ? null : 'auto-reply')}>
-            <div className="service-card-icon"><Zap size={22} /></div>
-            <div className="service-card-info">
-              <h3>Auto Reply & Follow-Ups</h3>
-              <p>Automatically respond to new leads</p>
+        <div className="services-grid">
+          {/* 1. Auto Reply & Follow-Ups */}
+          <div className={`service-card ${autoReplyEnabled ? 'enabled' : 'disabled'}`}>
+            <div className="service-card-header">
+              <div className="service-card-icon"><Zap size={22} /></div>
+              <div className="service-card-info">
+                <h3>Auto Reply & Follow-Ups</h3>
+                <p>Automatically respond to new leads</p>
+                {autoReplyEnabled && <span className="service-status-text">1 message in sequence</span>}
+              </div>
+              <div className="service-card-toggle">
+                <label className="toggle-switch">
+                  <input type="checkbox" checked={autoReplyEnabled} onChange={() => setAutoReplyEnabled(!autoReplyEnabled)} />
+                  <span className="toggle-slider"></span>
+                </label>
+              </div>
             </div>
-            <div className="service-card-toggle" onClick={(e) => e.stopPropagation()}>
-              <label className="toggle-switch">
-                <input type="checkbox" checked={autoReplyEnabled} onChange={() => setAutoReplyEnabled(!autoReplyEnabled)} />
-                <span className="toggle-slider"></span>
-              </label>
-            </div>
-            <button className={`service-card-expand ${expandedCard === 'auto-reply' ? 'expanded' : ''}`}>
-              <ChevronDown size={20} />
+            {expandedCard === 'auto-reply' && (
+              <div className="service-card-settings">
+                <div className="service-settings-inner">
+                  {/* AI Optimization Banner */}
+                  <div className="ai-optimization-banner coming-soon-banner">
+                    <div className="ai-banner-info">
+                      <Bot size={18} />
+                      <div>
+                        <strong>AI Optimization</strong>
+                        <span className="coming-soon-badge" style={{ marginLeft: 6 }}>Coming Soon</span>
+                        <p className="form-hint">AI decides timing, follow-ups, and message variations to maximize response.</p>
+                      </div>
+                    </div>
+                    <label className="toggle-switch">
+                      <input type="checkbox" checked={false} disabled />
+                      <span className="toggle-slider"></span>
+                    </label>
+                  </div>
+
+                  {/* First Reply Sub-Card */}
+                  <div className="sub-card">
+                    <div className="sub-card-header" onClick={() => toggleSubCard('auto-reply-first')}>
+                      <div className="sub-card-title">
+                        <Zap size={14} />
+                        <span>First Message</span>
+                      </div>
+                      <ChevronDown size={14} className={expandedSubCards.has('auto-reply-first') ? 'rotated' : ''} />
+                    </div>
+                    {expandedSubCards.has('auto-reply-first') && (
+                      <div className="sub-card-body">
+                        <p className="form-hint">Sent immediately when a new lead arrives.</p>
+                        <div className="form-group">
+                          <label>Template</label>
+                          <div className="select-wrapper">
+                            <select value={selectedTemplate} onChange={(e) => setSelectedTemplate(e.target.value)}>
+                              {MOCK_TEMPLATES.filter(t => t.id !== 't3').map(t => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                              ))}
+                            </select>
+                            <ChevronDown size={16} />
+                          </div>
+                        </div>
+                        <div className="template-preview-container">
+                          <div className="template-preview">
+                            {MOCK_TEMPLATES.find(t => t.id === selectedTemplate)?.content}
+                          </div>
+                          <button className="template-edit-btn">
+                            <Pencil size={12} /> Edit
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Follow-Up Messages Sub-Card (Coming Soon) */}
+                  <div className="sub-card sub-card-coming-soon">
+                    <div className="sub-card-header" onClick={() => toggleSubCard('auto-reply-followups')}>
+                      <div className="sub-card-title">
+                        <Clock size={14} />
+                        <span>Follow-Up Messages</span>
+                        <span className="coming-soon-badge">Coming Soon</span>
+                      </div>
+                      <ChevronDown size={14} className={expandedSubCards.has('auto-reply-followups') ? 'rotated' : ''} />
+                    </div>
+                    {expandedSubCards.has('auto-reply-followups') && (
+                      <div className="sub-card-body sub-card-disabled">
+                        <p className="form-hint">Automated follow-up messages sent after a delay.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            <button className="service-card-expand" onClick={() => setExpandedCard(expandedCard === 'auto-reply' ? null : 'auto-reply')}>
+              {expandedCard === 'auto-reply' ? 'Hide Settings' : 'Settings'}
+              <ChevronDown size={14} className={expandedCard === 'auto-reply' ? 'rotated' : ''} />
             </button>
           </div>
 
-          {expandedCard === 'auto-reply' && (
-            <div className="service-card-settings">
-              <div className="service-settings-inner">
-                {/* First Reply Sub-Card */}
-                <div className="sub-card">
-                  <div className="sub-card-header" onClick={() => toggleSubCard('auto-reply-first')}>
-                    <div className="sub-card-title">
-                      <Zap size={16} />
-                      <span>Instant Auto Reply</span>
-                      <span className="service-status-text" style={{ color: autoReplyEnabled ? '#059669' : '#9ca3af' }}>
-                        {autoReplyEnabled ? 'Active' : 'Paused'}
-                      </span>
-                    </div>
-                    {expandedSubCards.has('auto-reply-first') ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                  </div>
-                  {expandedSubCards.has('auto-reply-first') && (
-                    <div className="sub-card-body">
-                      <div className="form-group">
-                        <label>Template</label>
-                        <div className="select-wrapper">
-                          <select value={selectedTemplate} onChange={(e) => setSelectedTemplate(e.target.value)}>
-                            {MOCK_TEMPLATES.filter(t => t.id !== 't3').map(t => (
-                              <option key={t.id} value={t.id}>{t.name}</option>
-                            ))}
-                          </select>
-                          <ChevronDown size={16} />
-                        </div>
-                      </div>
-                      <div className="template-preview-container">
-                        <div className="template-preview" style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', fontSize: '13px', color: '#475569', lineHeight: 1.5 }}>
-                          {MOCK_TEMPLATES.find(t => t.id === selectedTemplate)?.content}
-                        </div>
-                        <button className="template-edit-btn" style={{ marginTop: '8px', fontSize: '13px', color: '#6366f1', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <Pencil size={12} /> Edit template
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* AI Follow-Up Sub-Card */}
-                <div className="sub-card">
-                  <div className="sub-card-header" onClick={() => toggleSubCard('auto-reply-ai')}>
-                    <div className="sub-card-title">
-                      <Bot size={16} />
-                      <span>AI-Powered Follow-Ups</span>
-                      <span className="coming-soon-badge" style={{ fontSize: '11px', background: '#dbeafe', color: '#2563eb', padding: '2px 8px', borderRadius: '10px' }}>Coming Soon</span>
-                    </div>
-                    {expandedSubCards.has('auto-reply-ai') ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                  </div>
-                  {expandedSubCards.has('auto-reply-ai') && (
-                    <div className="sub-card-body">
-                      <div className="ai-optimization-banner" style={{
-                        background: 'linear-gradient(135deg, #eff6ff, #f0f9ff)',
-                        border: '1px solid #bfdbfe',
-                        borderRadius: '8px',
-                        padding: '16px',
-                        textAlign: 'center',
-                      }}>
-                        <Bot size={24} style={{ color: '#3b82f6', marginBottom: '8px' }} />
-                        <p style={{ fontSize: '14px', color: '#1e40af', fontWeight: 600 }}>AI-Powered Follow-Ups</p>
-                        <p style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
-                          Automatically send intelligent follow-up messages based on conversation context.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
+          {/* 2. Lead Alerts */}
+          <div className={`service-card ${leadAlertsEnabled ? 'enabled' : 'disabled'}`}>
+            <div className="service-card-header">
+              <div className="service-card-icon"><Bell size={22} /></div>
+              <div className="service-card-info">
+                <h3>Lead Alerts</h3>
+                <p>Get notified immediately via SMS when a new lead arrives.</p>
+                {leadAlertsEnabled && <span className="service-status-text">SMS to {alertToPhone}</span>}
+              </div>
+              <div className="service-card-toggle">
+                <label className="toggle-switch">
+                  <input type="checkbox" checked={leadAlertsEnabled} onChange={() => setLeadAlertsEnabled(!leadAlertsEnabled)} />
+                  <span className="toggle-slider"></span>
+                </label>
               </div>
             </div>
-          )}
-        </div>
+            {expandedCard === 'alerts' && (
+              <div className="service-card-settings">
+                <div className="service-settings-inner">
+                  {/* SMS Alert Sub-Card */}
+                  <div className="sub-card">
+                    <div className="sub-card-header" onClick={() => toggleSubCard('alerts-sms')}>
+                      <div className="sub-card-title">
+                        <Bell size={14} />
+                        <span>SMS Alert</span>
+                      </div>
+                      <ChevronDown size={14} className={expandedSubCards.has('alerts-sms') ? 'rotated' : ''} />
+                    </div>
+                    {expandedSubCards.has('alerts-sms') && (
+                      <div className="sub-card-body">
+                        <p className="form-hint"><Clock size={12} /> Sends immediately when a new lead arrives</p>
+                        <div className="form-group">
+                          <label>Send to (your phone)</label>
+                          <input type="tel" value={alertToPhone} onChange={(e) => setAlertToPhone(e.target.value)} placeholder="+1234567890" />
+                        </div>
+                        <div className="form-group">
+                          <label>Send from</label>
+                          <div className="select-wrapper">
+                            <select value={alertFromPhone} onChange={(e) => setAlertFromPhone(e.target.value)}>
+                              <option value="+1 (813) 555-9999">+1 (813) 555-9999 (LeadBridge)</option>
+                              <option value="+1 (727) 555-8888">+1 (727) 555-8888 (LeadBridge)</option>
+                            </select>
+                            <ChevronDown size={16} />
+                          </div>
+                          <button className="get-own-number-btn" disabled>
+                            <Phone size={14} />
+                            Get your own number
+                            <span className="coming-soon-badge">Coming Soon</span>
+                          </button>
+                        </div>
+                        <div className="form-group">
+                          <label>Template</label>
+                          <div className="select-wrapper">
+                            <select value={alertTemplate} onChange={(e) => setAlertTemplate(e.target.value)}>
+                              {MOCK_TEMPLATES.map(t => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                              ))}
+                            </select>
+                            <ChevronDown size={16} />
+                          </div>
+                          <div className="template-preview-container">
+                            <div className="template-preview">
+                              {MOCK_TEMPLATES.find(t => t.id === alertTemplate)?.content}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="alert-test-section">
+                          <button
+                            className="btn btn-sm btn-secondary"
+                            onClick={handleTestSms}
+                            disabled={testSent}
+                          >
+                            {testSent ? <><CheckCircle size={14} /> Test Sent!</> : <><Send size={14} /> Send Test SMS</>}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
-        {/* 2. Lead Alerts */}
-        <div className={`service-card ${leadAlertsEnabled ? 'enabled' : 'disabled'}`}>
-          <div className="service-card-header" onClick={() => setExpandedCard(expandedCard === 'alerts' ? null : 'alerts')}>
-            <div className="service-card-icon"><Bell size={22} /></div>
-            <div className="service-card-info">
-              <h3>Lead Alerts</h3>
-              <p>Get notified when new leads arrive</p>
-            </div>
-            <div className="service-card-toggle" onClick={(e) => e.stopPropagation()}>
-              <label className="toggle-switch">
-                <input type="checkbox" checked={leadAlertsEnabled} onChange={() => setLeadAlertsEnabled(!leadAlertsEnabled)} />
-                <span className="toggle-slider"></span>
-              </label>
-            </div>
-            <button className={`service-card-expand ${expandedCard === 'alerts' ? 'expanded' : ''}`}>
-              <ChevronDown size={20} />
+                  {/* Call Alert Sub-Card (Coming Soon) */}
+                  <div className="sub-card sub-card-coming-soon">
+                    <div className="sub-card-header" onClick={() => toggleSubCard('alerts-call')}>
+                      <div className="sub-card-title">
+                        <PhoneCall size={14} />
+                        <span>Call Alert</span>
+                        <span className="coming-soon-badge">Coming Soon</span>
+                      </div>
+                      <ChevronDown size={14} className={expandedSubCards.has('alerts-call') ? 'rotated' : ''} />
+                    </div>
+                    {expandedSubCards.has('alerts-call') && (
+                      <div className="sub-card-body sub-card-disabled">
+                        <p className="form-hint">Get a phone call when a new lead arrives. We'll connect you directly to the customer.</p>
+                        <div className="form-group">
+                          <label>Call to (your phone)</label>
+                          <input type="tel" value="" placeholder="+1234567890" disabled />
+                        </div>
+                        <div className="form-group">
+                          <label>Call from</label>
+                          <div className="select-wrapper">
+                            <select disabled>
+                              <option>Select phone number</option>
+                            </select>
+                            <ChevronDown size={16} />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            <button className="service-card-expand" onClick={() => setExpandedCard(expandedCard === 'alerts' ? null : 'alerts')}>
+              {expandedCard === 'alerts' ? 'Hide Settings' : 'Settings'}
+              <ChevronDown size={14} className={expandedCard === 'alerts' ? 'rotated' : ''} />
             </button>
           </div>
 
-          {expandedCard === 'alerts' && (
-            <div className="service-card-settings">
-              <div className="service-settings-inner">
-                {/* SMS Alert Sub-Card */}
-                <div className="sub-card">
-                  <div className="sub-card-header" onClick={() => toggleSubCard('alerts-sms')}>
-                    <div className="sub-card-title">
-                      <MessageSquare size={16} />
-                      <span>SMS Alert</span>
-                      <span className="service-status-text" style={{ color: leadAlertsEnabled ? '#059669' : '#9ca3af' }}>
-                        {leadAlertsEnabled ? 'Active' : 'Paused'}
-                      </span>
-                    </div>
-                    {expandedSubCards.has('alerts-sms') ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                  </div>
-                  {expandedSubCards.has('alerts-sms') && (
-                    <div className="sub-card-body">
-                      <div className="form-group">
-                        <label>Send to (your phone)</label>
-                        <input type="tel" value={alertToPhone} onChange={(e) => setAlertToPhone(e.target.value)} style={{ width: '100%', padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '14px' }} />
-                      </div>
-                      <div className="form-group" style={{ marginTop: '12px' }}>
-                        <label>Send from</label>
-                        <div className="select-wrapper">
-                          <select value={alertFromPhone} onChange={(e) => setAlertFromPhone(e.target.value)}>
-                            <option value="+1 (813) 555-9999">+1 (813) 555-9999 (LeadBridge)</option>
-                            <option value="+1 (727) 555-8888">+1 (727) 555-8888 (LeadBridge)</option>
-                          </select>
-                          <ChevronDown size={16} />
-                        </div>
-                      </div>
-                      <div className="form-group" style={{ marginTop: '12px' }}>
-                        <label>Alert template</label>
-                        <div className="select-wrapper">
-                          <select value={alertTemplate} onChange={(e) => setAlertTemplate(e.target.value)}>
-                            {MOCK_TEMPLATES.map(t => (
-                              <option key={t.id} value={t.id}>{t.name}</option>
-                            ))}
-                          </select>
-                          <ChevronDown size={16} />
-                        </div>
-                      </div>
-                      <div className="template-preview-container" style={{ marginTop: '12px' }}>
-                        <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', fontSize: '13px', color: '#475569', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                          {MOCK_TEMPLATES.find(t => t.id === alertTemplate)?.content}
-                        </div>
-                      </div>
-                      <div style={{ marginTop: '14px' }}>
-                        <button
-                          className="btn btn-primary btn-sm"
-                          onClick={handleTestSms}
-                          disabled={testSent}
-                        >
-                          {testSent ? (
-                            <><CheckCircle size={14} /> Test Sent!</>
-                          ) : (
-                            <><Send size={14} /> Send Test SMS</>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Call Alert Sub-Card */}
-                <div className="sub-card">
-                  <div className="sub-card-header" onClick={() => toggleSubCard('alerts-call')}>
-                    <div className="sub-card-title">
-                      <PhoneCall size={16} />
-                      <span>Call Alert</span>
-                      <span className="coming-soon-badge" style={{ fontSize: '11px', background: '#dbeafe', color: '#2563eb', padding: '2px 8px', borderRadius: '10px' }}>Coming Soon</span>
-                    </div>
-                    {expandedSubCards.has('alerts-call') ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                  </div>
-                  {expandedSubCards.has('alerts-call') && (
-                    <div className="sub-card-body">
-                      <div style={{
-                        background: 'linear-gradient(135deg, #eff6ff, #f0f9ff)',
-                        border: '1px solid #bfdbfe',
-                        borderRadius: '8px',
-                        padding: '16px',
-                        textAlign: 'center',
-                      }}>
-                        <PhoneCall size={24} style={{ color: '#3b82f6', marginBottom: '8px' }} />
-                        <p style={{ fontSize: '14px', color: '#1e40af', fontWeight: 600 }}>Instant Call Alerts</p>
-                        <p style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
-                          Get a phone call when a new lead arrives.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
+          {/* 3. Customer Texting — Coming Soon */}
+          <div className="service-card coming-soon">
+            <div className="service-card-header">
+              <div className="service-card-icon"><MessageSquare size={22} /></div>
+              <div className="service-card-info">
+                <h3>Customer Texting <span className="coming-soon-badge">Coming Soon</span></h3>
+                <p>Send a direct text to customers to increase response rate.</p>
+              </div>
+              <div className="service-card-toggle">
+                <label className="toggle-switch">
+                  <input type="checkbox" checked={false} disabled />
+                  <span className="toggle-slider"></span>
+                </label>
               </div>
             </div>
-          )}
-        </div>
-
-        {/* 3. Customer Texting — Coming Soon */}
-        <div className="service-card coming-soon">
-          <div className="service-card-header">
-            <div className="service-card-icon"><MessageSquare size={22} /></div>
-            <div className="service-card-info">
-              <h3>Customer Texting</h3>
-              <p>Send a direct text to customers to increase response rate.</p>
-            </div>
-            <span className="coming-soon-badge" style={{ fontSize: '12px', background: '#dbeafe', color: '#2563eb', padding: '4px 12px', borderRadius: '10px', whiteSpace: 'nowrap' }}>Coming Soon</span>
           </div>
-        </div>
 
-        {/* 4. Instant Call Connect — Coming Soon */}
-        <div className="service-card coming-soon">
-          <div className="service-card-header">
-            <div className="service-card-icon"><PhoneCall size={22} /></div>
-            <div className="service-card-info">
-              <h3>Instant Call Connect</h3>
-              <p>When a new lead arrives, we call you and connect you to the customer instantly.</p>
+          {/* 4. Instant Call Connect — Coming Soon */}
+          <div className="service-card coming-soon">
+            <div className="service-card-header">
+              <div className="service-card-icon"><PhoneCall size={22} /></div>
+              <div className="service-card-info">
+                <h3>Instant Call Connect <span className="coming-soon-badge">Coming Soon</span></h3>
+                <p>When a new lead arrives, we call you and connect you to the customer instantly.</p>
+              </div>
+              <div className="service-card-toggle">
+                <label className="toggle-switch">
+                  <input type="checkbox" checked={false} disabled />
+                  <span className="toggle-slider"></span>
+                </label>
+              </div>
             </div>
-            <span className="coming-soon-badge" style={{ fontSize: '12px', background: '#dbeafe', color: '#2563eb', padding: '4px 12px', borderRadius: '10px', whiteSpace: 'nowrap' }}>Coming Soon</span>
           </div>
         </div>
       </div>
@@ -852,7 +824,8 @@ function LeadsView({ accounts, selectedAccountId, setSelectedAccountId }: {
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>('l1');
   const [searchQuery, setSearchQuery] = useState('');
   const [messageText, setMessageText] = useState('');
-  const [channel, setChannel] = useState<'platform' | 'sms'>('platform');
+  const [channelFilter, setChannelFilter] = useState<'all' | 'platform' | 'sms'>('all');
+  const [sendChannel, setSendChannel] = useState<'platform' | 'sms'>('platform');
 
   const filteredLeads = MOCK_LEADS.filter(lead => {
     const matchesSearch = !searchQuery || lead.name.toLowerCase().includes(searchQuery.toLowerCase()) || lead.category.toLowerCase().includes(searchQuery.toLowerCase());
@@ -862,197 +835,254 @@ function LeadsView({ accounts, selectedAccountId, setSelectedAccountId }: {
 
   const selectedLead = MOCK_LEADS.find(l => l.id === selectedLeadId);
 
-  const statusColor = (status: string) => {
-    switch (status) {
-      case 'new': return '#3b82f6';
-      case 'active': return '#059669';
-      case 'won': return '#8b5cf6';
-      default: return '#94a3b8';
-    }
-  };
+  const filteredMessages = selectedLead?.messages.filter(msg =>
+    channelFilter === 'all' || msg.channel === channelFilter
+  ) || [];
 
   return (
     <div className="messages-page">
       {/* Leads Sidebar */}
-      <div className="leads-sidebar">
-        <div className="sidebar-header" style={{ padding: '16px', borderBottom: '1px solid #e2e8f0' }}>
-          <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '12px' }}>Leads</h2>
-          <div className="leads-search" style={{ position: 'relative' }}>
-            <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
-            <input
-              type="text"
-              placeholder="Search leads..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ width: '100%', padding: '8px 12px 8px 34px', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '13px' }}
-            />
-          </div>
-          <div style={{ marginTop: '8px' }}>
-            <div className="select-wrapper" style={{ position: 'relative' }}>
-              <Building2 size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', zIndex: 1 }} />
-              <select
-                value={selectedAccountId || '__all__'}
-                onChange={(e) => setSelectedAccountId(e.target.value === '__all__' ? null : e.target.value)}
-                style={{ width: '100%', padding: '8px 12px 8px 32px', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '13px', appearance: 'none' }}
-              >
-                <option value="__all__">All Accounts</option>
-                {accounts.map(a => (
-                  <option key={a.id} value={a.id}>{a.businessName}</option>
-                ))}
-              </select>
-              <ChevronDown size={14} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', pointerEvents: 'none' }} />
-            </div>
-          </div>
+      <aside className="leads-sidebar">
+        <div className="sidebar-header">
+          <button className="btn-icon" disabled title="Back">
+            <Search size={20} />
+          </button>
+          <h2>Leads</h2>
+          <button className="btn-icon" disabled title="Refresh">
+            <RefreshCw size={20} />
+          </button>
         </div>
 
-        <div className="leads-list" style={{ overflowY: 'auto', flex: 1 }}>
-          {filteredLeads.map(lead => (
-            <div
-              key={lead.id}
-              className={`lead-item ${selectedLeadId === lead.id ? 'selected' : ''}`}
-              onClick={() => setSelectedLeadId(lead.id)}
-              style={{
-                padding: '12px 16px',
-                cursor: 'pointer',
-                borderBottom: '1px solid #f1f5f9',
-                background: selectedLeadId === lead.id ? '#eff6ff' : 'transparent',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
-                <span style={{ fontWeight: 600, fontSize: '14px' }}>{lead.name}</span>
-                <span style={{ fontSize: '11px', color: '#94a3b8' }}>{lead.time}</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                <span className="lead-status-badge" style={{
-                  fontSize: '11px',
-                  padding: '1px 8px',
-                  borderRadius: '10px',
-                  background: `${statusColor(lead.status)}15`,
-                  color: statusColor(lead.status),
-                  fontWeight: 500,
-                }}>{lead.status}</span>
-                <span style={{ fontSize: '12px', color: '#64748b' }}>{lead.category}</span>
-              </div>
-              <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {lead.snippet}
-              </p>
-            </div>
-          ))}
+        {/* Search Input */}
+        <div className="leads-search">
+          <Search size={16} />
+          <input
+            type="text"
+            placeholder="Search by name..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="leads-search-input"
+          />
         </div>
-      </div>
+
+        {/* Account Filter */}
+        <div className="account-filter">
+          <Building2 size={16} />
+          <select
+            value={selectedAccountId || 'all'}
+            onChange={(e) => setSelectedAccountId(e.target.value === 'all' ? null : e.target.value)}
+            className="account-filter-select"
+          >
+            <option value="all">All Accounts ({MOCK_LEADS.length})</option>
+            {accounts.map(a => {
+              const count = MOCK_LEADS.filter(l => l.account === a.businessName).length;
+              return (
+                <option key={a.id} value={a.id}>{a.businessName} ({count})</option>
+              );
+            })}
+          </select>
+        </div>
+
+        {/* Date Filter */}
+        <div className="account-filter">
+          <Calendar size={16} />
+          <select className="account-filter-select" disabled>
+            <option>All Time</option>
+          </select>
+        </div>
+
+        <div className="leads-list">
+          {filteredLeads.map(lead => {
+            const accountName = lead.account;
+            return (
+              <div
+                key={lead.id}
+                className={`lead-item ${selectedLeadId === lead.id ? 'selected' : ''}`}
+                onClick={() => setSelectedLeadId(lead.id)}
+              >
+                <div className="lead-avatar">
+                  <Users size={20} />
+                </div>
+                <div className="lead-preview">
+                  <div className="lead-header">
+                    <span className="lead-name">{lead.name}</span>
+                    <span className="lead-time">{lead.time}</span>
+                  </div>
+                  <div className="lead-meta">
+                    <span className="lead-category">{lead.category}</span>
+                    <span className={`lead-status-badge status-${lead.status}`}>
+                      {lead.status}
+                    </span>
+                  </div>
+                  <span className="lead-account-badge current">
+                    <Building2 size={12} />
+                    {accountName}
+                  </span>
+                  <p className="lead-snippet">{lead.snippet}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </aside>
 
       {/* Chat Area */}
-      <div className="chat-area" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <main className="chat-area">
         {selectedLead ? (
           <>
-            <div className="chat-header" style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#6366f1', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600 }}>
-                    {selectedLead.name[0]}
-                  </div>
-                  <div>
-                    <h3 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>{selectedLead.name}</h3>
-                    <span className="lead-status-badge" style={{
-                      fontSize: '11px',
-                      padding: '1px 8px',
-                      borderRadius: '10px',
-                      background: `${statusColor(selectedLead.status)}15`,
-                      color: statusColor(selectedLead.status),
-                    }}>{selectedLead.status}</span>
-                  </div>
+            {/* Lead Info Header */}
+            <div className="chat-header">
+              <div className="lead-info-header">
+                <div className="lead-avatar large">
+                  <Users size={24} />
                 </div>
-                <button className="btn btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <RefreshCw size={14} /> Sync
-                </button>
+                <div>
+                  <div className="lead-name-row">
+                    <h3>{selectedLead.name}</h3>
+                    <span className={`status-badge status-${selectedLead.status}`}>
+                      {selectedLead.status}
+                    </span>
+                  </div>
+                  <p>{selectedLead.category}</p>
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: '16px', marginTop: '10px', fontSize: '12px', color: '#64748b', flexWrap: 'wrap' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Phone size={12} /> {selectedLead.phone}</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><MapPin size={12} /> {selectedLead.location}</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><DollarSign size={12} /> {selectedLead.budget}</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Tag size={12} /> {selectedLead.category}</span>
+              <div className="lead-quick-info">
+                <span className="quick-info-item">
+                  <Phone size={16} />
+                  {selectedLead.phone}
+                </span>
+                <span className="quick-info-item">
+                  <MapPin size={16} />
+                  {selectedLead.location}
+                </span>
+                <span className="quick-info-item">
+                  <DollarSign size={16} />
+                  {selectedLead.budget}
+                </span>
+                <span className="quick-info-item">
+                  <Tag size={16} />
+                  {selectedLead.category}
+                </span>
+                <button className="btn-icon resync-btn" disabled title="Resync messages">
+                  <RefreshCw size={16} />
+                </button>
               </div>
             </div>
 
-            {/* Channel Filter */}
-            <div className="timeline-filter-bar" style={{ padding: '8px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', gap: '8px' }}>
-              {['All', 'Platform', 'SMS'].map(ch => (
+            {/* Channel Filter Bar */}
+            <div className="timeline-filter-bar">
+              {(['all', 'platform', 'sms'] as const).map((filter) => (
                 <button
-                  key={ch}
-                  className={`btn btn-sm ${(ch === 'All' && channel === 'platform') ? 'btn-primary' : 'btn-secondary'}`}
-                  style={{ fontSize: '12px', padding: '4px 12px' }}
-                  onClick={() => {}}
+                  key={filter}
+                  className={`timeline-filter-btn ${channelFilter === filter ? 'active' : ''}`}
+                  onClick={() => setChannelFilter(filter)}
                 >
-                  {ch}
+                  {filter === 'all' && 'All'}
+                  {filter === 'platform' && 'Platform'}
+                  {filter === 'sms' && 'SMS'}
                 </button>
               ))}
             </div>
 
             {/* Messages */}
-            <div className="messages-container" style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {selectedLead.messages.length > 0 ? selectedLead.messages.map(msg => (
-                <div key={msg.id} style={{
-                  display: 'flex',
-                  justifyContent: msg.sender === 'pro' ? 'flex-end' : 'flex-start',
-                }}>
-                  <div style={{
-                    maxWidth: '70%',
-                    padding: '10px 14px',
-                    borderRadius: msg.sender === 'pro' ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
-                    background: msg.sender === 'pro' ? '#6366f1' : '#f1f5f9',
-                    color: msg.sender === 'pro' ? 'white' : '#1e293b',
-                    fontSize: '14px',
-                    lineHeight: 1.5,
-                  }}>
-                    <p style={{ margin: 0 }}>{msg.text}</p>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', fontSize: '11px', opacity: 0.7 }}>
-                      <span>{msg.time}</span>
-                      <span style={{
-                        padding: '0 6px',
-                        borderRadius: '6px',
-                        background: msg.sender === 'pro' ? 'rgba(255,255,255,0.2)' : '#e2e8f0',
-                        fontSize: '10px',
-                      }}>{msg.channel === 'sms' ? 'SMS' : 'Platform'}</span>
-                    </div>
+            <div className="messages-container">
+              {filteredMessages.length > 0 ? filteredMessages.map(msg => (
+                <div
+                  key={msg.id}
+                  className={`message ${msg.sender === 'pro' ? 'sent' : 'received'} channel-${msg.channel}`}
+                >
+                  <div className="message-channel-badge">
+                    <span className={`channel-badge ${msg.channel}`}>
+                      {msg.channel === 'sms' ? 'SMS' : 'Platform'}
+                    </span>
+                  </div>
+                  <div className="message-content">{msg.text}</div>
+                  <div className="message-footer">
+                    <span className="message-time">{msg.time}</span>
                   </div>
                 </div>
               )) : (
-                <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>
-                  <MessageSquare size={32} style={{ marginBottom: '8px' }} />
+                <div className="no-messages">
+                  <MessageSquare size={32} />
                   <p>No messages yet</p>
+                  <small>Send a message to start the conversation</small>
                 </div>
               )}
             </div>
 
             {/* Message Input */}
-            <div className="message-input-container" style={{ padding: '12px 20px', borderTop: '1px solid #e2e8f0', display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-              <div className="select-wrapper" style={{ width: '120px', flexShrink: 0 }}>
-                <select value={channel} onChange={(e) => setChannel(e.target.value as 'platform' | 'sms')} style={{ padding: '10px 8px', fontSize: '13px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+            <div className="message-input-container">
+              <div className="channel-selector">
+                <select
+                  value={sendChannel}
+                  onChange={(e) => setSendChannel(e.target.value as 'platform' | 'sms')}
+                  className="channel-select"
+                >
                   <option value="platform">Platform</option>
                   <option value="sms">SMS</option>
                 </select>
               </div>
-              <input
-                type="text"
-                placeholder="Type a message..."
-                value={messageText}
-                onChange={(e) => setMessageText(e.target.value)}
-                style={{ flex: 1, padding: '10px 14px', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '14px' }}
-              />
-              <button className="btn btn-primary" style={{ padding: '10px 16px' }} disabled={!messageText.trim()}>
-                <Send size={16} />
-              </button>
+              <form className="message-input-form" onSubmit={(e) => e.preventDefault()}>
+                <input
+                  type="text"
+                  placeholder="Type a message..."
+                  value={messageText}
+                  onChange={(e) => setMessageText(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  className="btn send-btn btn-primary"
+                  disabled={!messageText.trim()}
+                >
+                  <Send size={20} />
+                </button>
+              </form>
             </div>
           </>
         ) : (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
-            <div style={{ textAlign: 'center' }}>
-              <MessageSquare size={48} style={{ marginBottom: '12px' }} />
-              <p style={{ fontSize: '16px' }}>Select a lead to view conversation</p>
-            </div>
+          <div className="no-lead-selected">
+            <MessageSquare size={64} />
+            <h3>Select a lead</h3>
+            <p>Choose a lead from the list to view details and send messages</p>
           </div>
         )}
-      </div>
+      </main>
+
+      {/* Right Details Panel */}
+      {selectedLead && (
+        <aside className="lead-details-sidebar">
+          <div className="details-sidebar-header">
+            <h3>Lead Details</h3>
+          </div>
+          <div className="details-sidebar-content">
+            <div className="details-section">
+              <h4>Communication Summary</h4>
+              <div className="comm-summary">
+                <div className="comm-summary-row">
+                  <span className="comm-summary-label">Platform Messages</span>
+                  <span className="comm-summary-value">{selectedLead.messages.filter(m => m.channel === 'platform').length}</span>
+                </div>
+                <div className="comm-summary-row">
+                  <span className="comm-summary-label">SMS Sent</span>
+                  <span className="comm-summary-value">{selectedLead.messages.filter(m => m.channel === 'sms').length}</span>
+                </div>
+              </div>
+            </div>
+            <div className="details-section">
+              <h4>Contact Info</h4>
+              <p className="detail-value"><Phone size={14} /> {selectedLead.phone}</p>
+              <p className="detail-value"><MapPin size={14} /> {selectedLead.location}</p>
+              <p className="detail-value"><DollarSign size={14} /> {selectedLead.budget}</p>
+            </div>
+            {selectedLead.messages[0] && (
+              <div className="details-section">
+                <h4>Customer Message</h4>
+                <p className="customer-message">{selectedLead.messages[0].text}</p>
+              </div>
+            )}
+          </div>
+        </aside>
+      )}
     </div>
   );
 }
