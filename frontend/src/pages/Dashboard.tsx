@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
-import { AlertCircle, CheckCircle, Loader2, RefreshCw, ExternalLink, Settings, X } from 'lucide-react';
+import { AlertCircle, CheckCircle, Loader2, RefreshCw, ExternalLink, Settings, X, Rocket, Link2 } from 'lucide-react';
 import { platformsApi, thumbtackApi, leadsApi } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
@@ -386,6 +386,25 @@ export function Dashboard() {
     );
   }
 
+  const hasAccounts = savedAccounts.length > 0;
+  const connectedAccounts = savedAccounts.filter(a => a.webhookId);
+
+  // Find the most recently used account for "Last Sync"
+  const lastSyncAccount = savedAccounts.length > 0
+    ? savedAccounts.reduce((latest, a) => new Date(a.lastUsedAt) > new Date(latest.lastUsedAt) ? a : latest)
+    : null;
+
+  const formatTimeAgo = (dateStr: string) => {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min${mins !== 1 ? 's' : ''} ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs} hour${hrs !== 1 ? 's' : ''} ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days} day${days !== 1 ? 's' : ''} ago`;
+  };
+
   return (
     <div className="dashboard">
       <header className="dashboard-header-card">
@@ -446,114 +465,166 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Health Issues Banner */}
-      {dashboardData.healthIssues.filter(i => i.severity === 'error').map((issue, index) => (
-        <div
-          key={`${issue.code}-${index}`}
-          className="health-issue-banner"
-          style={{
-            background: '#fef2f2', border: '2px solid #f87171', borderRadius: '8px',
-            padding: '16px 20px', marginBottom: '20px',
-            display: 'flex', alignItems: 'flex-start', gap: '12px',
-            boxShadow: '0 2px 8px rgba(239, 68, 68, 0.15)',
-          }}
-        >
-          <AlertCircle size={24} style={{ color: '#dc2626', flexShrink: 0, marginTop: '2px' }} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600, fontSize: '16px', color: '#991b1b', marginBottom: '6px' }}>
-              {issue.title}
+      {/* ========== NOT CONNECTED: Activation Block ========== */}
+      {!hasAccounts && (
+        <div className="activation-block">
+          <div className="activation-icon">
+            <Rocket size={48} />
+          </div>
+          <h2>Connect Your Thumbtack Account</h2>
+          <p>To start automating your leads, connect your marketplace account.</p>
+          <button
+            className="btn btn-primary btn-lg"
+            onClick={handleConnectThumbtack}
+            disabled={connecting}
+          >
+            {connecting ? (
+              <><Loader2 className="spinner" size={18} /> Connecting...</>
+            ) : (
+              <><Link2 size={18} /> Connect Thumbtack</>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* ========== CONNECTED: Status Badge + Dashboard ========== */}
+      {hasAccounts && (
+        <>
+          {/* Connection status badge */}
+          <div className="connection-status-bar">
+            <div className="connection-status-left">
+              <div className="platform-logo thumbtack-logo" style={{ width: '24px', height: '24px', fontSize: '9px' }}>TT</div>
+              <span className="connection-status-label">Thumbtack</span>
+              {connectedAccounts.length > 0 ? (
+                <span className="connection-badge-inline connected">
+                  <CheckCircle size={12} /> Connected
+                </span>
+              ) : (
+                <span className="connection-badge-inline disconnected">
+                  <AlertCircle size={12} /> Disconnected
+                </span>
+              )}
+              {lastSyncAccount && (
+                <span className="connection-sync-time">Last sync: {formatTimeAgo(lastSyncAccount.lastUsedAt)}</span>
+              )}
             </div>
-            <div style={{ fontSize: '14px', color: '#b91c1c', marginBottom: '8px' }}>
-              {issue.message}
-            </div>
-            {issue.action === 'reconnect' && (
-              <div style={{ fontSize: '13px', color: '#7f1d1d' }}>
-                Click "Reconnect" to log in again with your Thumbtack account.
-              </div>
+            {savedAccounts.length > 1 && (
+              <span className="connection-account-count">
+                {connectedAccounts.length}/{savedAccounts.length} accounts
+              </span>
             )}
           </div>
-          {(issue.action === 'connect' || issue.action === 'reconnect') && (
-            <button
-              className="btn btn-primary"
-              onClick={handleConnectThumbtack}
-              disabled={connecting}
-              style={{ whiteSpace: 'nowrap' }}
+
+          {/* Health Issues Banner */}
+          {dashboardData.healthIssues.filter(i => i.severity === 'error').map((issue, index) => (
+            <div
+              key={`${issue.code}-${index}`}
+              className="health-issue-banner"
+              style={{
+                background: '#fef2f2', border: '2px solid #f87171', borderRadius: '8px',
+                padding: '16px 20px', marginBottom: '20px',
+                display: 'flex', alignItems: 'flex-start', gap: '12px',
+                boxShadow: '0 2px 8px rgba(239, 68, 68, 0.15)',
+              }}
             >
-              {connecting ? (
-                <><Loader2 className="spinner" size={16} /> {issue.action === 'reconnect' ? 'Reconnecting...' : 'Connecting...'}</>
-              ) : issue.action === 'reconnect' ? (
-                <><RefreshCw size={16} style={{ marginRight: '6px' }} /> {issue.actionLabel || 'Reconnect'}</>
-              ) : (
-                issue.actionLabel || 'Connect'
+              <AlertCircle size={24} style={{ color: '#dc2626', flexShrink: 0, marginTop: '2px' }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, fontSize: '16px', color: '#991b1b', marginBottom: '6px' }}>
+                  {issue.title}
+                </div>
+                <div style={{ fontSize: '14px', color: '#b91c1c', marginBottom: '8px' }}>
+                  {issue.message}
+                </div>
+                {issue.action === 'reconnect' && (
+                  <div style={{ fontSize: '13px', color: '#7f1d1d' }}>
+                    Click "Reconnect" to log in again with your Thumbtack account.
+                  </div>
+                )}
+              </div>
+              {(issue.action === 'connect' || issue.action === 'reconnect') && (
+                <button
+                  className="btn btn-primary"
+                  onClick={handleConnectThumbtack}
+                  disabled={connecting}
+                  style={{ whiteSpace: 'nowrap' }}
+                >
+                  {connecting ? (
+                    <><Loader2 className="spinner" size={16} /> {issue.action === 'reconnect' ? 'Reconnecting...' : 'Connecting...'}</>
+                  ) : issue.action === 'reconnect' ? (
+                    <><RefreshCw size={16} style={{ marginRight: '6px' }} /> {issue.actionLabel || 'Reconnect'}</>
+                  ) : (
+                    issue.actionLabel || 'Connect'
+                  )}
+                </button>
               )}
-            </button>
-          )}
-        </div>
-      ))}
+            </div>
+          ))}
 
-      <AccountSelector
-        accounts={savedAccounts}
-        selectedAccountId={selectedAccountId}
-        onSelectAccount={handleSelectAccount}
-      />
+          <AccountSelector
+            accounts={savedAccounts}
+            selectedAccountId={selectedAccountId}
+            onSelectAccount={handleSelectAccount}
+          />
 
-      <AccountManagement
-        savedAccounts={savedAccounts}
-        selectedAccountId={selectedAccountId}
-        connecting={connecting}
-        onConnectThumbtack={handleConnectThumbtack}
-        onDisconnectWebhook={handleDisconnectWebhook}
-        onReconnectWebhook={handleReconnectWebhook}
-        onRemoveAccount={(account) => {
-          setConfirmRemoveAccount({ id: account.id, name: account.businessName });
-          setDeleteLeadsOnRemove(false);
-        }}
-        onUpdateEmail={handleUpdateEmail}
-        onImportNegotiations={handleImportNegotiations}
-        importing={importing}
-        importResults={importResults}
-        importTotal={importTotal}
-        showImportResults={showImportResults}
-        importIds={importIds}
-        onImportIdsChange={setImportIds}
-        onClearImport={() => { setImportIds(''); setImportResults([]); setShowImportResults(false); }}
-        togglingWebhookId={togglingWebhookId}
-        removingAccountId={removingAccountId}
-      />
+          <AccountManagement
+            savedAccounts={savedAccounts}
+            selectedAccountId={selectedAccountId}
+            connecting={connecting}
+            onConnectThumbtack={handleConnectThumbtack}
+            onDisconnectWebhook={handleDisconnectWebhook}
+            onReconnectWebhook={handleReconnectWebhook}
+            onRemoveAccount={(account) => {
+              setConfirmRemoveAccount({ id: account.id, name: account.businessName });
+              setDeleteLeadsOnRemove(false);
+            }}
+            onUpdateEmail={handleUpdateEmail}
+            onImportNegotiations={handleImportNegotiations}
+            importing={importing}
+            importResults={importResults}
+            importTotal={importTotal}
+            showImportResults={showImportResults}
+            importIds={importIds}
+            onImportIdsChange={setImportIds}
+            onClearImport={() => { setImportIds(''); setImportResults([]); setShowImportResults(false); }}
+            togglingWebhookId={togglingWebhookId}
+            removingAccountId={removingAccountId}
+          />
 
-      <section className="dashboard-section">
-        <h2>System Health</h2>
-        <SystemHealth
-          autoReplyEnabled={dashboardData.autoReplyEnabled}
-          customerSmsEnabled={dashboardData.customerSmsEnabled}
-          leadAlertsEnabled={dashboardData.leadAlertsEnabled}
-        />
-      </section>
+          <section className="dashboard-section">
+            <h2>System Health</h2>
+            <SystemHealth
+              autoReplyEnabled={dashboardData.autoReplyEnabled}
+              customerSmsEnabled={dashboardData.customerSmsEnabled}
+              leadAlertsEnabled={dashboardData.leadAlertsEnabled}
+            />
+          </section>
 
-      <section className="dashboard-section">
-        <h2>Today's Activity</h2>
-        <TodaysActivity
-          leadsToday={dashboardData.leadsToday}
-          smsSentToday={dashboardData.smsSentToday}
-          avgResponseTime={dashboardData.avgResponseTime}
-        />
-      </section>
+          <section className="dashboard-section">
+            <h2>Today's Activity</h2>
+            <TodaysActivity
+              leadsToday={dashboardData.leadsToday}
+              smsSentToday={dashboardData.smsSentToday}
+              avgResponseTime={dashboardData.avgResponseTime}
+            />
+          </section>
 
-      <AttentionNeeded
-        unrepliedLeadCount={dashboardData.unrepliedLeadCount}
-        failedSmsCount={dashboardData.failedSmsCount}
-        healthIssues={dashboardData.healthIssues}
-        onScrollToManage={() => {
-          document.getElementById('manage-accounts')?.scrollIntoView({ behavior: 'smooth' });
-        }}
-      />
+          <AttentionNeeded
+            unrepliedLeadCount={dashboardData.unrepliedLeadCount}
+            failedSmsCount={dashboardData.failedSmsCount}
+            healthIssues={dashboardData.healthIssues}
+            onScrollToManage={() => {
+              document.getElementById('manage-accounts')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+          />
 
-      <ConversionSnapshot
-        leadsLast7Days={dashboardData.leadsLast7Days}
-        customerEngagementRate7d={dashboardData.customerEngagementRate7d}
-        totalAutoRepliesSent={dashboardData.totalAutoRepliesSent}
-        totalSmsSent={dashboardData.totalSmsSent}
-      />
+          <ConversionSnapshot
+            leadsLast7Days={dashboardData.leadsLast7Days}
+            customerEngagementRate7d={dashboardData.customerEngagementRate7d}
+            totalAutoRepliesSent={dashboardData.totalAutoRepliesSent}
+            totalSmsSent={dashboardData.totalSmsSent}
+          />
+        </>
+      )}
 
       {/* Session Expired Modal */}
       {sessionExpiredAccount && (

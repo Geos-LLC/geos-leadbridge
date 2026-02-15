@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Home, MessageSquare, BarChart3, Settings, LogOut, Phone, Shield, FlaskConical, Briefcase, Menu, X } from 'lucide-react';
+import { Home, MessageSquare, BarChart3, Settings, LogOut, Phone, Shield, FlaskConical, Briefcase, Menu, X, AlertTriangle } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
+import { useAppStore } from '../store/appStore';
 import TrialBanner from './TrialBanner';
 import TrialExpiredModal from './TrialExpiredModal';
 import CancelledSubscriptionBanner from './CancelledSubscriptionBanner';
@@ -11,7 +12,13 @@ export function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuthStore();
+  const savedAccounts = useAppStore(state => state.savedAccounts);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // App-wide disconnection check
+  const hasAccounts = savedAccounts.length > 0;
+  const allDisconnected = hasAccounts && savedAccounts.every(a => !a.webhookId);
+  const someDisconnected = hasAccounts && !allDisconnected && savedAccounts.some(a => !a.webhookId);
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -115,6 +122,19 @@ export function Layout() {
             <span className="mobile-header-name">LeadBridge</span>
           </div>
         </div>
+        {(allDisconnected || someDisconnected) && (
+          <div className={`disconnect-banner ${allDisconnected ? 'all' : 'some'}`}>
+            <div className="disconnect-banner-content">
+              <AlertTriangle size={18} />
+              <span>
+                {allDisconnected
+                  ? 'Thumbtack Disconnected \u2013 Automation Paused'
+                  : `${savedAccounts.filter(a => !a.webhookId).length} account${savedAccounts.filter(a => !a.webhookId).length > 1 ? 's' : ''} disconnected`}
+              </span>
+              <Link to="/dashboard" className="disconnect-banner-action">Reconnect Now</Link>
+            </div>
+          </div>
+        )}
         <TrialBanner />
         <CancelledSubscriptionBanner />
         <Outlet />
