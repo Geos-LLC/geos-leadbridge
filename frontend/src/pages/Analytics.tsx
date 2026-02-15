@@ -607,7 +607,6 @@ export function Analytics() {
               </ResponsiveContainer>
             </div>
           )}
-          </div>
         </>
       )}
     </div>
