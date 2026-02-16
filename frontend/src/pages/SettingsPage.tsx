@@ -149,15 +149,20 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="settings-page">
-        <div className="settings-page-header">
-          <Settings size={24} />
+      <div className="p-6 lg:p-10 max-w-5xl mx-auto space-y-10">
+        <div className="flex items-center gap-4 mb-2">
+          <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-600">
+            <Settings className="w-6 h-6" />
+          </div>
           <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0 }}>Settings</h1>
+            <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Account <span className="gradient-text">Settings</span></h2>
+            <p className="text-slate-500">Manage your business profile, marketplace connections, and billing.</p>
           </div>
         </div>
-        <div className="loading-state">
-          <p>Loading settings...</p>
+        <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8">
+          <div className="flex items-center justify-center h-32">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+          </div>
         </div>
       </div>
     );
@@ -172,23 +177,29 @@ export default function SettingsPage() {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   return (
-    <div className="settings-page">
-      <div className="settings-page-header">
-        <Settings size={24} />
+    <div className="p-6 lg:p-10 max-w-5xl mx-auto space-y-10">
+      {/* Header */}
+      <div className="flex items-center gap-4 mb-2">
+        <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-600">
+          <Settings className="w-6 h-6" />
+        </div>
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0 }}>Settings</h1>
-          <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>Account, connections & subscription</p>
+          <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Account <span className="gradient-text">Settings</span></h2>
+          <p className="text-slate-500">Manage your business profile, marketplace connections, and billing.</p>
         </div>
       </div>
 
       {/* Section 1: Account Info */}
-      <div className="settings-section-card">
-        <h2 className="settings-section-title">Account Info</h2>
-        <div className="settings-field-grid">
-          <div className="settings-field">
-            <label>Name</label>
+      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="px-8 py-6 border-b border-slate-50">
+          <h3 className="text-lg font-bold text-slate-900">Business Profile</h3>
+        </div>
+        <div className="p-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="space-y-1">
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Name</p>
             {editingName ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div className="flex items-center gap-2">
                 <input
                   type="text"
                   value={nameValue}
@@ -198,479 +209,463 @@ export default function SettingsPage() {
                     if (e.key === 'Escape') setEditingName(false);
                   }}
                   autoFocus
-                  style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '14px', flex: 1 }}
+                  className="flex-1 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
                 />
-                <button className="btn-icon btn-success-subtle" onClick={handleSaveName} disabled={savingName} title="Save">
-                  {savingName ? <Loader2 className="spinner" size={14} /> : <Check size={14} />}
+                <button className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" onClick={handleSaveName} disabled={savingName} title="Save">
+                  {savingName ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check size={16} />}
                 </button>
-                <button className="btn-icon btn-secondary-subtle" onClick={() => setEditingName(false)} title="Cancel">
-                  <X size={14} />
+                <button className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg transition-colors" onClick={() => setEditingName(false)} title="Cancel">
+                  <X size={16} />
                 </button>
               </div>
             ) : (
-              <div className="settings-field-value" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => { setNameValue(user?.name || ''); setEditingName(true); }}>
-                {user?.name || 'Not set'}
-                <Pencil size={12} style={{ color: 'var(--text-secondary)' }} />
+              <div className="flex items-center gap-2 cursor-pointer group" onClick={() => { setNameValue(user?.name || ''); setEditingName(true); }}>
+                <p className="text-slate-900 font-semibold text-lg">{user?.name || 'Not set'}</p>
+                <Pencil size={14} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
               </div>
             )}
           </div>
-          <div className="settings-field">
-            <label>Email</label>
-            <div className="settings-field-value">{user?.email || 'Not set'}</div>
+          <div className="space-y-1">
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Email Address</p>
+            <p className="text-slate-900 font-semibold text-lg">{user?.email || 'Not set'}</p>
           </div>
           {user?.phoneNumber && (
-            <div className="settings-field">
-              <label>Notification Number</label>
-              <div className="settings-field-value" style={{ fontFamily: 'monospace' }}>{user.phoneNumber}</div>
+            <div className="space-y-1">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Phone Number</p>
+              <p className="text-slate-900 font-semibold text-lg font-mono">{user.phoneNumber}</p>
             </div>
           )}
-          <div className="settings-field">
-            <label>Time Zone</label>
-            <div className="settings-field-value">{timeZone}</div>
+          <div className="space-y-1">
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Time Zone</p>
+            <p className="text-slate-900 font-semibold text-lg">{timeZone}</p>
+          </div>
           </div>
         </div>
       </div>
 
       {/* Section 2: Marketplace Connections */}
-      <div className="settings-section-card">
-        <h2 className="settings-section-title">Marketplace Connections</h2>
-
-        {/* Thumbtack */}
-        <div className="settings-connection-group">
-          <div className="settings-connection-group-header">
-            <div className="platform-logo thumbtack-logo" style={{ width: '28px', height: '28px', fontSize: '11px' }}>TT</div>
-            <span style={{ fontWeight: 600, fontSize: '15px' }}>Thumbtack</span>
-          </div>
-          {accounts.length > 0 ? (
-            <div className="settings-connections-list">
-              {accounts.map(account => (
-                <div key={account.id} className="settings-connection-row">
-                  <div className="settings-connection-info">
-                    <span className="settings-connection-name">{account.businessName}</span>
-                    <span className="settings-connection-meta">ID: {account.businessId}</span>
-                  </div>
-                  <span className={`connection-badge ${account.webhookId ? 'connected' : 'disconnected'}`}>
-                    {account.webhookId ? (
-                      <><CheckCircle size={12} /> Connected</>
-                    ) : (
-                      <><AlertCircle size={12} /> Disconnected</>
-                    )}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ padding: '12px 16px', background: '#f8fafc', borderRadius: '8px', fontSize: '13px', color: '#94a3b8' }}>
-              No accounts connected. Connect from the Overview page.
-            </div>
-          )}
-
-          {/* Import Negotiations - collapsible */}
-          {accounts.length > 0 && (
-            <div className="import-section-collapsible" style={{ marginTop: '12px' }}>
-              <div className="import-section-header" onClick={() => setImportCollapsed(!importCollapsed)}>
-                <h3>
-                  <Download size={16} />
-                  Import Negotiations
-                </h3>
-                {importCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+      <div className="space-y-4">
+        <h3 className="text-xl font-bold text-slate-900 px-2">Marketplace Connections</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Thumbtack */}
+          <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-xs shadow-lg shadow-blue-100">TT</div>
+                <span className="font-bold text-slate-900">Thumbtack</span>
               </div>
-
-              <div className={`import-section-content ${importCollapsed ? 'collapsed' : ''}`}>
-                {importError && (
-                  <div style={{
-                    background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px',
-                    padding: '10px 12px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px',
-                    fontSize: '13px', color: '#991b1b',
-                  }}>
-                    <AlertCircle size={14} style={{ flexShrink: 0 }} />
-                    <span>{importError}</span>
-                    <button
-                      className="btn-icon"
-                      onClick={() => setImportError('')}
-                      style={{ marginLeft: 'auto', padding: '2px' }}
-                    >
-                      <X size={12} />
-                    </button>
+              {accounts.length > 0 && (
+                <span className="bg-emerald-50 text-emerald-600 text-[10px] font-bold px-2 py-1 rounded-full border border-emerald-100 uppercase tracking-tighter">Active</span>
+              )}
+            </div>
+            {accounts.length > 0 ? (
+              <div className="space-y-3">
+              {accounts.map(account => (
+                <div key={account.id} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-slate-900 truncate">{account.businessName}</p>
+                    <p className="text-[10px] text-slate-400 font-medium uppercase">ID: {account.businessId}</p>
                   </div>
-                )}
-
-                <div style={{ marginBottom: '12px' }}>
-                  <label style={{ fontSize: '13px', fontWeight: 500, color: '#475569', display: 'block', marginBottom: '6px' }}>
-                    Account
-                  </label>
-                  <select
-                    className="account-dropdown"
-                    value={importAccountId || ''}
-                    onChange={(e) => setImportAccountId(e.target.value || null)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '14px' }}
-                  >
-                    <option value="">Select account...</option>
-                    {accounts.map(a => (
-                      <option key={a.id} value={a.id}>{a.businessName}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <textarea
-                  className="import-textarea"
-                  placeholder={'Paste negotiation IDs here...\n\nExample: abc123, def456, ghi789'}
-                  value={importIds}
-                  onChange={(e) => setImportIds(e.target.value)}
-                  disabled={importing}
-                  rows={4}
-                />
-
-                <div className="import-actions">
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={handleImportNegotiations}
-                    disabled={importing || !importIds.trim() || !importAccountId}
-                  >
-                    {importing ? (
-                      <><Loader2 className="spinner" size={14} /> Importing...</>
-                    ) : (
-                      <><Download size={14} /> Import</>
-                    )}
-                  </button>
-                  {importIds && !importing && (
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => { setImportIds(''); setImportResults([]); setShowImportResults(false); setImportError(''); }}
-                    >
-                      <X size={14} /> Clear
-                    </button>
+                  {account.webhookId ? (
+                    <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-5 h-5 text-amber-500 shrink-0" />
                   )}
                 </div>
+              ))}
+              </div>
+            ) : (
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 border-dashed text-center">
+                <p className="text-sm text-slate-400">No accounts connected yet</p>
+                <p className="text-xs text-slate-400 mt-1">Connect from the Dashboard</p>
+              </div>
+            )}
 
-                {/* Import Progress */}
-                {importing && importTotal > 0 && (
-                  <div style={{ marginTop: '12px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <span style={{ fontSize: '13px', fontWeight: 500 }}>Importing...</span>
-                      <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                        {importResults.length} / {importTotal}
-                      </span>
-                    </div>
-                    <div style={{
-                      width: '100%', height: '6px', background: 'var(--border, #e5e7eb)',
-                      borderRadius: '3px', overflow: 'hidden',
-                    }}>
-                      <div style={{
-                        width: `${(importResults.length / importTotal) * 100}%`,
-                        height: '100%', background: 'var(--primary, #3b82f6)',
-                        borderRadius: '3px', transition: 'width 0.3s ease',
-                      }} />
-                    </div>
+            {/* Import Negotiations - collapsible */}
+            {accounts.length > 0 && (
+              <div className="mt-3 bg-blue-50/50 rounded-2xl border border-blue-100 overflow-hidden">
+                <div
+                  className="flex items-center justify-between p-3 cursor-pointer hover:bg-blue-50 transition-colors"
+                  onClick={() => setImportCollapsed(!importCollapsed)}
+                >
+                  <div className="flex items-center gap-2">
+                    <Download className="w-4 h-4 text-blue-600" />
+                    <h4 className="text-sm font-bold text-slate-900">Import Negotiations</h4>
                   </div>
-                )}
+                  {importCollapsed ? <ChevronDown className="w-5 h-5 text-slate-400" /> : <ChevronUp className="w-5 h-5 text-slate-400" />}
+                </div>
 
-                {/* Import Results */}
-                {showImportResults && importResults.length > 0 && !importing && (
-                  <div className="import-results" style={{ marginTop: '12px' }}>
-                    <h4 style={{ fontSize: '13px' }}>Results ({importResults.length} / {importTotal})</h4>
-                    <div className="results-list">
-                      {importResults.map((result, idx) => (
-                        <div key={idx} className={`result-item ${result.success ? (result.isNew ? 'success' : 'duplicate') : 'failed'}`}>
-                          <span className="result-id">{result.id}</span>
-                          {result.success ? (
-                            <span className="result-status">
-                              <CheckCircle size={14} className={`result-icon ${result.isNew ? 'success' : 'duplicate'}`} />
-                              {result.isNew ? 'New' : 'Exists'}
-                            </span>
-                          ) : (
-                            <span className="result-error">
-                              <AlertCircle size={14} className="result-icon failed" />
-                              {result.error}
-                            </span>
-                          )}
-                        </div>
-                      ))}
+                {!importCollapsed && (
+                  <div className="p-4 pt-0 space-y-3">
+                    {importError && (
+                      <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span className="flex-1">{importError}</span>
+                        <button
+                          className="p-1 hover:bg-red-100 rounded transition-colors"
+                          onClick={() => setImportError('')}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-2">
+                        Select Account
+                      </label>
+                      <select
+                        value={importAccountId || ''}
+                        onChange={(e) => setImportAccountId(e.target.value || null)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                      >
+                        <option value="">Choose account...</option>
+                        {accounts.map(a => (
+                          <option key={a.id} value={a.id}>{a.businessName}</option>
+                        ))}
+                      </select>
                     </div>
+
+                    <textarea
+                      placeholder="Paste negotiation IDs here (comma or newline separated)&#10;&#10;Example: abc123, def456, ghi789"
+                      value={importIds}
+                      onChange={(e) => setImportIds(e.target.value)}
+                      disabled={importing}
+                      rows={4}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300 disabled:bg-slate-50 disabled:text-slate-400"
+                    />
+
+                    <div className="flex gap-2">
+                      <button
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={handleImportNegotiations}
+                        disabled={importing || !importIds.trim() || !importAccountId}
+                      >
+                        {importing ? (
+                          <><Loader2 className="w-4 h-4 animate-spin" /> Importing...</>
+                        ) : (
+                          <><Download className="w-4 h-4" /> Import</>
+                        )}
+                      </button>
+                      {importIds && !importing && (
+                        <button
+                          className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-200 transition-colors"
+                          onClick={() => { setImportIds(''); setImportResults([]); setShowImportResults(false); setImportError(''); }}
+                        >
+                          <X className="w-4 h-4" /> Clear
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Import Progress */}
+                    {importing && importTotal > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="font-medium text-slate-700">Importing...</span>
+                          <span className="text-slate-500">
+                            {importResults.length} / {importTotal}
+                          </span>
+                        </div>
+                        <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-blue-600 rounded-full transition-all duration-300"
+                            style={{ width: `${(importResults.length / importTotal) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Import Results */}
+                    {showImportResults && importResults.length > 0 && !importing && (
+                      <div className="space-y-2">
+                        <h4 className="text-sm font-bold text-slate-700">Results ({importResults.length} / {importTotal})</h4>
+                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                          {importResults.map((result, idx) => (
+                            <div key={idx} className="flex items-center justify-between p-2 rounded-xl bg-white border border-slate-100 text-sm">
+                              <span className="font-mono text-xs text-slate-600">{result.id}</span>
+                              {result.success ? (
+                                <span className="flex items-center gap-1.5">
+                                  <CheckCircle className={`w-4 h-4 ${result.isNew ? 'text-emerald-500' : 'text-blue-500'}`} />
+                                  <span className={`text-xs font-medium ${result.isNew ? 'text-emerald-600' : 'text-blue-600'}`}>
+                                    {result.isNew ? 'New' : 'Exists'}
+                                  </span>
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1.5">
+                                  <AlertCircle className="w-4 h-4 text-red-500" />
+                                  <span className="text-xs text-red-600 max-w-[200px] truncate" title={result.error}>
+                                    {result.error}
+                                  </span>
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
 
-        {/* Yelp */}
-        <div className="settings-connection-group" style={{ marginTop: '16px' }}>
-          <div className="settings-connection-group-header">
-            <div className="platform-logo yelp-logo" style={{ width: '28px', height: '28px', fontSize: '12px', fontWeight: 700 }}>Y</div>
-            <span style={{ fontWeight: 600, fontSize: '15px' }}>Yelp</span>
-            <span className="connection-badge coming-soon">Coming Soon</span>
+          {/* Yelp */}
+          <div className="bg-slate-50 rounded-[2rem] border border-slate-200 border-dashed p-6 flex flex-col items-center justify-center text-center">
+            <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-300 font-bold mb-3 border border-slate-100 text-lg">Y</div>
+            <h4 className="font-bold text-slate-400">Yelp Integration</h4>
+            <p className="text-xs text-slate-400 mb-4">Coming very soon to LeadBridge</p>
+            <span className="px-4 py-1.5 bg-white text-slate-400 text-[10px] font-bold rounded-full border border-slate-200 uppercase tracking-widest">Waitlist Only</span>
           </div>
         </div>
       </div>
 
       {/* Section 3: Subscription & Billing */}
-      <div className="settings-section-card">
-        <h2 className="settings-section-title">Subscription & Billing</h2>
+      <div className="space-y-4">
+        <h3 className="text-xl font-bold text-slate-900 px-2">Subscription & Billing</h3>
 
         {/* STATE 1: Free Trial Active */}
         {isTrialActive && !isActivePaid && trial && (
-          <div className="billing-state-trial">
-            <div className="billing-trial-header">
-              <div className="billing-trial-badge">
-                <Rocket size={18} />
-                <span>Free Trial Active</span>
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600">
+                <Rocket className="w-5 h-5" />
               </div>
+              <span className="text-lg font-bold text-slate-900">Free Trial Active</span>
             </div>
-            <div className="billing-trial-details">
-              <div className="billing-trial-stat">
-                <span className="billing-trial-stat-label">Days Remaining</span>
-                <span className="billing-trial-stat-value">{trial.trialDaysRemaining}</span>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+              <div className="p-4 bg-slate-50 rounded-2xl text-center">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Days Remaining</p>
+                <p className="text-3xl font-bold text-slate-900">{trial.trialDaysRemaining}</p>
               </div>
-              <div className="billing-trial-stat">
-                <span className="billing-trial-stat-label">Leads Used</span>
-                <span className="billing-trial-stat-value">{trial.trialLeadsHandled} / {trial.trialLeadsLimit}</span>
+              <div className="p-4 bg-slate-50 rounded-2xl text-center">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Leads Used</p>
+                <p className="text-3xl font-bold text-slate-900">{trial.trialLeadsHandled} / {trial.trialLeadsLimit}</p>
               </div>
               {trial.trialEndDate && (
-                <div className="billing-trial-stat">
-                  <span className="billing-trial-stat-label">Trial Ends</span>
-                  <span className="billing-trial-stat-value">
+                <div className="p-4 bg-slate-50 rounded-2xl text-center">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Trial Ends</p>
+                  <p className="text-lg font-bold text-slate-900">
                     {new Date(trial.trialEndDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
-                  </span>
+                  </p>
                 </div>
               )}
             </div>
-            <p className="billing-trial-note">
+            <p className="text-sm text-slate-600 mb-4">
               After your trial, choose a plan starting at ${tierPrices.STARTER}/month.
             </p>
-            <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-              <Link to="/pricing" className="btn btn-primary btn-sm">
-                <Zap size={14} /> Choose a Plan
-              </Link>
-            </div>
+            <Link to="/pricing" className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors">
+              <Zap className="w-4 h-4" /> Choose a Plan
+            </Link>
           </div>
         )}
 
         {/* STATE 2: Trial Expired / No Plan */}
         {isTrialExpired && !isActivePaid && (
-          <div className="billing-state-expired">
-            <div className="billing-expired-header">
-              <AlertCircle size={22} />
-              <h3>Subscription Required</h3>
+          <div className="bg-amber-50 rounded-[2.5rem] border border-amber-200 shadow-sm p-8">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertCircle className="w-6 h-6 text-amber-600" />
+              <h3 className="text-lg font-bold text-amber-900">Subscription Required</h3>
             </div>
-            <p className="billing-expired-text">Your trial has ended. Upgrade to continue using automation.</p>
-            <div className="billing-feature-locks">
-              <div className="billing-feature-lock">
-                <Lock size={14} />
-                <Reply size={14} />
-                <span>Auto Reply</span>
+            <p className="text-slate-700 mb-6">Your trial has ended. Upgrade to continue using automation.</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              <div className="flex items-center gap-2 p-3 bg-amber-100/50 rounded-xl border border-amber-200 text-amber-700">
+                <Lock className="w-4 h-4 shrink-0" />
+                <span className="text-sm font-medium">Auto Reply</span>
               </div>
-              <div className="billing-feature-lock">
-                <Lock size={14} />
-                <MessageSquare size={14} />
-                <span>Follow-Ups</span>
+              <div className="flex items-center gap-2 p-3 bg-amber-100/50 rounded-xl border border-amber-200 text-amber-700">
+                <Lock className="w-4 h-4 shrink-0" />
+                <span className="text-sm font-medium">Follow-Ups</span>
               </div>
-              <div className="billing-feature-lock">
-                <Lock size={14} />
-                <MessageSquare size={14} />
-                <span>Customer SMS</span>
+              <div className="flex items-center gap-2 p-3 bg-amber-100/50 rounded-xl border border-amber-200 text-amber-700">
+                <Lock className="w-4 h-4 shrink-0" />
+                <span className="text-sm font-medium">Customer SMS</span>
               </div>
-              <div className="billing-feature-lock">
-                <Lock size={14} />
-                <PhoneCall size={14} />
-                <span>Call Connect</span>
+              <div className="flex items-center gap-2 p-3 bg-amber-100/50 rounded-xl border border-amber-200 text-amber-700">
+                <Lock className="w-4 h-4 shrink-0" />
+                <span className="text-sm font-medium">Call Connect</span>
               </div>
             </div>
-            <Link to="/pricing" className="btn btn-primary btn-sm" style={{ marginTop: '16px' }}>
-              <Zap size={14} /> View Plans
+            <Link to="/pricing" className="inline-flex items-center gap-2 px-6 py-3 bg-amber-600 text-white rounded-xl font-semibold hover:bg-amber-700 transition-colors">
+              <Zap className="w-4 h-4" /> View Plans
             </Link>
           </div>
         )}
 
         {/* STATE 2b: No trial data at all, no subscription */}
         {!isTrialActive && !isTrialExpired && !isActivePaid && !isCancelled && (
-          <div className="billing-state-expired">
-            <div className="billing-expired-header">
-              <Rocket size={22} />
-              <h3>Start Your Plan</h3>
+          <div className="bg-blue-50 rounded-[2.5rem] border border-blue-200 shadow-sm p-8">
+            <div className="flex items-center gap-3 mb-4">
+              <Rocket className="w-6 h-6 text-blue-600" />
+              <h3 className="text-lg font-bold text-blue-900">Start Your Plan</h3>
             </div>
-            <p className="billing-expired-text">Unlock powerful features for lead management and automation.</p>
-            <div className="billing-feature-locks" style={{ borderColor: '#e0e7ff' }}>
-              <div className="billing-feature-lock" style={{ color: '#4f46e5' }}>
-                <CheckCircle size={14} />
-                <span>Auto Reply</span>
+            <p className="text-slate-700 mb-6">Unlock powerful features for lead management and automation.</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              <div className="flex items-center gap-2 p-3 bg-blue-100/50 rounded-xl border border-blue-200 text-blue-700">
+                <CheckCircle className="w-4 h-4 shrink-0" />
+                <span className="text-sm font-medium">Auto Reply</span>
               </div>
-              <div className="billing-feature-lock" style={{ color: '#4f46e5' }}>
-                <CheckCircle size={14} />
-                <span>Follow-Ups</span>
+              <div className="flex items-center gap-2 p-3 bg-blue-100/50 rounded-xl border border-blue-200 text-blue-700">
+                <CheckCircle className="w-4 h-4 shrink-0" />
+                <span className="text-sm font-medium">Follow-Ups</span>
               </div>
-              <div className="billing-feature-lock" style={{ color: '#4f46e5' }}>
-                <CheckCircle size={14} />
-                <span>Customer SMS</span>
+              <div className="flex items-center gap-2 p-3 bg-blue-100/50 rounded-xl border border-blue-200 text-blue-700">
+                <CheckCircle className="w-4 h-4 shrink-0" />
+                <span className="text-sm font-medium">Customer SMS</span>
               </div>
-              <div className="billing-feature-lock" style={{ color: '#4f46e5' }}>
-                <CheckCircle size={14} />
-                <span>Call Connect</span>
+              <div className="flex items-center gap-2 p-3 bg-blue-100/50 rounded-xl border border-blue-200 text-blue-700">
+                <CheckCircle className="w-4 h-4 shrink-0" />
+                <span className="text-sm font-medium">Call Connect</span>
               </div>
             </div>
-            <Link to="/pricing" className="btn btn-primary btn-sm" style={{ marginTop: '16px' }}>
-              <Zap size={14} /> View Plans
+            <Link to="/pricing" className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors">
+              <Zap className="w-4 h-4" /> View Plans
             </Link>
           </div>
         )}
 
         {/* STATE 3: Active Paid Subscription */}
         {isActivePaid && subscription && (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
-              <div>
-                <h3 style={{ fontSize: '18px', fontWeight: 700, margin: 0 }}>
-                  {subscription.tier ? tierNames[subscription.tier] : 'Unknown'} Plan
-                </h3>
-                <div className={`subscription-status status-${subscription.status?.toLowerCase()}`} style={{ marginTop: '6px' }}>
-                  {subscription.status}
-                </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '28px', fontWeight: 700, color: '#1e293b' }}>
-                  ${subscription.tier ? tierPrices[subscription.tier] : 0}
-                </div>
-                <div style={{ fontSize: '13px', color: '#94a3b8' }}>/month</div>
-              </div>
-            </div>
-
-            {subscription.cancelAtPeriodEnd && subscription.periodEnd && (
-              <div className="subscription-notice cancelled-notice" style={{ backgroundColor: '#fff3cd', borderColor: '#ffc107' }}>
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                  <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9 9h2v5H9V9zm0-4h2v2H9V5z" fill="currentColor" style={{ color: '#856404' }}/>
-                </svg>
+          <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white relative overflow-hidden">
+            <div className="relative z-10">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8 pb-8 border-b border-white/10">
                 <div>
-                  <strong style={{ color: '#856404' }}>Subscription Ending</strong>
-                  <p style={{ color: '#856404' }}>You'll continue to have access until {new Date(subscription.periodEnd).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}. Reactivate anytime through the billing portal.</p>
+                  <div className="flex items-center gap-3 mb-2">
+                    <h3 className="text-2xl font-bold">{subscription.tier ? tierNames[subscription.tier] : 'Unknown'} Plan</h3>
+                    <span className="px-3 py-1 bg-emerald-500/20 text-emerald-400 text-xs font-bold rounded-full border border-emerald-500/30 uppercase">
+                      {subscription.status}
+                    </span>
+                  </div>
+                  <p className="text-slate-400 text-sm">
+                    {subscription.periodEnd && !subscription.cancelAtPeriodEnd
+                      ? `Next billing: ${new Date(subscription.periodEnd).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`
+                      : 'Manage your subscription'}
+                  </p>
+                </div>
+                <div className="text-left md:text-right">
+                  <div className="text-4xl font-black">${subscription.tier ? tierPrices[subscription.tier] : 0}<span className="text-lg text-slate-500 font-medium">/mo</span></div>
+                  {subscription.hasOwnNumber && (
+                    <p className="text-slate-400 text-xs mt-1">+ Business Number ($29/mo)</p>
+                  )}
                 </div>
               </div>
-            )}
 
-            {!subscription.cancelAtPeriodEnd && subscription.periodEnd && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#475569', marginBottom: '12px' }}>
-                <span>Next billing date</span>
-                <span style={{ fontWeight: 600 }}>
-                  {new Date(subscription.periodEnd).toLocaleDateString('en-US', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                  })}
-                </span>
+              {subscription.cancelAtPeriodEnd && subscription.periodEnd && (
+                <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="text-amber-400 font-bold">Subscription Ending</strong>
+                      <p className="text-slate-300 text-sm mt-1">
+                        You'll continue to have access until {new Date(subscription.periodEnd).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}. Reactivate anytime.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  className="flex-1 py-3 bg-white text-slate-900 rounded-xl font-bold text-sm hover:bg-slate-100 transition-colors disabled:opacity-50"
+                  onClick={handleManageSubscription}
+                  disabled={portalLoading}
+                >
+                  {portalLoading ? 'Opening...' : 'Manage Subscription'}
+                </button>
+                <Link to="/pricing" className="px-6 py-3 bg-white/10 text-white rounded-xl font-bold text-sm hover:bg-white/20 transition-colors">
+                  View Plans
+                </Link>
               </div>
-            )}
-
-            {subscription.hasOwnNumber && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#475569', marginBottom: '12px' }}>
-                <span>Add-ons</span>
-                <span style={{ fontWeight: 600 }}>Own Business Number (+$29/month)</span>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={handleManageSubscription}
-                disabled={portalLoading}
-              >
-                {portalLoading ? 'Opening...' : 'Manage Subscription'}
-              </button>
-              <Link to="/pricing" className="btn btn-secondary btn-sm">
-                View All Plans
-              </Link>
             </div>
-          </>
+            {/* Background decoration */}
+            <div className="absolute -right-20 -bottom-20 w-80 h-80 bg-blue-600/10 rounded-full blur-[100px]"></div>
+          </div>
         )}
 
         {/* STATE 3b: Cancelled subscription */}
         {isCancelled && subscription && (
-          <>
-            <div className="subscription-notice cancelled-notice">
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9 9h2v5H9V9zm0-4h2v2H9V5z" fill="currentColor"/>
-              </svg>
+          <div className="bg-slate-100 rounded-[2.5rem] border border-slate-200 shadow-sm p-8">
+            <div className="flex items-start gap-3 mb-6 p-4 bg-slate-200/50 rounded-2xl">
+              <AlertCircle className="w-5 h-5 text-slate-600 shrink-0 mt-0.5" />
               <div>
-                <strong>Subscription Cancelled</strong>
-                <p>Your subscription has been cancelled. {subscription.periodEnd && `Access continues until ${new Date(subscription.periodEnd).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}.`} Reactivate anytime.</p>
+                <strong className="text-slate-900 font-bold">Subscription Cancelled</strong>
+                <p className="text-slate-600 text-sm mt-1">
+                  Your subscription has been cancelled. {subscription.periodEnd && `Access continues until ${new Date(subscription.periodEnd).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}.`} Reactivate anytime.
+                </p>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+            <div className="flex gap-3">
               <button
-                className="btn btn-primary btn-sm"
+                className="px-6 py-3 bg-slate-900 text-white rounded-xl font-semibold hover:bg-slate-800 transition-colors disabled:opacity-50"
                 onClick={handleManageSubscription}
                 disabled={portalLoading}
               >
                 {portalLoading ? 'Opening...' : 'Reactivate'}
               </button>
-              <Link to="/pricing" className="btn btn-secondary btn-sm">
+              <Link to="/pricing" className="px-6 py-3 bg-white text-slate-700 rounded-xl font-semibold border border-slate-200 hover:bg-slate-50 transition-colors">
                 View Plans
               </Link>
             </div>
-          </>
+          </div>
         )}
       </div>
 
       {/* Section 4: Payment Method */}
-      <div className="settings-section-card">
-        <h2 className="settings-section-title">Payment Method</h2>
-        <div className="payment-card-placeholder">
-          <div className="payment-card-icon">
-            <svg width="40" height="26" viewBox="0 0 40 26" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="40" height="26" rx="4" fill="#635BFF"/>
-              <text x="20" y="16" textAnchor="middle" fill="white" fontSize="10" fontWeight="600">STRIPE</text>
-            </svg>
+      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="px-8 py-6 border-b border-slate-50">
+          <h3 className="text-lg font-bold text-slate-900">Payment Method</h3>
+        </div>
+        <div className="p-8">
+          <div className="flex items-center gap-6">
+            <div className="w-16 h-12 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-100">
+              <svg width="40" height="26" viewBox="0 0 40 26" fill="none">
+                <text x="20" y="16" textAnchor="middle" fill="white" fontSize="10" fontWeight="600">STRIPE</text>
+              </svg>
+            </div>
+            <div className="flex-1">
+              <p className="text-sm text-slate-600">
+                {isActivePaid ? 'Manage your payment method through the billing portal.' : 'Add a payment method to subscribe to a plan.'}
+              </p>
+            </div>
+            <button
+              className="px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-colors disabled:opacity-50 shrink-0"
+              onClick={handleManageSubscription}
+              disabled={portalLoading}
+            >
+              {portalLoading ? 'Opening...' : isActivePaid ? 'Update Card' : 'Add Card'}
+            </button>
           </div>
-          <div className="payment-card-info">
-            <p style={{ fontSize: '14px', color: '#475569', margin: 0 }}>
-              {isActivePaid ? 'Manage your payment method through the billing portal.' : 'Add a payment method to subscribe to a plan.'}
-            </p>
-          </div>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={handleManageSubscription}
-            disabled={portalLoading}
-          >
-            {portalLoading ? 'Opening...' : isActivePaid ? 'Update Card' : 'Add Card'}
-          </button>
         </div>
       </div>
 
       {/* Section 5: Invoices */}
-      <div className="settings-section-card">
-        <h2 className="settings-section-title">Invoices</h2>
-        {isActivePaid || isCancelled ? (
-          <>
-            <table className="invoices-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Description</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td colSpan={4} style={{ textAlign: 'center', color: '#94a3b8', padding: '24px' }}>
-                    View and manage invoices through the billing portal.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div style={{ marginTop: '12px' }}>
+      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="px-8 py-6 border-b border-slate-50">
+          <h3 className="text-lg font-bold text-slate-900">Invoices</h3>
+        </div>
+        <div className="p-8">
+          {isActivePaid || isCancelled ? (
+            <div className="space-y-4">
+              <div className="p-8 bg-slate-50 rounded-2xl text-center">
+                <p className="text-sm text-slate-500">
+                  View and manage invoices through the billing portal.
+                </p>
+              </div>
               <button
-                className="btn btn-secondary btn-sm"
+                className="px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-colors disabled:opacity-50"
                 onClick={handleManageSubscription}
                 disabled={portalLoading}
               >
                 {portalLoading ? 'Opening...' : 'View Invoices in Stripe'}
               </button>
             </div>
-          </>
-        ) : (
-          <p style={{ fontSize: '14px', color: '#94a3b8', margin: 0 }}>
-            No invoices yet. Invoices will appear here once you subscribe to a plan.
-          </p>
-        )}
+          ) : (
+            <div className="p-8 bg-slate-50 rounded-2xl text-center">
+              <p className="text-sm text-slate-500">
+                No invoices yet. Invoices will appear here once you subscribe to a plan.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
