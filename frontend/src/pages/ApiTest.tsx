@@ -456,6 +456,20 @@ export function ApiTest() {
           <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-8 space-y-6">
             <h2 className="text-2xl font-bold text-slate-900">Lead Details</h2>
 
+            {/* Info Banner */}
+            <div className="bg-blue-50 border-l-4 border-blue-500 rounded-xl p-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle size={18} className="text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-blue-900">This test will simulate a new lead from Thumbtack</p>
+                  <p className="text-xs text-blue-700">
+                    The results will show exactly which SMS messages were sent, to which phone numbers, and which rules triggered them.
+                    Use this to verify your SMS alert routing and automation rules are working correctly.
+                  </p>
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="block text-sm font-semibold text-slate-700">First Name</label>
@@ -658,21 +672,55 @@ export function ApiTest() {
                       {result.results.sseEventEmitted ? <CheckCircle size={14} className="text-emerald-600" /> : <XCircle size={14} className="text-red-600" />}
                       SSE event emitted
                     </div>
+                  </div>
 
-                    {/* SMS Status - prominent display */}
-                    <div className="flex items-center gap-2 font-semibold">
+                  {/* MESSAGE ROUTING - Prominent Section */}
+                  <div className={`rounded-xl p-4 space-y-3 ${result.results.smsSent ? 'bg-emerald-50 border-2 border-emerald-200' : 'bg-red-50 border-2 border-red-200'}`}>
+                    <div className="flex items-center gap-2">
                       {result.results.smsSent
-                        ? <CheckCircle size={14} className="text-emerald-600" />
-                        : <XCircle size={14} className="text-red-600" />}
-                      {result.results.smsSent
-                        ? `SMS sent (${result.results.smsSuccessCount} ok${result.results.smsFailedCount > 0 ? `, ${result.results.smsFailedCount} failed` : ''})`
-                        : 'SMS NOT sent'}
+                        ? <CheckCircle size={18} className="text-emerald-600" />
+                        : <XCircle size={18} className="text-red-600" />}
+                      <span className="font-bold text-base">
+                        {result.results.smsSent
+                          ? `✓ SMS Messages Sent (${result.results.smsSuccessCount} successful${result.results.smsFailedCount > 0 ? `, ${result.results.smsFailedCount} failed` : ''})`
+                          : '✗ No SMS Messages Sent'}
+                      </span>
                     </div>
 
                     {result.results.smsNotSentReason && (
-                      <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2 flex items-center gap-1">
-                        <AlertCircle size={12} />
-                        {result.results.smsNotSentReason}
+                      <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-2">
+                        <AlertCircle size={14} className="flex-shrink-0" />
+                        <strong>Reason:</strong> {result.results.smsNotSentReason}
+                      </div>
+                    )}
+
+                    {/* SMS Logs - Show where messages were sent */}
+                    {result.results.smsLogs.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="text-xs font-bold text-slate-700 uppercase tracking-wide">Messages Sent To:</div>
+                        {result.results.smsLogs.map((log, i) => (
+                          <div key={i} className={`p-3 rounded-lg border-2 ${log.status === 'failed' ? 'bg-red-50 border-red-300' : 'bg-white border-emerald-300'}`}>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 space-y-1">
+                                <div className="flex items-center gap-2">
+                                  {log.status === 'failed' ? <XCircle size={14} className="text-red-600" /> : <CheckCircle size={14} className="text-emerald-600" />}
+                                  <span className="font-bold text-sm">{log.toPhone || 'Unknown number'}</span>
+                                </div>
+                                <div className="text-xs text-slate-600 ml-6">
+                                  <strong>Rule:</strong> {log.ruleName || 'Unknown'}
+                                </div>
+                                {log.error && (
+                                  <div className="text-xs text-red-600 ml-6">
+                                    <strong>Error:</strong> {log.error}
+                                  </div>
+                                )}
+                              </div>
+                              <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${log.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                {log.status}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
 
@@ -697,36 +745,36 @@ export function ApiTest() {
                       </div>
                     )}
 
-                    <div className="text-sm">
-                      <span className="font-medium">{result.results.automationRulesFound}</span> auto-reply rule{result.results.automationRulesFound !== 1 ? 's' : ''} (Thumbtack)
+                    {/* Rules Summary */}
+                    <div className="space-y-1 text-sm pt-2 border-t border-slate-200">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-600">Automation Rules (Thumbtack):</span>
+                        <span className="font-bold">{result.results.automationRulesFound}</span>
+                      </div>
                       {result.results.automationRules.length > 0 && (
-                        <span className="text-[11px] text-slate-500 ml-1">
-                          ({result.results.automationRules.map(r => r.name).join(', ')})
-                        </span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {result.results.automationRules.map((r, i) => (
+                            <span key={i} className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-semibold rounded">
+                              {r.name}
+                            </span>
+                          ))}
+                        </div>
                       )}
-                    </div>
-                    <div className="text-sm">
-                      <span className="font-medium">{result.results.notificationRulesFound}</span> SMS alert rule{result.results.notificationRulesFound !== 1 ? 's' : ''}
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-slate-600">SMS Alert Rules:</span>
+                        <span className="font-bold">{result.results.notificationRulesFound}</span>
+                      </div>
                       {result.results.notificationRules.length > 0 && (
-                        <span className="text-[11px] text-slate-500 ml-1">
-                          ({result.results.notificationRules.map(r => r.name).join(', ')})
-                        </span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {result.results.notificationRules.map((r, i) => (
+                            <span key={i} className="px-2 py-0.5 bg-purple-50 text-purple-700 text-[10px] font-semibold rounded">
+                              {r.name}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </div>
                   </div>
-
-                  {result.results.smsLogs.length > 0 && (
-                    <div className="space-y-1">
-                      <span className="text-xs font-semibold text-slate-700">SMS Logs:</span>
-                      {result.results.smsLogs.map((log, i) => (
-                        <div key={i} className={`text-xs ${log.status === 'failed' ? 'text-red-600' : 'text-emerald-600'}`}>
-                          {log.ruleName || 'Unknown'}: {log.status}
-                          {log.toPhone && ` → ${log.toPhone}`}
-                          {log.error && ` - ${log.error}`}
-                        </div>
-                      ))}
-                    </div>
-                  )}
 
                   {result.results.webhookError && (
                     <div className="text-red-600 text-sm">
