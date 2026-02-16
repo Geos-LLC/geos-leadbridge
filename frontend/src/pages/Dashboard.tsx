@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Users, Send, Clock, TrendingUp, Plus, ChevronRight,
-  Briefcase, AlertCircle, Sparkles
+  Briefcase, Sparkles
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
@@ -37,6 +37,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [connectionModalOpen, setConnectionModalOpen] = useState(false);
   const [accountToReconnect, setAccountToReconnect] = useState<SavedAccount | null>(null);
+  const [showAllAccounts, setShowAllAccounts] = useState(false);
 
   useEffect(() => {
     loadAccounts();
@@ -160,14 +161,19 @@ export function Dashboard() {
         <div className="lg:col-span-2 space-y-6">
           <div className="flex items-center justify-between px-2">
             <h3 className="text-xl font-bold text-slate-900">Connected Platforms</h3>
-            <Link to="/services" className="text-blue-600 font-semibold text-sm hover:underline">
-              Manage All
-            </Link>
+            {savedAccounts.length > 2 && (
+              <button
+                onClick={() => setShowAllAccounts(!showAllAccounts)}
+                className="text-blue-600 font-semibold text-sm hover:underline"
+              >
+                {showAllAccounts ? 'Show Less' : 'Show All'}
+              </button>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {savedAccounts.length > 0 ? (
-              savedAccounts.slice(0, 2).map((account) => (
+              (showAllAccounts ? savedAccounts : savedAccounts.slice(0, 2)).map((account) => (
                 <div
                   key={account.id}
                   className="bg-white border border-slate-100 rounded-3xl p-5 flex items-center gap-5 hover:border-blue-200 transition-all cursor-pointer group shadow-sm"
@@ -229,54 +235,19 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* Alerts */}
+        {/* Quick Actions */}
         <div className="space-y-6">
-          <div className="flex items-center justify-between px-2">
-            <h3 className="text-xl font-bold text-slate-900">Action Required</h3>
-            <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-1 rounded-md">0 URGENT</span>
-          </div>
-
-          <div className="space-y-4">
-            {savedAccounts.some(a => !a.webhookId) && (
-              <div className="bg-rose-50/50 border border-rose-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-rose-50 transition-colors">
-                <div className="flex items-start gap-4">
-                  <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-xl flex items-center justify-center shrink-0">
-                    <AlertCircle className="w-5 h-5" />
-                  </div>
-                  <div className="flex-1">
-                    <h5 className="font-bold text-slate-900">Account Disconnected</h5>
-                    <p className="text-sm text-slate-600 mt-1 leading-relaxed">
-                      One or more accounts need reconnection to resume automation.
-                    </p>
-                    <button
-                      onClick={() => {
-                        const disconnected = savedAccounts.find(a => !a.webhookId);
-                        if (disconnected) {
-                          setAccountToReconnect(disconnected);
-                          setConnectionModalOpen(true);
-                        }
-                      }}
-                      className="mt-4 text-xs font-bold text-rose-600 uppercase tracking-wider flex items-center gap-1 hover:text-rose-700 transition-colors"
-                    >
-                      Reconnect Now <ChevronRight className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] p-6 text-white text-center shadow-lg shadow-indigo-100">
-              <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Sparkles className="w-6 h-6" />
-              </div>
-              <h4 className="font-bold text-lg mb-2">Automate Even Faster</h4>
-              <p className="text-indigo-100 text-sm mb-5 leading-relaxed">
-                Our new AI-powered response templates are now live for all users.
-              </p>
-              <Link to="/message-settings" className="w-full inline-block py-3 bg-white text-indigo-600 rounded-xl font-bold text-sm shadow-sm hover:bg-indigo-50 transition-colors">
-                Try AI Templates
-              </Link>
+          <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] p-6 text-white text-center shadow-lg shadow-indigo-100">
+            <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Sparkles className="w-6 h-6" />
             </div>
+            <h4 className="font-bold text-lg mb-2">Automate Even Faster</h4>
+            <p className="text-indigo-100 text-sm mb-5 leading-relaxed">
+              Our new AI-powered response templates are now live for all users.
+            </p>
+            <Link to="/message-settings" className="w-full inline-block py-3 bg-white text-indigo-600 rounded-xl font-bold text-sm shadow-sm hover:bg-indigo-50 transition-colors">
+              Try AI Templates
+            </Link>
           </div>
         </div>
       </div>
