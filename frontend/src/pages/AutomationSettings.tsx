@@ -813,22 +813,25 @@ export function AutomationSettings() {
 
       {/* Delete Confirmation Modal */}
       {deletingId && (
-        <div className="modal-overlay" onClick={() => setDeletingId(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3>Delete Automation Rule?</h3>
-            <p>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setDeletingId(null)}>
+          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-2xl font-bold text-slate-900 mb-2">Delete Automation Rule?</h3>
+            <p className="text-slate-500 mb-8">
               Are you sure you want to delete this rule? Any pending scheduled messages will be cancelled.
             </p>
-            <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => setDeletingId(null)}>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeletingId(null)}
+                className="flex-1 px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all"
+              >
                 Cancel
               </button>
               <button
-                className="btn btn-danger"
                 onClick={() => handleDelete(deletingId)}
                 disabled={saving}
+                className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 shadow-lg shadow-red-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                {saving ? <Loader2 size={16} className="spinner" /> : 'Delete'}
+                {saving ? <Loader2 size={16} className="animate-spin" /> : 'Delete'}
               </button>
             </div>
           </div>
@@ -837,47 +840,54 @@ export function AutomationSettings() {
 
       {/* Quick Template Creation Modal */}
       {showTemplateModal && (
-        <div className="modal-overlay" onClick={closeTemplateModal}>
-          <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>
-                <FileText size={20} />
-                Create New Template
-              </h3>
-              <button className="btn-icon" onClick={closeTemplateModal}>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={closeTemplateModal}>
+          <div className="bg-white rounded-3xl p-8 max-w-2xl w-full shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600">
+                  <FileText size={20} />
+                </div>
+                <h3 className="text-2xl font-bold text-slate-900">Create New Template</h3>
+              </div>
+              <button
+                onClick={closeTemplateModal}
+                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-all"
+              >
                 <X size={20} />
               </button>
             </div>
 
-            <div className="modal-body">
-              <div className="form-group">
-                <label>Template Name *</label>
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-slate-700">Template Name *</label>
                 <input
                   type="text"
                   value={newTemplateName}
                   onChange={e => setNewTemplateName(e.target.value)}
                   placeholder="e.g., Welcome Message"
                   autoFocus
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                 />
               </div>
 
-              <div className="form-group">
-                <label>Message Content *</label>
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-slate-700">Message Content *</label>
                 <textarea
                   ref={templateContentRef}
                   value={newTemplateContent}
                   onChange={e => setNewTemplateContent(e.target.value)}
                   placeholder="Hi {firstName}, thanks for reaching out about {category}! I wanted to follow up..."
                   rows={6}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all resize-none font-sans"
                 />
-                <div className="variable-buttons">
+                <div className="flex flex-wrap gap-2 mt-3">
                   {TEMPLATE_VARIABLES.map(v => (
                     <button
                       key={v.name}
                       type="button"
-                      className="variable-btn"
                       onClick={() => insertVariable(v.name)}
                       title={v.description}
+                      className="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-mono font-medium border border-blue-100 hover:bg-blue-100 transition-all"
                     >
                       {v.name}
                     </button>
@@ -886,16 +896,20 @@ export function AutomationSettings() {
               </div>
             </div>
 
-            <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={closeTemplateModal} disabled={savingTemplate}>
+            <div className="flex gap-3 mt-8 pt-6 border-t border-slate-100">
+              <button
+                onClick={closeTemplateModal}
+                disabled={savingTemplate}
+                className="flex-1 px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
                 Cancel
               </button>
               <button
-                className="btn btn-primary"
                 onClick={handleCreateTemplate}
                 disabled={savingTemplate || !newTemplateName.trim() || !newTemplateContent.trim()}
+                className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                {savingTemplate ? <Loader2 size={16} className="spinner" /> : <Save size={16} />}
+                {savingTemplate ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                 Create Template
               </button>
             </div>

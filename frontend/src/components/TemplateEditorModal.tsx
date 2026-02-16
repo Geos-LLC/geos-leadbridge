@@ -120,70 +120,83 @@ export function TemplateEditorModal({
   const title = mode === 'create' ? 'Create Template' : 'Edit Template';
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="template-editor-modal" onClick={e => e.stopPropagation()}>
-        <div className="template-editor-header">
-          <h3>{title}</h3>
-          <button className="btn-icon" onClick={onClose}><X size={18} /></button>
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-3xl p-8 max-w-2xl w-full shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-2xl font-bold text-slate-900">{title}</h3>
+          <button
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-all"
+          >
+            <X size={20} />
+          </button>
         </div>
 
-        <div className="template-editor-body">
+        <div className="space-y-6">
           {(mode === 'create' || mode === 'edit') && (
-            <div className="form-group">
-              <label>Template Name</label>
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-slate-700">Template Name</label>
               <input
                 type="text"
                 value={name}
                 onChange={e => { setName(e.target.value); setNameError(null); }}
                 placeholder="e.g., Follow-up Message"
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
               />
-              {nameError && !saveAsNewMode && <span className="field-error">{nameError}</span>}
+              {nameError && !saveAsNewMode && (
+                <p className="text-sm text-red-600 font-medium">{nameError}</p>
+              )}
             </div>
           )}
 
           {mode === 'service-edit' && !saveAsNewMode && (
-            <div className="template-editor-name-display">
-              Editing: <strong>{templateName || name}</strong>
+            <div className="px-4 py-3 bg-blue-50 rounded-xl border border-blue-100 text-sm text-slate-700">
+              Editing: <strong className="text-slate-900">{templateName || name}</strong>
             </div>
           )}
 
           {mode === 'service-edit' && saveAsNewMode && (
-            <div className="form-group">
-              <label>New Template Name</label>
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-slate-700">New Template Name</label>
               <input
                 type="text"
                 value={newName}
                 onChange={e => { setNewName(e.target.value); setNameError(null); }}
                 placeholder="Enter template name"
                 autoFocus
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
               />
-              {nameError && <span className="field-error">{nameError}</span>}
+              {nameError && (
+                <p className="text-sm text-red-600 font-medium">{nameError}</p>
+              )}
             </div>
           )}
 
-          <div className="form-group">
-            <label>Content</label>
+          <div className="space-y-2">
+            <label className="block text-sm font-semibold text-slate-700">Content</label>
             <textarea
               ref={contentRef}
               value={content}
               onChange={e => setContent(e.target.value)}
               placeholder="Enter template content..."
               rows={8}
-              className="template-editor-textarea"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all resize-none font-sans"
             />
           </div>
 
           {variables.length > 0 && (
-            <div className="template-editor-variables">
-              <label>Variables <span className="form-hint">(click to insert at cursor)</span></label>
-              <div className="variable-buttons">
+            <div className="space-y-3">
+              <label className="block text-sm font-semibold text-slate-700">
+                Variables <span className="text-xs font-normal text-slate-500">(click to insert at cursor)</span>
+              </label>
+              <div className="flex flex-wrap gap-2">
                 {variables.map(v => (
                   <button
                     key={v.name}
                     type="button"
-                    className="variable-btn"
                     onClick={() => insertVariable(v.name)}
                     title={v.desc}
+                    className="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-mono font-medium border border-blue-100 hover:bg-blue-100 transition-all"
                   >
                     {v.name}
                   </button>
@@ -193,42 +206,48 @@ export function TemplateEditorModal({
           )}
 
           {showDefaultCheckbox && (
-            <div className="form-group checkbox-group">
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={isDefault}
-                  onChange={e => setIsDefault(e.target.checked)}
-                />
+            <div className="flex items-center gap-3 pt-2">
+              <input
+                type="checkbox"
+                id="default-checkbox"
+                checked={isDefault}
+                onChange={e => setIsDefault(e.target.checked)}
+                className="w-4 h-4 text-blue-600 bg-slate-50 border-slate-300 rounded focus:ring-2 focus:ring-blue-500"
+              />
+              <label htmlFor="default-checkbox" className="text-sm font-medium text-slate-700 cursor-pointer">
                 Set as default template
               </label>
             </div>
           )}
         </div>
 
-        <div className="template-editor-footer">
-          <button className="btn btn-sm" onClick={onClose} disabled={saving}>
+        <div className="flex gap-3 mt-8 pt-6 border-t border-slate-100">
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="flex-1 px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
             Cancel
           </button>
 
           {mode === 'create' && (
             <button
-              className="btn btn-primary btn-sm"
               onClick={handleSave}
               disabled={saving || !name.trim() || !content.trim()}
+              className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              {saving ? <Loader2 size={14} className="spinner" /> : null}
+              {saving && <Loader2 size={16} className="animate-spin" />}
               Create Template
             </button>
           )}
 
           {mode === 'edit' && (
             <button
-              className="btn btn-primary btn-sm"
               onClick={handleSave}
               disabled={saving || !name.trim() || !content.trim()}
+              className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              {saving ? <Loader2 size={14} className="spinner" /> : null}
+              {saving && <Loader2 size={16} className="animate-spin" />}
               Save Changes
             </button>
           )}
@@ -237,19 +256,19 @@ export function TemplateEditorModal({
             <>
               {onSaveAsNew && (
                 <button
-                  className="btn btn-sm"
                   onClick={() => setSaveAsNewMode(true)}
                   disabled={saving}
+                  className="px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Save as New
                 </button>
               )}
               <button
-                className="btn btn-primary btn-sm"
                 onClick={handleSave}
                 disabled={saving || !content.trim()}
+                className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                {saving ? <Loader2 size={14} className="spinner" /> : null}
+                {saving && <Loader2 size={16} className="animate-spin" />}
                 Update &ldquo;{templateName || name}&rdquo;
               </button>
             </>
@@ -257,15 +276,19 @@ export function TemplateEditorModal({
 
           {mode === 'service-edit' && saveAsNewMode && (
             <>
-              <button className="btn btn-sm" onClick={() => setSaveAsNewMode(false)} disabled={saving}>
+              <button
+                onClick={() => setSaveAsNewMode(false)}
+                disabled={saving}
+                className="px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
                 Back
               </button>
               <button
-                className="btn btn-primary btn-sm"
                 onClick={handleSaveAsNew}
                 disabled={saving || !newName.trim() || !content.trim()}
+                className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                {saving ? <Loader2 size={14} className="spinner" /> : null}
+                {saving && <Loader2 size={16} className="animate-spin" />}
                 Create &amp; Apply
               </button>
             </>
