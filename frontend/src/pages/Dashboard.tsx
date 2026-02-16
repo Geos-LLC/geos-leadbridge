@@ -297,17 +297,20 @@ export function Dashboard() {
 
         {/* Quick Actions */}
         <div className="space-y-6">
-          <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] p-6 text-white text-center shadow-lg shadow-indigo-100">
-            <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Sparkles className="w-6 h-6" />
+          <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] p-8 text-white shadow-lg shadow-indigo-100 relative overflow-hidden">
+            <div className="relative z-10 flex flex-col items-center justify-center text-center h-full min-h-[200px]">
+              <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Sparkles className="w-8 h-8" />
+              </div>
+              <h3 className="text-2xl font-bold mb-3">Automate Even Faster</h3>
+              <p className="text-indigo-100 text-sm mb-6 leading-relaxed max-w-xs">
+                Our new AI-powered response templates are now live for all users.
+              </p>
+              <Link to="/message-settings" className="px-8 py-3 bg-white text-indigo-600 rounded-xl font-bold text-sm shadow-lg hover:bg-indigo-50 transition-all">
+                Try AI Templates
+              </Link>
             </div>
-            <h4 className="font-bold text-lg mb-2">Automate Even Faster</h4>
-            <p className="text-indigo-100 text-sm mb-5 leading-relaxed">
-              Our new AI-powered response templates are now live for all users.
-            </p>
-            <Link to="/message-settings" className="w-full inline-block py-3 bg-white text-indigo-600 rounded-xl font-bold text-sm shadow-sm hover:bg-indigo-50 transition-colors">
-              Try AI Templates
-            </Link>
+            <div className="absolute -right-20 -bottom-20 w-64 h-64 bg-purple-600/20 rounded-full blur-3xl"></div>
           </div>
         </div>
       </div>
