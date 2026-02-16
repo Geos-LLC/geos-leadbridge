@@ -1,0 +1,7 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Blue rounded square background -->
+  <rect width="256" height="256" rx="48" fill="#2563EB"/>
+
+  <!-- White Zap/Lightning icon -->
+  <path d="M160 64L96 128H128L96 192L160 128H128L160 64Z" fill="white" stroke="white" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
