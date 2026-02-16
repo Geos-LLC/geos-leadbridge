@@ -641,10 +641,13 @@ export class WebhooksService {
 
     // Determine sender (pro or customer)
     // Thumbtack uses "from" field with values "Customer" or "Pro"
-    const fromValue = (data.from || data.sender || '').toLowerCase();
-    const sender = fromValue === 'pro' ? 'pro' : 'customer';
+    // Use case-insensitive check to handle any capitalization variants
+    const fromValue = String(data.from || data.sender || '').toLowerCase().trim();
+    const sender = fromValue.includes('pro') || fromValue === 'business' ? 'pro' : 'customer';
     const messageContent = data.text || '';
     const messageTimestamp = new Date(data.sentAt || data.createTimestamp || Date.now());
+
+    this.logger.log(`Message sender detected: from="${data.from}", sender="${sender}"`);
 
     // Use upsert to handle race conditions and duplicates atomically
     try {
@@ -696,6 +699,9 @@ export class WebhooksService {
       const customerMessageCount = await this.prisma.message.count({
         where: { conversationId: conversation.id, sender: 'customer' },
       });
+
+      this.logger.log(`[AUTOMATION TRIGGER] Customer message detected. Total customer messages: ${customerMessageCount}, negotiation: ${negotiationId}`);
+      this.logger.log(`[AUTOMATION TRIGGER] isFirstCustomerReply: ${customerMessageCount === 1}, isSecondCustomerMessage: ${customerMessageCount === 2}`);
 
       // Find saved account for this business (search all users, prefer one with settings)
       const msgSavedAccounts = await this.prisma.savedAccount.findMany({
@@ -750,6 +756,9 @@ export class WebhooksService {
           this.logger.error('SMS notification trigger failed for customer reply', err.message);
         }
       }
+    } else {
+      // Pro message - no automation triggered
+      this.logger.log(`[AUTOMATION TRIGGER] ✗ Pro/Business message detected - no automation triggered`);
     }
   }
 

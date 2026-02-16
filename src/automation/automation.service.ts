@@ -370,13 +370,16 @@ export class AutomationService implements OnModuleInit {
    * This only triggers on the 2nd and subsequent customer messages.
    */
   async handleCustomerReply(context: CustomerReplyContext): Promise<void> {
-    this.logger.log(`Handling customer reply automation: ${context.negotiationId}, isFirst: ${context.isFirstCustomerReply}`);
+    this.logger.log(`[AUTOMATION] Handling customer reply: negotiation=${context.negotiationId}, business=${context.businessId}`);
+    this.logger.log(`[AUTOMATION] Message position: isFirstCustomerReply=${context.isFirstCustomerReply}, isSecondCustomerMessage=${context.isSecondCustomerMessage}`);
 
     // Skip the first customer message - only trigger on actual replies (2nd+ messages)
     if (context.isFirstCustomerReply) {
-      this.logger.log(`Skipping first customer message - automations only trigger on replies`);
+      this.logger.log(`[AUTOMATION] ✗ SKIPPED: First customer message - automations only trigger on replies (2nd+ messages)`);
       return;
     }
+
+    this.logger.log(`[AUTOMATION] ✓ ELIGIBLE: This is a customer reply (not the first message)`);
 
     // Find saved account by businessId
     const savedAccount = await this.prisma.savedAccount.findFirst({
@@ -388,7 +391,7 @@ export class AutomationService implements OnModuleInit {
     });
 
     if (!savedAccount) {
-      this.logger.warn(`No saved account found for businessId: ${context.businessId}`);
+      this.logger.warn(`[AUTOMATION] ✗ No saved account found for businessId: ${context.businessId}`);
       return;
     }
 
@@ -404,15 +407,16 @@ export class AutomationService implements OnModuleInit {
       },
     });
 
-    this.logger.log(`Found ${rules.length} customer_reply rules for account ${savedAccount.businessName}`);
+    this.logger.log(`[AUTOMATION] Found ${rules.length} customer_reply rule(s) for account ${savedAccount.businessName}`);
 
     for (const rule of rules) {
       // Check reply trigger mode - "first_only" means the first reply AFTER initial message (2nd message)
       if (rule.replyTriggerMode === 'first_only' && context.isSecondCustomerMessage !== true) {
-        this.logger.log(`Skipping rule ${rule.id} - only triggers on first reply after initial message`);
+        this.logger.log(`[AUTOMATION] ✗ SKIPPED rule "${rule.name}" (${rule.id}): mode=first_only but this is not the 2nd customer message`);
         continue;
       }
 
+      this.logger.log(`[AUTOMATION] ✓ TRIGGERING rule "${rule.name}" (${rule.id}): mode=${rule.replyTriggerMode || 'every_reply'}`);
       await this.scheduleAutomatedMessage(rule, context);
     }
   }
