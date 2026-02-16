@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, MessageSquare, PhoneCall, Reply, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check } from 'lucide-react';
+import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check } from 'lucide-react';
 import { billingApi, thumbtackApi, leadsApi, usersApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
