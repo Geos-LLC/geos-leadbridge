@@ -580,7 +580,7 @@ export function Analytics() {
                         <div className="h-1 bg-white/20 rounded-full w-full overflow-hidden">
                           <div
                             className="h-full bg-blue-500 rounded-full"
-                            style={{ width: `${(loc.count / displayData.locationDistribution[0].count) * 100}%` }}
+                            style={{ width: `${(loc.count / (displayData.locationDistribution?.[0]?.count || 1)) * 100}%` }}
                           />
                         </div>
                       </div>
