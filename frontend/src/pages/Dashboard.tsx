@@ -7,6 +7,8 @@ import {
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import { thumbtackApi } from '../services/api';
+import ConnectionModal from '../components/ConnectionModal';
+import type { SavedAccount } from '../types';
 
 interface DashboardStats {
   leadsToday: number;
@@ -33,6 +35,8 @@ export function Dashboard() {
     messagesSent: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [connectionModalOpen, setConnectionModalOpen] = useState(false);
+  const [accountToReconnect, setAccountToReconnect] = useState<SavedAccount | null>(null);
 
   useEffect(() => {
     loadAccounts();
@@ -61,6 +65,20 @@ export function Dashboard() {
     }
   }
 
+  const handleAccountClick = (account: SavedAccount) => {
+    if (!account.webhookId) {
+      // If disconnected, open reconnect modal
+      setAccountToReconnect(account);
+      setConnectionModalOpen(true);
+    }
+  };
+
+  const handleConnectionSuccess = () => {
+    // Reload accounts after successful connection
+    loadAccounts();
+    setAccountToReconnect(null);
+  };
+
   return (
     <div className="p-6 lg:p-10 max-w-7xl mx-auto space-y-10">
       {/* Welcome Section */}
@@ -80,10 +98,13 @@ export function Dashboard() {
           <Link to="/analytics" className="px-6 py-3 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700 hover:bg-slate-50 shadow-sm transition-all">
             View Reports
           </Link>
-          <Link to="/services" className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2">
+          <button
+            onClick={() => setConnectionModalOpen(true)}
+            className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2"
+          >
             <Plus className="w-5 h-5" />
             New Account
-          </Link>
+          </button>
         </div>
       </section>
 
@@ -147,7 +168,11 @@ export function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {savedAccounts.length > 0 ? (
               savedAccounts.slice(0, 2).map((account) => (
-                <div key={account.id} className="bg-white border border-slate-100 rounded-3xl p-5 flex items-center gap-5 hover:border-blue-200 transition-all cursor-pointer group shadow-sm">
+                <div
+                  key={account.id}
+                  className="bg-white border border-slate-100 rounded-3xl p-5 flex items-center gap-5 hover:border-blue-200 transition-all cursor-pointer group shadow-sm"
+                  onClick={() => handleAccountClick(account)}
+                >
                   <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors">
                     <Briefcase className="w-7 h-7" />
                   </div>
@@ -223,9 +248,18 @@ export function Dashboard() {
                     <p className="text-sm text-slate-600 mt-1 leading-relaxed">
                       One or more accounts need reconnection to resume automation.
                     </p>
-                    <Link to="/services" className="mt-4 text-xs font-bold text-rose-600 uppercase tracking-wider flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        const disconnected = savedAccounts.find(a => !a.webhookId);
+                        if (disconnected) {
+                          setAccountToReconnect(disconnected);
+                          setConnectionModalOpen(true);
+                        }
+                      }}
+                      className="mt-4 text-xs font-bold text-rose-600 uppercase tracking-wider flex items-center gap-1 hover:text-rose-700 transition-colors"
+                    >
                       Reconnect Now <ChevronRight className="w-3 h-3" />
-                    </Link>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -279,6 +313,17 @@ export function Dashboard() {
           </div>
         </div>
       </section>
+
+      {/* Connection Modal */}
+      <ConnectionModal
+        isOpen={connectionModalOpen}
+        onClose={() => {
+          setConnectionModalOpen(false);
+          setAccountToReconnect(null);
+        }}
+        accountToReconnect={accountToReconnect}
+        onSuccess={handleConnectionSuccess}
+      />
     </div>
   );
 }

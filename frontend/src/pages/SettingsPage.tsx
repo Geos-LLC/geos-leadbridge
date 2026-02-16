@@ -5,7 +5,8 @@ import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
 import type { SubscriptionDetails, SavedAccount, AccountDiagnostics } from '../types';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+import ConnectionModal from '../components/ConnectionModal';
 
 const tierNames: Record<string, string> = {
   STARTER: 'Instant Reply',
@@ -20,7 +21,6 @@ const tierPrices: Record<string, number> = {
 };
 
 export default function SettingsPage() {
-  const navigate = useNavigate();
   const user = useAuthStore(state => state.user);
   const setAuth = useAuthStore(state => state.setAuth);
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
@@ -30,6 +30,8 @@ export default function SettingsPage() {
   const [portalLoading, setPortalLoading] = useState(false);
   const [accountDiagnostics, setAccountDiagnostics] = useState<Record<string, AccountDiagnostics>>({});
   const [selectedAccountForInfo, setSelectedAccountForInfo] = useState<string | null>(null);
+  const [connectionModalOpen, setConnectionModalOpen] = useState(false);
+  const [accountToReconnect, setAccountToReconnect] = useState<SavedAccount | null>(null);
 
   // Name editing
   const [editingName, setEditingName] = useState(false);
@@ -87,9 +89,17 @@ export default function SettingsPage() {
     setAccountDiagnostics(diagnosticsMap);
   };
 
-  const handleReconnect = () => {
-    // Navigate to Overview/Dashboard where they can reconnect
-    navigate('/dashboard');
+  const handleReconnect = (account?: SavedAccount) => {
+    if (account) {
+      setAccountToReconnect(account);
+    }
+    setConnectionModalOpen(true);
+  };
+
+  const handleConnectionSuccess = () => {
+    // Reload data after successful connection
+    loadData();
+    setAccountToReconnect(null);
   };
 
   const handleManageSubscription = async () => {
@@ -325,7 +335,7 @@ export default function SettingsPage() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleReconnect();
+                              handleReconnect(account);
                             }}
                             className="p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                             title="Reconnect account"
@@ -800,7 +810,7 @@ export default function SettingsPage() {
                     <button
                       onClick={() => {
                         setSelectedAccountForInfo(null);
-                        handleReconnect();
+                        handleReconnect(account);
                       }}
                       className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2"
                     >
@@ -820,6 +830,17 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+
+      {/* Connection Modal */}
+      <ConnectionModal
+        isOpen={connectionModalOpen}
+        onClose={() => {
+          setConnectionModalOpen(false);
+          setAccountToReconnect(null);
+        }}
+        accountToReconnect={accountToReconnect}
+        onSuccess={handleConnectionSuccess}
+      />
     </div>
   );
 }
