@@ -7,6 +7,7 @@ import {
   LayoutGrid, Search, Info, Calendar, Tag
 } from 'lucide-react';
 import { NavLink, Outlet, useOutletContext, Link as RouterLink } from 'react-router-dom';
+import { TemplateEditorModal, type TemplateVariable } from '../components/TemplateEditorModal';
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -516,6 +517,25 @@ export function DemoAutomationView() {
 // ─── Templates Page ───────────────────────────────────────────
 
 export function DemoTemplatesView() {
+  const [isModalOpen, setIsModalOpen] = useState(true); // Open by default for demo
+  const [saving, setSaving] = useState(false);
+
+  // Convert VARIABLES to TemplateVariable format for the modal
+  const templateVariables: TemplateVariable[] = VARIABLES.map(v => ({
+    name: v.key,
+    desc: v.desc
+  }));
+
+  const handleCreateTemplate = (_data: { name: string; content: string; isDefault?: boolean }) => {
+    setSaving(true);
+    // Simulate saving
+    setTimeout(() => {
+      setSaving(false);
+      setIsModalOpen(false);
+      // In a real app, you'd update the templates list here
+    }, 1000);
+  };
+
   return (
     <div className="p-6 lg:p-10 max-w-5xl mx-auto space-y-10">
       <div className="flex items-end justify-between">
@@ -523,7 +543,10 @@ export function DemoTemplatesView() {
           <h2 className="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight mb-2">Message <span className="gradient-text">Templates</span></h2>
           <p className="text-slate-500 text-lg">Create reusable messages with dynamic variables</p>
         </div>
-        <button className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2">
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2"
+        >
           <Plus className="w-5 h-5" />
           Create New
         </button>
@@ -568,6 +591,20 @@ export function DemoTemplatesView() {
           ))}
         </div>
       </div>
+
+      {/* Template Editor Modal */}
+      <TemplateEditorModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        mode="create"
+        initialName=""
+        initialContent=""
+        saving={saving}
+        variables={templateVariables}
+        showDefaultCheckbox={true}
+        initialIsDefault={false}
+        onSave={handleCreateTemplate}
+      />
     </div>
   );
 }
