@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
+import { thumbtackApi } from '../services/api';
 
 interface DashboardStats {
   leadsToday: number;
@@ -20,7 +21,7 @@ interface DashboardStats {
 
 export function Dashboard() {
   const { user } = useAuthStore();
-  const { savedAccounts } = useAppStore();
+  const { savedAccounts, setSavedAccounts } = useAppStore();
   const [stats, setStats] = useState<DashboardStats>({
     leadsToday: 0,
     automatedReplies: 0,
@@ -34,6 +35,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    loadAccounts();
     // Simulate loading mock data
     setTimeout(() => {
       setStats({
@@ -49,6 +51,15 @@ export function Dashboard() {
       setLoading(false);
     }, 500);
   }, []);
+
+  async function loadAccounts() {
+    try {
+      const { accounts } = await thumbtackApi.getSavedAccounts();
+      setSavedAccounts(accounts);
+    } catch (err) {
+      console.error('Failed to load accounts:', err);
+    }
+  }
 
   return (
     <div className="p-6 lg:p-10 max-w-7xl mx-auto space-y-10">

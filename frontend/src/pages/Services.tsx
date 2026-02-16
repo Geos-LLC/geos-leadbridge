@@ -12,6 +12,7 @@ import type {
   AutomationRule, NotificationRule, SavedAccount, MessageTemplate,
 } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
+import { useAppStore } from '../store/appStore';
 
 // Combined variables — same set for all card types (matches Templates page)
 const ALL_VARIABLES = [...AUTO_REPLY_VARIABLES, ...SMS_VARIABLES.filter(
@@ -94,6 +95,7 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
 // -- Main Services Page --
 export function Services() {
   const navigate = useNavigate();
+  const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
 
   // Account state
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
@@ -151,6 +153,7 @@ export function Services() {
     try {
       const { accounts: accs } = await thumbtackApi.getSavedAccounts();
       setAccounts(accs);
+      setSavedAccounts(accs); // Update global app store
       if (accs.length > 0) {
         setSelectedAccountId(accs[0].id);
       }

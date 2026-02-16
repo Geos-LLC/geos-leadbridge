@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check } from 'lucide-react';
-import { billingApi, thumbtackApi, leadsApi, usersApi } from '../services/api';
+import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info } from 'lucide-react';
+import { billingApi, thumbtackApi, leadsApi, usersApi, testApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
-import type { SubscriptionDetails, SavedAccount } from '../types';
-import { Link } from 'react-router-dom';
+import { useAppStore } from '../store/appStore';
+import type { SubscriptionDetails, SavedAccount, AccountDiagnostics } from '../types';
+import { Link, useNavigate } from 'react-router-dom';
 
 const tierNames: Record<string, string> = {
   STARTER: 'Instant Reply',
@@ -19,12 +20,16 @@ const tierPrices: Record<string, number> = {
 };
 
 export default function SettingsPage() {
+  const navigate = useNavigate();
   const user = useAuthStore(state => state.user);
   const setAuth = useAuthStore(state => state.setAuth);
+  const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
   const [subscription, setSubscription] = useState<SubscriptionDetails | null>(null);
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [accountDiagnostics, setAccountDiagnostics] = useState<Record<string, AccountDiagnostics>>({});
+  const [selectedAccountForInfo, setSelectedAccountForInfo] = useState<string | null>(null);
 
   // Name editing
   const [editingName, setEditingName] = useState(false);
@@ -54,11 +59,37 @@ export default function SettingsPage() {
       ]);
       setSubscription(subResult);
       setAccounts(acctResult.accounts);
+      setSavedAccounts(acctResult.accounts); // Update app store
+
+      // Load diagnostics for accounts with issues
+      if (acctResult.accounts.length > 0) {
+        loadDiagnostics(acctResult.accounts);
+      }
     } catch (error: any) {
       console.error('Failed to load settings data:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadDiagnostics = async (accountsList: SavedAccount[]) => {
+    const diagnosticsMap: Record<string, AccountDiagnostics> = {};
+
+    for (const account of accountsList) {
+      try {
+        const diag = await testApi.getDiagnostics(account.id);
+        diagnosticsMap[account.id] = diag;
+      } catch (err) {
+        console.error(`Failed to load diagnostics for ${account.id}:`, err);
+      }
+    }
+
+    setAccountDiagnostics(diagnosticsMap);
+  };
+
+  const handleReconnect = () => {
+    // Navigate to Overview/Dashboard where they can reconnect
+    navigate('/dashboard');
   };
 
   const handleManageSubscription = async () => {
@@ -260,19 +291,53 @@ export default function SettingsPage() {
             </div>
             {accounts.length > 0 ? (
               <div className="space-y-3">
-              {accounts.map(account => (
-                <div key={account.id} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-slate-900 truncate">{account.businessName}</p>
-                    <p className="text-[10px] text-slate-400 font-medium uppercase">ID: {account.businessId}</p>
+              {accounts.map(account => {
+                const diag = accountDiagnostics[account.id];
+                const hasIssues = !account.webhookId || (diag && !diag.healthy);
+
+                return (
+                  <div
+                    key={account.id}
+                    className={`p-3 rounded-2xl border transition-all ${
+                      hasIssues
+                        ? 'bg-amber-50/50 border-amber-200 hover:border-amber-300 cursor-pointer'
+                        : 'bg-slate-50 border-slate-100 hover:border-slate-200'
+                    }`}
+                    onClick={() => hasIssues && setSelectedAccountForInfo(account.id)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-slate-900 truncate">{account.businessName}</p>
+                        <p className="text-[10px] text-slate-400 font-medium uppercase">ID: {account.businessId}</p>
+                        {hasIssues && diag && diag.issues.length > 0 && (
+                          <p className="text-[10px] text-amber-700 mt-1 flex items-center gap-1">
+                            <Info size={10} /> Click for details
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {account.webhookId ? (
+                          <CheckCircle className="w-5 h-5 text-emerald-500" />
+                        ) : (
+                          <AlertCircle className="w-5 h-5 text-amber-500" />
+                        )}
+                        {hasIssues && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleReconnect();
+                            }}
+                            className="p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                            title="Reconnect account"
+                          >
+                            <RefreshCw size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  {account.webhookId ? (
-                    <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0" />
-                  ) : (
-                    <AlertCircle className="w-5 h-5 text-amber-500 shrink-0" />
-                  )}
-                </div>
-              ))}
+                );
+              })}
               </div>
             ) : (
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 border-dashed text-center">
@@ -667,6 +732,94 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+
+      {/* Account Diagnostics Modal */}
+      {selectedAccountForInfo && accountDiagnostics[selectedAccountForInfo] && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setSelectedAccountForInfo(null)}>
+          <div className="bg-white rounded-3xl p-8 max-w-2xl w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+            {(() => {
+              const account = accounts.find(a => a.id === selectedAccountForInfo);
+              const diag = accountDiagnostics[selectedAccountForInfo];
+              if (!account || !diag) return null;
+
+              return (
+                <>
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h3 className="text-2xl font-bold text-slate-900">{account.businessName}</h3>
+                      <p className="text-sm text-slate-500 mt-1">Account Diagnostics</p>
+                    </div>
+                    <button
+                      className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
+                      onClick={() => setSelectedAccountForInfo(null)}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  {diag.issues.length > 0 && (
+                    <div className="mb-6 space-y-2">
+                      <h4 className="text-sm font-bold text-red-900 uppercase tracking-wider">Issues Found:</h4>
+                      {diag.issues.map((issue: string, i: number) => (
+                        <div key={i} className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+                          <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                          <span>{issue}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-3 mb-6">
+                    <div className="flex items-center gap-2 text-sm">
+                      {diag.platform.connected ? <CheckCircle size={14} className="text-emerald-600" /> : <AlertCircle size={14} className="text-red-600" />}
+                      <span>Thumbtack connected</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      {diag.account.hasWebhook ? <CheckCircle size={14} className="text-emerald-600" /> : <AlertCircle size={14} className="text-red-600" />}
+                      <span>Webhook registered</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      {diag.notifications.settingsExist ? <CheckCircle size={14} className="text-emerald-600" /> : <AlertCircle size={14} className="text-red-600" />}
+                      <span>Notification settings</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      {diag.notifications.hasSigcoreApiKey ? <CheckCircle size={14} className="text-emerald-600" /> : <AlertCircle size={14} className="text-red-600" />}
+                      <span>Sigcore API key</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      {diag.notifications.newLeadRules > 0 ? <CheckCircle size={14} className="text-emerald-600" /> : <AlertCircle size={14} className="text-red-600" />}
+                      <span>{diag.notifications.newLeadRules} SMS alert(s)</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      {diag.automation.totalRules > 0 ? <CheckCircle size={14} className="text-emerald-600" /> : <span className="text-slate-400">-</span>}
+                      <span>{diag.automation.totalRules} auto-reply rule(s)</span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => {
+                        setSelectedAccountForInfo(null);
+                        handleReconnect();
+                      }}
+                      className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2"
+                    >
+                      <RefreshCw size={16} />
+                      Reconnect Account
+                    </button>
+                    <button
+                      onClick={() => setSelectedAccountForInfo(null)}
+                      className="px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

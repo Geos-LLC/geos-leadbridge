@@ -76,6 +76,32 @@ export interface SavedAccount {
   createdAt: string;
 }
 
+export interface AccountDiagnostics {
+  healthy: boolean;
+  issues: string[];
+  platform: {
+    connected: boolean;
+  };
+  account: {
+    hasWebhook: boolean;
+  };
+  notifications: {
+    settingsExist: boolean;
+    hasSigcoreApiKey: boolean;
+    newLeadRules: number;
+    customerReplyRules: number;
+    rules: { name: string }[];
+  };
+  automation: {
+    totalRules: number;
+  };
+  recentLogs: {
+    ruleName: string | null;
+    status: string;
+    error: string | null;
+  }[];
+}
+
 // Message Templates for bulk follow-up messages
 export interface MessageTemplate {
   id: string;

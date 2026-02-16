@@ -3,9 +3,11 @@ import { Phone, Loader2, X, ChevronDown, AlertCircle, PhoneCall, Building2 } fro
 import { useNavigate } from 'react-router-dom';
 import { usersApi, thumbtackApi } from '../services/api';
 import type { SavedAccount, PhonePoolEntry } from '../types';
+import { useAppStore } from '../store/appStore';
 
 export function PhoneSettings() {
   const navigate = useNavigate();
+  const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -37,6 +39,7 @@ export function PhoneSettings() {
       setLoading(true);
       const { accounts } = await thumbtackApi.getSavedAccounts();
       setAccounts(accounts);
+      setSavedAccounts(accounts); // Update global app store
       if (accounts.length > 0) {
         setSelectedAccountId(accounts[0].id);
       }
