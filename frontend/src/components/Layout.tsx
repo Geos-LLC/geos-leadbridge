@@ -39,6 +39,23 @@ export function Layout() {
     { icon: <BarChart3 size={20} />, label: 'Insights', path: '/analytics' },
   ];
 
+  // Get current page name from route
+  const getPageName = () => {
+    const path = location.pathname;
+    const navItem = NAV_ITEMS.find(item => item.path === path);
+    if (navItem) return navItem.label;
+
+    // Handle other routes
+    if (path === '/settings') return 'Settings';
+    if (path === '/pricing') return 'Pricing';
+    if (path === '/admin') return 'Admin Dashboard';
+    if (path === '/admin/phone-pool') return 'Phone Pool';
+    if (path === '/api-test') return 'API Test';
+    if (path.startsWith('/admin/users/')) return 'User Details';
+
+    return 'LeadBridge';
+  };
+
   return (
     <div className="flex min-h-screen">
       <TrialExpiredModal />
@@ -135,6 +152,9 @@ export function Layout() {
 
       {/* Main Content */}
       <main className="flex-1 lg:ml-72 min-h-screen">
+        {/* Trial Banner at the very top */}
+        <TrialBanner />
+
         {/* Top Navbar */}
         <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-100 px-6 py-4">
           <div className="flex items-center justify-between">
@@ -142,7 +162,7 @@ export function Layout() {
               <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden p-2 text-slate-600">
                 <Menu className="w-6 h-6" />
               </button>
-              <h1 className="text-xl font-bold text-slate-900 lg:block hidden">LeadBridge</h1>
+              <h1 className="text-xl font-bold text-slate-900 lg:block hidden">{getPageName()}</h1>
             </div>
             <div className="flex items-center gap-3">
               <button className="relative p-2 text-slate-400 hover:text-slate-600 transition-colors">
@@ -168,7 +188,6 @@ export function Layout() {
             </div>
           </div>
         )}
-        <TrialBanner />
         <CancelledSubscriptionBanner />
 
         {/* Page Content */}
