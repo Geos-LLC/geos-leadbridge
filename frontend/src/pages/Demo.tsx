@@ -646,8 +646,6 @@ export function DemoLeadsView() {
       {/* Details Sidebar */}
       {selectedLead && (
         <aside className="w-72 border-l border-slate-100 bg-white p-6 hidden xl:block overflow-y-auto">
-          <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-6">Lead Intelligence</h4>
-
           <div className="space-y-8">
             {/* Communication */}
             <div>
