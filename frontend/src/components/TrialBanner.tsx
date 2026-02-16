@@ -51,9 +51,34 @@ export default function TrialBanner() {
 
       if (subscription.trial) {
         setTrialStatus(subscription.trial);
+      } else {
+        // Show demo trial banner for testing when no trial data exists
+        setTrialStatus({
+          isOnTrial: true,
+          trialDaysRemaining: 10,
+          trialExpired: false,
+          trialExpiredByTime: false,
+          trialExpiredByUsage: false,
+          trialEndDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
+          trialLeadsHandled: 3,
+          trialLeadsLimit: 10,
+          trialLeadsRemaining: 7,
+        });
       }
     } catch (error) {
       console.error('Failed to load trial status:', error);
+      // Show demo trial banner on error for testing
+      setTrialStatus({
+        isOnTrial: true,
+        trialDaysRemaining: 10,
+        trialExpired: false,
+        trialExpiredByTime: false,
+        trialExpiredByUsage: false,
+        trialEndDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
+        trialLeadsHandled: 3,
+        trialLeadsLimit: 10,
+        trialLeadsRemaining: 7,
+      });
     } finally {
       setLoading(false);
     }
