@@ -228,83 +228,78 @@ export default function AdminPhonePool() {
     }
   };
 
-  const getStatusBadgeClass = (status: string) => {
-    switch (status) {
-      case 'AVAILABLE': return 'badge-success';
-      case 'ASSIGNED': return 'badge-primary';
-      case 'RESERVED': return 'badge-warning';
-      case 'RELEASED': return 'badge-secondary';
-      default: return 'badge-secondary';
-    }
-  };
-
   if (loading && !stats) {
     return (
-      <div className="admin-dashboard">
-        <div className="admin-header">
-          <h1><Phone size={24} /> Phone Pool</h1>
+      <div className="p-6 lg:p-10 max-w-7xl mx-auto space-y-10">
+        <div className="space-y-2">
+          <h1 className="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
+            <Phone size={24} /> Phone Pool
+          </h1>
         </div>
-        <div className="loading-state">
-          <p>Loading phone pool...</p>
+        <div className="flex items-center justify-center py-20">
+          <p className="text-slate-500">Loading phone pool...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="admin-dashboard">
-      <div className="admin-header">
-        <h1><Phone size={24} /> Phone Pool</h1>
-        <p>Connect providers, sync numbers, and manage assignments</p>
+    <div className="p-6 lg:p-10 max-w-7xl mx-auto space-y-10">
+      <div className="space-y-2">
+        <h1 className="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
+          <Phone size={24} /> <span className="gradient-text">Phone Pool</span>
+        </h1>
+        <p className="text-slate-600 text-lg">Connect providers, sync numbers, and manage assignments</p>
       </div>
 
       {/* Tenant Key Warning */}
       {tenantKeyConfigured === false && (
-        <div className="card" style={{ borderColor: 'var(--warning)', marginBottom: '1rem' }}>
-          <div className="card-body" style={{ color: 'var(--warning)' }}>
-            <strong>SIGCORE_API_KEY not configured.</strong> Set the <code>SIGCORE_API_KEY</code> environment variable to enable provider connections.
+        <div className="bg-yellow-50 border border-yellow-300 rounded-3xl p-6">
+          <div className="text-yellow-800">
+            <strong>SIGCORE_API_KEY not configured.</strong> Set the <code className="bg-yellow-200 px-2 py-1 rounded text-sm">SIGCORE_API_KEY</code> environment variable to enable provider connections.
           </div>
         </div>
       )}
 
       {/* Stats Cards */}
       {stats && (
-        <div className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-value">{stats.total}</div>
-            <div className="stat-label">Total Numbers</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div className="text-3xl font-bold text-slate-900">{stats.total}</div>
+            <div className="text-sm text-slate-600 mt-2 font-medium">Total Numbers</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-value" style={{ color: 'var(--success)' }}>{stats.available}</div>
-            <div className="stat-label">Available</div>
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div className="text-3xl font-bold text-green-600">{stats.available}</div>
+            <div className="text-sm text-slate-600 mt-2 font-medium">Available</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-value" style={{ color: 'var(--primary)' }}>{stats.assigned}</div>
-            <div className="stat-label">Assigned</div>
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div className="text-3xl font-bold text-blue-600">{stats.assigned}</div>
+            <div className="text-sm text-slate-600 mt-2 font-medium">Assigned</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-value" style={{ color: 'var(--warning)' }}>{stats.reserved}</div>
-            <div className="stat-label">Reserved</div>
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div className="text-3xl font-bold text-yellow-600">{stats.reserved}</div>
+            <div className="text-sm text-slate-600 mt-2 font-medium">Reserved</div>
           </div>
         </div>
       )}
 
       {/* Actions Bar */}
-      <div className="admin-toolbar">
-        <div className="toolbar-left">
-          <div className="search-box">
-            <Search size={16} />
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
+        <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+          <div className="relative flex items-center">
+            <Search size={16} className="absolute left-4 text-slate-400" />
             <input
               type="text"
               placeholder="Search phone numbers..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
+              className="pl-11 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all w-full sm:w-64"
             />
           </div>
           <select
             value={statusFilter}
             onChange={e => setStatusFilter(e.target.value)}
-            className="filter-select"
+            className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
           >
             <option value="">All Status</option>
             <option value="AVAILABLE">Available</option>
@@ -313,21 +308,21 @@ export default function AdminPhonePool() {
             <option value="RELEASED">Released</option>
           </select>
         </div>
-        <div className="toolbar-right">
-          <button className="btn btn-secondary" onClick={loadData} title="Refresh">
+        <div className="flex flex-wrap gap-2 w-full lg:w-auto">
+          <button className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center gap-2" onClick={loadData} title="Refresh">
             <RefreshCw size={16} />
           </button>
           <button
-            className="btn btn-secondary"
+            className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleSync}
             disabled={syncing || tenantKeyConfigured === false}
             title="Sync numbers from connected providers"
           >
-            {syncing ? <Loader2 size={16} className="spinner" /> : <Download size={16} />}
+            {syncing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
             Sync Numbers
           </button>
           <button
-            className="btn btn-primary"
+            className="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={() => setShowConnect(true)}
             disabled={tenantKeyConfigured === false}
           >
@@ -335,7 +330,7 @@ export default function AdminPhonePool() {
             Connect Provider
           </button>
           <button
-            className="btn btn-danger"
+            className="px-4 py-2 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={() => handleDisconnect('openphone')}
             disabled={tenantKeyConfigured === false}
             title="Disconnect OpenPhone"
@@ -344,7 +339,7 @@ export default function AdminPhonePool() {
             Disconnect OpenPhone
           </button>
           <button
-            className="btn btn-danger"
+            className="px-4 py-2 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={() => handleDisconnect('twilio')}
             disabled={tenantKeyConfigured === false}
             title="Disconnect Twilio"
@@ -357,24 +352,24 @@ export default function AdminPhonePool() {
 
       {/* Connect Provider Form */}
       {showConnect && (
-        <div className="provision-form card">
-          <div className="card-header">
-            <h3>Connect Provider</h3>
-            <button className="btn-icon" onClick={() => setShowConnect(false)}>
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-8">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-xl font-bold text-slate-900">Connect Provider</h3>
+            <button className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all" onClick={() => setShowConnect(false)}>
               <X size={18} />
             </button>
           </div>
-          <div className="card-body">
+          <div className="space-y-6">
             {/* Provider Tabs */}
-            <div className="provider-tabs" style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+            <div className="flex gap-2">
               <button
-                className={`btn btn-sm ${connectProvider === 'openphone' ? 'btn-primary' : 'btn-secondary'}`}
+                className={`px-6 py-2 rounded-xl font-semibold transition-all ${connectProvider === 'openphone' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                 onClick={() => setConnectProvider('openphone')}
               >
                 OpenPhone
               </button>
               <button
-                className={`btn btn-sm ${connectProvider === 'twilio' ? 'btn-primary' : 'btn-secondary'}`}
+                className={`px-6 py-2 rounded-xl font-semibold transition-all ${connectProvider === 'twilio' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                 onClick={() => setConnectProvider('twilio')}
               >
                 Twilio
@@ -382,60 +377,64 @@ export default function AdminPhonePool() {
             </div>
 
             {connectProvider === 'openphone' ? (
-              <div className="form-group">
-                <label>OpenPhone API Key</label>
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-slate-700">OpenPhone API Key</label>
                 <input
                   type="password"
                   placeholder="Enter your OpenPhone API key"
                   value={connectFields.apiKey}
                   onChange={e => setConnectFields({ ...connectFields, apiKey: e.target.value })}
+                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                 />
               </div>
             ) : (
               <>
-                <div className="form-group">
-                  <label>Account SID</label>
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-slate-700">Account SID</label>
                   <input
                     type="text"
                     placeholder="AC..."
                     value={connectFields.accountSid}
                     onChange={e => setConnectFields({ ...connectFields, accountSid: e.target.value })}
+                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                   />
                 </div>
-                <div className="form-group">
-                  <label>Auth Token</label>
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-slate-700">Auth Token</label>
                   <input
                     type="password"
                     placeholder="Enter your Twilio auth token"
                     value={connectFields.authToken}
                     onChange={e => setConnectFields({ ...connectFields, authToken: e.target.value })}
+                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                   />
                 </div>
-                <div className="form-group">
-                  <label>Phone Number</label>
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-slate-700">Phone Number</label>
                   <input
                     type="text"
                     placeholder="+1234567890"
                     value={connectFields.phoneNumber}
                     onChange={e => setConnectFields({ ...connectFields, phoneNumber: e.target.value })}
+                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                   />
                 </div>
               </>
             )}
 
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+            <div className="flex gap-2 pt-4">
               <button
-                className="btn btn-primary"
+                className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 onClick={handleConnect}
                 disabled={connecting || (connectProvider === 'openphone' ? !connectFields.apiKey : (!connectFields.accountSid || !connectFields.authToken))}
               >
                 {connecting ? (
-                  <><Loader2 size={16} className="spinner" /> Connecting...</>
+                  <><Loader2 size={16} className="animate-spin" /> Connecting...</>
                 ) : (
                   <><Link size={16} /> Connect {connectProvider === 'openphone' ? 'OpenPhone' : 'Twilio'}</>
                 )}
               </button>
-              <button className="btn btn-secondary" onClick={() => setShowConnect(false)}>Cancel</button>
+              <button className="px-6 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all" onClick={() => setShowConnect(false)}>Cancel</button>
             </div>
 
           </div>
@@ -443,180 +442,202 @@ export default function AdminPhonePool() {
       )}
 
       {/* Phone Pool Table */}
-      <div className="admin-table-container">
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>Phone Number</th>
-              <th>Area Code</th>
-              <th>Provider</th>
-              <th>Status</th>
-              <th>Assigned To</th>
-              <th>Added</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {phones.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="empty-cell">
-                  {loading ? 'Loading...' : 'No phone numbers in pool. Connect a provider and sync to get started.'}
-                </td>
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50">
+                <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Phone Number</th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Area Code</th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Provider</th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Assigned To</th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Added</th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Actions</th>
               </tr>
-            ) : (
-              phones.map(phone => (
-                <tr key={phone.id}>
-                  <td className="font-mono">{phone.phoneNumber}</td>
-                  <td>{phone.areaCode || '-'}</td>
-                  <td><span className="provider-badge">{phone.provider}</span></td>
-                  <td>
-                    <span className={`status-badge ${getStatusBadgeClass(phone.status)}`}>
-                      {phone.status}
-                    </span>
-                  </td>
-                  <td>
-                    {phone.assignments && phone.assignments.length > 0 ? (
-                      <div className="assigned-users-list">
-                        {phone.assignments.map(assignment => (
-                          <div key={assignment.id} className="assigned-user-cell">
-                            <span className="assigned-user">{assignment.user.email}</span>
-                            {assignment.user.name && (
-                              <span className="assigned-user-name">{assignment.user.name}</span>
-                            )}
-                            <button
-                              className="btn btn-sm btn-secondary"
-                              onClick={() => handleUnassign(phone.id, assignment.user.id, assignment.user.email)}
-                              title={`Unassign from ${assignment.user.email}`}
-                              style={{ marginLeft: '0.25rem', padding: '2px 4px' }}
-                            >
-                              <UserMinus size={12} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="unassigned-label">Unassigned</span>
-                    )}
-                  </td>
-                  <td>{new Date(phone.provisionedAt).toLocaleDateString()}</td>
-                  <td>
-                    <div className="action-buttons">
-                      {phone.status !== 'RELEASED' && (
-                        <button
-                          className="btn btn-sm btn-secondary"
-                          onClick={() => {
-                            setAssigningPhoneId(phone.id);
-                            setUserSearch('');
-                            setUserResults([]);
-                          }}
-                          title="Assign to user"
-                        >
-                          <UserPlus size={14} />
-                        </button>
-                      )}
-                      {phone.status !== 'RELEASED' && (
-                        <button
-                          className="btn btn-sm btn-danger"
-                          onClick={() => handleRelease(phone.id, phone.phoneNumber)}
-                          title="Remove from pool"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      )}
-                    </div>
+            </thead>
+            <tbody>
+              {phones.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
+                    {loading ? 'Loading...' : 'No phone numbers in pool. Connect a provider and sync to get started.'}
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                phones.map(phone => (
+                  <tr key={phone.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                    <td className="px-6 py-4 font-mono text-slate-900">{phone.phoneNumber}</td>
+                    <td className="px-6 py-4 text-slate-700">{phone.areaCode || '-'}</td>
+                    <td className="px-6 py-4">
+                      <span className="px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-bold uppercase">
+                        {phone.provider}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${
+                        phone.status === 'AVAILABLE' ? 'bg-green-100 text-green-700' :
+                        phone.status === 'ASSIGNED' ? 'bg-blue-100 text-blue-700' :
+                        phone.status === 'RESERVED' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-slate-100 text-slate-700'
+                      }`}>
+                        {phone.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      {phone.assignments && phone.assignments.length > 0 ? (
+                        <div className="space-y-2">
+                          {phone.assignments.map(assignment => (
+                            <div key={assignment.id} className="flex items-center gap-2">
+                              <div className="flex flex-col">
+                                <span className="text-sm font-medium text-slate-900">{assignment.user.email}</span>
+                                {assignment.user.name && (
+                                  <span className="text-xs text-slate-500">{assignment.user.name}</span>
+                                )}
+                              </div>
+                              <button
+                                className="p-1 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-all"
+                                onClick={() => handleUnassign(phone.id, assignment.user.id, assignment.user.email)}
+                                title={`Unassign from ${assignment.user.email}`}
+                              >
+                                <UserMinus size={12} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 italic">Unassigned</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-slate-700">{new Date(phone.provisionedAt).toLocaleDateString()}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        {phone.status !== 'RELEASED' && (
+                          <button
+                            className="p-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-all"
+                            onClick={() => {
+                              setAssigningPhoneId(phone.id);
+                              setUserSearch('');
+                              setUserResults([]);
+                            }}
+                            title="Assign to user"
+                          >
+                            <UserPlus size={14} />
+                          </button>
+                        )}
+                        {phone.status !== 'RELEASED' && (
+                          <button
+                            className="p-2 bg-red-100 text-red-700 rounded-xl hover:bg-red-200 transition-all"
+                            onClick={() => handleRelease(phone.id, phone.phoneNumber)}
+                            title="Remove from pool"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
         {total > 0 && (
-          <div className="table-footer">
+          <div className="px-6 py-4 border-t border-slate-100 text-sm text-slate-600">
             Showing {phones.length} of {total} numbers
           </div>
         )}
       </div>
 
       {/* SMS Message History */}
-      <div className="admin-table-container" style={{ marginTop: '2rem' }}>
-        <div className="admin-header" style={{ marginBottom: '1rem' }}>
-          <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '18px' }}>
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-8">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
             <MessageSquare size={20} />
             SMS Message History
           </h2>
-          <button className="btn btn-secondary btn-sm" onClick={loadNotificationLogs} disabled={logsLoading}>
-            {logsLoading ? <Loader2 size={14} className="spinner" /> : <RefreshCw size={14} />}
+          <button className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center gap-2 disabled:opacity-50" onClick={loadNotificationLogs} disabled={logsLoading}>
+            {logsLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
           </button>
         </div>
 
         {logsLoading && smsLogs.length === 0 ? (
-          <div className="loading-state"><Loader2 size={20} className="spinner" /></div>
+          <div className="flex items-center justify-center py-12">
+            <Loader2 size={20} className="animate-spin text-blue-600" />
+          </div>
         ) : smsLogs.length > 0 ? (
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Account</th>
-                <th>Rule</th>
-                <th>From</th>
-                <th>To</th>
-                <th>Status</th>
-                <th>Delivered</th>
-              </tr>
-            </thead>
-            <tbody>
-              {smsLogs.map((log: any) => (
-                <tr key={log.id} className={log.status === 'failed' ? 'has-error' : ''}>
-                  <td>{new Date(log.createdAt).toLocaleString()}</td>
-                  <td>
-                    <span className="provider-badge">{log.savedAccount?.businessName || 'Unknown'}</span>
-                  </td>
-                  <td>
-                    {log.ruleName ? (
-                      <span className="provider-badge">{log.ruleName}</span>
-                    ) : (
-                      <span className="provider-badge" style={{ opacity: 0.5 }}>Legacy</span>
-                    )}
-                  </td>
-                  <td className="font-mono">{log.fromPhone || '-'}</td>
-                  <td className="font-mono">{log.toPhone}</td>
-                  <td>
-                    {log.status === 'delivered' ? (
-                      <span className="status-badge badge-success">
-                        <CheckCircle size={12} /> Delivered
-                      </span>
-                    ) : log.status === 'failed' ? (
-                      <span className="status-badge badge-danger" title={log.error || 'Unknown error'}>
-                        <AlertCircle size={12} /> {log.error ? log.error.substring(0, 30) : 'Failed'}
-                      </span>
-                    ) : log.status === 'sent' ? (
-                      <span className="status-badge badge-primary">
-                        <Send size={12} /> Sent
-                      </span>
-                    ) : (
-                      <span className="status-badge badge-warning">
-                        <Loader2 size={12} className="spinner" /> {log.status}
-                      </span>
-                    )}
-                  </td>
-                  <td>
-                    {log.deliveredAt ? (
-                      <span style={{ color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <CheckCircle size={12} />
-                        {new Date(log.deliveredAt).toLocaleString()}
-                      </span>
-                    ) : log.status === 'failed' ? (
-                      <span style={{ color: 'var(--text-muted)' }}>—</span>
-                    ) : (
-                      <span style={{ color: 'var(--text-secondary)' }}>Pending</span>
-                    )}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50">
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Time</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Account</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Rule</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">From</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">To</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Delivered</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {smsLogs.map((log: any) => (
+                  <tr key={log.id} className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${log.status === 'failed' ? 'bg-red-50/30' : ''}`}>
+                    <td className="px-6 py-4 text-slate-700 text-sm">{new Date(log.createdAt).toLocaleString()}</td>
+                    <td className="px-6 py-4">
+                      <span className="px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-bold">
+                        {log.savedAccount?.businessName || 'Unknown'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      {log.ruleName ? (
+                        <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">
+                          {log.ruleName}
+                        </span>
+                      ) : (
+                        <span className="px-3 py-1 bg-slate-100 text-slate-400 rounded-full text-xs font-bold">
+                          Legacy
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 font-mono text-slate-900 text-sm">{log.fromPhone || '-'}</td>
+                    <td className="px-6 py-4 font-mono text-slate-900 text-sm">{log.toPhone}</td>
+                    <td className="px-6 py-4">
+                      {log.status === 'delivered' ? (
+                        <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold inline-flex items-center gap-1">
+                          <CheckCircle size={12} /> Delivered
+                        </span>
+                      ) : log.status === 'failed' ? (
+                        <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold inline-flex items-center gap-1" title={log.error || 'Unknown error'}>
+                          <AlertCircle size={12} /> {log.error ? log.error.substring(0, 30) : 'Failed'}
+                        </span>
+                      ) : log.status === 'sent' ? (
+                        <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold inline-flex items-center gap-1">
+                          <Send size={12} /> Sent
+                        </span>
+                      ) : (
+                        <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-bold inline-flex items-center gap-1">
+                          <Loader2 size={12} className="animate-spin" /> {log.status}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      {log.deliveredAt ? (
+                        <span className="text-green-600 flex items-center gap-1 text-sm">
+                          <CheckCircle size={12} />
+                          {new Date(log.deliveredAt).toLocaleString()}
+                        </span>
+                      ) : log.status === 'failed' ? (
+                        <span className="text-slate-400">—</span>
+                      ) : (
+                        <span className="text-slate-500">Pending</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
-          <div className="empty-cell" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+          <div className="py-12 text-center text-slate-500">
             No SMS messages sent yet. Messages will appear here when notifications are triggered.
           </div>
         )}
@@ -624,67 +645,69 @@ export default function AdminPhonePool() {
 
       {/* Assign Modal */}
       {assigningPhoneId && (
-        <div className="modal-overlay" onClick={() => setAssigningPhoneId(null)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Assign Phone</h3>
-              <button className="btn-icon" onClick={() => setAssigningPhoneId(null)}>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setAssigningPhoneId(null)}>
+          <div className="bg-white rounded-3xl p-8 max-w-2xl w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-slate-900">Assign Phone</h3>
+              <button className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all" onClick={() => setAssigningPhoneId(null)}>
                 <X size={18} />
               </button>
             </div>
-            <div className="modal-body">
+            <div className="space-y-6">
               {/* Assign to All */}
               <button
-                className="btn btn-primary"
-                style={{ width: '100%', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                className="w-full px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2"
                 onClick={() => handleAssignAll(assigningPhoneId)}
               >
                 <Users size={16} />
                 Assign to All Tenants
               </button>
 
-              <div style={{ position: 'relative', textAlign: 'center', margin: '12px 0' }}>
-                <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)' }} />
-                <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: 'white', padding: '0 12px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+              <div className="relative text-center">
+                <hr className="border-t border-slate-200" />
+                <span className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white px-3 text-xs text-slate-500">
                   or assign to a specific tenant
                 </span>
               </div>
 
               {/* Search for specific user */}
-              <div className="form-group">
-                <label>Search Users</label>
-                <div className="search-box">
-                  <Search size={16} />
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-slate-700">Search Users</label>
+                <div className="relative flex items-center">
+                  <Search size={16} className="absolute left-4 text-slate-400" />
                   <input
                     type="text"
                     placeholder="Search by email or name..."
                     value={userSearch}
                     onChange={e => setUserSearch(e.target.value)}
                     autoFocus
+                    className="w-full pl-11 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                   />
                 </div>
               </div>
-              <div className="user-results">
+              <div className="space-y-2 max-h-64 overflow-y-auto">
                 {searchingUsers ? (
-                  <div className="loading-state"><Loader2 size={20} className="spinner" /></div>
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 size={20} className="animate-spin text-blue-600" />
+                  </div>
                 ) : userResults.length > 0 ? (
                   userResults.map(u => (
                     <button
                       key={u.id}
-                      className="user-result-item"
+                      className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 rounded-xl transition-all"
                       onClick={() => handleAssign(assigningPhoneId, u.id)}
                     >
-                      <div className="user-result-info">
-                        <span className="user-result-email">{u.email}</span>
-                        {u.name && <span className="user-result-name">{u.name}</span>}
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium text-slate-900">{u.email}</span>
+                        {u.name && <span className="text-sm text-slate-500">{u.name}</span>}
                       </div>
-                      <UserPlus size={16} />
+                      <UserPlus size={16} className="text-blue-600" />
                     </button>
                   ))
                 ) : userSearch.trim() ? (
-                  <p className="no-results">No users found</p>
+                  <p className="text-center py-8 text-slate-500">No users found</p>
                 ) : (
-                  <p className="no-results">Type to search for users</p>
+                  <p className="text-center py-8 text-slate-500">Type to search for users</p>
                 )}
               </div>
             </div>

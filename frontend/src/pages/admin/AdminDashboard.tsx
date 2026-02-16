@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Users, DollarSign, Activity, TrendingDown, Eye, Trash2, Plus, Minus } from 'lucide-react';
 import { adminApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
@@ -13,15 +14,20 @@ const tierNames: Record<string, string> = {
 
 function getTierDisplay(u: AdminUser): { label: string; className: string } {
   if (u.role === 'ADMIN') {
-    return { label: 'Admin', className: 'tier-badge tier-admin' };
+    return { label: 'Admin', className: 'px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-bold uppercase' };
   }
   if (u.subscriptionTier) {
+    const colors = {
+      STARTER: 'bg-blue-100 text-blue-700',
+      PRO: 'bg-indigo-100 text-indigo-700',
+      ENTERPRISE: 'bg-purple-100 text-purple-700',
+    };
     return {
       label: tierNames[u.subscriptionTier] || u.subscriptionTier,
-      className: `tier-badge tier-${u.subscriptionTier.toLowerCase()}`,
+      className: `px-3 py-1 ${colors[u.subscriptionTier as keyof typeof colors] || 'bg-slate-100 text-slate-700'} rounded-full text-xs font-bold uppercase`,
     };
   }
-  return { label: 'Free', className: 'tier-badge tier-free' };
+  return { label: 'Free', className: 'px-3 py-1 bg-slate-100 text-slate-500 rounded-full text-xs font-bold uppercase' };
 }
 
 export default function AdminDashboard() {
@@ -116,94 +122,78 @@ export default function AdminDashboard() {
 
   if (loading && !stats) {
     return (
-      <div className="admin-dashboard">
-        <div className="admin-header">
-          <h1>Admin Dashboard</h1>
-        </div>
-        <div className="loading-state">
-          <p>Loading dashboard...</p>
+      <div className="p-6 lg:p-10 max-w-7xl mx-auto">
+        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Admin Dashboard</h1>
+        <div className="flex items-center justify-center py-20">
+          <p className="text-slate-500">Loading dashboard...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="admin-dashboard">
-      <div className="admin-header">
-        <h1>Admin Dashboard</h1>
-        <p>Manage users and subscriptions</p>
-      </div>
+    <div className="p-6 lg:p-10 max-w-7xl mx-auto space-y-10">
+      {/* Header */}
+      <section>
+        <h1 className="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">
+          Admin <span className="gradient-text">Dashboard</span>
+        </h1>
+        <p className="text-slate-500 mt-2 text-lg">Manage users and subscriptions</p>
+      </section>
 
+      {/* Stats Grid */}
       {stats && (
-        <div className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" strokeWidth="2" strokeLinecap="round" />
-                <circle cx="9" cy="7" r="4" strokeWidth="2" />
-                <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" strokeWidth="2" strokeLinecap="round" />
-              </svg>
+        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
+              <Users className="w-6 h-6" />
             </div>
-            <div className="stat-content">
-              <div className="stat-value">{stats.totalUsers}</div>
-              <div className="stat-label">Total Users</div>
-            </div>
+            <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Total Users</p>
+            <h3 className="text-3xl font-bold text-slate-900 mt-1">{stats.totalUsers}</h3>
           </div>
 
-          <div className="stat-card">
-            <div className="stat-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" strokeWidth="2" strokeLinecap="round" />
-              </svg>
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-4">
+              <DollarSign className="w-6 h-6" />
             </div>
-            <div className="stat-content">
-              <div className="stat-value">${stats.monthlyRevenue.toLocaleString()}</div>
-              <div className="stat-label">Monthly Revenue (MRR)</div>
-            </div>
+            <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Monthly Revenue (MRR)</p>
+            <h3 className="text-3xl font-bold text-slate-900 mt-1">${stats.monthlyRevenue.toLocaleString()}</h3>
           </div>
 
-          <div className="stat-card">
-            <div className="stat-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-4">
+              <Activity className="w-6 h-6" />
             </div>
-            <div className="stat-content">
-              <div className="stat-value">{stats.activeSubscriptions}</div>
-              <div className="stat-label">Active Subscriptions</div>
-            </div>
+            <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Active Subscriptions</p>
+            <h3 className="text-3xl font-bold text-slate-900 mt-1">{stats.activeSubscriptions}</h3>
           </div>
 
-          <div className="stat-card">
-            <div className="stat-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                <path d="M3 3v18h18" strokeWidth="2" strokeLinecap="round" />
-                <path d="M18 17l-3-3-4 4-5-5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mb-4">
+              <TrendingDown className="w-6 h-6" />
             </div>
-            <div className="stat-content">
-              <div className="stat-value">{stats.churnRate}%</div>
-              <div className="stat-label">Churn Rate (30d)</div>
-            </div>
+            <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Churn Rate (30d)</p>
+            <h3 className="text-3xl font-bold text-slate-900 mt-1">{stats.churnRate}%</h3>
           </div>
-        </div>
+        </section>
       )}
 
-      <div className="users-section">
-        <div className="section-header">
-          <h2>Users</h2>
-          <div className="section-actions">
+      {/* Users Section */}
+      <section className="bg-white rounded-3xl border border-slate-100 shadow-sm p-8">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+          <h2 className="text-2xl font-bold text-slate-900">Users</h2>
+          <div className="flex flex-col sm:flex-row gap-3">
             <input
               type="text"
               placeholder="Search by email or name..."
               value={search}
               onChange={(e) => handleSearch(e.target.value)}
-              className="search-input"
+              className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
             />
             <select
               value={tierFilter}
               onChange={(e) => handleTierFilter(e.target.value)}
-              className="filter-select"
+              className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
             >
               <option value="">All Tiers</option>
               <option value="FREE">Free (Trial)</option>
@@ -214,17 +204,17 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        <div className="users-table-container">
-          <table className="users-table">
+        <div className="overflow-x-auto">
+          <table className="w-full">
             <thead>
-              <tr>
-                <th>Email</th>
-                <th>Name</th>
-                <th>Tier</th>
-                <th>Leads</th>
-                <th>Status</th>
-                <th>Created</th>
-                <th>Actions</th>
+              <tr className="border-b border-slate-100">
+                <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Email</th>
+                <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Name</th>
+                <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Tier</th>
+                <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Leads</th>
+                <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Created</th>
+                <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -232,81 +222,82 @@ export default function AdminDashboard() {
                 const tier = getTierDisplay(u);
                 const free = isFreeTier(u);
                 return (
-                  <tr key={u.id}>
-                    <td>{u.email}</td>
-                    <td>{u.name || '—'}</td>
-                    <td>
+                  <tr key={u.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                    <td className="py-4 px-4 text-sm text-slate-900">{u.email}</td>
+                    <td className="py-4 px-4 text-sm text-slate-700">{u.name || '—'}</td>
+                    <td className="py-4 px-4">
                       <span className={tier.className}>{tier.label}</span>
                     </td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontWeight: 600, fontSize: '13px' }}>{u.leadsCount}</span>
+                    <td className="py-4 px-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-900">{u.leadsCount}</span>
                         {free && (
-                          <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                          <span className="text-xs text-slate-400">
                             ({u.trialLeadsHandled}/{u.trialLeadsLimit})
                           </span>
                         )}
                       </div>
                     </td>
-                    <td>
+                    <td className="py-4 px-4">
                       {u.role === 'ADMIN' ? (
-                        <span className="status-badge status-active">ADMIN</span>
+                        <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-bold uppercase">ADMIN</span>
                       ) : u.subscriptionStatus ? (
-                        <span className={`status-badge status-${u.subscriptionStatus.toLowerCase()}`}>
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${
+                          u.subscriptionStatus === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700' :
+                          u.subscriptionStatus === 'TRIALING' ? 'bg-blue-100 text-blue-700' :
+                          u.subscriptionStatus === 'PAST_DUE' ? 'bg-amber-100 text-amber-700' :
+                          'bg-slate-100 text-slate-700'
+                        }`}>
                           {u.subscriptionStatus}
                         </span>
                       ) : free ? (
-                        <span className="status-badge status-trialing">FREE TRIAL</span>
+                        <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold uppercase">FREE TRIAL</span>
                       ) : (
                         '—'
                       )}
                     </td>
-                    <td>{new Date(u.createdAt).toLocaleDateString()}</td>
-                    <td>
-                      <div className="action-buttons">
+                    <td className="py-4 px-4 text-sm text-slate-700">{new Date(u.createdAt).toLocaleDateString()}</td>
+                    <td className="py-4 px-4">
+                      <div className="flex items-center gap-2">
                         {free && (
                           <>
                             <button
                               onClick={() => handleAddTrialLeads(u, -1)}
-                              className="btn-icon"
+                              className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-all disabled:opacity-50"
                               title="Remove 1 trial lead"
                               disabled={u.trialLeadsHandled <= 0}
-                              style={{ fontSize: '16px', fontWeight: 700, color: '#ef4444' }}
                             >
-                              &minus;
+                              <Minus className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleAddTrialLeads(u, 1)}
-                              className="btn-icon"
+                              className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
                               title="Add 1 trial lead"
-                              style={{ fontSize: '16px', fontWeight: 700, color: '#059669' }}
                             >
-                              +
+                              <Plus className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleResetTrialLeads(u)}
-                              className="btn-icon"
+                              className="px-2 py-1 text-xs text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all font-medium"
                               title="Reset trial leads to 0"
-                              style={{ fontSize: '11px', color: '#6366f1' }}
                             >
                               Reset
                             </button>
                           </>
                         )}
-                        <Link to={`/admin/users/${u.id}`} className="btn-icon" title="View Details">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" strokeWidth="2" />
-                            <circle cx="12" cy="12" r="3" strokeWidth="2" />
-                          </svg>
+                        <Link
+                          to={`/admin/users/${u.id}`}
+                          className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg transition-all"
+                          title="View Details"
+                        >
+                          <Eye className="w-4 h-4" />
                         </Link>
                         <button
                           onClick={() => handleDeleteUser(u.id, u.email)}
-                          className="btn-icon btn-danger"
+                          className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-all"
                           title="Delete User"
                         >
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" strokeWidth="2" strokeLinecap="round" />
-                          </svg>
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </td>
@@ -317,34 +308,34 @@ export default function AdminDashboard() {
           </table>
 
           {users.length === 0 && !loading && (
-            <div className="empty-state">
-              <p>No users found</p>
+            <div className="text-center py-12">
+              <p className="text-slate-500">No users found</p>
             </div>
           )}
 
           {total > limit && (
-            <div className="pagination">
+            <div className="flex items-center justify-between mt-6 pt-6 border-t border-slate-100">
               <button
                 onClick={() => setOffset(Math.max(0, offset - limit))}
                 disabled={offset === 0}
-                className="btn-secondary"
+                className="px-6 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Previous
               </button>
-              <span className="pagination-info">
+              <span className="text-sm text-slate-600">
                 Showing {offset + 1} to {Math.min(offset + limit, total)} of {total}
               </span>
               <button
                 onClick={() => setOffset(offset + limit)}
                 disabled={offset + limit >= total}
-                className="btn-secondary"
+                className="px-6 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Next
               </button>
             </div>
           )}
         </div>
-      </div>
+      </section>
     </div>
   );
 }
