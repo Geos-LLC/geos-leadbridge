@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
-import { thumbtackApi } from '../services/api';
+import { thumbtackApi, analyticsApi } from '../services/api';
 import ConnectionModal from '../components/ConnectionModal';
 import type { SavedAccount } from '../types';
 
@@ -41,20 +41,7 @@ export function Dashboard() {
 
   useEffect(() => {
     loadAccounts();
-    // Simulate loading mock data
-    setTimeout(() => {
-      setStats({
-        leadsToday: 12,
-        automatedReplies: 18,
-        avgResponseTime: '2m',
-        conversionRate: 68,
-        weeklyLeads: 84,
-        engagement: 92,
-        lifetimeReplies: 1247,
-        messagesSent: 2891,
-      });
-      setLoading(false);
-    }, 500);
+    loadDashboardStats();
   }, []);
 
   async function loadAccounts() {
@@ -63,6 +50,79 @@ export function Dashboard() {
       setSavedAccounts(accounts);
     } catch (err) {
       console.error('Failed to load accounts:', err);
+    }
+  }
+
+  async function loadDashboardStats() {
+    try {
+      setLoading(true);
+
+      // Calculate date ranges
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const sevenDaysAgo = new Date(now);
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      // Load analytics data in parallel
+      const [todayData, weekData, allTimeData] = await Promise.all([
+        // Today's leads
+        analyticsApi.getBasicAnalytics({
+          startDate: todayStart.toISOString(),
+          endDate: now.toISOString(),
+        }).catch(() => ({ data: { totalLeads: 0 } })),
+
+        // Last 7 days
+        analyticsApi.getBasicAnalytics({
+          startDate: sevenDaysAgo.toISOString(),
+          endDate: now.toISOString(),
+        }).catch(() => ({ data: { totalLeads: 0, customerEngagement: { engagementRate: 0 } } })),
+
+        // All time stats
+        analyticsApi.getAnalytics({}).catch(() => ({
+          data: {
+            totalLeads: 0,
+            connectionTime: { averageMinutes: 0 },
+            customerEngagement: { engagementRate: 0 },
+            messagesPerLead: { average: 0 },
+          },
+        })),
+      ]);
+
+      // Format average response time
+      const formatDuration = (minutes: number): string => {
+        if (minutes < 1) {
+          const seconds = Math.round(minutes * 60);
+          return `${seconds}s`;
+        }
+        if (minutes < 60) {
+          return `${Math.round(minutes)}m`;
+        }
+        const hours = Math.floor(minutes / 60);
+        const mins = Math.round(minutes % 60);
+        return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+      };
+
+      // Calculate estimated message counts (rough approximation)
+      const totalLeads = allTimeData.data.totalLeads || 0;
+      const avgMessagesPerLead = allTimeData.data.messagesPerLead?.average || 0;
+      const estimatedTotalMessages = Math.round(totalLeads * avgMessagesPerLead);
+      const estimatedProMessages = Math.round(estimatedTotalMessages / 2); // Rough estimate
+
+      setStats({
+        leadsToday: todayData.data.totalLeads || 0,
+        automatedReplies: Math.round(estimatedProMessages * 0.7), // Estimate 70% automated
+        avgResponseTime: formatDuration(allTimeData.data.connectionTime?.averageMinutes || 0),
+        conversionRate: Math.round(allTimeData.data.customerEngagement?.engagementRate || 0),
+        weeklyLeads: weekData.data.totalLeads || 0,
+        engagement: Math.round(weekData.data.customerEngagement?.engagementRate || 0),
+        lifetimeReplies: estimatedProMessages,
+        messagesSent: estimatedTotalMessages,
+      });
+    } catch (err) {
+      console.error('Failed to load dashboard stats:', err);
+      // Keep default zeros if error
+    } finally {
+      setLoading(false);
     }
   }
 
