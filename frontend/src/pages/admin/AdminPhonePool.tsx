@@ -284,69 +284,78 @@ export default function AdminPhonePool() {
       )}
 
       {/* Actions Bar */}
-      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
-        <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
-          <div className="relative flex items-center">
-            <Search size={16} className="absolute left-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search phone numbers..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="pl-11 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all w-full sm:w-64"
-            />
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
+        <div className="flex flex-col xl:flex-row gap-4 xl:items-center xl:justify-between">
+          {/* Left: Search and Filter */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex items-center min-w-0">
+              <Search size={16} className="absolute left-4 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search phone numbers..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full sm:w-64 pl-11 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              />
+            </div>
+            <select
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              className="w-full sm:w-auto px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+            >
+              <option value="">All Status</option>
+              <option value="AVAILABLE">Available</option>
+              <option value="ASSIGNED">Assigned</option>
+              <option value="RESERVED">Reserved</option>
+              <option value="RELEASED">Released</option>
+            </select>
           </div>
-          <select
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
-            className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-          >
-            <option value="">All Status</option>
-            <option value="AVAILABLE">Available</option>
-            <option value="ASSIGNED">Assigned</option>
-            <option value="RESERVED">Reserved</option>
-            <option value="RELEASED">Released</option>
-          </select>
-        </div>
-        <div className="flex flex-wrap gap-2 w-full lg:w-auto">
-          <button className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center gap-2" onClick={loadData} title="Refresh">
-            <RefreshCw size={16} />
-          </button>
-          <button
-            className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={handleSync}
-            disabled={syncing || tenantKeyConfigured === false}
-            title="Sync numbers from connected providers"
-          >
-            {syncing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-            Sync Numbers
-          </button>
-          <button
-            className="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => setShowConnect(true)}
-            disabled={tenantKeyConfigured === false}
-          >
-            <Link size={16} />
-            Connect Provider
-          </button>
-          <button
-            className="px-4 py-2 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => handleDisconnect('openphone')}
-            disabled={tenantKeyConfigured === false}
-            title="Disconnect OpenPhone"
-          >
-            <Unlink size={16} />
-            Disconnect OpenPhone
-          </button>
-          <button
-            className="px-4 py-2 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => handleDisconnect('twilio')}
-            disabled={tenantKeyConfigured === false}
-            title="Disconnect Twilio"
-          >
-            <Unlink size={16} />
-            Disconnect Twilio
-          </button>
+
+          {/* Right: Action Buttons */}
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+              onClick={loadData}
+              title="Refresh"
+            >
+              <RefreshCw size={16} />
+            </button>
+            <button
+              className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleSync}
+              disabled={syncing || tenantKeyConfigured === false}
+              title="Sync numbers from connected providers"
+            >
+              {syncing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+              <span className="hidden sm:inline">Sync Numbers</span>
+            </button>
+            <button
+              className="px-4 py-2.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => setShowConnect(true)}
+              disabled={tenantKeyConfigured === false}
+            >
+              <Link size={16} />
+              <span className="hidden sm:inline">Connect Provider</span>
+            </button>
+            <button
+              className="px-4 py-2.5 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => handleDisconnect('openphone')}
+              disabled={tenantKeyConfigured === false}
+              title="Disconnect OpenPhone"
+            >
+              <Unlink size={16} />
+              <span className="hidden lg:inline">Disconnect OpenPhone</span>
+            </button>
+            <button
+              className="px-4 py-2.5 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => handleDisconnect('twilio')}
+              disabled={tenantKeyConfigured === false}
+              title="Disconnect Twilio"
+            >
+              <Unlink size={16} />
+              <span className="hidden lg:inline">Disconnect Twilio</span>
+            </button>
+          </div>
         </div>
       </div>
 
