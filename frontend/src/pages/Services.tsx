@@ -638,21 +638,25 @@ export function Services() {
             )}
 
             {/* Follow-Up Messages - Coming Soon */}
-            {followUpRules.length > 0 && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 text-slate-400">
-                  <Clock className="w-4 h-4" />
-                  <span className="font-bold">Follow-Up Messages</span>
-                  <span className="px-2 py-0.5 bg-slate-200 text-[10px] font-bold rounded uppercase">Coming Soon</span>
-                </div>
-                {followUpRules.map((rule, idx) => (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-slate-400">
+                <Clock className="w-4 h-4" />
+                <span className="font-bold">Follow-Up Messages</span>
+                <span className="px-2 py-0.5 bg-slate-200 text-[10px] font-bold rounded uppercase">Coming Soon</span>
+              </div>
+              {followUpRules.length > 0 ? (
+                followUpRules.map((rule, idx) => (
                   <div key={rule.id} className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100 opacity-50">
                     <div className="text-sm font-bold text-slate-600 mb-3">Message {idx + 2}</div>
                     <div className="text-xs text-slate-500">Delay: {rule.delayMinutes} minutes</div>
                   </div>
-                ))}
-              </div>
-            )}
+                ))
+              ) : (
+                <div className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100 border-dashed opacity-50 text-center">
+                  <p className="text-sm text-slate-400">Scheduled follow-up messages will appear here</p>
+                </div>
+              )}
+            </div>
           </ServiceCard>
 
           {/* 2. Lead Alerts */}
