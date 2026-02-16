@@ -506,8 +506,9 @@ export function Services() {
 
   return (
     <div className="p-6 lg:p-10 max-w-5xl mx-auto space-y-8">
+      {/* Floating Notifications */}
       {error && (
-        <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-3 text-red-600 text-sm font-medium">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 max-w-md w-full mx-4 bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-3 text-red-600 text-sm font-medium shadow-lg animate-in slide-in-from-top-2">
           <AlertCircle size={16} className="shrink-0" />
           <span className="flex-1">{error}</span>
           <button onClick={() => setError(null)} className="p-1 hover:bg-red-100 rounded-lg transition-colors">
@@ -517,7 +518,7 @@ export function Services() {
       )}
 
       {successMessage && (
-        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3 text-emerald-600 text-sm font-medium">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 max-w-md w-full mx-4 bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3 text-emerald-600 text-sm font-medium shadow-lg animate-in slide-in-from-top-2">
           <CheckCircle size={16} className="shrink-0" />
           <span>{successMessage}</span>
         </div>
@@ -680,7 +681,6 @@ export function Services() {
                   type="tel"
                   value={alertToPhone}
                   onChange={e => setAlertToPhone(e.target.value)}
-                  onBlur={() => { if (leadAlertRule && alertToPhone !== leadAlertRule.toPhone) saveAlertToPhone(alertToPhone); }}
                   placeholder="+1234567890"
                   className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm focus:ring-blue-500 focus:border-blue-500"
                 />
@@ -755,25 +755,37 @@ export function Services() {
                     )}
                   </div>
 
-                  {/* Send Test + Trigger Stats */}
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-4 border-t border-slate-100">
-                    <button
-                      onClick={sendTestAlert}
-                      disabled={testing || saving || !leadAlertRule.toPhone || !alertFromPhone}
-                      className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                      title={!leadAlertRule.toPhone ? 'Set a destination phone first' : !alertFromPhone ? 'Set a send-from phone first' : 'Send a test SMS'}
-                    >
-                      {testing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                      Send Test SMS
-                    </button>
-                    {leadAlertRule.triggerCount > 0 && (
-                      <span className="text-xs text-slate-500">
-                        Triggered {leadAlertRule.triggerCount} time{leadAlertRule.triggerCount !== 1 ? 's' : ''}
-                        {leadAlertRule.lastTriggeredAt && (
-                          <> — last {new Date(leadAlertRule.lastTriggeredAt).toLocaleDateString()}</>
-                        )}
-                      </span>
-                    )}
+                  {/* Send Test + Trigger Stats + Save Button */}
+                  <div className="space-y-4 pt-4 border-t border-slate-100">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                      <button
+                        onClick={sendTestAlert}
+                        disabled={testing || saving || !leadAlertRule.toPhone || !alertFromPhone}
+                        className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        title={!leadAlertRule.toPhone ? 'Set a destination phone first' : !alertFromPhone ? 'Set a send-from phone first' : 'Send a test SMS'}
+                      >
+                        {testing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                        Send Test SMS
+                      </button>
+                      {leadAlertRule.triggerCount > 0 && (
+                        <span className="text-xs text-slate-500">
+                          Triggered {leadAlertRule.triggerCount} time{leadAlertRule.triggerCount !== 1 ? 's' : ''}
+                          {leadAlertRule.lastTriggeredAt && (
+                            <> — last {new Date(leadAlertRule.lastTriggeredAt).toLocaleDateString()}</>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        onClick={() => { if (leadAlertRule && alertToPhone !== leadAlertRule.toPhone) saveAlertToPhone(alertToPhone); }}
+                        disabled={saving || !alertToPhone || alertToPhone === leadAlertRule.toPhone}
+                        className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                        Save Changes
+                      </button>
+                    </div>
                   </div>
                 </>
               )}

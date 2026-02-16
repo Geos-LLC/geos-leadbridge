@@ -106,6 +106,7 @@ export function Layout() {
                 <div className="pt-8 mb-4 px-2 text-[11px] font-bold text-slate-400 uppercase tracking-widest">Admin</div>
                 <NavLink
                   to="/admin"
+                  end
                   className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
                   onClick={() => setMobileMenuOpen(false)}
                 >

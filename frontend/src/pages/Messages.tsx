@@ -1148,16 +1148,32 @@ export function Messages() {
                   <small className="text-slate-400 mt-1">Send a message to start the conversation</small>
                 </div>
               ) : (
-                filteredTimeline.map((event) => (
-                  <div
-                    key={event.id}
-                    className={`flex ${event.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div className={`max-w-md ${event.direction === 'outbound' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-900'} rounded-2xl px-4 py-2.5`}>
+                filteredTimeline.map((event) => {
+                  // Check if account is disconnected for SMS messages
+                  const account = selectedLead ? savedAccounts.find(a => a.businessId === selectedLead.businessId) : null;
+                  const isAccountDisconnected = account && !account.webhookId;
+                  const isSmsDisconnected = event.channel === 'sms' && isAccountDisconnected;
+
+                  return (
+                    <div
+                      key={event.id}
+                      className={`flex ${event.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div className={`max-w-md ${
+                        isSmsDisconnected && event.direction === 'outbound'
+                          ? 'bg-yellow-50 text-slate-900 border-2 border-yellow-200'
+                          : event.direction === 'outbound'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-100 text-slate-900'
+                      } rounded-2xl px-4 py-2.5`}>
                       {/* Channel Badge */}
                       <div className="flex items-center gap-2 mb-1">
                         <span className={`text-[10px] font-bold uppercase ${
-                          event.direction === 'outbound' ? 'text-blue-100' : 'text-blue-600'
+                          isSmsDisconnected && event.direction === 'outbound'
+                            ? 'text-yellow-700'
+                            : event.direction === 'outbound'
+                            ? 'text-blue-100'
+                            : 'text-blue-600'
                         }`}>
                           {event.channel === 'platform' && 'Platform'}
                           {event.channel === 'sms' && 'SMS'}
@@ -1207,7 +1223,11 @@ export function Messages() {
 
                       {/* Message Footer: time + SMS status */}
                       <div className={`flex items-center gap-2 mt-1 text-[10px] ${
-                        event.direction === 'outbound' ? 'text-blue-100' : 'text-slate-500'
+                        isSmsDisconnected && event.direction === 'outbound'
+                          ? 'text-yellow-700'
+                          : event.direction === 'outbound'
+                          ? 'text-blue-100'
+                          : 'text-slate-500'
                       }`}>
                         <span>
                           {event.timestamp.toLocaleTimeString('en-US', {
@@ -1236,7 +1256,8 @@ export function Messages() {
                       </div>
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
               <div ref={messagesEndRef} />
             </div>
