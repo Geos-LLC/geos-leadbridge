@@ -633,13 +633,18 @@ export class ThumbtackController {
     if (!platformConnection) connectionIssues.push('No active Thumbtack connection found for this user');
     if (!account.webhookId) connectionIssues.push('No webhook registered for this account');
 
+    // Check notification health based on what actually matters for SMS delivery:
+    // an enabled new_lead rule with both fromPhone and toPhone set.
+    // We do NOT require sigcoreApiKey — pool-phone users don't use Sigcore.
     const notificationIssues: string[] = [];
-    if (!notifSettings) notificationIssues.push('No notification settings configured');
-    else {
-      if (!notifSettings.enabled) notificationIssues.push('Notification settings are disabled');
-      if (!notifSettings.sigcoreApiKey) notificationIssues.push('No Sigcore API key configured');
-      const newLeadRules = (notifSettings.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead');
-      if (newLeadRules.length === 0) notificationIssues.push('No enabled "new_lead" SMS rules');
+    const newLeadRules = (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead');
+    if (newLeadRules.length === 0) {
+      notificationIssues.push('No enabled "new_lead" SMS rules configured');
+    } else {
+      const missingToPhone = newLeadRules.some((r: any) => !r.toPhone);
+      const missingFromPhone = newLeadRules.some((r: any) => !r.fromPhone);
+      if (missingToPhone) notificationIssues.push('Lead alert rule is missing a destination phone number');
+      if (missingFromPhone) notificationIssues.push('Lead alert rule is missing a sender phone number');
     }
 
     const healthy = connectionIssues.length === 0;
