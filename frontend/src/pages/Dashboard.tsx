@@ -192,7 +192,7 @@ export function Dashboard() {
   };
 
   return (
-    <div className="p-6 lg:p-10 max-w-7xl mx-auto space-y-10">
+    <div className="p-6 lg:p-10 max-w-7xl mx-auto flex flex-col gap-6 md:gap-10">
       {/* OAuth error banner */}
       {oauthError && (
         <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-2xl text-red-800">
@@ -203,7 +203,7 @@ export function Dashboard() {
       )}
 
       {/* Welcome Section */}
-      <section>
+      <section className="order-1">
         <p className="text-blue-600 font-semibold mb-1 uppercase tracking-wider text-xs">
           Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, {user?.name || 'User'}
         </p>
@@ -216,7 +216,7 @@ export function Dashboard() {
       </section>
 
       {/* Core Metrics */}
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 relative">
+      <section className="order-4 lg:order-2 grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 relative">
         {refreshing && (
           <div className="absolute -top-6 right-0 flex items-center gap-1.5 text-xs text-slate-400">
             <Loader2 className="w-3 h-3 animate-spin" />
@@ -276,9 +276,10 @@ export function Dashboard() {
         </div>
       </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 lg:items-start">
+      <div className="contents lg:grid lg:grid-cols-3 lg:gap-8 lg:items-start lg:order-3">
         {/* Accounts & Platforms */}
-        <div className="lg:col-span-2 flex flex-col gap-6 order-2 lg:order-1">
+        <div className="contents lg:block lg:col-span-2 lg:space-y-6">
+          <div className="order-2 lg:order-none space-y-6">
           <div className="flex items-center justify-between px-2">
             <h3 className="text-xl font-bold text-slate-900">Connected Platforms</h3>
             <button
@@ -384,9 +385,10 @@ export function Dashboard() {
               </div>
             )}
           </div>
+          </div>
 
           {/* System Health */}
-          <div className="bg-slate-900 rounded-[2rem] p-6 md:p-8 text-white relative overflow-hidden">
+          <div className="order-5 lg:order-none bg-slate-900 rounded-[2rem] p-6 md:p-8 text-white relative overflow-hidden">
             <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-8">
               <div className="md:max-w-xs">
                 <h3 className="text-xl md:text-2xl font-bold mb-2">System Performance</h3>
@@ -416,7 +418,8 @@ export function Dashboard() {
         </div>
 
         {/* Alerts & Quick Actions */}
-        <div className="flex flex-col gap-6 order-1 lg:order-2">
+        <div className="contents lg:block lg:space-y-6">
+          <div className="order-3 lg:order-none flex flex-col gap-6">
           {(() => {
             const isCheckingHealth = loadingDiagnostics || (savedAccounts.length > 0 && Object.keys(accountDiagnostics).length === 0);
             const disconnectedAccounts = savedAccounts.filter(a => {
@@ -533,8 +536,9 @@ export function Dashboard() {
               </>
             );
           })()}
+          </div>
 
-          <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] p-8 text-white shadow-lg shadow-indigo-100 relative overflow-hidden">
+          <div className="order-6 lg:order-none bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] p-8 text-white shadow-lg shadow-indigo-100 relative overflow-hidden">
             <div className="relative z-10 flex flex-col items-center justify-center text-center h-full">
               <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Sparkles className="w-8 h-8" />
@@ -553,7 +557,7 @@ export function Dashboard() {
       </div>
 
       {/* 7-Day Snapshot */}
-      <section className="space-y-6">
+      <section className="order-7 lg:order-4 space-y-6">
         <div className="flex items-center justify-between px-2">
           <h3 className="text-xl font-bold text-slate-900">7-Day Snapshot</h3>
         </div>

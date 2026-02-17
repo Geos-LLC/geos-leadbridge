@@ -48,7 +48,6 @@ export function Layout() {
     { icon: <Settings size={20} />, label: 'Templates', path: '/message-settings' },
     { icon: <MessageSquare size={20} />, label: 'Lead Activity', path: '/messages' },
     { icon: <Phone size={20} />, label: 'Business Line', path: '/phone-settings' },
-    { icon: <Smartphone size={20} />, label: 'SMS History', path: '/sms-history' },
     { icon: <BarChart3 size={20} />, label: 'Insights', path: '/analytics' },
   ];
 
@@ -136,6 +135,14 @@ export function Layout() {
                   <span>Phone Pool</span>
                 </NavLink>
                 <NavLink
+                  to="/sms-history"
+                  className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <Smartphone size={20} />
+                  <span>SMS History</span>
+                </NavLink>
+                <NavLink
                   to="/api-test"
                   className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
                   onClick={() => setMobileMenuOpen(false)}
@@ -170,10 +177,16 @@ export function Layout() {
         {/* Top Navbar */}
         <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-100 px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
               <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden p-2 text-slate-600">
                 <Menu className="w-6 h-6" />
               </button>
+              <div className="flex items-center gap-2 lg:hidden">
+                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-sm shadow-blue-200">
+                  <Zap className="w-4 h-4" />
+                </div>
+                <span className="text-lg font-bold tracking-tight text-slate-900">LeadBridge</span>
+              </div>
               <h1 className="text-xl font-bold text-slate-900 lg:block hidden">{getPageName()}</h1>
             </div>
             <div className="flex items-center gap-3">

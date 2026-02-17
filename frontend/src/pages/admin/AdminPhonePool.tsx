@@ -311,50 +311,53 @@ export default function AdminPhonePool() {
         </div>
 
         {/* Bottom Row: Action Buttons */}
-        <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100">
-          <button
-            className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
-            onClick={loadData}
-            title="Refresh"
-          >
-            <RefreshCw size={16} />
-            <span className="hidden sm:inline">Refresh</span>
-          </button>
-          <button
-            className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={handleSync}
-            disabled={syncing || tenantKeyConfigured === false}
-            title="Sync numbers from connected providers"
-          >
-            {syncing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-            <span>Sync Numbers</span>
-          </button>
-          <button
-            className="px-4 py-2.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => setShowConnect(true)}
-            disabled={tenantKeyConfigured === false}
-          >
-            <Link size={16} />
-            <span>Connect Provider</span>
-          </button>
-          <button
-            className="px-4 py-2.5 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => handleDisconnect('openphone')}
-            disabled={tenantKeyConfigured === false}
-            title="Disconnect OpenPhone"
-          >
-            <Unlink size={16} />
-            <span>Disconnect OpenPhone</span>
-          </button>
-          <button
-            className="px-4 py-2.5 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => handleDisconnect('twilio')}
-            disabled={tenantKeyConfigured === false}
-            title="Disconnect Twilio"
-          >
-            <Unlink size={16} />
-            <span>Disconnect Twilio</span>
-          </button>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-2 border-t border-slate-100">
+          <div className="flex items-center gap-2 flex-1">
+            <button
+              className="flex-1 sm:flex-none px-4 py-2.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => setShowConnect(true)}
+              disabled={tenantKeyConfigured === false}
+            >
+              <Link size={16} />
+              <span>Connect Provider</span>
+            </button>
+            <button
+              className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleSync}
+              disabled={syncing || tenantKeyConfigured === false}
+              title="Sync numbers from connected providers"
+            >
+              {syncing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+              <span>Sync</span>
+            </button>
+            <button
+              className="px-3 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center justify-center"
+              onClick={loadData}
+              title="Refresh"
+            >
+              <RefreshCw size={16} />
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="flex-1 sm:flex-none px-4 py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl font-semibold hover:bg-red-100 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => handleDisconnect('openphone')}
+              disabled={tenantKeyConfigured === false}
+              title="Disconnect OpenPhone"
+            >
+              <Unlink size={14} />
+              <span>OpenPhone</span>
+            </button>
+            <button
+              className="flex-1 sm:flex-none px-4 py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl font-semibold hover:bg-red-100 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => handleDisconnect('twilio')}
+              disabled={tenantKeyConfigured === false}
+              title="Disconnect Twilio"
+            >
+              <Unlink size={14} />
+              <span>Twilio</span>
+            </button>
+          </div>
         </div>
       </div>
 

@@ -885,7 +885,7 @@ export function Messages() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-50">
+    <div className="flex h-[100dvh] lg:h-screen w-full max-w-[100vw] lg:max-w-none bg-slate-50 overflow-hidden">
       {/* Leads Sidebar */}
       <aside className={`w-full md:w-80 bg-white border-r border-slate-100 flex flex-col ${mobilePanel !== 'list' ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-slate-100 flex items-center gap-3">
@@ -1074,26 +1074,26 @@ export function Messages() {
       </aside>
 
       {/* Chat Area */}
-      <main className={`flex-1 flex flex-col bg-white ${mobilePanel !== 'chat' ? 'hidden md:flex' : 'flex'}`}>
+      <main className={`flex-1 min-w-0 flex flex-col bg-white ${mobilePanel !== 'chat' ? 'hidden md:flex' : 'flex'}`}>
         {selectedLead ? (
           <>
             {/* Lead Info Header */}
-            <div className="p-4 border-b border-slate-100 bg-white">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
+            <div className="p-3 sm:p-4 border-b border-slate-100 bg-white">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                   {/* Mobile back button */}
                   <button
-                    className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors md:hidden"
+                    className="p-1.5 sm:p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors md:hidden shrink-0"
                     onClick={() => setMobilePanel('list')}
                   >
                     <ArrowLeft size={20} />
                   </button>
-                  <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
-                    <User size={24} />
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 shrink-0">
+                    <User size={20} />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-bold text-slate-900">{selectedLead.customerName}</h3>
+                      <h3 className="font-bold text-slate-900 truncate">{selectedLead.customerName}</h3>
                       <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase ${
                         selectedLead.status?.toLowerCase() === 'new' ? 'bg-blue-100 text-blue-700' :
                         selectedLead.status?.toLowerCase() === 'contacted' ? 'bg-green-100 text-green-700' :
@@ -1102,10 +1102,10 @@ export function Messages() {
                         {selectedLead.status}
                       </span>
                     </div>
-                    <p className="text-sm text-slate-500">{selectedLead.category || 'Service Request'}</p>
+                    <p className="text-sm text-slate-500 truncate">{selectedLead.category || 'Service Request'}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-1 sm:gap-3 shrink-0">
                   {/* Desktop-only meta details */}
                   <div className="hidden md:flex items-center gap-3 flex-wrap">
                     {selectedLead.customerPhone && (
@@ -1153,7 +1153,7 @@ export function Messages() {
 
             {/* Resync Error Message */}
             {resyncError && (
-              <div className="mx-4 mt-4 p-3 bg-red-50 border border-red-100 rounded-xl flex items-center gap-2 text-red-600 text-sm">
+              <div className="mx-3 sm:mx-4 mt-3 sm:mt-4 p-3 bg-red-50 border border-red-100 rounded-xl flex items-center gap-2 text-red-600 text-xs sm:text-sm">
                 <AlertCircle size={16} />
                 <span className="flex-1">{resyncError}</span>
                 <button className="p-1 hover:bg-red-100 rounded transition-colors" onClick={() => setResyncError(null)}>
@@ -1163,7 +1163,7 @@ export function Messages() {
             )}
 
             {/* Channel Filter Bar */}
-            <div className="flex gap-2 p-4 border-b border-slate-100">
+            <div className="flex gap-2 p-3 sm:p-4 border-b border-slate-100">
               {(['all', 'platform', 'sms'] as const).map((filter) => (
                 <button
                   key={filter}
@@ -1206,7 +1206,7 @@ export function Messages() {
                       key={event.id}
                       className={`flex ${event.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}
                     >
-                      <div className={`max-w-md ${
+                      <div className={`max-w-[85%] sm:max-w-md ${
                         isSmsDisconnected && event.direction === 'outbound'
                           ? 'bg-yellow-50 text-slate-900 border-2 border-yellow-200'
                           : event.channel === 'sms'
@@ -1317,13 +1317,13 @@ export function Messages() {
 
             {/* Message Input */}
             {canSendMessage ? (
-              <div className="p-4 border-t border-slate-100 bg-white">
-                <div className="flex gap-2">
+              <div className="p-2 sm:p-4 border-t border-slate-100 bg-white">
+                <div className="flex gap-1.5 sm:gap-2">
                   {/* Channel + Template Selector */}
                   <select
                     value={sendChannel}
                     onChange={(e) => setSendChannel(e.target.value as 'platform' | 'sms')}
-                    className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-[72px] sm:w-auto px-2 sm:px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 shrink-0"
                   >
                     <option value="platform">Platform</option>
                     {smsEnabled && selectedLead?.customerPhone && (
@@ -1332,18 +1332,18 @@ export function Messages() {
                   </select>
 
                   {/* Template Selector Dropdown */}
-                  <div className="relative">
+                  <div className="relative shrink-0">
                     <button
                       type="button"
-                      className="p-3 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-xl transition-colors flex items-center gap-1"
+                      className="p-2 sm:p-3 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-xl transition-colors flex items-center gap-1"
                       onClick={() => setShowTemplateDropdown(!showTemplateDropdown)}
                       title="Use template"
                     >
-                      <FileText size={20} />
-                      <ChevronDown size={14} />
+                      <FileText size={18} />
+                      <ChevronDown size={12} className="hidden sm:block" />
                     </button>
                     {showTemplateDropdown && singleMessageTemplates.length > 0 && (
-                      <div className="absolute bottom-full left-0 mb-2 w-80 bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden z-10">
+                      <div className="absolute bottom-full left-0 mb-2 w-[calc(100vw-2rem)] sm:w-80 bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden z-10">
                         <div className="p-3 border-b border-slate-100 bg-slate-50">
                           <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Use Template</span>
                         </div>
@@ -1362,7 +1362,7 @@ export function Messages() {
                       </div>
                     )}
                   </div>
-                  <form className="flex-1 flex gap-2" onSubmit={handleSendMessage}>
+                  <form className="flex-1 flex gap-1.5 sm:gap-2 min-w-0" onSubmit={handleSendMessage}>
                     <input
                       type="text"
                       value={messageText}
@@ -1371,22 +1371,22 @@ export function Messages() {
                         ? `SMS to ${formatPhoneNumber(selectedLead?.customerPhone || '')}...`
                         : 'Type a message...'}
                       disabled={sendingMessage}
-                      className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+                      className="flex-1 min-w-0 px-3 sm:px-4 py-2 sm:py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
                     />
                     <button
                       type="submit"
-                      className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                      className="px-3 sm:px-6 py-2 sm:py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center shrink-0"
                       disabled={!messageText.trim() || sendingMessage}
                     >
-                      {sendingMessage ? <Loader2 className="animate-spin" size={20} /> : <Send size={20} />}
+                      {sendingMessage ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
                     </button>
                   </form>
                 </div>
               </div>
             ) : (
-              <div className="p-4 border-t border-slate-100 bg-amber-50 flex items-center justify-center gap-2 text-amber-700">
-                <AlertCircle size={18} />
-                <span className="text-sm">
+              <div className="p-3 sm:p-4 border-t border-slate-100 bg-amber-50 flex items-center justify-center gap-2 text-amber-700">
+                <AlertCircle size={16} className="shrink-0" />
+                <span className="text-xs sm:text-sm text-center">
                   Switch to <strong>{getAccountNameForLead(selectedLead) || 'this account'}</strong> to send messages
                 </span>
               </div>
