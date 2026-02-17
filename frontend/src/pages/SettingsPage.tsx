@@ -292,8 +292,10 @@ export default function SettingsPage() {
                 const diag = accountDiagnostics[account.id];
                 const isCheckingDiag = !diag;
                 const hasConnectionIssues = !isCheckingDiag && (!account.webhookId || (diag && !diag.healthy));
-                const hasSmsIssues = !isCheckingDiag && !hasConnectionIssues && diag && (diag.notificationIssues?.length ?? 0) > 0;
-                const hasIssues = hasConnectionIssues || hasSmsIssues;
+                const notifIssuesArr = diag?.notificationIssues || [];
+                const isJustDisabled = !isCheckingDiag && !hasConnectionIssues && notifIssuesArr.length > 0 && notifIssuesArr.every((i: string) => i.toLowerCase().includes('disabled'));
+                const hasConfigIssues = !isCheckingDiag && !hasConnectionIssues && notifIssuesArr.length > 0 && !isJustDisabled;
+                const hasIssues = hasConnectionIssues || hasConfigIssues;
 
                 return (
                   <div
@@ -303,7 +305,7 @@ export default function SettingsPage() {
                         ? 'bg-slate-50 border-slate-200'
                         : hasConnectionIssues
                           ? 'bg-amber-50/50 border-amber-200 hover:border-amber-300 cursor-pointer'
-                          : hasSmsIssues
+                          : hasConfigIssues
                             ? 'bg-orange-50/50 border-orange-200 hover:border-orange-300 cursor-pointer'
                             : 'bg-slate-50 border-slate-100 hover:border-slate-200'
                     }`}
@@ -323,10 +325,13 @@ export default function SettingsPage() {
                             <Info size={10} /> Click for details
                           </p>
                         )}
-                        {hasSmsIssues && diag && (
+                        {hasConfigIssues && diag && (
                           <p className="text-[10px] text-orange-700 mt-1 flex items-center gap-1">
                             <Info size={10} /> {diag.notificationIssues[0]}
                           </p>
+                        )}
+                        {isJustDisabled && (
+                          <p className="text-[10px] text-slate-400 mt-1">Lead alerts off</p>
                         )}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -334,7 +339,7 @@ export default function SettingsPage() {
                           <Loader2 className="w-5 h-5 text-slate-300 animate-spin" />
                         ) : hasConnectionIssues ? (
                           <AlertCircle className="w-5 h-5 text-amber-500" />
-                        ) : hasSmsIssues ? (
+                        ) : hasConfigIssues ? (
                           <AlertCircle className="w-5 h-5 text-orange-400" />
                         ) : (
                           <CheckCircle className="w-5 h-5 text-emerald-500" />
@@ -776,8 +781,9 @@ export default function SettingsPage() {
                   </div>
 
                   {(() => {
-                    const notifIssues = diag.notificationIssues || [];
-                    const connIssues = diag.issues.filter((i: string) => !notifIssues.includes(i));
+                    const modalNotifs = diag.notificationIssues || [];
+                    const connIssues = diag.issues.filter((i: string) => !modalNotifs.includes(i));
+                    const realNotifs = modalNotifs.filter((i: string) => !i.toLowerCase().includes('disabled'));
                     return (
                       <>
                         {connIssues.length > 0 && (
@@ -791,10 +797,10 @@ export default function SettingsPage() {
                             ))}
                           </div>
                         )}
-                        {notifIssues.length > 0 && (
+                        {realNotifs.length > 0 && (
                           <div className="mb-4 space-y-2">
                             <h4 className="text-sm font-bold text-orange-900 uppercase tracking-wider">SMS Configuration:</h4>
-                            {notifIssues.map((issue: string, i: number) => (
+                            {realNotifs.map((issue: string, i: number) => (
                               <div key={i} className="flex items-start gap-2 p-3 bg-orange-50 border border-orange-200 rounded-xl text-sm text-orange-700">
                                 <AlertCircle size={16} className="shrink-0 mt-0.5" />
                                 <span>{issue}</span>
@@ -834,10 +840,11 @@ export default function SettingsPage() {
                   </div>
 
                   {(() => {
-                    const notifIssues = diag.notificationIssues || [];
-                    const connIssues = diag.issues.filter((i: string) => !notifIssues.includes(i));
+                    const modalNotifIssues = diag.notificationIssues || [];
+                    const connIssues = diag.issues.filter((i: string) => !modalNotifIssues.includes(i));
                     const hasConnIssues = connIssues.length > 0;
-                    const hasNotifIssues = notifIssues.length > 0;
+                    const onlyDisabled = modalNotifIssues.length > 0 && modalNotifIssues.every((i: string) => i.toLowerCase().includes('disabled'));
+                    const hasRealNotifIssues = modalNotifIssues.length > 0 && !onlyDisabled;
 
                     return (
                       <div className="flex gap-3">
@@ -853,7 +860,7 @@ export default function SettingsPage() {
                             Reconnect Account
                           </button>
                         )}
-                        {hasNotifIssues && !hasConnIssues && (
+                        {hasRealNotifIssues && !hasConnIssues && (
                           <button
                             onClick={() => {
                               setSelectedAccountForInfo(null);
