@@ -632,8 +632,7 @@ export class ThumbtackController {
       where: { savedAccountId: id },
       include: {
         notificationRules: {
-          where: { enabled: true },
-          select: { id: true, name: true, triggerType: true, toPhone: true, fromPhone: true },
+          select: { id: true, name: true, triggerType: true, toPhone: true, fromPhone: true, enabled: true },
         },
       },
     });
@@ -663,12 +662,15 @@ export class ThumbtackController {
     // an enabled new_lead rule with both fromPhone and toPhone set.
     // We do NOT require sigcoreApiKey — pool-phone users don't use Sigcore.
     const notificationIssues: string[] = [];
-    const newLeadRules = (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead');
-    if (newLeadRules.length === 0) {
-      notificationIssues.push('No enabled "new_lead" SMS rules configured');
+    const allNewLeadRules = (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead');
+    const enabledNewLeadRules = allNewLeadRules.filter((r: any) => r.enabled);
+    if (allNewLeadRules.length === 0) {
+      notificationIssues.push('No "new_lead" SMS rules configured');
+    } else if (enabledNewLeadRules.length === 0) {
+      notificationIssues.push('Lead alert rule exists but is disabled — toggle it on in Lead Alerts');
     } else {
-      const missingToPhone = newLeadRules.some((r: any) => !r.toPhone);
-      const missingFromPhone = newLeadRules.some((r: any) => !r.fromPhone);
+      const missingToPhone = enabledNewLeadRules.some((r: any) => !r.toPhone);
+      const missingFromPhone = enabledNewLeadRules.some((r: any) => !r.fromPhone);
       if (missingToPhone) notificationIssues.push('Lead alert rule is missing a destination phone number');
       if (missingFromPhone) notificationIssues.push('Lead alert rule is missing a sender phone number');
     }
@@ -691,8 +693,8 @@ export class ThumbtackController {
         settingsEnabled: notifSettings?.enabled ?? false,
         hasSigcoreApiKey: !!notifSettings?.sigcoreApiKey,
         totalRules: notifSettings?.notificationRules?.length || 0,
-        newLeadRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead').length,
-        customerReplyRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'customer_reply').length,
+        newLeadRules: enabledNewLeadRules.length,
+        customerReplyRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'customer_reply' && r.enabled).length,
       },
       automation: {
         totalRules: automationRules.length,
