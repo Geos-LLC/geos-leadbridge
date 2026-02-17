@@ -1,5 +1,4 @@
 import { Controller, Post, Get, Body, Param, UseGuards, Query } from '@nestjs/common';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AdminGuard } from '../admin/guards/admin.guard';
 import { TestService, SimulateWebhookDto } from './test.service';
 

@@ -205,7 +205,7 @@ export class LeadsService {
       let raw: Record<string, any> = {};
       try {
         raw = msg.rawJson ? JSON.parse(msg.rawJson) : {};
-      } catch (e) {
+      } catch (_e) {
         // Ignore parse errors
       }
 

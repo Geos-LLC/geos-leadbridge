@@ -28,7 +28,6 @@ import { PlatformService } from '../platform.service';
 import { PlatformFactory } from '../platform.factory';
 import { LeadsService } from '../../leads/leads.service';
 import { PlatformName } from '../../common/interfaces/platform.interface';
-import { ThumbtackAdapter } from './thumbtack.adapter';
 import { PrismaService } from '../../common/utils/prisma.service';
 
 @Controller('v1/thumbtack')

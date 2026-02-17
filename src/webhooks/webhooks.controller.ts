@@ -47,7 +47,7 @@ export class WebhooksController {
   @Public()
   @Post('yelp')
   @HttpCode(HttpStatus.OK)
-  async handleYelpWebhook(@Headers('x-yelp-signature') signature: string, @Body() payload: any) {
+  async handleYelpWebhook(@Headers('x-yelp-signature') _signature: string, @Body() _payload: any) {
     // Future implementation
     return { received: true };
   }
