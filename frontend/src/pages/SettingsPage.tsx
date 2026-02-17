@@ -819,8 +819,8 @@ export default function SettingsPage() {
                       <span>Notification settings</span>
                     </div>
                     <div className="flex items-center gap-2 text-sm">
-                      {diag.notifications.hasSigcoreApiKey ? <CheckCircle size={14} className="text-emerald-600" /> : <AlertCircle size={14} className="text-red-600" />}
-                      <span>Sigcore API key</span>
+                      {diag.notifications.hasSigcoreApiKey ? <CheckCircle size={14} className="text-emerald-600" /> : <span className="text-slate-400">-</span>}
+                      <span>Sigcore API key {!diag.notifications.hasSigcoreApiKey && <span className="text-slate-400">(optional)</span>}</span>
                     </div>
                     <div className="flex items-center gap-2 text-sm">
                       {diag.notifications.newLeadRules > 0 ? <CheckCircle size={14} className="text-emerald-600" /> : <AlertCircle size={14} className="text-red-600" />}
