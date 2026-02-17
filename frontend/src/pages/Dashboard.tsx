@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Users, Send, Clock, TrendingUp, Plus, ChevronRight,
-  Briefcase, Sparkles, AlertCircle
+  Briefcase, Sparkles, AlertCircle, ExternalLink
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
-import { thumbtackApi, analyticsApi } from '../services/api';
+import { thumbtackApi, analyticsApi, testApi } from '../services/api';
 import ConnectionModal from '../components/ConnectionModal';
-import type { SavedAccount } from '../types';
+import type { SavedAccount, AccountDiagnostics } from '../types';
 
 interface DashboardStats {
   leadsToday: number;
@@ -22,6 +22,7 @@ interface DashboardStats {
 }
 
 export function Dashboard() {
+  const navigate = useNavigate();
   const { user } = useAuthStore();
   const { savedAccounts, setSavedAccounts } = useAppStore();
   const [stats, setStats] = useState<DashboardStats>({
@@ -38,6 +39,7 @@ export function Dashboard() {
   const [connectionModalOpen, setConnectionModalOpen] = useState(false);
   const [accountToReconnect, setAccountToReconnect] = useState<SavedAccount | null>(null);
   const [showAllAccounts, setShowAllAccounts] = useState(false);
+  const [accountDiagnostics, setAccountDiagnostics] = useState<Record<string, AccountDiagnostics>>({});
 
   useEffect(() => {
     loadAccounts();
@@ -48,9 +50,29 @@ export function Dashboard() {
     try {
       const { accounts } = await thumbtackApi.getSavedAccounts();
       setSavedAccounts(accounts);
+
+      // Load diagnostics for all accounts
+      if (accounts.length > 0) {
+        loadDiagnostics(accounts);
+      }
     } catch (err) {
       console.error('Failed to load accounts:', err);
     }
+  }
+
+  async function loadDiagnostics(accountsList: SavedAccount[]) {
+    const diagnosticsMap: Record<string, AccountDiagnostics> = {};
+
+    for (const account of accountsList) {
+      try {
+        const diag = await testApi.getDiagnostics(account.id);
+        diagnosticsMap[account.id] = diag;
+      } catch (err) {
+        console.error(`Failed to load diagnostics for ${account.id}:`, err);
+      }
+    }
+
+    setAccountDiagnostics(diagnosticsMap);
   }
 
   async function loadDashboardStats() {
@@ -127,10 +149,16 @@ export function Dashboard() {
   }
 
   const handleAccountClick = (account: SavedAccount) => {
-    if (!account.webhookId) {
-      // If disconnected, open reconnect modal
+    const diag = accountDiagnostics[account.id];
+    const hasIssues = !account.webhookId || (diag && !diag.healthy);
+
+    if (hasIssues) {
+      // If has issues, open reconnect modal
       setAccountToReconnect(account);
       setConnectionModalOpen(true);
+    } else {
+      // If healthy, navigate to messages for this account
+      navigate(`/messages?account=${account.businessId}`);
     }
   };
 
@@ -233,27 +261,48 @@ export function Dashboard() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {savedAccounts.length > 0 ? (
-              (showAllAccounts ? savedAccounts : savedAccounts.slice(0, 2)).map((account) => (
-                <div
-                  key={account.id}
-                  className="bg-white border border-slate-100 rounded-3xl p-5 flex items-center gap-5 hover:border-blue-200 transition-all cursor-pointer group shadow-sm"
-                  onClick={() => handleAccountClick(account)}
-                >
-                  <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors">
-                    <Briefcase className="w-7 h-7" />
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="font-bold text-slate-900">{account.businessName}</h4>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className={`w-2 h-2 rounded-full ${account.webhookId ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
-                      <span className="text-xs text-slate-500 font-medium">
-                        {account.webhookId ? 'Synced: Thumbtack' : 'Disconnected'}
-                      </span>
+              (showAllAccounts ? savedAccounts : savedAccounts.slice(0, 2)).map((account) => {
+                const diag = accountDiagnostics[account.id];
+                const hasIssues = !account.webhookId || (diag && !diag.healthy);
+
+                return (
+                  <div
+                    key={account.id}
+                    className={`bg-white border rounded-3xl p-5 flex items-center gap-5 transition-all cursor-pointer group shadow-sm ${
+                      hasIssues
+                        ? 'border-amber-200 hover:border-amber-300'
+                        : 'border-slate-100 hover:border-blue-200'
+                    }`}
+                    onClick={() => handleAccountClick(account)}
+                  >
+                    {account.imageUrl ? (
+                      <img
+                        src={account.imageUrl}
+                        alt={account.businessName}
+                        className="w-14 h-14 rounded-2xl object-cover"
+                      />
+                    ) : (
+                      <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors">
+                        <Briefcase className="w-7 h-7" />
+                      </div>
+                    )}
+                    <div className="flex-1">
+                      <h4 className="font-bold text-slate-900">{account.businessName}</h4>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className={`w-2 h-2 rounded-full ${hasIssues ? 'bg-amber-500' : 'bg-emerald-500'}`}></span>
+                        <span className="text-xs text-slate-500 font-medium">
+                          {hasIssues ? (diag && !diag.healthy ? 'Needs attention' : 'Disconnected') : 'Synced: Thumbtack'}
+                        </span>
+                      </div>
                     </div>
+                    {hasIssues ? (
+                      <AlertCircle className="w-5 h-5 text-amber-500 group-hover:text-amber-600" />
+                    ) : (
+                      <ExternalLink className="w-5 h-5 text-slate-300 group-hover:text-blue-500" />
+                    )}
                   </div>
-                  <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-blue-500" />
-                </div>
-              ))
+                );
+              })
             ) : (
               <div className="col-span-2 bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-8 text-center">
                 <p className="text-slate-600 font-medium mb-4">No accounts connected yet</p>
