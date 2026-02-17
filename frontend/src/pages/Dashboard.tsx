@@ -349,15 +349,17 @@ export function Dashboard() {
 
                 return displayAccounts.map((account) => {
                   const diag = accountDiagnostics[account.id];
-                  const isCheckingDiag = loadingDiagnostics && !diag;
-                  const hasConnectionIssues = !account.webhookId || (diag && !diag.healthy);
-                  const hasSmsIssues = !hasConnectionIssues && diag && (diag.notificationIssues?.length ?? 0) > 0;
+                  const isCheckingDiag = !diag;
+                  const hasConnectionIssues = !isCheckingDiag && (!account.webhookId || (diag && !diag.healthy));
+                  const hasSmsIssues = !isCheckingDiag && !hasConnectionIssues && diag && (diag.notificationIssues?.length ?? 0) > 0;
 
-                  const borderClass = hasConnectionIssues
-                    ? 'border-amber-200 hover:border-amber-300'
-                    : hasSmsIssues
-                      ? 'border-orange-200 hover:border-orange-300'
-                      : 'border-slate-100 hover:border-blue-200';
+                  const borderClass = isCheckingDiag
+                    ? 'border-slate-200'
+                    : hasConnectionIssues
+                      ? 'border-amber-200 hover:border-amber-300'
+                      : hasSmsIssues
+                        ? 'border-orange-200 hover:border-orange-300'
+                        : 'border-slate-100 hover:border-blue-200';
 
                   return (
                     <div
