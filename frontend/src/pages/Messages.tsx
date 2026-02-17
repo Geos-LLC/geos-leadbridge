@@ -68,9 +68,11 @@ function hasNewUpdates(lead: Lead, lastSeenTimestamps: Record<string, string>): 
 }
 
 // Merge platform messages and SMS logs into a unified timeline
+// customerPhone: filter to only show SMS sent TO the customer (exclude internal alerts to business owner)
 function mergeTimeline(
   platformMessages: LocalMessage[],
   smsLogs: NotificationLog[],
+  customerPhone?: string | null,
 ): TimelineEvent[] {
   const events: TimelineEvent[] = [];
 
@@ -87,7 +89,18 @@ function mergeTimeline(
     });
   }
 
+  // Only include SMS logs sent TO the customer (filter out internal alerts to business owner)
   for (const log of smsLogs) {
+    // Skip if no customer phone or SMS wasn't sent to customer
+    if (!customerPhone || !log.toPhone) continue;
+
+    // Normalize phone numbers for comparison (remove non-digits)
+    const normalizedCustomerPhone = customerPhone.replace(/\D/g, '');
+    const normalizedToPhone = log.toPhone.replace(/\D/g, '');
+
+    // Only include SMS sent to the customer (not alerts sent to business owner)
+    if (normalizedToPhone !== normalizedCustomerPhone) continue;
+
     events.push({
       id: `sms-${log.id}`,
       channel: 'sms',
@@ -515,10 +528,18 @@ export function Messages() {
         console.warn('[Messages] Failed to load SMS logs for lead:', err);
       }
 
-      // Merge into unified timeline
-      const timeline = mergeTimeline(convertedMessages, leadSmsLogs);
+      // Merge into unified timeline (filter SMS to only show customer-facing messages)
+      const timeline = mergeTimeline(convertedMessages, leadSmsLogs, lead.customerPhone);
       setTimelineEvents(timeline);
-      setCommSummary(computeSummary(convertedMessages, leadSmsLogs));
+
+      // Compute summary with filtered SMS logs (only customer-facing)
+      const customerSmslogs = leadSmsLogs.filter(log => {
+        if (!lead.customerPhone || !log.toPhone) return false;
+        const normalizedCustomerPhone = lead.customerPhone.replace(/\D/g, '');
+        const normalizedToPhone = log.toPhone.replace(/\D/g, '');
+        return normalizedToPhone === normalizedCustomerPhone;
+      });
+      setCommSummary(computeSummary(convertedMessages, customerSmslogs));
     } catch (err) {
       console.error('[Messages] Failed to load messages:', err);
     } finally {
