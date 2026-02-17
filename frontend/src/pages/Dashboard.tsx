@@ -35,7 +35,6 @@ export function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [connectionModalOpen, setConnectionModalOpen] = useState(false);
   const [accountToReconnect, setAccountToReconnect] = useState<SavedAccount | null>(null);
-  const [showAllAccounts, setShowAllAccounts] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -296,14 +295,6 @@ export function Dashboard() {
         <div className="lg:col-span-2 flex flex-col gap-6">
           <div className="flex items-center justify-between px-2">
             <h3 className="text-xl font-bold text-slate-900">Connected Platforms</h3>
-            {savedAccounts.length > 2 && (
-              <button
-                onClick={() => setShowAllAccounts(!showAllAccounts)}
-                className="text-blue-600 font-semibold text-sm hover:underline"
-              >
-                {showAllAccounts ? 'Show Less' : 'Show All'}
-              </button>
-            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -324,7 +315,7 @@ export function Dashboard() {
                   return 0;
                 });
 
-                const displayAccounts = showAllAccounts ? sortedAccounts : sortedAccounts.slice(0, 2);
+                const displayAccounts = sortedAccounts;
 
                 return displayAccounts.map((account) => {
                   const diag = accountDiagnostics[account.id];
