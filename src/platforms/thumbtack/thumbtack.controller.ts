@@ -670,22 +670,43 @@ export class ThumbtackController {
     } else if (enabledNewLeadRules.length === 0) {
       notificationIssues.push('Lead alert rule exists but is disabled — toggle it on in Lead Alerts');
     } else {
-      // Check toPhone with fallback to settings.destinationPhone (sendToCustomer rules use lead phone at runtime)
-      const hasToPhone = enabledNewLeadRules.every((r: any) => r.sendToCustomer || r.toPhone || notifSettings?.destinationPhone);
-      if (!hasToPhone) notificationIssues.push('Lead alert rule is missing a destination phone number');
-
-      // Check fromPhone with fallback to settings.sigcoreFromPhone and pool phone
+      // Check if at least ONE enabled rule can successfully fire.
+      // Each rule fires independently — one working rule is enough for SMS delivery.
       const settingsFromPhone = notifSettings?.sigcoreFromPhone;
-      const hasFromPhoneOnRulesOrSettings = enabledNewLeadRules.every((r: any) => r.fromPhone) || !!settingsFromPhone;
-      if (!hasFromPhoneOnRulesOrSettings) {
-        // Last fallback: check for admin-assigned pool phone
-        const poolAssignment = await this.prisma.phonePoolAssignment.findFirst({
-          where: { userId: account.userId, phonePool: { status: { not: 'RELEASED' } } },
-          include: { phonePool: { select: { phoneNumber: true } } },
-          orderBy: { assignedAt: 'desc' },
-        });
-        if (!poolAssignment?.phonePool?.phoneNumber) {
-          notificationIssues.push('Lead alert rule is missing a sender phone number');
+      const settingsDestPhone = notifSettings?.destinationPhone;
+
+      const hasWorkingRule = enabledNewLeadRules.some((r: any) => {
+        const hasTo = r.sendToCustomer || r.toPhone || settingsDestPhone;
+        const hasFrom = r.fromPhone || settingsFromPhone;
+        return hasTo && hasFrom;
+      });
+
+      if (!hasWorkingRule) {
+        // No rule has both phones — check which piece is missing
+        const anyHasTo = enabledNewLeadRules.some((r: any) => r.sendToCustomer || r.toPhone || settingsDestPhone);
+        const anyHasFrom = enabledNewLeadRules.some((r: any) => r.fromPhone || settingsFromPhone);
+
+        if (!anyHasFrom) {
+          // Last fallback: check for admin-assigned pool phone
+          const poolAssignment = await this.prisma.phonePoolAssignment.findFirst({
+            where: { userId: account.userId, phonePool: { status: { not: 'RELEASED' } } },
+            include: { phonePool: { select: { phoneNumber: true } } },
+            orderBy: { assignedAt: 'desc' },
+          });
+          if (poolAssignment?.phonePool?.phoneNumber) {
+            // Pool phone covers fromPhone — recheck with that
+            if (anyHasTo) {
+              // At least one rule has toPhone + pool provides fromPhone → working
+            } else {
+              notificationIssues.push('Lead alert rule is missing a destination phone number');
+            }
+          } else {
+            if (!anyHasTo) notificationIssues.push('Lead alert rule is missing a destination phone number');
+            notificationIssues.push('Lead alert rule is missing a sender phone number');
+          }
+        } else {
+          // Has fromPhone but no toPhone on any rule
+          notificationIssues.push('Lead alert rule is missing a destination phone number');
         }
       }
     }
