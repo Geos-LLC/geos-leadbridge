@@ -203,30 +203,16 @@ export function Dashboard() {
       )}
 
       {/* Welcome Section */}
-      <section className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div>
-          <p className="text-blue-600 font-semibold mb-1 uppercase tracking-wider text-xs">
-            Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, {user?.name || 'User'}
-          </p>
-          <h2 className="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">
-            Your business is <span className="gradient-text">growing.</span>
-          </h2>
-          <p className="text-slate-500 mt-2 text-lg">
-            LeadBridge captured {stats.leadsToday} new lead{stats.leadsToday !== 1 ? 's' : ''} from Thumbtack today.
-          </p>
-        </div>
-        <div className="flex gap-3">
-          <Link to="/analytics" className="px-6 py-3 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700 hover:bg-slate-50 shadow-sm transition-all">
-            View Reports
-          </Link>
-          <button
-            onClick={() => setConnectionModalOpen(true)}
-            className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2"
-          >
-            <Plus className="w-5 h-5" />
-            New Account
-          </button>
-        </div>
+      <section>
+        <p className="text-blue-600 font-semibold mb-1 uppercase tracking-wider text-xs">
+          Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, {user?.name || 'User'}
+        </p>
+        <h2 className="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">
+          Your business is <span className="gradient-text">growing.</span>
+        </h2>
+        <p className="text-slate-500 mt-2 text-lg">
+          LeadBridge captured {stats.leadsToday} new lead{stats.leadsToday !== 1 ? 's' : ''} from Thumbtack today.
+        </p>
       </section>
 
       {/* Core Metrics */}
@@ -292,9 +278,17 @@ export function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 lg:items-start">
         {/* Accounts & Platforms */}
-        <div className="lg:col-span-2 flex flex-col gap-6">
+        <div className="lg:col-span-2 flex flex-col gap-6 order-2 lg:order-1">
           <div className="flex items-center justify-between px-2">
             <h3 className="text-xl font-bold text-slate-900">Connected Platforms</h3>
+            <button
+              onClick={() => setConnectionModalOpen(true)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">New Account</span>
+              <span className="sm:hidden">Add</span>
+            </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -422,7 +416,7 @@ export function Dashboard() {
         </div>
 
         {/* Alerts & Quick Actions */}
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6 order-1 lg:order-2">
           {(() => {
             const isCheckingHealth = loadingDiagnostics || (savedAccounts.length > 0 && Object.keys(accountDiagnostics).length === 0);
             const disconnectedAccounts = savedAccounts.filter(a => {
@@ -586,7 +580,9 @@ export function Dashboard() {
             </div>
           </div>
           <div className="bg-slate-50/50 p-6 flex items-center justify-center">
-            <p className="text-slate-400 text-sm italic">Detailed chart visualization loading...</p>
+            <Link to="/analytics" className="px-6 py-3 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700 hover:bg-slate-50 shadow-sm transition-all flex items-center gap-2">
+              View Full Reports <ChevronRight className="w-4 h-4" />
+            </Link>
           </div>
         </div>
       </section>

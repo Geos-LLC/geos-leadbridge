@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Outlet, Link as RouterLink, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   MessageSquare, BarChart3, Settings, LogOut, Phone, Shield, FlaskConical,
-  Menu, Bell, Zap, AlertTriangle, Workflow, LayoutGrid
+  Menu, Bell, Zap, AlertTriangle, Workflow, LayoutGrid, Smartphone
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -17,9 +17,15 @@ export function Layout() {
   const savedAccounts = useAppStore(state => state.savedAccounts);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  const loadAnalytics = useAppStore(state => state.loadAnalytics);
   const hasAccounts = savedAccounts.length > 0;
   const allDisconnected = hasAccounts && savedAccounts.every(a => !a.webhookId);
   const someDisconnected = hasAccounts && !allDisconnected && savedAccounts.some(a => !a.webhookId);
+
+  // Preload analytics data on app start (cached for instant page loads)
+  useEffect(() => {
+    loadAnalytics();
+  }, []);
 
   // Track when savedAccounts changes to debug banner visibility
   useEffect(() => {
@@ -42,6 +48,7 @@ export function Layout() {
     { icon: <Settings size={20} />, label: 'Templates', path: '/message-settings' },
     { icon: <MessageSquare size={20} />, label: 'Lead Activity', path: '/messages' },
     { icon: <Phone size={20} />, label: 'Business Line', path: '/phone-settings' },
+    { icon: <Smartphone size={20} />, label: 'SMS History', path: '/sms-history' },
     { icon: <BarChart3 size={20} />, label: 'Insights', path: '/analytics' },
   ];
 
@@ -52,6 +59,7 @@ export function Layout() {
     if (navItem) return navItem.label;
 
     // Handle other routes
+    if (path === '/sms-history') return 'SMS History';
     if (path === '/settings') return 'Settings';
     if (path === '/pricing') return 'Pricing';
     if (path === '/admin') return 'Admin Dashboard';

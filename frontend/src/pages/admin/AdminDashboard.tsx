@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Users, DollarSign, Activity, TrendingDown, Eye, Trash2, Plus, Minus } from 'lucide-react';
+import { Users, DollarSign, Activity, TrendingDown, Eye, Trash2, Plus, Minus, ChevronRight } from 'lucide-react';
 import { adminApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
@@ -143,57 +143,57 @@ export default function AdminDashboard() {
 
       {/* Stats Grid */}
       {stats && (
-        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
-            <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
-              <Users className="w-6 h-6" />
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+          <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-50 text-blue-600 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
+              <Users className="w-5 h-5 md:w-6 md:h-6" />
             </div>
-            <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Total Users</p>
-            <h3 className="text-3xl font-bold text-slate-900 mt-1">{stats.totalUsers}</h3>
+            <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Total Users</p>
+            <h3 className="text-2xl md:text-3xl font-bold text-slate-900 mt-1">{stats.totalUsers}</h3>
           </div>
 
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
-            <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-4">
-              <DollarSign className="w-6 h-6" />
+          <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div className="w-10 h-10 md:w-12 md:h-12 bg-emerald-50 text-emerald-600 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
+              <DollarSign className="w-5 h-5 md:w-6 md:h-6" />
             </div>
-            <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Monthly Revenue (MRR)</p>
-            <h3 className="text-3xl font-bold text-slate-900 mt-1">${stats.monthlyRevenue.toLocaleString()}</h3>
+            <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">MRR</p>
+            <h3 className="text-2xl md:text-3xl font-bold text-slate-900 mt-1">${stats.monthlyRevenue.toLocaleString()}</h3>
           </div>
 
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
-            <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-4">
-              <Activity className="w-6 h-6" />
+          <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div className="w-10 h-10 md:w-12 md:h-12 bg-indigo-50 text-indigo-600 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
+              <Activity className="w-5 h-5 md:w-6 md:h-6" />
             </div>
-            <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Active Subscriptions</p>
-            <h3 className="text-3xl font-bold text-slate-900 mt-1">{stats.activeSubscriptions}</h3>
+            <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Active Subs</p>
+            <h3 className="text-2xl md:text-3xl font-bold text-slate-900 mt-1">{stats.activeSubscriptions}</h3>
           </div>
 
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
-            <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mb-4">
-              <TrendingDown className="w-6 h-6" />
+          <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div className="w-10 h-10 md:w-12 md:h-12 bg-amber-50 text-amber-600 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
+              <TrendingDown className="w-5 h-5 md:w-6 md:h-6" />
             </div>
-            <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Churn Rate (30d)</p>
-            <h3 className="text-3xl font-bold text-slate-900 mt-1">{stats.churnRate}%</h3>
+            <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Churn (30d)</p>
+            <h3 className="text-2xl md:text-3xl font-bold text-slate-900 mt-1">{stats.churnRate}%</h3>
           </div>
         </section>
       )}
 
       {/* Users Section */}
-      <section className="bg-white rounded-3xl border border-slate-100 shadow-sm p-8">
+      <section className="bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm p-4 md:p-8">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-          <h2 className="text-2xl font-bold text-slate-900">Users</h2>
+          <h2 className="text-xl md:text-2xl font-bold text-slate-900">Users</h2>
           <div className="flex flex-col sm:flex-row gap-3">
             <input
               type="text"
               placeholder="Search by email or name..."
               value={search}
               onChange={(e) => handleSearch(e.target.value)}
-              className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
             />
             <select
               value={tierFilter}
               onChange={(e) => handleTierFilter(e.target.value)}
-              className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
             >
               <option value="">All Tiers</option>
               <option value="FREE">Free (Trial)</option>
@@ -204,7 +204,32 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        {/* Mobile: Card list */}
+        <div className="md:hidden space-y-2">
+          {users.map((u) => {
+            const tier = getTierDisplay(u);
+            return (
+              <Link
+                key={u.id}
+                to={`/admin/users/${u.id}`}
+                className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-colors border border-slate-100"
+              >
+                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-100 to-indigo-100 flex items-center justify-center text-blue-700 font-bold text-sm shrink-0">
+                  {(u.name?.[0] || u.email[0]).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-900 truncate">{u.name || u.email.split('@')[0]}</p>
+                  <p className="text-xs text-slate-500 truncate">{u.email}</p>
+                </div>
+                <span className={tier.className}>{tier.label}</span>
+                <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+              </Link>
+            );
+          })}
+        </div>
+
+        {/* Desktop: Full table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-100">
@@ -306,35 +331,35 @@ export default function AdminDashboard() {
               })}
             </tbody>
           </table>
-
-          {users.length === 0 && !loading && (
-            <div className="text-center py-12">
-              <p className="text-slate-500">No users found</p>
-            </div>
-          )}
-
-          {total > limit && (
-            <div className="flex items-center justify-between mt-6 pt-6 border-t border-slate-100">
-              <button
-                onClick={() => setOffset(Math.max(0, offset - limit))}
-                disabled={offset === 0}
-                className="px-6 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Previous
-              </button>
-              <span className="text-sm text-slate-600">
-                Showing {offset + 1} to {Math.min(offset + limit, total)} of {total}
-              </span>
-              <button
-                onClick={() => setOffset(offset + limit)}
-                disabled={offset + limit >= total}
-                className="px-6 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Next
-              </button>
-            </div>
-          )}
         </div>
+
+        {users.length === 0 && !loading && (
+          <div className="text-center py-12">
+            <p className="text-slate-500">No users found</p>
+          </div>
+        )}
+
+        {total > limit && (
+          <div className="flex items-center justify-between mt-6 pt-6 border-t border-slate-100">
+            <button
+              onClick={() => setOffset(Math.max(0, offset - limit))}
+              disabled={offset === 0}
+              className="px-4 md:px-6 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+            >
+              Previous
+            </button>
+            <span className="text-xs md:text-sm text-slate-600">
+              {offset + 1}–{Math.min(offset + limit, total)} of {total}
+            </span>
+            <button
+              onClick={() => setOffset(offset + limit)}
+              disabled={offset + limit >= total}
+              className="px-4 md:px-6 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+            >
+              Next
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );

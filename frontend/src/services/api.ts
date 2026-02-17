@@ -166,6 +166,10 @@ export const authApi = {
     const { data } = await api.post('/auth/reset-password', { token, password });
     return data;
   },
+  changePassword: async (currentPassword: string, newPassword: string): Promise<{ message: string }> => {
+    const { data } = await api.post('/auth/change-password', { currentPassword, newPassword });
+    return data;
+  },
 };
 
 // Health issue type from backend
