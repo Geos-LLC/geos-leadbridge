@@ -632,7 +632,7 @@ export class ThumbtackController {
       where: { savedAccountId: id },
       include: {
         notificationRules: {
-          select: { id: true, name: true, triggerType: true, toPhone: true, fromPhone: true, enabled: true },
+          select: { id: true, name: true, triggerType: true, toPhone: true, fromPhone: true, enabled: true, sendToCustomer: true },
         },
       },
     });
@@ -658,9 +658,10 @@ export class ThumbtackController {
     if (!platformConnection) connectionIssues.push('No active Thumbtack connection found for this user');
     if (!account.webhookId) connectionIssues.push('No webhook registered for this account');
 
-    // Check notification health based on what actually matters for SMS delivery:
-    // an enabled new_lead rule with both fromPhone and toPhone set.
-    // We do NOT require sigcoreApiKey — pool-phone users don't use Sigcore.
+    // Check notification health based on what actually matters for SMS delivery.
+    // Mirror the actual sending fallback chain:
+    //   fromPhone: rule.fromPhone → settings.sigcoreFromPhone → pool phone assignment
+    //   toPhone:   rule.toPhone   → settings.destinationPhone
     const notificationIssues: string[] = [];
     const allNewLeadRules = (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead');
     const enabledNewLeadRules = allNewLeadRules.filter((r: any) => r.enabled);
@@ -669,10 +670,24 @@ export class ThumbtackController {
     } else if (enabledNewLeadRules.length === 0) {
       notificationIssues.push('Lead alert rule exists but is disabled — toggle it on in Lead Alerts');
     } else {
-      const missingToPhone = enabledNewLeadRules.some((r: any) => !r.toPhone);
-      const missingFromPhone = enabledNewLeadRules.some((r: any) => !r.fromPhone);
-      if (missingToPhone) notificationIssues.push('Lead alert rule is missing a destination phone number');
-      if (missingFromPhone) notificationIssues.push('Lead alert rule is missing a sender phone number');
+      // Check toPhone with fallback to settings.destinationPhone (sendToCustomer rules use lead phone at runtime)
+      const hasToPhone = enabledNewLeadRules.every((r: any) => r.sendToCustomer || r.toPhone || notifSettings?.destinationPhone);
+      if (!hasToPhone) notificationIssues.push('Lead alert rule is missing a destination phone number');
+
+      // Check fromPhone with fallback to settings.sigcoreFromPhone and pool phone
+      const settingsFromPhone = notifSettings?.sigcoreFromPhone;
+      const hasFromPhoneOnRulesOrSettings = enabledNewLeadRules.every((r: any) => r.fromPhone) || !!settingsFromPhone;
+      if (!hasFromPhoneOnRulesOrSettings) {
+        // Last fallback: check for admin-assigned pool phone
+        const poolAssignment = await this.prisma.phonePoolAssignment.findFirst({
+          where: { userId: account.userId, phonePool: { status: { not: 'RELEASED' } } },
+          include: { phonePool: { select: { phoneNumber: true } } },
+          orderBy: { assignedAt: 'desc' },
+        });
+        if (!poolAssignment?.phonePool?.phoneNumber) {
+          notificationIssues.push('Lead alert rule is missing a sender phone number');
+        }
+      }
     }
 
     const healthy = connectionIssues.length === 0;
