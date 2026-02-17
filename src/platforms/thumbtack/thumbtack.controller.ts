@@ -17,6 +17,7 @@ import {
   BadRequestException,
   HttpException,
   HttpStatus,
+  Header,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
@@ -51,8 +52,9 @@ export class ThumbtackController {
    * Also saves each business as a saved account for multi-account switching
    * Skips businesses that already have active webhooks
    */
-  private async autoSetupWebhooks(userId: string): Promise<{ skippedAlreadyConnected: string[] }> {
+  private async autoSetupWebhooks(userId: string): Promise<{ skippedAlreadyConnected: string[]; webhookErrors: string[] }> {
     const skippedAlreadyConnected: string[] = [];
+    const webhookErrors: string[] = [];
 
     try {
       // Get all businesses for this user
@@ -142,8 +144,10 @@ export class ThumbtackController {
           if (err instanceof BadRequestException) {
             throw err;
           }
-          // Log but don't fail for other errors - webhook might already exist
-          console.warn(`Failed to setup webhook for business ${business.businessID}:`, err.message);
+          // Track webhook setup failures so the redirect URL can surface them
+          const errMsg = err.message || 'Unknown error';
+          console.error(`[autoSetupWebhooks] FAILED to setup webhook for business ${business.businessID} (${business.name}): ${errMsg}`);
+          webhookErrors.push(`${business.name}: ${errMsg}`);
         }
       }
     } catch (err) {
@@ -151,11 +155,12 @@ export class ThumbtackController {
       if (err instanceof BadRequestException) {
         throw err;
       }
-      console.error('Error in autoSetupWebhooks:', err.message);
+      console.error('[autoSetupWebhooks] Fatal error:', err.message);
       // Don't throw - OAuth succeeded, webhooks are just a bonus
     }
 
-    return { skippedAlreadyConnected };
+    console.log(`[autoSetupWebhooks] Done. skipped=${skippedAlreadyConnected.length}, errors=${webhookErrors.length}`);
+    return { skippedAlreadyConnected, webhookErrors };
   }
 
   // ==========================================
@@ -202,7 +207,7 @@ export class ThumbtackController {
       await this.platformService.handleCallback(userId, PlatformName.THUMBTACK, code);
 
       // Auto-setup webhooks for all businesses
-      const { skippedAlreadyConnected } = await this.autoSetupWebhooks(userId);
+      const { skippedAlreadyConnected, webhookErrors } = await this.autoSetupWebhooks(userId);
 
       // Build redirect URL with appropriate message
       const params = new URLSearchParams({ connected: 'thumbtack' });
@@ -211,6 +216,13 @@ export class ThumbtackController {
       if (skippedAlreadyConnected.length > 0) {
         params.set('warning', 'already_connected');
         params.set('skipped_accounts', skippedAlreadyConnected.join(', '));
+      }
+
+      // If webhook setup failed for any business, signal the frontend to retry
+      if (webhookErrors.length > 0) {
+        console.error('[ThumbtackController] Webhook setup failed after OAuth:', webhookErrors);
+        params.set('webhook_error', webhookErrors[0]);
+        params.set('reconnect', '1'); // Auto-open reconnect modal on dashboard
       }
 
       const redirectUrl = `${this.frontendUrl}/dashboard?${params.toString()}`;
@@ -509,6 +521,7 @@ export class ThumbtackController {
    * Get all saved Thumbtack accounts for switching
    */
   @Get('saved-accounts')
+  @Header('Cache-Control', 'no-store')
   async getSavedAccounts(@CurrentUser() user: any) {
     const accounts = await this.platformService.getSavedAccounts(user.id, PlatformName.THUMBTACK);
 

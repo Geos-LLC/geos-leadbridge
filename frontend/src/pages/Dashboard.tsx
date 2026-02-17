@@ -38,20 +38,35 @@ export function Dashboard() {
   const [showAllAccounts, setShowAllAccounts] = useState(false);
   const [accountDiagnostics, setAccountDiagnostics] = useState<Record<string, AccountDiagnostics>>({});
   const [loadingDiagnostics, setLoadingDiagnostics] = useState(false);
+  const [oauthError, setOauthError] = useState<string | null>(null);
 
   useEffect(() => {
     loadAccounts();
     loadDashboardStats();
   }, []);
 
-  // Auto-open reconnect modal when navigated here from the disconnect banner
+  // Handle OAuth callback params and auto-open reconnect modal
   useEffect(() => {
-    if (searchParams.get('reconnect') === '1' && savedAccounts.length > 0) {
+    const webhookError = searchParams.get('webhook_error');
+    const reconnect = searchParams.get('reconnect');
+    const error = searchParams.get('error');
+
+    if (webhookError) {
+      console.log('[Dashboard] Webhook setup failed after OAuth:', webhookError);
+      setOauthError(`Thumbtack authorization succeeded but webhook setup failed: ${webhookError}. Please try reconnecting again.`);
+    } else if (error) {
+      console.log('[Dashboard] OAuth error:', error, searchParams.get('error_description'));
+      setOauthError(searchParams.get('error_description') || error);
+    }
+
+    if (reconnect === '1' && savedAccounts.length > 0) {
       const unhealthy = savedAccounts.find(a => !a.webhookId);
       if (unhealthy) {
         setAccountToReconnect(unhealthy);
         setConnectionModalOpen(true);
       }
+      setSearchParams({}, { replace: true });
+    } else if (webhookError || error) {
       setSearchParams({}, { replace: true });
     }
   }, [searchParams, savedAccounts]);
@@ -198,6 +213,15 @@ export function Dashboard() {
 
   return (
     <div className="p-6 lg:p-10 max-w-7xl mx-auto space-y-10">
+      {/* OAuth error banner */}
+      {oauthError && (
+        <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-2xl text-red-800">
+          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-600" />
+          <div className="flex-1 text-sm">{oauthError}</div>
+          <button onClick={() => setOauthError(null)} className="text-red-400 hover:text-red-600 transition-colors">×</button>
+        </div>
+      )}
+
       {/* Welcome Section */}
       <section className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
