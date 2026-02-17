@@ -86,7 +86,8 @@ async function bootstrap() {
       console.log('[Request] URL:', req.url);
       console.log('[Request] Path:', req.path);
       console.log('[Request] OriginalUrl:', req.originalUrl);
-      console.log('[Request] Headers:', JSON.stringify(req.headers, null, 2));
+      const safeHeaders = { ...req.headers, authorization: req.headers.authorization ? '[REDACTED]' : undefined };
+      console.log('[Request] Headers:', JSON.stringify(safeHeaders, null, 2));
 
       // Log when response finishes
       res.on('finish', () => {
