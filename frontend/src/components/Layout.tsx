@@ -153,9 +153,6 @@ export function Layout() {
 
       {/* Main Content */}
       <main className="flex-1 lg:ml-72 min-h-screen">
-        {/* Trial Banner at the very top */}
-        <TrialBanner />
-
         {/* Top Navbar */}
         <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-100 px-6 py-4">
           <div className="flex items-center justify-between">
@@ -172,6 +169,9 @@ export function Layout() {
             </div>
           </div>
         </header>
+
+        {/* Trial Banner - sits below the header, overlays the top of page content */}
+        <TrialBanner />
 
         {/* Banners */}
         {(allDisconnected || someDisconnected) && (

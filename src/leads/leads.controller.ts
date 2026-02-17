@@ -18,6 +18,7 @@ import {
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { JwtSseAuthGuard } from '../common/guards/jwt-sse-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { LeadsService } from './leads.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Observable, fromEvent } from 'rxjs';
@@ -34,8 +35,10 @@ export class LeadsController {
   /**
    * Server-Sent Events endpoint for real-time lead updates
    * More efficient than polling for infrequent updates
-   * JwtSseAuthGuard (class-level) supports token in query parameter
+   * @Public() skips the global JwtAuthGuard so JwtSseAuthGuard can read the token from the query param
+   * (EventSource API does not support custom headers, so token must be passed as ?token=)
    */
+  @Public()
   @Sse('events')
   leadEvents(@CurrentUser() user: any): Observable<MessageEvent> {
     const userId = user.id;
