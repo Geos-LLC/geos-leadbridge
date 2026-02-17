@@ -1269,7 +1269,8 @@ export class NotificationsService implements OnModuleInit {
 
     const template = rule?.template || settings.template;
     const ruleName = rule?.name || 'Test';
-    const messageBody = this.renderTemplate(template, testLead);
+    const accountLabel = account.businessName ? `[${account.businessName}] ` : '';
+    const messageBody = `${accountLabel}${this.renderTemplate(template, testLead)}`;
 
     // Create notification log entry
     const logEntry = await this.prisma.notificationLog.create({

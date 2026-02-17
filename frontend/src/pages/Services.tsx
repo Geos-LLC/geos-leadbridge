@@ -126,7 +126,7 @@ export function Services() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
+  const [testStatus, setTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
   const [deletingAlert, setDeletingAlert] = useState(false);
   const [confirmDeleteAlert, setConfirmDeleteAlert] = useState(false);
 
@@ -422,19 +422,22 @@ export function Services() {
 
   async function sendTestAlert() {
     if (!leadAlertRule || !selectedAccountId) return;
-    setTesting(true);
+    setTestStatus('sending');
     setError(null);
     try {
       const result = await notificationsApi.sendTest(selectedAccountId, leadAlertRule.id);
       if (result.success) {
-        showSuccess('Test SMS sent!');
+        setTestStatus('delivered');
+        setTimeout(() => setTestStatus('idle'), 4000);
       } else {
+        setTestStatus('failed');
         setError(result.message || 'Failed to send test');
+        setTimeout(() => setTestStatus('idle'), 4000);
       }
     } catch (err: any) {
+      setTestStatus('failed');
       setError(err.response?.data?.message || err.message || 'Failed to send test SMS');
-    } finally {
-      setTesting(false);
+      setTimeout(() => setTestStatus('idle'), 4000);
     }
   }
 
@@ -731,6 +734,11 @@ export function Services() {
             const toPhoneMissing = !!leadAlertRule && !alertToPhone;
             const templateMissing = !!leadAlertRule && !leadAlertRule.templateId && !leadAlertRule.messageTemplate;
             const leadAlertsIncomplete = toPhoneMissing || templateMissing;
+            const directedHere = searchParams.get('expand') === 'lead-alerts';
+            const isDisabledButExists = !!leadAlertRule && !leadAlertRule.enabled;
+            const warningText = leadAlertsIncomplete
+              ? (toPhoneMissing ? 'Phone number required' : 'Template required')
+              : (directedHere && isDisabledButExists) ? 'Toggle on to activate lead alerts' : undefined;
             return (
           <ServiceCard
             icon={<Bell className="w-7 h-7" />}
@@ -740,8 +748,8 @@ export function Services() {
             onToggle={toggleLeadAlerts}
             expanded={expandedCard === 'lead-alerts'}
             onExpand={() => toggleExpand('lead-alerts')}
-            setupRequired={leadAlertsIncomplete}
-            warningText={leadAlertsIncomplete ? (toPhoneMissing ? 'Phone number required' : 'Template required') : undefined}
+            setupRequired={leadAlertsIncomplete || (directedHere && isDisabledButExists)}
+            warningText={warningText}
             statusText={!leadAlertsIncomplete && leadAlertRule?.enabled ? `Destination: ${leadAlertRule.toPhone}` : undefined}
             iconBgColor="bg-amber-50"
             iconTextColor="text-amber-600"
@@ -861,12 +869,23 @@ export function Services() {
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                       <button
                         onClick={sendTestAlert}
-                        disabled={testing || saving || !leadAlertRule.toPhone || !alertFromPhone}
-                        className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        disabled={testStatus === 'sending' || saving || !leadAlertRule.toPhone || !alertFromPhone}
+                        className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed flex items-center gap-2 ${
+                          testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                          testStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                          testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                          'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
+                        }`}
                         title={!leadAlertRule.toPhone ? 'Set a destination phone first' : !alertFromPhone ? 'Set a send-from phone first' : 'Send a test SMS'}
                       >
-                        {testing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                        Send Test SMS
+                        {testStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
+                         testStatus === 'delivered' ? <CheckCircle size={14} /> :
+                         testStatus === 'failed' ? <X size={14} /> :
+                         <Send size={14} />}
+                        {testStatus === 'sending' ? 'Sending...' :
+                         testStatus === 'delivered' ? 'Delivered' :
+                         testStatus === 'failed' ? 'Failed' :
+                         'Send Test SMS'}
                       </button>
                       {leadAlertRule.triggerCount > 0 && (
                         <span className="text-xs text-slate-500">

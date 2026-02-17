@@ -300,34 +300,20 @@ export function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {savedAccounts.length > 0 ? (
               (() => {
-                // Sort accounts: connection issues first, then SMS issues, then healthy
-                const sortedAccounts = [...savedAccounts].sort((a, b) => {
-                  const diagA = accountDiagnostics[a.id];
-                  const diagB = accountDiagnostics[b.id];
-                  const connA = !a.webhookId || (diagA && !diagA.healthy);
-                  const connB = !b.webhookId || (diagB && !diagB.healthy);
-                  const smsA = !connA && diagA && (diagA.notificationIssues?.length ?? 0) > 0;
-                  const smsB = !connB && diagB && (diagB.notificationIssues?.length ?? 0) > 0;
-                  if (connA && !connB) return -1;
-                  if (!connA && connB) return 1;
-                  if (smsA && !smsB) return -1;
-                  if (!smsA && smsB) return 1;
-                  return 0;
-                });
-
-                const displayAccounts = sortedAccounts;
-
-                return displayAccounts.map((account) => {
+                return savedAccounts.map((account) => {
                   const diag = accountDiagnostics[account.id];
                   const isCheckingDiag = !diag;
                   const hasConnectionIssues = !isCheckingDiag && (!account.webhookId || (diag && !diag.healthy));
-                  const hasSmsIssues = !isCheckingDiag && !hasConnectionIssues && diag && (diag.notificationIssues?.length ?? 0) > 0;
+                  const notifIssues = diag?.notificationIssues || [];
+                  // "disabled" = rule exists but toggled off; everything else = real config problem
+                  const isJustDisabled = !isCheckingDiag && !hasConnectionIssues && notifIssues.length > 0 && notifIssues.every((i: string) => i.toLowerCase().includes('disabled'));
+                  const hasConfigIssues = !isCheckingDiag && !hasConnectionIssues && notifIssues.length > 0 && !isJustDisabled;
 
                   const borderClass = isCheckingDiag
                     ? 'border-slate-200'
                     : hasConnectionIssues
                       ? 'border-amber-200 hover:border-amber-300'
-                      : hasSmsIssues
+                      : hasConfigIssues
                         ? 'border-orange-200 hover:border-orange-300'
                         : 'border-slate-100 hover:border-blue-200';
 
@@ -363,10 +349,15 @@ export function Dashboard() {
                                 {diag && !diag.healthy ? 'Needs attention' : 'Disconnected'}
                               </span>
                             </>
-                          ) : hasSmsIssues ? (
+                          ) : hasConfigIssues ? (
                             <>
                               <span className="w-2 h-2 rounded-full bg-orange-400"></span>
                               <span className="text-xs text-slate-500 font-medium">SMS not configured</span>
+                            </>
+                          ) : isJustDisabled ? (
+                            <>
+                              <span className="w-2 h-2 rounded-full bg-slate-300"></span>
+                              <span className="text-xs text-slate-400 font-medium">Lead alerts off</span>
                             </>
                           ) : (
                             <>
@@ -380,7 +371,7 @@ export function Dashboard() {
                         <div className="w-5 h-5" />
                       ) : hasConnectionIssues ? (
                         <AlertCircle className="w-5 h-5 text-amber-500 group-hover:text-amber-600" />
-                      ) : hasSmsIssues ? (
+                      ) : hasConfigIssues ? (
                         <BellOff className="w-5 h-5 text-orange-400 group-hover:text-orange-500" />
                       ) : (
                         <ExternalLink className="w-5 h-5 text-slate-300 group-hover:text-blue-500" />
@@ -438,13 +429,14 @@ export function Dashboard() {
               const diag = accountDiagnostics[a.id];
               return !a.webhookId || (diag && !diag.healthy);
             });
-            const smsIssueAccounts = savedAccounts.filter(a => {
+            const configIssueAccounts = savedAccounts.filter(a => {
               const diag = accountDiagnostics[a.id];
               const hasConnIssue = !a.webhookId || (diag && !diag.healthy);
-              return !hasConnIssue && diag && (diag.notificationIssues?.length ?? 0) > 0;
+              const issues = diag?.notificationIssues || [];
+              return !hasConnIssue && issues.length > 0 && !issues.every((i: string) => i.toLowerCase().includes('disabled'));
             });
             const hasConnectionIssues = disconnectedAccounts.length > 0;
-            const hasSmsIssues = smsIssueAccounts.length > 0;
+            const hasConfigIssues = configIssueAccounts.length > 0;
 
             return (
               <>
@@ -459,7 +451,7 @@ export function Dashboard() {
                     <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-1 rounded-md">
                       {disconnectedAccounts.length} URGENT
                     </span>
-                  ) : hasSmsIssues ? (
+                  ) : hasConfigIssues ? (
                     <span className="bg-orange-50 text-orange-600 text-xs font-bold px-2 py-1 rounded-md">
                       SETUP NEEDED
                     </span>
@@ -509,7 +501,7 @@ export function Dashboard() {
                       </div>
                     </div>
                   </div>
-                ) : hasSmsIssues ? (
+                ) : hasConfigIssues ? (
                   <Link to="/services?expand=lead-alerts" className="bg-orange-50/50 border border-orange-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-orange-50 transition-colors cursor-pointer flex items-center block">
                     <div className="flex items-start gap-4 w-full">
                       <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center shrink-0">
@@ -519,8 +511,8 @@ export function Dashboard() {
                         <h5 className="font-bold text-slate-900">Lead Alerts Not Configured</h5>
                         <p className="text-sm text-slate-600 mt-1 leading-relaxed">
                           {(() => {
-                            const firstIssue = accountDiagnostics[smsIssueAccounts[0]?.id]?.notificationIssues?.[0];
-                            return firstIssue || `${smsIssueAccounts.length} account${smsIssueAccounts.length !== 1 ? 's are' : ' is'} missing SMS alert setup.`;
+                            const firstIssue = accountDiagnostics[configIssueAccounts[0]?.id]?.notificationIssues?.[0];
+                            return firstIssue || `${configIssueAccounts.length} account${configIssueAccounts.length !== 1 ? 's are' : ' is'} missing SMS alert setup.`;
                           })()}
                         </p>
                         <div className="mt-4 text-xs font-bold text-orange-600 uppercase tracking-wider flex items-center gap-1 hover:text-orange-700 transition-colors">
