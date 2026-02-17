@@ -515,17 +515,23 @@ export class TestService {
       take: 5,
     });
 
-    // Build health checks - only flag critical issues that prevent SMS from working
-    const issues: string[] = [];
-    if (!platformConnection) issues.push('No active Thumbtack connection found for this user');
-    if (!account.webhookId) issues.push('No webhook registered for this account');
-    if (!notifSettings) issues.push('No notification settings configured');
+    // Connection health: only Thumbtack webhook/platform issues make healthy=false
+    // (SMS/notification config is a separate setup step, not a connection issue)
+    const connectionIssues: string[] = [];
+    if (!platformConnection) connectionIssues.push('No active Thumbtack connection found for this user');
+    if (!account.webhookId) connectionIssues.push('No webhook registered for this account');
+
+    // Notification issues are informational only - don't affect healthy flag
+    const notificationIssues: string[] = [];
+    if (!notifSettings) notificationIssues.push('No notification settings configured');
     else {
-      if (!notifSettings.enabled) issues.push('Notification settings are disabled');
-      if (!notifSettings.sigcoreApiKey) issues.push('No Sigcore API key configured');
+      if (!notifSettings.enabled) notificationIssues.push('Notification settings are disabled');
+      if (!notifSettings.sigcoreApiKey) notificationIssues.push('No Sigcore API key configured');
       const newLeadRules = notifSettings.notificationRules.filter(r => r.triggerType === 'new_lead');
-      if (newLeadRules.length === 0) issues.push('No enabled "new_lead" SMS rules');
+      if (newLeadRules.length === 0) notificationIssues.push('No enabled "new_lead" SMS rules');
     }
+
+    const issues = [...connectionIssues, ...notificationIssues];
 
     return {
       account: {
@@ -562,7 +568,7 @@ export class TestService {
         error: l.error,
         createdAt: l.createdAt,
       })),
-      healthy: issues.length === 0,
+      healthy: connectionIssues.length === 0,
       issues,
     };
   }
