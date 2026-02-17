@@ -885,7 +885,7 @@ export function Messages() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-50">
+    <div className="flex h-screen bg-slate-50 overflow-hidden">
       {/* Leads Sidebar */}
       <aside className={`w-full md:w-80 bg-white border-r border-slate-100 flex flex-col ${mobilePanel !== 'list' ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-slate-100 flex items-center gap-3">
@@ -1074,7 +1074,7 @@ export function Messages() {
       </aside>
 
       {/* Chat Area */}
-      <main className={`flex-1 flex flex-col bg-white ${mobilePanel !== 'chat' ? 'hidden md:flex' : 'flex'}`}>
+      <main className={`flex-1 min-w-0 flex flex-col bg-white ${mobilePanel !== 'chat' ? 'hidden md:flex' : 'flex'}`}>
         {selectedLead ? (
           <>
             {/* Lead Info Header */}
@@ -1206,7 +1206,7 @@ export function Messages() {
                       key={event.id}
                       className={`flex ${event.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}
                     >
-                      <div className={`max-w-md ${
+                      <div className={`max-w-[85%] sm:max-w-md ${
                         isSmsDisconnected && event.direction === 'outbound'
                           ? 'bg-yellow-50 text-slate-900 border-2 border-yellow-200'
                           : event.channel === 'sms'
@@ -1343,7 +1343,7 @@ export function Messages() {
                       <ChevronDown size={14} />
                     </button>
                     {showTemplateDropdown && singleMessageTemplates.length > 0 && (
-                      <div className="absolute bottom-full left-0 mb-2 w-80 bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden z-10">
+                      <div className="absolute bottom-full left-0 mb-2 w-[calc(100vw-2rem)] sm:w-80 bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden z-10">
                         <div className="p-3 border-b border-slate-100 bg-slate-50">
                           <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Use Template</span>
                         </div>
