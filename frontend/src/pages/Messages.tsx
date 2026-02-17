@@ -278,7 +278,9 @@ export function Messages() {
     }
 
     // EventSource doesn't support custom headers, so pass token as query parameter
-    const eventSource = new EventSource(`/api/v1/leads/events?token=${encodeURIComponent(token)}`);
+    // Use absolute URL to bypass Vercel's SPA catch-all rewrite and connect directly to the API server
+    const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
+    const eventSource = new EventSource(`${API_BASE}/v1/leads/events?token=${encodeURIComponent(token)}`);
 
     eventSource.onmessage = (event) => {
       try {
