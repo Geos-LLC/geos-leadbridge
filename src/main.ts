@@ -32,6 +32,7 @@ async function bootstrap() {
     'http://localhost:3000',
     'https://www.leadbridge360.com', // Production frontend (www)
     'https://leadbridge360.com',     // Production frontend (non-www)
+    'https://staging.leadbridge360.com', // Staging frontend
   ].filter(Boolean) as string[];
 
   console.log('[CORS] Allowed origins:', allowedOrigins);
