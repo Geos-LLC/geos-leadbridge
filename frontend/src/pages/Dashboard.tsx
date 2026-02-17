@@ -230,62 +230,62 @@ export function Dashboard() {
       </section>
 
       {/* Core Metrics */}
-      <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 relative">
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 relative">
         {refreshing && (
           <div className="absolute -top-6 right-0 flex items-center gap-1.5 text-xs text-slate-400">
             <Loader2 className="w-3 h-3 animate-spin" />
             Updating...
           </div>
         )}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
-          <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
-            <Users className="w-6 h-6" />
+        <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+          <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-50 text-blue-600 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
+            <Users className="w-5 h-5 md:w-6 md:h-6" />
           </div>
-          <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Leads Today</p>
-          <div className="flex items-baseline gap-2 mt-1">
-            <h3 className={`text-3xl font-bold text-slate-900 transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
+          <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Leads Today</p>
+          <div className="flex items-baseline gap-1 md:gap-2 mt-1">
+            <h3 className={`text-2xl md:text-3xl font-bold text-slate-900 transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
               {loading ? '0' : stats.leadsToday}
             </h3>
-            <span className="text-emerald-500 text-sm font-bold">+12%</span>
+            <span className="text-emerald-500 text-xs md:text-sm font-bold">+12%</span>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
-          <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-4">
-            <Send className="w-6 h-6" />
+        <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+          <div className="w-10 h-10 md:w-12 md:h-12 bg-emerald-50 text-emerald-600 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
+            <Send className="w-5 h-5 md:w-6 md:h-6" />
           </div>
-          <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Automated Replies</p>
-          <div className="flex items-baseline gap-2 mt-1">
-            <h3 className={`text-3xl font-bold text-slate-900 transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
+          <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Auto Replies</p>
+          <div className="flex items-baseline gap-1 md:gap-2 mt-1">
+            <h3 className={`text-2xl md:text-3xl font-bold text-slate-900 transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
               {loading ? '0' : stats.automatedReplies}
             </h3>
-            <span className="text-emerald-500 text-sm font-bold">100%</span>
+            <span className="text-emerald-500 text-xs md:text-sm font-bold">100%</span>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
-          <div className="w-12 h-12 bg-orange-50 text-orange-600 rounded-2xl flex items-center justify-center mb-4">
-            <Clock className="w-6 h-6" />
+        <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+          <div className="w-10 h-10 md:w-12 md:h-12 bg-orange-50 text-orange-600 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
+            <Clock className="w-5 h-5 md:w-6 md:h-6" />
           </div>
-          <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Avg Response Time</p>
-          <div className="flex items-baseline gap-2 mt-1">
-            <h3 className={`text-3xl font-bold text-slate-900 transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
+          <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Avg Response</p>
+          <div className="flex items-baseline gap-1 md:gap-2 mt-1">
+            <h3 className={`text-2xl md:text-3xl font-bold text-slate-900 transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
               {loading ? '—' : stats.avgResponseTime}
             </h3>
-            <span className="text-emerald-500 text-sm font-bold">Fast</span>
+            <span className="text-emerald-500 text-xs md:text-sm font-bold">Fast</span>
           </div>
         </div>
 
-        <div className="bg-indigo-600 p-6 rounded-3xl shadow-xl shadow-indigo-100 text-white">
-          <div className="w-12 h-12 bg-white/20 text-white rounded-2xl flex items-center justify-center mb-4">
-            <TrendingUp className="w-6 h-6" />
+        <div className="bg-indigo-600 p-4 md:p-6 rounded-2xl md:rounded-3xl shadow-xl shadow-indigo-100 text-white">
+          <div className="w-10 h-10 md:w-12 md:h-12 bg-white/20 text-white rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
+            <TrendingUp className="w-5 h-5 md:w-6 md:h-6" />
           </div>
-          <p className="text-indigo-100 text-sm font-medium uppercase tracking-wide">Engagement</p>
-          <div className="flex items-baseline gap-2 mt-1">
-            <h3 className={`text-3xl font-bold transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
+          <p className="text-indigo-100 text-xs md:text-sm font-medium uppercase tracking-wide">Engagement</p>
+          <div className="flex items-baseline gap-1 md:gap-2 mt-1">
+            <h3 className={`text-2xl md:text-3xl font-bold transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
               {loading ? '0' : stats.conversionRate}%
             </h3>
-            <span className="text-indigo-200 text-sm">of leads replied</span>
+            <span className="text-indigo-200 text-xs md:text-sm">of leads replied</span>
           </div>
         </div>
       </section>
@@ -392,28 +392,28 @@ export function Dashboard() {
           </div>
 
           {/* System Health */}
-          <div className="bg-slate-900 rounded-[2rem] p-8 text-white relative overflow-hidden h-[280px]">
-            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8 h-full">
-              <div className="max-w-xs">
-                <h3 className="text-2xl font-bold mb-2">System Performance</h3>
+          <div className="bg-slate-900 rounded-[2rem] p-6 md:p-8 text-white relative overflow-hidden">
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-8">
+              <div className="md:max-w-xs">
+                <h3 className="text-xl md:text-2xl font-bold mb-2">System Performance</h3>
                 <p className="text-slate-400 text-sm">Your automation bridge is running at optimal capacity. No downtime detected.</p>
               </div>
-              <div className="grid grid-cols-2 gap-4 flex-1">
-                <div className="bg-white/10 rounded-2xl p-4 flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
-                  <span className="text-sm font-medium">Auto-Reply: Active</span>
+              <div className="grid grid-cols-2 gap-3 md:gap-4 flex-1">
+                <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
+                  <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] shrink-0"></div>
+                  <span className="text-xs md:text-sm font-medium">Auto-Reply: Active</span>
                 </div>
-                <div className="bg-white/10 rounded-2xl p-4 flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
-                  <span className="text-sm font-medium">SMS Bridge: Up</span>
+                <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
+                  <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] shrink-0"></div>
+                  <span className="text-xs md:text-sm font-medium">SMS Bridge: Up</span>
                 </div>
-                <div className="bg-white/10 rounded-2xl p-4 flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.8)]"></div>
-                  <span className="text-sm font-medium">Lead Sync: Real-time</span>
+                <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
+                  <div className="w-2 h-2 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.8)] shrink-0"></div>
+                  <span className="text-xs md:text-sm font-medium">Lead Sync: Real-time</span>
                 </div>
-                <div className="bg-white/10 rounded-2xl p-4 flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full bg-amber-400"></div>
-                  <span className="text-sm font-medium opacity-60 italic">Voice: Beta</span>
+                <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
+                  <div className="w-2 h-2 rounded-full bg-amber-400 shrink-0"></div>
+                  <span className="text-xs md:text-sm font-medium opacity-60 italic">Voice: Beta</span>
                 </div>
               </div>
             </div>
@@ -540,7 +540,7 @@ export function Dashboard() {
             );
           })()}
 
-          <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] p-8 text-white shadow-lg shadow-indigo-100 relative overflow-hidden h-[280px]">
+          <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] p-8 text-white shadow-lg shadow-indigo-100 relative overflow-hidden">
             <div className="relative z-10 flex flex-col items-center justify-center text-center h-full">
               <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Sparkles className="w-8 h-8" />

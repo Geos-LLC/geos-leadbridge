@@ -21,6 +21,7 @@ import {
   Mail,
   FileText,
   ChevronDown,
+  ChevronRight,
   Smartphone,
   MessageCircle,
 } from 'lucide-react';
@@ -173,6 +174,9 @@ export function Messages() {
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [channelFilter, setChannelFilter] = useState<'all' | TimelineChannel>('all');
   const [sendChannel, setSendChannel] = useState<'platform' | 'sms'>('platform');
+
+  // Mobile panel state: 'list' (leads), 'chat' (conversation), 'details' (lead details)
+  const [mobilePanel, setMobilePanel] = useState<'list' | 'chat' | 'details'>('list');
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [commSummary, setCommSummary] = useState<CommunicationSummary>({
     platformMessages: 0, smsSent: 0, smsDelivered: 0, smsFailed: 0, calls: 0,
@@ -883,7 +887,7 @@ export function Messages() {
   return (
     <div className="flex h-screen bg-slate-50">
       {/* Leads Sidebar */}
-      <aside className="w-80 bg-white border-r border-slate-100 flex flex-col">
+      <aside className={`w-full md:w-80 bg-white border-r border-slate-100 flex flex-col ${mobilePanel !== 'list' ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-slate-100 flex items-center gap-3">
           <button className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors" onClick={() => navigate('/dashboard')}>
             <ArrowLeft size={20} />
@@ -1015,9 +1019,11 @@ export function Messages() {
                       toggleLeadSelection(lead.id, { stopPropagation: () => {} } as React.MouseEvent);
                     } else if (selectedLead?.id === lead.id) {
                       loadMessagesForLead(lead);
+                      setMobilePanel('chat');
                     } else {
                       console.log('[Messages] Negotiation object:', lead);
                       setSelectedLead(lead);
+                      setMobilePanel('chat');
                     }
                   }}
                 >
@@ -1068,13 +1074,20 @@ export function Messages() {
       </aside>
 
       {/* Chat Area */}
-      <main className="flex-1 flex flex-col bg-white">
+      <main className={`flex-1 flex flex-col bg-white ${mobilePanel !== 'chat' ? 'hidden md:flex' : 'flex'}`}>
         {selectedLead ? (
           <>
             {/* Lead Info Header */}
             <div className="p-4 border-b border-slate-100 bg-white">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
+                  {/* Mobile back button */}
+                  <button
+                    className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors md:hidden"
+                    onClick={() => setMobilePanel('list')}
+                  >
+                    <ArrowLeft size={20} />
+                  </button>
                   <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
                     <User size={24} />
                   </div>
@@ -1093,28 +1106,31 @@ export function Messages() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
-                  {selectedLead.customerPhone && (
-                    <a href={`tel:${selectedLead.customerPhone}`} className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-blue-600">
-                      <Phone size={14} />
-                      {formatPhoneNumber(selectedLead.customerPhone)}
-                    </a>
-                  )}
-                  {selectedLead.city && (
+                  {/* Desktop-only meta details */}
+                  <div className="hidden md:flex items-center gap-3 flex-wrap">
+                    {selectedLead.customerPhone && (
+                      <a href={`tel:${selectedLead.customerPhone}`} className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-blue-600">
+                        <Phone size={14} />
+                        {formatPhoneNumber(selectedLead.customerPhone)}
+                      </a>
+                    )}
+                    {selectedLead.city && (
+                      <span className="flex items-center gap-1.5 text-xs text-slate-600">
+                        <MapPin size={14} />
+                        {selectedLead.city}, {selectedLead.state}
+                      </span>
+                    )}
                     <span className="flex items-center gap-1.5 text-xs text-slate-600">
-                      <MapPin size={14} />
-                      {selectedLead.city}, {selectedLead.state}
+                      <Calendar size={14} />
+                      {formatDate(selectedLead.createdAt)}
                     </span>
-                  )}
-                  <span className="flex items-center gap-1.5 text-xs text-slate-600">
-                    <Calendar size={14} />
-                    {formatDate(selectedLead.createdAt)}
-                  </span>
-                  {selectedLead.raw?.estimate?.total && (
-                    <span className="flex items-center gap-1.5 text-xs text-slate-600">
-                      <DollarSign size={14} />
-                      {selectedLead.raw.estimate.total}
-                    </span>
-                  )}
+                    {selectedLead.raw?.estimate?.total && (
+                      <span className="flex items-center gap-1.5 text-xs text-slate-600">
+                        <DollarSign size={14} />
+                        {selectedLead.raw.estimate.total}
+                      </span>
+                    )}
+                  </div>
                   <button
                     className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors disabled:opacity-50"
                     onClick={handleResyncMessages}
@@ -1122,6 +1138,14 @@ export function Messages() {
                     title="Resync messages from Thumbtack"
                   >
                     {resyncingMessages ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+                  </button>
+                  {/* Mobile details arrow */}
+                  <button
+                    className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors md:hidden"
+                    onClick={() => setMobilePanel('details')}
+                    title="Lead details"
+                  >
+                    <ChevronRight size={20} />
                   </button>
                 </div>
               </div>
@@ -1379,9 +1403,41 @@ export function Messages() {
 
       {/* Right Details Panel */}
       {selectedLead && (
-        <aside className="w-72 bg-white border-l border-slate-100 overflow-y-auto hidden xl:block">
-          <div className="p-4 border-b border-slate-100">
+        <aside className={`w-full md:w-72 bg-white border-l border-slate-100 overflow-y-auto ${mobilePanel === 'details' ? 'flex flex-col' : 'hidden'} xl:block`}>
+          <div className="p-4 border-b border-slate-100 flex items-center gap-3">
+            {/* Mobile back button */}
+            <button
+              className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors xl:hidden"
+              onClick={() => setMobilePanel('chat')}
+            >
+              <ArrowLeft size={20} />
+            </button>
             <h3 className="font-bold text-slate-900">Lead Details</h3>
+          </div>
+          {/* Mobile-only: contact info (hidden in chat header on mobile) */}
+          <div className="p-4 border-b border-slate-100 space-y-2 xl:hidden">
+            {selectedLead.customerPhone && (
+              <a href={`tel:${selectedLead.customerPhone}`} className="flex items-center gap-2 text-sm text-slate-700 hover:text-blue-600">
+                <Phone size={16} className="text-slate-400" />
+                {formatPhoneNumber(selectedLead.customerPhone)}
+              </a>
+            )}
+            {selectedLead.city && (
+              <span className="flex items-center gap-2 text-sm text-slate-700">
+                <MapPin size={16} className="text-slate-400" />
+                {selectedLead.city}, {selectedLead.state}
+              </span>
+            )}
+            <span className="flex items-center gap-2 text-sm text-slate-700">
+              <Calendar size={16} className="text-slate-400" />
+              {formatDate(selectedLead.createdAt)}
+            </span>
+            {selectedLead.raw?.estimate?.total && (
+              <span className="flex items-center gap-2 text-sm text-slate-700">
+                <DollarSign size={16} className="text-slate-400" />
+                {selectedLead.raw.estimate.total}
+              </span>
+            )}
           </div>
           <div className="p-4 space-y-6">
             {/* Communication Summary */}
