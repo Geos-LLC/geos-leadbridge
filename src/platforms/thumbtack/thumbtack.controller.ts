@@ -15,6 +15,8 @@ import {
   Body,
   Param,
   BadRequestException,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
@@ -608,13 +610,25 @@ export class ThumbtackController {
     @CurrentUser() user: any,
     @Param('id') id: string,
   ) {
-    const result = await this.platformService.reconnectAccountWebhook(user.id, id);
-
-    return {
-      success: true,
-      message: 'Webhook reconnected',
-      webhookId: result.webhookId,
-    };
+    try {
+      const result = await this.platformService.reconnectAccountWebhook(user.id, id);
+      return {
+        success: true,
+        message: 'Webhook reconnected',
+        webhookId: result.webhookId,
+      };
+    } catch (err: any) {
+      const errMsg = (err.message || '').toLowerCase();
+      let errorCode: string;
+      if (errMsg.includes('expired') || errMsg.includes('token') || errMsg.includes('unauthorized') || errMsg.includes('authentication')) {
+        errorCode = 'token_expired';
+      } else if (errMsg.includes('permission') || errMsg.includes('access') || errMsg.includes('does not have access')) {
+        errorCode = 'token_revoked';
+      } else {
+        errorCode = 'unknown';
+      }
+      throw new HttpException({ message: err.message, errorCode }, HttpStatus.UNPROCESSABLE_ENTITY);
+    }
   }
 
   /**
