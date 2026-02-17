@@ -4,7 +4,7 @@ import {
   Zap, Briefcase, AlertCircle, CheckCircle, X, Clock,
   Bot, Pencil, Phone, Send, ChevronUp, Trash2,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   automationApi, notificationsApi, thumbtackApi, templatesApi, usersApi,
 } from '../services/api';
@@ -115,6 +115,7 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
 // -- Main Services Page --
 export function Services() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const storedAccounts = useAppStore(state => state.savedAccounts);
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
 
@@ -227,10 +228,11 @@ export function Services() {
       const defaultFrom = poolRes.phoneNumbers[0]?.phoneNumber || '';
       if (!leadAlert) setAlertFromPhone(defaultFrom);
 
-      // Auto-expand Lead Alerts card if setup is incomplete
+      // Auto-expand Lead Alerts card if setup is incomplete OR directed here from Dashboard alert
       const toPhoneMissing = leadAlert && !leadAlert.toPhone;
       const templateMissing = leadAlert && !leadAlert.templateId && !leadAlert.messageTemplate;
-      if (toPhoneMissing || templateMissing) {
+      const expandParam = searchParams.get('expand');
+      if (toPhoneMissing || templateMissing || expandParam === 'lead-alerts') {
         setExpandedCard('lead-alerts');
       }
 

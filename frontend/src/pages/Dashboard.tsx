@@ -195,7 +195,7 @@ export function Dashboard() {
       setAccountToReconnect(account);
       setConnectionModalOpen(true);
     } else if (hasSmsIssues) {
-      navigate('/services');
+      navigate('/services?expand=lead-alerts');
     } else {
       navigate(`/messages?account=${account.businessId}`);
     }
@@ -517,7 +517,7 @@ export function Dashboard() {
                     </div>
                   </div>
                 ) : hasSmsIssues ? (
-                  <Link to="/services" className="bg-orange-50/50 border border-orange-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-orange-50 transition-colors cursor-pointer flex items-center block">
+                  <Link to="/services?expand=lead-alerts" className="bg-orange-50/50 border border-orange-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-orange-50 transition-colors cursor-pointer flex items-center block">
                     <div className="flex items-start gap-4 w-full">
                       <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center shrink-0">
                         <BellOff className="w-5 h-5" />
@@ -525,10 +525,13 @@ export function Dashboard() {
                       <div className="flex-1">
                         <h5 className="font-bold text-slate-900">Lead Alerts Not Configured</h5>
                         <p className="text-sm text-slate-600 mt-1 leading-relaxed">
-                          {smsIssueAccounts.length} account{smsIssueAccounts.length !== 1 ? 's are' : ' is'} missing SMS alert setup. Configure in Automation → Lead Alerts.
+                          {(() => {
+                            const firstIssue = accountDiagnostics[smsIssueAccounts[0]?.id]?.notificationIssues?.[0];
+                            return firstIssue || `${smsIssueAccounts.length} account${smsIssueAccounts.length !== 1 ? 's are' : ' is'} missing SMS alert setup.`;
+                          })()}
                         </p>
                         <div className="mt-4 text-xs font-bold text-orange-600 uppercase tracking-wider flex items-center gap-1 hover:text-orange-700 transition-colors">
-                          Go to Automation <ChevronRight className="w-3 h-3" />
+                          Fix in Automation <ChevronRight className="w-3 h-3" />
                         </div>
                       </div>
                     </div>
