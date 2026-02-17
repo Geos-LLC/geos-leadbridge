@@ -168,6 +168,35 @@ export class AuthService {
   }
 
   /**
+   * Get account info for Chrome extension verification.
+   * Returns { ok, account, stats } format expected by the extension.
+   */
+  async getMe(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, name: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const collectedLeads = await this.prisma.thumbtackLeadId.count({
+      where: { userId },
+    });
+
+    return {
+      ok: true,
+      account: {
+        tenantId: user.id,
+        name: user.name || user.email,
+        email: user.email,
+      },
+      stats: { collectedLeads },
+    };
+  }
+
+  /**
    * Generate JWT token
    */
   private generateToken(userId: string, email: string): string {

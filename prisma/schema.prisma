@@ -90,6 +90,8 @@ model User {
   notificationSettings     NotificationSettings[] // Account-specific and user-level default notification settings
   poolPhones               PhonePool[]            // Legacy: single-assignment relation
   phonePoolAssignments     PhonePoolAssignment[]  // Many-to-many phone pool assignments
+  thumbtackSnapshots       ThumbtackSettingsSnapshot[]
+  thumbtackLeadIds         ThumbtackLeadId[]
 
   @@map("users")
 }
@@ -583,4 +585,57 @@ model PhonePoolAssignment {
   @@index([userId])
   @@index([phonePoolId])
   @@map("phone_pool_assignments")
+}
+
+// ==========================================
+// Thumbtack Chrome Extension Integration
+// ==========================================
+
+model ThumbtackSettingsSnapshot {
+  id            String    @id @default(uuid())
+  userId        String
+  provider      String    @default("thumbtack")
+  snapshotType  String    @default("budget")
+  scopeCategory String?
+  scopeLocation String?
+  weeklyBudget  Decimal   @db.Decimal(12, 2)
+  currency      String    @default("USD")
+  capturedAt    DateTime
+  receivedAt    DateTime  @default(now())
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  source        String?
+  pageUrl       String?
+  pageTitle     String?
+  rawJson       Json?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, snapshotType, effectiveFrom])
+  @@index([userId, snapshotType, effectiveTo])
+  @@index([userId, scopeCategory, scopeLocation, effectiveFrom])
+  @@map("thumbtack_settings_snapshots")
+}
+
+model ThumbtackLeadId {
+  id             String    @id @default(uuid())
+  userId         String
+  thumbtackId    String
+  batchId        String?
+  capturedAt     DateTime
+  collectedAt    DateTime  @default(now())
+  source         String?
+  pageUrl        String?
+  pageTitle      String?
+  imported       Boolean   @default(false)
+  importedAt     DateTime?
+  needsRefetch   Boolean   @default(false)
+  lastActivityAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, thumbtackId])
+  @@index([userId, collectedAt(sort: Desc)])
+  @@index([batchId])
+  @@map("thumbtack_lead_ids")
 }
