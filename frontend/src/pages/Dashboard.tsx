@@ -5,37 +5,33 @@ import {
   Briefcase, Sparkles, AlertCircle, ExternalLink, Loader2, CheckCircle
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
+import type { DashboardStats } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import { thumbtackApi, analyticsApi, testApi } from '../services/api';
 import ConnectionModal from '../components/ConnectionModal';
 import type { SavedAccount, AccountDiagnostics } from '../types';
 
-interface DashboardStats {
-  leadsToday: number;
-  automatedReplies: number;
-  avgResponseTime: string;
-  conversionRate: number;
-  weeklyLeads: number;
-  engagement: number;
-  lifetimeReplies: number;
-  messagesSent: number;
-}
-
 export function Dashboard() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  const { savedAccounts, setSavedAccounts } = useAppStore();
-  const [stats, setStats] = useState<DashboardStats>({
-    leadsToday: 0,
-    automatedReplies: 0,
-    avgResponseTime: '0m',
-    conversionRate: 0,
-    weeklyLeads: 0,
-    engagement: 0,
-    lifetimeReplies: 0,
-    messagesSent: 0,
-  });
-  const [loading, setLoading] = useState(true);
+  const { savedAccounts, setSavedAccounts, dashboardStats: cachedStats, setDashboardStats } = useAppStore();
+
+  // Start with cached stats (instant) — zeros only if nothing cached yet
+  const [stats, setStats] = useState<DashboardStats>(
+    cachedStats ?? {
+      leadsToday: 0,
+      automatedReplies: 0,
+      avgResponseTime: '—',
+      conversionRate: 0,
+      weeklyLeads: 0,
+      engagement: 0,
+      lifetimeReplies: 0,
+      messagesSent: 0,
+    }
+  );
+  // Only show skeleton loading on very first load (no cache)
+  const [loading, setLoading] = useState(!cachedStats);
+  const [refreshing, setRefreshing] = useState(false);
   const [connectionModalOpen, setConnectionModalOpen] = useState(false);
   const [accountToReconnect, setAccountToReconnect] = useState<SavedAccount | null>(null);
   const [showAllAccounts, setShowAllAccounts] = useState(false);
@@ -81,7 +77,12 @@ export function Dashboard() {
 
   async function loadDashboardStats() {
     try {
-      setLoading(true);
+      // If we have cached data, show refresh indicator instead of full skeleton
+      if (cachedStats) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
 
       // Calculate date ranges
       const now = new Date();
@@ -134,21 +135,25 @@ export function Dashboard() {
       const estimatedTotalMessages = Math.round(totalLeads * avgMessagesPerLead);
       const estimatedProMessages = Math.round(estimatedTotalMessages / 2); // Rough estimate
 
-      setStats({
+      const freshStats = {
         leadsToday: todayData.data.totalLeads || 0,
-        automatedReplies: Math.round(estimatedProMessages * 0.7), // Estimate 70% automated
+        automatedReplies: Math.round(estimatedProMessages * 0.7),
         avgResponseTime: formatDuration(allTimeData.data.connectionTime?.averageMinutes || 0),
         conversionRate: Math.round(allTimeData.data.customerEngagement?.engagementRate || 0),
         weeklyLeads: weekData.data.totalLeads || 0,
         engagement: Math.round(weekData.data.customerEngagement?.engagementRate || 0),
         lifetimeReplies: estimatedProMessages,
         messagesSent: estimatedTotalMessages,
-      });
+      };
+
+      setStats(freshStats);
+      setDashboardStats(freshStats); // Persist to localStorage for next visit
     } catch (err) {
       console.error('Failed to load dashboard stats:', err);
-      // Keep default zeros if error
+      // Keep cached/existing stats on error
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }
 
@@ -207,14 +212,22 @@ export function Dashboard() {
       </section>
 
       {/* Core Metrics */}
-      <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 relative">
+        {refreshing && (
+          <div className="absolute -top-6 right-0 flex items-center gap-1.5 text-xs text-slate-400">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Updating...
+          </div>
+        )}
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
           <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
             <Users className="w-6 h-6" />
           </div>
           <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Leads Today</p>
           <div className="flex items-baseline gap-2 mt-1">
-            <h3 className="text-3xl font-bold text-slate-900">{loading ? '...' : stats.leadsToday}</h3>
+            <h3 className={`text-3xl font-bold text-slate-900 transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
+              {loading ? '0' : stats.leadsToday}
+            </h3>
             <span className="text-emerald-500 text-sm font-bold">+12%</span>
           </div>
         </div>
@@ -225,7 +238,9 @@ export function Dashboard() {
           </div>
           <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Automated Replies</p>
           <div className="flex items-baseline gap-2 mt-1">
-            <h3 className="text-3xl font-bold text-slate-900">{loading ? '...' : stats.automatedReplies}</h3>
+            <h3 className={`text-3xl font-bold text-slate-900 transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
+              {loading ? '0' : stats.automatedReplies}
+            </h3>
             <span className="text-emerald-500 text-sm font-bold">100%</span>
           </div>
         </div>
@@ -236,7 +251,9 @@ export function Dashboard() {
           </div>
           <p className="text-slate-500 text-sm font-medium uppercase tracking-wide">Avg Response Time</p>
           <div className="flex items-baseline gap-2 mt-1">
-            <h3 className="text-3xl font-bold text-slate-900">{loading ? '...' : stats.avgResponseTime}</h3>
+            <h3 className={`text-3xl font-bold text-slate-900 transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
+              {loading ? '—' : stats.avgResponseTime}
+            </h3>
             <span className="text-emerald-500 text-sm font-bold">Fast</span>
           </div>
         </div>
@@ -247,7 +264,9 @@ export function Dashboard() {
           </div>
           <p className="text-indigo-100 text-sm font-medium uppercase tracking-wide">Conv. Rate</p>
           <div className="flex items-baseline gap-2 mt-1">
-            <h3 className="text-3xl font-bold">{loading ? '...' : stats.conversionRate}%</h3>
+            <h3 className={`text-3xl font-bold transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
+              {loading ? '0' : stats.conversionRate}%
+            </h3>
             <span className="text-indigo-200 text-sm">Target Met</span>
           </div>
         </div>
