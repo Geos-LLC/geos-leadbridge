@@ -868,8 +868,8 @@ export class NotificationsService implements OnModuleInit {
       return;
     }
 
-    if (!settings.sigcoreApiKey) {
-      this.logger.warn(`No Sigcore API key configured for account ${savedAccountId}. Connect Sigcore in SMS Alerts settings.`);
+    if (!this.appSigcoreApiKey && !settings.sigcoreApiKey) {
+      this.logger.warn(`No Sigcore API key configured for account ${savedAccountId} (no app-level or account-level key). Connect Sigcore in SMS Alerts settings.`);
       return;
     }
 
@@ -1034,8 +1034,8 @@ export class NotificationsService implements OnModuleInit {
       return;
     }
 
-    if (!settings.sigcoreApiKey) {
-      this.logger.warn(`No Sigcore API key configured for account ${savedAccountId}. Connect Sigcore in SMS Alerts settings.`);
+    if (!this.appSigcoreApiKey && !settings.sigcoreApiKey) {
+      this.logger.warn(`No Sigcore API key configured for account ${savedAccountId} (no app-level or account-level key). Connect Sigcore in SMS Alerts settings.`);
       return;
     }
 
