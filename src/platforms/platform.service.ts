@@ -417,6 +417,8 @@ export class PlatformService {
    * Reconnect webhooks for a saved account
    */
   async reconnectAccountWebhook(userId: string, accountId: string): Promise<{ webhookId: string }> {
+    console.log(`[reconnectAccountWebhook] Start: userId=${userId}, accountId=${accountId}`);
+
     // Get the saved account
     const account = await this.prisma.savedAccount.findFirst({
       where: {
@@ -426,12 +428,16 @@ export class PlatformService {
     });
 
     if (!account) {
+      console.error(`[reconnectAccountWebhook] Account not found: ${accountId}`);
       throw new Error('Account not found');
     }
+
+    console.log(`[reconnectAccountWebhook] Found account: ${account.businessName} (businessId=${account.businessId}, current webhookId=${account.webhookId})`);
 
     // Setup new webhook
     const result = await this.setupThumbtackWebhook(userId, account.businessId);
 
+    console.log(`[reconnectAccountWebhook] Done: new webhookId=${result.webhookId}`);
     return { webhookId: result.webhookId };
   }
 

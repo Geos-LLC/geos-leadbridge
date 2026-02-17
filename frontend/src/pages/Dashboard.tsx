@@ -59,6 +59,7 @@ export function Dashboard() {
   async function loadAccounts() {
     try {
       const { accounts } = await thumbtackApi.getSavedAccounts();
+      console.log('[Dashboard] Loaded accounts:', accounts.map(a => ({ id: a.id, name: a.businessName, webhookId: a.webhookId })));
       setSavedAccounts(accounts);
 
       // Load diagnostics for all accounts
@@ -185,7 +186,7 @@ export function Dashboard() {
   };
 
   const handleConnectionSuccess = async () => {
-    // Reload accounts after successful connection
+    console.log('[Dashboard] handleConnectionSuccess called - reloading accounts');
     setAccountToReconnect(null);
 
     // Wait a moment for backend to process the reconnection

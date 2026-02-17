@@ -21,6 +21,12 @@ export function Layout() {
   const allDisconnected = hasAccounts && savedAccounts.every(a => !a.webhookId);
   const someDisconnected = hasAccounts && !allDisconnected && savedAccounts.some(a => !a.webhookId);
 
+  // Track when savedAccounts changes to debug banner visibility
+  useEffect(() => {
+    console.log('[Layout] savedAccounts updated:', savedAccounts.map(a => ({ id: a.id, name: a.businessName, webhookId: a.webhookId })));
+    console.log('[Layout] Banner state: allDisconnected=', allDisconnected, 'someDisconnected=', someDisconnected);
+  }, [savedAccounts]);
+
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [location.pathname]);

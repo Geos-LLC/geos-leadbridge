@@ -57,16 +57,21 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, o
   const handleReconnect = async () => {
     if (!accountToReconnect) return;
 
+    console.log('[Reconnect] Starting reconnect for account:', accountToReconnect.id, accountToReconnect.businessName);
     try {
       setReconnecting(true);
       setError(null);
-      await thumbtackApi.reconnectAccount(accountToReconnect.id);
+      console.log('[Reconnect] Calling reconnectAccount API...');
+      const result = await thumbtackApi.reconnectAccount(accountToReconnect.id);
+      console.log('[Reconnect] API success, result:', result);
       setReconnectSuccess(true);
       setTimeout(() => {
+        console.log('[Reconnect] Calling onSuccess and closing modal');
         onSuccess?.();
         onClose();
       }, 1500);
-    } catch {
+    } catch (err: any) {
+      console.error('[Reconnect] API failed:', err?.response?.status, err?.response?.data || err?.message);
       // Any failure to reconnect requires re-authentication via OAuth
       setError('Could not reconnect automatically. Redirecting to Thumbtack to re-authorize...');
       setTimeout(handleStartOAuth, 2000);
