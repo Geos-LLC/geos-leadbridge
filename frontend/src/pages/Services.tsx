@@ -52,6 +52,15 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
                 {comingSoon && (
                   <span className="px-2 py-0.5 bg-slate-200 text-slate-500 text-[10px] font-bold rounded uppercase">Coming Soon</span>
                 )}
+                {!comingSoon && (
+                  <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full border uppercase tracking-wider ${
+                    enabled
+                      ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                      : 'bg-slate-100 text-slate-400 border-slate-200'
+                  }`}>
+                    {enabled ? 'Active' : 'Disabled'}
+                  </span>
+                )}
                 {setupRequired && !comingSoon && (
                   <span className="px-2 py-0.5 bg-orange-100 text-orange-600 text-[10px] font-bold rounded-full border border-orange-200 uppercase tracking-wider">Setup Required</span>
                 )}
@@ -254,7 +263,6 @@ export function Services() {
           autoReplyRules.map(r => automationApi.updateRule(r.id, { enabled }))
         );
         setAutoReplyRules(updated.map(u => u.rule));
-        showSuccess(enabled ? 'Auto Reply enabled' : 'Auto Reply disabled');
       } else if (enabled) {
         // First time: create default template + first message rule only
         let templateId = templates.find(t => t.name.includes('Auto Reply'))?.id;
@@ -299,7 +307,6 @@ export function Services() {
       if (leadAlertRule) {
         const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { enabled });
         setLeadAlertRule(rule);
-        showSuccess(enabled ? 'Lead Alerts enabled' : 'Lead Alerts disabled');
       } else if (enabled) {
         // Find or create a default Lead Alert template
         const DEFAULT_ALERT_TEMPLATE =
