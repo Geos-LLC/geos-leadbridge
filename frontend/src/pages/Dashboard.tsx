@@ -69,7 +69,7 @@ export function Dashboard() {
     }
   }, [searchParams, savedAccounts]);
 
-  async function loadAccounts() {
+  async function loadAccounts(forceDiagnostics = false) {
     try {
       const { accounts } = await thumbtackApi.getSavedAccounts();
       console.log('[Dashboard] Loaded accounts:', accounts.map(a => ({ id: a.id, name: a.businessName, webhookId: a.webhookId })));
@@ -77,7 +77,7 @@ export function Dashboard() {
 
       // Load diagnostics for all accounts (shared store)
       if (accounts.length > 0) {
-        loadDiagnostics(accounts);
+        loadDiagnostics(accounts, forceDiagnostics);
       }
     } catch (err) {
       console.error('Failed to load accounts:', err);
@@ -188,8 +188,8 @@ export function Dashboard() {
     // Wait a moment for backend to process the reconnection
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Reload accounts and diagnostics
-    await loadAccounts();
+    // Reload accounts and diagnostics (force refresh after reconnection)
+    await loadAccounts(true);
   };
 
   return (

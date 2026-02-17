@@ -42,7 +42,7 @@ interface AppState {
   accountDiagnostics: Record<string, AccountDiagnostics>;
   diagnosticsLoading: boolean;
   setAccountDiagnostics: (diag: Record<string, AccountDiagnostics>) => void;
-  loadDiagnostics: (accounts: SavedAccount[]) => Promise<void>;
+  loadDiagnostics: (accounts: SavedAccount[], force?: boolean) => Promise<void>;
 
   // Leads
   leads: Lead[];
@@ -95,7 +95,12 @@ export const useAppStore = create<AppState>()(
       accountDiagnostics: {},
       diagnosticsLoading: false,
       setAccountDiagnostics: (diag) => set({ accountDiagnostics: diag }),
-      loadDiagnostics: async (accounts) => {
+      loadDiagnostics: async (accounts, force = false) => {
+        const existing = get().accountDiagnostics;
+        // Skip if we already have diagnostics for all accounts (unless forced)
+        if (!force && accounts.length > 0 && accounts.every(a => existing[a.id])) {
+          return;
+        }
         set({ diagnosticsLoading: true });
         const diagnosticsMap: Record<string, AccountDiagnostics> = {};
         for (const account of accounts) {

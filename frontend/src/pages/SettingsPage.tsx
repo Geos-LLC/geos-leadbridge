@@ -53,7 +53,7 @@ export default function SettingsPage() {
     loadData();
   }, []);
 
-  const loadData = async () => {
+  const loadData = async (forceDiagnostics = false) => {
     try {
       setLoading(true);
       const [subResult, acctResult] = await Promise.all([
@@ -64,9 +64,9 @@ export default function SettingsPage() {
       setAccounts(acctResult.accounts);
       setSavedAccounts(acctResult.accounts); // Update app store
 
-      // Load diagnostics via shared store
+      // Load diagnostics via shared store (skips if already loaded unless forced)
       if (acctResult.accounts.length > 0) {
-        loadDiagnostics(acctResult.accounts);
+        loadDiagnostics(acctResult.accounts, forceDiagnostics);
       }
     } catch (error: any) {
       console.error('Failed to load settings data:', error);
@@ -83,8 +83,8 @@ export default function SettingsPage() {
   };
 
   const handleConnectionSuccess = () => {
-    // Reload data after successful connection
-    loadData();
+    // Force reload diagnostics after reconnection
+    loadData(true);
     setAccountToReconnect(null);
   };
 
