@@ -37,23 +37,32 @@ export default function TrialBanner() {
   }, [trialStatus, dismissed]);
 
   const loadTrialStatus = async () => {
+    console.log('[TrialBanner] loadTrialStatus called');
     try {
       const subscription = await billingApi.getSubscription();
+      console.log('[TrialBanner] subscription response:', JSON.stringify(subscription, null, 2));
 
       // Don't show banner if user has an active PAID subscription (not trial)
       const hasPaidSubscription = subscription.tier &&
         ['ACTIVE', 'PAST_DUE'].includes(subscription.status || '');
 
+      console.log('[TrialBanner] hasPaidSubscription:', hasPaidSubscription);
+      console.log('[TrialBanner] subscription.status:', subscription.status);
+      console.log('[TrialBanner] subscription.tier:', subscription.tier);
+      console.log('[TrialBanner] subscription.trial:', subscription.trial);
+
       if (hasPaidSubscription) {
+        console.log('[TrialBanner] hiding - user has paid subscription');
         setLoading(false);
         return;
       }
 
       // Show trial banner if user is on trial or if trial data exists
       if (subscription.trial) {
+        console.log('[TrialBanner] using subscription.trial data');
         setTrialStatus(subscription.trial);
       } else if (subscription.status === 'TRIALING') {
-        // User is on trial but no trial object - create demo data
+        console.log('[TrialBanner] TRIALING status - using fallback data');
         setTrialStatus({
           isOnTrial: true,
           trialDaysRemaining: 10,
@@ -66,7 +75,7 @@ export default function TrialBanner() {
           trialLeadsRemaining: 7,
         });
       } else {
-        // No subscription or trial - show demo trial banner
+        console.log('[TrialBanner] no subscription/trial - using demo data');
         setTrialStatus({
           isOnTrial: true,
           trialDaysRemaining: 10,
@@ -80,7 +89,7 @@ export default function TrialBanner() {
         });
       }
     } catch (error) {
-      console.error('Failed to load trial status:', error);
+      console.error('[TrialBanner] API error:', error);
       // Show demo trial banner on error for testing
       setTrialStatus({
         isOnTrial: true,
@@ -103,14 +112,20 @@ export default function TrialBanner() {
     setTimeout(() => setDismissed(true), 300); // Wait for animation
   };
 
+  console.log('[TrialBanner] render state:', { loading, dismissed, isVisible, trialStatus: trialStatus ? JSON.stringify(trialStatus) : null });
+
   if (loading || !trialStatus || dismissed) {
+    console.log('[TrialBanner] returning null - loading:', loading, 'trialStatus:', !!trialStatus, 'dismissed:', dismissed);
     return null;
   }
 
   // Don't show if user is not on trial and trial hasn't expired
   if (!trialStatus.isOnTrial && !trialStatus.trialExpired) {
+    console.log('[TrialBanner] returning null - not on trial and not expired');
     return null;
   }
+
+  console.log('[TrialBanner] RENDERING banner - isVisible:', isVisible, 'isOnTrial:', trialStatus.isOnTrial, 'trialExpired:', trialStatus.trialExpired);
 
   // Trial expired - show urgent banner (doesn't auto-hide)
   if (trialStatus.trialExpired) {
