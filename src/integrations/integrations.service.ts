@@ -201,6 +201,34 @@ export class IntegrationsService {
   }
 
   /**
+   * Query budget snapshots for a user.
+   */
+  async getSnapshots(userId: string) {
+    const snapshots = await this.prisma.thumbtackSettingsSnapshot.findMany({
+      where: { userId },
+      orderBy: { effectiveFrom: 'desc' },
+    });
+
+    return {
+      ok: true,
+      snapshots: snapshots.map((s) => ({
+        id: s.id,
+        snapshotType: s.snapshotType,
+        scopeCategory: s.scopeCategory,
+        scopeLocation: s.scopeLocation,
+        weeklyBudget: s.weeklyBudget,
+        currency: s.currency,
+        capturedAt: s.capturedAt,
+        effectiveFrom: s.effectiveFrom,
+        effectiveTo: s.effectiveTo,
+        source: s.source,
+        active: s.effectiveTo === null,
+      })),
+      total: snapshots.length,
+    };
+  }
+
+  /**
    * Get stats for the auth/me endpoint.
    */
   async getExtensionStats(userId: string) {

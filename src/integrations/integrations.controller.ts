@@ -60,6 +60,15 @@ export class IntegrationsController {
   }
 
   /**
+   * GET /api/integrations/thumbtack/snapshots
+   * Query budget snapshots for the authenticated user.
+   */
+  @Get('snapshots')
+  async getSnapshots(@CurrentUser() user: any) {
+    return this.integrationsService.getSnapshots(user.id);
+  }
+
+  /**
    * PATCH /api/integrations/thumbtack/leads/mark-imported
    * Mark specific lead IDs as imported into the main system.
    */
