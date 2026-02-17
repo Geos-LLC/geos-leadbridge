@@ -28,11 +28,16 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, o
     try {
       setLoading(true);
       setError(null);
-      const { businesses: biz } = await thumbtackApi.getBusinesses();
-      setBusinesses(biz);
+      const res = await thumbtackApi.getBusinesses();
+      // Backend returns needsReauth when token is expired/invalid
+      if (res.needsReauth) {
+        setBusinesses([]);
+      } else {
+        setBusinesses(res.businesses || []);
+      }
     } catch (err: any) {
-      // If no businesses, user needs to OAuth first
-      if (err.response?.status === 401 || err.response?.status === 404) {
+      // If no businesses or auth issue, user needs to OAuth first
+      if (err.response?.status === 401 || err.response?.status === 404 || err.response?.status === 500) {
         setBusinesses([]);
       } else {
         setError(err.message || 'Failed to load businesses');

@@ -291,13 +291,26 @@ export class ThumbtackController {
 
   @Get('businesses')
   async getBusinesses(@CurrentUser() user: any) {
-    const businesses = await this.leadsService.getBusinesses(user.id, PlatformName.THUMBTACK);
+    try {
+      const businesses = await this.leadsService.getBusinesses(user.id, PlatformName.THUMBTACK);
 
-    return {
-      platform: PlatformName.THUMBTACK,
-      count: businesses.length,
-      businesses,
-    };
+      return {
+        platform: PlatformName.THUMBTACK,
+        count: businesses.length,
+        businesses,
+      };
+    } catch (error) {
+      // Token expired / refresh failed — tell frontend to re-auth instead of 500
+      if (error.message?.includes('refresh') || error.message?.includes('expired') || error.message?.includes('not connected')) {
+        return {
+          platform: PlatformName.THUMBTACK,
+          count: 0,
+          businesses: [],
+          needsReauth: true,
+        };
+      }
+      throw error;
+    }
   }
 
   /**

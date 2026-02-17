@@ -280,12 +280,12 @@ export function Dashboard() {
           <div className="w-12 h-12 bg-white/20 text-white rounded-2xl flex items-center justify-center mb-4">
             <TrendingUp className="w-6 h-6" />
           </div>
-          <p className="text-indigo-100 text-sm font-medium uppercase tracking-wide">Conv. Rate</p>
+          <p className="text-indigo-100 text-sm font-medium uppercase tracking-wide">Engagement</p>
           <div className="flex items-baseline gap-2 mt-1">
             <h3 className={`text-3xl font-bold transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
               {loading ? '0' : stats.conversionRate}%
             </h3>
-            <span className="text-indigo-200 text-sm">Target Met</span>
+            <span className="text-indigo-200 text-sm">of leads replied</span>
           </div>
         </div>
       </section>

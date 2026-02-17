@@ -253,7 +253,7 @@ export const platformsApi = {
 
 // Thumbtack
 export const thumbtackApi = {
-  getBusinesses: async (): Promise<{ businesses: Business[] }> => {
+  getBusinesses: async (): Promise<{ businesses: Business[]; needsReauth?: boolean }> => {
     const { data } = await api.get('/v1/thumbtack/businesses');
     return data;
   },
