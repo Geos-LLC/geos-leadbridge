@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Users, Send, Clock, TrendingUp, Plus, ChevronRight,
-  Briefcase, Sparkles, AlertCircle, ExternalLink
+  Briefcase, Sparkles, AlertCircle, ExternalLink, Loader2, CheckCircle
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
@@ -40,6 +40,7 @@ export function Dashboard() {
   const [accountToReconnect, setAccountToReconnect] = useState<SavedAccount | null>(null);
   const [showAllAccounts, setShowAllAccounts] = useState(false);
   const [accountDiagnostics, setAccountDiagnostics] = useState<Record<string, AccountDiagnostics>>({});
+  const [loadingDiagnostics, setLoadingDiagnostics] = useState(false);
 
   useEffect(() => {
     loadAccounts();
@@ -61,18 +62,21 @@ export function Dashboard() {
   }
 
   async function loadDiagnostics(accountsList: SavedAccount[]) {
+    setLoadingDiagnostics(true);
     const diagnosticsMap: Record<string, AccountDiagnostics> = {};
 
     for (const account of accountsList) {
       try {
         const diag = await testApi.getDiagnostics(account.id);
         diagnosticsMap[account.id] = diag;
+        // Update diagnostics incrementally so UI updates as each completes
+        setAccountDiagnostics({ ...diagnosticsMap });
       } catch (err) {
         console.error(`Failed to load diagnostics for ${account.id}:`, err);
       }
     }
 
-    setAccountDiagnostics(diagnosticsMap);
+    setLoadingDiagnostics(false);
   }
 
   async function loadDashboardStats() {
@@ -261,48 +265,77 @@ export function Dashboard() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {savedAccounts.length > 0 ? (
-              (showAllAccounts ? savedAccounts : savedAccounts.slice(0, 2)).map((account) => {
-                const diag = accountDiagnostics[account.id];
-                const hasIssues = !account.webhookId || (diag && !diag.healthy);
+              (() => {
+                // Sort accounts: unhealthy first, then healthy
+                const sortedAccounts = [...savedAccounts].sort((a, b) => {
+                  const diagA = accountDiagnostics[a.id];
+                  const diagB = accountDiagnostics[b.id];
+                  const hasIssuesA = !a.webhookId || (diagA && !diagA.healthy);
+                  const hasIssuesB = !b.webhookId || (diagB && !diagB.healthy);
 
-                return (
-                  <div
-                    key={account.id}
-                    className={`bg-white border rounded-3xl p-5 flex items-center gap-5 transition-all cursor-pointer group shadow-sm ${
-                      hasIssues
-                        ? 'border-amber-200 hover:border-amber-300'
-                        : 'border-slate-100 hover:border-blue-200'
-                    }`}
-                    onClick={() => handleAccountClick(account)}
-                  >
-                    {account.imageUrl ? (
-                      <img
-                        src={account.imageUrl}
-                        alt={account.businessName}
-                        className="w-14 h-14 rounded-2xl object-cover"
-                      />
-                    ) : (
-                      <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors">
-                        <Briefcase className="w-7 h-7" />
+                  // Unhealthy accounts come first
+                  if (hasIssuesA && !hasIssuesB) return -1;
+                  if (!hasIssuesA && hasIssuesB) return 1;
+                  return 0;
+                });
+
+                const displayAccounts = showAllAccounts ? sortedAccounts : sortedAccounts.slice(0, 2);
+
+                return displayAccounts.map((account) => {
+                  const diag = accountDiagnostics[account.id];
+                  const isCheckingDiag = loadingDiagnostics && !diag;
+                  const hasIssues = !account.webhookId || (diag && !diag.healthy);
+
+                  return (
+                    <div
+                      key={account.id}
+                      className={`bg-white border rounded-3xl p-5 flex items-center gap-5 transition-all cursor-pointer group shadow-sm ${
+                        hasIssues
+                          ? 'border-amber-200 hover:border-amber-300'
+                          : 'border-slate-100 hover:border-blue-200'
+                      }`}
+                      onClick={() => handleAccountClick(account)}
+                    >
+                      {account.imageUrl ? (
+                        <img
+                          src={account.imageUrl}
+                          alt={account.businessName}
+                          className="w-14 h-14 rounded-2xl object-cover"
+                        />
+                      ) : (
+                        <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors">
+                          <Briefcase className="w-7 h-7" />
+                        </div>
+                      )}
+                      <div className="flex-1">
+                        <h4 className="font-bold text-slate-900">{account.businessName}</h4>
+                        <div className="flex items-center gap-2 mt-1">
+                          {isCheckingDiag ? (
+                            <>
+                              <Loader2 className="w-3 h-3 animate-spin text-slate-400" />
+                              <span className="text-xs text-slate-400 font-medium">Checking health...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className={`w-2 h-2 rounded-full ${hasIssues ? 'bg-amber-500' : 'bg-emerald-500'}`}></span>
+                              <span className="text-xs text-slate-500 font-medium">
+                                {hasIssues ? (diag && !diag.healthy ? 'Needs attention' : 'Disconnected') : 'Synced: Thumbtack'}
+                              </span>
+                            </>
+                          )}
+                        </div>
                       </div>
-                    )}
-                    <div className="flex-1">
-                      <h4 className="font-bold text-slate-900">{account.businessName}</h4>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className={`w-2 h-2 rounded-full ${hasIssues ? 'bg-amber-500' : 'bg-emerald-500'}`}></span>
-                        <span className="text-xs text-slate-500 font-medium">
-                          {hasIssues ? (diag && !diag.healthy ? 'Needs attention' : 'Disconnected') : 'Synced: Thumbtack'}
-                        </span>
-                      </div>
+                      {isCheckingDiag ? (
+                        <div className="w-5 h-5" />
+                      ) : hasIssues ? (
+                        <AlertCircle className="w-5 h-5 text-amber-500 group-hover:text-amber-600" />
+                      ) : (
+                        <ExternalLink className="w-5 h-5 text-slate-300 group-hover:text-blue-500" />
+                      )}
                     </div>
-                    {hasIssues ? (
-                      <AlertCircle className="w-5 h-5 text-amber-500 group-hover:text-amber-600" />
-                    ) : (
-                      <ExternalLink className="w-5 h-5 text-slate-300 group-hover:text-blue-500" />
-                    )}
-                  </div>
-                );
-              })
+                  );
+                });
+              })()
             ) : (
               <div className="col-span-2 bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-8 text-center">
                 <p className="text-slate-600 font-medium mb-4">No accounts connected yet</p>
@@ -346,40 +379,71 @@ export function Dashboard() {
 
         {/* Alerts & Quick Actions */}
         <div className="flex flex-col gap-6">
-          <div className="flex items-center justify-between px-2">
-            <h3 className="text-xl font-bold text-slate-900">Action Required</h3>
-            <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-1 rounded-md">
-              {savedAccounts.filter(a => !a.webhookId).length} URGENT
-            </span>
-          </div>
+          {(() => {
+            const unhealthyAccounts = savedAccounts.filter(a => {
+              const diag = accountDiagnostics[a.id];
+              return !a.webhookId || (diag && !diag.healthy);
+            });
+            const hasIssues = unhealthyAccounts.length > 0;
 
-          {savedAccounts.some(a => !a.webhookId) && (
-            <div className="bg-rose-50/50 border border-rose-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-rose-50 transition-colors">
-              <div className="flex items-start gap-4">
-                <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-xl flex items-center justify-center shrink-0">
-                  <AlertCircle className="w-5 h-5" />
+            return (
+              <>
+                <div className="flex items-center justify-between px-2">
+                  <h3 className="text-xl font-bold text-slate-900">System Status</h3>
+                  {hasIssues ? (
+                    <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-1 rounded-md">
+                      {unhealthyAccounts.length} URGENT
+                    </span>
+                  ) : (
+                    <span className="bg-emerald-50 text-emerald-600 text-xs font-bold px-2 py-1 rounded-md">
+                      ALL GOOD
+                    </span>
+                  )}
                 </div>
-                <div className="flex-1">
-                  <h5 className="font-bold text-slate-900">Account Disconnected</h5>
-                  <p className="text-sm text-slate-600 mt-1 leading-relaxed">
-                    One or more accounts need reconnection to resume automation.
-                  </p>
-                  <button
+
+                {hasIssues ? (
+                  <div className="bg-rose-50/50 border border-rose-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-rose-50 transition-colors cursor-pointer"
                     onClick={() => {
-                      const disconnected = savedAccounts.find(a => !a.webhookId);
-                      if (disconnected) {
-                        setAccountToReconnect(disconnected);
+                      const unhealthy = unhealthyAccounts[0];
+                      if (unhealthy) {
+                        setAccountToReconnect(unhealthy);
                         setConnectionModalOpen(true);
                       }
                     }}
-                    className="mt-4 text-xs font-bold text-rose-600 uppercase tracking-wider flex items-center gap-1 hover:text-rose-700 transition-colors"
                   >
-                    Reconnect Now <ChevronRight className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+                    <div className="flex items-start gap-4">
+                      <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-xl flex items-center justify-center shrink-0">
+                        <AlertCircle className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1">
+                        <h5 className="font-bold text-slate-900">Action Required</h5>
+                        <p className="text-sm text-slate-600 mt-1 leading-relaxed">
+                          {unhealthyAccounts.length} account{unhealthyAccounts.length !== 1 ? 's need' : ' needs'} attention to resume full automation.
+                        </p>
+                        <div className="mt-4 text-xs font-bold text-rose-600 uppercase tracking-wider flex items-center gap-1 hover:text-rose-700 transition-colors">
+                          Fix Now <ChevronRight className="w-3 h-3" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : savedAccounts.length > 0 ? (
+                  <div className="bg-emerald-50/50 border border-emerald-100 rounded-3xl p-5 relative overflow-hidden">
+                    <div className="flex items-start gap-4">
+                      <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center shrink-0">
+                        <CheckCircle className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1">
+                        <h5 className="font-bold text-slate-900">All Systems Operational</h5>
+                        <p className="text-sm text-slate-600 mt-1 leading-relaxed">
+                          All accounts are connected and automation is running smoothly.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            );
+          })()}
 
           <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] p-8 text-white shadow-lg shadow-indigo-100 relative overflow-hidden flex-1">
             <div className="relative z-10 flex flex-col items-center justify-center text-center h-full min-h-[200px]">
