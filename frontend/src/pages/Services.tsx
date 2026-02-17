@@ -30,14 +30,16 @@ interface ServiceCardProps {
   expanded?: boolean;
   onExpand?: () => void;
   statusText?: string;
+  warningText?: string;
+  setupRequired?: boolean;
   children?: React.ReactNode;
   iconBgColor?: string;
   iconTextColor?: string;
 }
 
-function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, expanded, onExpand, statusText, children, iconBgColor = 'bg-blue-50', iconTextColor = 'text-blue-600' }: ServiceCardProps) {
+function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, expanded, onExpand, statusText, warningText, setupRequired, children, iconBgColor = 'bg-blue-50', iconTextColor = 'text-blue-600' }: ServiceCardProps) {
   return (
-    <div className={`bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden hover:border-blue-200 transition-all ${comingSoon ? 'opacity-75 bg-slate-50/50' : ''}`}>
+    <div className={`bg-white rounded-3xl border shadow-sm overflow-hidden transition-all ${comingSoon ? 'opacity-75 bg-slate-50/50 border-slate-100' : setupRequired ? 'border-orange-200 hover:border-orange-300' : 'border-slate-100 hover:border-blue-200'}`}>
       <div className="p-6 md:p-8">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
           <div className="flex gap-5">
@@ -50,9 +52,18 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
                 {comingSoon && (
                   <span className="px-2 py-0.5 bg-slate-200 text-slate-500 text-[10px] font-bold rounded uppercase">Coming Soon</span>
                 )}
+                {setupRequired && !comingSoon && (
+                  <span className="px-2 py-0.5 bg-orange-100 text-orange-600 text-[10px] font-bold rounded-full border border-orange-200 uppercase tracking-wider">Setup Required</span>
+                )}
               </div>
               <p className={`mt-1 ${comingSoon ? 'text-slate-400' : 'text-slate-500'}`}>{description}</p>
-              {statusText && !comingSoon && (
+              {warningText && !comingSoon && (
+                <div className="flex items-center gap-2 mt-3">
+                  <span className="w-2 h-2 rounded-full bg-orange-400"></span>
+                  <span className="text-xs font-bold text-orange-600 uppercase tracking-tight">{warningText}</span>
+                </div>
+              )}
+              {statusText && !warningText && !comingSoon && (
                 <div className="flex items-center gap-2 mt-3">
                   <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                   <span className="text-xs font-bold text-slate-600 uppercase tracking-tight">{statusText}</span>
@@ -204,6 +215,13 @@ export function Services() {
       // Default from phone to first pool phone
       const defaultFrom = poolRes.phoneNumbers[0]?.phoneNumber || '';
       if (!leadAlert) setAlertFromPhone(defaultFrom);
+
+      // Auto-expand Lead Alerts card if setup is incomplete
+      const toPhoneMissing = leadAlert && !leadAlert.toPhone;
+      const templateMissing = leadAlert && !leadAlert.templateId && !leadAlert.messageTemplate;
+      if (toPhoneMissing || templateMissing) {
+        setExpandedCard('lead-alerts');
+      }
 
     } catch (err: any) {
       setError(err.message || 'Failed to load services data');
@@ -669,6 +687,11 @@ export function Services() {
           </ServiceCard>
 
           {/* 2. Lead Alerts */}
+          {(() => {
+            const toPhoneMissing = !!leadAlertRule && !alertToPhone;
+            const templateMissing = !!leadAlertRule && !leadAlertRule.templateId && !leadAlertRule.messageTemplate;
+            const leadAlertsIncomplete = toPhoneMissing || templateMissing;
+            return (
           <ServiceCard
             icon={<Bell className="w-7 h-7" />}
             title="Lead Alerts"
@@ -677,21 +700,35 @@ export function Services() {
             onToggle={toggleLeadAlerts}
             expanded={expandedCard === 'lead-alerts'}
             onExpand={() => toggleExpand('lead-alerts')}
-            statusText={leadAlertRule?.enabled ? `Destination: ${leadAlertRule.toPhone || 'not set'}` : undefined}
+            setupRequired={leadAlertsIncomplete}
+            warningText={leadAlertsIncomplete ? (toPhoneMissing ? 'Phone number required' : 'Template required') : undefined}
+            statusText={!leadAlertsIncomplete && leadAlertRule?.enabled ? `Destination: ${leadAlertRule.toPhone}` : undefined}
             iconBgColor="bg-amber-50"
             iconTextColor="text-amber-600"
           >
             {/* SMS Alert Configuration */}
             <div className="space-y-6">
               <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send to (your phone)</label>
+                <label className={`text-[11px] font-bold uppercase tracking-widest mb-2 block ${toPhoneMissing ? 'text-orange-500' : 'text-slate-400'}`}>
+                  Send to (your phone){toPhoneMissing && <span className="ml-1 text-orange-500">*</span>}
+                </label>
                 <input
                   type="tel"
                   value={alertToPhone}
                   onChange={e => setAlertToPhone(e.target.value)}
                   placeholder="+1234567890"
-                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm focus:ring-blue-500 focus:border-blue-500"
+                  className={`w-full rounded-xl p-3 text-sm focus:ring-2 focus:outline-none transition-colors ${
+                    toPhoneMissing
+                      ? 'border-2 border-orange-300 bg-orange-50/40 focus:ring-orange-200 focus:border-orange-400 placeholder:text-orange-300'
+                      : 'bg-white border border-slate-200 focus:ring-blue-500 focus:border-blue-500'
+                  }`}
                 />
+                {toPhoneMissing && (
+                  <p className="mt-1.5 text-xs text-orange-600 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    Enter your phone number to receive lead alert SMS messages
+                  </p>
+                )}
               </div>
 
               <div>
@@ -724,7 +761,9 @@ export function Services() {
               {leadAlertRule && (
                 <>
                   <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Template</label>
+                    <label className={`text-[11px] font-bold uppercase tracking-widest mb-2 block ${templateMissing ? 'text-orange-500' : 'text-slate-400'}`}>
+                      Template{templateMissing && <span className="ml-1 text-orange-500">*</span>}
+                    </label>
                     <select
                       value={leadAlertRule.templateId || leadAlertRule.messageTemplate?.id || ''}
                       onChange={e => {
@@ -735,7 +774,11 @@ export function Services() {
                         }
                       }}
                       disabled={saving}
-                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
+                      className={`w-full rounded-xl p-3 text-sm font-medium disabled:opacity-50 transition-colors ${
+                        templateMissing
+                          ? 'border-2 border-orange-300 bg-orange-50/40 focus:ring-orange-200 focus:border-orange-400'
+                          : 'bg-white border border-slate-200'
+                      }`}
                     >
                       <option value="">Select template</option>
                       {templates.map(t => (
@@ -743,6 +786,12 @@ export function Services() {
                       ))}
                       <option value="__create_new__">+ Create New Template</option>
                     </select>
+                    {templateMissing && (
+                      <p className="mt-1.5 text-xs text-orange-600 font-medium flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 shrink-0" />
+                        Select or create a template to define the SMS message content
+                      </p>
+                    )}
                     {leadAlertRule.messageTemplate && (
                       <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
                         {leadAlertRule.messageTemplate.content}
@@ -799,6 +848,8 @@ export function Services() {
               )}
             </div>
           </ServiceCard>
+            );
+          })()}
 
           {/* 3. Customer Texting — Coming Soon */}
           <ServiceCard
