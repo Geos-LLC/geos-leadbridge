@@ -772,6 +772,10 @@ export function Services() {
                     className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
                   >
                     <option value="">Select phone number</option>
+                    {/* Show current fromPhone even if not in pool list */}
+                    {alertFromPhone && !poolPhones.some(p => p.phoneNumber === alertFromPhone) && (
+                      <option value={alertFromPhone}>{alertFromPhone} (configured)</option>
+                    )}
                     {poolPhones.map(p => (
                       <option key={p.id} value={p.phoneNumber}>
                         {p.phoneNumber} (LeadBridge)
