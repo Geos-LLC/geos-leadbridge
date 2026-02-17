@@ -7,10 +7,12 @@ import { useAppStore } from '../store/appStore';
 
 export function PhoneSettings() {
   const navigate = useNavigate();
+  const storedAccounts = useAppStore(state => state.savedAccounts);
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
-  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
-  const [loading, setLoading] = useState(true);
+  // Seed from Zustand store to avoid loading flash / health-status flicker
+  const [accounts, setAccounts] = useState<SavedAccount[]>(storedAccounts);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(storedAccounts[0]?.id || '');
+  const [loading, setLoading] = useState(storedAccounts.length === 0);
   const [error, setError] = useState<string | null>(null);
 
   // Pool phone state
@@ -36,15 +38,17 @@ export function PhoneSettings() {
 
   async function loadAccounts() {
     try {
-      setLoading(true);
-      const { accounts } = await thumbtackApi.getSavedAccounts();
-      setAccounts(accounts);
-      setSavedAccounts(accounts); // Update global app store
-      if (accounts.length > 0) {
-        setSelectedAccountId(accounts[0].id);
+      const { accounts: fresh } = await thumbtackApi.getSavedAccounts();
+      setAccounts(fresh);
+      setSavedAccounts(fresh); // Update global app store
+      if (!selectedAccountId && fresh.length > 0) {
+        setSelectedAccountId(fresh[0].id);
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to load accounts');
+      // Silent fail if we already have store data
+      if (accounts.length === 0) {
+        setError(err.message || 'Failed to load accounts');
+      }
     } finally {
       setLoading(false);
     }

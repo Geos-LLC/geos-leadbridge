@@ -95,12 +95,13 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
 // -- Main Services Page --
 export function Services() {
   const navigate = useNavigate();
+  const storedAccounts = useAppStore(state => state.savedAccounts);
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
 
-  // Account state
-  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState('');
-  const [loading, setLoading] = useState(true);
+  // Account state — seed from Zustand store so there's no loading flash
+  const [accounts, setAccounts] = useState<SavedAccount[]>(storedAccounts);
+  const [selectedAccountId, setSelectedAccountId] = useState(storedAccounts[0]?.id || '');
+  const [loading, setLoading] = useState(storedAccounts.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -154,11 +155,15 @@ export function Services() {
       const { accounts: accs } = await thumbtackApi.getSavedAccounts();
       setAccounts(accs);
       setSavedAccounts(accs); // Update global app store
-      if (accs.length > 0) {
+      // Only set selectedAccount from fetch if nothing was pre-selected from store
+      if (!selectedAccountId && accs.length > 0) {
         setSelectedAccountId(accs[0].id);
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to load accounts');
+      // If we have store data, silent fail; only show error if accounts list is empty
+      if (accounts.length === 0) {
+        setError(err.message || 'Failed to load accounts');
+      }
     } finally {
       setLoading(false);
     }
