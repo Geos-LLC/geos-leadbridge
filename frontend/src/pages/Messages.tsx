@@ -1162,6 +1162,8 @@ export function Messages() {
                       <div className={`max-w-md ${
                         isSmsDisconnected && event.direction === 'outbound'
                           ? 'bg-yellow-50 text-slate-900 border-2 border-yellow-200'
+                          : event.channel === 'sms'
+                          ? 'bg-yellow-50 text-slate-900'
                           : event.direction === 'outbound'
                           ? 'bg-blue-600 text-white'
                           : 'bg-slate-100 text-slate-900'
@@ -1170,6 +1172,8 @@ export function Messages() {
                       <div className="flex items-center gap-2 mb-1">
                         <span className={`text-[10px] font-bold uppercase ${
                           isSmsDisconnected && event.direction === 'outbound'
+                            ? 'text-yellow-700'
+                            : event.channel === 'sms'
                             ? 'text-yellow-700'
                             : event.direction === 'outbound'
                             ? 'text-blue-100'
@@ -1224,6 +1228,8 @@ export function Messages() {
                       {/* Message Footer: time + SMS status */}
                       <div className={`flex items-center gap-2 mt-1 text-[10px] ${
                         isSmsDisconnected && event.direction === 'outbound'
+                          ? 'text-yellow-700'
+                          : event.channel === 'sms'
                           ? 'text-yellow-700'
                           : event.direction === 'outbound'
                           ? 'text-blue-100'
