@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { useNotificationStore, type NotificationType } from '../store/notificationStore';
 import { AlertCircle, AlertTriangle, CheckCircle, Info, X } from 'lucide-react';
 
@@ -13,7 +14,7 @@ export function ToastNotifications() {
 
   if (notifications.length === 0) return null;
 
-  return (
+  return createPortal(
     <div className="toast-container">
       {notifications.map((notification) => (
         <div
@@ -37,6 +38,7 @@ export function ToastNotifications() {
           )}
         </div>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }
