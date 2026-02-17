@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Lead, Business, Platform, SavedAccount } from '../types';
+import type { Lead, Business, Platform, SavedAccount, AccountDiagnostics } from '../types';
+import { thumbtackApi } from '../services/api';
 
 export interface DashboardStats {
   leadsToday: number;
@@ -36,6 +37,12 @@ interface AppState {
   // Cached dashboard stats (persisted for instant load)
   dashboardStats: DashboardStats | null;
   setDashboardStats: (stats: DashboardStats) => void;
+
+  // Account diagnostics (shared across pages, not persisted)
+  accountDiagnostics: Record<string, AccountDiagnostics>;
+  diagnosticsLoading: boolean;
+  setAccountDiagnostics: (diag: Record<string, AccountDiagnostics>) => void;
+  loadDiagnostics: (accounts: SavedAccount[]) => Promise<void>;
 
   // Leads
   leads: Lead[];
@@ -83,6 +90,26 @@ export const useAppStore = create<AppState>()(
       // Dashboard stats cache
       dashboardStats: null,
       setDashboardStats: (stats) => set({ dashboardStats: stats }),
+
+      // Account diagnostics
+      accountDiagnostics: {},
+      diagnosticsLoading: false,
+      setAccountDiagnostics: (diag) => set({ accountDiagnostics: diag }),
+      loadDiagnostics: async (accounts) => {
+        set({ diagnosticsLoading: true });
+        const diagnosticsMap: Record<string, AccountDiagnostics> = {};
+        for (const account of accounts) {
+          try {
+            const diag = await thumbtackApi.getAccountHealth(account.id);
+            diagnosticsMap[account.id] = diag;
+            // Update incrementally so UI updates as each completes
+            set({ accountDiagnostics: { ...diagnosticsMap } });
+          } catch (err) {
+            console.error(`Failed to load diagnostics for ${account.id}:`, err);
+          }
+        }
+        set({ diagnosticsLoading: false });
+      },
 
       // Leads (not persisted - loaded fresh each session)
       leads: [],

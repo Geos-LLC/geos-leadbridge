@@ -4,7 +4,7 @@ import { billingApi, thumbtackApi, leadsApi, usersApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
-import type { SubscriptionDetails, SavedAccount, AccountDiagnostics } from '../types';
+import type { SubscriptionDetails, SavedAccount } from '../types';
 import { Link } from 'react-router-dom';
 import ConnectionModal from '../components/ConnectionModal';
 
@@ -24,11 +24,12 @@ export default function SettingsPage() {
   const user = useAuthStore(state => state.user);
   const setAuth = useAuthStore(state => state.setAuth);
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
+  const accountDiagnostics = useAppStore(state => state.accountDiagnostics);
+  const loadDiagnostics = useAppStore(state => state.loadDiagnostics);
   const [subscription, setSubscription] = useState<SubscriptionDetails | null>(null);
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [portalLoading, setPortalLoading] = useState(false);
-  const [accountDiagnostics, setAccountDiagnostics] = useState<Record<string, AccountDiagnostics>>({});
   const [selectedAccountForInfo, setSelectedAccountForInfo] = useState<string | null>(null);
   const [connectionModalOpen, setConnectionModalOpen] = useState(false);
   const [accountToReconnect, setAccountToReconnect] = useState<SavedAccount | null>(null);
@@ -63,7 +64,7 @@ export default function SettingsPage() {
       setAccounts(acctResult.accounts);
       setSavedAccounts(acctResult.accounts); // Update app store
 
-      // Load diagnostics for accounts with issues
+      // Load diagnostics via shared store
       if (acctResult.accounts.length > 0) {
         loadDiagnostics(acctResult.accounts);
       }
@@ -72,21 +73,6 @@ export default function SettingsPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const loadDiagnostics = async (accountsList: SavedAccount[]) => {
-    const diagnosticsMap: Record<string, AccountDiagnostics> = {};
-
-    for (const account of accountsList) {
-      try {
-        const diag = await thumbtackApi.getAccountHealth(account.id);
-        diagnosticsMap[account.id] = diag;
-      } catch (err) {
-        console.error(`Failed to load diagnostics for ${account.id}:`, err);
-      }
-    }
-
-    setAccountDiagnostics(diagnosticsMap);
   };
 
   const handleReconnect = (account?: SavedAccount) => {
@@ -303,19 +289,22 @@ export default function SettingsPage() {
               <div className="space-y-3">
               {accounts.map(account => {
                 const diag = accountDiagnostics[account.id];
-                const hasConnectionIssues = !account.webhookId || (diag && !diag.healthy);
-                const hasSmsIssues = !hasConnectionIssues && diag && (diag.notificationIssues?.length ?? 0) > 0;
+                const isCheckingDiag = !diag;
+                const hasConnectionIssues = !isCheckingDiag && (!account.webhookId || (diag && !diag.healthy));
+                const hasSmsIssues = !isCheckingDiag && !hasConnectionIssues && diag && (diag.notificationIssues?.length ?? 0) > 0;
                 const hasIssues = hasConnectionIssues || hasSmsIssues;
 
                 return (
                   <div
                     key={account.id}
                     className={`p-3 rounded-2xl border transition-all ${
-                      hasConnectionIssues
-                        ? 'bg-amber-50/50 border-amber-200 hover:border-amber-300 cursor-pointer'
-                        : hasSmsIssues
-                          ? 'bg-orange-50/50 border-orange-200 hover:border-orange-300 cursor-pointer'
-                          : 'bg-slate-50 border-slate-100 hover:border-slate-200'
+                      isCheckingDiag
+                        ? 'bg-slate-50 border-slate-200'
+                        : hasConnectionIssues
+                          ? 'bg-amber-50/50 border-amber-200 hover:border-amber-300 cursor-pointer'
+                          : hasSmsIssues
+                            ? 'bg-orange-50/50 border-orange-200 hover:border-orange-300 cursor-pointer'
+                            : 'bg-slate-50 border-slate-100 hover:border-slate-200'
                     }`}
                     onClick={() => hasIssues && setSelectedAccountForInfo(account.id)}
                   >
@@ -323,6 +312,11 @@ export default function SettingsPage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-slate-900 truncate">{account.businessName}</p>
                         <p className="text-[10px] text-slate-400 font-medium uppercase">ID: {account.businessId}</p>
+                        {isCheckingDiag && (
+                          <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                            <Loader2 size={10} className="animate-spin" /> Checking health...
+                          </p>
+                        )}
                         {hasConnectionIssues && diag && diag.issues.length > 0 && (
                           <p className="text-[10px] text-amber-700 mt-1 flex items-center gap-1">
                             <Info size={10} /> Click for details
@@ -335,7 +329,9 @@ export default function SettingsPage() {
                         )}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        {hasConnectionIssues ? (
+                        {isCheckingDiag ? (
+                          <Loader2 className="w-5 h-5 text-slate-300 animate-spin" />
+                        ) : hasConnectionIssues ? (
                           <AlertCircle className="w-5 h-5 text-amber-500" />
                         ) : hasSmsIssues ? (
                           <AlertCircle className="w-5 h-5 text-orange-400" />

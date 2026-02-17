@@ -9,13 +9,13 @@ import type { DashboardStats } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import { thumbtackApi, analyticsApi } from '../services/api';
 import ConnectionModal from '../components/ConnectionModal';
-import type { SavedAccount, AccountDiagnostics } from '../types';
+import type { SavedAccount } from '../types';
 
 export function Dashboard() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuthStore();
-  const { savedAccounts, setSavedAccounts, dashboardStats: cachedStats, setDashboardStats } = useAppStore();
+  const { savedAccounts, setSavedAccounts, dashboardStats: cachedStats, setDashboardStats, accountDiagnostics, diagnosticsLoading: loadingDiagnostics, loadDiagnostics } = useAppStore();
 
   // Start with cached stats (instant) — zeros only if nothing cached yet
   const [stats, setStats] = useState<DashboardStats>(
@@ -36,8 +36,6 @@ export function Dashboard() {
   const [connectionModalOpen, setConnectionModalOpen] = useState(false);
   const [accountToReconnect, setAccountToReconnect] = useState<SavedAccount | null>(null);
   const [showAllAccounts, setShowAllAccounts] = useState(false);
-  const [accountDiagnostics, setAccountDiagnostics] = useState<Record<string, AccountDiagnostics>>({});
-  const [loadingDiagnostics, setLoadingDiagnostics] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -77,32 +75,13 @@ export function Dashboard() {
       console.log('[Dashboard] Loaded accounts:', accounts.map(a => ({ id: a.id, name: a.businessName, webhookId: a.webhookId })));
       setSavedAccounts(accounts);
 
-      // Load diagnostics for all accounts
+      // Load diagnostics for all accounts (shared store)
       if (accounts.length > 0) {
-        setLoadingDiagnostics(true);
         loadDiagnostics(accounts);
       }
     } catch (err) {
       console.error('Failed to load accounts:', err);
     }
-  }
-
-  async function loadDiagnostics(accountsList: SavedAccount[]) {
-    setLoadingDiagnostics(true);
-    const diagnosticsMap: Record<string, AccountDiagnostics> = {};
-
-    for (const account of accountsList) {
-      try {
-        const diag = await thumbtackApi.getAccountHealth(account.id);
-        diagnosticsMap[account.id] = diag;
-        // Update diagnostics incrementally so UI updates as each completes
-        setAccountDiagnostics({ ...diagnosticsMap });
-      } catch (err) {
-        console.error(`Failed to load diagnostics for ${account.id}:`, err);
-      }
-    }
-
-    setLoadingDiagnostics(false);
   }
 
   async function loadDashboardStats() {
