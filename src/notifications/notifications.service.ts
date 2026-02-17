@@ -255,7 +255,7 @@ export class NotificationsService implements OnModuleInit {
         sigcoreApiKey: data.sigcoreApiKey,
         sigcoreFromPhone: data.sigcoreFromPhone,
         sigcoreWorkspaceId: data.sigcoreWorkspaceId,
-        template: data.template ?? 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
+        template: data.template ?? 'New lead: {{lead.name}}, Price {{lead.price}}\nLocation: {{lead.location}}, {{lead.zip}}\nService: {{lead.service}} {{lead.bedrooms}} bed /{{lead.bathrooms}} bath\nFrequency: {{lead.frequency}}\nDescription: {{lead.serviceDescription}}\nAdd-ons: {{lead.addons}}\nPets: {{lead.pets}}\nMessage: {{lead.message}}\nPhone: {{lead.phone}}',
         quietHoursStart: data.quietHoursStart,
         quietHoursEnd: data.quietHoursEnd,
         quietHoursTimezone: data.quietHoursTimezone ?? 'America/New_York',

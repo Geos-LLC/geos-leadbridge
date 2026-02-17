@@ -300,11 +300,22 @@ export function Services() {
         showSuccess(enabled ? 'Lead Alerts enabled' : 'Lead Alerts disabled');
       } else if (enabled) {
         // Find or create a default Lead Alert template
+        const DEFAULT_ALERT_TEMPLATE =
+          'New lead: {{lead.name}}, Price {{lead.price}}\n' +
+          'Location: {{lead.location}}, {{lead.zip}}\n' +
+          'Service: {{lead.service}} {{lead.bedrooms}} bed /{{lead.bathrooms}} bath\n' +
+          'Frequency: {{lead.frequency}}\n' +
+          'Description: {{lead.serviceDescription}}\n' +
+          'Add-ons: {{lead.addons}}\n' +
+          'Pets: {{lead.pets}}\n' +
+          'Message: {{lead.message}}\n' +
+          'Phone: {{lead.phone}}';
+
         let templateId = templates.find(t => t.name.includes('Lead Alert'))?.id;
         if (!templateId) {
           const { template } = await templatesApi.createTemplate(
             'Lead Alert - SMS',
-            'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
+            DEFAULT_ALERT_TEMPLATE,
           );
           templateId = template.id;
           setTemplates(prev => [template, ...prev]);
@@ -317,7 +328,7 @@ export function Services() {
           fromPhone: alertFromPhone || defaultFrom,
           toPhone: alertToPhone,
           sendToCustomer: false,
-          template: 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
+          template: DEFAULT_ALERT_TEMPLATE,
           templateId,
           enabled: true,
         });
