@@ -106,8 +106,8 @@ export class ThumbtackController {
               // Admin users can proceed - they'll get a new webhook for testing
               console.log(`Admin user bypassing webhook conflict for business ${business.name} (${business.businessID})`);
             } else {
-              // Same user - just update credentials for token refresh
-              console.log(`Business ${business.name} (${business.businessID}) already has active webhook - updating credentials only`);
+              // Same user re-authenticating — update credentials and refresh the webhook
+              console.log(`Business ${business.name} (${business.businessID}) - same user reconnecting, refreshing webhook`);
               if (credentials) {
                 await this.platformService.updateAccountCredentials(
                   existingAccount.id,
@@ -115,7 +115,9 @@ export class ThumbtackController {
                 );
                 console.log(`Updated credentials for existing account: ${business.name}`);
               }
-              skippedAlreadyConnected.push(business.name);
+              // Re-register the webhook so it is active with fresh credentials
+              await this.platformService.setupThumbtackWebhook(userId, business.businessID);
+              console.log(`Webhook refreshed for business: ${business.name} (${business.businessID})`);
               continue;
             }
           }

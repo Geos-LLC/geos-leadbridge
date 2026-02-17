@@ -66,25 +66,10 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, o
         onSuccess?.();
         onClose();
       }, 1500);
-    } catch (err: any) {
-      const errorCode = err.response?.data?.errorCode;
-      const errMsg = (err.response?.data?.message || err.message || '').toLowerCase();
-      const isAuthError =
-        errorCode === 'token_expired' ||
-        errorCode === 'token_revoked' ||
-        err.response?.status === 401 ||
-        errMsg.includes('expired') ||
-        errMsg.includes('token') ||
-        errMsg.includes('authentication') ||
-        errMsg.includes('reconnect') ||
-        errMsg.includes('unauthorized');
-
-      if (isAuthError) {
-        setError('Your Thumbtack session has expired. Redirecting to reconnect...');
-        setTimeout(handleStartOAuth, 2000);
-      } else {
-        setError(err.response?.data?.message || err.message || 'Failed to reconnect account');
-      }
+    } catch {
+      // Any failure to reconnect requires re-authentication via OAuth
+      setError('Could not reconnect automatically. Redirecting to Thumbtack to re-authorize...');
+      setTimeout(handleStartOAuth, 2000);
     } finally {
       setReconnecting(false);
     }
