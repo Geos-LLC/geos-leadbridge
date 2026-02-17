@@ -303,15 +303,19 @@ export default function SettingsPage() {
               <div className="space-y-3">
               {accounts.map(account => {
                 const diag = accountDiagnostics[account.id];
-                const hasIssues = !account.webhookId || (diag && !diag.healthy);
+                const hasConnectionIssues = !account.webhookId || (diag && !diag.healthy);
+                const hasSmsIssues = !hasConnectionIssues && diag && (diag.notificationIssues?.length ?? 0) > 0;
+                const hasIssues = hasConnectionIssues || hasSmsIssues;
 
                 return (
                   <div
                     key={account.id}
                     className={`p-3 rounded-2xl border transition-all ${
-                      hasIssues
+                      hasConnectionIssues
                         ? 'bg-amber-50/50 border-amber-200 hover:border-amber-300 cursor-pointer'
-                        : 'bg-slate-50 border-slate-100 hover:border-slate-200'
+                        : hasSmsIssues
+                          ? 'bg-orange-50/50 border-orange-200 hover:border-orange-300 cursor-pointer'
+                          : 'bg-slate-50 border-slate-100 hover:border-slate-200'
                     }`}
                     onClick={() => hasIssues && setSelectedAccountForInfo(account.id)}
                   >
@@ -319,19 +323,26 @@ export default function SettingsPage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-slate-900 truncate">{account.businessName}</p>
                         <p className="text-[10px] text-slate-400 font-medium uppercase">ID: {account.businessId}</p>
-                        {hasIssues && diag && diag.issues.length > 0 && (
+                        {hasConnectionIssues && diag && diag.issues.length > 0 && (
                           <p className="text-[10px] text-amber-700 mt-1 flex items-center gap-1">
                             <Info size={10} /> Click for details
                           </p>
                         )}
+                        {hasSmsIssues && diag && (
+                          <p className="text-[10px] text-orange-700 mt-1 flex items-center gap-1">
+                            <Info size={10} /> {diag.notificationIssues[0]}
+                          </p>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        {hasIssues ? (
+                        {hasConnectionIssues ? (
                           <AlertCircle className="w-5 h-5 text-amber-500" />
+                        ) : hasSmsIssues ? (
+                          <AlertCircle className="w-5 h-5 text-orange-400" />
                         ) : (
                           <CheckCircle className="w-5 h-5 text-emerald-500" />
                         )}
-                        {hasIssues && (
+                        {hasConnectionIssues && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -767,17 +778,36 @@ export default function SettingsPage() {
                     </button>
                   </div>
 
-                  {diag.issues.length > 0 && (
-                    <div className="mb-6 space-y-2">
-                      <h4 className="text-sm font-bold text-red-900 uppercase tracking-wider">Issues Found:</h4>
-                      {diag.issues.map((issue: string, i: number) => (
-                        <div key={i} className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
-                          <AlertCircle size={16} className="shrink-0 mt-0.5" />
-                          <span>{issue}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {(() => {
+                    const notifIssues = diag.notificationIssues || [];
+                    const connIssues = diag.issues.filter((i: string) => !notifIssues.includes(i));
+                    return (
+                      <>
+                        {connIssues.length > 0 && (
+                          <div className="mb-4 space-y-2">
+                            <h4 className="text-sm font-bold text-red-900 uppercase tracking-wider">Connection Issues:</h4>
+                            {connIssues.map((issue: string, i: number) => (
+                              <div key={i} className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+                                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                                <span>{issue}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {notifIssues.length > 0 && (
+                          <div className="mb-4 space-y-2">
+                            <h4 className="text-sm font-bold text-orange-900 uppercase tracking-wider">SMS Configuration:</h4>
+                            {notifIssues.map((issue: string, i: number) => (
+                              <div key={i} className="flex items-start gap-2 p-3 bg-orange-50 border border-orange-200 rounded-xl text-sm text-orange-700">
+                                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                                <span>{issue}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   <div className="grid grid-cols-2 gap-3 mb-6">
                     <div className="flex items-center gap-2 text-sm">
