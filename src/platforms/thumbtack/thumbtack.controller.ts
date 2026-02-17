@@ -692,6 +692,13 @@ export class ThumbtackController {
 
     const healthy = connectionIssues.length === 0;
 
+    // Diagnostic log — track exactly what the health check finds
+    console.log(`[Health] account=${account.businessName} (${id}) | ` +
+      `settings=${!!notifSettings} enabled=${notifSettings?.enabled} sigcoreFromPhone=${!!notifSettings?.sigcoreFromPhone} destPhone=${!!notifSettings?.destinationPhone} | ` +
+      `allRules=${notifSettings?.notificationRules?.length || 0} newLeadAll=${allNewLeadRules.length} newLeadEnabled=${enabledNewLeadRules.length} | ` +
+      `rules=${JSON.stringify(allNewLeadRules.map((r: any) => ({ name: r.name, enabled: r.enabled, fromPhone: !!r.fromPhone, toPhone: !!r.toPhone, sendToCustomer: r.sendToCustomer })))} | ` +
+      `connIssues=${JSON.stringify(connectionIssues)} notifIssues=${JSON.stringify(notificationIssues)}`);
+
     return {
       account: {
         id: account.id,
