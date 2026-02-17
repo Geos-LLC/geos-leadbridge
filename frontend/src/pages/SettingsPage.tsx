@@ -326,10 +326,10 @@ export default function SettingsPage() {
                         )}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        {account.webhookId ? (
-                          <CheckCircle className="w-5 h-5 text-emerald-500" />
-                        ) : (
+                        {hasIssues ? (
                           <AlertCircle className="w-5 h-5 text-amber-500" />
+                        ) : (
+                          <CheckCircle className="w-5 h-5 text-emerald-500" />
                         )}
                         {hasIssues && (
                           <button
