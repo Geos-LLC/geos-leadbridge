@@ -23,11 +23,35 @@ async function bootstrap() {
   // Get configuration
   const configService = app.get(ConfigService);
   const port = configService.get<number>('port') || 3000;
+  const frontendUrl = configService.get<string>('frontendUrl');
 
-  // Enable CORS
+  // Enable CORS - allow configured frontend URL and localhost for development
+  const allowedOrigins = [
+    frontendUrl,
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://www.leadbridge360.com', // Production frontend
+  ].filter(Boolean);
+
+  console.log('[CORS] Allowed origins:', allowedOrigins);
+
   app.enableCors({
-    origin: true, // In production, specify allowed origins
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.warn('[CORS] Blocked origin:', origin);
+        callback(null, false);
+      }
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   });
 
   // Global validation pipe
