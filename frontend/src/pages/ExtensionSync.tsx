@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  RefreshCw, Loader2, CheckCircle, AlertCircle, Download, Package,
+  RefreshCw, Loader2, CheckCircle, Download, Package,
   Clock, DollarSign, ArrowUpRight, Filter,
 } from 'lucide-react';
 import { integrationsApi } from '../services/api';
@@ -148,15 +148,6 @@ export function ExtensionSync() {
     });
   };
 
-  const formatFullDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
 
   return (
     <div className="p-4 md:p-6 lg:p-10 max-w-7xl mx-auto space-y-6 md:space-y-10">
