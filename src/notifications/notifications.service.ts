@@ -92,6 +92,7 @@ export interface CustomerReplyContext {
   userId: string;
   savedAccountId: string;
   leadId: string;
+  accountName?: string;
   lead: {
     customerName: string;
     customerPhone?: string | null;
@@ -161,6 +162,7 @@ export interface SendNotificationContext {
   userId: string;
   savedAccountId: string;
   leadId: string;
+  accountName?: string;
   lead: {
     customerName: string;
     customerPhone?: string | null;
@@ -1061,7 +1063,7 @@ export class NotificationsService implements OnModuleInit {
         continue;
       }
 
-      await this.sendNotificationWithRule(settings, rule, { userId, savedAccountId, leadId, lead });
+      await this.sendNotificationWithRule(settings, rule, { userId, savedAccountId, leadId, accountName: context.accountName, lead });
     }
   }
 
@@ -1106,7 +1108,7 @@ export class NotificationsService implements OnModuleInit {
     }
 
     // Render the message template
-    const messageBody = this.renderTemplate(template, lead);
+    const messageBody = this.renderTemplate(template, lead, context.accountName);
 
     this.logger.log(`Sending notification for rule: ${ruleName} from ${fromPhone} to ${toPhone}`);
 
@@ -1270,7 +1272,7 @@ export class NotificationsService implements OnModuleInit {
     const template = rule?.template || settings.template;
     const ruleName = rule?.name || 'Test';
     const accountLabel = account.businessName ? `[${account.businessName}] ` : '';
-    const messageBody = `${accountLabel}${this.renderTemplate(template, testLead)}`;
+    const messageBody = `${accountLabel}${this.renderTemplate(template, testLead, account.businessName)}`;
 
     // Create notification log entry
     const logEntry = await this.prisma.notificationLog.create({
@@ -1524,10 +1526,16 @@ export class NotificationsService implements OnModuleInit {
       const settings = pending.notificationRule.notificationSettings;
       const rule = pending.notificationRule;
 
+      const savedAccount = await this.prisma.savedAccount.findUnique({
+        where: { id: pending.savedAccountId },
+        select: { businessName: true },
+      });
+
       const context: SendNotificationContext = {
         userId: settings.userId || '',
         savedAccountId: pending.savedAccountId,
         leadId: pending.leadId,
+        accountName: savedAccount?.businessName || undefined,
         lead: {
           customerName: pending.lead.customerName,
           customerPhone: pending.lead.customerPhone,
@@ -1563,8 +1571,12 @@ export class NotificationsService implements OnModuleInit {
       message?: string | null;
       rawJson?: string | null;
     },
+    accountName?: string,
   ): string {
     let message = template;
+
+    // Replace account variables
+    message = message.replace(/\{\{account\.name\}\}/gi, accountName || 'Your Business');
 
     // Replace basic variables
     message = message.replace(/\{\{lead\.name\}\}/gi, lead.customerName || 'Unknown');
@@ -1658,7 +1670,7 @@ export class NotificationsService implements OnModuleInit {
         if (raw.estimate?.total) {
           estimate = raw.estimate.total;
         }
-      } catch (err) {
+      } catch (_err) {
         // Failed to parse rawJson, use defaults
       }
     }

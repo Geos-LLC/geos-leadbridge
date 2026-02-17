@@ -8,6 +8,7 @@ import type { AutomationRule, SavedAccount, MessageTemplate } from '../types';
 const TEMPLATE_VARIABLES = [
   { name: '{customerName}', description: 'Full customer name' },
   { name: '{firstName}', description: 'First name only' },
+  { name: '{accountName}', description: 'Your business name' },
   { name: '{category}', description: 'Service category or "your project"' },
   { name: '{city}', description: 'Customer city' },
   { name: '{state}', description: 'Customer state' },
