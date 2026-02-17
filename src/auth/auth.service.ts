@@ -320,4 +320,39 @@ export class AuthService {
       message: 'Password has been reset successfully. You can now log in with your new password.',
     };
   }
+
+  /**
+   * Change password for authenticated user
+   */
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    if (!currentPassword || !newPassword) {
+      throw new BadRequestException('Current password and new password are required');
+    }
+
+    if (newPassword.length < 8) {
+      throw new BadRequestException('New password must be at least 8 characters');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user || !user.password) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const isCurrentValid = await EncryptionUtil.comparePassword(currentPassword, user.password);
+    if (!isCurrentValid) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    const hashedPassword = await EncryptionUtil.hashPassword(newPassword);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
+
+    return { message: 'Password changed successfully' };
+  }
 }

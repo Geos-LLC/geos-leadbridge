@@ -49,4 +49,14 @@ export class AuthController {
   ) {
     return this.authService.resetPassword(token, password);
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('change-password')
+  async changePassword(
+    @CurrentUser() user: any,
+    @Body('currentPassword') currentPassword: string,
+    @Body('newPassword') newPassword: string,
+  ) {
+    return this.authService.changePassword(user.id, currentPassword, newPassword);
+  }
 }
