@@ -216,9 +216,9 @@ export function Dashboard() {
         </div>
       </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 lg:items-start">
         {/* Accounts & Platforms */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="lg:col-span-2 flex flex-col gap-6">
           <div className="flex items-center justify-between px-2">
             <h3 className="text-xl font-bold text-slate-900">Connected Platforms</h3>
             {savedAccounts.length > 2 && (
@@ -296,7 +296,7 @@ export function Dashboard() {
         </div>
 
         {/* Alerts & Quick Actions */}
-        <div className="space-y-6">
+        <div className="flex flex-col gap-6">
           <div className="flex items-center justify-between px-2">
             <h3 className="text-xl font-bold text-slate-900">Action Required</h3>
             <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-1 rounded-md">
@@ -304,50 +304,48 @@ export function Dashboard() {
             </span>
           </div>
 
-          <div className="space-y-4">
-            {savedAccounts.some(a => !a.webhookId) && (
-              <div className="bg-rose-50/50 border border-rose-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-rose-50 transition-colors">
-                <div className="flex items-start gap-4">
-                  <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-xl flex items-center justify-center shrink-0">
-                    <AlertCircle className="w-5 h-5" />
-                  </div>
-                  <div className="flex-1">
-                    <h5 className="font-bold text-slate-900">Account Disconnected</h5>
-                    <p className="text-sm text-slate-600 mt-1 leading-relaxed">
-                      One or more accounts need reconnection to resume automation.
-                    </p>
-                    <button
-                      onClick={() => {
-                        const disconnected = savedAccounts.find(a => !a.webhookId);
-                        if (disconnected) {
-                          setAccountToReconnect(disconnected);
-                          setConnectionModalOpen(true);
-                        }
-                      }}
-                      className="mt-4 text-xs font-bold text-rose-600 uppercase tracking-wider flex items-center gap-1 hover:text-rose-700 transition-colors"
-                    >
-                      Reconnect Now <ChevronRight className="w-3 h-3" />
-                    </button>
-                  </div>
+          {savedAccounts.some(a => !a.webhookId) && (
+            <div className="bg-rose-50/50 border border-rose-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-rose-50 transition-colors">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-xl flex items-center justify-center shrink-0">
+                  <AlertCircle className="w-5 h-5" />
+                </div>
+                <div className="flex-1">
+                  <h5 className="font-bold text-slate-900">Account Disconnected</h5>
+                  <p className="text-sm text-slate-600 mt-1 leading-relaxed">
+                    One or more accounts need reconnection to resume automation.
+                  </p>
+                  <button
+                    onClick={() => {
+                      const disconnected = savedAccounts.find(a => !a.webhookId);
+                      if (disconnected) {
+                        setAccountToReconnect(disconnected);
+                        setConnectionModalOpen(true);
+                      }
+                    }}
+                    className="mt-4 text-xs font-bold text-rose-600 uppercase tracking-wider flex items-center gap-1 hover:text-rose-700 transition-colors"
+                  >
+                    Reconnect Now <ChevronRight className="w-3 h-3" />
+                  </button>
                 </div>
               </div>
-            )}
-
-            <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] p-8 text-white shadow-lg shadow-indigo-100 relative overflow-hidden">
-              <div className="relative z-10 flex flex-col items-center justify-center text-center h-full min-h-[200px]">
-                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6">
-                  <Sparkles className="w-8 h-8" />
-                </div>
-                <h3 className="text-2xl font-bold mb-3">Automate Even Faster</h3>
-                <p className="text-indigo-100 text-sm mb-6 leading-relaxed max-w-xs">
-                  Our new AI-powered response templates are now live for all users.
-                </p>
-                <Link to="/message-settings" className="px-8 py-3 bg-white text-indigo-600 rounded-xl font-bold text-sm shadow-lg hover:bg-indigo-50 transition-all">
-                  Try AI Templates
-                </Link>
-              </div>
-              <div className="absolute -right-20 -bottom-20 w-64 h-64 bg-purple-600/20 rounded-full blur-3xl"></div>
             </div>
+          )}
+
+          <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] p-8 text-white shadow-lg shadow-indigo-100 relative overflow-hidden flex-1">
+            <div className="relative z-10 flex flex-col items-center justify-center text-center h-full min-h-[200px]">
+              <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Sparkles className="w-8 h-8" />
+              </div>
+              <h3 className="text-2xl font-bold mb-3">Automate Even Faster</h3>
+              <p className="text-indigo-100 text-sm mb-6 leading-relaxed max-w-xs">
+                Our new AI-powered response templates are now live for all users.
+              </p>
+              <Link to="/message-settings" className="px-8 py-3 bg-white text-indigo-600 rounded-xl font-bold text-sm shadow-lg hover:bg-indigo-50 transition-all">
+                Try AI Templates
+              </Link>
+            </div>
+            <div className="absolute -right-20 -bottom-20 w-64 h-64 bg-purple-600/20 rounded-full blur-3xl"></div>
           </div>
         </div>
       </div>
