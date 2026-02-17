@@ -195,7 +195,7 @@ export function Dashboard() {
       setAccountToReconnect(account);
       setConnectionModalOpen(true);
     } else if (hasSmsIssues) {
-      navigate('/phone-settings');
+      navigate('/services');
     } else {
       navigate(`/messages?account=${account.businessId}`);
     }
@@ -492,7 +492,7 @@ export function Dashboard() {
                 </div>
 
                 {hasConnectionIssues ? (
-                  <div className="bg-rose-50/50 border border-rose-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-rose-50 transition-colors cursor-pointer h-[116px] flex items-center"
+                  <div className="bg-rose-50/50 border border-rose-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-rose-50 transition-colors cursor-pointer flex items-center"
                     onClick={() => {
                       const unhealthy = disconnectedAccounts[0];
                       if (unhealthy) {
@@ -517,24 +517,24 @@ export function Dashboard() {
                     </div>
                   </div>
                 ) : hasSmsIssues ? (
-                  <Link to="/phone-settings" className="bg-orange-50/50 border border-orange-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-orange-50 transition-colors cursor-pointer h-[116px] flex items-center block">
+                  <Link to="/services" className="bg-orange-50/50 border border-orange-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-orange-50 transition-colors cursor-pointer flex items-center block">
                     <div className="flex items-start gap-4 w-full">
                       <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center shrink-0">
                         <BellOff className="w-5 h-5" />
                       </div>
                       <div className="flex-1">
-                        <h5 className="font-bold text-slate-900">SMS Not Configured</h5>
+                        <h5 className="font-bold text-slate-900">Lead Alerts Not Configured</h5>
                         <p className="text-sm text-slate-600 mt-1 leading-relaxed">
-                          {smsIssueAccounts.length} account{smsIssueAccounts.length !== 1 ? 's are' : ' is'} missing SMS alert setup. You won't receive lead notifications.
+                          {smsIssueAccounts.length} account{smsIssueAccounts.length !== 1 ? 's are' : ' is'} missing SMS alert setup. Configure in Automation → Lead Alerts.
                         </p>
                         <div className="mt-4 text-xs font-bold text-orange-600 uppercase tracking-wider flex items-center gap-1 hover:text-orange-700 transition-colors">
-                          Set Up SMS <ChevronRight className="w-3 h-3" />
+                          Go to Automation <ChevronRight className="w-3 h-3" />
                         </div>
                       </div>
                     </div>
                   </Link>
                 ) : savedAccounts.length > 0 ? (
-                  <div className="bg-emerald-50/50 border border-emerald-100 rounded-3xl p-5 relative overflow-hidden h-[116px] flex items-center">
+                  <div className="bg-emerald-50/50 border border-emerald-100 rounded-3xl p-5 relative overflow-hidden flex items-center">
                     <div className="flex items-start gap-4 w-full">
                       <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center shrink-0">
                         <CheckCircle className="w-5 h-5" />
