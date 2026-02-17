@@ -62,7 +62,7 @@ export class ThumbtackController {
 
       if (businesses.length === 0) {
         console.log('No businesses found to setup webhooks for');
-        return { skippedAlreadyConnected };
+        return { skippedAlreadyConnected, webhookErrors };
       }
 
       // Get the full credentials from stored platform (to save per-account)
