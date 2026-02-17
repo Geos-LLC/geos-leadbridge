@@ -611,7 +611,16 @@ export class ThumbtackController {
     });
 
     if (!account) {
-      return { healthy: true, issues: [], notificationIssues: [] };
+      return {
+        healthy: true,
+        issues: [],
+        notificationIssues: [],
+        platform: { connected: false },
+        account: { hasWebhook: false },
+        notifications: { settingsExist: false, settingsEnabled: false, hasSigcoreApiKey: false, totalRules: 0, newLeadRules: 0, customerReplyRules: 0 },
+        automation: { totalRules: 0, rules: [] },
+        recentLogs: [],
+      };
     }
 
     const platformConnection = await this.prisma.platform.findFirst({
@@ -627,6 +636,23 @@ export class ThumbtackController {
           select: { id: true, name: true, triggerType: true, toPhone: true, fromPhone: true },
         },
       },
+    });
+
+    // Automation rules
+    const automationRules = await this.prisma.automationRule.findMany({
+      where: { savedAccountId: id, enabled: true },
+      select: { id: true, name: true, triggerType: true },
+    });
+
+    // Recent notification logs
+    const recentLogs = await this.prisma.notificationLog.findMany({
+      where: {
+        notificationSettingsId: notifSettings?.id,
+        createdAt: { gte: new Date(Date.now() - 86400000) },
+      },
+      select: { id: true, status: true, ruleName: true, error: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
     });
 
     const connectionIssues: string[] = [];
@@ -668,6 +694,16 @@ export class ThumbtackController {
         newLeadRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead').length,
         customerReplyRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'customer_reply').length,
       },
+      automation: {
+        totalRules: automationRules.length,
+        rules: automationRules.map(r => ({ name: r.name, triggerType: r.triggerType })),
+      },
+      recentLogs: recentLogs.map(l => ({
+        status: l.status,
+        ruleName: l.ruleName,
+        error: l.error,
+        createdAt: l.createdAt,
+      })),
       healthy,
       issues: [...connectionIssues, ...notificationIssues],
       notificationIssues,
