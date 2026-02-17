@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { MessageSquare, RefreshCw, Loader2, CheckCircle, AlertCircle, Send, ChevronDown, Phone, Clock } from 'lucide-react';
-import { notificationsApi } from '../services/api';
+import { adminApi } from '../services/api';
 import type { NotificationLog } from '../types';
 
 function formatPhone(phone: string): string {
@@ -57,7 +57,7 @@ export function SmsHistory() {
   const loadLogs = async () => {
     try {
       setLoading(true);
-      const data = await notificationsApi.getAllLogs(200);
+      const data = await adminApi.getNotificationLogs(200);
       setLogs(data.logs);
     } catch (err) {
       console.error('Failed to load SMS logs:', err);
@@ -87,7 +87,7 @@ export function SmsHistory() {
         <h1 className="text-2xl md:text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">
           SMS <span className="gradient-text">History</span>
         </h1>
-        <p className="text-slate-500 mt-1 md:mt-2 text-sm md:text-lg">View all SMS notifications sent from your accounts</p>
+        <p className="text-slate-500 mt-1 md:mt-2 text-sm md:text-lg">View all SMS notifications sent across all accounts</p>
       </section>
 
       {/* Stats */}

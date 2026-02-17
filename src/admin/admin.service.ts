@@ -336,6 +336,12 @@ export class AdminService {
                 id: true,
                 businessId: true,
                 businessName: true,
+                user: {
+                  select: {
+                    email: true,
+                    name: true,
+                  },
+                },
               },
             },
           },
