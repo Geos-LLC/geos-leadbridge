@@ -16,6 +16,7 @@ import { PhoneSettings } from './pages/PhoneSettings';
 import { Services } from './pages/Services';
 import { ApiTest } from './pages/ApiTest';
 import { Analytics } from './pages/Analytics';
+import { SmsHistory } from './pages/SmsHistory';
 import Pricing from './pages/Pricing';
 import SettingsPage from './pages/SettingsPage';
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -75,6 +76,7 @@ function App() {
             <Route path="/automation" element={<AutomationSettings />} />
             <Route path="/notifications" element={<NotificationSettings />} />
             <Route path="/phone-settings" element={<PhoneSettings />} />
+            <Route path="/sms-history" element={<SmsHistory />} />
             <Route path="/services" element={<Services />} />
             <Route path="/api-test" element={<ApiTest />} />
             <Route path="/pricing" element={<Pricing />} />
