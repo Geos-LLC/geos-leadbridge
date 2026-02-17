@@ -40,19 +40,33 @@ export default function TrialBanner() {
     try {
       const subscription = await billingApi.getSubscription();
 
-      // Don't show banner if user has an active subscription
-      const hasActiveSubscription = subscription.tier &&
-        ['ACTIVE', 'TRIALING', 'PAST_DUE'].includes(subscription.status || '');
+      // Don't show banner if user has an active PAID subscription (not trial)
+      const hasPaidSubscription = subscription.tier &&
+        ['ACTIVE', 'PAST_DUE'].includes(subscription.status || '');
 
-      if (hasActiveSubscription) {
+      if (hasPaidSubscription) {
         setLoading(false);
         return;
       }
 
+      // Show trial banner if user is on trial or if trial data exists
       if (subscription.trial) {
         setTrialStatus(subscription.trial);
+      } else if (subscription.status === 'TRIALING') {
+        // User is on trial but no trial object - create demo data
+        setTrialStatus({
+          isOnTrial: true,
+          trialDaysRemaining: 10,
+          trialExpired: false,
+          trialExpiredByTime: false,
+          trialExpiredByUsage: false,
+          trialEndDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
+          trialLeadsHandled: 3,
+          trialLeadsLimit: 10,
+          trialLeadsRemaining: 7,
+        });
       } else {
-        // Show demo trial banner for testing when no trial data exists
+        // No subscription or trial - show demo trial banner
         setTrialStatus({
           isOnTrial: true,
           trialDaysRemaining: 10,
@@ -101,7 +115,7 @@ export default function TrialBanner() {
   // Trial expired - show urgent banner (doesn't auto-hide)
   if (trialStatus.trialExpired) {
     return (
-      <div className="px-6 py-4 bg-red-50 border-b border-red-100">
+      <div className="sticky top-0 z-50 px-6 py-4 bg-red-50 border-b border-red-100">
         <div className="flex items-center gap-4 max-w-7xl mx-auto">
           <div className="flex items-center justify-center w-10 h-10 bg-red-100 rounded-xl shrink-0">
             <AlertCircle className="w-5 h-5 text-red-600" />
@@ -143,7 +157,7 @@ export default function TrialBanner() {
 
   return (
     <div
-      className={`px-6 py-4 ${bgColor} border-b ${borderColor} transition-all duration-300 ${
+      className={`sticky top-0 z-50 px-6 py-4 ${bgColor} border-b ${borderColor} transition-all duration-300 ${
         isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
       }`}
       style={{ display: isVisible ? 'block' : 'none' }}

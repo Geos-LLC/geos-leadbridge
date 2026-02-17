@@ -166,10 +166,15 @@ export function Dashboard() {
     }
   };
 
-  const handleConnectionSuccess = () => {
+  const handleConnectionSuccess = async () => {
     // Reload accounts after successful connection
-    loadAccounts();
     setAccountToReconnect(null);
+
+    // Wait a moment for backend to process the reconnection
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Reload accounts and diagnostics
+    await loadAccounts();
   };
 
   return (
