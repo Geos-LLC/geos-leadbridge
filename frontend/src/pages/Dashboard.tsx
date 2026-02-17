@@ -348,8 +348,8 @@ export function Dashboard() {
           </div>
 
           {/* System Health */}
-          <div className="bg-slate-900 rounded-[2rem] p-8 text-white relative overflow-hidden">
-            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8">
+          <div className="bg-slate-900 rounded-[2rem] p-8 text-white relative overflow-hidden h-[280px]">
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8 h-full">
               <div className="max-w-xs">
                 <h3 className="text-2xl font-bold mb-2">System Performance</h3>
                 <p className="text-slate-400 text-sm">Your automation bridge is running at optimal capacity. No downtime detected.</p>
@@ -402,7 +402,7 @@ export function Dashboard() {
                 </div>
 
                 {hasIssues ? (
-                  <div className="bg-rose-50/50 border border-rose-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-rose-50 transition-colors cursor-pointer"
+                  <div className="bg-rose-50/50 border border-rose-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-rose-50 transition-colors cursor-pointer h-[116px] flex items-center"
                     onClick={() => {
                       const unhealthy = unhealthyAccounts[0];
                       if (unhealthy) {
@@ -411,7 +411,7 @@ export function Dashboard() {
                       }
                     }}
                   >
-                    <div className="flex items-start gap-4">
+                    <div className="flex items-start gap-4 w-full">
                       <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-xl flex items-center justify-center shrink-0">
                         <AlertCircle className="w-5 h-5" />
                       </div>
@@ -427,8 +427,8 @@ export function Dashboard() {
                     </div>
                   </div>
                 ) : savedAccounts.length > 0 ? (
-                  <div className="bg-emerald-50/50 border border-emerald-100 rounded-3xl p-5 relative overflow-hidden">
-                    <div className="flex items-start gap-4">
+                  <div className="bg-emerald-50/50 border border-emerald-100 rounded-3xl p-5 relative overflow-hidden h-[116px] flex items-center">
+                    <div className="flex items-start gap-4 w-full">
                       <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center shrink-0">
                         <CheckCircle className="w-5 h-5" />
                       </div>
@@ -445,8 +445,8 @@ export function Dashboard() {
             );
           })()}
 
-          <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] p-8 text-white shadow-lg shadow-indigo-100 relative overflow-hidden flex-1">
-            <div className="relative z-10 flex flex-col items-center justify-center text-center h-full min-h-[200px]">
+          <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] p-8 text-white shadow-lg shadow-indigo-100 relative overflow-hidden h-[280px]">
+            <div className="relative z-10 flex flex-col items-center justify-center text-center h-full">
               <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Sparkles className="w-8 h-8" />
               </div>
