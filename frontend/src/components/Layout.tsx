@@ -17,9 +17,15 @@ export function Layout() {
   const savedAccounts = useAppStore(state => state.savedAccounts);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  const loadAnalytics = useAppStore(state => state.loadAnalytics);
   const hasAccounts = savedAccounts.length > 0;
   const allDisconnected = hasAccounts && savedAccounts.every(a => !a.webhookId);
   const someDisconnected = hasAccounts && !allDisconnected && savedAccounts.some(a => !a.webhookId);
+
+  // Preload analytics data on app start (cached for instant page loads)
+  useEffect(() => {
+    loadAnalytics();
+  }, []);
 
   // Track when savedAccounts changes to debug banner visibility
   useEffect(() => {

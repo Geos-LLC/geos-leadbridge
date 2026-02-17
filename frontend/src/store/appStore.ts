@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Lead, Business, Platform, SavedAccount, AccountDiagnostics } from '../types';
-import { thumbtackApi } from '../services/api';
+import { thumbtackApi, analyticsApi, type AnalyticsData } from '../services/api';
 
 export interface DashboardStats {
   leadsToday: number;
@@ -37,6 +37,12 @@ interface AppState {
   // Cached dashboard stats (persisted for instant load)
   dashboardStats: DashboardStats | null;
   setDashboardStats: (stats: DashboardStats) => void;
+
+  // Cached analytics data (persisted for instant load)
+  analyticsCache: Partial<AnalyticsData> | null;
+  analyticsLoading: boolean;
+  setAnalyticsCache: (data: Partial<AnalyticsData>) => void;
+  loadAnalytics: (force?: boolean) => Promise<void>;
 
   // Account diagnostics (shared across pages, not persisted)
   accountDiagnostics: Record<string, AccountDiagnostics>;
@@ -91,6 +97,28 @@ export const useAppStore = create<AppState>()(
       dashboardStats: null,
       setDashboardStats: (stats) => set({ dashboardStats: stats }),
 
+      // Analytics cache
+      analyticsCache: null,
+      analyticsLoading: false,
+      setAnalyticsCache: (data) => set({ analyticsCache: data }),
+      loadAnalytics: async (force = false) => {
+        const existing = get().analyticsCache;
+        if (!force && existing) return;
+        set({ analyticsLoading: true });
+        try {
+          // Load basic (fast) analytics first
+          const { data: basicData } = await analyticsApi.getBasicAnalytics({});
+          set({ analyticsCache: basicData as Partial<AnalyticsData> });
+          // Then load full analytics in background
+          const { data: fullData } = await analyticsApi.getAnalytics({});
+          set({ analyticsCache: fullData });
+        } catch (err) {
+          console.error('Failed to preload analytics:', err);
+        } finally {
+          set({ analyticsLoading: false });
+        }
+      },
+
       // Account diagnostics
       accountDiagnostics: {},
       diagnosticsLoading: false,
@@ -140,6 +168,7 @@ export const useAppStore = create<AppState>()(
       partialize: (state) => ({
         savedAccounts: state.savedAccounts,
         dashboardStats: state.dashboardStats,
+        analyticsCache: state.analyticsCache,
         configuredBusinessId: state.configuredBusinessId,
       }),
     }
