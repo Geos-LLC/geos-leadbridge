@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Users, Send, Clock, TrendingUp, Plus, ChevronRight,
-  Briefcase, Sparkles, AlertCircle, ExternalLink, Loader2, CheckCircle
+  Briefcase, Sparkles, AlertCircle, ExternalLink, Loader2, CheckCircle, BellOff
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import type { DashboardStats } from '../store/appStore';
@@ -188,14 +188,15 @@ export function Dashboard() {
 
   const handleAccountClick = (account: SavedAccount) => {
     const diag = accountDiagnostics[account.id];
-    const hasIssues = !account.webhookId || (diag && !diag.healthy);
+    const hasConnectionIssues = !account.webhookId || (diag && !diag.healthy);
+    const hasSmsIssues = diag && (diag.notificationIssues?.length ?? 0) > 0;
 
-    if (hasIssues) {
-      // If has issues, open reconnect modal
+    if (hasConnectionIssues) {
       setAccountToReconnect(account);
       setConnectionModalOpen(true);
+    } else if (hasSmsIssues) {
+      navigate('/phone-settings');
     } else {
-      // If healthy, navigate to messages for this account
       navigate(`/messages?account=${account.businessId}`);
     }
   };
@@ -328,16 +329,18 @@ export function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {savedAccounts.length > 0 ? (
               (() => {
-                // Sort accounts: unhealthy first, then healthy
+                // Sort accounts: connection issues first, then SMS issues, then healthy
                 const sortedAccounts = [...savedAccounts].sort((a, b) => {
                   const diagA = accountDiagnostics[a.id];
                   const diagB = accountDiagnostics[b.id];
-                  const hasIssuesA = !a.webhookId || (diagA && !diagA.healthy);
-                  const hasIssuesB = !b.webhookId || (diagB && !diagB.healthy);
-
-                  // Unhealthy accounts come first
-                  if (hasIssuesA && !hasIssuesB) return -1;
-                  if (!hasIssuesA && hasIssuesB) return 1;
+                  const connA = !a.webhookId || (diagA && !diagA.healthy);
+                  const connB = !b.webhookId || (diagB && !diagB.healthy);
+                  const smsA = !connA && diagA && (diagA.notificationIssues?.length ?? 0) > 0;
+                  const smsB = !connB && diagB && (diagB.notificationIssues?.length ?? 0) > 0;
+                  if (connA && !connB) return -1;
+                  if (!connA && connB) return 1;
+                  if (smsA && !smsB) return -1;
+                  if (!smsA && smsB) return 1;
                   return 0;
                 });
 
@@ -346,16 +349,19 @@ export function Dashboard() {
                 return displayAccounts.map((account) => {
                   const diag = accountDiagnostics[account.id];
                   const isCheckingDiag = loadingDiagnostics && !diag;
-                  const hasIssues = !account.webhookId || (diag && !diag.healthy);
+                  const hasConnectionIssues = !account.webhookId || (diag && !diag.healthy);
+                  const hasSmsIssues = !hasConnectionIssues && diag && (diag.notificationIssues?.length ?? 0) > 0;
+
+                  const borderClass = hasConnectionIssues
+                    ? 'border-amber-200 hover:border-amber-300'
+                    : hasSmsIssues
+                      ? 'border-orange-200 hover:border-orange-300'
+                      : 'border-slate-100 hover:border-blue-200';
 
                   return (
                     <div
                       key={account.id}
-                      className={`bg-white border rounded-3xl p-5 flex items-center gap-5 transition-all cursor-pointer group shadow-sm ${
-                        hasIssues
-                          ? 'border-amber-200 hover:border-amber-300'
-                          : 'border-slate-100 hover:border-blue-200'
-                      }`}
+                      className={`bg-white border rounded-3xl p-5 flex items-center gap-5 transition-all cursor-pointer group shadow-sm ${borderClass}`}
                       onClick={() => handleAccountClick(account)}
                     >
                       {account.imageUrl ? (
@@ -377,20 +383,32 @@ export function Dashboard() {
                               <Loader2 className="w-3 h-3 animate-spin text-slate-400" />
                               <span className="text-xs text-slate-400 font-medium">Checking health...</span>
                             </>
+                          ) : hasConnectionIssues ? (
+                            <>
+                              <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                              <span className="text-xs text-slate-500 font-medium">
+                                {diag && !diag.healthy ? 'Needs attention' : 'Disconnected'}
+                              </span>
+                            </>
+                          ) : hasSmsIssues ? (
+                            <>
+                              <span className="w-2 h-2 rounded-full bg-orange-400"></span>
+                              <span className="text-xs text-slate-500 font-medium">SMS not configured</span>
+                            </>
                           ) : (
                             <>
-                              <span className={`w-2 h-2 rounded-full ${hasIssues ? 'bg-amber-500' : 'bg-emerald-500'}`}></span>
-                              <span className="text-xs text-slate-500 font-medium">
-                                {hasIssues ? (diag && !diag.healthy ? 'Needs attention' : 'Disconnected') : 'Synced: Thumbtack'}
-                              </span>
+                              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                              <span className="text-xs text-slate-500 font-medium">Synced: Thumbtack</span>
                             </>
                           )}
                         </div>
                       </div>
                       {isCheckingDiag ? (
                         <div className="w-5 h-5" />
-                      ) : hasIssues ? (
+                      ) : hasConnectionIssues ? (
                         <AlertCircle className="w-5 h-5 text-amber-500 group-hover:text-amber-600" />
+                      ) : hasSmsIssues ? (
+                        <BellOff className="w-5 h-5 text-orange-400 group-hover:text-orange-500" />
                       ) : (
                         <ExternalLink className="w-5 h-5 text-slate-300 group-hover:text-blue-500" />
                       )}
@@ -442,19 +460,29 @@ export function Dashboard() {
         {/* Alerts & Quick Actions */}
         <div className="flex flex-col gap-6">
           {(() => {
-            const unhealthyAccounts = savedAccounts.filter(a => {
+            const disconnectedAccounts = savedAccounts.filter(a => {
               const diag = accountDiagnostics[a.id];
               return !a.webhookId || (diag && !diag.healthy);
             });
-            const hasIssues = unhealthyAccounts.length > 0;
+            const smsIssueAccounts = savedAccounts.filter(a => {
+              const diag = accountDiagnostics[a.id];
+              const hasConnIssue = !a.webhookId || (diag && !diag.healthy);
+              return !hasConnIssue && diag && (diag.notificationIssues?.length ?? 0) > 0;
+            });
+            const hasConnectionIssues = disconnectedAccounts.length > 0;
+            const hasSmsIssues = smsIssueAccounts.length > 0;
 
             return (
               <>
                 <div className="flex items-center justify-between px-2">
                   <h3 className="text-xl font-bold text-slate-900">System Status</h3>
-                  {hasIssues ? (
+                  {hasConnectionIssues ? (
                     <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-1 rounded-md">
-                      {unhealthyAccounts.length} URGENT
+                      {disconnectedAccounts.length} URGENT
+                    </span>
+                  ) : hasSmsIssues ? (
+                    <span className="bg-orange-50 text-orange-600 text-xs font-bold px-2 py-1 rounded-md">
+                      SETUP NEEDED
                     </span>
                   ) : (
                     <span className="bg-emerald-50 text-emerald-600 text-xs font-bold px-2 py-1 rounded-md">
@@ -463,10 +491,10 @@ export function Dashboard() {
                   )}
                 </div>
 
-                {hasIssues ? (
+                {hasConnectionIssues ? (
                   <div className="bg-rose-50/50 border border-rose-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-rose-50 transition-colors cursor-pointer h-[116px] flex items-center"
                     onClick={() => {
-                      const unhealthy = unhealthyAccounts[0];
+                      const unhealthy = disconnectedAccounts[0];
                       if (unhealthy) {
                         setAccountToReconnect(unhealthy);
                         setConnectionModalOpen(true);
@@ -480,7 +508,7 @@ export function Dashboard() {
                       <div className="flex-1">
                         <h5 className="font-bold text-slate-900">Action Required</h5>
                         <p className="text-sm text-slate-600 mt-1 leading-relaxed">
-                          {unhealthyAccounts.length} account{unhealthyAccounts.length !== 1 ? 's need' : ' needs'} attention to resume full automation.
+                          {disconnectedAccounts.length} account{disconnectedAccounts.length !== 1 ? 's need' : ' needs'} attention to resume full automation.
                         </p>
                         <div className="mt-4 text-xs font-bold text-rose-600 uppercase tracking-wider flex items-center gap-1 hover:text-rose-700 transition-colors">
                           Fix Now <ChevronRight className="w-3 h-3" />
@@ -488,6 +516,23 @@ export function Dashboard() {
                       </div>
                     </div>
                   </div>
+                ) : hasSmsIssues ? (
+                  <Link to="/phone-settings" className="bg-orange-50/50 border border-orange-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-orange-50 transition-colors cursor-pointer h-[116px] flex items-center block">
+                    <div className="flex items-start gap-4 w-full">
+                      <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center shrink-0">
+                        <BellOff className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1">
+                        <h5 className="font-bold text-slate-900">SMS Not Configured</h5>
+                        <p className="text-sm text-slate-600 mt-1 leading-relaxed">
+                          {smsIssueAccounts.length} account{smsIssueAccounts.length !== 1 ? 's are' : ' is'} missing SMS alert setup. You won't receive lead notifications.
+                        </p>
+                        <div className="mt-4 text-xs font-bold text-orange-600 uppercase tracking-wider flex items-center gap-1 hover:text-orange-700 transition-colors">
+                          Set Up SMS <ChevronRight className="w-3 h-3" />
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
                 ) : savedAccounts.length > 0 ? (
                   <div className="bg-emerald-50/50 border border-emerald-100 rounded-3xl p-5 relative overflow-hidden h-[116px] flex items-center">
                     <div className="flex items-start gap-4 w-full">

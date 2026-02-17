@@ -532,6 +532,7 @@ export class TestService {
     }
 
     const issues = [...connectionIssues, ...notificationIssues];
+    const healthy = connectionIssues.length === 0;
 
     return {
       account: {
@@ -568,8 +569,9 @@ export class TestService {
         error: l.error,
         createdAt: l.createdAt,
       })),
-      healthy: connectionIssues.length === 0,
+      healthy,
       issues,
+      notificationIssues,
     };
   }
 

@@ -79,6 +79,7 @@ export interface SavedAccount {
 export interface AccountDiagnostics {
   healthy: boolean;
   issues: string[];
+  notificationIssues: string[];
   platform: {
     connected: boolean;
   };

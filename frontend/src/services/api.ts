@@ -984,6 +984,7 @@ export interface AccountDiagnostics {
   recentLogs: Array<{ status: string; ruleName: string | null; error: string | null; createdAt: string }>;
   healthy: boolean;
   issues: string[];
+  notificationIssues: string[];
 }
 
 export const testApi = {
