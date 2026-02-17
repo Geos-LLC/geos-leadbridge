@@ -7,7 +7,7 @@ import {
 import { useAppStore } from '../store/appStore';
 import type { DashboardStats } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
-import { thumbtackApi, analyticsApi, testApi } from '../services/api';
+import { thumbtackApi, analyticsApi } from '../services/api';
 import ConnectionModal from '../components/ConnectionModal';
 import type { SavedAccount, AccountDiagnostics } from '../types';
 
@@ -92,7 +92,7 @@ export function Dashboard() {
 
     for (const account of accountsList) {
       try {
-        const diag = await testApi.getDiagnostics(account.id);
+        const diag = await thumbtackApi.getAccountHealth(account.id);
         diagnosticsMap[account.id] = diag;
         // Update diagnostics incrementally so UI updates as each completes
         setAccountDiagnostics({ ...diagnosticsMap });

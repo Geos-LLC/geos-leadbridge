@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info } from 'lucide-react';
-import { billingApi, thumbtackApi, leadsApi, usersApi, testApi } from '../services/api';
+import { billingApi, thumbtackApi, leadsApi, usersApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -79,7 +79,7 @@ export default function SettingsPage() {
 
     for (const account of accountsList) {
       try {
-        const diag = await testApi.getDiagnostics(account.id);
+        const diag = await thumbtackApi.getAccountHealth(account.id);
         diagnosticsMap[account.id] = diag;
       } catch (err) {
         console.error(`Failed to load diagnostics for ${account.id}:`, err);

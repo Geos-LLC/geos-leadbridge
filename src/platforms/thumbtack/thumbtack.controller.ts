@@ -29,6 +29,7 @@ import { PlatformFactory } from '../platform.factory';
 import { LeadsService } from '../../leads/leads.service';
 import { PlatformName } from '../../common/interfaces/platform.interface';
 import { ThumbtackAdapter } from './thumbtack.adapter';
+import { PrismaService } from '../../common/utils/prisma.service';
 
 @Controller('v1/thumbtack')
 @UseGuards(JwtAuthGuard)
@@ -40,6 +41,7 @@ export class ThumbtackController {
     private platformFactory: PlatformFactory,
     private leadsService: LeadsService,
     private configService: ConfigService,
+    private prisma: PrismaService,
   ) {
     // Sanitize frontendUrl - remove trailing slashes and whitespace
     const rawUrl = this.configService.get<string>('frontendUrl') || 'http://localhost:5173';
@@ -591,6 +593,79 @@ export class ThumbtackController {
     return {
       success: true,
       message: 'Account updated successfully',
+    };
+  }
+
+  /**
+   * Get account health/diagnostics for the current user's own account.
+   * Returns notification issues and connection status without requiring admin access.
+   */
+  @Get('saved-accounts/:id/health')
+  async getAccountHealth(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id, userId: user.id },
+      select: { id: true, businessId: true, businessName: true, webhookId: true, userId: true },
+    });
+
+    if (!account) {
+      return { healthy: true, issues: [], notificationIssues: [] };
+    }
+
+    const platformConnection = await this.prisma.platform.findFirst({
+      where: { platformName: 'thumbtack', userId: user.id, connected: true },
+      select: { id: true, externalBusinessId: true, connected: true },
+    });
+
+    const notifSettings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId: id },
+      include: {
+        notificationRules: {
+          where: { enabled: true },
+          select: { id: true, name: true, triggerType: true, toPhone: true, fromPhone: true },
+        },
+      },
+    });
+
+    const connectionIssues: string[] = [];
+    if (!platformConnection) connectionIssues.push('No active Thumbtack connection found for this user');
+    if (!account.webhookId) connectionIssues.push('No webhook registered for this account');
+
+    const notificationIssues: string[] = [];
+    if (!notifSettings) notificationIssues.push('No notification settings configured');
+    else {
+      if (!notifSettings.enabled) notificationIssues.push('Notification settings are disabled');
+      if (!notifSettings.sigcoreApiKey) notificationIssues.push('No Sigcore API key configured');
+      const newLeadRules = (notifSettings.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead');
+      if (newLeadRules.length === 0) notificationIssues.push('No enabled "new_lead" SMS rules');
+    }
+
+    const healthy = connectionIssues.length === 0;
+
+    return {
+      account: {
+        id: account.id,
+        businessId: account.businessId,
+        businessName: account.businessName,
+        hasWebhook: !!account.webhookId,
+      },
+      platform: {
+        connected: !!platformConnection,
+        externalBusinessId: platformConnection?.externalBusinessId || null,
+      },
+      notifications: {
+        settingsExist: !!notifSettings,
+        settingsEnabled: notifSettings?.enabled ?? false,
+        hasSigcoreApiKey: !!notifSettings?.sigcoreApiKey,
+        totalRules: notifSettings?.notificationRules?.length || 0,
+        newLeadRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead').length,
+        customerReplyRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'customer_reply').length,
+      },
+      healthy,
+      issues: [...connectionIssues, ...notificationIssues],
+      notificationIssues,
     };
   }
 

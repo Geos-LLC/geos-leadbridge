@@ -320,6 +320,10 @@ export const thumbtackApi = {
     const { data } = await api.get(`/v1/thumbtack/saved-accounts/${id}/validate-token`);
     return data;
   },
+  getAccountHealth: async (id: string): Promise<AccountDiagnostics> => {
+    const { data } = await api.get(`/v1/thumbtack/saved-accounts/${id}/health`);
+    return data;
+  },
 };
 
 // Attachment type for messages
