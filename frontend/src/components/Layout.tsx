@@ -183,7 +183,7 @@ export function Layout() {
                   ? 'Thumbtack Disconnected – Automation Paused'
                   : `${savedAccounts.filter(a => !a.webhookId).length} account${savedAccounts.filter(a => !a.webhookId).length > 1 ? 's' : ''} disconnected`}
               </span>
-              <RouterLink to="/dashboard" className={`ml-auto text-sm font-bold ${allDisconnected ? 'text-red-600 hover:text-red-700' : 'text-amber-600 hover:text-amber-700'}`}>
+              <RouterLink to="/dashboard?reconnect=1" className={`ml-auto text-sm font-bold ${allDisconnected ? 'text-red-600 hover:text-red-700' : 'text-amber-600 hover:text-amber-700'}`}>
                 Reconnect Now →
               </RouterLink>
             </div>

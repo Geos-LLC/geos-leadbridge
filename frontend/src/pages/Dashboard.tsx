@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Users, Send, Clock, TrendingUp, Plus, ChevronRight,
   Briefcase, Sparkles, AlertCircle, ExternalLink, Loader2, CheckCircle
@@ -13,6 +13,7 @@ import type { SavedAccount, AccountDiagnostics } from '../types';
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuthStore();
   const { savedAccounts, setSavedAccounts, dashboardStats: cachedStats, setDashboardStats } = useAppStore();
 
@@ -42,6 +43,18 @@ export function Dashboard() {
     loadAccounts();
     loadDashboardStats();
   }, []);
+
+  // Auto-open reconnect modal when navigated here from the disconnect banner
+  useEffect(() => {
+    if (searchParams.get('reconnect') === '1' && savedAccounts.length > 0) {
+      const unhealthy = savedAccounts.find(a => !a.webhookId);
+      if (unhealthy) {
+        setAccountToReconnect(unhealthy);
+        setConnectionModalOpen(true);
+      }
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, savedAccounts]);
 
   async function loadAccounts() {
     try {
