@@ -79,6 +79,7 @@ export function Dashboard() {
 
       // Load diagnostics for all accounts
       if (accounts.length > 0) {
+        setLoadingDiagnostics(true);
         loadDiagnostics(accounts);
       }
     } catch (err) {
@@ -460,6 +461,7 @@ export function Dashboard() {
         {/* Alerts & Quick Actions */}
         <div className="flex flex-col gap-6">
           {(() => {
+            const isCheckingHealth = loadingDiagnostics || (savedAccounts.length > 0 && Object.keys(accountDiagnostics).length === 0);
             const disconnectedAccounts = savedAccounts.filter(a => {
               const diag = accountDiagnostics[a.id];
               return !a.webhookId || (diag && !diag.healthy);
@@ -476,7 +478,12 @@ export function Dashboard() {
               <>
                 <div className="flex items-center justify-between px-2">
                   <h3 className="text-xl font-bold text-slate-900">System Status</h3>
-                  {hasConnectionIssues ? (
+                  {isCheckingHealth ? (
+                    <span className="bg-slate-100 text-slate-500 text-xs font-bold px-2 py-1 rounded-md flex items-center gap-1.5">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      CHECKING
+                    </span>
+                  ) : hasConnectionIssues ? (
                     <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-1 rounded-md">
                       {disconnectedAccounts.length} URGENT
                     </span>
@@ -491,7 +498,21 @@ export function Dashboard() {
                   )}
                 </div>
 
-                {hasConnectionIssues ? (
+                {isCheckingHealth ? (
+                  <div className="bg-slate-50/50 border border-slate-200 rounded-3xl p-5 relative overflow-hidden flex items-center">
+                    <div className="flex items-start gap-4 w-full">
+                      <div className="w-10 h-10 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center shrink-0">
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      </div>
+                      <div className="flex-1">
+                        <h5 className="font-bold text-slate-900">Checking Systems...</h5>
+                        <p className="text-sm text-slate-500 mt-1 leading-relaxed">
+                          Verifying account connections and notification settings.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : hasConnectionIssues ? (
                   <div className="bg-rose-50/50 border border-rose-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-rose-50 transition-colors cursor-pointer flex items-center"
                     onClick={() => {
                       const unhealthy = disconnectedAccounts[0];
