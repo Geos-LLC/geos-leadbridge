@@ -127,17 +127,16 @@ export default function TrialBanner() {
 
   console.log('[TrialBanner] RENDERING banner - isVisible:', isVisible, 'isOnTrial:', trialStatus.isOnTrial, 'trialExpired:', trialStatus.trialExpired);
 
-  // Trial expired - show urgent banner overlaying the page
+  // Trial expired - show urgent banner overlaying the page at top
   if (trialStatus.trialExpired) {
     return (
-      <div className="fixed bottom-0 left-0 lg:left-72 right-0 z-50 px-6 py-4 bg-red-600 border-t border-red-700 shadow-2xl">
+      <div className="fixed top-0 left-0 lg:left-72 right-0 z-[60] px-6 py-3 bg-red-600 border-b border-red-700 shadow-2xl">
         <div className="flex items-center gap-4 max-w-7xl mx-auto">
-          <div className="flex items-center justify-center w-9 h-9 bg-white/20 rounded-xl shrink-0">
-            <AlertCircle className="w-5 h-5 text-white" />
+          <div className="flex items-center justify-center w-8 h-8 bg-white/20 rounded-xl shrink-0">
+            <AlertCircle className="w-4 h-4 text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-white">Your trial has expired</p>
-            <p className="text-xs text-red-200 mt-0.5">Subscribe now to continue using all features</p>
+            <p className="text-sm font-bold text-white">Your trial has expired — Subscribe to continue using all features</p>
           </div>
           <Link
             to="/pricing"
@@ -169,8 +168,8 @@ export default function TrialBanner() {
 
   return (
     <div
-      className={`fixed bottom-0 left-0 lg:left-72 right-0 z-50 px-6 py-4 ${bgColor} border-t ${borderColor} shadow-2xl transition-all duration-300 ${
-        isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
+      className={`fixed top-0 left-0 lg:left-72 right-0 z-[60] px-6 py-3 ${bgColor} border-b ${borderColor} shadow-2xl transition-all duration-300 ${
+        isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full'
       }`}
     >
       <div className="flex items-center gap-4 max-w-7xl mx-auto">
