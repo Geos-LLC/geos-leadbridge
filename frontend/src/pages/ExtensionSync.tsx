@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   RefreshCw, Loader2, CheckCircle, Download, Package,
-  Clock, DollarSign, ArrowUpRight, Filter, ExternalLink, Chrome,
+  Clock, DollarSign, ArrowUpRight, Filter, Chrome,
 } from 'lucide-react';
 import { integrationsApi } from '../services/api';
 
@@ -185,24 +185,30 @@ export function ExtensionSync() {
             <span className="text-sm">Checking for extension...</span>
           </div>
         ) : extensionInstalled ? (
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <div className="space-y-4">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
                 <CheckCircle size={18} className="text-green-600" />
               </div>
               <div>
                 <span className="text-sm font-semibold text-green-700">Extension installed</span>
-                <p className="text-xs text-slate-400 mt-0.5">Log in to Thumbtack and the extension will sync automatically</p>
+                <p className="text-xs text-slate-400 mt-0.5">Click a button below to open Thumbtack with the extension</p>
               </div>
             </div>
-            <a
-              href="https://www.thumbtack.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="sm:ml-auto px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-2"
-            >
-              <ExternalLink size={16} /> Open Thumbtack
-            </a>
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={() => document.dispatchEvent(new CustomEvent('leadbridge-launch', { detail: { action: 'collect-leads' } }))}
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-2"
+              >
+                <Download size={16} /> Get IDs
+              </button>
+              <button
+                onClick={() => document.dispatchEvent(new CustomEvent('leadbridge-launch', { detail: { action: 'sync-budget' } }))}
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-2"
+              >
+                <DollarSign size={16} /> Get Budget
+              </button>
+            </div>
           </div>
         ) : (
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
