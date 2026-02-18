@@ -41,5 +41,9 @@ export class CollectLeadsDto {
 
   @IsOptional()
   @IsObject()
+  leadStatuses?: Record<string, string>;
+
+  @IsOptional()
+  @IsObject()
   metadata?: Record<string, any>;
 }

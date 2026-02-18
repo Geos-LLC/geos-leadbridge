@@ -1030,6 +1030,7 @@ export const integrationsApi = {
       capturedAt: string;
       collectedAt: string;
       source: string | null;
+      thumbtackStatus: string | null;
       imported: boolean;
       importedAt: string | null;
       needsRefetch: boolean;

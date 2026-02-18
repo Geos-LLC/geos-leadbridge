@@ -12,6 +12,7 @@ type CollectedLead = {
   capturedAt: string;
   collectedAt: string;
   source: string | null;
+  thumbtackStatus: string | null;
   imported: boolean;
   importedAt: string | null;
   needsRefetch: boolean;
@@ -304,6 +305,7 @@ export function ExtensionSync() {
                       </th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Thumbtack ID</th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Collected</th>
+                      <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">TT Status</th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Source</th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Status</th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Batch</th>
@@ -328,6 +330,7 @@ export function ExtensionSync() {
                           </code>
                         </td>
                         <td className="py-3 px-4 text-sm text-slate-600">{formatDate(lead.collectedAt)}</td>
+                        <td className="py-3 px-4 text-sm text-slate-500">{lead.thumbtackStatus || '-'}</td>
                         <td className="py-3 px-4 text-sm text-slate-500">{lead.source || '-'}</td>
                         <td className="py-3 px-4"><LeadStatusBadge lead={lead} /></td>
                         <td className="py-3 px-4 text-xs text-slate-400 font-mono">{lead.batchId?.slice(0, 8) || '-'}</td>
@@ -359,7 +362,7 @@ export function ExtensionSync() {
                     </div>
                     <div className="flex items-center justify-between text-xs text-slate-500">
                       <span>{formatDate(lead.collectedAt)}</span>
-                      <span>{lead.source || 'No source'}</span>
+                      <span>{lead.thumbtackStatus || lead.source || 'No source'}</span>
                     </div>
                     {lead.importedAt && (
                       <p className="text-xs text-green-600">Imported: {formatDate(lead.importedAt)}</p>

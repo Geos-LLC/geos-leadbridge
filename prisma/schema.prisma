@@ -627,10 +627,11 @@ model ThumbtackLeadId {
   source         String?
   pageUrl        String?
   pageTitle      String?
-  imported       Boolean   @default(false)
-  importedAt     DateTime?
-  needsRefetch   Boolean   @default(false)
-  lastActivityAt DateTime?
+  thumbtackStatus String?
+  imported        Boolean   @default(false)
+  importedAt      DateTime?
+  needsRefetch    Boolean   @default(false)
+  lastActivityAt  DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
