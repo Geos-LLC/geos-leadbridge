@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   RefreshCw, Loader2, CheckCircle, Download, Package,
-  Clock, DollarSign, ArrowUpRight, Filter,
+  Clock, DollarSign, ArrowUpRight, Filter, ExternalLink, Chrome,
 } from 'lucide-react';
 import { integrationsApi } from '../services/api';
 
@@ -58,6 +58,10 @@ function LeadStatusBadge({ lead }: { lead: CollectedLead }) {
 type TabId = 'leads' | 'budgets';
 type LeadFilter = 'all' | 'pending' | 'imported' | 'refetch';
 
+const CHROME_STORE_URL = 'https://chromewebstore.google.com/detail/leadbridge-sync-thumbtack/YOUR_EXTENSION_ID';
+const THUMBTACK_INBOX_URL = 'https://www.thumbtack.com/pro-inbox/';
+const THUMBTACK_BUDGET_URL = 'https://www.thumbtack.com/pro/budget/';
+
 export function ExtensionSync() {
   const [activeTab, setActiveTab] = useState<TabId>('leads');
   const [leads, setLeads] = useState<CollectedLead[]>([]);
@@ -67,6 +71,20 @@ export function ExtensionSync() {
   const [importResult, setImportResult] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<LeadFilter>('all');
+  const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
+
+  // Detect if the Chrome extension is installed
+  // The extension's leadbridgeAuth.js sets data-leadbridge-extension="true" on <html>
+  useEffect(() => {
+    const check = () => {
+      const installed = document.documentElement.getAttribute('data-leadbridge-extension') === 'true';
+      setExtensionInstalled(installed);
+    };
+    // Check immediately and after a short delay (content script may not have run yet)
+    check();
+    const timer = setTimeout(check, 1500);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -160,6 +178,58 @@ export function ExtensionSync() {
         <p className="text-slate-500 mt-1 md:mt-2 text-sm md:text-lg">
           View and import data collected by the Chrome extension
         </p>
+      </section>
+
+      {/* Extension Actions */}
+      <section className="bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm p-4 md:p-6">
+        {extensionInstalled === null ? (
+          <div className="flex items-center gap-3 text-slate-400">
+            <Loader2 size={18} className="animate-spin" />
+            <span className="text-sm">Checking for extension...</span>
+          </div>
+        ) : extensionInstalled ? (
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
+                <CheckCircle size={18} className="text-green-600" />
+              </div>
+              <span className="text-sm font-semibold text-green-700">Extension installed</span>
+            </div>
+            <div className="flex flex-wrap gap-2 sm:ml-auto">
+              <a
+                href={THUMBTACK_INBOX_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-2"
+              >
+                <ExternalLink size={16} /> Open Thumbtack Inbox
+              </a>
+              <a
+                href={THUMBTACK_BUDGET_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-2"
+              >
+                <DollarSign size={16} /> Open Thumbtack Budget
+              </a>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-slate-900">Chrome Extension not detected</p>
+              <p className="text-xs text-slate-500 mt-1">Install the LeadBridge Sync extension to capture lead IDs and budget data from Thumbtack</p>
+            </div>
+            <a
+              href={CHROME_STORE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-2 whitespace-nowrap"
+            >
+              <Chrome size={16} /> Install Extension
+            </a>
+          </div>
+        )}
       </section>
 
       {/* Tabs */}
