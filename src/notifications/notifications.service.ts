@@ -974,13 +974,16 @@ export class NotificationsService implements OnModuleInit {
     }
 
     // First try to get account-specific settings
+    const replyRuleInclude = {
+      notificationRules: {
+        where: { triggerType: 'customer_reply', enabled: true },
+        include: { messageTemplate: true },
+      },
+    };
+
     let settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
-      include: {
-        notificationRules: {
-          where: { triggerType: 'customer_reply', enabled: true },
-        },
-      },
+      include: replyRuleInclude,
     });
 
     // Fallback: If no account-specific settings, try user-level default settings
@@ -991,11 +994,7 @@ export class NotificationsService implements OnModuleInit {
           userId: userId,
           savedAccountId: null,
         },
-        include: {
-          notificationRules: {
-            where: { triggerType: 'customer_reply', enabled: true },
-          },
-        },
+        include: replyRuleInclude,
       });
 
       if (settings) {
@@ -1014,11 +1013,7 @@ export class NotificationsService implements OnModuleInit {
           sigcoreApiKey: { not: null },
           enabled: true,
         },
-        include: {
-          notificationRules: {
-            where: { triggerType: 'customer_reply', enabled: true },
-          },
-        },
+        include: replyRuleInclude,
       });
 
       if (settings) {
@@ -1097,7 +1092,7 @@ export class NotificationsService implements OnModuleInit {
       }
     }
 
-    const template = rule?.template || settings.template;
+    const template = rule?.messageTemplate?.content || rule?.template || settings.template;
     const ruleName = rule?.name || 'Legacy Alert';
     const ruleId = rule?.id || null;
 
@@ -1236,6 +1231,7 @@ export class NotificationsService implements OnModuleInit {
     if (ruleId) {
       rule = await this.prisma.notificationRule.findFirst({
         where: { id: ruleId, notificationSettingsId: settings.id },
+        include: { messageTemplate: true },
       });
       if (!rule) {
         return { success: false, error: 'Rule not found' };
@@ -1269,7 +1265,7 @@ export class NotificationsService implements OnModuleInit {
       }),
     };
 
-    const template = rule?.template || settings.template;
+    const template = rule?.messageTemplate?.content || rule?.template || settings.template;
     const ruleName = rule?.name || 'Test';
     const accountLabel = account.businessName ? `[${account.businessName}] ` : '';
     const messageBody = `${accountLabel}${this.renderTemplate(template, testLead, account.businessName)}`;
