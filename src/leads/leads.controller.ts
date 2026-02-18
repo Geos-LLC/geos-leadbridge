@@ -15,7 +15,6 @@ import {
   Sse,
   MessageEvent,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { JwtSseAuthGuard } from '../common/guards/jwt-sse-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';

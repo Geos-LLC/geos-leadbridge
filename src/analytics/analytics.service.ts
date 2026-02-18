@@ -506,7 +506,7 @@ export class AnalyticsService {
           typeCounts.set(cleaningTypeAnswer, (typeCounts.get(cleaningTypeAnswer) || 0) + 1);
           total++;
         }
-      } catch (err) {
+      } catch (_err) {
         // Skip invalid JSON
       }
     }
@@ -530,7 +530,7 @@ export class AnalyticsService {
     });
 
     const addonCounts = new Map<string, number>();
-    let totalLeadsWithAddons = 0;
+    let _totalLeadsWithAddons = 0;
 
     for (const lead of leads) {
       try {
@@ -540,14 +540,14 @@ export class AnalyticsService {
         // Details is an array of {question, answer} objects
         const addOnsAnswer = this.findAnswer(details, ['Add-ons', 'Additional services', 'Extras']);
         if (addOnsAnswer) {
-          totalLeadsWithAddons++;
+          _totalLeadsWithAddons++;
           // Answer might be comma-separated or a single value
           const addons = addOnsAnswer.split(/,|\n/).map(a => a.trim()).filter(Boolean);
           for (const addon of addons) {
             addonCounts.set(addon, (addonCounts.get(addon) || 0) + 1);
           }
         }
-      } catch (err) {
+      } catch (_err) {
         // Skip invalid JSON
       }
     }
@@ -585,7 +585,7 @@ export class AnalyticsService {
           frequencyCounts.set(frequencyAnswer, (frequencyCounts.get(frequencyAnswer) || 0) + 1);
           total++;
         }
-      } catch (err) {
+      } catch (_err) {
         // Skip invalid JSON
       }
     }
@@ -676,7 +676,7 @@ export class AnalyticsService {
           const baths = this.extractNumber(bathroomsAnswer);
           if (baths !== null) bathrooms.push(baths);
         }
-      } catch (err) {
+      } catch (_err) {
         // Skip invalid JSON
       }
     }

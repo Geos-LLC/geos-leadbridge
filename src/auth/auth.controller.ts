@@ -35,6 +35,12 @@ export class AuthController {
     return this.authService.getProfile(user.id);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Get('me')
+  async getMe(@CurrentUser() user: any) {
+    return this.authService.getMe(user.id);
+  }
+
   @Public()
   @Post('forgot-password')
   async forgotPassword(@Body('email') email: string) {

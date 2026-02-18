@@ -1019,4 +1019,70 @@ export const testApi = {
   },
 };
 
+// Extension Sync (Chrome extension collected data)
+export const integrationsApi = {
+  getCollectedLeads: async (filters?: { pending?: boolean; refetch?: boolean }): Promise<{
+    ok: boolean;
+    leads: Array<{
+      id: string;
+      thumbtackId: string;
+      batchId: string | null;
+      capturedAt: string;
+      collectedAt: string;
+      source: string | null;
+      thumbtackStatus: string | null;
+      imported: boolean;
+      importedAt: string | null;
+      needsRefetch: boolean;
+      lastActivityAt: string | null;
+    }>;
+    total: number;
+  }> => {
+    const params = new URLSearchParams();
+    if (filters?.pending) params.append('pending', 'true');
+    if (filters?.refetch) params.append('refetch', 'true');
+    const query = params.toString();
+    const { data } = await api.get(`/integrations/thumbtack/leads${query ? `?${query}` : ''}`);
+    return data;
+  },
+  markLeadsImported: async (thumbtackIds: string[]): Promise<{ ok: boolean; markedCount: number }> => {
+    const { data } = await api.patch('/integrations/thumbtack/leads/mark-imported', { thumbtackIds });
+    return data;
+  },
+  getBudgetSnapshots: async (): Promise<{
+    ok: boolean;
+    snapshots: Array<{
+      id: string;
+      snapshotType: string;
+      scopeCategory: string | null;
+      scopeLocation: string | null;
+      weeklyBudget: string;
+      currency: string;
+      capturedAt: string;
+      effectiveFrom: string;
+      effectiveTo: string | null;
+      source: string | null;
+      active: boolean;
+    }>;
+    total: number;
+  }> => {
+    const { data } = await api.get('/integrations/thumbtack/snapshots');
+    return data;
+  },
+  deleteCollectedLeads: async (thumbtackIds?: string[]): Promise<{ ok: boolean; deletedCount: number }> => {
+    const { data } = await api.delete('/integrations/thumbtack/leads', { data: thumbtackIds?.length ? { thumbtackIds } : {} });
+    return data;
+  },
+  importNegotiationBatch: async (negotiationIds: string[]): Promise<{
+    success: boolean;
+    imported: number;
+    skipped: number;
+    errors: string[];
+    results: Array<{ negotiationId: string; leadId?: string; isNew?: boolean; error?: string }>;
+  }> => {
+    const { data } = await api.post('/v1/thumbtack/negotiations/import-batch', { negotiationIds });
+    return data;
+  },
+};
+
 export default api;

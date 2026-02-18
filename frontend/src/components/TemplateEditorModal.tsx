@@ -10,12 +10,14 @@ export interface TemplateVariable {
 export const AUTO_REPLY_VARIABLES: TemplateVariable[] = [
   { name: '{customerName}', desc: 'Full customer name' },
   { name: '{firstName}', desc: 'First name only' },
+  { name: '{accountName}', desc: 'Your business name' },
   { name: '{category}', desc: 'Service category' },
   { name: '{city}', desc: 'Customer city' },
   { name: '{state}', desc: 'Customer state' },
 ];
 
 export const SMS_VARIABLES: TemplateVariable[] = [
+  { name: '{{account.name}}', desc: 'Your business name' },
   { name: '{{lead.name}}', desc: 'Customer name' },
   { name: '{{lead.phone}}', desc: 'Customer phone' },
   { name: '{{lead.service}}', desc: 'Service category' },

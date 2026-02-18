@@ -373,6 +373,24 @@ export class WebhooksService {
       lead.id,
     );
 
+    // Find saved account for this business (used by both automation and SMS notifications)
+    const savedAccounts = await this.prisma.savedAccount.findMany({
+      where: {
+        platform,
+        businessId: business.businessID,
+      },
+      include: { notificationSettings: { select: { id: true } } },
+    });
+    // Prefer: 1) account with settings matching userId, 2) any account with settings, 3) account matching userId, 4) first
+    const savedAccount =
+      savedAccounts.find((a: any) => a.notificationSettings && a.userId === userId) ||
+      savedAccounts.find((a: any) => a.notificationSettings) ||
+      savedAccounts.find((a: any) => a.userId === userId) ||
+      savedAccounts[0] || null;
+    if (savedAccounts.length > 1) {
+      this.logger.warn(`Multiple savedAccounts for business ${business.businessID}: ${savedAccounts.map(a => `${a.id}(user=${a.userId},settings=${!!a.notificationSettings})`).join(', ')}. Using ${savedAccount?.id}`);
+    }
+
     // Trigger automation rules for new leads
     try {
       await this.automationService.handleNewLead({
@@ -381,6 +399,7 @@ export class WebhooksService {
         negotiationId,
         leadId: lead.id,
         customerName,
+        accountName: savedAccount?.businessName || undefined,
         category: request.category?.name,
         city: location.city,
         state: location.state,
@@ -391,31 +410,12 @@ export class WebhooksService {
 
     // Send SMS notification to company for new lead
     try {
-      // Find the saved account for this business to get notification settings
-      // Search by businessId across ALL users - the notification settings may be on a
-      // different savedAccount record (e.g., different userId from reconnecting Thumbtack)
-      const savedAccounts = await this.prisma.savedAccount.findMany({
-        where: {
-          platform,
-          businessId: business.businessID,
-        },
-        include: { notificationSettings: { select: { id: true } } },
-      });
-      // Prefer: 1) account with settings matching userId, 2) any account with settings, 3) account matching userId, 4) first
-      const savedAccount =
-        savedAccounts.find((a: any) => a.notificationSettings && a.userId === userId) ||
-        savedAccounts.find((a: any) => a.notificationSettings) ||
-        savedAccounts.find((a: any) => a.userId === userId) ||
-        savedAccounts[0] || null;
-      if (savedAccounts.length > 1) {
-        this.logger.warn(`Multiple savedAccounts for business ${business.businessID}: ${savedAccounts.map(a => `${a.id}(user=${a.userId},settings=${!!a.notificationSettings})`).join(', ')}. Using ${savedAccount?.id}`);
-      }
-
       if (savedAccount) {
         await this.notificationsService.sendLeadNotification({
           userId,
           savedAccountId: savedAccount.id,
           leadId: lead.id,
+          accountName: savedAccount.businessName,
           lead: {
             customerName,
             customerPhone: customer.phone,
@@ -724,6 +724,7 @@ export class WebhooksService {
           isFirstCustomerReply: customerMessageCount === 1,
           isSecondCustomerMessage: customerMessageCount === 2, // First actual reply after initial message
           customerName: lead.customerName,
+          accountName: savedAccount?.businessName || undefined,
           category: lead.category || undefined,
           city: lead.city || undefined,
           state: lead.state || undefined,
@@ -739,6 +740,7 @@ export class WebhooksService {
             userId,
             savedAccountId: savedAccount.id,
             leadId: lead.id,
+            accountName: savedAccount.businessName,
             lead: {
               customerName: lead.customerName,
               customerPhone: lead.customerPhone,

@@ -160,11 +160,15 @@ export class TemplatesService {
    */
   personalizeMessage(templateContent: string, lead: {
     customerName: string;
+    accountName?: string | null;
     category?: string | null;
     city?: string | null;
     state?: string | null;
   }): string {
     let message = templateContent;
+
+    // Replace {accountName} with business name
+    message = message.replace(/\{accountName\}/gi, lead.accountName || 'Your Business');
 
     // Replace {customerName} with full name
     message = message.replace(/\{customerName\}/gi, lead.customerName || 'there');

@@ -34,6 +34,7 @@ export interface AutomationTriggerContext {
   negotiationId: string;
   leadId: string;
   customerName: string;
+  accountName?: string;
   category?: string;
   city?: string;
   state?: string;
@@ -507,6 +508,7 @@ export class AutomationService implements OnModuleInit {
       // Personalize the message
       const personalizedMessage = this.templatesService.personalizeMessage(template.content, {
         customerName: context.customerName,
+        accountName: context.accountName,
         category: context.category,
         city: context.city,
         state: context.state,
@@ -598,12 +600,20 @@ export class AutomationService implements OnModuleInit {
       const scheduledTime = pending.scheduledFor.getTime();
       const delayMs = Math.max(0, scheduledTime - now);
 
+      const savedAccount = pending.lead.businessId
+        ? await this.prisma.savedAccount.findFirst({
+            where: { businessId: pending.lead.businessId },
+            select: { businessName: true },
+          })
+        : null;
+
       const context: AutomationTriggerContext = {
         userId: pending.automationRule.userId,
         businessId: pending.lead.businessId || '',
         negotiationId: pending.negotiationId,
         leadId: pending.leadId,
         customerName: pending.lead.customerName,
+        accountName: savedAccount?.businessName || undefined,
         category: pending.lead.category || undefined,
         city: pending.lead.city || undefined,
         state: pending.lead.state || undefined,

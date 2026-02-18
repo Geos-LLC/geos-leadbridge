@@ -6,6 +6,7 @@ import type { NotificationRule, SavedAccount } from '../types';
 
 // Available variables for SMS template
 const TEMPLATE_VARIABLES = [
+  { name: '{{account.name}}', description: 'Your business name' },
   { name: '{{lead.name}}', description: 'Customer name' },
   { name: '{{lead.phone}}', description: 'Customer phone' },
   { name: '{{lead.service}}', description: 'Service category' },

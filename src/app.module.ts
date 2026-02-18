@@ -20,6 +20,7 @@ import { AdminModule } from './admin/admin.module';
 import { SigcoreModule } from './sigcore/sigcore.module';
 import { UsersModule } from './users/users.module';
 import { TestModule } from './test/test.module';
+import { IntegrationsModule } from './integrations/integrations.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PrismaService } from './common/utils/prisma.service';
 
@@ -43,6 +44,7 @@ import { PrismaService } from './common/utils/prisma.service';
     SigcoreModule,
     UsersModule,
     TestModule,
+    IntegrationsModule,
   ],
   providers: [
     PrismaService,
