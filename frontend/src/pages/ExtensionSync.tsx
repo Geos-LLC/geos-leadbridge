@@ -282,7 +282,7 @@ export function ExtensionSync() {
           Budget History ({snapshots.length})
         </button>
         <button
-          onClick={loadData}
+          onClick={() => loadData()}
           disabled={loading}
           className="ml-auto px-3 py-2 rounded-xl text-sm font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-2"
         >
