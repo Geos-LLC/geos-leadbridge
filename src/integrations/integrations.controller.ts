@@ -3,6 +3,7 @@ import {
   Post,
   Get,
   Patch,
+  Delete,
   Body,
   Query,
   UseGuards,
@@ -94,5 +95,17 @@ export class IntegrationsController {
       user.id,
       dto.thumbtackIds,
     );
+  }
+
+  /**
+   * DELETE /api/integrations/thumbtack/leads
+   * Delete collected lead IDs. Pass thumbtackIds in body, or omit to delete all.
+   */
+  @Delete('leads')
+  async deleteLeadIds(
+    @CurrentUser() user: any,
+    @Body() body: { thumbtackIds?: string[] },
+  ) {
+    return this.integrationsService.deleteLeadIds(user.id, body.thumbtackIds);
   }
 }

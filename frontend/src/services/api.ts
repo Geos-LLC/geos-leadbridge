@@ -1069,6 +1069,10 @@ export const integrationsApi = {
     const { data } = await api.get('/integrations/thumbtack/snapshots');
     return data;
   },
+  deleteCollectedLeads: async (thumbtackIds?: string[]): Promise<{ ok: boolean; deletedCount: number }> => {
+    const { data } = await api.delete('/integrations/thumbtack/leads', { data: thumbtackIds?.length ? { thumbtackIds } : {} });
+    return data;
+  },
   importNegotiationBatch: async (negotiationIds: string[]): Promise<{
     success: boolean;
     imported: number;

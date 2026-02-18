@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   RefreshCw, Loader2, CheckCircle, Download, Package,
-  Clock, DollarSign, ArrowUpRight, Filter, Chrome,
+  Clock, DollarSign, ArrowUpRight, Filter, Chrome, Trash2,
 } from 'lucide-react';
 import { integrationsApi } from '../services/api';
 
@@ -66,6 +66,7 @@ export function ExtensionSync() {
   const [snapshots, setSnapshots] = useState<BudgetSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<LeadFilter>('all');
@@ -154,6 +155,26 @@ export function ExtensionSync() {
 
   const handleImportSelected = () => handleImport(Array.from(selected));
   const handleImportAllPending = () => handleImport(pendingLeads.map((l) => l.thumbtackId));
+
+  const handleDelete = async (thumbtackIds?: string[]) => {
+    const count = thumbtackIds?.length || leads.length;
+    if (!confirm(`Delete ${count} collected lead${count !== 1 ? 's' : ''}? This cannot be undone.`)) return;
+    try {
+      setDeleting(true);
+      setImportResult(null);
+      const result = await integrationsApi.deleteCollectedLeads(thumbtackIds);
+      setImportResult(`Deleted ${result.deletedCount} leads`);
+      setSelected(new Set());
+      await loadData();
+    } catch (err: any) {
+      setImportResult(`Delete failed: ${err.message}`);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleDeleteSelected = () => handleDelete(Array.from(selected));
+  const handleDeleteAll = () => handleDelete();
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleString(undefined, {
@@ -324,16 +345,26 @@ export function ExtensionSync() {
               ))}
             </div>
 
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="flex flex-wrap items-center gap-2 ml-auto">
               {selected.size > 0 && (
-                <button
-                  onClick={handleImportSelected}
-                  disabled={importing}
-                  className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-2"
-                >
-                  {importing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                  Import Selected ({selected.size})
-                </button>
+                <>
+                  <button
+                    onClick={handleImportSelected}
+                    disabled={importing}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-2"
+                  >
+                    {importing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                    Import Selected ({selected.size})
+                  </button>
+                  <button
+                    onClick={handleDeleteSelected}
+                    disabled={deleting}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 inline-flex items-center gap-2"
+                  >
+                    {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                    Delete Selected ({selected.size})
+                  </button>
+                </>
               )}
               {pendingLeads.length > 0 && (
                 <button
@@ -343,6 +374,16 @@ export function ExtensionSync() {
                 >
                   {importing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                   Import All Pending ({pendingLeads.length})
+                </button>
+              )}
+              {leads.length > 0 && (
+                <button
+                  onClick={handleDeleteAll}
+                  disabled={deleting}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                  Delete All
                 </button>
               )}
             </div>

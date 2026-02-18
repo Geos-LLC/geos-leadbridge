@@ -233,6 +233,24 @@ export class IntegrationsService {
   }
 
   /**
+   * Delete collected lead IDs. If thumbtackIds provided, delete those; otherwise delete all.
+   */
+  async deleteLeadIds(userId: string, thumbtackIds?: string[]) {
+    const where: any = { userId };
+    if (thumbtackIds?.length) {
+      where.thumbtackId = { in: thumbtackIds };
+    }
+
+    const result = await this.prisma.thumbtackLeadId.deleteMany({ where });
+
+    this.logger.log(
+      `Deleted ${result.count} collected leads for user ${userId}`,
+    );
+
+    return { ok: true, deletedCount: result.count };
+  }
+
+  /**
    * Get stats for the auth/me endpoint.
    */
   async getExtensionStats(userId: string) {
