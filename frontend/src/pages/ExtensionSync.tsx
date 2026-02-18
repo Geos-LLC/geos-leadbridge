@@ -58,7 +58,7 @@ function LeadStatusBadge({ lead }: { lead: CollectedLead }) {
 type TabId = 'leads' | 'budgets';
 type LeadFilter = 'all' | 'pending' | 'imported' | 'refetch';
 
-const CHROME_STORE_URL = 'https://chromewebstore.google.com/detail/leadbridge-sync-thumbtack/YOUR_EXTENSION_ID';
+const CHROME_STORE_URL = 'https://chromewebstore.google.com/detail/leadbridge-sync-thumbtack/mkhkooldgglhnpkjfgmpkneongipfhnm';
 const THUMBTACK_INBOX_URL = 'https://www.thumbtack.com/pro-inbox/';
 const THUMBTACK_BUDGET_URL = 'https://www.thumbtack.com/pro/budget/';
 
