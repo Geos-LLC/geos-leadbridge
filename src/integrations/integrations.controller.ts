@@ -6,6 +6,7 @@ import {
   Body,
   Query,
   UseGuards,
+  Logger,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -17,6 +18,8 @@ import { MarkImportedDto } from './dto/mark-imported.dto';
 @Controller('integrations/thumbtack')
 @UseGuards(JwtAuthGuard)
 export class IntegrationsController {
+  private readonly logger = new Logger(IntegrationsController.name);
+
   constructor(private integrationsService: IntegrationsService) {}
 
   /**
@@ -28,7 +31,12 @@ export class IntegrationsController {
     @CurrentUser() user: any,
     @Body() dto: BudgetSnapshotDto,
   ) {
-    return this.integrationsService.saveBudgetSnapshot(user.id, dto);
+    try {
+      return await this.integrationsService.saveBudgetSnapshot(user.id, dto);
+    } catch (err) {
+      this.logger.error(`saveBudgetSnapshot failed for user ${user?.id}: ${err.message}`, err.stack);
+      throw err;
+    }
   }
 
   /**
@@ -40,7 +48,12 @@ export class IntegrationsController {
     @CurrentUser() user: any,
     @Body() dto: CollectLeadsDto,
   ) {
-    return this.integrationsService.collectLeadIds(user.id, dto);
+    try {
+      return await this.integrationsService.collectLeadIds(user.id, dto);
+    } catch (err) {
+      this.logger.error(`collectLeadIds failed for user ${user?.id}: ${err.message}`, err.stack);
+      throw err;
+    }
   }
 
   /**
