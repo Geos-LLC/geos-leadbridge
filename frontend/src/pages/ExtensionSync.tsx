@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   RefreshCw, Loader2, CheckCircle, Download, Package,
   Clock, DollarSign, ArrowUpRight, Filter, Chrome, Trash2,
@@ -84,25 +84,35 @@ export function ExtensionSync() {
     return () => clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  const prevTotalsRef = useRef({ leads: 0, snapshots: 0 });
 
-  const loadData = async () => {
+  const loadData = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const [leadsRes, snapshotsRes] = await Promise.all([
         integrationsApi.getCollectedLeads(),
         integrationsApi.getBudgetSnapshots(),
       ]);
       setLeads(leadsRes.leads);
       setSnapshots(snapshotsRes.snapshots);
+      prevTotalsRef.current = { leads: leadsRes.total, snapshots: snapshotsRes.total };
     } catch (err) {
-      console.error('Failed to load extension data:', err);
+      if (!silent) console.error('Failed to load extension data:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
+  }, []);
+
+  // Initial load
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Auto-refresh every 5s (silent — no loading spinner)
+  useEffect(() => {
+    const interval = setInterval(() => loadData(true), 5000);
+    return () => clearInterval(interval);
+  }, [loadData]);
 
   const filteredLeads = leads.filter((l) => {
     if (filter === 'pending') return !l.imported;
