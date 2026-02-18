@@ -4,7 +4,6 @@ import {
   Clock, DollarSign, ArrowUpRight, Filter, ExternalLink, Chrome,
 } from 'lucide-react';
 import { integrationsApi } from '../services/api';
-import { useAppStore } from '../store/appStore';
 
 type CollectedLead = {
   id: string;
@@ -60,11 +59,6 @@ type TabId = 'leads' | 'budgets';
 type LeadFilter = 'all' | 'pending' | 'imported' | 'refetch';
 
 const CHROME_STORE_URL = 'https://chromewebstore.google.com/detail/leadbridge-sync-thumbtack/mkhkooldgglhnpkjfgmpkneongipfhnm';
-const THUMBTACK_INBOX_URL = 'https://www.thumbtack.com/pro-inbox/';
-
-function getThumbtackBudgetUrl(businessId: string) {
-  return `https://www.thumbtack.com/services/${businessId}/budget/?origin=services&fromService=true`;
-}
 
 export function ExtensionSync() {
   const [activeTab, setActiveTab] = useState<TabId>('leads');
@@ -76,8 +70,6 @@ export function ExtensionSync() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<LeadFilter>('all');
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
-  const savedAccounts = useAppStore((s) => s.savedAccounts);
-
   // Detect if the Chrome extension is installed
   // The extension's leadbridgeAuth.js sets data-leadbridge-extension="true" on <html>
   useEffect(() => {
@@ -193,39 +185,24 @@ export function ExtensionSync() {
             <span className="text-sm">Checking for extension...</span>
           </div>
         ) : extensionInstalled ? (
-          <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
                 <CheckCircle size={18} className="text-green-600" />
               </div>
-              <span className="text-sm font-semibold text-green-700">Extension installed</span>
+              <div>
+                <span className="text-sm font-semibold text-green-700">Extension installed</span>
+                <p className="text-xs text-slate-400 mt-0.5">Log in to Thumbtack and the extension will sync automatically</p>
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <a
-                href={THUMBTACK_INBOX_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-2"
-              >
-                <ExternalLink size={16} /> Open Thumbtack Inbox
-              </a>
-              {savedAccounts.length > 0 ? (
-                savedAccounts.map((acct) => (
-                  <a
-                    key={acct.id}
-                    href={getThumbtackBudgetUrl(acct.businessId)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-2"
-                  >
-                    <DollarSign size={16} /> Budget — {acct.businessName}
-                  </a>
-                ))
-              ) : (
-                <span className="px-4 py-2 text-xs text-slate-400">No accounts linked — connect a Thumbtack account to see budget links</span>
-              )}
-            </div>
-            <p className="text-xs text-slate-400">You may need to log in to Thumbtack first for the budget page to load.</p>
+            <a
+              href="https://www.thumbtack.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="sm:ml-auto px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-2"
+            >
+              <ExternalLink size={16} /> Open Thumbtack
+            </a>
           </div>
         ) : (
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
