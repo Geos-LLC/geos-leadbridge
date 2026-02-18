@@ -60,7 +60,7 @@ type LeadFilter = 'all' | 'pending' | 'imported' | 'refetch';
 
 const CHROME_STORE_URL = 'https://chromewebstore.google.com/detail/leadbridge-sync-thumbtack/mkhkooldgglhnpkjfgmpkneongipfhnm';
 const THUMBTACK_INBOX_URL = 'https://www.thumbtack.com/pro-inbox/';
-const THUMBTACK_BUDGET_URL = 'https://www.thumbtack.com/pro/budget/';
+const THUMBTACK_BUDGET_URL = 'https://www.thumbtack.com/services/558978902305792014/budget/?origin=services&fromService=true';
 
 export function ExtensionSync() {
   const [activeTab, setActiveTab] = useState<TabId>('leads');
