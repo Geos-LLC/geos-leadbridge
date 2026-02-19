@@ -94,12 +94,13 @@ export class IntegrationsService {
       });
 
       if (existing) {
-        // Update: mark as needing refetch (had new activity)
+        // Update: only mark needsRefetch if the lead was already imported
+        // (avoids marking all leads as needsRefetch when batch streaming re-sends them)
         await this.prisma.thumbtackLeadId.update({
           where: { id: existing.id },
           data: {
             batchId,
-            needsRefetch: true,
+            ...(existing.imported ? { needsRefetch: true } : {}),
             lastActivityAt: capturedAt,
             ...(status ? { thumbtackStatus: status } : {}),
             ...(customerName ? { customerName } : {}),
