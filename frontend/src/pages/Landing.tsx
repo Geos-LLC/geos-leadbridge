@@ -79,6 +79,15 @@ export function Landing() {
                 <div className="w-12 h-12 rounded-full border-4 border-white overflow-hidden bg-slate-200">
                   <img src="https://images.unsplash.com/photo-1581578731548-c64695ce6958?auto=format&fit=crop&q=80&w=100&h=100" alt="Pro 3" className="w-full h-full object-cover" />
                 </div>
+                <div className="w-12 h-12 rounded-full border-4 border-white overflow-hidden bg-slate-200">
+                  <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=100&h=100" alt="Pro 4" className="w-full h-full object-cover" />
+                </div>
+                <div className="w-12 h-12 rounded-full border-4 border-white overflow-hidden bg-slate-200">
+                  <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=100&h=100" alt="Pro 5" className="w-full h-full object-cover" />
+                </div>
+                <div className="w-12 h-12 rounded-full border-4 border-white overflow-hidden bg-slate-200">
+                  <img src="https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&q=80&w=100&h=100" alt="Pro 6" className="w-full h-full object-cover" />
+                </div>
                 <div className="w-12 h-12 rounded-full border-4 border-white overflow-hidden bg-slate-200 flex items-center justify-center bg-blue-600 text-white text-xs font-bold">
                   +500
                 </div>
