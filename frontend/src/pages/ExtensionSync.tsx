@@ -267,7 +267,7 @@ export function ExtensionSync() {
                 onClick={() => {
                   const acc = accounts.find((a) => a.id === selectedAccountId);
                   document.dispatchEvent(new CustomEvent('leadbridge-launch', {
-                    detail: { action: 'collect-leads', accountId: acc?.id || null, accountName: acc?.businessName || null },
+                    detail: { action: 'collect-leads', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: acc?.emailHint || null },
                   }));
                 }}
                 className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-2"
@@ -278,7 +278,7 @@ export function ExtensionSync() {
                 onClick={() => {
                   const acc = accounts.find((a) => a.id === selectedAccountId);
                   document.dispatchEvent(new CustomEvent('leadbridge-launch', {
-                    detail: { action: 'sync-budget', accountId: acc?.id || null, accountName: acc?.businessName || null },
+                    detail: { action: 'sync-budget', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: acc?.emailHint || null },
                   }));
                 }}
                 className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-2"
