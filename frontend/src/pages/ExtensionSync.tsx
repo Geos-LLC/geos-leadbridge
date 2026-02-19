@@ -69,6 +69,7 @@ export function ExtensionSync() {
   const [snapshots, setSnapshots] = useState<BudgetSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  const [deleteResult, setDeleteResult] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<LeadFilter>('all');
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
@@ -160,13 +161,13 @@ export function ExtensionSync() {
     if (!confirm(`Delete ${count} collected lead${count !== 1 ? 's' : ''}? This cannot be undone.`)) return;
     try {
       setDeleting(true);
-      setImportResult(null);
+      setDeleteResult(null);
       const result = await integrationsApi.deleteCollectedLeads(thumbtackIds);
-      setImportResult(`Deleted ${result.deletedCount} leads`);
+      setDeleteResult(`Deleted ${result.deletedCount} leads`);
       setSelected(new Set());
       await loadData();
     } catch (err: any) {
-      setImportResult(`Delete failed: ${err.message}`);
+      setDeleteResult(`Delete failed: ${err.message}`);
     } finally {
       setDeleting(false);
     }
