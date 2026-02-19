@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info, Eye, EyeOff, DollarSign } from 'lucide-react';
+import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info, Eye, EyeOff, DollarSign, Clock, ArrowUpRight, List } from 'lucide-react';
 import { authApi, billingApi, thumbtackApi, leadsApi, usersApi, integrationsApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
@@ -68,6 +68,11 @@ export default function SettingsPage() {
   const [extensionImportedCount, setExtensionImportedCount] = useState(0);
   const [extensionTotalCount, setExtensionTotalCount] = useState(0);
 
+  // Collected leads modal
+  const [showCollectedModal, setShowCollectedModal] = useState(false);
+  const [collectedLeads, setCollectedLeads] = useState<any[]>([]);
+  const [collectedLoading, setCollectedLoading] = useState(false);
+
   // Extension detection
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
 
@@ -130,6 +135,19 @@ export default function SettingsPage() {
       console.error('Failed to load settings data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openCollectedModal = async () => {
+    setShowCollectedModal(true);
+    setCollectedLoading(true);
+    try {
+      const res = await integrationsApi.getCollectedLeads(importAccountId ? { accountId: importAccountId } : {});
+      setCollectedLeads(res.leads || []);
+    } catch {
+      setCollectedLeads([]);
+    } finally {
+      setCollectedLoading(false);
     }
   };
 
@@ -735,18 +753,26 @@ export default function SettingsPage() {
 
                     {/* Collected leads stats */}
                     {importAccountId && extensionTotalCount > 0 && (
-                      <div className="flex items-center gap-4 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs">
-                        <span className="text-slate-500">
-                          <span className="font-bold text-slate-900">{extensionTotalCount}</span> collected
-                        </span>
-                        <span className="text-slate-300">|</span>
-                        <span className="text-emerald-600">
-                          <span className="font-bold">{extensionImportedCount}</span> imported
-                        </span>
-                        <span className="text-slate-300">|</span>
-                        <span className={extensionPendingCount > 0 ? 'text-amber-600' : 'text-slate-400'}>
-                          <span className="font-bold">{extensionPendingCount}</span> pending
-                        </span>
+                      <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                        <div className="flex items-center gap-4">
+                          <span className="text-slate-500">
+                            <span className="font-bold text-slate-900">{extensionTotalCount}</span> collected
+                          </span>
+                          <span className="text-slate-300">|</span>
+                          <span className="text-emerald-600">
+                            <span className="font-bold">{extensionImportedCount}</span> imported
+                          </span>
+                          <span className="text-slate-300">|</span>
+                          <span className={extensionPendingCount > 0 ? 'text-amber-600' : 'text-slate-400'}>
+                            <span className="font-bold">{extensionPendingCount}</span> pending
+                          </span>
+                        </div>
+                        <button
+                          onClick={openCollectedModal}
+                          className="text-blue-600 hover:text-blue-700 font-semibold hover:underline inline-flex items-center gap-1"
+                        >
+                          <List size={12} /> View all
+                        </button>
                       </div>
                     )}
 
@@ -1240,6 +1266,79 @@ export default function SettingsPage() {
                 </>
               );
             })()}
+          </div>
+        </div>
+      )}
+
+      {/* Collected Leads Modal */}
+      {showCollectedModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowCollectedModal(false)}>
+          <div className="bg-white rounded-3xl p-6 max-w-3xl w-full shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Collected Leads</h3>
+                {!collectedLoading && collectedLeads.length > 0 && (
+                  <p className="text-sm text-slate-500 mt-0.5">
+                    {collectedLeads.filter(l => l.imported).length} imported · {collectedLeads.filter(l => !l.imported).length} pending · {collectedLeads.length} total
+                  </p>
+                )}
+              </div>
+              <button
+                className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
+                onClick={() => setShowCollectedModal(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1">
+              {collectedLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+                </div>
+              ) : collectedLeads.length === 0 ? (
+                <div className="text-center py-12 text-slate-400">No collected leads yet</div>
+              ) : (
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-slate-100">
+                      <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Thumbtack ID</th>
+                      <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Collected</th>
+                      <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">TT Status</th>
+                      <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {collectedLeads.map((lead: any) => (
+                      <tr key={lead.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                        <td className="py-2.5 px-3">
+                          <code className="text-xs font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded">{lead.thumbtackId}</code>
+                        </td>
+                        <td className="py-2.5 px-3 text-sm text-slate-600">
+                          {new Date(lead.collectedAt || lead.capturedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                        </td>
+                        <td className="py-2.5 px-3 text-sm text-slate-500">{lead.thumbtackStatus || '-'}</td>
+                        <td className="py-2.5 px-3">
+                          {lead.imported ? (
+                            <span className="px-2.5 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold inline-flex items-center gap-1">
+                              <CheckCircle size={12} /> Imported
+                            </span>
+                          ) : lead.needsRefetch ? (
+                            <span className="px-2.5 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-bold inline-flex items-center gap-1">
+                              <ArrowUpRight size={12} /> Needs Refetch
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold inline-flex items-center gap-1">
+                              <Clock size={12} /> Pending
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         </div>
       )}
