@@ -635,6 +635,7 @@ model ThumbtackLeadId {
   pageUrl         String?
   pageTitle       String?
   thumbtackStatus String?
+  customerName    String?
   imported        Boolean   @default(false)
   importedAt      DateTime?
   needsRefetch    Boolean   @default(false)

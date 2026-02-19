@@ -91,6 +91,25 @@ export default function SettingsPage() {
     return () => clearTimeout(timer);
   }, []);
 
+  // Listen for extension refresh event (avoids full page reload when returning from extension)
+  useEffect(() => {
+    const handleRefresh = () => {
+      if (importAccountId) {
+        integrationsApi.getCollectedLeads({ accountId: importAccountId }).then((res) => {
+          const allLeads = res.leads || [];
+          const pending = allLeads.filter((l: any) => !l.imported);
+          const imported = allLeads.filter((l: any) => l.imported);
+          setExtensionPendingCount(pending.length);
+          setExtensionPendingIds(pending.map((l: any) => l.thumbtackId));
+          setExtensionImportedCount(imported.length);
+          setExtensionTotalCount(allLeads.length);
+        }).catch(() => {});
+      }
+    };
+    document.addEventListener('leadbridge-refresh-import', handleRefresh);
+    return () => document.removeEventListener('leadbridge-refresh-import', handleRefresh);
+  }, [importAccountId]);
+
   // Load extension pending leads when import account changes
   useEffect(() => {
     if (!importAccountId) {
@@ -1302,6 +1321,7 @@ export default function SettingsPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-slate-100">
+                      <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Customer</th>
                       <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Thumbtack ID</th>
                       <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Collected</th>
                       <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">TT Status</th>
@@ -1311,6 +1331,7 @@ export default function SettingsPage() {
                   <tbody>
                     {collectedLeads.map((lead: any) => (
                       <tr key={lead.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                        <td className="py-2.5 px-3 text-sm font-medium text-slate-900">{lead.customerName || '-'}</td>
                         <td className="py-2.5 px-3">
                           <code className="text-xs font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded">{lead.thumbtackId}</code>
                         </td>

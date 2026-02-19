@@ -19,6 +19,7 @@ type CollectedLead = {
   importedAt: string | null;
   needsRefetch: boolean;
   lastActivityAt: string | null;
+  customerName: string | null;
 };
 
 type BudgetSnapshot = {
@@ -426,6 +427,7 @@ export function ExtensionSync() {
                           className="rounded border-slate-300"
                         />
                       </th>
+                      <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Customer</th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Thumbtack ID</th>
                       {showAccountColumn && <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Account</th>}
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Collected</th>
@@ -448,6 +450,7 @@ export function ExtensionSync() {
                             />
                           )}
                         </td>
+                        <td className="py-3 px-4 text-sm font-medium text-slate-900">{lead.customerName || '-'}</td>
                         <td className="py-3 px-4">
                           <code className="text-sm font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded">
                             {lead.thumbtackId}
@@ -483,9 +486,12 @@ export function ExtensionSync() {
                             className="rounded border-slate-300"
                           />
                         )}
-                        <code className="text-xs font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded break-all">
-                          {lead.thumbtackId}
-                        </code>
+                        <div>
+                          {lead.customerName && <span className="text-sm font-medium text-slate-900 block">{lead.customerName}</span>}
+                          <code className="text-xs font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded break-all">
+                            {lead.thumbtackId}
+                          </code>
+                        </div>
                       </div>
                       <LeadStatusBadge lead={lead} />
                     </div>
