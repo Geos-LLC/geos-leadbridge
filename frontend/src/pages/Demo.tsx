@@ -187,6 +187,12 @@ export function DemoLayout() {
                 <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse mr-2"></span>
                 Demo Mode Active
               </div>
+              <RouterLink
+                to="/register"
+                className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-md whitespace-nowrap"
+              >
+                Start Free Trial — First 10 Leads Free
+              </RouterLink>
               <button className="relative p-2 text-slate-400 hover:text-slate-600 transition-colors">
                 <Bell className="w-6 h-6" />
                 <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>

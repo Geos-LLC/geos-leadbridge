@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info, Eye, EyeOff } from 'lucide-react';
-import { authApi, billingApi, thumbtackApi, leadsApi, usersApi } from '../services/api';
+import { authApi, billingApi, thumbtackApi, leadsApi, usersApi, integrationsApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -61,9 +61,30 @@ export default function SettingsPage() {
   const [showImportResults, setShowImportResults] = useState(false);
   const [importError, setImportError] = useState('');
 
+  // Extension-collected leads
+  const [extensionPendingCount, setExtensionPendingCount] = useState(0);
+  const [extensionPendingIds, setExtensionPendingIds] = useState<string[]>([]);
+
   useEffect(() => {
     loadData();
   }, []);
+
+  // Load extension pending leads when import account changes
+  useEffect(() => {
+    if (!importAccountId) {
+      setExtensionPendingCount(0);
+      setExtensionPendingIds([]);
+      return;
+    }
+    integrationsApi.getCollectedLeads({ accountId: importAccountId }).then((res) => {
+      const pending = (res.leads || []).filter((l: any) => !l.imported);
+      setExtensionPendingCount(pending.length);
+      setExtensionPendingIds(pending.map((l: any) => l.thumbtackId));
+    }).catch(() => {
+      setExtensionPendingCount(0);
+      setExtensionPendingIds([]);
+    });
+  }, [importAccountId]);
 
   const loadData = async (forceDiagnostics = false) => {
     try {
@@ -211,6 +232,77 @@ export default function SettingsPage() {
     if (newCount > 0 && failCount === 0) {
       notify.success('Import Complete', `Successfully imported ${newCount} negotiation(s)`);
       setImportIds('');
+    } else if (failCount > 0 && newCount > 0) {
+      notify.warning('Import Partial', `${newCount} imported, ${failCount} failed`);
+    } else if (failCount > 0) {
+      setImportError(`Failed to import all ${failCount} negotiation(s)`);
+    }
+  };
+
+  const handleImportFromExtension = async () => {
+    if (!importAccountId || extensionPendingIds.length === 0) return;
+
+    setImporting(true);
+    setImportError('');
+    setImportResults([]);
+
+    // Validate token first
+    try {
+      const validation = await thumbtackApi.validateToken(importAccountId);
+      if (!validation.valid) {
+        setAccountToReconnect(accounts.find(a => a.id === importAccountId) || null);
+        setConnectionModalOpen(true);
+        setImporting(false);
+        return;
+      }
+    } catch {
+      setAccountToReconnect(accounts.find(a => a.id === importAccountId) || null);
+      setConnectionModalOpen(true);
+      setImporting(false);
+      return;
+    }
+
+    setImportTotal(extensionPendingIds.length);
+    setShowImportResults(true);
+
+    const results: typeof importResults = [];
+    const successIds: string[] = [];
+
+    for (const id of extensionPendingIds) {
+      try {
+        const result = await leadsApi.importNegotiation(id, importAccountId);
+        results.push({ id, success: true, isNew: result.isNew });
+        successIds.push(id);
+      } catch (err: any) {
+        const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to import';
+        results.push({ id, success: false, error: errorMsg });
+      }
+      setImportResults([...results]);
+    }
+
+    // Mark successful ones as imported in extension sync table
+    if (successIds.length > 0) {
+      try {
+        await integrationsApi.markLeadsImported(successIds);
+      } catch { /* best effort */ }
+    }
+
+    setImporting(false);
+
+    // Reload extension pending count
+    integrationsApi.getCollectedLeads({ accountId: importAccountId }).then((res) => {
+      const pending = (res.leads || []).filter((l: any) => !l.imported);
+      setExtensionPendingCount(pending.length);
+      setExtensionPendingIds(pending.map((l: any) => l.thumbtackId));
+    }).catch(() => {
+      setExtensionPendingCount(0);
+      setExtensionPendingIds([]);
+    });
+
+    const newCount = results.filter(r => r.success && r.isNew).length;
+    const failCount = results.filter(r => !r.success).length;
+    if (newCount > 0 && failCount === 0) {
+      notify.success('Import Complete', `Imported ${newCount} lead(s) from extension`);
     } else if (failCount > 0 && newCount > 0) {
       notify.warning('Import Partial', `${newCount} imported, ${failCount} failed`);
     } else if (failCount > 0) {
@@ -562,6 +654,27 @@ export default function SettingsPage() {
                       </select>
                     </div>
 
+                    {/* Extension-collected leads */}
+                    {importAccountId && extensionPendingCount > 0 && (
+                      <div className="flex items-center justify-between p-3 bg-green-50 border border-green-100 rounded-xl">
+                        <div>
+                          <p className="text-sm font-semibold text-green-800">{extensionPendingCount} pending from extension</p>
+                          <p className="text-xs text-green-600">Collected lead IDs ready to import</p>
+                        </div>
+                        <button
+                          onClick={handleImportFromExtension}
+                          disabled={importing}
+                          className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+                        >
+                          {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                          Import All
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="border-t border-blue-100 pt-3">
+                      <p className="text-xs font-medium text-slate-500 mb-2">Or paste IDs manually:</p>
+                    </div>
                     <textarea
                       placeholder="Paste negotiation IDs here (comma or newline separated)&#10;&#10;Example: abc123, def456, ghi789"
                       value={importIds}

@@ -3,16 +3,8 @@ import {
   RefreshCw, Loader2, CheckCircle, Download, Package,
   Clock, DollarSign, ArrowUpRight, Filter, Chrome, Trash2, Building2, ChevronDown,
 } from 'lucide-react';
-import { integrationsApi, thumbtackApi, leadsApi } from '../services/api';
+import { integrationsApi, thumbtackApi } from '../services/api';
 import type { SavedAccount } from '../types';
-import ConnectionModal from '../components/ConnectionModal';
-
-type ImportProgress = {
-  current: number;
-  total: number;
-  succeeded: number;
-  failed: number;
-};
 
 type CollectedLead = {
   id: string;
@@ -76,12 +68,7 @@ export function ExtensionSync() {
   const [leads, setLeads] = useState<CollectedLead[]>([]);
   const [snapshots, setSnapshots] = useState<BudgetSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
-  const [importing, setImporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [importResult, setImportResult] = useState<string | null>(null);
-  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
-  const [reconnectModalOpen, setReconnectModalOpen] = useState(false);
-  const [accountToReconnect, setAccountToReconnect] = useState<SavedAccount | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<LeadFilter>('all');
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
@@ -168,65 +155,6 @@ export function ExtensionSync() {
     }
   };
 
-  const handleImport = async (ids: string[]) => {
-    if (ids.length === 0) return;
-    setImporting(true);
-    setImportResult(null);
-
-    // Validate token before starting import
-    if (accountFilter) {
-      try {
-        const validation = await thumbtackApi.validateToken(accountFilter);
-        if (!validation.valid) {
-          const acc = accounts.find((a) => a.id === accountFilter) || null;
-          setAccountToReconnect(acc);
-          setReconnectModalOpen(true);
-          setImporting(false);
-          return;
-        }
-      } catch {
-        const acc = accounts.find((a) => a.id === accountFilter) || null;
-        setAccountToReconnect(acc);
-        setReconnectModalOpen(true);
-        setImporting(false);
-        return;
-      }
-    }
-
-    const progress: ImportProgress = { current: 0, total: ids.length, succeeded: 0, failed: 0 };
-    setImportProgress({ ...progress });
-
-    const successIds: string[] = [];
-
-    for (const id of ids) {
-      try {
-        await leadsApi.importNegotiation(id, accountFilter);
-        progress.succeeded++;
-        successIds.push(id);
-      } catch {
-        progress.failed++;
-      }
-      progress.current++;
-      setImportProgress({ ...progress });
-    }
-
-    // Mark successful ones as imported in the extension sync table
-    if (successIds.length > 0) {
-      try {
-        await integrationsApi.markLeadsImported(successIds);
-      } catch { /* best effort */ }
-    }
-
-    setImportResult(`Imported ${progress.succeeded} of ${progress.total} leads${progress.failed > 0 ? ` (${progress.failed} failed)` : ''}`);
-    setImportProgress(null);
-    setSelected(new Set());
-    setImporting(false);
-    await loadData();
-  };
-
-  const handleImportSelected = () => handleImport(Array.from(selected));
-  const handleImportAllPending = () => handleImport(pendingLeads.map((l) => l.thumbtackId));
-
   const handleDelete = async (thumbtackIds?: string[]) => {
     const count = thumbtackIds?.length || leads.length;
     if (!confirm(`Delete ${count} collected lead${count !== 1 ? 's' : ''}? This cannot be undone.`)) return;
@@ -259,7 +187,6 @@ export function ExtensionSync() {
   const accountMap = new Map(accounts.map((a) => [a.id, a.businessName]));
   const getAccountName = (id: string | null) => (id ? accountMap.get(id) || null : null);
   const showAccountColumn = selectedAccountId === 'all' && accounts.length > 1;
-  const requiresAccountSelection = accounts.length > 1 && selectedAccountId === 'all';
 
 
   return (
@@ -428,36 +355,6 @@ export function ExtensionSync() {
             </div>
           </section>
 
-          {/* Import progress */}
-          {importProgress && (
-            <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="font-semibold text-slate-700">
-                  Importing... {importProgress.current} / {importProgress.total}
-                </span>
-                <span className="text-slate-500">
-                  {importProgress.succeeded} imported{importProgress.failed > 0 ? `, ${importProgress.failed} failed` : ''}
-                </span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-300 ease-out bg-blue-600"
-                  style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
-                />
-              </div>
-              <p className="text-xs text-slate-400">
-                {importProgress.total - importProgress.current} remaining
-              </p>
-            </div>
-          )}
-
-          {/* Import result */}
-          {importResult && !importProgress && (
-            <div className={`p-4 rounded-xl text-sm font-medium ${importResult.includes('failed') || importResult.includes('Failed') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
-              {importResult}
-            </div>
-          )}
-
           {/* Filter + Actions */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
@@ -479,35 +376,13 @@ export function ExtensionSync() {
 
             <div className="flex flex-wrap items-center gap-2 ml-auto">
               {selected.size > 0 && (
-                <>
-                  <button
-                    onClick={handleImportSelected}
-                    disabled={importing || requiresAccountSelection}
-                    title={requiresAccountSelection ? 'Select a specific account to import' : undefined}
-                    className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
-                  >
-                    {importing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                    Import Selected ({selected.size})
-                  </button>
-                  <button
-                    onClick={handleDeleteSelected}
-                    disabled={deleting}
-                    className="px-4 py-2 rounded-xl text-sm font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 inline-flex items-center gap-2"
-                  >
-                    {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                    Delete Selected ({selected.size})
-                  </button>
-                </>
-              )}
-              {pendingLeads.length > 0 && (
                 <button
-                  onClick={handleImportAllPending}
-                  disabled={importing || requiresAccountSelection}
-                  title={requiresAccountSelection ? 'Select a specific account to import' : undefined}
-                  className="px-4 py-2 rounded-xl text-sm font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+                  onClick={handleDeleteSelected}
+                  disabled={deleting}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 inline-flex items-center gap-2"
                 >
-                  {importing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                  Import All Pending ({pendingLeads.length})
+                  {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                  Delete Selected ({selected.size})
                 </button>
               )}
               {leads.length > 0 && (
@@ -706,19 +581,6 @@ export function ExtensionSync() {
         </>
       )}
 
-      <ConnectionModal
-        isOpen={reconnectModalOpen}
-        onClose={() => {
-          setReconnectModalOpen(false);
-          setAccountToReconnect(null);
-        }}
-        accountToReconnect={accountToReconnect}
-        onSuccess={() => {
-          setReconnectModalOpen(false);
-          setAccountToReconnect(null);
-          loadData(true);
-        }}
-      />
     </div>
   );
 }
