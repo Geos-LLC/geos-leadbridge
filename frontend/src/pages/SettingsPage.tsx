@@ -94,8 +94,7 @@ export default function SettingsPage() {
       setExtensionTotalCount(0);
       return;
     }
-    // Fetch all collected leads (not filtered by account) since older leads may not have savedAccountId
-    integrationsApi.getCollectedLeads({}).then((res) => {
+    integrationsApi.getCollectedLeads({ accountId: importAccountId }).then((res) => {
       const allLeads = res.leads || [];
       const pending = allLeads.filter((l: any) => !l.imported);
       const imported = allLeads.filter((l: any) => l.imported);
@@ -314,8 +313,8 @@ export default function SettingsPage() {
 
     setImporting(false);
 
-    // Reload extension counts
-    integrationsApi.getCollectedLeads({}).then((res) => {
+    // Reload extension counts for selected account
+    integrationsApi.getCollectedLeads({ accountId: importAccountId }).then((res) => {
       const allLeads = res.leads || [];
       const pending = allLeads.filter((l: any) => !l.imported);
       const imported = allLeads.filter((l: any) => l.imported);
