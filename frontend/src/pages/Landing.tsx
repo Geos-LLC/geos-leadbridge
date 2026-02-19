@@ -74,10 +74,10 @@ export function Landing() {
                   <img src="https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&q=80&w=100&h=100" alt="Pro 1" className="w-full h-full object-cover" />
                 </div>
                 <div className="w-12 h-12 rounded-full border-4 border-white overflow-hidden bg-slate-200">
-                  <img src="https://images.unsplash.com/photo-1621905252507-b354bcadcabc?auto=format&fit=crop&q=80&w=100&h=100" alt="Pro 2" className="w-full h-full object-cover" />
+                  <img src="https://images.unsplash.com/photo-1633332755192-727a05c4013d?auto=format&fit=crop&q=80&w=100&h=100" alt="Pro 2" className="w-full h-full object-cover" />
                 </div>
                 <div className="w-12 h-12 rounded-full border-4 border-white overflow-hidden bg-slate-200">
-                  <img src="https://images.unsplash.com/photo-1581578731548-c64695ce6958?auto=format&fit=crop&q=80&w=100&h=100" alt="Pro 3" className="w-full h-full object-cover" />
+                  <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=100&h=100" alt="Pro 3" className="w-full h-full object-cover" />
                 </div>
                 <div className="w-12 h-12 rounded-full border-4 border-white overflow-hidden bg-slate-200">
                   <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=100&h=100" alt="Pro 4" className="w-full h-full object-cover" />
