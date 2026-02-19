@@ -36,7 +36,7 @@ export function Analytics() {
 
   // Filters from URL params
   const businessId = searchParams.get('businessId') || 'all';
-  const timeRange = searchParams.get('range') || '30d';
+  const timeRange = searchParams.get('range') || 'all';
   const customStart = searchParams.get('startDate') || '';
   const customEnd = searchParams.get('endDate') || '';
 
