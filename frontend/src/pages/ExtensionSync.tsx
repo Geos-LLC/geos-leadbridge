@@ -212,6 +212,7 @@ export function ExtensionSync() {
   const accountMap = new Map(accounts.map((a) => [a.id, a.businessName]));
   const getAccountName = (id: string | null) => (id ? accountMap.get(id) || null : null);
   const showAccountColumn = selectedAccountId === 'all' && accounts.length > 1;
+  const requiresAccountSelection = accounts.length > 1 && selectedAccountId === 'all';
 
 
   return (
@@ -262,29 +263,34 @@ export function ExtensionSync() {
                 </div>
               </div>
             )}
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <button
+                disabled={accounts.length > 0 && selectedAccountId === 'all'}
                 onClick={() => {
                   const acc = accounts.find((a) => a.id === selectedAccountId);
                   document.dispatchEvent(new CustomEvent('leadbridge-launch', {
                     detail: { action: 'collect-leads', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: acc?.emailHint || null },
                   }));
                 }}
-                className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-2"
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-2"
               >
                 <Download size={16} /> Get IDs
               </button>
               <button
+                disabled={accounts.length > 0 && selectedAccountId === 'all'}
                 onClick={() => {
                   const acc = accounts.find((a) => a.id === selectedAccountId);
                   document.dispatchEvent(new CustomEvent('leadbridge-launch', {
                     detail: { action: 'sync-budget', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: acc?.emailHint || null },
                   }));
                 }}
-                className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-2"
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-2"
               >
                 <DollarSign size={16} /> Get Budget
               </button>
+              {accounts.length > 0 && selectedAccountId === 'all' && (
+                <span className="text-xs text-amber-600 font-medium">Select an account to sync</span>
+              )}
             </div>
           </div>
         ) : (
@@ -406,8 +412,9 @@ export function ExtensionSync() {
                 <>
                   <button
                     onClick={handleImportSelected}
-                    disabled={importing}
-                    className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-2"
+                    disabled={importing || requiresAccountSelection}
+                    title={requiresAccountSelection ? 'Select a specific account to import' : undefined}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
                   >
                     {importing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                     Import Selected ({selected.size})
@@ -425,8 +432,9 @@ export function ExtensionSync() {
               {pendingLeads.length > 0 && (
                 <button
                   onClick={handleImportAllPending}
-                  disabled={importing}
-                  className="px-4 py-2 rounded-xl text-sm font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 inline-flex items-center gap-2"
+                  disabled={importing || requiresAccountSelection}
+                  title={requiresAccountSelection ? 'Select a specific account to import' : undefined}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
                 >
                   {importing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                   Import All Pending ({pendingLeads.length})
