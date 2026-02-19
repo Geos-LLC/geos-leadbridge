@@ -64,6 +64,8 @@ export default function SettingsPage() {
   // Extension-collected leads
   const [extensionPendingCount, setExtensionPendingCount] = useState(0);
   const [extensionPendingIds, setExtensionPendingIds] = useState<string[]>([]);
+  const [extensionImportedCount, setExtensionImportedCount] = useState(0);
+  const [extensionTotalCount, setExtensionTotalCount] = useState(0);
 
   // Extension detection
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
@@ -88,15 +90,23 @@ export default function SettingsPage() {
     if (!importAccountId) {
       setExtensionPendingCount(0);
       setExtensionPendingIds([]);
+      setExtensionImportedCount(0);
+      setExtensionTotalCount(0);
       return;
     }
     integrationsApi.getCollectedLeads({ accountId: importAccountId }).then((res) => {
-      const pending = (res.leads || []).filter((l: any) => !l.imported);
+      const allLeads = res.leads || [];
+      const pending = allLeads.filter((l: any) => !l.imported);
+      const imported = allLeads.filter((l: any) => l.imported);
       setExtensionPendingCount(pending.length);
       setExtensionPendingIds(pending.map((l: any) => l.thumbtackId));
+      setExtensionImportedCount(imported.length);
+      setExtensionTotalCount(allLeads.length);
     }).catch(() => {
       setExtensionPendingCount(0);
       setExtensionPendingIds([]);
+      setExtensionImportedCount(0);
+      setExtensionTotalCount(0);
     });
   }, [importAccountId]);
 
@@ -713,6 +723,23 @@ export default function SettingsPage() {
                             Install the <a href="https://chromewebstore.google.com/detail/leadbridge-sync-thumbtack/mkhkooldgglhnpkjfgmpkneongipfhnm" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">LeadBridge Sync</a> extension to collect IDs automatically.
                           </div>
                         )}
+                      </div>
+                    )}
+
+                    {/* Collected leads stats */}
+                    {importAccountId && extensionTotalCount > 0 && (
+                      <div className="flex items-center gap-4 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                        <span className="text-slate-500">
+                          <span className="font-bold text-slate-900">{extensionTotalCount}</span> collected
+                        </span>
+                        <span className="text-slate-300">|</span>
+                        <span className="text-emerald-600">
+                          <span className="font-bold">{extensionImportedCount}</span> imported
+                        </span>
+                        <span className="text-slate-300">|</span>
+                        <span className={extensionPendingCount > 0 ? 'text-amber-600' : 'text-slate-400'}>
+                          <span className="font-bold">{extensionPendingCount}</span> pending
+                        </span>
                       </div>
                     )}
 
