@@ -73,6 +73,13 @@ export default function SettingsPage() {
   const [collectedLeads, setCollectedLeads] = useState<any[]>([]);
   const [collectedLoading, setCollectedLoading] = useState(false);
 
+  // Budget snapshots
+  const [budgetSnapshots, setBudgetSnapshots] = useState<Array<{ id: string; weeklyBudget: string; currency: string; capturedAt: string; effectiveFrom: string; effectiveTo: string | null; active: boolean; scopeCategory: string | null; scopeLocation: string | null }>>([]);
+  const [showBudgetModal, setShowBudgetModal] = useState(false);
+
+  // Manual paste toggle
+  const [showManualPaste, setShowManualPaste] = useState(false);
+
   // Extension detection
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
 
@@ -104,19 +111,23 @@ export default function SettingsPage() {
           setExtensionImportedCount(imported.length);
           setExtensionTotalCount(allLeads.length);
         }).catch(() => {});
+        integrationsApi.getBudgetSnapshots(importAccountId).then((res) => {
+          setBudgetSnapshots(res.snapshots || []);
+        }).catch(() => {});
       }
     };
     document.addEventListener('leadbridge-refresh-import', handleRefresh);
     return () => document.removeEventListener('leadbridge-refresh-import', handleRefresh);
   }, [importAccountId]);
 
-  // Load extension pending leads when import account changes
+  // Load extension pending leads + budget snapshots when import account changes
   useEffect(() => {
     if (!importAccountId) {
       setExtensionPendingCount(0);
       setExtensionPendingIds([]);
       setExtensionImportedCount(0);
       setExtensionTotalCount(0);
+      setBudgetSnapshots([]);
       return;
     }
     integrationsApi.getCollectedLeads({ accountId: importAccountId }).then((res) => {
@@ -133,6 +144,9 @@ export default function SettingsPage() {
       setExtensionImportedCount(0);
       setExtensionTotalCount(0);
     });
+    integrationsApi.getBudgetSnapshots(importAccountId).then((res) => {
+      setBudgetSnapshots(res.snapshots || []);
+    }).catch(() => setBudgetSnapshots([]));
   }, [importAccountId]);
 
   const loadData = async (forceDiagnostics = false) => {
@@ -770,32 +784,79 @@ export default function SettingsPage() {
                       </div>
                     )}
 
-                    {/* Collected leads stats */}
-                    {importAccountId && extensionTotalCount > 0 && (
-                      <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs">
-                        <div className="flex items-center gap-4">
-                          <span className="text-slate-500">
-                            <span className="font-bold text-slate-900">{extensionTotalCount}</span> collected
-                          </span>
-                          <span className="text-slate-300">|</span>
-                          <span className="text-emerald-600">
-                            <span className="font-bold">{extensionImportedCount}</span> imported
-                          </span>
-                          <span className="text-slate-300">|</span>
-                          <span className={extensionPendingCount > 0 ? 'text-amber-600' : 'text-slate-400'}>
-                            <span className="font-bold">{extensionPendingCount}</span> pending
-                          </span>
+                    {/* Sync Info: Collected Leads + Budget */}
+                    {importAccountId && (
+                      <div className="space-y-2">
+                        {/* Collected Leads Info */}
+                        <div className="flex items-center justify-between px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <Download size={13} className="text-slate-400" />
+                            <span className="font-semibold text-slate-700">Leads:</span>
+                            {extensionTotalCount > 0 ? (
+                              <div className="flex items-center gap-3 ml-1">
+                                <span className="text-slate-500">
+                                  <span className="font-bold text-slate-900">{extensionTotalCount}</span> collected
+                                </span>
+                                <span className="text-emerald-600">
+                                  <span className="font-bold">{extensionImportedCount}</span> imported
+                                </span>
+                                <span className={extensionPendingCount > 0 ? 'text-amber-600' : 'text-slate-400'}>
+                                  <span className="font-bold">{extensionPendingCount}</span> pending
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 ml-1">No leads collected yet</span>
+                            )}
+                          </div>
+                          {extensionTotalCount > 0 && (
+                            <button
+                              onClick={openCollectedModal}
+                              className="text-blue-600 hover:text-blue-700 font-semibold hover:underline inline-flex items-center gap-1"
+                            >
+                              <List size={12} /> View
+                            </button>
+                          )}
                         </div>
-                        <button
-                          onClick={openCollectedModal}
-                          className="text-blue-600 hover:text-blue-700 font-semibold hover:underline inline-flex items-center gap-1"
-                        >
-                          <List size={12} /> View all
-                        </button>
+
+                        {/* Budget Info */}
+                        <div className="flex items-center justify-between px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <DollarSign size={13} className="text-slate-400" />
+                            <span className="font-semibold text-slate-700">Budget:</span>
+                            {budgetSnapshots.length > 0 ? (
+                              <div className="flex items-center gap-2 ml-1">
+                                {Number(budgetSnapshots[0].weeklyBudget) === 0 ? (
+                                  <span className="font-bold text-indigo-600">Unlimited</span>
+                                ) : (
+                                  <span className="text-slate-900">
+                                    <span className="font-bold">${Number(budgetSnapshots[0].weeklyBudget).toFixed(0)}</span>
+                                    <span className="text-slate-400">/{budgetSnapshots[0].currency}/wk</span>
+                                  </span>
+                                )}
+                                {budgetSnapshots[0].active && (
+                                  <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full text-[10px] font-bold">Active</span>
+                                )}
+                                <span className="text-slate-400">
+                                  · {budgetSnapshots.length} snapshot{budgetSnapshots.length !== 1 ? 's' : ''}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 ml-1">No budget data yet</span>
+                            )}
+                          </div>
+                          {budgetSnapshots.length > 0 && (
+                            <button
+                              onClick={() => setShowBudgetModal(true)}
+                              className="text-blue-600 hover:text-blue-700 font-semibold hover:underline inline-flex items-center gap-1"
+                            >
+                              <Clock size={12} /> History
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
 
-                    {/* Extension-collected leads */}
+                    {/* Extension-collected leads: Import action */}
                     {importAccountId && extensionPendingCount > 0 && (
                       <div className="flex items-center justify-between p-3 bg-green-50 border border-green-100 rounded-xl">
                         <div>
@@ -812,40 +873,6 @@ export default function SettingsPage() {
                         </button>
                       </div>
                     )}
-
-                    <div className="border-t border-blue-100 pt-3">
-                      <p className="text-xs font-medium text-slate-500 mb-2">Or paste IDs manually:</p>
-                    </div>
-                    <textarea
-                      placeholder="Paste negotiation IDs here (comma or newline separated)&#10;&#10;Example: abc123, def456, ghi789"
-                      value={importIds}
-                      onChange={(e) => setImportIds(e.target.value)}
-                      disabled={importing}
-                      rows={4}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300 disabled:bg-slate-50 disabled:text-slate-400"
-                    />
-
-                    <div className="flex gap-2">
-                      <button
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        onClick={handleImportNegotiations}
-                        disabled={importing || !importIds.trim() || !importAccountId}
-                      >
-                        {importing ? (
-                          <><Loader2 className="w-4 h-4 animate-spin" /> Importing...</>
-                        ) : (
-                          <><Download className="w-4 h-4" /> Import</>
-                        )}
-                      </button>
-                      {importIds && !importing && (
-                        <button
-                          className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-200 transition-colors"
-                          onClick={() => { setImportIds(''); setImportResults([]); setShowImportResults(false); setImportError(''); }}
-                        >
-                          <X className="w-4 h-4" /> Clear
-                        </button>
-                      )}
-                    </div>
 
                     {/* Import Progress */}
                     {importing && importTotal > 0 && (
@@ -891,6 +918,52 @@ export default function SettingsPage() {
                             </div>
                           ))}
                         </div>
+                      </div>
+                    )}
+
+                    {/* Manual Paste (collapsible) */}
+                    {importAccountId && (
+                      <div className="border-t border-blue-100 pt-2">
+                        <button
+                          onClick={() => setShowManualPaste(!showManualPaste)}
+                          className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-600 transition-colors"
+                        >
+                          {showManualPaste ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                          Paste IDs manually
+                        </button>
+                        {showManualPaste && (
+                          <div className="mt-2 space-y-2">
+                            <textarea
+                              placeholder="Paste negotiation IDs here (comma or newline separated)&#10;&#10;Example: abc123, def456, ghi789"
+                              value={importIds}
+                              onChange={(e) => setImportIds(e.target.value)}
+                              disabled={importing}
+                              rows={3}
+                              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300 disabled:bg-slate-50 disabled:text-slate-400"
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                onClick={handleImportNegotiations}
+                                disabled={importing || !importIds.trim() || !importAccountId}
+                              >
+                                {importing ? (
+                                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Importing...</>
+                                ) : (
+                                  <><Download className="w-3.5 h-3.5" /> Import</>
+                                )}
+                              </button>
+                              {importIds && !importing && (
+                                <button
+                                  className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-200 transition-colors"
+                                  onClick={() => { setImportIds(''); setImportResults([]); setShowImportResults(false); setImportError(''); }}
+                                >
+                                  <X className="w-3.5 h-3.5" /> Clear
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1352,6 +1425,77 @@ export default function SettingsPage() {
                             <span className="px-2.5 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold inline-flex items-center gap-1">
                               <Clock size={12} /> Pending
                             </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Budget History Modal */}
+      {showBudgetModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowBudgetModal(false)}>
+          <div className="bg-white rounded-3xl p-6 max-w-2xl w-full shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Budget History</h3>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  {budgetSnapshots.length} snapshot{budgetSnapshots.length !== 1 ? 's' : ''}
+                </p>
+              </div>
+              <button
+                className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
+                onClick={() => setShowBudgetModal(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1">
+              {budgetSnapshots.length === 0 ? (
+                <div className="text-center py-12 text-slate-400">No budget snapshots yet</div>
+              ) : (
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-slate-100">
+                      <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Budget</th>
+                      <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Category</th>
+                      <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Captured</th>
+                      <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Effective</th>
+                      <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {budgetSnapshots.map((snap) => (
+                      <tr key={snap.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                        <td className="py-2.5 px-3">
+                          {Number(snap.weeklyBudget) === 0 ? (
+                            <span className="text-sm font-bold text-indigo-600">Unlimited</span>
+                          ) : (
+                            <span className="text-sm font-bold text-slate-900">
+                              ${Number(snap.weeklyBudget).toFixed(0)}
+                              <span className="text-xs text-slate-400 ml-0.5 font-normal">/{snap.currency}/wk</span>
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-sm text-slate-600">{snap.scopeCategory || '-'}</td>
+                        <td className="py-2.5 px-3 text-sm text-slate-500">
+                          {new Date(snap.capturedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                        </td>
+                        <td className="py-2.5 px-3 text-sm text-slate-500">
+                          {new Date(snap.effectiveFrom).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                          {snap.effectiveTo ? ` – ${new Date(snap.effectiveTo).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ' – now'}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          {snap.active ? (
+                            <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">Active</span>
+                          ) : (
+                            <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-xs font-bold">Closed</span>
                           )}
                         </td>
                       </tr>
