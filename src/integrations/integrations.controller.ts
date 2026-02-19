@@ -67,11 +67,13 @@ export class IntegrationsController {
     @Query('pending') pending?: string,
     @Query('refetch') refetch?: string,
     @Query('accountId') accountId?: string,
+    @Query('limit') limit?: string,
   ) {
     return this.integrationsService.getLeadIds(user.id, {
       pending: pending === 'true',
       refetch: refetch === 'true',
       savedAccountId: accountId,
+      limit: limit ? parseInt(limit, 10) : undefined,
     });
   }
 

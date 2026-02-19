@@ -144,7 +144,7 @@ export class IntegrationsService {
    */
   async getLeadIds(
     userId: string,
-    filters: { pending?: boolean; refetch?: boolean; savedAccountId?: string },
+    filters: { pending?: boolean; refetch?: boolean; savedAccountId?: string; limit?: number },
   ) {
     const where: any = { userId };
 
@@ -161,6 +161,7 @@ export class IntegrationsService {
     const leads = await this.prisma.thumbtackLeadId.findMany({
       where,
       orderBy: { collectedAt: 'desc' },
+      ...(filters.limit ? { take: filters.limit } : {}),
     });
 
     return {
