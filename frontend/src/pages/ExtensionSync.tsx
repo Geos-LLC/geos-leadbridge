@@ -19,7 +19,7 @@ type CollectedLead = {
   importedAt: string | null;
   needsRefetch: boolean;
   lastActivityAt: string | null;
-  customerName: string | null;
+  customerName?: string | null;
 };
 
 type BudgetSnapshot = {
