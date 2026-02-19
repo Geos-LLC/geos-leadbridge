@@ -399,6 +399,12 @@ export function ExtensionSync() {
             </div>
           </div>
 
+          {deleteResult && (
+            <div className={`p-3 rounded-xl text-sm font-medium ${deleteResult.startsWith('Delete failed') ? 'bg-red-50 text-red-700 border border-red-100' : 'bg-green-50 text-green-700 border border-green-100'}`}>
+              {deleteResult}
+            </div>
+          )}
+
           {filteredLeads.length === 0 ? (
             <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center">
               <Package className="w-12 h-12 text-slate-300 mx-auto mb-3" />
