@@ -1571,11 +1571,13 @@ export class NotificationsService implements OnModuleInit {
   ): string {
     let message = template;
 
-    // Replace account variables
+    // Replace account variables (support both {{account.name}} and {accountName})
     message = message.replace(/\{\{account\.name\}\}/gi, accountName || 'Your Business');
+    message = message.replace(/\{accountName\}/gi, accountName || 'Your Business');
 
-    // Replace basic variables
+    // Replace basic variables (support both {{lead.x}} and {x} single-brace shortcuts)
     message = message.replace(/\{\{lead\.name\}\}/gi, lead.customerName || 'Unknown');
+    message = message.replace(/\{customerName\}/gi, lead.customerName || 'Unknown');
     message = message.replace(/\{\{lead\.phone\}\}/gi, lead.customerPhone || 'Not provided');
     message = message.replace(/\{\{lead\.service\}\}/gi, lead.category || 'Not specified');
 
@@ -1602,6 +1604,15 @@ export class NotificationsService implements OnModuleInit {
         const raw = JSON.parse(lead.rawJson);
         const request = raw.request || {};
         const details = request.details || [];
+
+        // Log details for debugging which fields Thumbtack sends
+        if (details.length > 0) {
+          this.logger.debug(
+            `Lead template details (${details.length} items): ${JSON.stringify(details.map((d: any) => ({ q: d.question, a: d.answer })))}`,
+          );
+        } else {
+          this.logger.debug('Lead template: no request.details in webhook payload');
+        }
 
         // Details is an array of {question, answer} objects
         // Use the description field as service description
