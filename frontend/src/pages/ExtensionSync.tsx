@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { integrationsApi, thumbtackApi, leadsApi } from '../services/api';
 import type { SavedAccount } from '../types';
+import ConnectionModal from '../components/ConnectionModal';
 
 type ImportProgress = {
   current: number;
@@ -79,6 +80,8 @@ export function ExtensionSync() {
   const [deleting, setDeleting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+  const [reconnectModalOpen, setReconnectModalOpen] = useState(false);
+  const [accountToReconnect, setAccountToReconnect] = useState<SavedAccount | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<LeadFilter>('all');
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
@@ -175,12 +178,16 @@ export function ExtensionSync() {
       try {
         const validation = await thumbtackApi.validateToken(accountFilter);
         if (!validation.valid) {
-          setImportResult('Session expired. Please reconnect this account from the Settings page, then try again.');
+          const acc = accounts.find((a) => a.id === accountFilter) || null;
+          setAccountToReconnect(acc);
+          setReconnectModalOpen(true);
           setImporting(false);
           return;
         }
       } catch {
-        setImportResult('Session expired. Please reconnect this account from the Settings page, then try again.');
+        const acc = accounts.find((a) => a.id === accountFilter) || null;
+        setAccountToReconnect(acc);
+        setReconnectModalOpen(true);
         setImporting(false);
         return;
       }
@@ -698,6 +705,20 @@ export function ExtensionSync() {
           )}
         </>
       )}
+
+      <ConnectionModal
+        isOpen={reconnectModalOpen}
+        onClose={() => {
+          setReconnectModalOpen(false);
+          setAccountToReconnect(null);
+        }}
+        accountToReconnect={accountToReconnect}
+        onSuccess={() => {
+          setReconnectModalOpen(false);
+          setAccountToReconnect(null);
+          loadData(true);
+        }}
+      />
     </div>
   );
 }
