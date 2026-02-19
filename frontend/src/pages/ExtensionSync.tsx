@@ -6,6 +6,13 @@ import {
 import { integrationsApi, thumbtackApi } from '../services/api';
 import type { SavedAccount } from '../types';
 
+type ImportProgress = {
+  current: number;
+  total: number;
+  succeeded: number;
+  failed: number;
+};
+
 type CollectedLead = {
   id: string;
   thumbtackId: string;
@@ -71,6 +78,7 @@ export function ExtensionSync() {
   const [importing, setImporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<LeadFilter>('all');
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
@@ -159,22 +167,54 @@ export function ExtensionSync() {
 
   const handleImport = async (ids: string[]) => {
     if (ids.length === 0) return;
-    try {
-      setImporting(true);
-      setImportResult(null);
-      const result = await integrationsApi.importNegotiationBatch(ids, accountFilter);
-      await integrationsApi.markLeadsImported(ids.filter((id) => {
-        const r = result.results?.find((r) => r.negotiationId === id);
-        return r && !r.error;
-      }));
-      setImportResult(`Imported ${result.imported} leads (${result.skipped} skipped, ${result.errors?.length || 0} errors)`);
-      setSelected(new Set());
-      await loadData();
-    } catch (err: any) {
-      setImportResult(`Import failed: ${err.message}`);
-    } finally {
-      setImporting(false);
+    setImporting(true);
+    setImportResult(null);
+
+    // Validate token before starting import
+    if (accountFilter) {
+      try {
+        const validation = await thumbtackApi.validateToken(accountFilter);
+        if (!validation.valid) {
+          setImportResult('Session expired. Please reconnect this account from the Settings page, then try again.');
+          setImporting(false);
+          return;
+        }
+      } catch {
+        setImportResult('Session expired. Please reconnect this account from the Settings page, then try again.');
+        setImporting(false);
+        return;
+      }
     }
+
+    const progress: ImportProgress = { current: 0, total: ids.length, succeeded: 0, failed: 0 };
+    setImportProgress({ ...progress });
+
+    const successIds: string[] = [];
+
+    for (const id of ids) {
+      try {
+        await thumbtackApi.importNegotiation(id, accountFilter);
+        progress.succeeded++;
+        successIds.push(id);
+      } catch {
+        progress.failed++;
+      }
+      progress.current++;
+      setImportProgress({ ...progress });
+    }
+
+    // Mark successful ones as imported in the extension sync table
+    if (successIds.length > 0) {
+      try {
+        await integrationsApi.markLeadsImported(successIds);
+      } catch { /* best effort */ }
+    }
+
+    setImportResult(`Imported ${progress.succeeded} of ${progress.total} leads${progress.failed > 0 ? ` (${progress.failed} failed)` : ''}`);
+    setImportProgress(null);
+    setSelected(new Set());
+    setImporting(false);
+    await loadData();
   };
 
   const handleImportSelected = () => handleImport(Array.from(selected));
@@ -381,9 +421,32 @@ export function ExtensionSync() {
             </div>
           </section>
 
+          {/* Import progress */}
+          {importProgress && (
+            <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-semibold text-slate-700">
+                  Importing... {importProgress.current} / {importProgress.total}
+                </span>
+                <span className="text-slate-500">
+                  {importProgress.succeeded} imported{importProgress.failed > 0 ? `, ${importProgress.failed} failed` : ''}
+                </span>
+              </div>
+              <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-300 ease-out bg-blue-600"
+                  style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
+                />
+              </div>
+              <p className="text-xs text-slate-400">
+                {importProgress.total - importProgress.current} remaining
+              </p>
+            </div>
+          )}
+
           {/* Import result */}
-          {importResult && (
-            <div className={`p-4 rounded-xl text-sm font-medium ${importResult.includes('failed') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+          {importResult && !importProgress && (
+            <div className={`p-4 rounded-xl text-sm font-medium ${importResult.includes('failed') || importResult.includes('Failed') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
               {importResult}
             </div>
           )}

@@ -8,23 +8,18 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { PlatformService } from '../platforms/platform.service';
 import { PlatformFactory } from '../platforms/platform.factory';
-import { EncryptionUtil } from '../common/utils/encryption.util';
 import { NormalizedLead } from '../common/dto/normalized.dto';
 import { TemplatesService } from '../templates/templates.service';
 
 @Injectable()
 export class LeadsService {
-  private readonly encryptionKey: string;
-
   constructor(
     private prisma: PrismaService,
     private platformService: PlatformService,
     private platformFactory: PlatformFactory,
     private configService: ConfigService,
     private templatesService: TemplatesService,
-  ) {
-    this.encryptionKey = this.configService.get<string>('encryption.key') || 'default-32-char-encryption-key';
-  }
+  ) {}
 
   /**
    * Get businesses for a user from a specific platform (Thumbtack)
@@ -564,14 +559,14 @@ export class LeadsService {
         targetBusinessId = savedAccount.businessId;
         console.log(`[LeadsService] Using saved account: ${savedAccount.businessName} (businessId: ${targetBusinessId})`);
 
-        // Get account-specific credentials
-        if (savedAccount.credentialsJson) {
-          try {
-            accountCredentials = EncryptionUtil.decryptObject(savedAccount.credentialsJson, this.encryptionKey);
-            console.log(`[LeadsService] Using account-specific credentials for import`);
-          } catch (err) {
-            console.warn(`[LeadsService] Failed to decrypt account credentials:`, err.message);
+        // Get account-specific credentials with automatic token refresh
+        try {
+          accountCredentials = await this.platformService.getAccountCredentialsByBusinessId(userId, 'thumbtack', savedAccount.businessId);
+          if (accountCredentials) {
+            console.log(`[LeadsService] Using account-specific credentials for import (auto-refreshed if needed)`);
           }
+        } catch (err) {
+          console.warn(`[LeadsService] Failed to get account credentials:`, err.message);
         }
       } else {
         console.warn(`[LeadsService] Account ${accountId} not found for user ${userId}`);
