@@ -359,6 +359,29 @@ export function Analytics() {
               </div>
             )}
 
+            {/* Job Status Distribution */}
+            {displayData.jobStatusDistribution && displayData.jobStatusDistribution.length > 0 && (
+              <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
+                <div className="flex items-center justify-between mb-6 md:mb-8">
+                  <h3 className="text-lg md:text-xl font-bold text-slate-900">Job Status</h3>
+                  <Users className="w-5 h-5 text-slate-400" />
+                </div>
+                <div className="space-y-4">
+                  {displayData.jobStatusDistribution.map((status, index) => (
+                    <div key={status.name} className="flex items-center gap-3">
+                      <div
+                        className="w-3 h-3 rounded-full shrink-0"
+                        style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                      />
+                      <span className="text-sm font-medium text-slate-700 flex-1">{status.name}</span>
+                      <span className="text-sm font-bold text-slate-900">{status.count}</span>
+                      <span className="text-xs text-slate-400 w-12 text-right">{Math.round(status.percentage)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Connection Time Details */}
             {displayData.connectionTime ? (
               <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm">

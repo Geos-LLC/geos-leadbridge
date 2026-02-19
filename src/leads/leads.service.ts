@@ -632,6 +632,18 @@ export class LeadsService {
       throw new NotFoundException('Lead not found after import');
     }
 
+    // Copy thumbtackStatus from the extension-collected ThumbtackLeadId record
+    const collectedLead = await this.prisma.thumbtackLeadId.findFirst({
+      where: { userId, thumbtackId: negotiationId },
+    });
+    if (collectedLead?.thumbtackStatus && collectedLead.thumbtackStatus !== storedLead.thumbtackStatus) {
+      await this.prisma.lead.update({
+        where: { id: storedLead.id },
+        data: { thumbtackStatus: collectedLead.thumbtackStatus },
+      });
+      console.log(`[LeadsService] Copied thumbtackStatus "${collectedLead.thumbtackStatus}" to lead`);
+    }
+
     // Also import messages for this negotiation using account-specific credentials if available
     await this.importMessagesForNegotiation(userId, 'thumbtack', negotiationId, storedLead.customerName, accountCredentials || undefined);
 

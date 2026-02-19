@@ -145,6 +145,7 @@ model Lead {
   state             String?
   category          String?  // Service category
   status            String   @default("new") // "new" | "contacted" | "quoted" | "booked" | "lost"
+  thumbtackStatus   String?  // Job status from Thumbtack UI (e.g. "Hired", "Not hired")
   threadId          String?  // Universal conversation ID
   rawJson           String   @db.Text // Original platform payload
   syncedToCrm       Boolean  @default(false)

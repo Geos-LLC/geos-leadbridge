@@ -682,6 +682,9 @@ export interface AnalyticsData {
   customerEngagement: CustomerEngagementMetric;
   totalLeads: number;
 
+  // Job status from Thumbtack UI
+  jobStatusDistribution?: ServiceDetailDistribution[];
+
   // Service detail analytics
   cleaningTypeDistribution?: ServiceDetailDistribution[];
   addOnsDistribution?: ServiceDetailDistribution[];
