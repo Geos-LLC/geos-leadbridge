@@ -513,12 +513,13 @@ export class ThumbtackController {
   async importNegotiations(
     @CurrentUser() user: any,
     @Body('negotiationIds') negotiationIds: string[],
+    @Body('accountId') accountId?: string,
   ) {
     if (!negotiationIds || !Array.isArray(negotiationIds) || negotiationIds.length === 0) {
       throw new BadRequestException('negotiationIds array is required');
     }
 
-    const results = await this.leadsService.importThumbtackNegotiations(user.id, negotiationIds);
+    const results = await this.leadsService.importThumbtackNegotiations(user.id, negotiationIds, accountId);
 
     return {
       success: true,

@@ -55,6 +55,9 @@ export class AnalyticsResponseDto {
   customerEngagement: CustomerEngagementMetric;
   totalLeads: number;
 
+  // Job status from Thumbtack UI (Hired, Not hired, etc.)
+  jobStatusDistribution?: ServiceDetailDistribution[];
+
   // Service detail analytics
   cleaningTypeDistribution?: ServiceDetailDistribution[];
   addOnsDistribution?: ServiceDetailDistribution[];

@@ -8,6 +8,7 @@ import {
   ResponseTimeMetric,
   MessagesPerLeadMetric,
   CustomerEngagementMetric,
+  ServiceDetailDistribution,
 } from './dto/analytics-response.dto';
 
 @Injectable()
@@ -34,11 +35,12 @@ export class AnalyticsService {
     };
 
     // Execute only fast metrics in parallel
-    const [categoryDist, engagement, totalLeads, businessInfo] =
+    const [categoryDist, engagement, totalLeads, jobStatusDist, businessInfo] =
       await Promise.all([
         this.getCategoryDistribution(baseWhere),
         this.getCustomerEngagement(baseWhere),
         this.getTotalLeads(baseWhere),
+        this.getJobStatusDistribution(baseWhere),
         query.businessId
           ? this.getBusinessInfo(userId, query.businessId)
           : null,
@@ -48,6 +50,7 @@ export class AnalyticsService {
       categoryDistribution: categoryDist,
       customerEngagement: engagement,
       totalLeads,
+      jobStatusDistribution: jobStatusDist,
       dateRange: {
         start: query.startDate || 'all-time',
         end: query.endDate || 'now',
@@ -84,6 +87,7 @@ export class AnalyticsService {
       messagesPerLead,
       engagement,
       totalLeads,
+      jobStatusDist,
       businessInfo,
       cleaningTypes,
       addOns,
@@ -99,6 +103,7 @@ export class AnalyticsService {
       this.getMessagesPerLead(baseWhere),
       this.getCustomerEngagement(baseWhere),
       this.getTotalLeads(baseWhere),
+      this.getJobStatusDistribution(baseWhere),
       query.businessId
         ? this.getBusinessInfo(userId, query.businessId)
         : null,
@@ -118,6 +123,7 @@ export class AnalyticsService {
       messagesPerLead,
       customerEngagement: engagement,
       totalLeads,
+      jobStatusDistribution: jobStatusDist,
       cleaningTypeDistribution: cleaningTypes,
       addOnsDistribution: addOns,
       frequencyDistribution: frequencies,
@@ -147,6 +153,54 @@ export class AnalyticsService {
       }
     }
     return filter;
+  }
+
+  // Job Status Distribution - Thumbtack job status from extension (Hired, Not hired, etc.)
+  // Uses Lead.thumbtackStatus when available, falls back to ThumbtackLeadId.thumbtackStatus
+  private async getJobStatusDistribution(
+    where: any,
+  ): Promise<ServiceDetailDistribution[]> {
+    // First try leads that have thumbtackStatus directly
+    const leadsWithStatus = await this.prisma.lead.groupBy({
+      by: ['thumbtackStatus'],
+      where: { ...where, thumbtackStatus: { not: null } },
+      _count: { id: true },
+      orderBy: { _count: { id: 'desc' } },
+    });
+
+    if (leadsWithStatus.length > 0) {
+      const total = leadsWithStatus.reduce((sum, r) => sum + r._count.id, 0);
+      return leadsWithStatus.map((r) => ({
+        name: r.thumbtackStatus || 'Unknown',
+        count: r._count.id,
+        percentage: total > 0 ? (r._count.id / total) * 100 : 0,
+      }));
+    }
+
+    // Fallback: query ThumbtackLeadId table for status data (for leads imported before this feature)
+    const userId = where.userId;
+    if (!userId) return [];
+
+    const collectedWithStatus = await this.prisma.thumbtackLeadId.groupBy({
+      by: ['thumbtackStatus'],
+      where: {
+        userId,
+        thumbtackStatus: { not: null },
+        imported: true,
+        ...(where.businessId ? {
+          savedAccount: { businessId: where.businessId },
+        } : {}),
+      },
+      _count: { id: true },
+      orderBy: { _count: { id: 'desc' } },
+    });
+
+    const total = collectedWithStatus.reduce((sum, r) => sum + r._count.id, 0);
+    return collectedWithStatus.map((r) => ({
+      name: r.thumbtackStatus || 'Unknown',
+      count: r._count.id,
+      percentage: total > 0 ? (r._count.id / total) * 100 : 0,
+    }));
   }
 
   // Category Distribution - Group by category field

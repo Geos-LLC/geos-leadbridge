@@ -145,6 +145,7 @@ model Lead {
   state             String?
   category          String?  // Service category
   status            String   @default("new") // "new" | "contacted" | "quoted" | "booked" | "lost"
+  thumbtackStatus   String?  // Job status from Thumbtack UI (e.g. "Hired", "Not hired")
   threadId          String?  // Universal conversation ID
   rawJson           String   @db.Text // Original platform payload
   syncedToCrm       Boolean  @default(false)
@@ -290,6 +291,8 @@ model SavedAccount {
   user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   automationRules      AutomationRule[]
   notificationSettings NotificationSettings?
+  collectedLeads       ThumbtackLeadId[]
+  settingsSnapshots    ThumbtackSettingsSnapshot[]
 
   @@unique([userId, platform, businessId])
   @@index([userId])
@@ -592,51 +595,58 @@ model PhonePoolAssignment {
 // ==========================================
 
 model ThumbtackSettingsSnapshot {
-  id            String    @id @default(uuid())
-  userId        String
-  provider      String    @default("thumbtack")
-  snapshotType  String    @default("budget")
-  scopeCategory String?
-  scopeLocation String?
-  weeklyBudget  Decimal   @db.Decimal(12, 2)
-  currency      String    @default("USD")
-  capturedAt    DateTime
-  receivedAt    DateTime  @default(now())
-  effectiveFrom DateTime
-  effectiveTo   DateTime?
-  source        String?
-  pageUrl       String?
-  pageTitle     String?
-  rawJson       Json?
+  id             String    @id @default(uuid())
+  userId         String
+  savedAccountId String?
+  provider       String    @default("thumbtack")
+  snapshotType   String    @default("budget")
+  scopeCategory  String?
+  scopeLocation  String?
+  weeklyBudget   Decimal   @db.Decimal(12, 2)
+  currency       String    @default("USD")
+  capturedAt     DateTime
+  receivedAt     DateTime  @default(now())
+  effectiveFrom  DateTime
+  effectiveTo    DateTime?
+  source         String?
+  pageUrl        String?
+  pageTitle      String?
+  rawJson        Json?
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  savedAccount SavedAccount? @relation(fields: [savedAccountId], references: [id])
 
   @@index([userId, snapshotType, effectiveFrom])
   @@index([userId, snapshotType, effectiveTo])
   @@index([userId, scopeCategory, scopeLocation, effectiveFrom])
+  @@index([savedAccountId])
   @@map("thumbtack_settings_snapshots")
 }
 
 model ThumbtackLeadId {
-  id             String    @id @default(uuid())
-  userId         String
-  thumbtackId    String
-  batchId        String?
-  capturedAt     DateTime
-  collectedAt    DateTime  @default(now())
-  source         String?
-  pageUrl        String?
-  pageTitle      String?
+  id              String    @id @default(uuid())
+  userId          String
+  savedAccountId  String?
+  thumbtackId     String
+  batchId         String?
+  capturedAt      DateTime
+  collectedAt     DateTime  @default(now())
+  source          String?
+  pageUrl         String?
+  pageTitle       String?
   thumbtackStatus String?
+  customerName    String?
   imported        Boolean   @default(false)
   importedAt      DateTime?
   needsRefetch    Boolean   @default(false)
   lastActivityAt  DateTime?
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  savedAccount SavedAccount? @relation(fields: [savedAccountId], references: [id])
 
   @@unique([userId, thumbtackId])
   @@index([userId, collectedAt(sort: Desc)])
   @@index([batchId])
+  @@index([savedAccountId])
   @@map("thumbtack_lead_ids")
 }

@@ -66,10 +66,14 @@ export class IntegrationsController {
     @CurrentUser() user: any,
     @Query('pending') pending?: string,
     @Query('refetch') refetch?: string,
+    @Query('accountId') accountId?: string,
+    @Query('limit') limit?: string,
   ) {
     return this.integrationsService.getLeadIds(user.id, {
       pending: pending === 'true',
       refetch: refetch === 'true',
+      savedAccountId: accountId,
+      limit: limit ? parseInt(limit, 10) : undefined,
     });
   }
 
@@ -78,8 +82,11 @@ export class IntegrationsController {
    * Query budget snapshots for the authenticated user.
    */
   @Get('snapshots')
-  async getSnapshots(@CurrentUser() user: any) {
-    return this.integrationsService.getSnapshots(user.id);
+  async getSnapshots(
+    @CurrentUser() user: any,
+    @Query('accountId') accountId?: string,
+  ) {
+    return this.integrationsService.getSnapshots(user.id, accountId);
   }
 
   /**
@@ -107,5 +114,14 @@ export class IntegrationsController {
     @Body() body: { thumbtackIds?: string[] },
   ) {
     return this.integrationsService.deleteLeadIds(user.id, body.thumbtackIds);
+  }
+
+  /**
+   * DELETE /api/integrations/thumbtack/snapshots
+   * Delete all budget snapshots for the authenticated user.
+   */
+  @Delete('snapshots')
+  async deleteSnapshots(@CurrentUser() user: any) {
+    return this.integrationsService.deleteSnapshots(user.id);
   }
 }

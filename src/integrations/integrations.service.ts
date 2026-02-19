@@ -43,6 +43,7 @@ export class IntegrationsService {
         data: {
           id: snapshotId,
           userId,
+          savedAccountId: dto.savedAccountId || null,
           provider: dto.provider || 'thumbtack',
           snapshotType: dto.snapshotType || 'budget',
           scopeCategory: dto.scope?.category || null,
@@ -87,19 +88,23 @@ export class IntegrationsService {
 
     for (const thumbtackId of dto.leadIds) {
       const status = dto.leadStatuses?.[thumbtackId] || null;
+      const customerName = dto.leadNames?.[thumbtackId] || null;
       const existing = await this.prisma.thumbtackLeadId.findUnique({
         where: { userId_thumbtackId: { userId, thumbtackId } },
       });
 
       if (existing) {
-        // Update: mark as needing refetch (had new activity)
+        // Update: only mark needsRefetch if the lead was already imported
+        // (avoids marking all leads as needsRefetch when batch streaming re-sends them)
         await this.prisma.thumbtackLeadId.update({
           where: { id: existing.id },
           data: {
             batchId,
-            needsRefetch: true,
+            ...(existing.imported ? { needsRefetch: true } : {}),
             lastActivityAt: capturedAt,
             ...(status ? { thumbtackStatus: status } : {}),
+            ...(customerName ? { customerName } : {}),
+            ...(dto.savedAccountId ? { savedAccountId: dto.savedAccountId } : {}),
           },
         });
         updatedCount++;
@@ -108,6 +113,7 @@ export class IntegrationsService {
         await this.prisma.thumbtackLeadId.create({
           data: {
             userId,
+            savedAccountId: dto.savedAccountId || null,
             thumbtackId,
             batchId,
             capturedAt,
@@ -115,6 +121,7 @@ export class IntegrationsService {
             pageUrl: dto.page?.url || null,
             pageTitle: dto.page?.title || null,
             thumbtackStatus: status,
+            customerName,
           },
         });
         newCount++;
@@ -141,7 +148,7 @@ export class IntegrationsService {
    */
   async getLeadIds(
     userId: string,
-    filters: { pending?: boolean; refetch?: boolean },
+    filters: { pending?: boolean; refetch?: boolean; savedAccountId?: string; limit?: number },
   ) {
     const where: any = { userId };
 
@@ -151,10 +158,14 @@ export class IntegrationsService {
     if (filters.refetch) {
       where.needsRefetch = true;
     }
+    if (filters.savedAccountId) {
+      where.savedAccountId = filters.savedAccountId;
+    }
 
     const leads = await this.prisma.thumbtackLeadId.findMany({
       where,
       orderBy: { collectedAt: 'desc' },
+      ...(filters.limit ? { take: filters.limit } : {}),
     });
 
     return {
@@ -162,11 +173,13 @@ export class IntegrationsService {
       leads: leads.map((l) => ({
         id: l.id,
         thumbtackId: l.thumbtackId,
+        savedAccountId: l.savedAccountId,
         batchId: l.batchId,
         capturedAt: l.capturedAt,
         collectedAt: l.collectedAt,
         source: l.source,
         thumbtackStatus: l.thumbtackStatus,
+        customerName: l.customerName,
         imported: l.imported,
         importedAt: l.importedAt,
         needsRefetch: l.needsRefetch,
@@ -207,9 +220,14 @@ export class IntegrationsService {
   /**
    * Query budget snapshots for a user.
    */
-  async getSnapshots(userId: string) {
+  async getSnapshots(userId: string, savedAccountId?: string) {
+    const where: any = { userId };
+    if (savedAccountId) {
+      where.savedAccountId = savedAccountId;
+    }
+
     const snapshots = await this.prisma.thumbtackSettingsSnapshot.findMany({
-      where: { userId },
+      where,
       orderBy: { effectiveFrom: 'desc' },
     });
 
@@ -217,6 +235,7 @@ export class IntegrationsService {
       ok: true,
       snapshots: snapshots.map((s) => ({
         id: s.id,
+        savedAccountId: s.savedAccountId,
         snapshotType: s.snapshotType,
         scopeCategory: s.scopeCategory,
         scopeLocation: s.scopeLocation,
@@ -230,6 +249,21 @@ export class IntegrationsService {
       })),
       total: snapshots.length,
     };
+  }
+
+  /**
+   * Delete all budget snapshots for a user.
+   */
+  async deleteSnapshots(userId: string) {
+    const result = await this.prisma.thumbtackSettingsSnapshot.deleteMany({
+      where: { userId },
+    });
+
+    this.logger.log(
+      `Deleted ${result.count} budget snapshots for user ${userId}`,
+    );
+
+    return { ok: true, deletedCount: result.count };
   }
 
   /**

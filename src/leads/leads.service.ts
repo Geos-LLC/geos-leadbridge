@@ -8,23 +8,18 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { PlatformService } from '../platforms/platform.service';
 import { PlatformFactory } from '../platforms/platform.factory';
-import { EncryptionUtil } from '../common/utils/encryption.util';
 import { NormalizedLead } from '../common/dto/normalized.dto';
 import { TemplatesService } from '../templates/templates.service';
 
 @Injectable()
 export class LeadsService {
-  private readonly encryptionKey: string;
-
   constructor(
     private prisma: PrismaService,
     private platformService: PlatformService,
     private platformFactory: PlatformFactory,
     private configService: ConfigService,
     private templatesService: TemplatesService,
-  ) {
-    this.encryptionKey = this.configService.get<string>('encryption.key') || 'default-32-char-encryption-key';
-  }
+  ) {}
 
   /**
    * Get businesses for a user from a specific platform (Thumbtack)
@@ -564,14 +559,14 @@ export class LeadsService {
         targetBusinessId = savedAccount.businessId;
         console.log(`[LeadsService] Using saved account: ${savedAccount.businessName} (businessId: ${targetBusinessId})`);
 
-        // Get account-specific credentials
-        if (savedAccount.credentialsJson) {
-          try {
-            accountCredentials = EncryptionUtil.decryptObject(savedAccount.credentialsJson, this.encryptionKey);
-            console.log(`[LeadsService] Using account-specific credentials for import`);
-          } catch (err) {
-            console.warn(`[LeadsService] Failed to decrypt account credentials:`, err.message);
+        // Get account-specific credentials with automatic token refresh
+        try {
+          accountCredentials = await this.platformService.getAccountCredentialsByBusinessId(userId, 'thumbtack', savedAccount.businessId);
+          if (accountCredentials) {
+            console.log(`[LeadsService] Using account-specific credentials for import (auto-refreshed if needed)`);
           }
+        } catch (err) {
+          console.warn(`[LeadsService] Failed to get account credentials:`, err.message);
         }
       } else {
         console.warn(`[LeadsService] Account ${accountId} not found for user ${userId}`);
@@ -635,6 +630,18 @@ export class LeadsService {
 
     if (!storedLead) {
       throw new NotFoundException('Lead not found after import');
+    }
+
+    // Copy thumbtackStatus from the extension-collected ThumbtackLeadId record
+    const collectedLead = await this.prisma.thumbtackLeadId.findFirst({
+      where: { userId, thumbtackId: negotiationId },
+    });
+    if (collectedLead?.thumbtackStatus && collectedLead.thumbtackStatus !== storedLead.thumbtackStatus) {
+      await this.prisma.lead.update({
+        where: { id: storedLead.id },
+        data: { thumbtackStatus: collectedLead.thumbtackStatus },
+      });
+      console.log(`[LeadsService] Copied thumbtackStatus "${collectedLead.thumbtackStatus}" to lead`);
     }
 
     // Also import messages for this negotiation using account-specific credentials if available
@@ -783,12 +790,13 @@ export class LeadsService {
   async importThumbtackNegotiations(
     userId: string,
     negotiationIds: string[],
+    accountId?: string,
   ): Promise<{ imported: number; failed: number; errors: string[] }> {
     const results = { imported: 0, failed: 0, errors: [] as string[] };
 
     for (const negotiationId of negotiationIds) {
       try {
-        await this.importThumbtackNegotiation(userId, negotiationId);
+        await this.importThumbtackNegotiation(userId, negotiationId, accountId);
         results.imported++;
       } catch (error) {
         results.failed++;

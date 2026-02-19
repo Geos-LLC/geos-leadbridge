@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   RefreshCw, Loader2, CheckCircle, Download, Package,
-  Clock, DollarSign, ArrowUpRight, Filter, Chrome, Trash2,
+  Clock, DollarSign, ArrowUpRight, Filter, Chrome, Trash2, Building2, ChevronDown,
 } from 'lucide-react';
-import { integrationsApi } from '../services/api';
+import { integrationsApi, thumbtackApi } from '../services/api';
+import type { SavedAccount } from '../types';
 
 type CollectedLead = {
   id: string;
   thumbtackId: string;
+  savedAccountId: string | null;
   batchId: string | null;
   capturedAt: string;
   collectedAt: string;
@@ -17,10 +19,12 @@ type CollectedLead = {
   importedAt: string | null;
   needsRefetch: boolean;
   lastActivityAt: string | null;
+  customerName?: string | null;
 };
 
 type BudgetSnapshot = {
   id: string;
+  savedAccountId: string | null;
   snapshotType: string;
   scopeCategory: string | null;
   scopeLocation: string | null;
@@ -65,12 +69,13 @@ export function ExtensionSync() {
   const [leads, setLeads] = useState<CollectedLead[]>([]);
   const [snapshots, setSnapshots] = useState<BudgetSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
-  const [importing, setImporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [importResult, setImportResult] = useState<string | null>(null);
+  const [deleteResult, setDeleteResult] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<LeadFilter>('all');
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
+  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
   // Detect if the Chrome extension is installed
   // The extension's leadbridgeAuth.js sets data-leadbridge-extension="true" on <html>
   useEffect(() => {
@@ -84,14 +89,23 @@ export function ExtensionSync() {
     return () => clearTimeout(timer);
   }, []);
 
+  // Load saved accounts
+  useEffect(() => {
+    thumbtackApi.getSavedAccounts().then((res) => {
+      setAccounts(res.accounts || []);
+    }).catch(() => {});
+  }, []);
+
   const prevTotalsRef = useRef({ leads: 0, snapshots: 0 });
+
+  const accountFilter = selectedAccountId === 'all' ? undefined : selectedAccountId;
 
   const loadData = useCallback(async (silent = false) => {
     try {
       if (!silent) setLoading(true);
       const [leadsRes, snapshotsRes] = await Promise.all([
-        integrationsApi.getCollectedLeads(),
-        integrationsApi.getBudgetSnapshots(),
+        integrationsApi.getCollectedLeads({ accountId: accountFilter }),
+        integrationsApi.getBudgetSnapshots(accountFilter),
       ]);
       setLeads(leadsRes.leads);
       setSnapshots(snapshotsRes.snapshots);
@@ -101,7 +115,7 @@ export function ExtensionSync() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, []);
+  }, [accountFilter]);
 
   // Initial load
   useEffect(() => {
@@ -143,41 +157,18 @@ export function ExtensionSync() {
     }
   };
 
-  const handleImport = async (ids: string[]) => {
-    if (ids.length === 0) return;
-    try {
-      setImporting(true);
-      setImportResult(null);
-      const result = await integrationsApi.importNegotiationBatch(ids);
-      await integrationsApi.markLeadsImported(ids.filter((id) => {
-        const r = result.results?.find((r) => r.negotiationId === id);
-        return r && !r.error;
-      }));
-      setImportResult(`Imported ${result.imported} leads (${result.skipped} skipped, ${result.errors?.length || 0} errors)`);
-      setSelected(new Set());
-      await loadData();
-    } catch (err: any) {
-      setImportResult(`Import failed: ${err.message}`);
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  const handleImportSelected = () => handleImport(Array.from(selected));
-  const handleImportAllPending = () => handleImport(pendingLeads.map((l) => l.thumbtackId));
-
   const handleDelete = async (thumbtackIds?: string[]) => {
     const count = thumbtackIds?.length || leads.length;
     if (!confirm(`Delete ${count} collected lead${count !== 1 ? 's' : ''}? This cannot be undone.`)) return;
     try {
       setDeleting(true);
-      setImportResult(null);
+      setDeleteResult(null);
       const result = await integrationsApi.deleteCollectedLeads(thumbtackIds);
-      setImportResult(`Deleted ${result.deletedCount} leads`);
+      setDeleteResult(`Deleted ${result.deletedCount} leads`);
       setSelected(new Set());
       await loadData();
     } catch (err: any) {
-      setImportResult(`Delete failed: ${err.message}`);
+      setDeleteResult(`Delete failed: ${err.message}`);
     } finally {
       setDeleting(false);
     }
@@ -194,6 +185,10 @@ export function ExtensionSync() {
       minute: '2-digit',
     });
   };
+
+  const accountMap = new Map(accounts.map((a) => [a.id, a.businessName]));
+  const getAccountName = (id: string | null) => (id ? accountMap.get(id) || null : null);
+  const showAccountColumn = selectedAccountId === 'all' && accounts.length > 1;
 
 
   return (
@@ -223,22 +218,55 @@ export function ExtensionSync() {
               </div>
               <div>
                 <span className="text-sm font-semibold text-green-700">Extension installed</span>
-                <p className="text-xs text-slate-400 mt-0.5">Click a button below to open Thumbtack with the extension</p>
+                <p className="text-xs text-slate-400 mt-0.5">Select an account and click a button to open Thumbtack with the extension</p>
               </div>
             </div>
-            <div className="flex flex-wrap gap-3">
+            {accounts.length > 0 && (
+              <div className="flex items-center gap-3">
+                <Building2 size={16} className="text-slate-400 flex-shrink-0" />
+                <div className="relative">
+                  <select
+                    value={selectedAccountId}
+                    onChange={(e) => setSelectedAccountId(e.target.value)}
+                    className="appearance-none bg-white border border-slate-200 rounded-xl px-4 py-2 pr-8 text-sm font-medium text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer"
+                  >
+                    <option value="all">All Accounts</option>
+                    {accounts.map((acc) => (
+                      <option key={acc.id} value={acc.id}>{acc.businessName}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                </div>
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-3">
               <button
-                onClick={() => document.dispatchEvent(new CustomEvent('leadbridge-launch', { detail: { action: 'collect-leads' } }))}
-                className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-2"
+                disabled={accounts.length > 0 && selectedAccountId === 'all'}
+                onClick={() => {
+                  const acc = accounts.find((a) => a.id === selectedAccountId);
+                  document.dispatchEvent(new CustomEvent('leadbridge-launch', {
+                    detail: { action: 'collect-leads', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: acc?.emailHint || null },
+                  }));
+                }}
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-2"
               >
                 <Download size={16} /> Get IDs
               </button>
               <button
-                onClick={() => document.dispatchEvent(new CustomEvent('leadbridge-launch', { detail: { action: 'sync-budget' } }))}
-                className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-2"
+                disabled={accounts.length > 0 && selectedAccountId === 'all'}
+                onClick={() => {
+                  const acc = accounts.find((a) => a.id === selectedAccountId);
+                  document.dispatchEvent(new CustomEvent('leadbridge-launch', {
+                    detail: { action: 'sync-budget', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: acc?.emailHint || null },
+                  }));
+                }}
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-2"
               >
                 <DollarSign size={16} /> Get Budget
               </button>
+              {accounts.length > 0 && selectedAccountId === 'all' && (
+                <span className="text-xs text-amber-600 font-medium">Select an account to sync</span>
+              )}
             </div>
           </div>
         ) : (
@@ -329,13 +357,6 @@ export function ExtensionSync() {
             </div>
           </section>
 
-          {/* Import result */}
-          {importResult && (
-            <div className={`p-4 rounded-xl text-sm font-medium ${importResult.includes('failed') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
-              {importResult}
-            </div>
-          )}
-
           {/* Filter + Actions */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
@@ -357,33 +378,13 @@ export function ExtensionSync() {
 
             <div className="flex flex-wrap items-center gap-2 ml-auto">
               {selected.size > 0 && (
-                <>
-                  <button
-                    onClick={handleImportSelected}
-                    disabled={importing}
-                    className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-2"
-                  >
-                    {importing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                    Import Selected ({selected.size})
-                  </button>
-                  <button
-                    onClick={handleDeleteSelected}
-                    disabled={deleting}
-                    className="px-4 py-2 rounded-xl text-sm font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 inline-flex items-center gap-2"
-                  >
-                    {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                    Delete Selected ({selected.size})
-                  </button>
-                </>
-              )}
-              {pendingLeads.length > 0 && (
                 <button
-                  onClick={handleImportAllPending}
-                  disabled={importing}
-                  className="px-4 py-2 rounded-xl text-sm font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 inline-flex items-center gap-2"
+                  onClick={handleDeleteSelected}
+                  disabled={deleting}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 inline-flex items-center gap-2"
                 >
-                  {importing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                  Import All Pending ({pendingLeads.length})
+                  {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                  Delete Selected ({selected.size})
                 </button>
               )}
               {leads.length > 0 && (
@@ -398,6 +399,12 @@ export function ExtensionSync() {
               )}
             </div>
           </div>
+
+          {deleteResult && (
+            <div className={`p-3 rounded-xl text-sm font-medium ${deleteResult.startsWith('Delete failed') ? 'bg-red-50 text-red-700 border border-red-100' : 'bg-green-50 text-green-700 border border-green-100'}`}>
+              {deleteResult}
+            </div>
+          )}
 
           {filteredLeads.length === 0 ? (
             <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center">
@@ -420,7 +427,9 @@ export function ExtensionSync() {
                           className="rounded border-slate-300"
                         />
                       </th>
+                      <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Customer</th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Thumbtack ID</th>
+                      {showAccountColumn && <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Account</th>}
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Collected</th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">TT Status</th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Source</th>
@@ -441,11 +450,17 @@ export function ExtensionSync() {
                             />
                           )}
                         </td>
+                        <td className="py-3 px-4 text-sm font-medium text-slate-900">{lead.customerName || '-'}</td>
                         <td className="py-3 px-4">
                           <code className="text-sm font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded">
                             {lead.thumbtackId}
                           </code>
                         </td>
+                        {showAccountColumn && (
+                          <td className="py-3 px-4 text-sm text-slate-600">
+                            {getAccountName(lead.savedAccountId) || <span className="text-slate-300">-</span>}
+                          </td>
+                        )}
                         <td className="py-3 px-4 text-sm text-slate-600">{formatDate(lead.collectedAt)}</td>
                         <td className="py-3 px-4 text-sm text-slate-500">{lead.thumbtackStatus || '-'}</td>
                         <td className="py-3 px-4 text-sm text-slate-500">{lead.source || '-'}</td>
@@ -471,9 +486,12 @@ export function ExtensionSync() {
                             className="rounded border-slate-300"
                           />
                         )}
-                        <code className="text-xs font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded break-all">
-                          {lead.thumbtackId}
-                        </code>
+                        <div>
+                          {lead.customerName && <span className="text-sm font-medium text-slate-900 block">{lead.customerName}</span>}
+                          <code className="text-xs font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded break-all">
+                            {lead.thumbtackId}
+                          </code>
+                        </div>
                       </div>
                       <LeadStatusBadge lead={lead} />
                     </div>
@@ -501,6 +519,25 @@ export function ExtensionSync() {
             </div>
           ) : (
             <>
+              {/* Delete All (testing) */}
+              <div className="flex justify-end mb-3">
+                <button
+                  onClick={async () => {
+                    if (!window.confirm(`Delete all ${snapshots.length} budget snapshots? This cannot be undone.`)) return;
+                    try {
+                      await integrationsApi.deleteBudgetSnapshots();
+                      setSnapshots([]);
+                    } catch {
+                      // silent
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors"
+                >
+                  <Trash2 size={13} />
+                  Delete All ({snapshots.length})
+                </button>
+              </div>
+
               {/* Desktop Table */}
               <div className="hidden md:block bg-white rounded-2xl border border-slate-100 overflow-hidden">
                 <table className="w-full">
@@ -518,10 +555,16 @@ export function ExtensionSync() {
                     {snapshots.map((snap) => (
                       <tr key={snap.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
                         <td className="py-3 px-4">
-                          <span className="text-lg font-bold text-slate-900">
-                            ${Number(snap.weeklyBudget).toFixed(0)}
-                          </span>
-                          <span className="text-xs text-slate-400 ml-1">/{snap.currency}/wk</span>
+                          {Number(snap.weeklyBudget) === 0 ? (
+                            <span className="text-lg font-bold text-indigo-600">Unlimited</span>
+                          ) : (
+                            <>
+                              <span className="text-lg font-bold text-slate-900">
+                                ${Number(snap.weeklyBudget).toFixed(0)}
+                              </span>
+                              <span className="text-xs text-slate-400 ml-1">/{snap.currency}/wk</span>
+                            </>
+                          )}
                         </td>
                         <td className="py-3 px-4 text-sm text-slate-600">{snap.scopeCategory || '-'}</td>
                         <td className="py-3 px-4 text-sm text-slate-600">{snap.scopeLocation || '-'}</td>
@@ -549,7 +592,11 @@ export function ExtensionSync() {
                   <div key={snap.id} className="bg-white rounded-2xl border border-slate-100 p-4 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-lg font-bold text-slate-900">
-                        ${Number(snap.weeklyBudget).toFixed(0)}<span className="text-xs text-slate-400 ml-1 font-normal">/{snap.currency}/wk</span>
+                        {Number(snap.weeklyBudget) === 0 ? (
+                          <span className="text-indigo-600">Unlimited</span>
+                        ) : (
+                          <>${Number(snap.weeklyBudget).toFixed(0)}<span className="text-xs text-slate-400 ml-1 font-normal">/{snap.currency}/wk</span></>
+                        )}
                       </span>
                       {snap.active ? (
                         <span className="px-2.5 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold">Active</span>
@@ -575,6 +622,7 @@ export function ExtensionSync() {
           )}
         </>
       )}
+
     </div>
   );
 }

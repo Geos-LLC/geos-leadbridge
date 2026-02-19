@@ -83,12 +83,12 @@ export function Layout() {
       <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-slate-100 transform transition-transform duration-300 ease-in-out ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
         <div className="flex flex-col h-full p-6">
           {/* Brand */}
-          <div className="flex items-center gap-3 mb-10 px-2">
+          <RouterLink to="/" className="flex items-center gap-3 mb-10 px-2 hover:opacity-80 transition-opacity">
             <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
               <Zap className="w-6 h-6" />
             </div>
             <span className="text-xl font-bold tracking-tight">LeadBridge</span>
-          </div>
+          </RouterLink>
 
           {/* Navigation Links */}
           <nav className="flex-1 space-y-1 sidebar-scroll overflow-y-auto">
@@ -190,12 +190,12 @@ export function Layout() {
               <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden p-2 text-slate-600">
                 <Menu className="w-6 h-6" />
               </button>
-              <div className="flex items-center gap-2 lg:hidden">
+              <RouterLink to="/" className="flex items-center gap-2 lg:hidden hover:opacity-80 transition-opacity">
                 <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-sm shadow-blue-200">
                   <Zap className="w-4 h-4" />
                 </div>
                 <span className="text-lg font-bold tracking-tight text-slate-900">LeadBridge</span>
-              </div>
+              </RouterLink>
               <h1 className="text-xl font-bold text-slate-900 lg:block hidden">{getPageName()}</h1>
             </div>
             <div className="flex items-center gap-3">
