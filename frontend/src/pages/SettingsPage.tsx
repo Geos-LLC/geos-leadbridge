@@ -5,7 +5,7 @@ import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
 import type { SubscriptionDetails, SavedAccount } from '../types';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import ConnectionModal from '../components/ConnectionModal';
 
 const tierNames: Record<string, string> = {
@@ -52,7 +52,8 @@ export default function SettingsPage() {
   const [passwordError, setPasswordError] = useState('');
 
   // Import negotiations state
-  const [importCollapsed, setImportCollapsed] = useState(true);
+  const [searchParams] = useSearchParams();
+  const [importCollapsed, setImportCollapsed] = useState(() => searchParams.get('import') !== 'open');
   const [importAccountId, setImportAccountId] = useState<string | null>(null);
   const [importIds, setImportIds] = useState('');
   const [importing, setImporting] = useState(false);
