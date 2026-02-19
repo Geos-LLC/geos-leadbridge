@@ -94,7 +94,8 @@ export default function SettingsPage() {
       setExtensionTotalCount(0);
       return;
     }
-    integrationsApi.getCollectedLeads({ accountId: importAccountId }).then((res) => {
+    // Fetch all collected leads (not filtered by account) since older leads may not have savedAccountId
+    integrationsApi.getCollectedLeads({}).then((res) => {
       const allLeads = res.leads || [];
       const pending = allLeads.filter((l: any) => !l.imported);
       const imported = allLeads.filter((l: any) => l.imported);
@@ -313,14 +314,20 @@ export default function SettingsPage() {
 
     setImporting(false);
 
-    // Reload extension pending count
-    integrationsApi.getCollectedLeads({ accountId: importAccountId }).then((res) => {
-      const pending = (res.leads || []).filter((l: any) => !l.imported);
+    // Reload extension counts
+    integrationsApi.getCollectedLeads({}).then((res) => {
+      const allLeads = res.leads || [];
+      const pending = allLeads.filter((l: any) => !l.imported);
+      const imported = allLeads.filter((l: any) => l.imported);
       setExtensionPendingCount(pending.length);
       setExtensionPendingIds(pending.map((l: any) => l.thumbtackId));
+      setExtensionImportedCount(imported.length);
+      setExtensionTotalCount(allLeads.length);
     }).catch(() => {
       setExtensionPendingCount(0);
       setExtensionPendingIds([]);
+      setExtensionImportedCount(0);
+      setExtensionTotalCount(0);
     });
 
     const newCount = results.filter(r => r.success && r.isNew).length;
