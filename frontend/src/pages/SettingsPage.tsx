@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info, Eye, EyeOff } from 'lucide-react';
+import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info, Eye, EyeOff, DollarSign } from 'lucide-react';
 import { authApi, billingApi, thumbtackApi, leadsApi, usersApi, integrationsApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
@@ -65,8 +65,22 @@ export default function SettingsPage() {
   const [extensionPendingCount, setExtensionPendingCount] = useState(0);
   const [extensionPendingIds, setExtensionPendingIds] = useState<string[]>([]);
 
+  // Extension detection
+  const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
+
   useEffect(() => {
     loadData();
+  }, []);
+
+  // Detect Chrome extension
+  useEffect(() => {
+    const check = () => {
+      const installed = document.documentElement.getAttribute('data-leadbridge-extension') === 'true';
+      setExtensionInstalled(installed);
+    };
+    check();
+    const timer = setTimeout(check, 1500);
+    return () => clearTimeout(timer);
   }, []);
 
   // Load extension pending leads when import account changes
@@ -653,6 +667,54 @@ export default function SettingsPage() {
                         ))}
                       </select>
                     </div>
+
+                    {/* Extension Sync Buttons */}
+                    {importAccountId && (
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                        {extensionInstalled === null ? (
+                          <div className="flex items-center gap-2 text-slate-400 text-sm">
+                            <Loader2 size={14} className="animate-spin" />
+                            <span>Checking for extension...</span>
+                          </div>
+                        ) : extensionInstalled ? (
+                          <>
+                            <div className="flex items-center gap-2 mb-2">
+                              <CheckCircle size={14} className="text-green-600" />
+                              <span className="text-xs font-semibold text-green-700">Extension installed</span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  const acc = accounts.find(a => a.id === importAccountId);
+                                  document.dispatchEvent(new CustomEvent('leadbridge-launch', {
+                                    detail: { action: 'collect-leads', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: acc?.emailHint || null },
+                                  }));
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-1.5"
+                              >
+                                <Download size={13} /> Get IDs
+                              </button>
+                              <button
+                                onClick={() => {
+                                  const acc = accounts.find(a => a.id === importAccountId);
+                                  document.dispatchEvent(new CustomEvent('leadbridge-launch', {
+                                    detail: { action: 'sync-budget', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: acc?.emailHint || null },
+                                  }));
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-1.5"
+                              >
+                                <DollarSign size={13} /> Get Budget
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-xs text-slate-500">
+                            <span className="font-semibold text-slate-700">Extension not detected.</span>{' '}
+                            Install the <a href="https://chromewebstore.google.com/detail/leadbridge-sync-thumbtack/mkhkooldgglhnpkjfgmpkneongipfhnm" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">LeadBridge Sync</a> extension to collect IDs automatically.
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Extension-collected leads */}
                     {importAccountId && extensionPendingCount > 0 && (
