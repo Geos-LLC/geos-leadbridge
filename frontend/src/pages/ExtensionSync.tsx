@@ -3,7 +3,7 @@ import {
   RefreshCw, Loader2, CheckCircle, Download, Package,
   Clock, DollarSign, ArrowUpRight, Filter, Chrome, Trash2, Building2, ChevronDown,
 } from 'lucide-react';
-import { integrationsApi, thumbtackApi } from '../services/api';
+import { integrationsApi, thumbtackApi, leadsApi } from '../services/api';
 import type { SavedAccount } from '../types';
 
 type ImportProgress = {
@@ -193,7 +193,7 @@ export function ExtensionSync() {
 
     for (const id of ids) {
       try {
-        await thumbtackApi.importNegotiation(id, accountFilter);
+        await leadsApi.importNegotiation(id, accountFilter);
         progress.succeeded++;
         successIds.push(id);
       } catch {
