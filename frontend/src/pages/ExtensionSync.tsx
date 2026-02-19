@@ -536,10 +536,16 @@ export function ExtensionSync() {
                     {snapshots.map((snap) => (
                       <tr key={snap.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
                         <td className="py-3 px-4">
-                          <span className="text-lg font-bold text-slate-900">
-                            ${Number(snap.weeklyBudget).toFixed(0)}
-                          </span>
-                          <span className="text-xs text-slate-400 ml-1">/{snap.currency}/wk</span>
+                          {Number(snap.weeklyBudget) === 0 ? (
+                            <span className="text-lg font-bold text-indigo-600">Unlimited</span>
+                          ) : (
+                            <>
+                              <span className="text-lg font-bold text-slate-900">
+                                ${Number(snap.weeklyBudget).toFixed(0)}
+                              </span>
+                              <span className="text-xs text-slate-400 ml-1">/{snap.currency}/wk</span>
+                            </>
+                          )}
                         </td>
                         <td className="py-3 px-4 text-sm text-slate-600">{snap.scopeCategory || '-'}</td>
                         <td className="py-3 px-4 text-sm text-slate-600">{snap.scopeLocation || '-'}</td>
@@ -567,7 +573,11 @@ export function ExtensionSync() {
                   <div key={snap.id} className="bg-white rounded-2xl border border-slate-100 p-4 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-lg font-bold text-slate-900">
-                        ${Number(snap.weeklyBudget).toFixed(0)}<span className="text-xs text-slate-400 ml-1 font-normal">/{snap.currency}/wk</span>
+                        {Number(snap.weeklyBudget) === 0 ? (
+                          <span className="text-indigo-600">Unlimited</span>
+                        ) : (
+                          <>${Number(snap.weeklyBudget).toFixed(0)}<span className="text-xs text-slate-400 ml-1 font-normal">/{snap.currency}/wk</span></>
+                        )}
                       </span>
                       {snap.active ? (
                         <span className="px-2.5 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold">Active</span>
