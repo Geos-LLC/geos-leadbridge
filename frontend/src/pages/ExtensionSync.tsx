@@ -519,6 +519,25 @@ export function ExtensionSync() {
             </div>
           ) : (
             <>
+              {/* Delete All (testing) */}
+              <div className="flex justify-end mb-3">
+                <button
+                  onClick={async () => {
+                    if (!window.confirm(`Delete all ${snapshots.length} budget snapshots? This cannot be undone.`)) return;
+                    try {
+                      await integrationsApi.deleteBudgetSnapshots();
+                      setSnapshots([]);
+                    } catch {
+                      // silent
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors"
+                >
+                  <Trash2 size={13} />
+                  Delete All ({snapshots.length})
+                </button>
+              </div>
+
               {/* Desktop Table */}
               <div className="hidden md:block bg-white rounded-2xl border border-slate-100 overflow-hidden">
                 <table className="w-full">

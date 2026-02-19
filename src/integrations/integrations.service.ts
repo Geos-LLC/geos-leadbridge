@@ -252,6 +252,21 @@ export class IntegrationsService {
   }
 
   /**
+   * Delete all budget snapshots for a user.
+   */
+  async deleteSnapshots(userId: string) {
+    const result = await this.prisma.thumbtackSettingsSnapshot.deleteMany({
+      where: { userId },
+    });
+
+    this.logger.log(
+      `Deleted ${result.count} budget snapshots for user ${userId}`,
+    );
+
+    return { ok: true, deletedCount: result.count };
+  }
+
+  /**
    * Delete collected lead IDs. If thumbtackIds provided, delete those; otherwise delete all.
    */
   async deleteLeadIds(userId: string, thumbtackIds?: string[]) {

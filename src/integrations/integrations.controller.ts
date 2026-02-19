@@ -115,4 +115,13 @@ export class IntegrationsController {
   ) {
     return this.integrationsService.deleteLeadIds(user.id, body.thumbtackIds);
   }
+
+  /**
+   * DELETE /api/integrations/thumbtack/snapshots
+   * Delete all budget snapshots for the authenticated user.
+   */
+  @Delete('snapshots')
+  async deleteSnapshots(@CurrentUser() user: any) {
+    return this.integrationsService.deleteSnapshots(user.id);
+  }
 }
