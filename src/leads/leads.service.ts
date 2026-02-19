@@ -783,12 +783,13 @@ export class LeadsService {
   async importThumbtackNegotiations(
     userId: string,
     negotiationIds: string[],
+    accountId?: string,
   ): Promise<{ imported: number; failed: number; errors: string[] }> {
     const results = { imported: 0, failed: 0, errors: [] as string[] };
 
     for (const negotiationId of negotiationIds) {
       try {
-        await this.importThumbtackNegotiation(userId, negotiationId);
+        await this.importThumbtackNegotiation(userId, negotiationId, accountId);
         results.imported++;
       } catch (error) {
         results.failed++;

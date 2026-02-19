@@ -40,6 +40,10 @@ class BudgetDto {
 export class BudgetSnapshotDto {
   @IsOptional()
   @IsString()
+  savedAccountId?: string;
+
+  @IsOptional()
+  @IsString()
   provider?: string;
 
   @IsOptional()

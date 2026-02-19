@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   RefreshCw, Loader2, CheckCircle, Download, Package,
-  Clock, DollarSign, ArrowUpRight, Filter, Chrome, Trash2,
+  Clock, DollarSign, ArrowUpRight, Filter, Chrome, Trash2, Building2, ChevronDown,
 } from 'lucide-react';
-import { integrationsApi } from '../services/api';
+import { integrationsApi, thumbtackApi } from '../services/api';
+import type { SavedAccount } from '../types';
 
 type CollectedLead = {
   id: string;
   thumbtackId: string;
+  savedAccountId: string | null;
   batchId: string | null;
   capturedAt: string;
   collectedAt: string;
@@ -21,6 +23,7 @@ type CollectedLead = {
 
 type BudgetSnapshot = {
   id: string;
+  savedAccountId: string | null;
   snapshotType: string;
   scopeCategory: string | null;
   scopeLocation: string | null;
@@ -71,6 +74,8 @@ export function ExtensionSync() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<LeadFilter>('all');
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
+  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
   // Detect if the Chrome extension is installed
   // The extension's leadbridgeAuth.js sets data-leadbridge-extension="true" on <html>
   useEffect(() => {
@@ -84,14 +89,23 @@ export function ExtensionSync() {
     return () => clearTimeout(timer);
   }, []);
 
+  // Load saved accounts
+  useEffect(() => {
+    thumbtackApi.getSavedAccounts().then((res) => {
+      setAccounts(res.accounts || []);
+    }).catch(() => {});
+  }, []);
+
   const prevTotalsRef = useRef({ leads: 0, snapshots: 0 });
+
+  const accountFilter = selectedAccountId === 'all' ? undefined : selectedAccountId;
 
   const loadData = useCallback(async (silent = false) => {
     try {
       if (!silent) setLoading(true);
       const [leadsRes, snapshotsRes] = await Promise.all([
-        integrationsApi.getCollectedLeads(),
-        integrationsApi.getBudgetSnapshots(),
+        integrationsApi.getCollectedLeads({ accountId: accountFilter }),
+        integrationsApi.getBudgetSnapshots(accountFilter),
       ]);
       setLeads(leadsRes.leads);
       setSnapshots(snapshotsRes.snapshots);
@@ -101,7 +115,7 @@ export function ExtensionSync() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, []);
+  }, [accountFilter]);
 
   // Initial load
   useEffect(() => {
@@ -148,7 +162,7 @@ export function ExtensionSync() {
     try {
       setImporting(true);
       setImportResult(null);
-      const result = await integrationsApi.importNegotiationBatch(ids);
+      const result = await integrationsApi.importNegotiationBatch(ids, accountFilter);
       await integrationsApi.markLeadsImported(ids.filter((id) => {
         const r = result.results?.find((r) => r.negotiationId === id);
         return r && !r.error;
@@ -195,6 +209,10 @@ export function ExtensionSync() {
     });
   };
 
+  const accountMap = new Map(accounts.map((a) => [a.id, a.businessName]));
+  const getAccountName = (id: string | null) => (id ? accountMap.get(id) || null : null);
+  const showAccountColumn = selectedAccountId === 'all' && accounts.length > 1;
+
 
   return (
     <div className="p-4 md:p-6 lg:p-10 max-w-7xl mx-auto space-y-6 md:space-y-10">
@@ -223,18 +241,46 @@ export function ExtensionSync() {
               </div>
               <div>
                 <span className="text-sm font-semibold text-green-700">Extension installed</span>
-                <p className="text-xs text-slate-400 mt-0.5">Click a button below to open Thumbtack with the extension</p>
+                <p className="text-xs text-slate-400 mt-0.5">Select an account and click a button to open Thumbtack with the extension</p>
               </div>
             </div>
+            {accounts.length > 0 && (
+              <div className="flex items-center gap-3">
+                <Building2 size={16} className="text-slate-400 flex-shrink-0" />
+                <div className="relative">
+                  <select
+                    value={selectedAccountId}
+                    onChange={(e) => setSelectedAccountId(e.target.value)}
+                    className="appearance-none bg-white border border-slate-200 rounded-xl px-4 py-2 pr-8 text-sm font-medium text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer"
+                  >
+                    <option value="all">All Accounts</option>
+                    {accounts.map((acc) => (
+                      <option key={acc.id} value={acc.id}>{acc.businessName}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                </div>
+              </div>
+            )}
             <div className="flex flex-wrap gap-3">
               <button
-                onClick={() => document.dispatchEvent(new CustomEvent('leadbridge-launch', { detail: { action: 'collect-leads' } }))}
+                onClick={() => {
+                  const acc = accounts.find((a) => a.id === selectedAccountId);
+                  document.dispatchEvent(new CustomEvent('leadbridge-launch', {
+                    detail: { action: 'collect-leads', accountId: acc?.id || null, accountName: acc?.businessName || null },
+                  }));
+                }}
                 className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center gap-2"
               >
                 <Download size={16} /> Get IDs
               </button>
               <button
-                onClick={() => document.dispatchEvent(new CustomEvent('leadbridge-launch', { detail: { action: 'sync-budget' } }))}
+                onClick={() => {
+                  const acc = accounts.find((a) => a.id === selectedAccountId);
+                  document.dispatchEvent(new CustomEvent('leadbridge-launch', {
+                    detail: { action: 'sync-budget', accountId: acc?.id || null, accountName: acc?.businessName || null },
+                  }));
+                }}
                 className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-2"
               >
                 <DollarSign size={16} /> Get Budget
@@ -421,6 +467,7 @@ export function ExtensionSync() {
                         />
                       </th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Thumbtack ID</th>
+                      {showAccountColumn && <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Account</th>}
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Collected</th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">TT Status</th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Source</th>
@@ -446,6 +493,11 @@ export function ExtensionSync() {
                             {lead.thumbtackId}
                           </code>
                         </td>
+                        {showAccountColumn && (
+                          <td className="py-3 px-4 text-sm text-slate-600">
+                            {getAccountName(lead.savedAccountId) || <span className="text-slate-300">-</span>}
+                          </td>
+                        )}
                         <td className="py-3 px-4 text-sm text-slate-600">{formatDate(lead.collectedAt)}</td>
                         <td className="py-3 px-4 text-sm text-slate-500">{lead.thumbtackStatus || '-'}</td>
                         <td className="py-3 px-4 text-sm text-slate-500">{lead.source || '-'}</td>

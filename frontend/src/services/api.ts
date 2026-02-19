@@ -1021,11 +1021,12 @@ export const testApi = {
 
 // Extension Sync (Chrome extension collected data)
 export const integrationsApi = {
-  getCollectedLeads: async (filters?: { pending?: boolean; refetch?: boolean }): Promise<{
+  getCollectedLeads: async (filters?: { pending?: boolean; refetch?: boolean; accountId?: string }): Promise<{
     ok: boolean;
     leads: Array<{
       id: string;
       thumbtackId: string;
+      savedAccountId: string | null;
       batchId: string | null;
       capturedAt: string;
       collectedAt: string;
@@ -1041,6 +1042,7 @@ export const integrationsApi = {
     const params = new URLSearchParams();
     if (filters?.pending) params.append('pending', 'true');
     if (filters?.refetch) params.append('refetch', 'true');
+    if (filters?.accountId) params.append('accountId', filters.accountId);
     const query = params.toString();
     const { data } = await api.get(`/integrations/thumbtack/leads${query ? `?${query}` : ''}`);
     return data;
@@ -1049,10 +1051,11 @@ export const integrationsApi = {
     const { data } = await api.patch('/integrations/thumbtack/leads/mark-imported', { thumbtackIds });
     return data;
   },
-  getBudgetSnapshots: async (): Promise<{
+  getBudgetSnapshots: async (accountId?: string): Promise<{
     ok: boolean;
     snapshots: Array<{
       id: string;
+      savedAccountId: string | null;
       snapshotType: string;
       scopeCategory: string | null;
       scopeLocation: string | null;
@@ -1066,21 +1069,25 @@ export const integrationsApi = {
     }>;
     total: number;
   }> => {
-    const { data } = await api.get('/integrations/thumbtack/snapshots');
+    const query = accountId ? `?accountId=${accountId}` : '';
+    const { data } = await api.get(`/integrations/thumbtack/snapshots${query}`);
     return data;
   },
   deleteCollectedLeads: async (thumbtackIds?: string[]): Promise<{ ok: boolean; deletedCount: number }> => {
     const { data } = await api.delete('/integrations/thumbtack/leads', { data: thumbtackIds?.length ? { thumbtackIds } : {} });
     return data;
   },
-  importNegotiationBatch: async (negotiationIds: string[]): Promise<{
+  importNegotiationBatch: async (negotiationIds: string[], accountId?: string): Promise<{
     success: boolean;
     imported: number;
     skipped: number;
     errors: string[];
     results: Array<{ negotiationId: string; leadId?: string; isNew?: boolean; error?: string }>;
   }> => {
-    const { data } = await api.post('/v1/thumbtack/negotiations/import-batch', { negotiationIds });
+    const { data } = await api.post('/v1/thumbtack/negotiations/import-batch', {
+      negotiationIds,
+      ...(accountId ? { accountId } : {}),
+    });
     return data;
   },
 };

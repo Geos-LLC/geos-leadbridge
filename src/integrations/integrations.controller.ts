@@ -66,10 +66,12 @@ export class IntegrationsController {
     @CurrentUser() user: any,
     @Query('pending') pending?: string,
     @Query('refetch') refetch?: string,
+    @Query('accountId') accountId?: string,
   ) {
     return this.integrationsService.getLeadIds(user.id, {
       pending: pending === 'true',
       refetch: refetch === 'true',
+      savedAccountId: accountId,
     });
   }
 
@@ -78,8 +80,11 @@ export class IntegrationsController {
    * Query budget snapshots for the authenticated user.
    */
   @Get('snapshots')
-  async getSnapshots(@CurrentUser() user: any) {
-    return this.integrationsService.getSnapshots(user.id);
+  async getSnapshots(
+    @CurrentUser() user: any,
+    @Query('accountId') accountId?: string,
+  ) {
+    return this.integrationsService.getSnapshots(user.id, accountId);
   }
 
   /**

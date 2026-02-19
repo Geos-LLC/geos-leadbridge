@@ -43,6 +43,7 @@ export class IntegrationsService {
         data: {
           id: snapshotId,
           userId,
+          savedAccountId: dto.savedAccountId || null,
           provider: dto.provider || 'thumbtack',
           snapshotType: dto.snapshotType || 'budget',
           scopeCategory: dto.scope?.category || null,
@@ -100,6 +101,7 @@ export class IntegrationsService {
             needsRefetch: true,
             lastActivityAt: capturedAt,
             ...(status ? { thumbtackStatus: status } : {}),
+            ...(dto.savedAccountId ? { savedAccountId: dto.savedAccountId } : {}),
           },
         });
         updatedCount++;
@@ -108,6 +110,7 @@ export class IntegrationsService {
         await this.prisma.thumbtackLeadId.create({
           data: {
             userId,
+            savedAccountId: dto.savedAccountId || null,
             thumbtackId,
             batchId,
             capturedAt,
@@ -141,7 +144,7 @@ export class IntegrationsService {
    */
   async getLeadIds(
     userId: string,
-    filters: { pending?: boolean; refetch?: boolean },
+    filters: { pending?: boolean; refetch?: boolean; savedAccountId?: string },
   ) {
     const where: any = { userId };
 
@@ -150,6 +153,9 @@ export class IntegrationsService {
     }
     if (filters.refetch) {
       where.needsRefetch = true;
+    }
+    if (filters.savedAccountId) {
+      where.savedAccountId = filters.savedAccountId;
     }
 
     const leads = await this.prisma.thumbtackLeadId.findMany({
@@ -162,6 +168,7 @@ export class IntegrationsService {
       leads: leads.map((l) => ({
         id: l.id,
         thumbtackId: l.thumbtackId,
+        savedAccountId: l.savedAccountId,
         batchId: l.batchId,
         capturedAt: l.capturedAt,
         collectedAt: l.collectedAt,
@@ -207,9 +214,14 @@ export class IntegrationsService {
   /**
    * Query budget snapshots for a user.
    */
-  async getSnapshots(userId: string) {
+  async getSnapshots(userId: string, savedAccountId?: string) {
+    const where: any = { userId };
+    if (savedAccountId) {
+      where.savedAccountId = savedAccountId;
+    }
+
     const snapshots = await this.prisma.thumbtackSettingsSnapshot.findMany({
-      where: { userId },
+      where,
       orderBy: { effectiveFrom: 'desc' },
     });
 
@@ -217,6 +229,7 @@ export class IntegrationsService {
       ok: true,
       snapshots: snapshots.map((s) => ({
         id: s.id,
+        savedAccountId: s.savedAccountId,
         snapshotType: s.snapshotType,
         scopeCategory: s.scopeCategory,
         scopeLocation: s.scopeLocation,

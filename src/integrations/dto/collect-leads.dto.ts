@@ -21,6 +21,10 @@ class PageDto {
 export class CollectLeadsDto {
   @IsOptional()
   @IsString()
+  savedAccountId?: string;
+
+  @IsOptional()
+  @IsString()
   provider?: string;
 
   @IsDateString()
