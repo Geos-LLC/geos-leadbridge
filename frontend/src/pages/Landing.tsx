@@ -23,8 +23,8 @@ export function Landing() {
             <a href="#pricing" className="hover:text-blue-600">Pricing</a>
           </div>
           <div className="flex items-center gap-4">
-            <Link to="/login" className="text-sm font-semibold text-slate-600 hover:text-blue-600">Login</Link>
-            <Link to="/demo" className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-md">Try Demo</Link>
+            <Link to="/login" className="text-sm font-semibold text-slate-600 hover:text-blue-600">Sign In</Link>
+            <Link to="/register" className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-md">Start Free Trial</Link>
           </div>
         </div>
       </nav>
@@ -58,10 +58,15 @@ export function Landing() {
                 <ArrowUpRight className="w-5 h-5 text-emerald-500" /> Increase revenue
               </div>
             </div>
-            <Link to="/register" className="inline-flex items-center gap-3 px-8 py-4 bg-blue-600 text-white rounded-2xl text-lg font-bold hover:bg-blue-700 transition-all shadow-xl shadow-blue-200 group">
-              Get More Jobs Automatically
-              <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-            </Link>
+            <div className="flex flex-wrap items-center gap-4">
+              <Link to="/register" className="inline-flex items-center gap-3 px-8 py-4 bg-blue-600 text-white rounded-2xl text-lg font-bold hover:bg-blue-700 transition-all shadow-xl shadow-blue-200 group">
+                Start Free Trial — First 10 Leads Free
+                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              </Link>
+              <Link to="/demo" className="inline-flex items-center gap-2 px-6 py-3.5 border-2 border-slate-200 text-slate-700 rounded-2xl text-sm font-bold hover:border-blue-300 hover:text-blue-600 transition-all">
+                See It In Action
+              </Link>
+            </div>
 
             <div className="mt-12 flex items-center gap-4">
               <div className="flex -space-x-3">
@@ -125,6 +130,18 @@ export function Landing() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* Still Not Sure? */}
+      <section className="py-16 bg-white">
+        <div className="max-w-2xl mx-auto px-6 text-center">
+          <h3 className="text-2xl font-extrabold text-slate-900 mb-3">Still not sure?</h3>
+          <p className="text-lg text-slate-500 mb-8">Watch how LeadBridge replies in real time.</p>
+          <Link to="/demo" className="inline-flex items-center gap-2 px-8 py-4 bg-slate-900 text-white rounded-2xl text-lg font-bold hover:bg-slate-800 transition-all shadow-lg">
+            See Live Demo
+            <ArrowRight className="w-5 h-5" />
+          </Link>
         </div>
       </section>
 
@@ -302,7 +319,8 @@ export function Landing() {
             <span className="text-lg font-bold">LeadBridge</span>
           </div>
           <p className="text-slate-400 text-sm">© 2024 LeadBridge AI. Built for the Home Service Industry.</p>
-          <div className="flex gap-6 text-slate-400">
+          <div className="flex items-center gap-6 text-slate-400">
+            <Link to="/demo" className="text-sm hover:text-blue-600 transition-colors">Demo</Link>
             <a href="#" className="hover:text-blue-600 transition-colors"><Twitter className="w-5 h-5" /></a>
             <a href="#" className="hover:text-blue-600 transition-colors"><Linkedin className="w-5 h-5" /></a>
           </div>
