@@ -168,7 +168,7 @@ export class CallConnectService {
           botNumberE164: settings.botNumberE164,
           agentPhoneE164: settings.agentPhoneE164,
           maxAgentAttempts: settings.maxAgentAttempts,
-          agentAcceptDigits: settings.agentAcceptDigits || '0123456789*#',
+          agentAcceptDigits: '0123456789*#',
           ...(settings.agentWhisperMessage && { agentWhisperMessage: settings.agentWhisperMessage }),
           ...(settings.leadGreetingMessage && { leadGreetingMessage: settings.leadGreetingMessage }),
           leadVoicemailEnabled: settings.leadVoicemailEnabled ?? false,
