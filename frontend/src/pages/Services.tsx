@@ -20,11 +20,6 @@ const ALL_VARIABLES = [...AUTO_REPLY_VARIABLES, ...SMS_VARIABLES.filter(
   v => !AUTO_REPLY_VARIABLES.some(a => a.desc === v.desc)
 )];
 
-// Variables available in Call Connect message templates
-const CC_VARIABLES = [
-  { name: '{summary}', desc: 'Lead info & service category' },
-];
-
 // -- ServiceCard sub-component --
 interface ServiceCardProps {
   icon: React.ReactNode;
@@ -180,6 +175,7 @@ export function Services() {
   const [ccVoicemailEnabled, setCcVoicemailEnabled] = useState(false);
   const [ccVoicemailMessage, setCcVoicemailMessage] = useState('');
   const [ccVoicemailRecordingUrl, setCcVoicemailRecordingUrl] = useState('');
+  const [ccBotNumber, setCcBotNumber] = useState('');
   const [ccSaving, setCcSaving] = useState(false);
   const [ccTestPhone, setCcTestPhone] = useState('');
   const [ccTesting, setCcTesting] = useState(false);
@@ -236,6 +232,7 @@ export function Services() {
       ]);
 
       const ccs = ccRes.settings;
+      const defaultBotNumber = poolRes.phoneNumbers[0]?.phoneNumber || '';
       if (ccs) {
         setCcEnabled(ccs.enabled);
         setCcMode(ccs.mode);
@@ -252,6 +249,7 @@ export function Services() {
         setCcVoicemailEnabled(ccs.leadVoicemailEnabled);
         setCcVoicemailMessage(ccs.leadVoicemailMessage || '');
         setCcVoicemailRecordingUrl(ccs.leadVoicemailRecordingUrl || '');
+        setCcBotNumber(ccs.botNumberE164 || defaultBotNumber);
       } else {
         setCcEnabled(false);
         setCcMode('AGENT_FIRST');
@@ -268,6 +266,7 @@ export function Services() {
         setCcVoicemailEnabled(false);
         setCcVoicemailMessage('');
         setCcVoicemailRecordingUrl('');
+        setCcBotNumber(defaultBotNumber);
       }
 
       // Collect ALL new_lead automation rules
@@ -284,6 +283,20 @@ export function Services() {
       setLeadAlertRule(leadAlert);
       setTemplates(templatesRes.templates);
       setPoolPhones(poolRes.phoneNumbers);
+
+      // If CC messages are empty, pre-select default CC templates if they exist
+      if (!ccs?.agentWhisperMessage) {
+        const t = templatesRes.templates.find((x: any) => x.name === 'CC - Agent Whisper');
+        if (t) { setCcAgentWhisperMessage(t.content); setCcWhisperTemplateId(t.id); }
+      }
+      if (!ccs?.leadGreetingMessage) {
+        const t = templatesRes.templates.find((x: any) => x.name === 'CC - Lead Greeting');
+        if (t) { setCcLeadGreetingMessage(t.content); setCcGreetingTemplateId(t.id); }
+      }
+      if (!ccs?.leadVoicemailMessage) {
+        const t = templatesRes.templates.find((x: any) => x.name === 'CC - Voicemail TTS');
+        if (t) { setCcVoicemailMessage(t.content); setCcVoicemailTemplateId(t.id); }
+      }
 
       // Pre-fill form states from existing rules
       if (leadAlert) {
@@ -378,15 +391,15 @@ export function Services() {
       } else if (enabled) {
         // Find or create a default Lead Alert template
         const DEFAULT_ALERT_TEMPLATE =
-          'New lead: {{lead.name}}, Price {{lead.price}}\n' +
-          'Location: {{lead.location}}, {{lead.zip}}\n' +
-          'Service: {{lead.service}} {{lead.bedrooms}} bed /{{lead.bathrooms}} bath\n' +
-          'Frequency: {{lead.frequency}}\n' +
-          'Description: {{lead.serviceDescription}}\n' +
-          'Add-ons: {{lead.addons}}\n' +
-          'Pets: {{lead.pets}}\n' +
-          'Message: {{lead.message}}\n' +
-          'Phone: {{lead.phone}}';
+          'New lead: {lead.name}, Price {lead.price}\n' +
+          'Location: {lead.location}, {lead.zip}\n' +
+          'Service: {lead.service} {lead.bedrooms} bed / {lead.bathrooms} bath\n' +
+          'Frequency: {lead.frequency}\n' +
+          'Description: {lead.serviceDescription}\n' +
+          'Add-ons: {lead.addons}\n' +
+          'Pets: {lead.pets}\n' +
+          'Message: {lead.message}\n' +
+          'Phone: {lead.phone}';
 
         let templateId = templates.find(t => t.name.includes('Lead Alert'))?.id;
         if (!templateId) {
@@ -431,6 +444,44 @@ export function Services() {
     try {
       const { settings } = await callConnectApi.saveSettings(selectedAccountId, { enabled });
       setCcEnabled(settings.enabled);
+
+      // On first enable with no messages set, create and pre-select default CC templates
+      if (enabled && !ccAgentWhisperMessage && !ccLeadGreetingMessage && !ccVoicemailMessage) {
+        const DEFAULT_CC_WHISPER = 'Hi {customerName}, you have a new lead for {category}. Press any key to connect with the customer.';
+        const DEFAULT_CC_GREETING = 'Hi {customerName}! Thanks for your inquiry about {category}. We\'re connecting you with a specialist right now. Please hold for just a moment.';
+        const DEFAULT_CC_VOICEMAIL = 'Hi {customerName}, this is {accountName}. We tried to reach you about your {category} request. Please call us back and we\'ll be happy to help!';
+
+        const whisperExists = templates.find(t => t.name === 'CC - Agent Whisper');
+        const greetingExists = templates.find(t => t.name === 'CC - Lead Greeting');
+        const voicemailExists = templates.find(t => t.name === 'CC - Voicemail TTS');
+
+        const [whisperTpl, greetingTpl, voicemailTpl] = await Promise.all([
+          whisperExists
+            ? Promise.resolve({ template: whisperExists })
+            : templatesApi.createTemplate('CC - Agent Whisper', DEFAULT_CC_WHISPER),
+          greetingExists
+            ? Promise.resolve({ template: greetingExists })
+            : templatesApi.createTemplate('CC - Lead Greeting', DEFAULT_CC_GREETING),
+          voicemailExists
+            ? Promise.resolve({ template: voicemailExists })
+            : templatesApi.createTemplate('CC - Voicemail TTS', DEFAULT_CC_VOICEMAIL),
+        ]);
+
+        setTemplates(prev => {
+          const updated = [...prev];
+          if (!whisperExists) updated.push(whisperTpl.template);
+          if (!greetingExists) updated.push(greetingTpl.template);
+          if (!voicemailExists) updated.push(voicemailTpl.template);
+          return updated;
+        });
+
+        setCcAgentWhisperMessage(whisperTpl.template.content);
+        setCcWhisperTemplateId(whisperTpl.template.id);
+        setCcLeadGreetingMessage(greetingTpl.template.content);
+        setCcGreetingTemplateId(greetingTpl.template.id);
+        setCcVoicemailMessage(voicemailTpl.template.content);
+        setCcVoicemailTemplateId(voicemailTpl.template.id);
+      }
     } catch (err: any) {
       setCcEnabled(!enabled); // rollback
       setError(err.response?.data?.message || err.message || 'Failed to update Call Connect');
@@ -459,6 +510,7 @@ export function Services() {
         leadVoicemailEnabled: ccVoicemailEnabled,
         leadVoicemailMessage: ccVoicemailEnabled ? ccVoicemailMessage || undefined : undefined,
         leadVoicemailRecordingUrl: ccVoicemailEnabled ? ccVoicemailRecordingUrl || undefined : undefined,
+        botNumberE164: ccBotNumber || undefined,
       });
       showSuccess('Instant Call Connect settings saved');
     } catch (err: any) {
@@ -1159,6 +1211,36 @@ export function Services() {
               <p className="text-xs text-slate-400 mt-1.5">Phone Sigcore will ring when a new lead arrives</p>
             </div>
 
+            {/* Send from */}
+            <div className="max-w-sm">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send from</label>
+              <div className="relative">
+                <select
+                  value={ccBotNumber}
+                  onChange={e => setCcBotNumber(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium appearance-none"
+                >
+                  <option value="">Select phone number</option>
+                  {ccBotNumber && !poolPhones.some(p => p.phoneNumber === ccBotNumber) && (
+                    <option value={ccBotNumber}>{ccBotNumber} (configured)</option>
+                  )}
+                  {poolPhones.map(p => (
+                    <option key={p.id} value={p.phoneNumber}>
+                      {p.phoneNumber} (LeadBridge)
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                  <ChevronDown className="w-4 h-4" />
+                </div>
+              </div>
+              <button className="mt-2 px-4 py-2 bg-slate-100 text-slate-400 rounded-xl text-xs font-bold flex items-center gap-2 cursor-not-allowed">
+                <Phone className="w-3 h-3" />
+                Get your own number
+                <span className="px-1.5 py-0.5 bg-slate-200 text-[9px] rounded uppercase">Coming Soon</span>
+              </button>
+            </div>
+
             {/* Quiet Hours */}
             <div>
               <div className="flex items-center gap-3 mb-3">
@@ -1208,7 +1290,7 @@ export function Services() {
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Agent Whisper Message</label>
               <p className="text-xs text-slate-400 mb-3">
                 Played to you before the bridge. Press <span className="font-semibold text-slate-500">any key</span> to accept.
-                Variable: <code className="bg-white border border-slate-200 px-1 py-0.5 rounded text-slate-600">{'{summary}'}</code> lead info
+                Use variables like <code className="bg-white border border-slate-200 px-1 py-0.5 rounded text-slate-600">{'{customerName}'}</code> or <code className="bg-white border border-slate-200 px-1 py-0.5 rounded text-slate-600">{'{category}'}</code>.
               </p>
               <div className="space-y-3">
                 <select
@@ -1227,13 +1309,13 @@ export function Services() {
                   {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                   <option value="__create_new__">+ Create New Template</option>
                 </select>
-                <div className="relative group">
+                <div className="relative">
                   <textarea
                     value={ccAgentWhisperMessage}
                     onChange={e => { setCcAgentWhisperMessage(e.target.value); setCcWhisperTemplateId(null); }}
                     rows={3}
-                    placeholder="New lead: {summary}. Press any key to connect."
-                    className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100"
+                    placeholder="New lead: {customerName} needs help with {category}. Press any key to connect."
+                    className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100 pr-12"
                   />
                   {ccAgentWhisperMessage && (
                     <button
@@ -1241,7 +1323,8 @@ export function Services() {
                         const tpl = ccWhisperTemplateId ? templates.find(t => t.id === ccWhisperTemplateId) : null;
                         setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccAgentWhisperMessage, type: 'cc-whisper' });
                       }}
-                      className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                      className="absolute top-3 right-3 p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-violet-600 hover:border-violet-200 transition-colors"
+                      title="Edit template"
                     >
                       <Pencil className="w-4 h-4" />
                     </button>
@@ -1271,13 +1354,13 @@ export function Services() {
                   {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                   <option value="__create_new__">+ Create New Template</option>
                 </select>
-                <div className="relative group">
+                <div className="relative">
                   <textarea
                     value={ccLeadGreetingMessage}
                     onChange={e => { setCcLeadGreetingMessage(e.target.value); setCcGreetingTemplateId(null); }}
                     rows={3}
-                    placeholder="Hi! We received your inquiry and are connecting you with a specialist. Please hold for a moment."
-                    className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100"
+                    placeholder="Hi {customerName}! We received your inquiry and are connecting you with a specialist. Please hold."
+                    className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100 pr-12"
                   />
                   {ccLeadGreetingMessage && (
                     <button
@@ -1285,7 +1368,8 @@ export function Services() {
                         const tpl = ccGreetingTemplateId ? templates.find(t => t.id === ccGreetingTemplateId) : null;
                         setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccLeadGreetingMessage, type: 'cc-greeting' });
                       }}
-                      className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                      className="absolute top-3 right-3 p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-violet-600 hover:border-violet-200 transition-colors"
+                      title="Edit template"
                     >
                       <Pencil className="w-4 h-4" />
                     </button>
@@ -1340,13 +1424,13 @@ export function Services() {
                         {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                         <option value="__create_new__">+ Create New Template</option>
                       </select>
-                      <div className="relative group">
+                      <div className="relative">
                         <textarea
                           value={ccVoicemailMessage}
                           onChange={e => { setCcVoicemailMessage(e.target.value); setCcVoicemailTemplateId(null); }}
                           rows={3}
-                          placeholder="Hi, we tried to reach you about your inquiry. Please call us back or we'll follow up shortly. Thank you!"
-                          className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100"
+                          placeholder="Hi {customerName}, this is {accountName}. We tried to reach you about your {category} request. Please call us back!"
+                          className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100 pr-12"
                         />
                         {ccVoicemailMessage && (
                           <button
@@ -1354,7 +1438,8 @@ export function Services() {
                               const tpl = ccVoicemailTemplateId ? templates.find(t => t.id === ccVoicemailTemplateId) : null;
                               setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccVoicemailMessage, type: 'cc-voicemail' });
                             }}
-                            className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                            className="absolute top-3 right-3 p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-violet-600 hover:border-violet-200 transition-colors"
+                            title="Edit template"
                           >
                             <Pencil className="w-4 h-4" />
                           </button>
@@ -1417,7 +1502,7 @@ export function Services() {
         initialContent={templateEditor?.content || ''}
         templateName={templateEditor?.templateName}
         saving={saving}
-        variables={templateEditor?.type?.startsWith('cc-') ? CC_VARIABLES : ALL_VARIABLES}
+        variables={ALL_VARIABLES}
         existingNames={templates.map(t => t.name)}
         onSave={templateEditor?.mode === 'create' ? handleEditorCreate : handleEditorUpdate}
         onSaveAsNew={handleEditorSaveAsNew}

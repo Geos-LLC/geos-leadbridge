@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Loader2 } from 'lucide-react';
+import { X, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 
 export interface TemplateVariable {
   name: string;
@@ -17,22 +17,22 @@ export const AUTO_REPLY_VARIABLES: TemplateVariable[] = [
 ];
 
 export const SMS_VARIABLES: TemplateVariable[] = [
-  { name: '{{account.name}}', desc: 'Your business name' },
-  { name: '{{lead.name}}', desc: 'Customer name' },
-  { name: '{{lead.phone}}', desc: 'Customer phone' },
-  { name: '{{lead.service}}', desc: 'Service category' },
-  { name: '{{lead.location}}', desc: 'City, State' },
-  { name: '{{lead.zip}}', desc: 'ZIP code' },
-  { name: '{{lead.message}}', desc: 'Customer request message' },
-  { name: '{{lead.serviceDescription}}', desc: 'Detailed service description' },
-  { name: '{{lead.addons}}', desc: 'Service add-ons' },
-  { name: '{{lead.frequency}}', desc: 'Service frequency' },
-  { name: '{{lead.bedrooms}}', desc: 'Number of bedrooms' },
-  { name: '{{lead.bathrooms}}', desc: 'Number of bathrooms' },
-  { name: '{{lead.price}}', desc: 'Lead price/cost' },
-  { name: '{{lead.pets}}', desc: 'Pet information' },
-  { name: '{{lead.estimate}}', desc: 'Estimated cost/quote' },
-  { name: '{{lead.dates}}', desc: 'Requested date/schedule' },
+  { name: '{account.name}', desc: 'Your business name' },
+  { name: '{lead.name}', desc: 'Customer name' },
+  { name: '{lead.phone}', desc: 'Customer phone' },
+  { name: '{lead.service}', desc: 'Service category' },
+  { name: '{lead.location}', desc: 'City, State' },
+  { name: '{lead.zip}', desc: 'ZIP code' },
+  { name: '{lead.message}', desc: 'Customer request message' },
+  { name: '{lead.serviceDescription}', desc: 'Detailed service description' },
+  { name: '{lead.addons}', desc: 'Service add-ons' },
+  { name: '{lead.frequency}', desc: 'Service frequency' },
+  { name: '{lead.bedrooms}', desc: 'Number of bedrooms' },
+  { name: '{lead.bathrooms}', desc: 'Number of bathrooms' },
+  { name: '{lead.price}', desc: 'Lead price/cost' },
+  { name: '{lead.pets}', desc: 'Pet information' },
+  { name: '{lead.estimate}', desc: 'Estimated cost/quote' },
+  { name: '{lead.dates}', desc: 'Requested date/schedule' },
 ];
 
 interface TemplateEditorModalProps {
@@ -63,7 +63,9 @@ export function TemplateEditorModal({
   const [saveAsNewMode, setSaveAsNewMode] = useState(false);
   const [newName, setNewName] = useState('');
   const [nameError, setNameError] = useState<string | null>(null);
+  const [varsExpanded, setVarsExpanded] = useState(false);
   const contentRef = useRef<HTMLTextAreaElement>(null);
+  const VARS_INITIAL_COUNT = 6;
 
   useEffect(() => {
     if (isOpen) {
@@ -73,6 +75,7 @@ export function TemplateEditorModal({
       setSaveAsNewMode(false);
       setNewName('');
       setNameError(null);
+      setVarsExpanded(false);
     }
   }, [isOpen, initialName, initialContent, initialIsDefault]);
 
@@ -188,11 +191,26 @@ export function TemplateEditorModal({
 
           {variables.length > 0 && (
             <div className="space-y-3">
-              <label className="block text-sm font-semibold text-slate-700">
-                Variables <span className="text-xs font-normal text-slate-500">(click to insert at cursor)</span>
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="block text-sm font-semibold text-slate-700">
+                  Variables <span className="text-xs font-normal text-slate-500">(click to insert at cursor)</span>
+                </label>
+                {variables.length > VARS_INITIAL_COUNT && (
+                  <button
+                    type="button"
+                    onClick={() => setVarsExpanded(v => !v)}
+                    className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors"
+                  >
+                    {varsExpanded ? (
+                      <><ChevronUp className="w-3 h-3" /> Show less</>
+                    ) : (
+                      <><ChevronDown className="w-3 h-3" /> +{variables.length - VARS_INITIAL_COUNT} more</>
+                    )}
+                  </button>
+                )}
+              </div>
               <div className="flex flex-wrap gap-2">
-                {variables.map(v => (
+                {(varsExpanded ? variables : variables.slice(0, VARS_INITIAL_COUNT)).map(v => (
                   <button
                     key={v.name}
                     type="button"

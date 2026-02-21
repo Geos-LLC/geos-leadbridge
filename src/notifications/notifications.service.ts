@@ -1571,22 +1571,29 @@ export class NotificationsService implements OnModuleInit {
   ): string {
     let message = template;
 
-    // Replace account variables (support both {{account.name}} and {accountName})
+    // Replace account variables — support {{account.name}}, {account.name}, and {accountName}
     message = message.replace(/\{\{account\.name\}\}/gi, accountName || 'Your Business');
+    message = message.replace(/\{account\.name\}/gi, accountName || 'Your Business');
     message = message.replace(/\{accountName\}/gi, accountName || 'Your Business');
 
-    // Replace basic variables (support both {{lead.x}} and {x} single-brace shortcuts)
+    // Replace basic variables — support both {{lead.x}} and {lead.x} single-brace syntax
     message = message.replace(/\{\{lead\.name\}\}/gi, lead.customerName || 'Unknown');
+    message = message.replace(/\{lead\.name\}/gi, lead.customerName || 'Unknown');
     message = message.replace(/\{customerName\}/gi, lead.customerName || 'Unknown');
     message = message.replace(/\{\{lead\.phone\}\}/gi, lead.customerPhone || 'Not provided');
+    message = message.replace(/\{lead\.phone\}/gi, lead.customerPhone || 'Not provided');
     message = message.replace(/\{\{lead\.service\}\}/gi, lead.category || 'Not specified');
+    message = message.replace(/\{lead\.service\}/gi, lead.category || 'Not specified');
 
     const location = [lead.city, lead.state].filter(Boolean).join(', ') || 'Not specified';
     message = message.replace(/\{\{lead\.location\}\}/gi, location);
+    message = message.replace(/\{lead\.location\}/gi, location);
 
     // Replace new variables
     message = message.replace(/\{\{lead\.zip\}\}/gi, lead.postcode || 'Not provided');
+    message = message.replace(/\{lead\.zip\}/gi, lead.postcode || 'Not provided');
     message = message.replace(/\{\{lead\.message\}\}/gi, lead.message || 'No message');
+    message = message.replace(/\{lead\.message\}/gi, lead.message || 'No message');
 
     // Parse rawJson for additional fields
     let serviceDescription = 'Not specified';
@@ -1683,14 +1690,23 @@ export class NotificationsService implements OnModuleInit {
     }
 
     message = message.replace(/\{\{lead\.serviceDescription\}\}/gi, serviceDescription);
+    message = message.replace(/\{lead\.serviceDescription\}/gi, serviceDescription);
     message = message.replace(/\{\{lead\.addons\}\}/gi, addons);
+    message = message.replace(/\{lead\.addons\}/gi, addons);
     message = message.replace(/\{\{lead\.frequency\}\}/gi, frequency);
+    message = message.replace(/\{lead\.frequency\}/gi, frequency);
     message = message.replace(/\{\{lead\.bedrooms\}\}/gi, bedrooms);
+    message = message.replace(/\{lead\.bedrooms\}/gi, bedrooms);
     message = message.replace(/\{\{lead\.bathrooms\}\}/gi, bathrooms);
+    message = message.replace(/\{lead\.bathrooms\}/gi, bathrooms);
     message = message.replace(/\{\{lead\.price\}\}/gi, price);
+    message = message.replace(/\{lead\.price\}/gi, price);
     message = message.replace(/\{\{lead\.pets\}\}/gi, pets);
+    message = message.replace(/\{lead\.pets\}/gi, pets);
     message = message.replace(/\{\{lead\.estimate\}\}/gi, estimate);
+    message = message.replace(/\{lead\.estimate\}/gi, estimate);
     message = message.replace(/\{\{lead\.dates\}\}/gi, dates);
+    message = message.replace(/\{lead\.dates\}/gi, dates);
 
     return message;
   }
