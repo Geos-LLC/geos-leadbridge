@@ -354,6 +354,22 @@ export function Services() {
     setTimeout(() => setSuccessMessage(null), 3000);
   }
 
+  // --- Phone formatting helpers ---
+
+  function formatPhoneE164(raw: string): string {
+    if (!raw.trim()) return raw;
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length === 0) return raw;
+    if (digits.length === 10) return `+1${digits}`;
+    if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+    if (digits.length >= 7 && digits.length <= 15) return `+${digits}`;
+    return raw;
+  }
+
+  function isValidPhoneE164(phone: string): boolean {
+    return /^\+[1-9]\d{6,14}$/.test(phone);
+  }
+
   // --- Toggle Handlers ---
 
   async function toggleAutoReply(enabled: boolean) {
@@ -931,17 +947,31 @@ export function Services() {
                   type="tel"
                   value={alertToPhone}
                   onChange={e => setAlertToPhone(e.target.value)}
+                  onBlur={e => {
+                    const formatted = formatPhoneE164(e.target.value);
+                    if (formatted !== e.target.value) setAlertToPhone(formatted);
+                  }}
                   placeholder="+1234567890"
                   className={`w-full rounded-xl p-3 text-sm focus:ring-2 focus:outline-none transition-colors ${
                     toPhoneMissing
                       ? 'border-2 border-orange-300 bg-orange-50/40 focus:ring-orange-200 focus:border-orange-400 placeholder:text-orange-300'
-                      : 'bg-white border border-slate-200 focus:ring-blue-500 focus:border-blue-500'
+                      : alertToPhone && !isValidPhoneE164(alertToPhone)
+                        ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200 focus:border-red-400'
+                        : alertToPhone && isValidPhoneE164(alertToPhone)
+                          ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200 focus:border-emerald-400'
+                          : 'bg-white border border-slate-200 focus:ring-blue-500 focus:border-blue-500'
                   }`}
                 />
                 {toPhoneMissing && (
                   <p className="mt-1.5 text-xs text-orange-600 font-medium flex items-center gap-1">
                     <AlertCircle className="w-3 h-3 shrink-0" />
                     Enter your phone number to receive lead alert SMS messages
+                  </p>
+                )}
+                {!toPhoneMissing && alertToPhone && !isValidPhoneE164(alertToPhone) && (
+                  <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    Must be E.164 format, e.g. +12125550100
                   </p>
                 )}
               </div>
@@ -1182,10 +1212,27 @@ export function Services() {
                   type="tel"
                   value={ccAgentPhone}
                   onChange={e => setCcAgentPhone(e.target.value)}
+                  onBlur={e => {
+                    const formatted = formatPhoneE164(e.target.value);
+                    if (formatted !== e.target.value) setCcAgentPhone(formatted);
+                  }}
                   placeholder="+15551234567"
-                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent"
+                  className={`w-full rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                    ccAgentPhone && !isValidPhoneE164(ccAgentPhone)
+                      ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                      : ccAgentPhone && isValidPhoneE164(ccAgentPhone)
+                        ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                        : 'bg-white border border-slate-200 focus:ring-violet-300'
+                  }`}
                 />
-                <p className="text-xs text-slate-400 mt-1.5">Phone Sigcore will ring when a new lead arrives</p>
+                {ccAgentPhone && !isValidPhoneE164(ccAgentPhone) ? (
+                  <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    Must be E.164 format, e.g. +12125550100
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-400 mt-1.5">Phone Sigcore will ring when a new lead arrives</p>
+                )}
               </div>
 
               {/* Send from */}
@@ -1419,8 +1466,18 @@ export function Services() {
                     type="tel"
                     value={ccTestPhone}
                     onChange={e => setCcTestPhone(e.target.value)}
+                    onBlur={e => {
+                      const formatted = formatPhoneE164(e.target.value);
+                      if (formatted !== e.target.value) setCcTestPhone(formatted);
+                    }}
                     placeholder="+15559876543"
-                    className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent min-w-[160px]"
+                    className={`rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent min-w-[160px] transition-colors ${
+                      ccTestPhone && !isValidPhoneE164(ccTestPhone)
+                        ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                        : ccTestPhone && isValidPhoneE164(ccTestPhone)
+                          ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                          : 'bg-slate-50 border border-slate-200 focus:ring-violet-500'
+                    }`}
                   />
                   <button
                     onClick={handleTestCall}
