@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  automationApi, notificationsApi, thumbtackApi, templatesApi, usersApi,
+  automationApi, notificationsApi, thumbtackApi, templatesApi, usersApi, callConnectApi,
 } from '../services/api';
 import type {
   AutomationRule, NotificationRule, SavedAccount, MessageTemplate,
@@ -158,6 +158,10 @@ export function Services() {
     type: 'autoReply' | 'alert';
   } | null>(null);
 
+  // Instant Call Connect state
+  const [ccEnabled, setCcEnabled] = useState(false);
+  const [ccSaving, setCcSaving] = useState(false);
+
   // Lead Alerts form state (needed for first-time creation)
   const [alertToPhone, setAlertToPhone] = useState('');
   const [alertFromPhone, setAlertFromPhone] = useState('');
@@ -197,12 +201,15 @@ export function Services() {
       setLoading(true);
       setError(null);
 
-      const [automationRes, notifRes, templatesRes, poolRes] = await Promise.all([
+      const [automationRes, notifRes, templatesRes, poolRes, ccRes] = await Promise.all([
         automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] })),
         notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] })),
         templatesApi.getTemplates().catch(() => ({ templates: [] as MessageTemplate[] })),
         usersApi.getPoolPhonesForSms().catch(() => ({ phoneNumbers: [] })),
+        callConnectApi.getSettings(accountId).catch(() => ({ settings: null })),
       ]);
+
+      setCcEnabled(ccRes.settings?.enabled ?? false);
 
       // Collect ALL new_lead automation rules
       const allAutoReplies = automationRes.rules.filter(
@@ -357,6 +364,22 @@ export function Services() {
     }
   }
 
+
+  async function toggleCallConnect(enabled: boolean) {
+    if (!selectedAccountId) return;
+    setCcSaving(true);
+    setCcEnabled(enabled); // optimistic
+    try {
+      const { settings } = await callConnectApi.saveSettings(selectedAccountId, { enabled });
+      setCcEnabled(settings.enabled);
+      showSuccess(enabled ? 'Instant Call Connect enabled' : 'Instant Call Connect disabled');
+    } catch (err: any) {
+      setCcEnabled(!enabled); // rollback
+      setError(err.response?.data?.message || err.message || 'Failed to update Call Connect');
+    } finally {
+      setCcSaving(false);
+    }
+  }
 
   // --- Auto Reply Handlers ---
 
@@ -967,9 +990,11 @@ export function Services() {
             icon={<PhoneCall className="w-7 h-7" />}
             title="Instant Call Connect"
             description="Receive a phone call to bridge you instantly to new leads."
-            enabled={false}
-            onToggle={() => {}}
-            comingSoon={true}
+            enabled={ccEnabled}
+            onToggle={ccSaving ? () => {} : toggleCallConnect}
+            statusText={ccEnabled ? 'Active — bridging calls for new leads' : undefined}
+            iconBgColor="bg-violet-50"
+            iconTextColor="text-violet-600"
           />
 
         </div>

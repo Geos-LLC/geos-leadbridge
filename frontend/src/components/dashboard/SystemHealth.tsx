@@ -39,7 +39,6 @@ export default function SystemHealth({
       label: 'Call Connect',
       icon: <Phone size={20} />,
       enabled: false,
-      comingSoon: true,
       serviceId: 'call-connect',
     },
     {
