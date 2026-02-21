@@ -256,6 +256,7 @@ export class CallConnectService {
     customerPhone: string | null;
     customerName: string;
     category?: string | null;
+    location?: string | null;
     leadSummary?: string;
   }): Promise<void> {
     if (!params.savedAccountId || !params.customerPhone) return;
@@ -310,6 +311,9 @@ export class CallConnectService {
             leadId: params.leadId,
             leadPhoneE164: params.customerPhone,
             leadSummary: summary,
+            customerName: params.customerName || '',
+            category: params.category || '',
+            location: params.location || '',
             source: 'thumbtack',
           },
           { headers: this.buildHeaders(sigcoreApiKey) },
@@ -505,6 +509,9 @@ export class CallConnectService {
             leadId: `test-${Date.now()}`,
             leadPhoneE164: testPhone,
             leadSummary,
+            customerName: testCustomer.name,
+            category: testCustomer.category,
+            location: `${testCustomer.city}, ${testCustomer.state}`,
             source: 'thumbtack_test',
           },
           { headers: this.buildHeaders(sigcoreApiKey) },

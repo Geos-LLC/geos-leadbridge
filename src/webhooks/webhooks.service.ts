@@ -447,7 +447,8 @@ export class WebhooksService {
         customerPhone: customer.phone ?? null,
         customerName,
         category: request.category?.name ?? null,
-        leadSummary: `${customerName} – ${request.category?.name || 'Service'} – ${location.city || ''}`,
+        location: [location.city, location.state].filter(Boolean).join(', ') || null,
+        leadSummary: `${customerName} — ${request.category?.name || 'Service'} — ${[location.city, location.state].filter(Boolean).join(', ')}`,
       });
     } catch (err: any) {
       this.logger.error('Call-connect trigger failed for new lead', err.message);
