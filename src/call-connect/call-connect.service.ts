@@ -485,8 +485,17 @@ export class CallConnectService {
       where: { savedAccountId },
       select: { sigcoreApiKey: true, sigcoreWorkspaceId: true },
     });
-    const sigcoreApiKey =
-      ns?.sigcoreApiKey || this.configService.get<string>('SIGCORE_API_KEY') || null;
+
+    const accountKey = ns?.sigcoreApiKey;
+    const envKey = this.configService.get<string>('SIGCORE_API_KEY');
+    const sigcoreApiKey = accountKey || envKey || null;
+
+    this.logger.log(
+      `[triggerTestCall] accountKey=${accountKey ? `"${accountKey.slice(0, 6)}…" (len ${accountKey.length})` : 'empty/null'} | ` +
+      `envKey=${envKey ? `"${envKey.slice(0, 6)}…" (len ${envKey.length})` : 'not set'} | ` +
+      `using=${sigcoreApiKey ? `"${sigcoreApiKey.slice(0, 6)}…"` : 'NONE'}`
+    );
+
     if (!sigcoreApiKey) {
       throw new BadRequestException('No Sigcore API key configured in Notification Settings');
     }
