@@ -1091,7 +1091,7 @@ export function Services() {
           >
             {/* Connection Mode */}
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-3">Connection Mode</label>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Connection Mode</label>
               <div className="space-y-2">
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input
@@ -1122,56 +1122,24 @@ export function Services() {
               </div>
             </div>
 
-            {/* Agent Routing + Phone */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Agent Routing</label>
-                <div className="relative">
-                  <select
-                    value={ccAgentStrategy}
-                    onChange={e => setCcAgentStrategy(e.target.value as AgentStrategy)}
-                    className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent pr-10"
-                  >
-                    <option value="owner">Owner</option>
-                    <option value="round_robin">Round-robin</option>
-                    <option value="on_duty">On duty</option>
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Agent Phone (E.164)</label>
-                <input
-                  type="tel"
-                  value={ccAgentPhone}
-                  onChange={e => setCcAgentPhone(e.target.value)}
-                  placeholder="+15551234567"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
-                />
-                <p className="text-xs text-slate-400 mt-1">Phone Sigcore will ring when a new lead arrives</p>
-              </div>
-            </div>
-
-            {/* Max Attempts */}
-            <div className="max-w-xs">
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Max Agent Attempts</label>
-              <div className="relative">
-                <select
-                  value={ccMaxAttempts}
-                  onChange={e => setCcMaxAttempts(Number(e.target.value))}
-                  className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent pr-10"
-                >
-                  {[1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-              </div>
+            {/* Agent Phone */}
+            <div className="max-w-sm">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Agent Phone (E.164)</label>
+              <input
+                type="tel"
+                value={ccAgentPhone}
+                onChange={e => setCcAgentPhone(e.target.value)}
+                placeholder="+15551234567"
+                className="w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent"
+              />
+              <p className="text-xs text-slate-400 mt-1.5">Phone Sigcore will ring when a new lead arrives</p>
             </div>
 
             {/* Quiet Hours */}
             <div>
               <div className="flex items-center gap-3 mb-3">
-                <Moon className="w-4 h-4 text-slate-500" />
-                <span className="text-sm font-semibold text-slate-700">Quiet Hours</span>
+                <Moon className="w-4 h-4 text-slate-400" />
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Quiet Hours</span>
                 <label className="inline-flex items-center cursor-pointer">
                   <input
                     type="checkbox"
@@ -1188,7 +1156,7 @@ export function Services() {
                     <select
                       value={ccQuietTimezone}
                       onChange={e => setCcQuietTimezone(e.target.value)}
-                      className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent pr-10"
+                      className="w-full appearance-none bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent pr-10"
                     >
                       {['America/New_York','America/Chicago','America/Denver','America/Los_Angeles','America/Phoenix','America/Anchorage','Pacific/Honolulu'].map(tz => (
                         <option key={tz} value={tz}>{tz}</option>
@@ -1198,12 +1166,12 @@ export function Services() {
                   </div>
                   <div className="flex gap-6">
                     <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">From</label>
-                      <input type="time" value={ccQuietStart} onChange={e => setCcQuietStart(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent" />
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">From</label>
+                      <input type="time" value={ccQuietStart} onChange={e => setCcQuietStart(e.target.value)} className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">To</label>
-                      <input type="time" value={ccQuietEnd} onChange={e => setCcQuietEnd(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent" />
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">To</label>
+                      <input type="time" value={ccQuietEnd} onChange={e => setCcQuietEnd(e.target.value)} className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent" />
                     </div>
                   </div>
                   <p className="text-xs text-slate-400">Calls will not be triggered during quiet hours</p>
@@ -1212,50 +1180,55 @@ export function Services() {
             </div>
 
             {/* Agent Whisper Message */}
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">Agent Whisper Message</label>
-              <p className="text-xs text-slate-400 mb-2">Played to you before you're bridged. Use <code className="bg-slate-100 px-1 rounded">{'{summary}'}</code> for the lead summary and <code className="bg-slate-100 px-1 rounded">{'{digit}'}</code> for the accept digit.</p>
-              <textarea
-                value={ccAgentWhisperMessage}
-                onChange={e => setCcAgentWhisperMessage(e.target.value)}
-                rows={3}
-                placeholder="New lead: {summary}. Press {digit} to connect."
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
-              />
+            <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Agent Whisper Message</label>
+              <p className="text-xs text-slate-400 mb-3">Played to you before the bridge. Variables: <code className="bg-white border border-slate-200 px-1 py-0.5 rounded text-slate-600">{'{summary}'}</code> lead info · <code className="bg-white border border-slate-200 px-1 py-0.5 rounded text-slate-600">{'{digit}'}</code> accept key</p>
+              <div className="space-y-3">
+                <select
+                  value=""
+                  onChange={e => { const t = templates.find(x => x.id === e.target.value); if (t) setCcAgentWhisperMessage(t.content); }}
+                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
+                >
+                  <option value="">Pre-fill from template…</option>
+                  {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                <textarea
+                  value={ccAgentWhisperMessage}
+                  onChange={e => setCcAgentWhisperMessage(e.target.value)}
+                  rows={3}
+                  placeholder="New lead: {summary}. Press {digit} to connect."
+                  className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100"
+                />
+              </div>
             </div>
 
             {/* Lead Greeting Message */}
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">Lead Greeting Message</label>
-              <p className="text-xs text-slate-400 mb-2">Played to the lead while they wait for you to answer.</p>
-              <textarea
-                value={ccLeadGreetingMessage}
-                onChange={e => setCcLeadGreetingMessage(e.target.value)}
-                rows={3}
-                placeholder="Hi! We received your inquiry and are connecting you with a specialist. Please hold for a moment."
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
-              />
-            </div>
-
-            {/* Accept Digit */}
-            <div className="max-w-xs">
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Agent Accept Digit</label>
-              <p className="text-xs text-slate-400 mb-2">The key you press to accept the bridge (used in whisper message).</p>
-              <input
-                type="text"
-                value={ccAgentAcceptDigits}
-                onChange={e => setCcAgentAcceptDigits(e.target.value)}
-                maxLength={1}
-                placeholder="1"
-                className="w-24 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
-              />
+            <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Lead Greeting Message</label>
+              <p className="text-xs text-slate-400 mb-3">Played to the lead while they wait for you to answer.</p>
+              <div className="space-y-3">
+                <select
+                  value=""
+                  onChange={e => { const t = templates.find(x => x.id === e.target.value); if (t) setCcLeadGreetingMessage(t.content); }}
+                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
+                >
+                  <option value="">Pre-fill from template…</option>
+                  {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                <textarea
+                  value={ccLeadGreetingMessage}
+                  onChange={e => setCcLeadGreetingMessage(e.target.value)}
+                  rows={3}
+                  placeholder="Hi! We received your inquiry and are connecting you with a specialist. Please hold for a moment."
+                  className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100"
+                />
+              </div>
             </div>
 
             {/* Auto Voicemail Drop */}
-            <div>
-              <div className="flex items-center gap-3 mb-3">
-                <PhoneCall className="w-4 h-4 text-slate-500" />
-                <span className="text-sm font-semibold text-slate-700">Auto Voicemail Drop</span>
+            <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+              <div className="flex items-center gap-3 mb-1">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Auto Voicemail Drop</label>
                 <label className="inline-flex items-center cursor-pointer">
                   <input
                     type="checkbox"
@@ -1266,28 +1239,38 @@ export function Services() {
                   <div className="relative w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-violet-600"></div>
                 </label>
               </div>
-              <p className="text-xs text-slate-400 mb-3 pl-7">Automatically leaves a message when the lead doesn't answer.</p>
+              <p className="text-xs text-slate-400 mb-4">Automatically leaves a message when the lead doesn't answer.</p>
               {ccVoicemailEnabled && (
-                <div className="space-y-4 pl-7">
+                <div className="space-y-5">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Recording URL <span className="font-normal text-slate-400">(optional — takes priority over TTS)</span></label>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Recording URL <span className="normal-case font-normal text-slate-400">(optional — takes priority over TTS)</span></label>
                     <input
                       type="url"
                       value={ccVoicemailRecordingUrl}
                       onChange={e => setCcVoicemailRecordingUrl(e.target.value)}
                       placeholder="https://example.com/voicemail.mp3"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">TTS Voicemail Message <span className="font-normal text-slate-400">(fallback when no recording URL)</span></label>
-                    <textarea
-                      value={ccVoicemailMessage}
-                      onChange={e => setCcVoicemailMessage(e.target.value)}
-                      rows={3}
-                      placeholder="Hi, we tried to reach you about your inquiry. Please call us back or we'll follow up shortly. Thank you!"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
-                    />
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">TTS Voicemail Message <span className="normal-case font-normal text-slate-400">(fallback when no recording URL)</span></label>
+                    <div className="space-y-3 mt-2">
+                      <select
+                        value=""
+                        onChange={e => { const t = templates.find(x => x.id === e.target.value); if (t) setCcVoicemailMessage(t.content); }}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
+                      >
+                        <option value="">Pre-fill from template…</option>
+                        {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                      <textarea
+                        value={ccVoicemailMessage}
+                        onChange={e => setCcVoicemailMessage(e.target.value)}
+                        rows={3}
+                        placeholder="Hi, we tried to reach you about your inquiry. Please call us back or we'll follow up shortly. Thank you!"
+                        className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100"
+                      />
+                    </div>
                   </div>
                 </div>
               )}
