@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, CheckCircle, X, Clock,
-  Bot, Pencil, Phone, Send, ChevronUp, Trash2,
+  Bot, Pencil, Phone, Send, ChevronUp, Trash2, Save, Moon,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -10,6 +10,7 @@ import {
 } from '../services/api';
 import type {
   AutomationRule, NotificationRule, SavedAccount, MessageTemplate,
+  CallConnectMode, AgentStrategy,
 } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
 import { useAppStore } from '../store/appStore';
@@ -160,6 +161,14 @@ export function Services() {
 
   // Instant Call Connect state
   const [ccEnabled, setCcEnabled] = useState(false);
+  const [ccMode, setCcMode] = useState<CallConnectMode>('AGENT_FIRST');
+  const [ccAgentStrategy, setCcAgentStrategy] = useState<AgentStrategy>('owner');
+  const [ccAgentPhone, setCcAgentPhone] = useState('');
+  const [ccMaxAttempts, setCcMaxAttempts] = useState(2);
+  const [ccQuietEnabled, setCcQuietEnabled] = useState(false);
+  const [ccQuietTimezone, setCcQuietTimezone] = useState('America/New_York');
+  const [ccQuietStart, setCcQuietStart] = useState('22:00');
+  const [ccQuietEnd, setCcQuietEnd] = useState('08:00');
   const [ccSaving, setCcSaving] = useState(false);
 
   // Lead Alerts form state (needed for first-time creation)
@@ -209,7 +218,28 @@ export function Services() {
         callConnectApi.getSettings(accountId).catch(() => ({ settings: null })),
       ]);
 
-      setCcEnabled(ccRes.settings?.enabled ?? false);
+      const ccs = ccRes.settings;
+      if (ccs) {
+        setCcEnabled(ccs.enabled);
+        setCcMode(ccs.mode);
+        setCcAgentStrategy(ccs.agentStrategy);
+        setCcAgentPhone(ccs.agentPhoneE164 || '');
+        setCcMaxAttempts(ccs.maxAgentAttempts);
+        setCcQuietEnabled(ccs.quietHoursEnabled);
+        setCcQuietTimezone(ccs.quietHoursTimezone || 'America/New_York');
+        setCcQuietStart(ccs.quietHoursStart || '22:00');
+        setCcQuietEnd(ccs.quietHoursEnd || '08:00');
+      } else {
+        setCcEnabled(false);
+        setCcMode('AGENT_FIRST');
+        setCcAgentStrategy('owner');
+        setCcAgentPhone('');
+        setCcMaxAttempts(2);
+        setCcQuietEnabled(false);
+        setCcQuietTimezone('America/New_York');
+        setCcQuietStart('22:00');
+        setCcQuietEnd('08:00');
+      }
 
       // Collect ALL new_lead automation rules
       const allAutoReplies = automationRes.rules.filter(
@@ -367,15 +397,37 @@ export function Services() {
 
   async function toggleCallConnect(enabled: boolean) {
     if (!selectedAccountId) return;
-    setCcSaving(true);
     setCcEnabled(enabled); // optimistic
+    setCcSaving(true);
     try {
       const { settings } = await callConnectApi.saveSettings(selectedAccountId, { enabled });
       setCcEnabled(settings.enabled);
-      showSuccess(enabled ? 'Instant Call Connect enabled' : 'Instant Call Connect disabled');
     } catch (err: any) {
       setCcEnabled(!enabled); // rollback
       setError(err.response?.data?.message || err.message || 'Failed to update Call Connect');
+    } finally {
+      setCcSaving(false);
+    }
+  }
+
+  async function saveCcSettings() {
+    if (!selectedAccountId) return;
+    setCcSaving(true);
+    try {
+      await callConnectApi.saveSettings(selectedAccountId, {
+        enabled: ccEnabled,
+        mode: ccMode,
+        agentStrategy: ccAgentStrategy,
+        agentPhoneE164: ccAgentPhone || undefined,
+        maxAgentAttempts: ccMaxAttempts,
+        quietHoursEnabled: ccQuietEnabled,
+        quietHoursTimezone: ccQuietEnabled ? ccQuietTimezone : undefined,
+        quietHoursStart: ccQuietEnabled ? ccQuietStart : undefined,
+        quietHoursEnd: ccQuietEnabled ? ccQuietEnd : undefined,
+      });
+      showSuccess('Instant Call Connect settings saved');
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'Failed to save Call Connect settings');
     } finally {
       setCcSaving(false);
     }
@@ -992,10 +1044,146 @@ export function Services() {
             description="Receive a phone call to bridge you instantly to new leads."
             enabled={ccEnabled}
             onToggle={ccSaving ? () => {} : toggleCallConnect}
+            expanded={expandedCard === 'call-connect'}
+            onExpand={() => toggleExpand('call-connect')}
             statusText={ccEnabled ? 'Active — bridging calls for new leads' : undefined}
             iconBgColor="bg-violet-50"
             iconTextColor="text-violet-600"
-          />
+          >
+            {/* Connection Mode */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-3">Connection Mode</label>
+              <div className="space-y-2">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="ccMode"
+                    checked={ccMode === 'AGENT_FIRST'}
+                    onChange={() => setCcMode('AGENT_FIRST')}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="text-sm font-medium text-slate-800">Agent first</span>
+                    <span className="text-xs text-slate-500 block">We call you, then connect the lead once you answer</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="ccMode"
+                    checked={ccMode === 'PARALLEL'}
+                    onChange={() => setCcMode('PARALLEL')}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="text-sm font-medium text-slate-800">Parallel</span>
+                    <span className="text-xs text-slate-500 block">Call you and the lead simultaneously (fastest)</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {/* Agent Routing + Phone */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">Agent Routing</label>
+                <div className="relative">
+                  <select
+                    value={ccAgentStrategy}
+                    onChange={e => setCcAgentStrategy(e.target.value as AgentStrategy)}
+                    className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent pr-10"
+                  >
+                    <option value="owner">Owner</option>
+                    <option value="round_robin">Round-robin</option>
+                    <option value="on_duty">On duty</option>
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">Agent Phone (E.164)</label>
+                <input
+                  type="tel"
+                  value={ccAgentPhone}
+                  onChange={e => setCcAgentPhone(e.target.value)}
+                  placeholder="+15551234567"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                />
+                <p className="text-xs text-slate-400 mt-1">Phone Sigcore will ring when a new lead arrives</p>
+              </div>
+            </div>
+
+            {/* Max Attempts */}
+            <div className="max-w-xs">
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Max Agent Attempts</label>
+              <div className="relative">
+                <select
+                  value={ccMaxAttempts}
+                  onChange={e => setCcMaxAttempts(Number(e.target.value))}
+                  className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent pr-10"
+                >
+                  {[1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+
+            {/* Quiet Hours */}
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <Moon className="w-4 h-4 text-slate-500" />
+                <span className="text-sm font-semibold text-slate-700">Quiet Hours</span>
+                <label className="inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={ccQuietEnabled}
+                    onChange={e => setCcQuietEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="relative w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-violet-600"></div>
+                </label>
+              </div>
+              {ccQuietEnabled && (
+                <div className="space-y-3 pl-7">
+                  <div className="relative max-w-xs">
+                    <select
+                      value={ccQuietTimezone}
+                      onChange={e => setCcQuietTimezone(e.target.value)}
+                      className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent pr-10"
+                    >
+                      {['America/New_York','America/Chicago','America/Denver','America/Los_Angeles','America/Phoenix','America/Anchorage','Pacific/Honolulu'].map(tz => (
+                        <option key={tz} value={tz}>{tz}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  </div>
+                  <div className="flex gap-6">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">From</label>
+                      <input type="time" value={ccQuietStart} onChange={e => setCcQuietStart(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">To</label>
+                      <input type="time" value={ccQuietEnd} onChange={e => setCcQuietEnd(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-400">Calls will not be triggered during quiet hours</p>
+                </div>
+              )}
+            </div>
+
+            {/* Save button */}
+            <div className="flex">
+              <button
+                onClick={saveCcSettings}
+                disabled={ccSaving}
+                className="flex items-center gap-2 px-6 py-3 bg-violet-600 text-white rounded-xl font-semibold text-sm hover:bg-violet-700 shadow-lg shadow-violet-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {ccSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save Settings
+              </button>
+            </div>
+          </ServiceCard>
 
         </div>
       )}
