@@ -833,56 +833,44 @@ export function Services() {
 
             {/* First Message */}
             {firstReplyRule && (
-              <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2 text-blue-600 font-bold">
-                    <Zap className="w-4 h-4" />
-                    <span>First Message</span>
-                  </div>
-                  <span className="text-xs font-semibold text-slate-400 italic">Sent Immediately</span>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="relative">
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Template Selection</label>
-                    <select
-                      value={firstReplyRule.templateId || ''}
-                      onChange={e => {
-                        if (e.target.value === '__create_new__') {
-                          setTemplateEditor({ mode: 'create', ruleId: firstReplyRule.id, content: '', type: 'autoReply' });
-                        } else {
-                          changeRuleTemplate(firstReplyRule.id, e.target.value);
-                        }
-                      }}
-                      disabled={saving}
-                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Template</label>
+                <select
+                  value={firstReplyRule.templateId || ''}
+                  onChange={e => {
+                    if (e.target.value === '__create_new__') {
+                      setTemplateEditor({ mode: 'create', ruleId: firstReplyRule.id, content: '', type: 'autoReply' });
+                    } else {
+                      changeRuleTemplate(firstReplyRule.id, e.target.value);
+                    }
+                  }}
+                  disabled={saving}
+                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
+                >
+                  <option value="">Select template...</option>
+                  {templates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                  <option value="__create_new__">+ Create New Template</option>
+                </select>
+                {firstReplyRule.template?.content && (
+                  <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                    {firstReplyRule.template.content}
+                    <button
+                      onClick={() => setTemplateEditor({
+                        mode: 'service-edit',
+                        ruleId: firstReplyRule.id,
+                        templateId: firstReplyRule.template!.id,
+                        templateName: templates.find(t => t.id === firstReplyRule.templateId)?.name || 'template',
+                        content: firstReplyRule.template!.content,
+                        type: 'autoReply',
+                      })}
+                      className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
                     >
-                      <option value="">Select template...</option>
-                      {templates.map(t => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                      <option value="__create_new__">+ Create New Template</option>
-                    </select>
+                      <Pencil className="w-4 h-4" />
+                    </button>
                   </div>
-                  {firstReplyRule.template?.content && (
-                    <div className="bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
-                      {firstReplyRule.template.content}
-                      <button
-                        onClick={() => setTemplateEditor({
-                          mode: 'service-edit',
-                          ruleId: firstReplyRule.id,
-                          templateId: firstReplyRule.template!.id,
-                          templateName: templates.find(t => t.id === firstReplyRule.templateId)?.name || 'template',
-                          content: firstReplyRule.template!.content,
-                          type: 'autoReply',
-                        })}
-                        className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
+                )}
               </div>
             )}
 
@@ -1276,56 +1264,46 @@ export function Services() {
             </div>
 
             {/* Agent Whisper Message */}
-            <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Agent Whisper Message</label>
+            <div>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Agent Whisper Message</label>
               <p className="text-xs text-slate-400 mb-3">
                 Played to you before the bridge. Press <span className="font-semibold text-slate-500">any key</span> to accept.
-                Use variables like <code className="bg-white border border-slate-200 px-1 py-0.5 rounded text-slate-600">{'{customerName}'}</code> or <code className="bg-white border border-slate-200 px-1 py-0.5 rounded text-slate-600">{'{category}'}</code>.
               </p>
-              <div className="space-y-3">
-                <select
-                  value={ccWhisperTemplateId || ''}
-                  onChange={e => {
-                    if (e.target.value === '__create_new__') {
-                      setTemplateEditor({ mode: 'create', ruleId: '', content: ccAgentWhisperMessage, type: 'cc-whisper' });
-                    } else {
-                      const t = templates.find(x => x.id === e.target.value);
-                      if (t) { setCcAgentWhisperMessage(t.content); setCcWhisperTemplateId(t.id); }
-                    }
-                  }}
-                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
-                >
-                  <option value="">Select template…</option>
-                  {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  <option value="__create_new__">+ Create New Template</option>
-                </select>
-                <div className="relative">
-                  <textarea
-                    value={ccAgentWhisperMessage}
-                    onChange={e => { setCcAgentWhisperMessage(e.target.value); setCcWhisperTemplateId(null); }}
-                    rows={3}
-                    placeholder="New lead: {customerName} needs help with {category}. Press any key to connect."
-                    className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100 pr-12"
-                  />
-                  {ccAgentWhisperMessage && (
-                    <button
-                      onClick={() => {
-                        const tpl = ccWhisperTemplateId ? templates.find(t => t.id === ccWhisperTemplateId) : null;
-                        setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccAgentWhisperMessage, type: 'cc-whisper' });
-                      }}
-                      className="absolute top-3 right-3 p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-violet-600 hover:border-violet-200 transition-colors"
-                      title="Edit template"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                  )}
+              <select
+                value={ccWhisperTemplateId || ''}
+                onChange={e => {
+                  if (e.target.value === '__create_new__') {
+                    setTemplateEditor({ mode: 'create', ruleId: '', content: ccAgentWhisperMessage, type: 'cc-whisper' });
+                  } else {
+                    const t = templates.find(x => x.id === e.target.value);
+                    if (t) { setCcAgentWhisperMessage(t.content); setCcWhisperTemplateId(t.id); }
+                  }
+                }}
+                className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
+              >
+                <option value="">Select template…</option>
+                {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                <option value="__create_new__">+ Create New Template</option>
+              </select>
+              {ccAgentWhisperMessage && (
+                <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                  {ccAgentWhisperMessage}
+                  <button
+                    onClick={() => {
+                      const tpl = ccWhisperTemplateId ? templates.find(t => t.id === ccWhisperTemplateId) : null;
+                      setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccAgentWhisperMessage, type: 'cc-whisper' });
+                    }}
+                    className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Lead Greeting Message — only relevant in Parallel mode */}
-            <div className={`bg-slate-50 rounded-2xl p-6 border transition-opacity ${ccMode === 'AGENT_FIRST' ? 'border-slate-100 opacity-40 pointer-events-none select-none' : 'border-slate-100'}`}>
-              <div className="flex items-center gap-2 mb-1">
+            <div className={`transition-opacity ${ccMode === 'AGENT_FIRST' ? 'opacity-40 pointer-events-none select-none' : ''}`}>
+              <div className="flex items-center gap-2 mb-2">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Lead Greeting Message</label>
                 {ccMode === 'AGENT_FIRST' && (
                   <span className="px-2 py-0.5 bg-slate-200 text-slate-500 text-[10px] font-bold rounded uppercase tracking-wide">Parallel only</span>
@@ -1337,50 +1315,41 @@ export function Services() {
                   : 'Played to the lead while they wait for you to answer.'
                 }
               </p>
-              <div className="space-y-3">
-                <select
-                  value={ccGreetingTemplateId || ''}
-                  onChange={e => {
-                    if (e.target.value === '__create_new__') {
-                      setTemplateEditor({ mode: 'create', ruleId: '', content: ccLeadGreetingMessage, type: 'cc-greeting' });
-                    } else {
-                      const t = templates.find(x => x.id === e.target.value);
-                      if (t) { setCcLeadGreetingMessage(t.content); setCcGreetingTemplateId(t.id); }
-                    }
-                  }}
-                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
-                >
-                  <option value="">Select template…</option>
-                  {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  <option value="__create_new__">+ Create New Template</option>
-                </select>
-                <div className="relative">
-                  <textarea
-                    value={ccLeadGreetingMessage}
-                    onChange={e => { setCcLeadGreetingMessage(e.target.value); setCcGreetingTemplateId(null); }}
-                    rows={3}
-                    placeholder="Hi {customerName}! We received your inquiry and are connecting you with a specialist. Please hold."
-                    className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100 pr-12"
-                  />
-                  {ccLeadGreetingMessage && (
-                    <button
-                      onClick={() => {
-                        const tpl = ccGreetingTemplateId ? templates.find(t => t.id === ccGreetingTemplateId) : null;
-                        setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccLeadGreetingMessage, type: 'cc-greeting' });
-                      }}
-                      className="absolute top-3 right-3 p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-violet-600 hover:border-violet-200 transition-colors"
-                      title="Edit template"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                  )}
+              <select
+                value={ccGreetingTemplateId || ''}
+                onChange={e => {
+                  if (e.target.value === '__create_new__') {
+                    setTemplateEditor({ mode: 'create', ruleId: '', content: ccLeadGreetingMessage, type: 'cc-greeting' });
+                  } else {
+                    const t = templates.find(x => x.id === e.target.value);
+                    if (t) { setCcLeadGreetingMessage(t.content); setCcGreetingTemplateId(t.id); }
+                  }
+                }}
+                className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
+              >
+                <option value="">Select template…</option>
+                {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                <option value="__create_new__">+ Create New Template</option>
+              </select>
+              {ccLeadGreetingMessage && (
+                <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                  {ccLeadGreetingMessage}
+                  <button
+                    onClick={() => {
+                      const tpl = ccGreetingTemplateId ? templates.find(t => t.id === ccGreetingTemplateId) : null;
+                      setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccLeadGreetingMessage, type: 'cc-greeting' });
+                    }}
+                    className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Auto Voicemail Drop */}
-            <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
-              <div className="flex items-center gap-3 mb-1">
+            <div>
+              <div className="flex items-center gap-3 mb-2">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Auto Voicemail Drop</label>
                 <label className="inline-flex items-center cursor-pointer">
                   <input
@@ -1406,87 +1375,76 @@ export function Services() {
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">TTS Voicemail Message <span className="normal-case font-normal text-slate-400">(fallback when no recording URL)</span></label>
-                    <div className="space-y-3 mt-2">
-                      <select
-                        value={ccVoicemailTemplateId || ''}
-                        onChange={e => {
-                          if (e.target.value === '__create_new__') {
-                            setTemplateEditor({ mode: 'create', ruleId: '', content: ccVoicemailMessage, type: 'cc-voicemail' });
-                          } else {
-                            const t = templates.find(x => x.id === e.target.value);
-                            if (t) { setCcVoicemailMessage(t.content); setCcVoicemailTemplateId(t.id); }
-                          }
-                        }}
-                        className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
-                      >
-                        <option value="">Select template…</option>
-                        {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                        <option value="__create_new__">+ Create New Template</option>
-                      </select>
-                      <div className="relative">
-                        <textarea
-                          value={ccVoicemailMessage}
-                          onChange={e => { setCcVoicemailMessage(e.target.value); setCcVoicemailTemplateId(null); }}
-                          rows={3}
-                          placeholder="Hi {customerName}, this is {accountName}. We tried to reach you about your {category} request. Please call us back!"
-                          className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100 pr-12"
-                        />
-                        {ccVoicemailMessage && (
-                          <button
-                            onClick={() => {
-                              const tpl = ccVoicemailTemplateId ? templates.find(t => t.id === ccVoicemailTemplateId) : null;
-                              setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccVoicemailMessage, type: 'cc-voicemail' });
-                            }}
-                            className="absolute top-3 right-3 p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-violet-600 hover:border-violet-200 transition-colors"
-                            title="Edit template"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                        )}
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">TTS Voicemail Message <span className="normal-case font-normal text-slate-400">(fallback when no recording URL)</span></label>
+                    <select
+                      value={ccVoicemailTemplateId || ''}
+                      onChange={e => {
+                        if (e.target.value === '__create_new__') {
+                          setTemplateEditor({ mode: 'create', ruleId: '', content: ccVoicemailMessage, type: 'cc-voicemail' });
+                        } else {
+                          const t = templates.find(x => x.id === e.target.value);
+                          if (t) { setCcVoicemailMessage(t.content); setCcVoicemailTemplateId(t.id); }
+                        }
+                      }}
+                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
+                    >
+                      <option value="">Select template…</option>
+                      {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      <option value="__create_new__">+ Create New Template</option>
+                    </select>
+                    {ccVoicemailMessage && (
+                      <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                        {ccVoicemailMessage}
+                        <button
+                          onClick={() => {
+                            const tpl = ccVoicemailTemplateId ? templates.find(t => t.id === ccVoicemailTemplateId) : null;
+                            setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccVoicemailMessage, type: 'cc-voicemail' });
+                          }}
+                          className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Save button */}
-            <div className="flex">
-              <button
-                onClick={saveCcSettings}
-                disabled={ccSaving}
-                className="flex items-center gap-2 px-6 py-3 bg-violet-600 text-white rounded-xl font-semibold text-sm hover:bg-violet-700 shadow-lg shadow-violet-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {ccSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                Save Settings
-              </button>
-            </div>
-
-            {/* Test Call */}
-            <div className="pt-6 border-t border-slate-100">
-              <p className="text-sm font-semibold text-slate-700 mb-1">Test Call</p>
-              <p className="text-xs text-slate-400 mb-3">Enter a customer phone number to trigger a live test — Sigcore will call your agent phone then bridge to this number.</p>
-              <div className="flex gap-3 flex-wrap">
-                <input
-                  type="tel"
-                  value={ccTestPhone}
-                  onChange={e => setCcTestPhone(e.target.value)}
-                  placeholder="+15559876543"
-                  className="flex-1 min-w-0 max-w-xs bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
-                />
+            {/* Test Call + Save Settings */}
+            <div className="space-y-4 pt-4 border-t border-slate-100">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex gap-3 flex-wrap items-center">
+                  <input
+                    type="tel"
+                    value={ccTestPhone}
+                    onChange={e => setCcTestPhone(e.target.value)}
+                    placeholder="+15559876543"
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent min-w-[160px]"
+                  />
+                  <button
+                    onClick={handleTestCall}
+                    disabled={ccTesting || !ccTestPhone.trim() || !ccEnabled}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {ccTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
+                    {ccTesting ? 'Calling…' : 'Test Call'}
+                  </button>
+                </div>
+                {!ccEnabled && (
+                  <p className="text-xs text-orange-500">Enable Call Connect first to run a test.</p>
+                )}
+              </div>
+              <div className="flex justify-end">
                 <button
-                  onClick={handleTestCall}
-                  disabled={ccTesting || !ccTestPhone.trim() || !ccEnabled}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 text-white rounded-xl font-semibold text-sm hover:bg-slate-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                  onClick={saveCcSettings}
+                  disabled={ccSaving}
+                  className="px-6 py-2.5 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 shadow-lg shadow-violet-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  {ccTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <PhoneCall className="w-4 h-4" />}
-                  {ccTesting ? 'Calling…' : 'Test Call'}
+                  {ccSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  Save Settings
                 </button>
               </div>
-              {!ccEnabled && (
-                <p className="text-xs text-orange-500 mt-2">Enable Call Connect first to run a test.</p>
-              )}
             </div>
           </ServiceCard>
 
