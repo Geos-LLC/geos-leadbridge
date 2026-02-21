@@ -1172,6 +1172,7 @@ export function Services() {
             iconBgColor="bg-violet-50"
             iconTextColor="text-violet-600"
           >
+            <div className={!ccEnabled ? 'opacity-40 pointer-events-none select-none' : ''}>
             {/* Connection Mode — segmented switcher */}
             <div>
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Connection Mode</label>
@@ -1503,6 +1504,7 @@ export function Services() {
                 </button>
               </div>
             </div>
+            </div>{/* end disabled overlay */}
           </ServiceCard>
 
         </div>
