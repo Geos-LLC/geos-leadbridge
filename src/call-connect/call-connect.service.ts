@@ -121,11 +121,9 @@ export class CallConnectService {
       this.logger.warn(`Failed to push call-connect settings to Sigcore: ${err.message}`);
     }
 
-    // Ensure webhook subscription exists (one-time per account)
+    // Ensure webhook subscription exists — always attempt so stale/missing IDs get fixed
     try {
-      if (!settings.sigcoreWebhookId) {
-        await this.ensureWebhookSubscription(savedAccountId, settings.id);
-      }
+      await this.ensureWebhookSubscription(savedAccountId, settings.id);
     } catch (err: any) {
       this.logger.warn(`Failed to register Sigcore call-connect webhook: ${err.message}`);
     }
@@ -208,8 +206,14 @@ export class CallConnectService {
 
     const settings = await this.prisma.callConnectSettings.findUnique({
       where: { id: settingsId },
-      select: { sigcoreWebhookSecret: true },
+      select: { sigcoreWebhookId: true, sigcoreWebhookSecret: true },
     });
+
+    // Already registered — skip to avoid duplicate subscriptions
+    if (settings?.sigcoreWebhookId) {
+      this.logger.log(`Sigcore webhook already registered (id: ${settings.sigcoreWebhookId}) for account ${savedAccountId}`);
+      return;
+    }
 
     // Include accountId as query param so webhook handler can look up per-business secret
     const webhookUrl = `${this.appBaseUrl}/api/webhooks/sigcore/call-connect?accountId=${savedAccountId}`;
