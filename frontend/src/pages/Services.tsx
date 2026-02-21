@@ -311,15 +311,19 @@ export function Services() {
       const greetingTpl = allTemplates.find(t => t.name === 'CC - Lead Greeting');
       const voicemailTpl = allTemplates.find(t => t.name === 'CC - Voicemail TTS');
 
-      if (!ccs?.agentWhisperMessage && whisperTpl) {
-        setCcAgentWhisperMessage(whisperTpl.content); setCcWhisperTemplateId(whisperTpl.id);
-      }
-      if (!ccs?.leadGreetingMessage && greetingTpl) {
-        setCcLeadGreetingMessage(greetingTpl.content); setCcGreetingTemplateId(greetingTpl.id);
-      }
-      if (!ccs?.leadVoicemailMessage && voicemailTpl) {
-        setCcVoicemailMessage(voicemailTpl.content); setCcVoicemailTemplateId(voicemailTpl.id);
-      }
+      // Load default content if nothing saved yet
+      if (!ccs?.agentWhisperMessage && whisperTpl) setCcAgentWhisperMessage(whisperTpl.content);
+      if (!ccs?.leadGreetingMessage && greetingTpl) setCcLeadGreetingMessage(greetingTpl.content);
+      if (!ccs?.leadVoicemailMessage && voicemailTpl) setCcVoicemailMessage(voicemailTpl.content);
+
+      // Always restore the dropdown selection: match saved content to a template,
+      // falling back to the default CC template by name so it stays pre-selected across reloads.
+      const whisperContent = ccs?.agentWhisperMessage || whisperTpl?.content || '';
+      const greetingContent = ccs?.leadGreetingMessage || greetingTpl?.content || '';
+      const voicemailContent = ccs?.leadVoicemailMessage || voicemailTpl?.content || '';
+      setCcWhisperTemplateId(allTemplates.find(t => t.content === whisperContent)?.id || whisperTpl?.id || null);
+      setCcGreetingTemplateId(allTemplates.find(t => t.content === greetingContent)?.id || greetingTpl?.id || null);
+      setCcVoicemailTemplateId(allTemplates.find(t => t.content === voicemailContent)?.id || voicemailTpl?.id || null);
 
       // Pre-fill form states from existing rules
       if (leadAlert) {

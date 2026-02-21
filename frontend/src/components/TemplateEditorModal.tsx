@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Loader2 } from 'lucide-react';
 
 export interface TemplateVariable {
   name: string;
@@ -63,9 +63,7 @@ export function TemplateEditorModal({
   const [saveAsNewMode, setSaveAsNewMode] = useState(false);
   const [newName, setNewName] = useState('');
   const [nameError, setNameError] = useState<string | null>(null);
-  const [varsExpanded, setVarsExpanded] = useState(false);
   const contentRef = useRef<HTMLTextAreaElement>(null);
-  const VARS_INITIAL_COUNT = 6;
 
   useEffect(() => {
     if (isOpen) {
@@ -75,7 +73,6 @@ export function TemplateEditorModal({
       setSaveAsNewMode(false);
       setNewName('');
       setNameError(null);
-      setVarsExpanded(false);
     }
   }, [isOpen, initialName, initialContent, initialIsDefault]);
 
@@ -191,26 +188,11 @@ export function TemplateEditorModal({
 
           {variables.length > 0 && (
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="block text-sm font-semibold text-slate-700">
-                  Variables <span className="text-xs font-normal text-slate-500">(click to insert at cursor)</span>
-                </label>
-                {variables.length > VARS_INITIAL_COUNT && (
-                  <button
-                    type="button"
-                    onClick={() => setVarsExpanded(v => !v)}
-                    className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors"
-                  >
-                    {varsExpanded ? (
-                      <><ChevronUp className="w-3 h-3" /> Show less</>
-                    ) : (
-                      <><ChevronDown className="w-3 h-3" /> +{variables.length - VARS_INITIAL_COUNT} more</>
-                    )}
-                  </button>
-                )}
-              </div>
+              <label className="block text-sm font-semibold text-slate-700">
+                Variables <span className="text-xs font-normal text-slate-500">(click to insert at cursor)</span>
+              </label>
               <div className="flex flex-wrap gap-2">
-                {(varsExpanded ? variables : variables.slice(0, VARS_INITIAL_COUNT)).map(v => (
+                {variables.map(v => (
                   <button
                     key={v.name}
                     type="button"
