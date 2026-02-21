@@ -124,13 +124,15 @@ export class CallConnectService {
     };
   }
 
-  /** Get Sigcore API key from NotificationSettings for a given account */
+  /** Get Sigcore API key — account-level first, then env-level fallback */
   private async getSigcoreApiKey(savedAccountId: string): Promise<string | null> {
     const ns = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
       select: { sigcoreApiKey: true },
     });
-    return ns?.sigcoreApiKey ?? null;
+    return ns?.sigcoreApiKey
+      ?? this.configService.get<string>('SIGCORE_API_KEY')
+      ?? null;
   }
 
   /** Push call-connect settings to Sigcore */
@@ -437,7 +439,8 @@ export class CallConnectService {
       where: { savedAccountId },
       select: { sigcoreApiKey: true, sigcoreWorkspaceId: true },
     });
-    const sigcoreApiKey = ns?.sigcoreApiKey;
+    const sigcoreApiKey =
+      ns?.sigcoreApiKey ?? this.configService.get<string>('SIGCORE_API_KEY') ?? null;
     if (!sigcoreApiKey) {
       throw new BadRequestException('No Sigcore API key configured in Notification Settings');
     }
