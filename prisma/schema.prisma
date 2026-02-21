@@ -665,7 +665,6 @@ model CallConnectSettings {
   agentStrategy        String          @default("owner") // "owner" | "round_robin" | "on_duty"
   agentPhoneE164       String?         // Agent's phone number to ring
   botNumberE164        String?         // Shared bot caller-ID number
-  sigcoreApiKey        String?         // Per-business Sigcore API key (X-API-Key)
   sigcoreWebhookSecret String?         // HMAC secret registered with Sigcore webhook subscription
   sigcoreWebhookId     String?         // Sigcore webhook subscription ID (for dedup)
   maxAgentAttempts     Int             @default(2)

@@ -23,7 +23,6 @@ import SettingsPage from './pages/SettingsPage';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminUserDetails from './pages/admin/AdminUserDetails';
 import AdminPhonePool from './pages/admin/AdminPhonePool';
-import { CallConnectSettings } from './pages/CallConnectSettings';
 import {
   DemoLayout, DemoOverviewView, DemoAutomationView, DemoTemplatesView,
   DemoLeadsView, DemoPhoneView, DemoInsightsView, DemoPricingView, DemoSettingsView,
@@ -84,7 +83,6 @@ function App() {
             <Route path="/api-test" element={<ApiTest />} />
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/call-connect" element={<CallConnectSettings />} />
             <Route path="/billing" element={<Navigate to="/settings" />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/users/:userId" element={<AdminUserDetails />} />

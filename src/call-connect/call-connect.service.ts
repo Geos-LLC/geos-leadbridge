@@ -16,8 +16,6 @@ export interface SaveCallConnectSettingsDto {
   agentStrategy?: 'owner' | 'round_robin' | 'on_duty';
   agentPhoneE164?: string;
   botNumberE164?: string;
-  sigcoreApiKey?: string;
-  sigcoreWebhookSecret?: string;
   maxAgentAttempts?: number;
   quietHoursEnabled?: boolean;
   quietHoursTimezone?: string;
@@ -78,8 +76,6 @@ export class CallConnectService {
         agentStrategy: dto.agentStrategy ?? 'owner',
         agentPhoneE164: dto.agentPhoneE164,
         botNumberE164: dto.botNumberE164,
-        sigcoreApiKey: dto.sigcoreApiKey,
-        sigcoreWebhookSecret: dto.sigcoreWebhookSecret,
         maxAgentAttempts: dto.maxAgentAttempts ?? 2,
         quietHoursEnabled: dto.quietHoursEnabled ?? false,
         quietHoursTimezone: dto.quietHoursTimezone,
@@ -92,8 +88,6 @@ export class CallConnectService {
         ...(dto.agentStrategy && { agentStrategy: dto.agentStrategy }),
         ...(dto.agentPhoneE164 !== undefined && { agentPhoneE164: dto.agentPhoneE164 }),
         ...(dto.botNumberE164 !== undefined && { botNumberE164: dto.botNumberE164 }),
-        ...(dto.sigcoreApiKey !== undefined && { sigcoreApiKey: dto.sigcoreApiKey }),
-        ...(dto.sigcoreWebhookSecret !== undefined && { sigcoreWebhookSecret: dto.sigcoreWebhookSecret }),
         ...(dto.maxAgentAttempts !== undefined && { maxAgentAttempts: dto.maxAgentAttempts }),
         ...(dto.quietHoursEnabled !== undefined && { quietHoursEnabled: dto.quietHoursEnabled }),
         ...(dto.quietHoursTimezone !== undefined && { quietHoursTimezone: dto.quietHoursTimezone }),
@@ -130,9 +124,19 @@ export class CallConnectService {
     };
   }
 
+  /** Get Sigcore API key from NotificationSettings for a given account */
+  private async getSigcoreApiKey(savedAccountId: string): Promise<string | null> {
+    const ns = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { sigcoreApiKey: true },
+    });
+    return ns?.sigcoreApiKey ?? null;
+  }
+
   /** Push call-connect settings to Sigcore */
   private async pushSettingsToSigcore(savedAccountId: string, settings: any): Promise<void> {
-    if (!settings.sigcoreApiKey) return;
+    const apiKey = await this.getSigcoreApiKey(savedAccountId);
+    if (!apiKey) return;
 
     const url = `${this.sigcoreApiUrl}/api/internal/call-connect/settings`;
     await firstValueFrom(
@@ -152,7 +156,7 @@ export class CallConnectService {
             },
           }),
         },
-        { headers: this.buildHeaders(settings.sigcoreApiKey) },
+        { headers: this.buildHeaders(apiKey) },
       ),
     );
 
@@ -161,11 +165,13 @@ export class CallConnectService {
 
   /** Register per-business webhook subscription with Sigcore */
   private async ensureWebhookSubscription(savedAccountId: string, settingsId: string): Promise<void> {
+    const apiKey = await this.getSigcoreApiKey(savedAccountId);
+    if (!apiKey) return;
+
     const settings = await this.prisma.callConnectSettings.findUnique({
       where: { id: settingsId },
-      select: { sigcoreApiKey: true, sigcoreWebhookSecret: true },
+      select: { sigcoreWebhookSecret: true },
     });
-    if (!settings?.sigcoreApiKey) return;
 
     // Include accountId as query param so webhook handler can look up per-business secret
     const webhookUrl = `${this.appBaseUrl}/api/webhooks/sigcore/call-connect?accountId=${savedAccountId}`;
@@ -190,7 +196,7 @@ export class CallConnectService {
             'call_connect.failed',
           ],
         },
-        { headers: this.buildHeaders(settings.sigcoreApiKey) },
+        { headers: this.buildHeaders(apiKey) },
       ),
     );
 
@@ -233,8 +239,15 @@ export class CallConnectService {
       where: { savedAccountId: params.savedAccountId },
     });
     if (!settings?.enabled) return;
-    if (!settings.sigcoreApiKey) {
-      this.logger.log('Skipping call-connect — no Sigcore API key configured for account');
+
+    // Get API key from NotificationSettings (single source of truth)
+    const ns = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId: params.savedAccountId },
+      select: { sigcoreApiKey: true, sigcoreWorkspaceId: true },
+    });
+    const sigcoreApiKey = ns?.sigcoreApiKey;
+    if (!sigcoreApiKey) {
+      this.logger.log('Skipping call-connect — no Sigcore API key configured in notification settings');
       return;
     }
 
@@ -254,11 +267,7 @@ export class CallConnectService {
       return;
     }
 
-    // Resolve workspace/business ID for Sigcore — prefer NotificationSettings.sigcoreWorkspaceId
-    const ns = await this.prisma.notificationSettings.findUnique({
-      where: { savedAccountId: params.savedAccountId },
-      select: { sigcoreWorkspaceId: true },
-    });
+    // Resolve workspace/business ID from NotificationSettings
     const sigcoreBusinessId = ns?.sigcoreWorkspaceId || params.businessId || params.savedAccountId;
 
     const summary =
@@ -277,7 +286,7 @@ export class CallConnectService {
             leadSummary: summary,
             source: 'thumbtack',
           },
-          { headers: this.buildHeaders(settings.sigcoreApiKey) },
+          { headers: this.buildHeaders(sigcoreApiKey) },
         ),
       );
 
@@ -421,18 +430,15 @@ export class CallConnectService {
 
   /** Cancel a call-connect session */
   async cancelSession(sessionId: string, savedAccountId: string): Promise<void> {
-    const settings = await this.prisma.callConnectSettings.findUnique({
-      where: { savedAccountId },
-      select: { sigcoreApiKey: true },
-    });
-    if (!settings?.sigcoreApiKey) return;
+    const apiKey = await this.getSigcoreApiKey(savedAccountId);
+    if (!apiKey) return;
 
     const url = `${this.sigcoreApiUrl}/api/internal/call-connect/cancel`;
     await firstValueFrom(
       this.httpService.post(
         url,
         { sessionId },
-        { headers: this.buildHeaders(settings.sigcoreApiKey) },
+        { headers: this.buildHeaders(apiKey) },
       ),
     );
 

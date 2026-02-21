@@ -420,8 +420,6 @@ export interface CallConnectSettings {
   agentStrategy: AgentStrategy;
   agentPhoneE164: string | null;
   botNumberE164: string | null;
-  sigcoreApiKey: string | null;
-  sigcoreWebhookSecret: string | null;
   maxAgentAttempts: number;
   quietHoursEnabled: boolean;
   quietHoursTimezone: string | null;

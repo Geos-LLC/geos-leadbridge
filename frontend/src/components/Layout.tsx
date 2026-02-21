@@ -48,7 +48,6 @@ export function Layout() {
     { icon: <Settings size={20} />, label: 'Templates', path: '/message-settings' },
     { icon: <MessageSquare size={20} />, label: 'Lead Activity', path: '/messages' },
     { icon: <Phone size={20} />, label: 'Business Line', path: '/phone-settings' },
-    { icon: <Zap size={20} />, label: 'Instant Call', path: '/call-connect' },
     { icon: <BarChart3 size={20} />, label: 'Insights', path: '/analytics' },
   ];
 
@@ -59,7 +58,6 @@ export function Layout() {
     if (navItem) return navItem.label;
 
     // Handle other routes
-    if (path === '/call-connect') return 'Instant Call Connect';
     if (path === '/sms-history') return 'SMS History';
     if (path === '/settings') return 'Settings';
     if (path === '/pricing') return 'Pricing';
