@@ -442,8 +442,13 @@ export class AutomationService implements OnModuleInit {
     });
 
     if (existing) {
-      this.logger.log(`Skipping duplicate: rule ${rule.id} already has pending message for ${context.negotiationId}`);
-      return;
+      if (existing.status === 'pending') {
+        // Message is still queued — don't schedule another
+        this.logger.log(`Skipping duplicate: rule ${rule.id} already has pending message for ${context.negotiationId}`);
+        return;
+      }
+      // Previous message was sent/failed/cancelled — delete old record so a new one can be created (every_reply mode)
+      await this.prisma.pendingAutomatedMessage.delete({ where: { id: existing.id } });
     }
 
     const scheduledFor = new Date(Date.now() + rule.delayMinutes * 60 * 1000);
