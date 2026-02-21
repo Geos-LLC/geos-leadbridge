@@ -21,6 +21,12 @@ export interface SaveCallConnectSettingsDto {
   quietHoursTimezone?: string;
   quietHoursStart?: string;
   quietHoursEnd?: string;
+  agentAcceptDigits?: string;
+  agentWhisperMessage?: string;
+  leadGreetingMessage?: string;
+  leadVoicemailEnabled?: boolean;
+  leadVoicemailMessage?: string;
+  leadVoicemailRecordingUrl?: string;
 }
 
 @Injectable()
@@ -81,6 +87,12 @@ export class CallConnectService {
         quietHoursTimezone: dto.quietHoursTimezone,
         quietHoursStart: dto.quietHoursStart,
         quietHoursEnd: dto.quietHoursEnd,
+        agentAcceptDigits: dto.agentAcceptDigits ?? '1',
+        agentWhisperMessage: dto.agentWhisperMessage,
+        leadGreetingMessage: dto.leadGreetingMessage,
+        leadVoicemailEnabled: dto.leadVoicemailEnabled ?? false,
+        leadVoicemailMessage: dto.leadVoicemailMessage,
+        leadVoicemailRecordingUrl: dto.leadVoicemailRecordingUrl,
       },
       update: {
         ...(dto.enabled !== undefined && { enabled: dto.enabled }),
@@ -93,6 +105,12 @@ export class CallConnectService {
         ...(dto.quietHoursTimezone !== undefined && { quietHoursTimezone: dto.quietHoursTimezone }),
         ...(dto.quietHoursStart !== undefined && { quietHoursStart: dto.quietHoursStart }),
         ...(dto.quietHoursEnd !== undefined && { quietHoursEnd: dto.quietHoursEnd }),
+        ...(dto.agentAcceptDigits !== undefined && { agentAcceptDigits: dto.agentAcceptDigits }),
+        ...(dto.agentWhisperMessage !== undefined && { agentWhisperMessage: dto.agentWhisperMessage }),
+        ...(dto.leadGreetingMessage !== undefined && { leadGreetingMessage: dto.leadGreetingMessage }),
+        ...(dto.leadVoicemailEnabled !== undefined && { leadVoicemailEnabled: dto.leadVoicemailEnabled }),
+        ...(dto.leadVoicemailMessage !== undefined && { leadVoicemailMessage: dto.leadVoicemailMessage }),
+        ...(dto.leadVoicemailRecordingUrl !== undefined && { leadVoicemailRecordingUrl: dto.leadVoicemailRecordingUrl }),
       },
     });
 
@@ -150,6 +168,12 @@ export class CallConnectService {
           botNumberE164: settings.botNumberE164,
           agentPhoneE164: settings.agentPhoneE164,
           maxAgentAttempts: settings.maxAgentAttempts,
+          ...(settings.agentAcceptDigits && { agentAcceptDigits: settings.agentAcceptDigits }),
+          ...(settings.agentWhisperMessage && { agentWhisperMessage: settings.agentWhisperMessage }),
+          ...(settings.leadGreetingMessage && { leadGreetingMessage: settings.leadGreetingMessage }),
+          leadVoicemailEnabled: settings.leadVoicemailEnabled ?? false,
+          ...(settings.leadVoicemailMessage && { leadVoicemailMessage: settings.leadVoicemailMessage }),
+          ...(settings.leadVoicemailRecordingUrl && { leadVoicemailRecordingUrl: settings.leadVoicemailRecordingUrl }),
           ...(settings.quietHoursEnabled && settings.quietHoursTimezone && settings.quietHoursStart && settings.quietHoursEnd && {
             quietHours: {
               timezone: settings.quietHoursTimezone,

@@ -169,6 +169,12 @@ export function Services() {
   const [ccQuietTimezone, setCcQuietTimezone] = useState('America/New_York');
   const [ccQuietStart, setCcQuietStart] = useState('22:00');
   const [ccQuietEnd, setCcQuietEnd] = useState('08:00');
+  const [ccAgentAcceptDigits, setCcAgentAcceptDigits] = useState('1');
+  const [ccAgentWhisperMessage, setCcAgentWhisperMessage] = useState('');
+  const [ccLeadGreetingMessage, setCcLeadGreetingMessage] = useState('');
+  const [ccVoicemailEnabled, setCcVoicemailEnabled] = useState(false);
+  const [ccVoicemailMessage, setCcVoicemailMessage] = useState('');
+  const [ccVoicemailRecordingUrl, setCcVoicemailRecordingUrl] = useState('');
   const [ccSaving, setCcSaving] = useState(false);
   const [ccTestPhone, setCcTestPhone] = useState('');
   const [ccTesting, setCcTesting] = useState(false);
@@ -231,6 +237,12 @@ export function Services() {
         setCcQuietTimezone(ccs.quietHoursTimezone || 'America/New_York');
         setCcQuietStart(ccs.quietHoursStart || '22:00');
         setCcQuietEnd(ccs.quietHoursEnd || '08:00');
+        setCcAgentAcceptDigits(ccs.agentAcceptDigits || '1');
+        setCcAgentWhisperMessage(ccs.agentWhisperMessage || '');
+        setCcLeadGreetingMessage(ccs.leadGreetingMessage || '');
+        setCcVoicemailEnabled(ccs.leadVoicemailEnabled);
+        setCcVoicemailMessage(ccs.leadVoicemailMessage || '');
+        setCcVoicemailRecordingUrl(ccs.leadVoicemailRecordingUrl || '');
       } else {
         setCcEnabled(false);
         setCcMode('AGENT_FIRST');
@@ -241,6 +253,12 @@ export function Services() {
         setCcQuietTimezone('America/New_York');
         setCcQuietStart('22:00');
         setCcQuietEnd('08:00');
+        setCcAgentAcceptDigits('1');
+        setCcAgentWhisperMessage('');
+        setCcLeadGreetingMessage('');
+        setCcVoicemailEnabled(false);
+        setCcVoicemailMessage('');
+        setCcVoicemailRecordingUrl('');
       }
 
       // Collect ALL new_lead automation rules
@@ -426,6 +444,12 @@ export function Services() {
         quietHoursTimezone: ccQuietEnabled ? ccQuietTimezone : undefined,
         quietHoursStart: ccQuietEnabled ? ccQuietStart : undefined,
         quietHoursEnd: ccQuietEnabled ? ccQuietEnd : undefined,
+        agentAcceptDigits: ccAgentAcceptDigits || '1',
+        agentWhisperMessage: ccAgentWhisperMessage || undefined,
+        leadGreetingMessage: ccLeadGreetingMessage || undefined,
+        leadVoicemailEnabled: ccVoicemailEnabled,
+        leadVoicemailMessage: ccVoicemailEnabled ? ccVoicemailMessage || undefined : undefined,
+        leadVoicemailRecordingUrl: ccVoicemailEnabled ? ccVoicemailRecordingUrl || undefined : undefined,
       });
       showSuccess('Instant Call Connect settings saved');
     } catch (err: any) {
@@ -1183,6 +1207,88 @@ export function Services() {
                     </div>
                   </div>
                   <p className="text-xs text-slate-400">Calls will not be triggered during quiet hours</p>
+                </div>
+              )}
+            </div>
+
+            {/* Agent Whisper Message */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Agent Whisper Message</label>
+              <p className="text-xs text-slate-400 mb-2">Played to you before you're bridged. Use <code className="bg-slate-100 px-1 rounded">{'{summary}'}</code> for the lead summary and <code className="bg-slate-100 px-1 rounded">{'{digit}'}</code> for the accept digit.</p>
+              <textarea
+                value={ccAgentWhisperMessage}
+                onChange={e => setCcAgentWhisperMessage(e.target.value)}
+                rows={3}
+                placeholder="New lead: {summary}. Press {digit} to connect."
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
+              />
+            </div>
+
+            {/* Lead Greeting Message */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Lead Greeting Message</label>
+              <p className="text-xs text-slate-400 mb-2">Played to the lead while they wait for you to answer.</p>
+              <textarea
+                value={ccLeadGreetingMessage}
+                onChange={e => setCcLeadGreetingMessage(e.target.value)}
+                rows={3}
+                placeholder="Hi! We received your inquiry and are connecting you with a specialist. Please hold for a moment."
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
+              />
+            </div>
+
+            {/* Accept Digit */}
+            <div className="max-w-xs">
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Agent Accept Digit</label>
+              <p className="text-xs text-slate-400 mb-2">The key you press to accept the bridge (used in whisper message).</p>
+              <input
+                type="text"
+                value={ccAgentAcceptDigits}
+                onChange={e => setCcAgentAcceptDigits(e.target.value)}
+                maxLength={1}
+                placeholder="1"
+                className="w-24 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+              />
+            </div>
+
+            {/* Auto Voicemail Drop */}
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <PhoneCall className="w-4 h-4 text-slate-500" />
+                <span className="text-sm font-semibold text-slate-700">Auto Voicemail Drop</span>
+                <label className="inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={ccVoicemailEnabled}
+                    onChange={e => setCcVoicemailEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="relative w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-violet-600"></div>
+                </label>
+              </div>
+              <p className="text-xs text-slate-400 mb-3 pl-7">Automatically leaves a message when the lead doesn't answer.</p>
+              {ccVoicemailEnabled && (
+                <div className="space-y-4 pl-7">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Recording URL <span className="font-normal text-slate-400">(optional — takes priority over TTS)</span></label>
+                    <input
+                      type="url"
+                      value={ccVoicemailRecordingUrl}
+                      onChange={e => setCcVoicemailRecordingUrl(e.target.value)}
+                      placeholder="https://example.com/voicemail.mp3"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">TTS Voicemail Message <span className="font-normal text-slate-400">(fallback when no recording URL)</span></label>
+                    <textarea
+                      value={ccVoicemailMessage}
+                      onChange={e => setCcVoicemailMessage(e.target.value)}
+                      rows={3}
+                      placeholder="Hi, we tried to reach you about your inquiry. Please call us back or we'll follow up shortly. Thank you!"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
+                    />
+                  </div>
                 </div>
               )}
             </div>

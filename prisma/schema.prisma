@@ -667,12 +667,18 @@ model CallConnectSettings {
   botNumberE164        String?         // Shared bot caller-ID number
   sigcoreWebhookSecret String?         // HMAC secret registered with Sigcore webhook subscription
   sigcoreWebhookId     String?         // Sigcore webhook subscription ID (for dedup)
-  maxAgentAttempts     Int             @default(2)
-  quietHoursEnabled    Boolean         @default(false)
-  quietHoursTimezone   String?
-  quietHoursStart      String?         // "HH:MM"
-  quietHoursEnd        String?         // "HH:MM"
-  createdAt            DateTime        @default(now())
+  maxAgentAttempts          Int             @default(2)
+  quietHoursEnabled         Boolean         @default(false)
+  quietHoursTimezone        String?
+  quietHoursStart           String?         // "HH:MM"
+  quietHoursEnd             String?         // "HH:MM"
+  agentAcceptDigits         String?         @default("1") // Digit agent presses to accept the bridge
+  agentWhisperMessage       String?         // TTS played to agent before bridge; supports {summary} {digit}
+  leadGreetingMessage       String?         // TTS played to lead while waiting for agent
+  leadVoicemailEnabled      Boolean         @default(false) // Auto Voicemail Drop
+  leadVoicemailMessage      String?         // TTS voicemail text (fallback when no recording URL)
+  leadVoicemailRecordingUrl String?         // Pre-recorded voicemail audio URL (takes priority over TTS)
+  createdAt                 DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
 
   savedAccount SavedAccount @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)

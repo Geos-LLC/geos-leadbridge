@@ -425,6 +425,12 @@ export interface CallConnectSettings {
   quietHoursTimezone: string | null;
   quietHoursStart: string | null;
   quietHoursEnd: string | null;
+  agentAcceptDigits: string | null;
+  agentWhisperMessage: string | null;
+  leadGreetingMessage: string | null;
+  leadVoicemailEnabled: boolean;
+  leadVoicemailMessage: string | null;
+  leadVoicemailRecordingUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }
