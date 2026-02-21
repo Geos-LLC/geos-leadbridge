@@ -3,7 +3,7 @@
  * Manages Instant Call Connect settings and triggers via Sigcore API
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../common/utils/prisma.service';
@@ -438,29 +438,40 @@ export class CallConnectService {
       select: { sigcoreApiKey: true, sigcoreWorkspaceId: true },
     });
     const sigcoreApiKey = ns?.sigcoreApiKey;
-    if (!sigcoreApiKey) throw new Error('No Sigcore API key configured in Notification Settings');
+    if (!sigcoreApiKey) {
+      throw new BadRequestException('No Sigcore API key configured in Notification Settings');
+    }
 
     const settings = await this.prisma.callConnectSettings.findUnique({
       where: { savedAccountId },
     });
-    if (!settings?.enabled) throw new Error('Instant Call Connect is not enabled for this account');
+    if (!settings?.enabled) {
+      throw new BadRequestException('Instant Call Connect is not enabled for this account');
+    }
 
     const sigcoreBusinessId = ns?.sigcoreWorkspaceId || savedAccountId;
     const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
 
-    const response = await firstValueFrom(
-      this.httpService.post(
-        url,
-        {
-          businessId: sigcoreBusinessId,
-          leadId: `test-${Date.now()}`,
-          leadPhoneE164: testPhone,
-          leadSummary: 'Test Call — triggered manually from LeadBridge',
-          source: 'thumbtack_test',
-        },
-        { headers: this.buildHeaders(sigcoreApiKey) },
-      ),
-    );
+    let response: any;
+    try {
+      response = await firstValueFrom(
+        this.httpService.post(
+          url,
+          {
+            businessId: sigcoreBusinessId,
+            leadId: `test-${Date.now()}`,
+            leadPhoneE164: testPhone,
+            leadSummary: 'Test Call — triggered manually from LeadBridge',
+            source: 'thumbtack_test',
+          },
+          { headers: this.buildHeaders(sigcoreApiKey) },
+        ),
+      );
+    } catch (err: any) {
+      const sigcoreMsg = err.response?.data?.message || err.response?.data?.error || err.message;
+      this.logger.error(`Sigcore test call failed: ${sigcoreMsg}`);
+      throw new BadRequestException(`Sigcore error: ${sigcoreMsg}`);
+    }
 
     const sessionId = response.data?.sessionId || null;
     this.logger.log(`Test call-connect session started: ${sessionId} (test phone: ${testPhone})`);
