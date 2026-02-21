@@ -154,13 +154,15 @@ export class CallConnectService {
     };
   }
 
-  /** Get Sigcore API key — account-level first, then env-level fallback */
+  /** Get Sigcore API key — env-level first (authoritative), then account-level fallback */
   private async getSigcoreApiKey(savedAccountId: string): Promise<string | null> {
+    const envKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (envKey) return envKey;
     const ns = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
       select: { sigcoreApiKey: true },
     });
-    return ns?.sigcoreApiKey || this.configService.get<string>('SIGCORE_API_KEY') || null;
+    return ns?.sigcoreApiKey || null;
   }
 
   /** Push call-connect settings to Sigcore */
@@ -283,7 +285,7 @@ export class CallConnectService {
       select: { sigcoreApiKey: true, sigcoreWorkspaceId: true },
     });
     const sigcoreApiKey =
-      ns?.sigcoreApiKey || this.configService.get<string>('SIGCORE_API_KEY') || null;
+      this.configService.get<string>('SIGCORE_API_KEY') || ns?.sigcoreApiKey || null;
     if (!sigcoreApiKey) {
       this.logger.log('Skipping call-connect — no Sigcore API key configured');
       return;
@@ -488,7 +490,7 @@ export class CallConnectService {
 
     const accountKey = ns?.sigcoreApiKey;
     const envKey = this.configService.get<string>('SIGCORE_API_KEY');
-    const sigcoreApiKey = accountKey || envKey || null;
+    const sigcoreApiKey = envKey || accountKey || null; // env var is authoritative
 
     this.logger.log(
       `[triggerTestCall] accountKey=${accountKey ? `"${accountKey.slice(0, 6)}…" (len ${accountKey.length})` : 'empty/null'} | ` +
