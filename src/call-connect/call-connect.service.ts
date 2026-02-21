@@ -160,9 +160,7 @@ export class CallConnectService {
       where: { savedAccountId },
       select: { sigcoreApiKey: true },
     });
-    return ns?.sigcoreApiKey
-      ?? this.configService.get<string>('SIGCORE_API_KEY')
-      ?? null;
+    return ns?.sigcoreApiKey || this.configService.get<string>('SIGCORE_API_KEY') || null;
   }
 
   /** Push call-connect settings to Sigcore */
@@ -284,9 +282,10 @@ export class CallConnectService {
       where: { savedAccountId: params.savedAccountId },
       select: { sigcoreApiKey: true, sigcoreWorkspaceId: true },
     });
-    const sigcoreApiKey = ns?.sigcoreApiKey;
+    const sigcoreApiKey =
+      ns?.sigcoreApiKey || this.configService.get<string>('SIGCORE_API_KEY') || null;
     if (!sigcoreApiKey) {
-      this.logger.log('Skipping call-connect — no Sigcore API key configured in notification settings');
+      this.logger.log('Skipping call-connect — no Sigcore API key configured');
       return;
     }
 
@@ -487,7 +486,7 @@ export class CallConnectService {
       select: { sigcoreApiKey: true, sigcoreWorkspaceId: true },
     });
     const sigcoreApiKey =
-      ns?.sigcoreApiKey ?? this.configService.get<string>('SIGCORE_API_KEY') ?? null;
+      ns?.sigcoreApiKey || this.configService.get<string>('SIGCORE_API_KEY') || null;
     if (!sigcoreApiKey) {
       throw new BadRequestException('No Sigcore API key configured in Notification Settings');
     }
