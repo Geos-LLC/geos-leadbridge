@@ -281,21 +281,44 @@ export function Services() {
       ) || null;
 
       setLeadAlertRule(leadAlert);
-      setTemplates(templatesRes.templates);
       setPoolPhones(poolRes.phoneNumbers);
 
-      // If CC messages are empty, pre-select default CC templates if they exist
-      if (!ccs?.agentWhisperMessage) {
-        const t = templatesRes.templates.find((x: any) => x.name === 'CC - Agent Whisper');
-        if (t) { setCcAgentWhisperMessage(t.content); setCcWhisperTemplateId(t.id); }
+      // Seed CC default templates for every user on first page visit
+      const DEFAULT_CC_WHISPER = 'Hi {customerName}, you have a new lead for {category}. Press any key to connect with the customer.';
+      const DEFAULT_CC_GREETING = 'Hi {customerName}! Thanks for your inquiry about {category}. We\'re connecting you with a specialist right now. Please hold for just a moment.';
+      const DEFAULT_CC_VOICEMAIL = 'Hi {customerName}, this is {accountName}. We tried to reach you about your {category} request. Please call us back and we\'ll be happy to help!';
+
+      let allTemplates: MessageTemplate[] = [...templatesRes.templates];
+      const whisperExists = allTemplates.find(t => t.name === 'CC - Agent Whisper');
+      const greetingExists = allTemplates.find(t => t.name === 'CC - Lead Greeting');
+      const voicemailExists = allTemplates.find(t => t.name === 'CC - Voicemail TTS');
+
+      if (!whisperExists || !greetingExists || !voicemailExists) {
+        const [whisperRes, greetingRes, voicemailRes] = await Promise.all([
+          whisperExists ? Promise.resolve({ template: whisperExists }) : templatesApi.createTemplate('CC - Agent Whisper', DEFAULT_CC_WHISPER),
+          greetingExists ? Promise.resolve({ template: greetingExists }) : templatesApi.createTemplate('CC - Lead Greeting', DEFAULT_CC_GREETING),
+          voicemailExists ? Promise.resolve({ template: voicemailExists }) : templatesApi.createTemplate('CC - Voicemail TTS', DEFAULT_CC_VOICEMAIL),
+        ]);
+        if (!whisperExists) allTemplates = [...allTemplates, whisperRes.template];
+        if (!greetingExists) allTemplates = [...allTemplates, greetingRes.template];
+        if (!voicemailExists) allTemplates = [...allTemplates, voicemailRes.template];
       }
-      if (!ccs?.leadGreetingMessage) {
-        const t = templatesRes.templates.find((x: any) => x.name === 'CC - Lead Greeting');
-        if (t) { setCcLeadGreetingMessage(t.content); setCcGreetingTemplateId(t.id); }
+
+      setTemplates(allTemplates);
+
+      // Pre-select CC templates: use saved setting content if set, otherwise load the default template
+      const whisperTpl = allTemplates.find(t => t.name === 'CC - Agent Whisper');
+      const greetingTpl = allTemplates.find(t => t.name === 'CC - Lead Greeting');
+      const voicemailTpl = allTemplates.find(t => t.name === 'CC - Voicemail TTS');
+
+      if (!ccs?.agentWhisperMessage && whisperTpl) {
+        setCcAgentWhisperMessage(whisperTpl.content); setCcWhisperTemplateId(whisperTpl.id);
       }
-      if (!ccs?.leadVoicemailMessage) {
-        const t = templatesRes.templates.find((x: any) => x.name === 'CC - Voicemail TTS');
-        if (t) { setCcVoicemailMessage(t.content); setCcVoicemailTemplateId(t.id); }
+      if (!ccs?.leadGreetingMessage && greetingTpl) {
+        setCcLeadGreetingMessage(greetingTpl.content); setCcGreetingTemplateId(greetingTpl.id);
+      }
+      if (!ccs?.leadVoicemailMessage && voicemailTpl) {
+        setCcVoicemailMessage(voicemailTpl.content); setCcVoicemailTemplateId(voicemailTpl.id);
       }
 
       // Pre-fill form states from existing rules
@@ -444,44 +467,6 @@ export function Services() {
     try {
       const { settings } = await callConnectApi.saveSettings(selectedAccountId, { enabled });
       setCcEnabled(settings.enabled);
-
-      // On first enable with no messages set, create and pre-select default CC templates
-      if (enabled && !ccAgentWhisperMessage && !ccLeadGreetingMessage && !ccVoicemailMessage) {
-        const DEFAULT_CC_WHISPER = 'Hi {customerName}, you have a new lead for {category}. Press any key to connect with the customer.';
-        const DEFAULT_CC_GREETING = 'Hi {customerName}! Thanks for your inquiry about {category}. We\'re connecting you with a specialist right now. Please hold for just a moment.';
-        const DEFAULT_CC_VOICEMAIL = 'Hi {customerName}, this is {accountName}. We tried to reach you about your {category} request. Please call us back and we\'ll be happy to help!';
-
-        const whisperExists = templates.find(t => t.name === 'CC - Agent Whisper');
-        const greetingExists = templates.find(t => t.name === 'CC - Lead Greeting');
-        const voicemailExists = templates.find(t => t.name === 'CC - Voicemail TTS');
-
-        const [whisperTpl, greetingTpl, voicemailTpl] = await Promise.all([
-          whisperExists
-            ? Promise.resolve({ template: whisperExists })
-            : templatesApi.createTemplate('CC - Agent Whisper', DEFAULT_CC_WHISPER),
-          greetingExists
-            ? Promise.resolve({ template: greetingExists })
-            : templatesApi.createTemplate('CC - Lead Greeting', DEFAULT_CC_GREETING),
-          voicemailExists
-            ? Promise.resolve({ template: voicemailExists })
-            : templatesApi.createTemplate('CC - Voicemail TTS', DEFAULT_CC_VOICEMAIL),
-        ]);
-
-        setTemplates(prev => {
-          const updated = [...prev];
-          if (!whisperExists) updated.push(whisperTpl.template);
-          if (!greetingExists) updated.push(greetingTpl.template);
-          if (!voicemailExists) updated.push(voicemailTpl.template);
-          return updated;
-        });
-
-        setCcAgentWhisperMessage(whisperTpl.template.content);
-        setCcWhisperTemplateId(whisperTpl.template.id);
-        setCcLeadGreetingMessage(greetingTpl.template.content);
-        setCcGreetingTemplateId(greetingTpl.template.id);
-        setCcVoicemailMessage(voicemailTpl.template.content);
-        setCcVoicemailTemplateId(voicemailTpl.template.id);
-      }
     } catch (err: any) {
       setCcEnabled(!enabled); // rollback
       setError(err.response?.data?.message || err.message || 'Failed to update Call Connect');
