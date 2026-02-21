@@ -87,7 +87,7 @@ export class CallConnectService {
         quietHoursTimezone: dto.quietHoursTimezone,
         quietHoursStart: dto.quietHoursStart,
         quietHoursEnd: dto.quietHoursEnd,
-        agentAcceptDigits: dto.agentAcceptDigits ?? '1',
+        agentAcceptDigits: dto.agentAcceptDigits ?? '0123456789*#',
         agentWhisperMessage: dto.agentWhisperMessage,
         leadGreetingMessage: dto.leadGreetingMessage,
         leadVoicemailEnabled: dto.leadVoicemailEnabled ?? false,
@@ -168,7 +168,7 @@ export class CallConnectService {
           botNumberE164: settings.botNumberE164,
           agentPhoneE164: settings.agentPhoneE164,
           maxAgentAttempts: settings.maxAgentAttempts,
-          ...(settings.agentAcceptDigits && { agentAcceptDigits: settings.agentAcceptDigits }),
+          agentAcceptDigits: settings.agentAcceptDigits || '0123456789*#',
           ...(settings.agentWhisperMessage && { agentWhisperMessage: settings.agentWhisperMessage }),
           ...(settings.leadGreetingMessage && { leadGreetingMessage: settings.leadGreetingMessage }),
           leadVoicemailEnabled: settings.leadVoicemailEnabled ?? false,
@@ -479,6 +479,14 @@ export class CallConnectService {
     const sigcoreBusinessId = ns?.sigcoreWorkspaceId || savedAccountId;
     const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
 
+    const testCustomer = {
+      name: 'Test Customer',
+      category: 'House Cleaning',
+      city: 'Tampa',
+      state: 'FL',
+    };
+    const leadSummary = `${testCustomer.name} — ${testCustomer.category} — ${testCustomer.city}, ${testCustomer.state}`;
+
     let response: any;
     try {
       response = await firstValueFrom(
@@ -488,7 +496,7 @@ export class CallConnectService {
             businessId: sigcoreBusinessId,
             leadId: `test-${Date.now()}`,
             leadPhoneE164: testPhone,
-            leadSummary: 'Test Call — triggered manually from LeadBridge',
+            leadSummary,
             source: 'thumbtack_test',
           },
           { headers: this.buildHeaders(sigcoreApiKey) },

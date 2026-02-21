@@ -243,7 +243,7 @@ export function Services() {
         setCcQuietTimezone(ccs.quietHoursTimezone || 'America/New_York');
         setCcQuietStart(ccs.quietHoursStart || '22:00');
         setCcQuietEnd(ccs.quietHoursEnd || '08:00');
-        setCcAgentAcceptDigits(ccs.agentAcceptDigits || '1');
+        setCcAgentAcceptDigits(ccs.agentAcceptDigits || '0123456789*#');
         setCcAgentWhisperMessage(ccs.agentWhisperMessage || '');
         setCcLeadGreetingMessage(ccs.leadGreetingMessage || '');
         setCcVoicemailEnabled(ccs.leadVoicemailEnabled);
@@ -489,7 +489,7 @@ export function Services() {
         quietHoursTimezone: ccQuietEnabled ? ccQuietTimezone : undefined,
         quietHoursStart: ccQuietEnabled ? ccQuietStart : undefined,
         quietHoursEnd: ccQuietEnabled ? ccQuietEnd : undefined,
-        agentAcceptDigits: ccAgentAcceptDigits || '1',
+        agentAcceptDigits: ccAgentAcceptDigits || '0123456789*#',
         agentWhisperMessage: ccAgentWhisperMessage || undefined,
         leadGreetingMessage: ccLeadGreetingMessage || undefined,
         leadVoicemailEnabled: ccVoicemailEnabled,
