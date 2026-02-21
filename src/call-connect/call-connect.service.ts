@@ -34,11 +34,10 @@ export class CallConnectService {
     private configService: ConfigService,
     private httpService: HttpService,
   ) {
-    const rawUrl =
+    // Use SIGCORE_API_URL exactly as notifications.service does (includes /api suffix)
+    this.sigcoreApiUrl =
       this.configService.get<string>('SIGCORE_API_URL') ||
-      'https://sigcore-production.up.railway.app';
-    // Strip trailing /api if present — we build full paths ourselves
-    this.sigcoreApiUrl = rawUrl.replace(/\/api\/?$/, '');
+      'https://sigcore-production.up.railway.app/api';
 
     const rawBaseUrl =
       this.configService.get<string>('APP_BASE_URL') ||
@@ -140,7 +139,7 @@ export class CallConnectService {
     const apiKey = await this.getSigcoreApiKey(savedAccountId);
     if (!apiKey) return;
 
-    const url = `${this.sigcoreApiUrl}/api/internal/call-connect/settings`;
+    const url = `${this.sigcoreApiUrl}/v1/call-connect/settings`;
     await firstValueFrom(
       this.httpService.post(
         url,
@@ -179,7 +178,7 @@ export class CallConnectService {
     const webhookUrl = `${this.appBaseUrl}/api/webhooks/sigcore/call-connect?accountId=${savedAccountId}`;
     const secret = settings?.sigcoreWebhookSecret || crypto.randomBytes(32).toString('hex');
 
-    const url = `${this.sigcoreApiUrl}/api/webhooks/subscriptions`;
+    const url = `${this.sigcoreApiUrl}/v1/webhook-subscriptions`;
     const response = await firstValueFrom(
       this.httpService.post(
         url,
@@ -277,7 +276,7 @@ export class CallConnectService {
       [params.customerName, params.category].filter(Boolean).join(' – ');
 
     try {
-      const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
+      const url = `${this.sigcoreApiUrl}/v1/call-connect/start`;
       const response = await firstValueFrom(
         this.httpService.post(
           url,
@@ -453,7 +452,7 @@ export class CallConnectService {
     }
 
     const sigcoreBusinessId = ns?.sigcoreWorkspaceId || savedAccountId;
-    const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
+    const url = `${this.sigcoreApiUrl}/v1/call-connect/start`;
 
     let response: any;
     try {
@@ -486,7 +485,7 @@ export class CallConnectService {
     const apiKey = await this.getSigcoreApiKey(savedAccountId);
     if (!apiKey) return;
 
-    const url = `${this.sigcoreApiUrl}/api/internal/call-connect/cancel`;
+    const url = `${this.sigcoreApiUrl}/v1/call-connect/cancel`;
     await firstValueFrom(
       this.httpService.post(
         url,
