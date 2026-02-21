@@ -1150,80 +1150,81 @@ export function Services() {
             iconBgColor="bg-violet-50"
             iconTextColor="text-violet-600"
           >
-            {/* Connection Mode */}
+            {/* Connection Mode — segmented switcher */}
             <div>
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Connection Mode</label>
-              <div className="space-y-2">
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="ccMode"
-                    checked={ccMode === 'AGENT_FIRST'}
-                    onChange={() => setCcMode('AGENT_FIRST')}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    <span className="text-sm font-medium text-slate-800">Agent first</span>
-                    <span className="text-xs text-slate-500 block">We call you, then connect the lead once you answer</span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="ccMode"
-                    checked={ccMode === 'PARALLEL'}
-                    onChange={() => setCcMode('PARALLEL')}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    <span className="text-sm font-medium text-slate-800">Parallel</span>
-                    <span className="text-xs text-slate-500 block">Call you and the lead simultaneously (fastest)</span>
-                  </span>
-                </label>
-              </div>
-            </div>
-
-            {/* Agent Phone */}
-            <div className="max-w-sm">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Agent Phone (E.164)</label>
-              <input
-                type="tel"
-                value={ccAgentPhone}
-                onChange={e => setCcAgentPhone(e.target.value)}
-                placeholder="+15551234567"
-                className="w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent"
-              />
-              <p className="text-xs text-slate-400 mt-1.5">Phone Sigcore will ring when a new lead arrives</p>
-            </div>
-
-            {/* Send from */}
-            <div className="max-w-sm">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send from</label>
-              <div className="relative">
-                <select
-                  value={ccBotNumber}
-                  onChange={e => setCcBotNumber(e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium appearance-none"
+              <div className="flex bg-slate-100 rounded-2xl p-1 max-w-lg">
+                <button
+                  onClick={() => setCcMode('AGENT_FIRST')}
+                  className={`flex-1 flex flex-col items-center gap-0.5 rounded-xl px-4 py-3 transition-all ${
+                    ccMode === 'AGENT_FIRST'
+                      ? 'bg-white text-violet-700 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
                 >
-                  <option value="">Select phone number</option>
-                  {ccBotNumber && !poolPhones.some(p => p.phoneNumber === ccBotNumber) && (
-                    <option value={ccBotNumber}>{ccBotNumber} (configured)</option>
-                  )}
-                  {poolPhones.map(p => (
-                    <option key={p.id} value={p.phoneNumber}>
-                      {p.phoneNumber} (LeadBridge)
-                    </option>
-                  ))}
-                </select>
-                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
-                  <ChevronDown className="w-4 h-4" />
-                </div>
+                  <Phone className="w-4 h-4" />
+                  <span className="text-sm font-bold">Agent First</span>
+                  <span className="text-[11px] font-normal text-slate-400 leading-tight text-center">We call you, then bridge the lead</span>
+                </button>
+                <button
+                  onClick={() => setCcMode('PARALLEL')}
+                  className={`flex-1 flex flex-col items-center gap-0.5 rounded-xl px-4 py-3 transition-all ${
+                    ccMode === 'PARALLEL'
+                      ? 'bg-white text-violet-700 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  <Zap className="w-4 h-4" />
+                  <span className="text-sm font-bold">Parallel</span>
+                  <span className="text-[11px] font-normal text-slate-400 leading-tight text-center">Call you and lead simultaneously</span>
+                </button>
               </div>
-              <button className="mt-2 px-4 py-2 bg-slate-100 text-slate-400 rounded-xl text-xs font-bold flex items-center gap-2 cursor-not-allowed">
-                <Phone className="w-3 h-3" />
-                Get your own number
-                <span className="px-1.5 py-0.5 bg-slate-200 text-[9px] rounded uppercase">Coming Soon</span>
-              </button>
+            </div>
+
+            {/* Agent Phone + Send from — side by side */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Agent Phone */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Agent Phone (E.164)</label>
+                <input
+                  type="tel"
+                  value={ccAgentPhone}
+                  onChange={e => setCcAgentPhone(e.target.value)}
+                  placeholder="+15551234567"
+                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent"
+                />
+                <p className="text-xs text-slate-400 mt-1.5">Phone Sigcore will ring when a new lead arrives</p>
+              </div>
+
+              {/* Send from */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send from</label>
+                <div className="relative">
+                  <select
+                    value={ccBotNumber}
+                    onChange={e => setCcBotNumber(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium appearance-none"
+                  >
+                    <option value="">Select phone number</option>
+                    {ccBotNumber && !poolPhones.some(p => p.phoneNumber === ccBotNumber) && (
+                      <option value={ccBotNumber}>{ccBotNumber} (configured)</option>
+                    )}
+                    {poolPhones.map(p => (
+                      <option key={p.id} value={p.phoneNumber}>
+                        {p.phoneNumber} (LeadBridge)
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                    <ChevronDown className="w-4 h-4" />
+                  </div>
+                </div>
+                <button className="mt-2 px-4 py-2 bg-slate-100 text-slate-400 rounded-xl text-xs font-bold flex items-center gap-2 cursor-not-allowed">
+                  <Phone className="w-3 h-3" />
+                  Get your own number
+                  <span className="px-1.5 py-0.5 bg-slate-200 text-[9px] rounded uppercase">Coming Soon</span>
+                </button>
+              </div>
             </div>
 
             {/* Quiet Hours */}
@@ -1318,10 +1319,20 @@ export function Services() {
               </div>
             </div>
 
-            {/* Lead Greeting Message */}
-            <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Lead Greeting Message</label>
-              <p className="text-xs text-slate-400 mb-3">Played to the lead while they wait for you to answer.</p>
+            {/* Lead Greeting Message — only relevant in Parallel mode */}
+            <div className={`bg-slate-50 rounded-2xl p-6 border transition-opacity ${ccMode === 'AGENT_FIRST' ? 'border-slate-100 opacity-40 pointer-events-none select-none' : 'border-slate-100'}`}>
+              <div className="flex items-center gap-2 mb-1">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Lead Greeting Message</label>
+                {ccMode === 'AGENT_FIRST' && (
+                  <span className="px-2 py-0.5 bg-slate-200 text-slate-500 text-[10px] font-bold rounded uppercase tracking-wide">Parallel only</span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mb-3">
+                {ccMode === 'AGENT_FIRST'
+                  ? 'Not used in Agent First mode — the lead is not called until you answer.'
+                  : 'Played to the lead while they wait for you to answer.'
+                }
+              </p>
               <div className="space-y-3">
                 <select
                   value={ccGreetingTemplateId || ''}
