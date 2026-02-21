@@ -177,8 +177,9 @@ export class CallConnectService {
           mode: settings.mode,
           botNumberE164: settings.botNumberE164,
           agentPhoneE164: settings.agentPhoneE164,
+          ringTimeoutSeconds: 60,
           maxAgentAttempts: settings.maxAgentAttempts,
-          agentAcceptDigits: '0123456789*#',
+          agentVoicemailMode: 'TTS',
           ...(settings.agentWhisperMessage && { agentWhisperMessage: settings.agentWhisperMessage }),
           ...(settings.leadGreetingMessage && { leadGreetingMessage: settings.leadGreetingMessage }),
           leadVoicemailEnabled: settings.leadVoicemailEnabled ?? false,
@@ -321,12 +322,6 @@ export class CallConnectService {
     try {
       const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
 
-      const vars = {
-        customerName: params.customerName || '',
-        category: params.category || '',
-        location: params.location || '',
-      };
-
       const response = await firstValueFrom(
         this.httpService.post(
           url,
@@ -335,10 +330,7 @@ export class CallConnectService {
             leadId: params.leadId,
             leadPhoneE164: params.customerPhone,
             leadSummary: summary,
-            ...(settings.agentWhisperMessage && { agentWhisperMessage: this.substituteVars(settings.agentWhisperMessage, vars) }),
-            ...(settings.leadGreetingMessage && { leadGreetingMessage: this.substituteVars(settings.leadGreetingMessage, vars) }),
-            ...(settings.leadVoicemailMessage && { leadVoicemailMessage: this.substituteVars(settings.leadVoicemailMessage, vars) }),
-            source: 'thumbtack',
+            source: 'leadbridge',
           },
           { headers: this.buildHeaders(sigcoreApiKey) },
         ),
@@ -534,12 +526,6 @@ export class CallConnectService {
 
     let response: any;
     try {
-      const testVars = {
-        customerName: testCustomer.name,
-        category: testCustomer.category,
-        location: `${testCustomer.city}, ${testCustomer.state}`,
-      };
-
       response = await firstValueFrom(
         this.httpService.post(
           url,
@@ -548,10 +534,7 @@ export class CallConnectService {
             leadId: `test-${Date.now()}`,
             leadPhoneE164: testPhone,
             leadSummary,
-            ...(settings.agentWhisperMessage && { agentWhisperMessage: this.substituteVars(settings.agentWhisperMessage, testVars) }),
-            ...(settings.leadGreetingMessage && { leadGreetingMessage: this.substituteVars(settings.leadGreetingMessage, testVars) }),
-            ...(settings.leadVoicemailMessage && { leadVoicemailMessage: this.substituteVars(settings.leadVoicemailMessage, testVars) }),
-            source: 'thumbtack_test',
+            source: 'leadbridge',
           },
           { headers: this.buildHeaders(sigcoreApiKey) },
         ),
