@@ -477,6 +477,14 @@ export class CallConnectService {
     }
 
     const sigcoreBusinessId = ns?.sigcoreWorkspaceId || savedAccountId;
+
+    // Always sync settings to Sigcore before test call so agentAcceptDigits is current
+    try {
+      await this.pushSettingsToSigcore(savedAccountId, settings);
+    } catch (err: any) {
+      this.logger.warn(`Failed to push settings before test call: ${err.message}`);
+    }
+
     const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
 
     const testCustomer = {
