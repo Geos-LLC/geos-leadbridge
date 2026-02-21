@@ -133,6 +133,18 @@ export class CallConnectService {
     return settings;
   }
 
+  // ─── Template variable substitution ─────────────────────────────────────────
+
+  private substituteVars(
+    template: string,
+    vars: { customerName?: string; category?: string; location?: string },
+  ): string {
+    return template
+      .replace(/\{customerName\}/g, vars.customerName || '')
+      .replace(/\{category\}/g, vars.category || '')
+      .replace(/\{location\}/g, vars.location || '');
+  }
+
   // ─── Sigcore API ─────────────────────────────────────────────────────────────
 
   private buildHeaders(apiKey: string): Record<string, string> {
@@ -303,6 +315,13 @@ export class CallConnectService {
 
     try {
       const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
+
+      const vars = {
+        customerName: params.customerName || '',
+        category: params.category || '',
+        location: params.location || '',
+      };
+
       const response = await firstValueFrom(
         this.httpService.post(
           url,
@@ -311,9 +330,9 @@ export class CallConnectService {
             leadId: params.leadId,
             leadPhoneE164: params.customerPhone,
             leadSummary: summary,
-            customerName: params.customerName || '',
-            category: params.category || '',
-            location: params.location || '',
+            ...(settings.agentWhisperMessage && { agentWhisperMessage: this.substituteVars(settings.agentWhisperMessage, vars) }),
+            ...(settings.leadGreetingMessage && { leadGreetingMessage: this.substituteVars(settings.leadGreetingMessage, vars) }),
+            ...(settings.leadVoicemailMessage && { leadVoicemailMessage: this.substituteVars(settings.leadVoicemailMessage, vars) }),
             source: 'thumbtack',
           },
           { headers: this.buildHeaders(sigcoreApiKey) },
@@ -501,6 +520,12 @@ export class CallConnectService {
 
     let response: any;
     try {
+      const testVars = {
+        customerName: testCustomer.name,
+        category: testCustomer.category,
+        location: `${testCustomer.city}, ${testCustomer.state}`,
+      };
+
       response = await firstValueFrom(
         this.httpService.post(
           url,
@@ -509,9 +534,9 @@ export class CallConnectService {
             leadId: `test-${Date.now()}`,
             leadPhoneE164: testPhone,
             leadSummary,
-            customerName: testCustomer.name,
-            category: testCustomer.category,
-            location: `${testCustomer.city}, ${testCustomer.state}`,
+            ...(settings.agentWhisperMessage && { agentWhisperMessage: this.substituteVars(settings.agentWhisperMessage, testVars) }),
+            ...(settings.leadGreetingMessage && { leadGreetingMessage: this.substituteVars(settings.leadGreetingMessage, testVars) }),
+            ...(settings.leadVoicemailMessage && { leadVoicemailMessage: this.substituteVars(settings.leadVoicemailMessage, testVars) }),
             source: 'thumbtack_test',
           },
           { headers: this.buildHeaders(sigcoreApiKey) },
