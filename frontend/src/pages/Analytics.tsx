@@ -26,6 +26,7 @@ import {
 } from 'recharts';
 import { analyticsApi, thumbtackApi, type AnalyticsData } from '../services/api';
 import { useAppStore } from '../store/appStore';
+import { notify } from '../store/notificationStore';
 
 export function Analytics() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -92,6 +93,7 @@ export function Analytics() {
       }
     } catch (err) {
       console.error('Failed to load analytics:', err);
+      notify.error('Analytics', 'Failed to load analytics data. Please refresh.');
     } finally {
       setLoading(false);
     }
