@@ -21,6 +21,32 @@ enum UserRole {
   ADMIN
 }
 
+// ==========================================
+// Enums for Instant Call Connect
+// ==========================================
+
+enum CallConnectMode {
+  AGENT_FIRST
+  PARALLEL
+}
+
+enum CallConnectStatus {
+  CREATED
+  CALLING_AGENT
+  AGENT_ANSWERED
+  AGENT_ACCEPTED
+  CALLING_LEAD
+  BRIDGED
+  VOICEMAIL_DROP
+  ENDED
+  FAILED
+  CANCELED
+  // legacy values kept for backward compat with existing rows
+  RINGING_AGENT
+  RINGING_LEAD
+  CANCELLED
+}
+
 enum SubscriptionTier {
   STARTER
   PRO
@@ -92,6 +118,7 @@ model User {
   phonePoolAssignments     PhonePoolAssignment[]  // Many-to-many phone pool assignments
   thumbtackSnapshots       ThumbtackSettingsSnapshot[]
   thumbtackLeadIds         ThumbtackLeadId[]
+  callConnectSettings      CallConnectSettings[]
 
   @@map("users")
 }
@@ -157,6 +184,7 @@ model Lead {
   conversation            Conversation?                 @relation(fields: [threadId], references: [id])
   pendingMessages         PendingAutomatedMessage[]
   pendingNotificationMsgs PendingNotificationMessage[]
+  callConnectSessions     LeadCallConnect[]
 
   @@unique([platform, externalRequestId])
   @@index([userId])
@@ -291,6 +319,7 @@ model SavedAccount {
   user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   automationRules      AutomationRule[]
   notificationSettings NotificationSettings?
+  callConnectSettings  CallConnectSettings?
   collectedLeads       ThumbtackLeadId[]
   settingsSnapshots    ThumbtackSettingsSnapshot[]
 
@@ -621,6 +650,58 @@ model ThumbtackSettingsSnapshot {
   @@index([userId, scopeCategory, scopeLocation, effectiveFrom])
   @@index([savedAccountId])
   @@map("thumbtack_settings_snapshots")
+}
+
+// ==========================================
+// Instant Call Connect
+// ==========================================
+
+model CallConnectSettings {
+  id                   String          @id @default(uuid())
+  savedAccountId       String          @unique
+  userId               String
+  enabled              Boolean         @default(false)
+  mode                 CallConnectMode @default(AGENT_FIRST)
+  agentStrategy        String          @default("owner") // "owner" | "round_robin" | "on_duty"
+  agentPhoneE164       String?         // Agent's phone number to ring
+  botNumberE164        String?         // Shared bot caller-ID number
+  sigcoreApiKey        String?         // Per-business Sigcore API key (X-API-Key)
+  sigcoreWebhookSecret String?         // HMAC secret registered with Sigcore webhook subscription
+  sigcoreWebhookId     String?         // Sigcore webhook subscription ID (for dedup)
+  maxAgentAttempts     Int             @default(2)
+  quietHoursEnabled    Boolean         @default(false)
+  quietHoursTimezone   String?
+  quietHoursStart      String?         // "HH:MM"
+  quietHoursEnd        String?         // "HH:MM"
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  savedAccount SavedAccount @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("call_connect_settings")
+}
+
+model LeadCallConnect {
+  id               String            @id @default(uuid())
+  leadId           String
+  businessId       String?           // Sigcore workspace/business ID (stored for reference)
+  sigcoreSessionId String            @unique
+  status           CallConnectStatus @default(CREATED)
+  attempt          Int               @default(0)
+  lastEventAt      DateTime          @default(now())
+  failureReason    String?
+  recordingUrl     String?
+  timeline         Json              @default("[]") // Append-only array of event objects
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@index([sigcoreSessionId])
+  @@map("lead_call_connect")
 }
 
 model ThumbtackLeadId {

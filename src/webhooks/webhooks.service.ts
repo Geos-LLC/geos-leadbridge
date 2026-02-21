@@ -10,6 +10,7 @@ import { PrismaService } from '../common/utils/prisma.service';
 import { PlatformFactory } from '../platforms/platform.factory';
 import { AutomationService } from '../automation/automation.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { CallConnectService } from '../call-connect/call-connect.service';
 
 @Injectable()
 export class WebhooksService {
@@ -29,6 +30,8 @@ export class WebhooksService {
     private automationService: AutomationService,
     @Inject(forwardRef(() => NotificationsService))
     private notificationsService: NotificationsService,
+    @Inject(forwardRef(() => CallConnectService))
+    private callConnectService: CallConnectService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -432,6 +435,22 @@ export class WebhooksService {
       }
     } catch (err: any) {
       this.logger.error('SMS notification failed for new lead', err.message);
+    }
+
+    // Trigger Instant Call Connect for new lead
+    try {
+      await this.callConnectService.triggerForLead({
+        userId,
+        savedAccountId: savedAccount?.id ?? null,
+        businessId: business.businessID ?? null,
+        leadId: lead.id,
+        customerPhone: customer.phone ?? null,
+        customerName,
+        category: request.category?.name ?? null,
+        leadSummary: `${customerName} – ${request.category?.name || 'Service'} – ${location.city || ''}`,
+      });
+    } catch (err: any) {
+      this.logger.error('Call-connect trigger failed for new lead', err.message);
     }
   }
 

@@ -1099,4 +1099,29 @@ export const integrationsApi = {
   },
 };
 
+// Instant Call Connect API
+import type { CallConnectSettings, LeadCallConnect } from '../types';
+
+export const callConnectApi = {
+  getSettings: async (accountId: string): Promise<{ settings: CallConnectSettings | null }> => {
+    const { data } = await api.get(`/v1/call-connect/settings?accountId=${accountId}`);
+    return data;
+  },
+  saveSettings: async (
+    savedAccountId: string,
+    updates: Partial<Omit<CallConnectSettings, 'id' | 'savedAccountId' | 'createdAt' | 'updatedAt'>>,
+  ): Promise<{ settings: CallConnectSettings }> => {
+    const { data } = await api.put('/v1/call-connect/settings', { savedAccountId, ...updates });
+    return data;
+  },
+  getLeadSessions: async (leadId: string): Promise<{ sessions: LeadCallConnect[] }> => {
+    const { data } = await api.get(`/v1/call-connect/lead/${leadId}`);
+    return data;
+  },
+  cancelSession: async (sessionId: string, savedAccountId: string): Promise<{ cancelled: boolean }> => {
+    const { data } = await api.post('/v1/call-connect/cancel', { sessionId, savedAccountId });
+    return data;
+  },
+};
+
 export default api;
