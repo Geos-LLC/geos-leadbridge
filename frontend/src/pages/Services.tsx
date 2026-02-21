@@ -177,7 +177,7 @@ export function Services() {
   const [ccVoicemailRecordingUrl, setCcVoicemailRecordingUrl] = useState('');
   const [ccBotNumber, setCcBotNumber] = useState('');
   const [ccSaving, setCcSaving] = useState(false);
-  const [ccTestPhone, setCcTestPhone] = useState('');
+  const [ccTestPhone, setCcTestPhone] = useState(() => localStorage.getItem('cc_test_phone') || '');
   const [ccTesting, setCcTesting] = useState(false);
   // Track which saved template is currently loaded in each CC message field (for edit button)
   const [ccWhisperTemplateId, setCcWhisperTemplateId] = useState<string | null>(null);
@@ -1466,10 +1466,16 @@ export function Services() {
                   <input
                     type="tel"
                     value={ccTestPhone}
-                    onChange={e => setCcTestPhone(e.target.value)}
+                    onChange={e => {
+                      setCcTestPhone(e.target.value);
+                      localStorage.setItem('cc_test_phone', e.target.value);
+                    }}
                     onBlur={e => {
                       const formatted = formatPhoneE164(e.target.value);
-                      if (formatted !== e.target.value) setCcTestPhone(formatted);
+                      if (formatted !== e.target.value) {
+                        setCcTestPhone(formatted);
+                        localStorage.setItem('cc_test_phone', formatted);
+                      }
                     }}
                     placeholder="+15559876543"
                     className={`rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent min-w-[160px] transition-colors ${
