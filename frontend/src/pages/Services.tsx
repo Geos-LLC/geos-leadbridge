@@ -22,7 +22,7 @@ const ALL_VARIABLES = [...AUTO_REPLY_VARIABLES, ...SMS_VARIABLES.filter(
 
 // Variables available in Call Connect message templates
 const CC_VARIABLES = [
-  { tag: '{summary}', desc: 'Lead info & service category' },
+  { name: '{summary}', desc: 'Lead info & service category' },
 ];
 
 // -- ServiceCard sub-component --
