@@ -447,8 +447,14 @@ export class AutomationService implements OnModuleInit {
         this.logger.log(`Skipping duplicate: rule ${rule.id} already has pending message for ${context.negotiationId}`);
         return;
       }
-      // Previous message was sent/failed/cancelled — delete old record so a new one can be created (every_reply mode)
-      await this.prisma.pendingAutomatedMessage.delete({ where: { id: existing.id } });
+      // For every_reply rules: previous message was already sent/failed/cancelled — allow a new one
+      if (rule.replyTriggerMode === 'every_reply') {
+        await this.prisma.pendingAutomatedMessage.delete({ where: { id: existing.id } });
+      } else {
+        // For new_lead / first_only rules: only send once per lead, even if the record is sent
+        this.logger.log(`Skipping re-send: rule ${rule.id} (${rule.triggerType}/${rule.replyTriggerMode}) already triggered for ${context.negotiationId}`);
+        return;
+      }
     }
 
     const scheduledFor = new Date(Date.now() + rule.delayMinutes * 60 * 1000);
