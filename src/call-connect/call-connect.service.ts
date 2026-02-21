@@ -175,7 +175,7 @@ export class CallConnectService {
 
     // Include accountId as query param so webhook handler can look up per-business secret
     const webhookUrl = `${this.appBaseUrl}/api/webhooks/sigcore/call-connect?accountId=${savedAccountId}`;
-    const secret = settings.sigcoreWebhookSecret || crypto.randomBytes(32).toString('hex');
+    const secret = settings?.sigcoreWebhookSecret || crypto.randomBytes(32).toString('hex');
 
     const url = `${this.sigcoreApiUrl}/api/webhooks/subscriptions`;
     const response = await firstValueFrom(
@@ -207,7 +207,7 @@ export class CallConnectService {
       data: {
         sigcoreWebhookId: webhookId || null,
         // Store generated secret if it wasn't already set
-        ...(!settings.sigcoreWebhookSecret && { sigcoreWebhookSecret: secret }),
+        ...(!settings?.sigcoreWebhookSecret && { sigcoreWebhookSecret: secret }),
       },
     });
 
