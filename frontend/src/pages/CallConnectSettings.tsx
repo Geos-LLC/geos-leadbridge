@@ -16,7 +16,7 @@ import { useNavigate } from 'react-router-dom';
 import { callConnectApi, thumbtackApi } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { notify } from '../store/notificationStore';
-import type { CallConnectSettings, CallConnectMode, AgentStrategy, SavedAccount } from '../types';
+import type { CallConnectMode, AgentStrategy, SavedAccount } from '../types';
 
 const MODE_OPTIONS: { value: CallConnectMode; label: string; desc: string }[] = [
   { value: 'AGENT_FIRST', label: 'Agent first (recommended)', desc: 'We call you first, then connect to the lead once you answer.' },
@@ -45,7 +45,6 @@ export function CallConnectSettings() {
 
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
-  const [settings, setSettings] = useState<CallConnectSettings | null>(null);
 
   const [enabled, setEnabled] = useState(false);
   const [mode, setMode] = useState<CallConnectMode>('AGENT_FIRST');
@@ -87,7 +86,6 @@ export function CallConnectSettings() {
     try {
       const res = await callConnectApi.getSettings(accountId);
       if (res.settings) {
-        setSettings(res.settings);
         setEnabled(res.settings.enabled);
         setMode(res.settings.mode);
         setAgentStrategy(res.settings.agentStrategy);
@@ -98,7 +96,6 @@ export function CallConnectSettings() {
         setQuietHoursStart(res.settings.quietHoursStart || '22:00');
         setQuietHoursEnd(res.settings.quietHoursEnd || '08:00');
       } else {
-        setSettings(null);
         setEnabled(false);
         setMode('AGENT_FIRST');
         setAgentStrategy('owner');
