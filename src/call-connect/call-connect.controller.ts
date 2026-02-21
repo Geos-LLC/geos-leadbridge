@@ -91,6 +91,25 @@ export class CallConnectController {
   }
 
   /**
+   * POST /api/v1/call-connect/test
+   * Fire a test call to verify call-connect works end-to-end.
+   */
+  @Post('test')
+  @HttpCode(HttpStatus.OK)
+  async testCall(
+    @Body() body: { savedAccountId: string; testPhone: string },
+    @Request() req: any,
+  ) {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: body.savedAccountId, userId: req.user.id },
+    });
+    if (!account) throw new ForbiddenException('Account not found');
+
+    const result = await this.callConnectService.triggerTestCall(body.savedAccountId, body.testPhone);
+    return { triggered: true, sessionId: result.sessionId };
+  }
+
+  /**
    * POST /api/v1/call-connect/cancel
    * Cancel an active call-connect session.
    */

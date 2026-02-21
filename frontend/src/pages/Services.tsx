@@ -170,6 +170,8 @@ export function Services() {
   const [ccQuietStart, setCcQuietStart] = useState('22:00');
   const [ccQuietEnd, setCcQuietEnd] = useState('08:00');
   const [ccSaving, setCcSaving] = useState(false);
+  const [ccTestPhone, setCcTestPhone] = useState('');
+  const [ccTesting, setCcTesting] = useState(false);
 
   // Lead Alerts form state (needed for first-time creation)
   const [alertToPhone, setAlertToPhone] = useState('');
@@ -430,6 +432,19 @@ export function Services() {
       setError(err.response?.data?.message || err.message || 'Failed to save Call Connect settings');
     } finally {
       setCcSaving(false);
+    }
+  }
+
+  async function handleTestCall() {
+    if (!selectedAccountId || !ccTestPhone.trim()) return;
+    setCcTesting(true);
+    try {
+      await callConnectApi.testCall(selectedAccountId, ccTestPhone.trim());
+      showSuccess('Test call triggered — your agent phone should ring shortly');
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'Test call failed');
+    } finally {
+      setCcTesting(false);
     }
   }
 
@@ -1182,6 +1197,32 @@ export function Services() {
                 {ccSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save Settings
               </button>
+            </div>
+
+            {/* Test Call */}
+            <div className="pt-6 border-t border-slate-100">
+              <p className="text-sm font-semibold text-slate-700 mb-1">Test Call</p>
+              <p className="text-xs text-slate-400 mb-3">Enter a customer phone number to trigger a live test — Sigcore will call your agent phone then bridge to this number.</p>
+              <div className="flex gap-3 flex-wrap">
+                <input
+                  type="tel"
+                  value={ccTestPhone}
+                  onChange={e => setCcTestPhone(e.target.value)}
+                  placeholder="+15559876543"
+                  className="flex-1 min-w-0 max-w-xs bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                />
+                <button
+                  onClick={handleTestCall}
+                  disabled={ccTesting || !ccTestPhone.trim() || !ccEnabled}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 text-white rounded-xl font-semibold text-sm hover:bg-slate-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                >
+                  {ccTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <PhoneCall className="w-4 h-4" />}
+                  {ccTesting ? 'Calling…' : 'Test Call'}
+                </button>
+              </div>
+              {!ccEnabled && (
+                <p className="text-xs text-orange-500 mt-2">Enable Call Connect first to run a test.</p>
+              )}
             </div>
           </ServiceCard>
 

@@ -428,6 +428,45 @@ export class CallConnectService {
     });
   }
 
+  /**
+   * Fire a test call to verify call-connect is configured correctly.
+   * Uses a caller-supplied test customer phone so the agent can verify the bridge works.
+   */
+  async triggerTestCall(savedAccountId: string, testPhone: string): Promise<{ sessionId: string | null }> {
+    const ns = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { sigcoreApiKey: true, sigcoreWorkspaceId: true },
+    });
+    const sigcoreApiKey = ns?.sigcoreApiKey;
+    if (!sigcoreApiKey) throw new Error('No Sigcore API key configured in Notification Settings');
+
+    const settings = await this.prisma.callConnectSettings.findUnique({
+      where: { savedAccountId },
+    });
+    if (!settings?.enabled) throw new Error('Instant Call Connect is not enabled for this account');
+
+    const sigcoreBusinessId = ns?.sigcoreWorkspaceId || savedAccountId;
+    const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
+
+    const response = await firstValueFrom(
+      this.httpService.post(
+        url,
+        {
+          businessId: sigcoreBusinessId,
+          leadId: `test-${Date.now()}`,
+          leadPhoneE164: testPhone,
+          leadSummary: 'Test Call — triggered manually from LeadBridge',
+          source: 'thumbtack_test',
+        },
+        { headers: this.buildHeaders(sigcoreApiKey) },
+      ),
+    );
+
+    const sessionId = response.data?.sessionId || null;
+    this.logger.log(`Test call-connect session started: ${sessionId} (test phone: ${testPhone})`);
+    return { sessionId };
+  }
+
   /** Cancel a call-connect session */
   async cancelSession(sessionId: string, savedAccountId: string): Promise<void> {
     const apiKey = await this.getSigcoreApiKey(savedAccountId);

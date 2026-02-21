@@ -1122,6 +1122,10 @@ export const callConnectApi = {
     const { data } = await api.post('/v1/call-connect/cancel', { sessionId, savedAccountId });
     return data;
   },
+  testCall: async (savedAccountId: string, testPhone: string): Promise<{ triggered: boolean; sessionId: string | null }> => {
+    const { data } = await api.post('/v1/call-connect/test', { savedAccountId, testPhone });
+    return data;
+  },
 };
 
 export default api;
