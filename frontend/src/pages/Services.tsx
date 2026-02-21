@@ -20,6 +20,11 @@ const ALL_VARIABLES = [...AUTO_REPLY_VARIABLES, ...SMS_VARIABLES.filter(
   v => !AUTO_REPLY_VARIABLES.some(a => a.desc === v.desc)
 )];
 
+// Variables available in Call Connect message templates
+const CC_VARIABLES = [
+  { tag: '{summary}', desc: 'Lead info & service category' },
+];
+
 // -- ServiceCard sub-component --
 interface ServiceCardProps {
   icon: React.ReactNode;
@@ -156,7 +161,7 @@ export function Services() {
     templateId?: string;
     templateName?: string;
     content: string;
-    type: 'autoReply' | 'alert';
+    type: 'autoReply' | 'alert' | 'cc-whisper' | 'cc-greeting' | 'cc-voicemail';
   } | null>(null);
 
   // Instant Call Connect state
@@ -178,6 +183,10 @@ export function Services() {
   const [ccSaving, setCcSaving] = useState(false);
   const [ccTestPhone, setCcTestPhone] = useState('');
   const [ccTesting, setCcTesting] = useState(false);
+  // Track which saved template is currently loaded in each CC message field (for edit button)
+  const [ccWhisperTemplateId, setCcWhisperTemplateId] = useState<string | null>(null);
+  const [ccGreetingTemplateId, setCcGreetingTemplateId] = useState<string | null>(null);
+  const [ccVoicemailTemplateId, setCcVoicemailTemplateId] = useState<string | null>(null);
 
   // Lead Alerts form state (needed for first-time creation)
   const [alertToPhone, setAlertToPhone] = useState('');
@@ -590,6 +599,12 @@ export function Services() {
         await changeRuleTemplate(templateEditor.ruleId, template.id);
       } else if (templateEditor.type === 'alert') {
         await changeAlertRuleTemplate(templateEditor.ruleId, template.id);
+      } else if (templateEditor.type === 'cc-whisper') {
+        setCcAgentWhisperMessage(template.content); setCcWhisperTemplateId(template.id);
+      } else if (templateEditor.type === 'cc-greeting') {
+        setCcLeadGreetingMessage(template.content); setCcGreetingTemplateId(template.id);
+      } else if (templateEditor.type === 'cc-voicemail') {
+        setCcVoicemailMessage(template.content); setCcVoicemailTemplateId(template.id);
       }
       setTemplateEditor(null);
       showSuccess('Template created');
@@ -602,7 +617,7 @@ export function Services() {
 
   async function handleEditorUpdate({ content }: { name: string; content: string }) {
     if (!templateEditor || !templateEditor.templateId) return;
-    const { ruleId, templateId } = templateEditor;
+    const { ruleId, templateId, type } = templateEditor;
     setSaving(true);
     try {
       const { template } = await templatesApi.updateTemplate(templateId, { content });
@@ -615,6 +630,9 @@ export function Services() {
       if (leadAlertRule?.id === ruleId && leadAlertRule?.messageTemplate?.id === templateId) {
         setLeadAlertRule({ ...leadAlertRule, messageTemplate: { ...leadAlertRule.messageTemplate!, content: template.content } });
       }
+      if (type === 'cc-whisper') setCcAgentWhisperMessage(template.content);
+      else if (type === 'cc-greeting') setCcLeadGreetingMessage(template.content);
+      else if (type === 'cc-voicemail') setCcVoicemailMessage(template.content);
       setTemplateEditor(null);
       showSuccess('Template saved');
     } catch (err: any) {
@@ -634,6 +652,12 @@ export function Services() {
         await changeRuleTemplate(templateEditor.ruleId, template.id);
       } else if (templateEditor.type === 'alert') {
         await changeAlertRuleTemplate(templateEditor.ruleId, template.id);
+      } else if (templateEditor.type === 'cc-whisper') {
+        setCcAgentWhisperMessage(template.content); setCcWhisperTemplateId(template.id);
+      } else if (templateEditor.type === 'cc-greeting') {
+        setCcLeadGreetingMessage(template.content); setCcGreetingTemplateId(template.id);
+      } else if (templateEditor.type === 'cc-voicemail') {
+        setCcVoicemailMessage(template.content); setCcVoicemailTemplateId(template.id);
       }
       setTemplateEditor(null);
       showSuccess('Saved as new template');
@@ -1182,23 +1206,47 @@ export function Services() {
             {/* Agent Whisper Message */}
             <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Agent Whisper Message</label>
-              <p className="text-xs text-slate-400 mb-3">Played to you before the bridge. Variables: <code className="bg-white border border-slate-200 px-1 py-0.5 rounded text-slate-600">{'{summary}'}</code> lead info · <code className="bg-white border border-slate-200 px-1 py-0.5 rounded text-slate-600">{'{digit}'}</code> accept key</p>
+              <p className="text-xs text-slate-400 mb-3">
+                Played to you before the bridge. Press <span className="font-semibold text-slate-500">any key</span> to accept.
+                Variable: <code className="bg-white border border-slate-200 px-1 py-0.5 rounded text-slate-600">{'{summary}'}</code> lead info
+              </p>
               <div className="space-y-3">
                 <select
-                  value=""
-                  onChange={e => { const t = templates.find(x => x.id === e.target.value); if (t) setCcAgentWhisperMessage(t.content); }}
+                  value={ccWhisperTemplateId || ''}
+                  onChange={e => {
+                    if (e.target.value === '__create_new__') {
+                      setTemplateEditor({ mode: 'create', ruleId: '', content: ccAgentWhisperMessage, type: 'cc-whisper' });
+                    } else {
+                      const t = templates.find(x => x.id === e.target.value);
+                      if (t) { setCcAgentWhisperMessage(t.content); setCcWhisperTemplateId(t.id); }
+                    }
+                  }}
                   className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
                 >
-                  <option value="">Pre-fill from template…</option>
+                  <option value="">Select template…</option>
                   {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  <option value="__create_new__">+ Create New Template</option>
                 </select>
-                <textarea
-                  value={ccAgentWhisperMessage}
-                  onChange={e => setCcAgentWhisperMessage(e.target.value)}
-                  rows={3}
-                  placeholder="New lead: {summary}. Press {digit} to connect."
-                  className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100"
-                />
+                <div className="relative group">
+                  <textarea
+                    value={ccAgentWhisperMessage}
+                    onChange={e => { setCcAgentWhisperMessage(e.target.value); setCcWhisperTemplateId(null); }}
+                    rows={3}
+                    placeholder="New lead: {summary}. Press any key to connect."
+                    className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100"
+                  />
+                  {ccAgentWhisperMessage && (
+                    <button
+                      onClick={() => {
+                        const tpl = ccWhisperTemplateId ? templates.find(t => t.id === ccWhisperTemplateId) : null;
+                        setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccAgentWhisperMessage, type: 'cc-whisper' });
+                      }}
+                      className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1208,20 +1256,41 @@ export function Services() {
               <p className="text-xs text-slate-400 mb-3">Played to the lead while they wait for you to answer.</p>
               <div className="space-y-3">
                 <select
-                  value=""
-                  onChange={e => { const t = templates.find(x => x.id === e.target.value); if (t) setCcLeadGreetingMessage(t.content); }}
+                  value={ccGreetingTemplateId || ''}
+                  onChange={e => {
+                    if (e.target.value === '__create_new__') {
+                      setTemplateEditor({ mode: 'create', ruleId: '', content: ccLeadGreetingMessage, type: 'cc-greeting' });
+                    } else {
+                      const t = templates.find(x => x.id === e.target.value);
+                      if (t) { setCcLeadGreetingMessage(t.content); setCcGreetingTemplateId(t.id); }
+                    }
+                  }}
                   className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
                 >
-                  <option value="">Pre-fill from template…</option>
+                  <option value="">Select template…</option>
                   {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  <option value="__create_new__">+ Create New Template</option>
                 </select>
-                <textarea
-                  value={ccLeadGreetingMessage}
-                  onChange={e => setCcLeadGreetingMessage(e.target.value)}
-                  rows={3}
-                  placeholder="Hi! We received your inquiry and are connecting you with a specialist. Please hold for a moment."
-                  className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100"
-                />
+                <div className="relative group">
+                  <textarea
+                    value={ccLeadGreetingMessage}
+                    onChange={e => { setCcLeadGreetingMessage(e.target.value); setCcGreetingTemplateId(null); }}
+                    rows={3}
+                    placeholder="Hi! We received your inquiry and are connecting you with a specialist. Please hold for a moment."
+                    className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100"
+                  />
+                  {ccLeadGreetingMessage && (
+                    <button
+                      onClick={() => {
+                        const tpl = ccGreetingTemplateId ? templates.find(t => t.id === ccGreetingTemplateId) : null;
+                        setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccLeadGreetingMessage, type: 'cc-greeting' });
+                      }}
+                      className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1256,20 +1325,41 @@ export function Services() {
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">TTS Voicemail Message <span className="normal-case font-normal text-slate-400">(fallback when no recording URL)</span></label>
                     <div className="space-y-3 mt-2">
                       <select
-                        value=""
-                        onChange={e => { const t = templates.find(x => x.id === e.target.value); if (t) setCcVoicemailMessage(t.content); }}
+                        value={ccVoicemailTemplateId || ''}
+                        onChange={e => {
+                          if (e.target.value === '__create_new__') {
+                            setTemplateEditor({ mode: 'create', ruleId: '', content: ccVoicemailMessage, type: 'cc-voicemail' });
+                          } else {
+                            const t = templates.find(x => x.id === e.target.value);
+                            if (t) { setCcVoicemailMessage(t.content); setCcVoicemailTemplateId(t.id); }
+                          }
+                        }}
                         className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
                       >
-                        <option value="">Pre-fill from template…</option>
+                        <option value="">Select template…</option>
                         {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        <option value="__create_new__">+ Create New Template</option>
                       </select>
-                      <textarea
-                        value={ccVoicemailMessage}
-                        onChange={e => setCcVoicemailMessage(e.target.value)}
-                        rows={3}
-                        placeholder="Hi, we tried to reach you about your inquiry. Please call us back or we'll follow up shortly. Thank you!"
-                        className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100"
-                      />
+                      <div className="relative group">
+                        <textarea
+                          value={ccVoicemailMessage}
+                          onChange={e => { setCcVoicemailMessage(e.target.value); setCcVoicemailTemplateId(null); }}
+                          rows={3}
+                          placeholder="Hi, we tried to reach you about your inquiry. Please call us back or we'll follow up shortly. Thank you!"
+                          className="w-full bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed resize-none focus:outline-none focus:border-violet-300 focus:ring-1 focus:ring-violet-100"
+                        />
+                        {ccVoicemailMessage && (
+                          <button
+                            onClick={() => {
+                              const tpl = ccVoicemailTemplateId ? templates.find(t => t.id === ccVoicemailTemplateId) : null;
+                              setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccVoicemailMessage, type: 'cc-voicemail' });
+                            }}
+                            className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1327,7 +1417,7 @@ export function Services() {
         initialContent={templateEditor?.content || ''}
         templateName={templateEditor?.templateName}
         saving={saving}
-        variables={ALL_VARIABLES}
+        variables={templateEditor?.type?.startsWith('cc-') ? CC_VARIABLES : ALL_VARIABLES}
         existingNames={templates.map(t => t.name)}
         onSave={templateEditor?.mode === 'create' ? handleEditorCreate : handleEditorUpdate}
         onSaveAsNew={handleEditorSaveAsNew}
