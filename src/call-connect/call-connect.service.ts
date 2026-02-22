@@ -180,9 +180,9 @@ export class CallConnectService {
           agentPhoneE164: settings.agentPhoneE164,
           ringTimeoutSeconds: 60,
           maxAgentAttempts: settings.maxAgentAttempts,
-          agentAcceptDigits: settings.agentAcceptDigits || '0123456789*#',
-          ...(settings.agentWhisperMessage && { agentWhisperMessage: settings.agentWhisperMessage }),
-          ...(settings.leadGreetingMessage && { leadGreetingMessage: settings.leadGreetingMessage }),
+          agentAcceptDigits: '0123456789*#',
+          agentWhisperMessage: settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.',
+          leadGreetingMessage: settings.leadGreetingMessage || 'Please hold while we connect you with a specialist.',
           leadVoicemailEnabled: false,
           ...(settings.quietHoursEnabled && settings.quietHoursTimezone && settings.quietHoursStart && settings.quietHoursEnd && {
             quietHours: {
@@ -318,23 +318,6 @@ export class CallConnectService {
       params.leadSummary ||
       [params.customerName, params.category].filter(Boolean).join(' – ');
 
-    // Build per-call whisper / greeting with lead data substituted
-    const templateVars = {
-      customerName: params.customerName,
-      category: params.category ?? '',
-      location: params.location ?? '',
-      summary,
-    };
-
-    const defaultWhisper = `New lead: ${summary}. Press any key to connect.`;
-    const agentWhisperMessage = settings.agentWhisperMessage
-      ? this.substituteVars(settings.agentWhisperMessage, templateVars)
-      : defaultWhisper;
-
-    const leadGreetingMessage = settings.leadGreetingMessage
-      ? this.substituteVars(settings.leadGreetingMessage, templateVars)
-      : 'Please hold while we connect you with a specialist.';
-
     try {
       const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
 
@@ -346,8 +329,6 @@ export class CallConnectService {
             leadId: params.leadId,
             leadPhoneE164: params.customerPhone,
             leadSummary: summary,
-            agentWhisperMessage,
-            leadGreetingMessage,
             source: 'leadbridge',
           },
           { headers: this.buildHeaders(sigcoreApiKey) },
@@ -534,31 +515,7 @@ export class CallConnectService {
 
     const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
 
-    const testCustomer = {
-      name: 'Test Customer',
-      category: 'House Cleaning',
-      city: 'Tampa',
-      state: 'FL',
-    };
-    const location = `${testCustomer.city}, ${testCustomer.state}`;
-    const leadSummary = `${testCustomer.name} — ${testCustomer.category} — ${location}`;
-
-    // Build per-call whisper / greeting with test data substituted
-    const templateVars = {
-      customerName: testCustomer.name,
-      category: testCustomer.category,
-      location,
-      summary: leadSummary,
-    };
-
-    const defaultWhisper = `New lead: ${leadSummary}. Press any key to connect.`;
-    const agentWhisperMessage = settings.agentWhisperMessage
-      ? this.substituteVars(settings.agentWhisperMessage, templateVars)
-      : defaultWhisper;
-
-    const leadGreetingMessage = settings.leadGreetingMessage
-      ? this.substituteVars(settings.leadGreetingMessage, templateVars)
-      : 'Please hold while we connect you with a specialist.';
+    const leadSummary = 'Test Customer — House Cleaning — Tampa, FL';
 
     let response: any;
     try {
@@ -570,8 +527,6 @@ export class CallConnectService {
             leadId: `test-${Date.now()}`,
             leadPhoneE164: testPhone,
             leadSummary,
-            agentWhisperMessage,
-            leadGreetingMessage,
             source: 'leadbridge',
           },
           { headers: this.buildHeaders(sigcoreApiKey) },
