@@ -28,14 +28,18 @@ const STATUS_CONFIG: Record<
 };
 
 const EVENT_LABELS: Record<string, string> = {
-  'call_connect.session.created': 'Session created',
-  'call_connect.agent.ringing':   'Agent ringing',
-  'call_connect.agent.accepted':  'Agent accepted',
-  'call_connect.lead.ringing':    'Lead ringing',
-  'call_connect.bridged':         'Bridged ✓',
-  'call_connect.voicemail_drop':  'Voicemail dropped',
-  'call_connect.ended':           'Ended',
-  'call_connect.failed':          'Failed',
+  'call_connect.session.created':  'Session created',
+  'call_connect.session_created':  'Session created',
+  'call_connect.agent.ringing':    'Agent ringing',
+  'call_connect.agent_ringing':    'Agent ringing',
+  'call_connect.agent.accepted':   'Agent accepted',
+  'call_connect.agent_accepted':   'Agent accepted',
+  'call_connect.lead.ringing':     'Lead ringing',
+  'call_connect.lead_ringing':     'Lead ringing',
+  'call_connect.bridged':          'Bridged ✓',
+  'call_connect.voicemail_drop':   'Voicemail dropped',
+  'call_connect.ended':            'Ended',
+  'call_connect.failed':           'Failed',
 };
 
 function formatTime(iso: string) {
