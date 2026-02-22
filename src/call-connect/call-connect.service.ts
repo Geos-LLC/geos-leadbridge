@@ -40,7 +40,10 @@ export class CallConnectService {
     private configService: ConfigService,
     private httpService: HttpService,
   ) {
+    // SIGCORE_CALL_CONNECT_URL lets call-connect point to a different Sigcore instance
+    // (e.g. staging) while notifications/SMS continue using SIGCORE_API_URL (production).
     const rawUrl =
+      this.configService.get<string>('SIGCORE_CALL_CONNECT_URL') ||
       this.configService.get<string>('SIGCORE_API_URL') ||
       'https://sigcore-production.up.railway.app/api';
     // Strip trailing /api — we build full paths ourselves using /api/internal/...
