@@ -180,6 +180,7 @@ export class CallConnectService {
           agentPhoneE164: settings.agentPhoneE164,
           ringTimeoutSeconds: 60,
           maxAgentAttempts: settings.maxAgentAttempts,
+          agentAcceptDigits: '0123456789',
           agentWhisperMessage: settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.',
           leadGreetingMessage: settings.leadGreetingMessage || 'Please hold while we connect you with a specialist.',
           leadVoicemailEnabled: false,
