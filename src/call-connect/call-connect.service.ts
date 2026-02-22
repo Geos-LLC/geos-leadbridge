@@ -336,15 +336,21 @@ export class CallConnectService {
       params.leadSummary ||
       [params.customerName, params.category].filter(Boolean).join(' – ');
 
-    // Whisper/greeting messages are read by Sigcore from settings (pushed via pushSettingsToSigcore).
-    // Do NOT send them in the /start body — Sigcore's DTO strips unknown fields (NestJS whitelist).
-    // Template vars like {summary}, {customerName} are substituted by Sigcore per-session.
+    // Build the complete whisper message on LeadBridge's side so Sigcore receives
+    // the final text directly — no template substitution needed on Sigcore's end.
+    // If settings has a custom template, apply vars here; otherwise use default.
+    const whisperTemplate = settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.';
+    const agentWhisperMessage = whisperTemplate
+      .replace(/\{summary\}/g, summary)
+      .replace(/\{customerName\}/g, params.customerName || '')
+      .replace(/\{category\}/g, params.category || '')
+      .replace(/\{location\}/g, params.location || '');
 
     try {
       const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
 
       this.logger.log(
-        `[triggerForLead] POST ${url} | businessId=${sigcoreBusinessId} | lead=${params.leadId} | phone=${params.customerPhone}`,
+        `[triggerForLead] POST ${url} | businessId=${sigcoreBusinessId} | lead=${params.leadId} | phone=${params.customerPhone} | whisper="${agentWhisperMessage}"`,
       );
 
       const response = await firstValueFrom(
@@ -355,6 +361,7 @@ export class CallConnectService {
             leadId: params.leadId,
             leadPhoneE164: params.customerPhone,
             leadSummary: summary,
+            agentWhisperMessage,
             agentHint: settings.agentPhoneE164 || undefined,
             source: 'leadbridge',
           },
@@ -550,14 +557,18 @@ export class CallConnectService {
     const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
     const leadSummary = 'Test Customer — House Cleaning — Tampa, FL';
 
-    // Only send fields that Sigcore's StartCallConnectDto accepts.
-    // agentWhisperMessage and leadGreetingMessage are read from settings by Sigcore,
-    // NOT from the /start body (NestJS whitelist strips unknown fields).
+    // Build the full whisper message here so Sigcore receives it pre-built.
+    // This ensures the agent hears the correct, up-to-date summary regardless of
+    // what template may be stored in Sigcore settings.
+    const whisperTemplate = settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.';
+    const agentWhisperMessage = whisperTemplate.replace(/\{summary\}/g, leadSummary);
+
     const startPayload = {
       businessId: sigcoreBusinessId,
       leadId: `test-${Date.now()}`,
       leadPhoneE164: testPhone,
       leadSummary,
+      agentWhisperMessage,
       agentHint: settings.agentPhoneE164 || undefined,
       source: 'leadbridge',
     };
