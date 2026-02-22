@@ -22,9 +22,9 @@ export function Layout() {
   const allDisconnected = hasAccounts && savedAccounts.every(a => !a.webhookId);
   const someDisconnected = hasAccounts && !allDisconnected && savedAccounts.some(a => !a.webhookId);
 
-  // Preload analytics data on app start (cached for instant page loads)
+  // Preload analytics data on app start — always force-refresh so cache stays current
   useEffect(() => {
-    loadAnalytics();
+    loadAnalytics(true);
   }, []);
 
   // Track when savedAccounts changes to debug banner visibility

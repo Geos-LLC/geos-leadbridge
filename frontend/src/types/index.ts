@@ -51,11 +51,19 @@ export interface Message {
   conversationId: string;
   platform: string;
   externalMessageId: string;
-  sender: 'customer' | 'pro';
+  sender: 'customer' | 'pro' | 'system';
   content: string;
   isRead: boolean;
   sentAt: string;
   deliveredAt?: string;
+  notificationLogId?: string;
+}
+
+export interface CustomerTextingSettings {
+  enabled: boolean;
+  autoReplyTemplate: string;
+  followUps: Array<{ id?: string; enabled: boolean; delayMinutes: number; template: string }>;
+  stopOnCustomerReply: boolean;
 }
 
 export interface Platform {
@@ -389,4 +397,69 @@ export interface CommunicationSummary {
   smsDelivered: number;
   smsFailed: number;
   calls: number;
+}
+
+// ─── Instant Call Connect ────────────────────────────────────────────────────
+
+export type CallConnectMode = 'AGENT_FIRST' | 'PARALLEL';
+export type AgentStrategy = 'owner' | 'round_robin' | 'on_duty';
+
+export type CallConnectStatus =
+  | 'CREATED'
+  | 'CALLING_AGENT'
+  | 'AGENT_ANSWERED'
+  | 'AGENT_ACCEPTED'
+  | 'CALLING_LEAD'
+  | 'BRIDGED'
+  | 'VOICEMAIL_DROP'
+  | 'ENDED'
+  | 'FAILED'
+  | 'CANCELED'
+  // legacy values
+  | 'RINGING_AGENT'
+  | 'RINGING_LEAD'
+  | 'CANCELLED';
+
+export interface CallConnectSettings {
+  id: string;
+  savedAccountId: string;
+  enabled: boolean;
+  mode: CallConnectMode;
+  agentStrategy: AgentStrategy;
+  agentPhoneE164: string | null;
+  botNumberE164: string | null;
+  maxAgentAttempts: number;
+  quietHoursEnabled: boolean;
+  quietHoursTimezone: string | null;
+  quietHoursStart: string | null;
+  quietHoursEnd: string | null;
+  agentAcceptDigits: string | null;
+  agentWhisperMessage: string | null;
+  leadGreetingMessage: string | null;
+  leadVoicemailEnabled: boolean;
+  leadVoicemailMessage: string | null;
+  leadVoicemailRecordingUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CallConnectTimelineEntry {
+  event: string;
+  timestamp: string;
+  data: Record<string, any>;
+}
+
+export interface LeadCallConnect {
+  id: string;
+  leadId: string;
+  businessId: string | null;
+  sigcoreSessionId: string;
+  status: CallConnectStatus;
+  attempt: number;
+  lastEventAt: string;
+  failureReason: string | null;
+  recordingUrl: string | null;
+  timeline: CallConnectTimelineEntry[];
+  createdAt: string;
+  updatedAt: string;
 }

@@ -9,12 +9,30 @@ const ALL_VARIABLES = [...AUTO_REPLY_VARIABLES, ...SMS_VARIABLES.filter(
   v => !AUTO_REPLY_VARIABLES.some(a => a.desc === v.desc)
 )];
 
+type TemplateFilter = 'all' | 'auto-reply' | 'alerts' | 'call-connect';
+
+function getTemplateFilter(name: string): TemplateFilter {
+  const n = name.toLowerCase();
+  if (/auto[\s-]?reply|follow[\s-]?up|welcome/.test(n)) return 'auto-reply';
+  if (/alert|notification/.test(n)) return 'alerts';
+  if (/^cc[\s-]|call[\s-]?connect|whisper|greeting|voicemail/.test(n)) return 'call-connect';
+  return 'all';
+}
+
+const FILTER_TABS: { key: TemplateFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'auto-reply', label: 'Auto Reply' },
+  { key: 'alerts', label: 'Alerts' },
+  { key: 'call-connect', label: 'Call Connect' },
+];
+
 export function MessageSettings() {
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedTemplates, setExpandedTemplates] = useState<Set<string>>(new Set());
+  const [activeFilter, setActiveFilter] = useState<TemplateFilter>('all');
 
   // Modal state
   const [editorMode, setEditorMode] = useState<'create' | 'edit' | null>(null);
@@ -151,17 +169,45 @@ export function MessageSettings() {
 
       {/* Templates List */}
       <section className="space-y-6">
-        <div className="flex items-center justify-between px-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-2">
           <h3 className="text-xl font-bold text-slate-900">Your Library</h3>
-          <span className="text-slate-400 text-sm font-medium">{templates.length} Template{templates.length !== 1 ? 's' : ''} saved</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            {FILTER_TABS.map(tab => {
+              const count = tab.key === 'all'
+                ? templates.length
+                : templates.filter(t => getTemplateFilter(t.name) === tab.key).length;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveFilter(tab.key)}
+                  className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    activeFilter === tab.key
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  }`}
+                >
+                  {tab.label}
+                  {count > 0 && (
+                    <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${
+                      activeFilter === tab.key ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-500'
+                    }`}>{count}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        {templates.length === 0 ? (
+        {templates.filter(t => activeFilter === 'all' || getTemplateFilter(t.name) === activeFilter).length === 0 ? (
           <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-12 text-center">
             <FileText className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-            <h3 className="text-lg font-bold text-slate-600 mb-2">No templates yet</h3>
+            <h3 className="text-lg font-bold text-slate-600 mb-2">
+              {activeFilter === 'all' ? 'No templates yet' : `No ${FILTER_TABS.find(t => t.key === activeFilter)?.label} templates`}
+            </h3>
             <p className="text-slate-500 mb-6 max-w-md mx-auto">
-              Templates let you send personalized follow-up messages to multiple leads at once. Create your first one to get started.
+              {activeFilter === 'all'
+                ? 'Templates let you send personalized follow-up messages to multiple leads at once. Create your first one to get started.'
+                : 'No templates match this filter yet. Create one or check another category.'}
             </p>
             <button
               onClick={openCreate}
@@ -173,7 +219,7 @@ export function MessageSettings() {
           </div>
         ) : (
           <div className="space-y-4">
-            {templates.map(template => {
+            {templates.filter(t => activeFilter === 'all' || getTemplateFilter(t.name) === activeFilter).map(template => {
               const isExpanded = expandedTemplates.has(template.id);
               return (
                 <div

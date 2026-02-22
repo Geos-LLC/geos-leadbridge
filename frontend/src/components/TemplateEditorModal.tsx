@@ -17,22 +17,22 @@ export const AUTO_REPLY_VARIABLES: TemplateVariable[] = [
 ];
 
 export const SMS_VARIABLES: TemplateVariable[] = [
-  { name: '{{account.name}}', desc: 'Your business name' },
-  { name: '{{lead.name}}', desc: 'Customer name' },
-  { name: '{{lead.phone}}', desc: 'Customer phone' },
-  { name: '{{lead.service}}', desc: 'Service category' },
-  { name: '{{lead.location}}', desc: 'City, State' },
-  { name: '{{lead.zip}}', desc: 'ZIP code' },
-  { name: '{{lead.message}}', desc: 'Customer request message' },
-  { name: '{{lead.serviceDescription}}', desc: 'Detailed service description' },
-  { name: '{{lead.addons}}', desc: 'Service add-ons' },
-  { name: '{{lead.frequency}}', desc: 'Service frequency' },
-  { name: '{{lead.bedrooms}}', desc: 'Number of bedrooms' },
-  { name: '{{lead.bathrooms}}', desc: 'Number of bathrooms' },
-  { name: '{{lead.price}}', desc: 'Lead price/cost' },
-  { name: '{{lead.pets}}', desc: 'Pet information' },
-  { name: '{{lead.estimate}}', desc: 'Estimated cost/quote' },
-  { name: '{{lead.dates}}', desc: 'Requested date/schedule' },
+  { name: '{account.name}', desc: 'Your business name' },
+  { name: '{lead.name}', desc: 'Customer name' },
+  { name: '{lead.phone}', desc: 'Customer phone' },
+  { name: '{lead.service}', desc: 'Service category' },
+  { name: '{lead.location}', desc: 'City, State' },
+  { name: '{lead.zip}', desc: 'ZIP code' },
+  { name: '{lead.message}', desc: 'Customer request message' },
+  { name: '{lead.serviceDescription}', desc: 'Detailed service description' },
+  { name: '{lead.addons}', desc: 'Service add-ons' },
+  { name: '{lead.frequency}', desc: 'Service frequency' },
+  { name: '{lead.bedrooms}', desc: 'Number of bedrooms' },
+  { name: '{lead.bathrooms}', desc: 'Number of bathrooms' },
+  { name: '{lead.price}', desc: 'Lead price/cost' },
+  { name: '{lead.pets}', desc: 'Pet information' },
+  { name: '{lead.estimate}', desc: 'Estimated cost/quote' },
+  { name: '{lead.dates}', desc: 'Requested date/schedule' },
 ];
 
 interface TemplateEditorModalProps {

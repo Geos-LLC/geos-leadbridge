@@ -343,12 +343,13 @@ export interface ApiMessage {
   conversationId: string;
   platform: string;
   externalMessageId: string;
-  sender: 'customer' | 'pro';
+  sender: 'customer' | 'pro' | 'system';
   content: string;
   attachments?: MessageAttachment[];
   isRead: boolean;
   sentAt: string;
   deliveredAt?: string;
+  notificationLogId?: string;
 }
 
 // Leads
@@ -620,6 +621,15 @@ export const notificationsApi = {
   },
   disconnectSigcore: async (savedAccountId: string): Promise<{ success: boolean; error?: string }> => {
     const { data } = await api.delete(`/v1/notifications/sigcore/disconnect/${savedAccountId}`);
+    return data;
+  },
+  // Customer Texting
+  getCustomerTextingSettings: async (savedAccountId: string): Promise<{ success: boolean; enabled: boolean; autoReplyTemplate: string; followUps: Array<{ id?: string; enabled: boolean; delayMinutes: number; template: string }>; stopOnCustomerReply: boolean }> => {
+    const { data } = await api.get(`/v1/notifications/customer-texting/${savedAccountId}`);
+    return data;
+  },
+  saveCustomerTextingSettings: async (savedAccountId: string, settings: { enabled: boolean; autoReplyTemplate: string; followUps: Array<{ enabled: boolean; delayMinutes: number; template: string }>; stopOnCustomerReply: boolean }): Promise<{ success: boolean }> => {
+    const { data } = await api.put(`/v1/notifications/customer-texting/${savedAccountId}`, settings);
     return data;
   },
 };
@@ -1094,6 +1104,44 @@ export const integrationsApi = {
     const { data } = await api.post('/v1/thumbtack/negotiations/import-batch', {
       negotiationIds,
       ...(accountId ? { accountId } : {}),
+    });
+    return data;
+  },
+};
+
+// Instant Call Connect API
+import type { CallConnectSettings, LeadCallConnect } from '../types';
+
+export const callConnectApi = {
+  getSettings: async (accountId: string): Promise<{ settings: CallConnectSettings | null }> => {
+    const { data } = await api.get(`/v1/call-connect/settings?accountId=${accountId}`);
+    return data;
+  },
+  saveSettings: async (
+    savedAccountId: string,
+    updates: Partial<Omit<CallConnectSettings, 'id' | 'savedAccountId' | 'createdAt' | 'updatedAt'>>,
+  ): Promise<{ settings: CallConnectSettings }> => {
+    const { data } = await api.put('/v1/call-connect/settings', { savedAccountId, ...updates });
+    return data;
+  },
+  getLeadSessions: async (leadId: string): Promise<{ sessions: LeadCallConnect[] }> => {
+    const { data } = await api.get(`/v1/call-connect/lead/${leadId}`);
+    return data;
+  },
+  cancelSession: async (sessionId: string, savedAccountId: string): Promise<{ cancelled: boolean }> => {
+    const { data } = await api.post('/v1/call-connect/cancel', { sessionId, savedAccountId });
+    return data;
+  },
+  testCall: async (savedAccountId: string, testPhone: string): Promise<{ triggered: boolean; sessionId: string | null }> => {
+    const { data } = await api.post('/v1/call-connect/test', { savedAccountId, testPhone });
+    return data;
+  },
+  uploadVoicemail: async (savedAccountId: string, file: File): Promise<{ recordingUrl: string }> => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('savedAccountId', savedAccountId);
+    const { data } = await api.post('/v1/call-connect/upload-voicemail', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
     });
     return data;
   },

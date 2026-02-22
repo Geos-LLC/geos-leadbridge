@@ -10,9 +10,16 @@ import { PrismaService } from '../common/utils/prisma.service';
 import { PlatformsModule } from '../platforms/platforms.module';
 import { AutomationModule } from '../automation/automation.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { CallConnectModule } from '../call-connect/call-connect.module';
 
 @Module({
-  imports: [ConfigModule, PlatformsModule, forwardRef(() => AutomationModule), forwardRef(() => NotificationsModule)],
+  imports: [
+    ConfigModule,
+    PlatformsModule,
+    forwardRef(() => AutomationModule),
+    forwardRef(() => NotificationsModule),
+    forwardRef(() => CallConnectModule),
+  ],
   controllers: [WebhooksController],
   providers: [WebhooksService, PrismaService],
   exports: [WebhooksService],

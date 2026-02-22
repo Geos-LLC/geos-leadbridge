@@ -41,5 +41,10 @@ export default () => ({
   sigcore: {
     apiUrl: process.env.SIGCORE_API_URL || 'https://sigcore-production.up.railway.app',
     apiKey: process.env.SIGCORE_API_KEY,
+    // HMAC secret for verifying incoming call-connect webhooks from Sigcore
+    callConnectWebhookSecret: process.env.SIGCORE_CALL_CONNECT_WEBHOOK_SECRET,
   },
+
+  // Public base URL of this app — used to build webhook callback URLs sent to Sigcore
+  appBaseUrl: process.env.APP_BASE_URL || process.env.FRONTEND_URL || 'https://leadbridge360.com',
 });

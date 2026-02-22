@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Plus, Pencil, Trash2, Loader2, Save, X, Zap, Clock, Play, Pause, ChevronDown, FileText } from 'lucide-react';
+import { ArrowLeft, Plus, Pencil, Trash2, Loader2, Save, X, Zap, Clock, Play, Pause, ChevronDown, FileText, Phone, Moon, Upload, Music, MessageSquare } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { automationApi, thumbtackApi, templatesApi } from '../services/api';
-import type { AutomationRule, SavedAccount, MessageTemplate } from '../types';
+import { automationApi, thumbtackApi, templatesApi, callConnectApi, notificationsApi } from '../services/api';
+import type { AutomationRule, SavedAccount, MessageTemplate, CallConnectMode, AgentStrategy } from '../types';
 
 // Available variables for templates
 const TEMPLATE_VARIABLES = [
@@ -52,6 +52,36 @@ export function AutomationSettings() {
   // Delete confirmation
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // ── Call Connect settings ──────────────────────────────────────────────────
+  const [ccLoading, setCcLoading] = useState(false);
+  const [ccSaving, setCcSaving] = useState(false);
+  const [ccEnabled, setCcEnabled] = useState(false);
+  const [ccMode, setCcMode] = useState<CallConnectMode>('AGENT_FIRST');
+  const [ccAgentStrategy, setCcAgentStrategy] = useState<AgentStrategy>('owner');
+  const [ccAgentPhone, setCcAgentPhone] = useState('');
+  const [ccMaxAttempts, setCcMaxAttempts] = useState(2);
+  const [ccQuietEnabled, setCcQuietEnabled] = useState(false);
+  const [ccQuietTimezone, setCcQuietTimezone] = useState('America/New_York');
+  const [ccQuietStart, setCcQuietStart] = useState('22:00');
+  const [ccQuietEnd, setCcQuietEnd] = useState('08:00');
+  const [ccRecordingUrl, setCcRecordingUrl] = useState<string | null>(null);
+  const [ccUploading, setCcUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Customer Texting settings ─────────────────────────────────────────────
+  const [ctLoading, setCtLoading] = useState(false);
+  const [ctSaving, setCtSaving] = useState(false);
+  const [ctEnabled, setCtEnabled] = useState(false);
+  const [ctAutoReplyTemplate, setCtAutoReplyTemplate] = useState(
+    'Hi {{lead.name}}, this is {{account.name}}. We just received your request for {{lead.service}} in {{lead.location}}. When would be a good time to call you?'
+  );
+  const [ctFollowUps, setCtFollowUps] = useState([
+    { enabled: true, delayMinutes: 10, template: 'Hi {{lead.name}}, just checking in — did you get our message about your {{lead.service}} request? We\'d love to help!' },
+    { enabled: true, delayMinutes: 60, template: 'Hi {{lead.name}}, this is {{account.name}} again. We\'re available to discuss your {{lead.service}} needs. Feel free to reply with a good time to chat!' },
+    { enabled: false, delayMinutes: 1440, template: 'Hi {{lead.name}}, we wanted to follow up one more time about your {{lead.service}} request. Reply anytime and we\'ll get back to you right away!' },
+  ]);
+  const [ctStopOnReply, setCtStopOnReply] = useState(true);
+
   // Quick template creation modal
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState('');
@@ -62,6 +92,14 @@ export function AutomationSettings() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    const effectiveAccountId = selectedAccountId !== 'all' ? selectedAccountId : accounts[0]?.id;
+    if (effectiveAccountId) {
+      loadCcSettings(effectiveAccountId);
+      loadCtSettings(effectiveAccountId);
+    }
+  }, [selectedAccountId, accounts]);
 
   async function loadData() {
     try {
@@ -86,6 +124,115 @@ export function AutomationSettings() {
       setError(err.message || 'Failed to load data');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadCcSettings(accountId: string) {
+    setCcLoading(true);
+    try {
+      const res = await callConnectApi.getSettings(accountId);
+      if (res.settings) {
+        setCcEnabled(res.settings.enabled);
+        setCcMode(res.settings.mode);
+        setCcAgentStrategy(res.settings.agentStrategy);
+        setCcAgentPhone(res.settings.agentPhoneE164 || '');
+        setCcMaxAttempts(res.settings.maxAgentAttempts);
+        setCcQuietEnabled(res.settings.quietHoursEnabled);
+        setCcQuietTimezone(res.settings.quietHoursTimezone || 'America/New_York');
+        setCcQuietStart(res.settings.quietHoursStart || '22:00');
+        setCcQuietEnd(res.settings.quietHoursEnd || '08:00');
+        setCcRecordingUrl(res.settings.leadVoicemailRecordingUrl || null);
+      } else {
+        setCcEnabled(false);
+        setCcMode('AGENT_FIRST');
+        setCcAgentStrategy('owner');
+        setCcAgentPhone('');
+        setCcMaxAttempts(2);
+        setCcQuietEnabled(false);
+        setCcQuietTimezone('America/New_York');
+        setCcQuietStart('22:00');
+        setCcQuietEnd('08:00');
+        setCcRecordingUrl(null);
+      }
+    } catch {
+      // non-fatal
+    } finally {
+      setCcLoading(false);
+    }
+  }
+
+  async function saveCcSettings() {
+    const effectiveAccountId = selectedAccountId !== 'all' ? selectedAccountId : accounts[0]?.id;
+    if (!effectiveAccountId) return;
+    setCcSaving(true);
+    try {
+      await callConnectApi.saveSettings(effectiveAccountId, {
+        enabled: ccEnabled,
+        mode: ccMode,
+        agentStrategy: ccAgentStrategy,
+        agentPhoneE164: ccAgentPhone || undefined,
+        maxAgentAttempts: ccMaxAttempts,
+        quietHoursEnabled: ccQuietEnabled,
+        quietHoursTimezone: ccQuietEnabled ? ccQuietTimezone : undefined,
+        quietHoursStart: ccQuietEnabled ? ccQuietStart : undefined,
+        quietHoursEnd: ccQuietEnabled ? ccQuietEnd : undefined,
+      });
+      await loadCcSettings(effectiveAccountId);
+    } catch {
+      setError('Failed to save Instant Call Connect settings');
+    } finally {
+      setCcSaving(false);
+    }
+  }
+
+  async function handleVoicemailUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const effectiveAccountId = selectedAccountId !== 'all' ? selectedAccountId : accounts[0]?.id;
+    if (!effectiveAccountId) return;
+
+    setCcUploading(true);
+    try {
+      const res = await callConnectApi.uploadVoicemail(effectiveAccountId, file);
+      setCcRecordingUrl(res.recordingUrl);
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'Upload failed');
+    } finally {
+      setCcUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
+  async function loadCtSettings(accountId: string) {
+    setCtLoading(true);
+    try {
+      const res = await notificationsApi.getCustomerTextingSettings(accountId);
+      setCtEnabled(res.enabled);
+      setCtAutoReplyTemplate(res.autoReplyTemplate);
+      setCtFollowUps(res.followUps);
+      setCtStopOnReply(res.stopOnCustomerReply);
+    } catch {
+      // non-fatal — keep defaults
+    } finally {
+      setCtLoading(false);
+    }
+  }
+
+  async function saveCtSettings() {
+    const effectiveAccountId = selectedAccountId !== 'all' ? selectedAccountId : accounts[0]?.id;
+    if (!effectiveAccountId) return;
+    setCtSaving(true);
+    try {
+      await notificationsApi.saveCustomerTextingSettings(effectiveAccountId, {
+        enabled: ctEnabled,
+        autoReplyTemplate: ctAutoReplyTemplate,
+        followUps: ctFollowUps,
+        stopOnCustomerReply: ctStopOnReply,
+      });
+    } catch {
+      setError('Failed to save Customer Texting settings');
+    } finally {
+      setCtSaving(false);
     }
   }
 
@@ -807,6 +954,347 @@ export function AutomationSettings() {
                   )}
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Customer Texting ──────────────────────────────────────────── */}
+        <div className="rules-section" style={{ marginTop: '2rem' }}>
+          <div className="section-header">
+            <h2>
+              <MessageSquare size={18} style={{ marginRight: 6, verticalAlign: 'middle' }} />
+              Customer Texting
+            </h2>
+          </div>
+
+          {ctLoading ? (
+            <div className="loading-container" style={{ minHeight: 80 }}>
+              <Loader2 size={20} className="spinner" />
+            </div>
+          ) : (
+            <div className={`rule-card ${ctEnabled ? 'enabled' : 'disabled'}`} style={{ display: 'block' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <button
+                  className={`toggle-btn ${ctEnabled ? 'on' : 'off'}`}
+                  onClick={() => setCtEnabled(e => !e)}
+                  title={ctEnabled ? 'Disable' : 'Enable'}
+                  style={{ marginTop: 2, flexShrink: 0 }}
+                >
+                  {ctEnabled ? <Play size={14} /> : <Pause size={14} />}
+                </button>
+                <div style={{ flex: 1 }}>
+                  <div className="rule-header" style={{ marginBottom: 4 }}>
+                    <h3>Customer Texting</h3>
+                  </div>
+                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>
+                    Automatically text customers when new leads arrive, with follow-up reminders.
+                  </p>
+
+                  {ctEnabled && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      {/* Auto-reply template */}
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>Auto-Reply Message</label>
+                        <p className="form-hint">Sent immediately when a new lead arrives.</p>
+                        <textarea
+                          value={ctAutoReplyTemplate}
+                          onChange={e => setCtAutoReplyTemplate(e.target.value)}
+                          rows={3}
+                          style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }}
+                        />
+                        <div className="variable-buttons" style={{ marginTop: 6 }}>
+                          {TEMPLATE_VARIABLES.map(v => (
+                            <button
+                              key={v.name}
+                              type="button"
+                              className="variable-btn"
+                              onClick={() => setCtAutoReplyTemplate(prev => prev + v.name)}
+                              title={v.description}
+                            >
+                              {v.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Follow-up schedule */}
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>Follow-Up Messages</label>
+                        <p className="form-hint">Scheduled messages sent if the customer hasn't replied.</p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          {ctFollowUps.map((fu, idx) => (
+                            <div
+                              key={idx}
+                              style={{
+                                padding: '10px 12px',
+                                borderRadius: 8,
+                                border: '1px solid',
+                                borderColor: fu.enabled ? '#d1d5db' : '#e5e7eb',
+                                background: fu.enabled ? '#f9fafb' : '#fafafa',
+                                opacity: fu.enabled ? 1 : 0.7,
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: fu.enabled ? 8 : 0 }}>
+                                <button
+                                  className={`toggle-btn ${fu.enabled ? 'on' : 'off'}`}
+                                  style={{ transform: 'scale(0.8)', flexShrink: 0 }}
+                                  onClick={() => {
+                                    const updated = [...ctFollowUps];
+                                    updated[idx] = { ...fu, enabled: !fu.enabled };
+                                    setCtFollowUps(updated);
+                                  }}
+                                >
+                                  {fu.enabled ? <Play size={12} /> : <Pause size={12} />}
+                                </button>
+                                <span style={{ fontSize: 13, fontWeight: 500 }}>
+                                  <Clock size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                                  {fu.delayMinutes < 60 ? `${fu.delayMinutes} min` : `${fu.delayMinutes / 60} hour${fu.delayMinutes > 60 ? 's' : ''}`}
+                                </span>
+                              </div>
+                              {fu.enabled && (
+                                <textarea
+                                  value={fu.template}
+                                  onChange={e => {
+                                    const updated = [...ctFollowUps];
+                                    updated[idx] = { ...fu, template: e.target.value };
+                                    setCtFollowUps(updated);
+                                  }}
+                                  rows={2}
+                                  style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }}
+                                />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Stop on reply */}
+                      <div className="form-group checkbox-group" style={{ marginBottom: 0 }}>
+                        <label className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={ctStopOnReply}
+                            onChange={e => setCtStopOnReply(e.target.checked)}
+                          />
+                          Cancel follow-ups if customer replies
+                        </label>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="form-actions" style={{ marginTop: 16 }}>
+                    <button
+                      className="btn btn-primary"
+                      onClick={saveCtSettings}
+                      disabled={ctSaving}
+                    >
+                      {ctSaving ? <Loader2 size={16} className="spinner" /> : <Save size={16} />}
+                      Save
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Instant Call Connect ───────────────────────────────────────── */}
+        <div className="rules-section" style={{ marginTop: '2rem' }}>
+          <div className="section-header">
+            <h2>
+              <Phone size={18} style={{ marginRight: 6, verticalAlign: 'middle' }} />
+              Instant Call Connect
+            </h2>
+          </div>
+
+          {ccLoading ? (
+            <div className="loading-container" style={{ minHeight: 80 }}>
+              <Loader2 size={20} className="spinner" />
+            </div>
+          ) : (
+            <div className={`rule-card ${ccEnabled ? 'enabled' : 'disabled'}`} style={{ display: 'block' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <button
+                  className={`toggle-btn ${ccEnabled ? 'on' : 'off'}`}
+                  onClick={() => setCcEnabled(e => !e)}
+                  title={ccEnabled ? 'Disable' : 'Enable'}
+                  style={{ marginTop: 2, flexShrink: 0 }}
+                >
+                  {ccEnabled ? <Play size={14} /> : <Pause size={14} />}
+                </button>
+                <div style={{ flex: 1 }}>
+                  <div className="rule-header" style={{ marginBottom: 4 }}>
+                    <h3>Instant Call Connect</h3>
+                  </div>
+                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>
+                    When a new lead arrives, automatically call you and connect them to the lead instantly.
+                  </p>
+
+                  {ccEnabled && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      {/* Connection mode */}
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>Connection Mode</label>
+                        <div className="radio-group">
+                          <label className="radio-label">
+                            <input
+                              type="radio"
+                              name="ccMode"
+                              checked={ccMode === 'AGENT_FIRST'}
+                              onChange={() => setCcMode('AGENT_FIRST')}
+                            />
+                            Agent first — we call you, then connect the lead once you answer
+                          </label>
+                          <label className="radio-label">
+                            <input
+                              type="radio"
+                              name="ccMode"
+                              checked={ccMode === 'PARALLEL'}
+                              onChange={() => setCcMode('PARALLEL')}
+                            />
+                            Parallel — call you and the lead simultaneously (fastest)
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Agent strategy */}
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>Agent Routing</label>
+                        <div className="select-wrapper" style={{ maxWidth: 220 }}>
+                          <select value={ccAgentStrategy} onChange={e => setCcAgentStrategy(e.target.value as AgentStrategy)}>
+                            <option value="owner">Owner</option>
+                            <option value="round_robin">Round-robin</option>
+                            <option value="on_duty">On duty</option>
+                          </select>
+                          <ChevronDown size={16} />
+                        </div>
+                      </div>
+
+                      {/* Agent phone */}
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>Agent Phone (E.164)</label>
+                        <input
+                          type="tel"
+                          value={ccAgentPhone}
+                          onChange={e => setCcAgentPhone(e.target.value)}
+                          placeholder="+15551234567"
+                          style={{ maxWidth: 220 }}
+                        />
+                        <p className="form-hint">Phone Sigcore will ring when a new lead arrives.</p>
+                      </div>
+
+                      {/* Max attempts */}
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>Max agent attempts</label>
+                        <div className="select-wrapper" style={{ maxWidth: 120 }}>
+                          <select value={ccMaxAttempts} onChange={e => setCcMaxAttempts(Number(e.target.value))}>
+                            {[1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}
+                          </select>
+                          <ChevronDown size={16} />
+                        </div>
+                      </div>
+
+                      {/* Quiet hours */}
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <Moon size={14} />
+                          <label style={{ margin: 0 }}>Quiet Hours</label>
+                          <button
+                            className={`toggle-btn ${ccQuietEnabled ? 'on' : 'off'}`}
+                            style={{ transform: 'scale(0.85)', marginLeft: 4 }}
+                            onClick={() => setCcQuietEnabled(v => !v)}
+                          >
+                            {ccQuietEnabled ? <Play size={12} /> : <Pause size={12} />}
+                          </button>
+                        </div>
+                        {ccQuietEnabled && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div className="select-wrapper" style={{ maxWidth: 240 }}>
+                              <select value={ccQuietTimezone} onChange={e => setCcQuietTimezone(e.target.value)}>
+                                {['America/New_York','America/Chicago','America/Denver','America/Los_Angeles','America/Phoenix','America/Anchorage','Pacific/Honolulu'].map(tz => (
+                                  <option key={tz} value={tz}>{tz}</option>
+                                ))}
+                              </select>
+                              <ChevronDown size={16} />
+                            </div>
+                            <div style={{ display: 'flex', gap: 12 }}>
+                              <div>
+                                <label style={{ fontSize: 12, marginBottom: 4 }}>From</label>
+                                <input type="time" value={ccQuietStart} onChange={e => setCcQuietStart(e.target.value)} />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 12, marginBottom: 4 }}>To</label>
+                                <input type="time" value={ccQuietEnd} onChange={e => setCcQuietEnd(e.target.value)} />
+                              </div>
+                            </div>
+                            <p className="form-hint" style={{ marginTop: 0 }}>Calls will not be triggered during quiet hours.</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Voicemail recording upload */}
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>
+                          <Music size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                          Voicemail Recording (MP3 / WAV)
+                        </label>
+                        <p className="form-hint">Upload a pre-recorded audio file to play as voicemail when the lead doesn't answer.</p>
+
+                        {ccRecordingUrl && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <audio controls src={ccRecordingUrl} style={{ height: 32, flex: 1 }} />
+                            <button
+                              type="button"
+                              className="btn-icon btn-danger-subtle"
+                              title="Remove recording"
+                              onClick={async () => {
+                                const effectiveAccountId = selectedAccountId !== 'all' ? selectedAccountId : accounts[0]?.id;
+                                if (!effectiveAccountId) return;
+                                try {
+                                  await callConnectApi.saveSettings(effectiveAccountId, { leadVoicemailRecordingUrl: '' } as any);
+                                  setCcRecordingUrl(null);
+                                } catch { /* ignore */ }
+                              }}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        )}
+
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept=".mp3,.wav,audio/mpeg,audio/wav"
+                          onChange={handleVoicemailUpload}
+                          style={{ display: 'none' }}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={ccUploading}
+                          style={{ fontSize: 13 }}
+                        >
+                          {ccUploading
+                            ? <><Loader2 size={14} className="spinner" /> Uploading...</>
+                            : <><Upload size={14} /> {ccRecordingUrl ? 'Replace file' : 'Upload file'}</>}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="form-actions" style={{ marginTop: 16 }}>
+                    <button
+                      className="btn btn-primary"
+                      onClick={saveCcSettings}
+                      disabled={ccSaving}
+                    >
+                      {ccSaving ? <Loader2 size={16} className="spinner" /> : <Save size={16} />}
+                      Save
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>

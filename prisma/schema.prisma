@@ -21,6 +21,32 @@ enum UserRole {
   ADMIN
 }
 
+// ==========================================
+// Enums for Instant Call Connect
+// ==========================================
+
+enum CallConnectMode {
+  AGENT_FIRST
+  PARALLEL
+}
+
+enum CallConnectStatus {
+  CREATED
+  CALLING_AGENT
+  AGENT_ANSWERED
+  AGENT_ACCEPTED
+  CALLING_LEAD
+  BRIDGED
+  VOICEMAIL_DROP
+  ENDED
+  FAILED
+  CANCELED
+  // legacy values kept for backward compat with existing rows
+  RINGING_AGENT
+  RINGING_LEAD
+  CANCELLED
+}
+
 enum SubscriptionTier {
   STARTER
   PRO
@@ -92,6 +118,7 @@ model User {
   phonePoolAssignments     PhonePoolAssignment[]  // Many-to-many phone pool assignments
   thumbtackSnapshots       ThumbtackSettingsSnapshot[]
   thumbtackLeadIds         ThumbtackLeadId[]
+  callConnectSettings      CallConnectSettings[]
 
   @@map("users")
 }
@@ -157,6 +184,7 @@ model Lead {
   conversation            Conversation?                 @relation(fields: [threadId], references: [id])
   pendingMessages         PendingAutomatedMessage[]
   pendingNotificationMsgs PendingNotificationMessage[]
+  callConnectSessions     LeadCallConnect[]
 
   @@unique([platform, externalRequestId])
   @@index([userId])
@@ -207,8 +235,9 @@ model Message {
   isRead          Boolean  @default(false)
   sentAt          DateTime @default(now())
   deliveredAt     DateTime?
-  rawJson         String?  @db.Text
-  createdAt       DateTime @default(now())
+  rawJson           String?  @db.Text
+  notificationLogId String?  // Links outbound SMS to NotificationLog for delivery status
+  createdAt         DateTime @default(now())
 
   // Relationships
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -218,6 +247,7 @@ model Message {
   @@index([conversationId])
   @@index([userId])
   @@index([sentAt])
+  @@index([notificationLogId])
   @@map("messages")
 }
 
@@ -291,6 +321,7 @@ model SavedAccount {
   user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   automationRules      AutomationRule[]
   notificationSettings NotificationSettings?
+  callConnectSettings  CallConnectSettings?
   collectedLeads       ThumbtackLeadId[]
   settingsSnapshots    ThumbtackSettingsSnapshot[]
 
@@ -395,9 +426,11 @@ model NotificationSettings {
   quietHoursStart   String?  // e.g., "22:00"
   quietHoursEnd     String?  // e.g., "08:00"
   quietHoursTimezone String? @default("America/New_York")
-  requirePhone      Boolean  @default(true) // Only notify if lead has phone
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  requirePhone            Boolean  @default(true) // Only notify if lead has phone
+  customerTextingEnabled  Boolean  @default(false) // Separate toggle for customer-facing SMS texting
+  inboundSmsWebhookId     String?  // Sigcore webhook ID for inbound SMS
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
   // Relationships
   user              User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -621,6 +654,63 @@ model ThumbtackSettingsSnapshot {
   @@index([userId, scopeCategory, scopeLocation, effectiveFrom])
   @@index([savedAccountId])
   @@map("thumbtack_settings_snapshots")
+}
+
+// ==========================================
+// Instant Call Connect
+// ==========================================
+
+model CallConnectSettings {
+  id                   String          @id @default(uuid())
+  savedAccountId       String          @unique
+  userId               String
+  enabled              Boolean         @default(false)
+  mode                 CallConnectMode @default(AGENT_FIRST)
+  agentStrategy        String          @default("owner") // "owner" | "round_robin" | "on_duty"
+  agentPhoneE164       String?         // Agent's phone number to ring
+  botNumberE164        String?         // Shared bot caller-ID number
+  sigcoreWebhookSecret String?         // HMAC secret registered with Sigcore webhook subscription
+  sigcoreWebhookId     String?         // Sigcore webhook subscription ID (for dedup)
+  maxAgentAttempts          Int             @default(2)
+  quietHoursEnabled         Boolean         @default(false)
+  quietHoursTimezone        String?
+  quietHoursStart           String?         // "HH:MM"
+  quietHoursEnd             String?         // "HH:MM"
+  agentAcceptDigits         String?         @default("1") // Digit agent presses to accept the bridge
+  agentWhisperMessage       String?         // TTS played to agent before bridge; supports {summary} {digit}
+  leadGreetingMessage       String?         // TTS played to lead while waiting for agent
+  leadVoicemailEnabled      Boolean         @default(false) // Auto Voicemail Drop
+  leadVoicemailMessage      String?         // TTS voicemail text (fallback when no recording URL)
+  leadVoicemailRecordingUrl String?         // Pre-recorded voicemail audio URL (takes priority over TTS)
+  createdAt                 DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  savedAccount SavedAccount @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("call_connect_settings")
+}
+
+model LeadCallConnect {
+  id               String            @id @default(uuid())
+  leadId           String
+  businessId       String?           // Sigcore workspace/business ID (stored for reference)
+  sigcoreSessionId String            @unique
+  status           CallConnectStatus @default(CREATED)
+  attempt          Int               @default(0)
+  lastEventAt      DateTime          @default(now())
+  failureReason    String?
+  recordingUrl     String?
+  timeline         Json              @default("[]") // Append-only array of event objects
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@index([sigcoreSessionId])
+  @@map("lead_call_connect")
 }
 
 model ThumbtackLeadId {

@@ -62,6 +62,13 @@ async function bootstrap() {
   const expressApp = app.getHttpAdapter().getInstance();
   const express = require('express');
 
+  // Serve uploaded files (voicemail recordings, etc.)
+  const uploadsPath = path.join(process.cwd(), 'uploads');
+  if (!fs.existsSync(uploadsPath)) {
+    fs.mkdirSync(uploadsPath, { recursive: true });
+  }
+  expressApp.use('/uploads', express.static(uploadsPath, { maxAge: '7d' }));
+
   // Serve frontend static files
   const frontendPath = path.join(__dirname, '..', 'frontend', 'dist');
   if (fs.existsSync(frontendPath)) {

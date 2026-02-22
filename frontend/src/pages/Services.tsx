@@ -2,14 +2,15 @@ import { useState, useEffect } from 'react';
 import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, CheckCircle, X, Clock,
-  Bot, Pencil, Phone, Send, ChevronUp, Trash2,
+  Bot, Pencil, Phone, Send, ChevronUp, Trash2, Save, Moon,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  automationApi, notificationsApi, thumbtackApi, templatesApi, usersApi,
+  automationApi, notificationsApi, thumbtackApi, templatesApi, usersApi, callConnectApi,
 } from '../services/api';
 import type {
   AutomationRule, NotificationRule, SavedAccount, MessageTemplate,
+  CallConnectMode, AgentStrategy,
 } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
 import { useAppStore } from '../store/appStore';
@@ -155,8 +156,33 @@ export function Services() {
     templateId?: string;
     templateName?: string;
     content: string;
-    type: 'autoReply' | 'alert';
+    type: 'autoReply' | 'alert' | 'cc-whisper' | 'cc-greeting' | 'cc-voicemail';
   } | null>(null);
+
+  // Instant Call Connect state
+  const [ccEnabled, setCcEnabled] = useState(false);
+  const [ccMode, setCcMode] = useState<CallConnectMode>('AGENT_FIRST');
+  const [ccAgentStrategy, setCcAgentStrategy] = useState<AgentStrategy>('owner');
+  const [ccAgentPhone, setCcAgentPhone] = useState('');
+  const [ccMaxAttempts, setCcMaxAttempts] = useState(2);
+  const [ccQuietEnabled, setCcQuietEnabled] = useState(false);
+  const [ccQuietTimezone, setCcQuietTimezone] = useState('America/New_York');
+  const [ccQuietStart, setCcQuietStart] = useState('22:00');
+  const [ccQuietEnd, setCcQuietEnd] = useState('08:00');
+  const [ccAgentAcceptDigits, setCcAgentAcceptDigits] = useState('1');
+  const [ccAgentWhisperMessage, setCcAgentWhisperMessage] = useState('');
+  const [ccLeadGreetingMessage, setCcLeadGreetingMessage] = useState('');
+  const [ccVoicemailEnabled, setCcVoicemailEnabled] = useState(false);
+  const [ccVoicemailMessage, setCcVoicemailMessage] = useState('');
+  const [ccVoicemailRecordingUrl, setCcVoicemailRecordingUrl] = useState('');
+  const [ccBotNumber, setCcBotNumber] = useState('');
+  const [ccSaving, setCcSaving] = useState(false);
+  const [ccTestPhone, setCcTestPhone] = useState(() => localStorage.getItem('cc_test_phone') || '');
+  const [ccTesting, setCcTesting] = useState(false);
+  // Track which saved template is currently loaded in each CC message field (for edit button)
+  const [ccWhisperTemplateId, setCcWhisperTemplateId] = useState<string | null>(null);
+  const [ccGreetingTemplateId, setCcGreetingTemplateId] = useState<string | null>(null);
+  const [ccVoicemailTemplateId, setCcVoicemailTemplateId] = useState<string | null>(null);
 
   // Lead Alerts form state (needed for first-time creation)
   const [alertToPhone, setAlertToPhone] = useState('');
@@ -197,12 +223,51 @@ export function Services() {
       setLoading(true);
       setError(null);
 
-      const [automationRes, notifRes, templatesRes, poolRes] = await Promise.all([
+      const [automationRes, notifRes, templatesRes, poolRes, ccRes] = await Promise.all([
         automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] })),
         notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] })),
         templatesApi.getTemplates().catch(() => ({ templates: [] as MessageTemplate[] })),
         usersApi.getPoolPhonesForSms().catch(() => ({ phoneNumbers: [] })),
+        callConnectApi.getSettings(accountId).catch(() => ({ settings: null })),
       ]);
+
+      const ccs = ccRes.settings;
+      const defaultBotNumber = poolRes.phoneNumbers[0]?.phoneNumber || '';
+      if (ccs) {
+        setCcEnabled(ccs.enabled);
+        setCcMode(ccs.mode);
+        setCcAgentStrategy(ccs.agentStrategy);
+        setCcAgentPhone(ccs.agentPhoneE164 || '');
+        setCcMaxAttempts(ccs.maxAgentAttempts);
+        setCcQuietEnabled(ccs.quietHoursEnabled);
+        setCcQuietTimezone(ccs.quietHoursTimezone || 'America/New_York');
+        setCcQuietStart(ccs.quietHoursStart || '22:00');
+        setCcQuietEnd(ccs.quietHoursEnd || '08:00');
+        setCcAgentAcceptDigits(ccs.agentAcceptDigits || '0123456789*#');
+        setCcAgentWhisperMessage(ccs.agentWhisperMessage || '');
+        setCcLeadGreetingMessage(ccs.leadGreetingMessage || '');
+        setCcVoicemailEnabled(ccs.leadVoicemailEnabled);
+        setCcVoicemailMessage(ccs.leadVoicemailMessage || '');
+        setCcVoicemailRecordingUrl(ccs.leadVoicemailRecordingUrl || '');
+        setCcBotNumber(ccs.botNumberE164 || defaultBotNumber);
+      } else {
+        setCcEnabled(false);
+        setCcMode('AGENT_FIRST');
+        setCcAgentStrategy('owner');
+        setCcAgentPhone('');
+        setCcMaxAttempts(2);
+        setCcQuietEnabled(false);
+        setCcQuietTimezone('America/New_York');
+        setCcQuietStart('22:00');
+        setCcQuietEnd('08:00');
+        setCcAgentAcceptDigits('1');
+        setCcAgentWhisperMessage('');
+        setCcLeadGreetingMessage('');
+        setCcVoicemailEnabled(false);
+        setCcVoicemailMessage('');
+        setCcVoicemailRecordingUrl('');
+        setCcBotNumber(defaultBotNumber);
+      }
 
       // Collect ALL new_lead automation rules
       const allAutoReplies = automationRes.rules.filter(
@@ -216,8 +281,49 @@ export function Services() {
       ) || null;
 
       setLeadAlertRule(leadAlert);
-      setTemplates(templatesRes.templates);
       setPoolPhones(poolRes.phoneNumbers);
+
+      // Seed CC default templates for every user on first page visit
+      const DEFAULT_CC_WHISPER = 'Hi {customerName}, you have a new lead for {category}. Press any key to connect with the customer.';
+      const DEFAULT_CC_GREETING = 'Hi {customerName}! Thanks for your inquiry about {category}. We\'re connecting you with a specialist right now. Please hold for just a moment.';
+      const DEFAULT_CC_VOICEMAIL = 'Hi {customerName}, this is {accountName}. We tried to reach you about your {category} request. Please call us back and we\'ll be happy to help!';
+
+      let allTemplates: MessageTemplate[] = [...templatesRes.templates];
+      const whisperExists = allTemplates.find(t => t.name === 'CC - Agent Whisper');
+      const greetingExists = allTemplates.find(t => t.name === 'CC - Lead Greeting');
+      const voicemailExists = allTemplates.find(t => t.name === 'CC - Voicemail TTS');
+
+      if (!whisperExists || !greetingExists || !voicemailExists) {
+        const [whisperRes, greetingRes, voicemailRes] = await Promise.all([
+          whisperExists ? Promise.resolve({ template: whisperExists }) : templatesApi.createTemplate('CC - Agent Whisper', DEFAULT_CC_WHISPER),
+          greetingExists ? Promise.resolve({ template: greetingExists }) : templatesApi.createTemplate('CC - Lead Greeting', DEFAULT_CC_GREETING),
+          voicemailExists ? Promise.resolve({ template: voicemailExists }) : templatesApi.createTemplate('CC - Voicemail TTS', DEFAULT_CC_VOICEMAIL),
+        ]);
+        if (!whisperExists) allTemplates = [...allTemplates, whisperRes.template];
+        if (!greetingExists) allTemplates = [...allTemplates, greetingRes.template];
+        if (!voicemailExists) allTemplates = [...allTemplates, voicemailRes.template];
+      }
+
+      setTemplates(allTemplates);
+
+      // Pre-select CC templates: use saved setting content if set, otherwise load the default template
+      const whisperTpl = allTemplates.find(t => t.name === 'CC - Agent Whisper');
+      const greetingTpl = allTemplates.find(t => t.name === 'CC - Lead Greeting');
+      const voicemailTpl = allTemplates.find(t => t.name === 'CC - Voicemail TTS');
+
+      // Load default content if nothing saved yet
+      if (!ccs?.agentWhisperMessage && whisperTpl) setCcAgentWhisperMessage(whisperTpl.content);
+      if (!ccs?.leadGreetingMessage && greetingTpl) setCcLeadGreetingMessage(greetingTpl.content);
+      if (!ccs?.leadVoicemailMessage && voicemailTpl) setCcVoicemailMessage(voicemailTpl.content);
+
+      // Always restore the dropdown selection: match saved content to a template,
+      // falling back to the default CC template by name so it stays pre-selected across reloads.
+      const whisperContent = ccs?.agentWhisperMessage || whisperTpl?.content || '';
+      const greetingContent = ccs?.leadGreetingMessage || greetingTpl?.content || '';
+      const voicemailContent = ccs?.leadVoicemailMessage || voicemailTpl?.content || '';
+      setCcWhisperTemplateId(allTemplates.find(t => t.content === whisperContent)?.id || whisperTpl?.id || null);
+      setCcGreetingTemplateId(allTemplates.find(t => t.content === greetingContent)?.id || greetingTpl?.id || null);
+      setCcVoicemailTemplateId(allTemplates.find(t => t.content === voicemailContent)?.id || voicemailTpl?.id || null);
 
       // Pre-fill form states from existing rules
       if (leadAlert) {
@@ -246,6 +352,22 @@ export function Services() {
   function showSuccess(msg: string) {
     setSuccessMessage(msg);
     setTimeout(() => setSuccessMessage(null), 3000);
+  }
+
+  // --- Phone formatting helpers ---
+
+  function formatPhoneE164(raw: string): string {
+    if (!raw.trim()) return raw;
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length === 0) return raw;
+    if (digits.length === 10) return `+1${digits}`;
+    if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+    if (digits.length >= 7 && digits.length <= 15) return `+${digits}`;
+    return raw;
+  }
+
+  function isValidPhoneE164(phone: string): boolean {
+    return /^\+[1-9]\d{6,14}$/.test(phone);
   }
 
   // --- Toggle Handlers ---
@@ -312,15 +434,15 @@ export function Services() {
       } else if (enabled) {
         // Find or create a default Lead Alert template
         const DEFAULT_ALERT_TEMPLATE =
-          'New lead: {{lead.name}}, Price {{lead.price}}\n' +
-          'Location: {{lead.location}}, {{lead.zip}}\n' +
-          'Service: {{lead.service}} {{lead.bedrooms}} bed /{{lead.bathrooms}} bath\n' +
-          'Frequency: {{lead.frequency}}\n' +
-          'Description: {{lead.serviceDescription}}\n' +
-          'Add-ons: {{lead.addons}}\n' +
-          'Pets: {{lead.pets}}\n' +
-          'Message: {{lead.message}}\n' +
-          'Phone: {{lead.phone}}';
+          'New lead: {lead.name}, Price {lead.price}\n' +
+          'Location: {lead.location}, {lead.zip}\n' +
+          'Service: {lead.service} {lead.bedrooms} bed / {lead.bathrooms} bath\n' +
+          'Frequency: {lead.frequency}\n' +
+          'Description: {lead.serviceDescription}\n' +
+          'Add-ons: {lead.addons}\n' +
+          'Pets: {lead.pets}\n' +
+          'Message: {lead.message}\n' +
+          'Phone: {lead.phone}';
 
         let templateId = templates.find(t => t.name.includes('Lead Alert'))?.id;
         if (!templateId) {
@@ -357,6 +479,64 @@ export function Services() {
     }
   }
 
+
+  async function toggleCallConnect(enabled: boolean) {
+    if (!selectedAccountId) return;
+    setCcEnabled(enabled); // optimistic
+    setCcSaving(true);
+    try {
+      const { settings } = await callConnectApi.saveSettings(selectedAccountId, { enabled });
+      setCcEnabled(settings.enabled);
+    } catch (err: any) {
+      setCcEnabled(!enabled); // rollback
+      setError(err.response?.data?.message || err.message || 'Failed to update Call Connect');
+    } finally {
+      setCcSaving(false);
+    }
+  }
+
+  async function saveCcSettings() {
+    if (!selectedAccountId) return;
+    setCcSaving(true);
+    try {
+      await callConnectApi.saveSettings(selectedAccountId, {
+        enabled: ccEnabled,
+        mode: ccMode,
+        agentStrategy: ccAgentStrategy,
+        agentPhoneE164: ccAgentPhone || undefined,
+        maxAgentAttempts: ccMaxAttempts,
+        quietHoursEnabled: ccQuietEnabled,
+        quietHoursTimezone: ccQuietEnabled ? ccQuietTimezone : undefined,
+        quietHoursStart: ccQuietEnabled ? ccQuietStart : undefined,
+        quietHoursEnd: ccQuietEnabled ? ccQuietEnd : undefined,
+        agentAcceptDigits: ccAgentAcceptDigits || '0123456789*#',
+        agentWhisperMessage: ccAgentWhisperMessage || undefined,
+        leadGreetingMessage: ccLeadGreetingMessage || undefined,
+        leadVoicemailEnabled: ccVoicemailEnabled,
+        leadVoicemailMessage: ccVoicemailEnabled ? ccVoicemailMessage || undefined : undefined,
+        leadVoicemailRecordingUrl: ccVoicemailEnabled ? ccVoicemailRecordingUrl || undefined : undefined,
+        botNumberE164: ccBotNumber || undefined,
+      });
+      showSuccess('Instant Call Connect settings saved');
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'Failed to save Call Connect settings');
+    } finally {
+      setCcSaving(false);
+    }
+  }
+
+  async function handleTestCall() {
+    if (!selectedAccountId || !ccTestPhone.trim()) return;
+    setCcTesting(true);
+    try {
+      await callConnectApi.testCall(selectedAccountId, ccTestPhone.trim());
+      showSuccess('Test call triggered — your agent phone should ring shortly');
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'Test call failed');
+    } finally {
+      setCcTesting(false);
+    }
+  }
 
   // --- Auto Reply Handlers ---
 
@@ -476,6 +656,12 @@ export function Services() {
         await changeRuleTemplate(templateEditor.ruleId, template.id);
       } else if (templateEditor.type === 'alert') {
         await changeAlertRuleTemplate(templateEditor.ruleId, template.id);
+      } else if (templateEditor.type === 'cc-whisper') {
+        setCcAgentWhisperMessage(template.content); setCcWhisperTemplateId(template.id);
+      } else if (templateEditor.type === 'cc-greeting') {
+        setCcLeadGreetingMessage(template.content); setCcGreetingTemplateId(template.id);
+      } else if (templateEditor.type === 'cc-voicemail') {
+        setCcVoicemailMessage(template.content); setCcVoicemailTemplateId(template.id);
       }
       setTemplateEditor(null);
       showSuccess('Template created');
@@ -488,7 +674,7 @@ export function Services() {
 
   async function handleEditorUpdate({ content }: { name: string; content: string }) {
     if (!templateEditor || !templateEditor.templateId) return;
-    const { ruleId, templateId } = templateEditor;
+    const { ruleId, templateId, type } = templateEditor;
     setSaving(true);
     try {
       const { template } = await templatesApi.updateTemplate(templateId, { content });
@@ -501,6 +687,9 @@ export function Services() {
       if (leadAlertRule?.id === ruleId && leadAlertRule?.messageTemplate?.id === templateId) {
         setLeadAlertRule({ ...leadAlertRule, messageTemplate: { ...leadAlertRule.messageTemplate!, content: template.content } });
       }
+      if (type === 'cc-whisper') setCcAgentWhisperMessage(template.content);
+      else if (type === 'cc-greeting') setCcLeadGreetingMessage(template.content);
+      else if (type === 'cc-voicemail') setCcVoicemailMessage(template.content);
       setTemplateEditor(null);
       showSuccess('Template saved');
     } catch (err: any) {
@@ -520,6 +709,12 @@ export function Services() {
         await changeRuleTemplate(templateEditor.ruleId, template.id);
       } else if (templateEditor.type === 'alert') {
         await changeAlertRuleTemplate(templateEditor.ruleId, template.id);
+      } else if (templateEditor.type === 'cc-whisper') {
+        setCcAgentWhisperMessage(template.content); setCcWhisperTemplateId(template.id);
+      } else if (templateEditor.type === 'cc-greeting') {
+        setCcLeadGreetingMessage(template.content); setCcGreetingTemplateId(template.id);
+      } else if (templateEditor.type === 'cc-voicemail') {
+        setCcVoicemailMessage(template.content); setCcVoicemailTemplateId(template.id);
       }
       setTemplateEditor(null);
       showSuccess('Saved as new template');
@@ -654,56 +849,44 @@ export function Services() {
 
             {/* First Message */}
             {firstReplyRule && (
-              <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2 text-blue-600 font-bold">
-                    <Zap className="w-4 h-4" />
-                    <span>First Message</span>
-                  </div>
-                  <span className="text-xs font-semibold text-slate-400 italic">Sent Immediately</span>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="relative">
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Template Selection</label>
-                    <select
-                      value={firstReplyRule.templateId || ''}
-                      onChange={e => {
-                        if (e.target.value === '__create_new__') {
-                          setTemplateEditor({ mode: 'create', ruleId: firstReplyRule.id, content: '', type: 'autoReply' });
-                        } else {
-                          changeRuleTemplate(firstReplyRule.id, e.target.value);
-                        }
-                      }}
-                      disabled={saving}
-                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Template</label>
+                <select
+                  value={firstReplyRule.templateId || ''}
+                  onChange={e => {
+                    if (e.target.value === '__create_new__') {
+                      setTemplateEditor({ mode: 'create', ruleId: firstReplyRule.id, content: '', type: 'autoReply' });
+                    } else {
+                      changeRuleTemplate(firstReplyRule.id, e.target.value);
+                    }
+                  }}
+                  disabled={saving}
+                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
+                >
+                  <option value="">Select template...</option>
+                  {templates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                  <option value="__create_new__">+ Create New Template</option>
+                </select>
+                {firstReplyRule.template?.content && (
+                  <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                    {firstReplyRule.template.content}
+                    <button
+                      onClick={() => setTemplateEditor({
+                        mode: 'service-edit',
+                        ruleId: firstReplyRule.id,
+                        templateId: firstReplyRule.template!.id,
+                        templateName: templates.find(t => t.id === firstReplyRule.templateId)?.name || 'template',
+                        content: firstReplyRule.template!.content,
+                        type: 'autoReply',
+                      })}
+                      className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
                     >
-                      <option value="">Select template...</option>
-                      {templates.map(t => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                      <option value="__create_new__">+ Create New Template</option>
-                    </select>
+                      <Pencil className="w-4 h-4" />
+                    </button>
                   </div>
-                  {firstReplyRule.template?.content && (
-                    <div className="bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
-                      {firstReplyRule.template.content}
-                      <button
-                        onClick={() => setTemplateEditor({
-                          mode: 'service-edit',
-                          ruleId: firstReplyRule.id,
-                          templateId: firstReplyRule.template!.id,
-                          templateName: templates.find(t => t.id === firstReplyRule.templateId)?.name || 'template',
-                          content: firstReplyRule.template!.content,
-                          type: 'autoReply',
-                        })}
-                        className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
+                )}
               </div>
             )}
 
@@ -764,17 +947,31 @@ export function Services() {
                   type="tel"
                   value={alertToPhone}
                   onChange={e => setAlertToPhone(e.target.value)}
+                  onBlur={e => {
+                    const formatted = formatPhoneE164(e.target.value);
+                    if (formatted !== e.target.value) setAlertToPhone(formatted);
+                  }}
                   placeholder="+1234567890"
                   className={`w-full rounded-xl p-3 text-sm focus:ring-2 focus:outline-none transition-colors ${
                     toPhoneMissing
                       ? 'border-2 border-orange-300 bg-orange-50/40 focus:ring-orange-200 focus:border-orange-400 placeholder:text-orange-300'
-                      : 'bg-white border border-slate-200 focus:ring-blue-500 focus:border-blue-500'
+                      : alertToPhone && !isValidPhoneE164(alertToPhone)
+                        ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200 focus:border-red-400'
+                        : alertToPhone && isValidPhoneE164(alertToPhone)
+                          ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200 focus:border-emerald-400'
+                          : 'bg-white border border-slate-200 focus:ring-blue-500 focus:border-blue-500'
                   }`}
                 />
                 {toPhoneMissing && (
                   <p className="mt-1.5 text-xs text-orange-600 font-medium flex items-center gap-1">
                     <AlertCircle className="w-3 h-3 shrink-0" />
                     Enter your phone number to receive lead alert SMS messages
+                  </p>
+                )}
+                {!toPhoneMissing && alertToPhone && !isValidPhoneE164(alertToPhone) && (
+                  <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    Must be E.164 format, e.g. +12125550100
                   </p>
                 )}
               </div>
@@ -967,10 +1164,354 @@ export function Services() {
             icon={<PhoneCall className="w-7 h-7" />}
             title="Instant Call Connect"
             description="Receive a phone call to bridge you instantly to new leads."
-            enabled={false}
-            onToggle={() => {}}
-            comingSoon={true}
-          />
+            enabled={ccEnabled}
+            onToggle={ccSaving ? () => {} : toggleCallConnect}
+            expanded={expandedCard === 'call-connect'}
+            onExpand={() => toggleExpand('call-connect')}
+            statusText={ccEnabled ? 'Active — bridging calls for new leads' : undefined}
+            iconBgColor="bg-violet-50"
+            iconTextColor="text-violet-600"
+          >
+            <div className={!ccEnabled ? 'opacity-40 pointer-events-none select-none' : ''}>
+            {/* Connection Mode — segmented switcher */}
+            <div>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Connection Mode</label>
+              <div className="flex bg-slate-100 rounded-2xl p-1 max-w-lg">
+                <button
+                  onClick={() => setCcMode('AGENT_FIRST')}
+                  className={`flex-1 flex flex-col items-center gap-0.5 rounded-xl px-4 py-3 transition-all ${
+                    ccMode === 'AGENT_FIRST'
+                      ? 'bg-white text-violet-700 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  <Phone className="w-4 h-4" />
+                  <span className="text-sm font-bold">Agent First</span>
+                  <span className="text-[11px] font-normal text-slate-400 leading-tight text-center">We call you, then bridge the lead</span>
+                </button>
+                <button
+                  onClick={() => setCcMode('PARALLEL')}
+                  className={`flex-1 flex flex-col items-center gap-0.5 rounded-xl px-4 py-3 transition-all ${
+                    ccMode === 'PARALLEL'
+                      ? 'bg-white text-violet-700 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  <Zap className="w-4 h-4" />
+                  <span className="text-sm font-bold">Parallel</span>
+                  <span className="text-[11px] font-normal text-slate-400 leading-tight text-center">Call you and lead simultaneously</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Agent Phone + Send from — side by side */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Agent Phone */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Agent Phone (E.164)</label>
+                <input
+                  type="tel"
+                  value={ccAgentPhone}
+                  onChange={e => setCcAgentPhone(e.target.value)}
+                  onBlur={e => {
+                    const formatted = formatPhoneE164(e.target.value);
+                    if (formatted !== e.target.value) setCcAgentPhone(formatted);
+                  }}
+                  placeholder="+15551234567"
+                  className={`w-full rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                    ccAgentPhone && !isValidPhoneE164(ccAgentPhone)
+                      ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                      : ccAgentPhone && isValidPhoneE164(ccAgentPhone)
+                        ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                        : 'bg-white border border-slate-200 focus:ring-violet-300'
+                  }`}
+                />
+                {ccAgentPhone && !isValidPhoneE164(ccAgentPhone) ? (
+                  <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    Must be E.164 format, e.g. +12125550100
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-400 mt-1.5">Phone Sigcore will ring when a new lead arrives</p>
+                )}
+              </div>
+
+              {/* Send from */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send from</label>
+                <div className="relative">
+                  <select
+                    value={ccBotNumber}
+                    onChange={e => setCcBotNumber(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium appearance-none"
+                  >
+                    <option value="">Select phone number</option>
+                    {ccBotNumber && !poolPhones.some(p => p.phoneNumber === ccBotNumber) && (
+                      <option value={ccBotNumber}>{ccBotNumber} (configured)</option>
+                    )}
+                    {poolPhones.map(p => (
+                      <option key={p.id} value={p.phoneNumber}>
+                        {p.phoneNumber} (LeadBridge)
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                    <ChevronDown className="w-4 h-4" />
+                  </div>
+                </div>
+                <button className="mt-2 px-4 py-2 bg-slate-100 text-slate-400 rounded-xl text-xs font-bold flex items-center gap-2 cursor-not-allowed">
+                  <Phone className="w-3 h-3" />
+                  Get your own number
+                  <span className="px-1.5 py-0.5 bg-slate-200 text-[9px] rounded uppercase">Coming Soon</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quiet Hours */}
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <Moon className="w-4 h-4 text-slate-400" />
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Quiet Hours</span>
+                <label className="inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={ccQuietEnabled}
+                    onChange={e => setCcQuietEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="relative w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-violet-600"></div>
+                </label>
+              </div>
+              {ccQuietEnabled && (
+                <div className="space-y-3 pl-7">
+                  <div className="relative max-w-xs">
+                    <select
+                      value={ccQuietTimezone}
+                      onChange={e => setCcQuietTimezone(e.target.value)}
+                      className="w-full appearance-none bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent pr-10"
+                    >
+                      {['America/New_York','America/Chicago','America/Denver','America/Los_Angeles','America/Phoenix','America/Anchorage','Pacific/Honolulu'].map(tz => (
+                        <option key={tz} value={tz}>{tz}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  </div>
+                  <div className="flex gap-6">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">From</label>
+                      <input type="time" value={ccQuietStart} onChange={e => setCcQuietStart(e.target.value)} className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">To</label>
+                      <input type="time" value={ccQuietEnd} onChange={e => setCcQuietEnd(e.target.value)} className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-400">Calls will not be triggered during quiet hours</p>
+                </div>
+              )}
+            </div>
+
+            {/* Agent Whisper Message */}
+            <div>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Agent Whisper Message</label>
+              <p className="text-xs text-slate-400 mb-3">
+                Played to you before the bridge. Press <span className="font-semibold text-slate-500">any key</span> to accept.
+              </p>
+              <select
+                value={ccWhisperTemplateId || ''}
+                onChange={e => {
+                  if (e.target.value === '__create_new__') {
+                    setTemplateEditor({ mode: 'create', ruleId: '', content: ccAgentWhisperMessage, type: 'cc-whisper' });
+                  } else {
+                    const t = templates.find(x => x.id === e.target.value);
+                    if (t) { setCcAgentWhisperMessage(t.content); setCcWhisperTemplateId(t.id); }
+                  }
+                }}
+                className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
+              >
+                <option value="">Select template…</option>
+                {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                <option value="__create_new__">+ Create New Template</option>
+              </select>
+              {ccAgentWhisperMessage && (
+                <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                  {ccAgentWhisperMessage}
+                  <button
+                    onClick={() => {
+                      const tpl = ccWhisperTemplateId ? templates.find(t => t.id === ccWhisperTemplateId) : null;
+                      setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccAgentWhisperMessage, type: 'cc-whisper' });
+                    }}
+                    className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Lead Greeting Message — only relevant in Parallel mode */}
+            <div className={`transition-opacity ${ccMode === 'AGENT_FIRST' ? 'opacity-40 pointer-events-none select-none' : ''}`}>
+              <div className="flex items-center gap-2 mb-2">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Lead Greeting Message</label>
+                {ccMode === 'AGENT_FIRST' && (
+                  <span className="px-2 py-0.5 bg-slate-200 text-slate-500 text-[10px] font-bold rounded uppercase tracking-wide">Parallel only</span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mb-3">
+                {ccMode === 'AGENT_FIRST'
+                  ? 'Not used in Agent First mode — the lead is not called until you answer.'
+                  : 'Played to the lead while they wait for you to answer.'
+                }
+              </p>
+              <select
+                value={ccGreetingTemplateId || ''}
+                onChange={e => {
+                  if (e.target.value === '__create_new__') {
+                    setTemplateEditor({ mode: 'create', ruleId: '', content: ccLeadGreetingMessage, type: 'cc-greeting' });
+                  } else {
+                    const t = templates.find(x => x.id === e.target.value);
+                    if (t) { setCcLeadGreetingMessage(t.content); setCcGreetingTemplateId(t.id); }
+                  }
+                }}
+                className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
+              >
+                <option value="">Select template…</option>
+                {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                <option value="__create_new__">+ Create New Template</option>
+              </select>
+              {ccLeadGreetingMessage && (
+                <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                  {ccLeadGreetingMessage}
+                  <button
+                    onClick={() => {
+                      const tpl = ccGreetingTemplateId ? templates.find(t => t.id === ccGreetingTemplateId) : null;
+                      setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccLeadGreetingMessage, type: 'cc-greeting' });
+                    }}
+                    className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Auto Voicemail Drop */}
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Auto Voicemail Drop</label>
+                <label className="inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={ccVoicemailEnabled}
+                    onChange={e => setCcVoicemailEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="relative w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-violet-600"></div>
+                </label>
+              </div>
+              <p className="text-xs text-slate-400 mb-4">Automatically leaves a message when the lead doesn't answer.</p>
+              {ccVoicemailEnabled && (
+                <div className="space-y-5">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Recording URL <span className="normal-case font-normal text-slate-400">(optional — takes priority over TTS)</span></label>
+                    <input
+                      type="url"
+                      value={ccVoicemailRecordingUrl}
+                      onChange={e => setCcVoicemailRecordingUrl(e.target.value)}
+                      placeholder="https://example.com/voicemail.mp3"
+                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">TTS Voicemail Message <span className="normal-case font-normal text-slate-400">(fallback when no recording URL)</span></label>
+                    <select
+                      value={ccVoicemailTemplateId || ''}
+                      onChange={e => {
+                        if (e.target.value === '__create_new__') {
+                          setTemplateEditor({ mode: 'create', ruleId: '', content: ccVoicemailMessage, type: 'cc-voicemail' });
+                        } else {
+                          const t = templates.find(x => x.id === e.target.value);
+                          if (t) { setCcVoicemailMessage(t.content); setCcVoicemailTemplateId(t.id); }
+                        }
+                      }}
+                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
+                    >
+                      <option value="">Select template…</option>
+                      {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      <option value="__create_new__">+ Create New Template</option>
+                    </select>
+                    {ccVoicemailMessage && (
+                      <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                        {ccVoicemailMessage}
+                        <button
+                          onClick={() => {
+                            const tpl = ccVoicemailTemplateId ? templates.find(t => t.id === ccVoicemailTemplateId) : null;
+                            setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccVoicemailMessage, type: 'cc-voicemail' });
+                          }}
+                          className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Test Call + Save Settings */}
+            <div className="space-y-4 pt-4 border-t border-slate-100">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex gap-3 flex-wrap items-center">
+                  <input
+                    type="tel"
+                    value={ccTestPhone}
+                    onChange={e => {
+                      setCcTestPhone(e.target.value);
+                      localStorage.setItem('cc_test_phone', e.target.value);
+                    }}
+                    onBlur={e => {
+                      const formatted = formatPhoneE164(e.target.value);
+                      if (formatted !== e.target.value) {
+                        setCcTestPhone(formatted);
+                        localStorage.setItem('cc_test_phone', formatted);
+                      }
+                    }}
+                    placeholder="+15559876543"
+                    className={`rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent min-w-[160px] transition-colors ${
+                      ccTestPhone && !isValidPhoneE164(ccTestPhone)
+                        ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                        : ccTestPhone && isValidPhoneE164(ccTestPhone)
+                          ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                          : 'bg-slate-50 border border-slate-200 focus:ring-violet-500'
+                    }`}
+                  />
+                  <button
+                    onClick={handleTestCall}
+                    disabled={ccTesting || !ccTestPhone.trim() || !ccEnabled}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {ccTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
+                    {ccTesting ? 'Calling…' : 'Test Call'}
+                  </button>
+                </div>
+                {!ccEnabled && (
+                  <p className="text-xs text-orange-500">Enable Call Connect first to run a test.</p>
+                )}
+              </div>
+              <div className="flex justify-end">
+                <button
+                  onClick={saveCcSettings}
+                  disabled={ccSaving}
+                  className="px-6 py-2.5 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 shadow-lg shadow-violet-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {ccSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  Save Settings
+                </button>
+              </div>
+            </div>
+            </div>{/* end disabled overlay */}
+          </ServiceCard>
 
         </div>
       )}
