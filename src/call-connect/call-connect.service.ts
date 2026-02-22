@@ -180,12 +180,9 @@ export class CallConnectService {
           ringTimeoutSeconds: 60,
           maxAgentAttempts: settings.maxAgentAttempts,
           agentAcceptDigits: settings.agentAcceptDigits || '0123456789*#',
-          agentVoicemailMode: 'TTS',
           ...(settings.agentWhisperMessage && { agentWhisperMessage: settings.agentWhisperMessage }),
           ...(settings.leadGreetingMessage && { leadGreetingMessage: settings.leadGreetingMessage }),
-          leadVoicemailEnabled: settings.leadVoicemailEnabled ?? false,
-          ...(settings.leadVoicemailMessage && { leadVoicemailMessage: settings.leadVoicemailMessage }),
-          ...(settings.leadVoicemailRecordingUrl && { leadVoicemailRecordingUrl: settings.leadVoicemailRecordingUrl }),
+          leadVoicemailEnabled: false,
           ...(settings.quietHoursEnabled && settings.quietHoursTimezone && settings.quietHoursStart && settings.quietHoursEnd && {
             quietHours: {
               timezone: settings.quietHoursTimezone,
