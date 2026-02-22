@@ -496,6 +496,31 @@ export class NotificationsService implements OnModuleInit {
         },
       });
 
+      // Store ad-hoc SMS as a Message record in the Conversation
+      if (lead.threadId) {
+        try {
+          await this.prisma.message.create({
+            data: {
+              conversationId: lead.threadId,
+              userId: lead.userId,
+              platform: 'sms',
+              externalMessageId: result.messageId || `sms-adhoc-${logEntry.id}`,
+              sender: 'pro',
+              content: messageBody,
+              isRead: true,
+              sentAt: new Date(),
+              notificationLogId: logEntry.id,
+            },
+          });
+          await this.prisma.conversation.update({
+            where: { id: lead.threadId },
+            data: { lastMessageAt: new Date() },
+          });
+        } catch (err: any) {
+          this.logger.warn(`Failed to store ad-hoc SMS as Message: ${err.message}`);
+        }
+      }
+
       return { success: true, logId: logEntry.id };
     } catch (error: any) {
       await this.prisma.notificationLog.update({
@@ -1170,7 +1195,38 @@ export class NotificationsService implements OnModuleInit {
         });
       }
 
-      this.logger.log(`Notification sent for rule ${ruleName} to ${settings.destinationPhone}`);
+      // Store customer-facing SMS as a Message record in the Conversation
+      if (rule?.sendToCustomer && leadId) {
+        try {
+          const leadRecord = await this.prisma.lead.findUnique({
+            where: { id: leadId },
+            select: { threadId: true, userId: true },
+          });
+          if (leadRecord?.threadId) {
+            await this.prisma.message.create({
+              data: {
+                conversationId: leadRecord.threadId,
+                userId: leadRecord.userId,
+                platform: 'sms',
+                externalMessageId: result.messageId || `sms-rule-${logEntry.id}`,
+                sender: 'pro',
+                content: messageBody,
+                isRead: true,
+                sentAt: new Date(),
+                notificationLogId: logEntry.id,
+              },
+            });
+            await this.prisma.conversation.update({
+              where: { id: leadRecord.threadId },
+              data: { lastMessageAt: new Date() },
+            });
+          }
+        } catch (err: any) {
+          this.logger.warn(`Failed to store customer SMS as Message: ${err.message}`);
+        }
+      }
+
+      this.logger.log(`Notification sent for rule ${ruleName} to ${toPhone}`);
     } catch (error: any) {
       // Update log with error
       await this.prisma.notificationLog.update({
@@ -2306,6 +2362,185 @@ export class NotificationsService implements OnModuleInit {
     } catch (error: any) {
       this.logger.error(`[disconnectProvider] Error: ${error.message}`);
     }
+  }
+
+  // ==========================================
+  // Customer Texting Settings
+  // ==========================================
+
+  /**
+   * Get customer texting configuration for an account
+   * Returns the customerTextingEnabled flag and all sendToCustomer rules
+   */
+  async getCustomerTextingSettings(
+    userId: string,
+    savedAccountId: string,
+  ): Promise<{
+    enabled: boolean;
+    autoReplyTemplate: string;
+    followUps: Array<{ id?: string; enabled: boolean; delayMinutes: number; template: string }>;
+    stopOnCustomerReply: boolean;
+  }> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+    });
+    if (!account) throw new NotFoundException('Account not found');
+
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+    });
+
+    // Get customer texting rules (sendToCustomer: true)
+    const rules = settings
+      ? await this.prisma.notificationRule.findMany({
+          where: {
+            notificationSettingsId: settings.id,
+            sendToCustomer: true,
+          },
+          orderBy: { delayMinutes: 'asc' },
+        })
+      : [];
+
+    // Extract auto-reply (delay 0) and follow-ups (delay > 0)
+    const autoReplyRule = rules.find(r => r.delayMinutes === 0);
+    const followUpRules = rules.filter(r => r.delayMinutes > 0);
+
+    return {
+      enabled: settings?.customerTextingEnabled ?? false,
+      autoReplyTemplate: autoReplyRule?.template || 'Hi {{lead.name}}, this is {{account.name}}. We just received your request for {{lead.service}} in {{lead.location}}. When would be a good time to call you?',
+      followUps: followUpRules.length > 0
+        ? followUpRules.map(r => ({
+            id: r.id,
+            enabled: r.enabled,
+            delayMinutes: r.delayMinutes,
+            template: r.template,
+          }))
+        : [
+            { enabled: true, delayMinutes: 10, template: 'Hi {{lead.name}}, just checking in — did you get our message about your {{lead.service}} request? We\'d love to help!' },
+            { enabled: true, delayMinutes: 60, template: 'Hi {{lead.name}}, this is {{account.name}} again. We\'re available to discuss your {{lead.service}} needs. Feel free to reply with a good time to chat!' },
+            { enabled: false, delayMinutes: 1440, template: 'Hi {{lead.name}}, we wanted to follow up one more time about your {{lead.service}} request. Reply anytime and we\'ll get back to you right away!' },
+          ],
+      stopOnCustomerReply: autoReplyRule?.stopOnCustomerReply ?? true,
+    };
+  }
+
+  /**
+   * Save customer texting configuration for an account
+   * Creates/updates sendToCustomer notification rules
+   */
+  async saveCustomerTextingSettings(
+    userId: string,
+    savedAccountId: string,
+    dto: {
+      enabled: boolean;
+      autoReplyTemplate: string;
+      followUps: Array<{ enabled: boolean; delayMinutes: number; template: string }>;
+      stopOnCustomerReply: boolean;
+    },
+  ): Promise<{ success: boolean }> {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+    });
+    if (!account) throw new NotFoundException('Account not found');
+
+    // Ensure NotificationSettings exists
+    let settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+    });
+    if (!settings) {
+      settings = await this.prisma.notificationSettings.create({
+        data: {
+          savedAccountId,
+          userId,
+          enabled: true,
+          customerTextingEnabled: dto.enabled,
+        },
+      });
+    } else {
+      await this.prisma.notificationSettings.update({
+        where: { id: settings.id },
+        data: { customerTextingEnabled: dto.enabled },
+      });
+    }
+
+    // Delete existing customer-texting rules for this account
+    await this.prisma.notificationRule.deleteMany({
+      where: {
+        notificationSettingsId: settings.id,
+        sendToCustomer: true,
+      },
+    });
+
+    if (!dto.enabled) {
+      return { success: true };
+    }
+
+    // Resolve fromPhone: settings phone or pool phone
+    let fromPhone = settings.sigcoreFromPhone;
+    if (!fromPhone) {
+      const assignment = await this.prisma.phonePoolAssignment.findFirst({
+        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
+        include: { phonePool: true },
+        orderBy: { assignedAt: 'desc' },
+      });
+      if (assignment) fromPhone = assignment.phonePool.phoneNumber;
+    }
+
+    // Create auto-reply rule (delay 0)
+    await this.prisma.notificationRule.create({
+      data: {
+        notificationSettingsId: settings.id,
+        name: 'Auto-Reply to Customer',
+        triggerType: 'new_lead',
+        fromPhone,
+        sendToCustomer: true,
+        template: dto.autoReplyTemplate,
+        delayMinutes: 0,
+        stopOnCustomerReply: dto.stopOnCustomerReply,
+        enabled: true,
+      },
+    });
+
+    // Create follow-up rules
+    for (const fu of dto.followUps) {
+      if (fu.delayMinutes <= 0) continue;
+      await this.prisma.notificationRule.create({
+        data: {
+          notificationSettingsId: settings.id,
+          name: `Follow-Up (${fu.delayMinutes >= 60 ? `${fu.delayMinutes / 60}hr` : `${fu.delayMinutes}min`})`,
+          triggerType: 'new_lead',
+          fromPhone,
+          sendToCustomer: true,
+          template: fu.template,
+          delayMinutes: fu.delayMinutes,
+          stopOnCustomerReply: dto.stopOnCustomerReply,
+          enabled: fu.enabled,
+        },
+      });
+    }
+
+    // Register inbound SMS webhook with Sigcore (if not already registered)
+    if (!settings.inboundSmsWebhookId) {
+      try {
+        const apiKey = this.appSigcoreApiKey || settings.sigcoreApiKey;
+        if (apiKey) {
+          const appBaseUrl = this.configService.get<string>('APP_BASE_URL', 'https://leadbridge360.com');
+          const webhookUrl = `${appBaseUrl}/api/webhooks/sigcore/inbound-sms?accountId=${savedAccountId}`;
+          const result = await this.createSigcoreWebhook(apiKey, webhookUrl);
+          if (result.webhookId) {
+            await this.prisma.notificationSettings.update({
+              where: { id: settings.id },
+              data: { inboundSmsWebhookId: result.webhookId },
+            });
+            this.logger.log(`Registered inbound SMS webhook: ${result.webhookId}`);
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`Failed to register inbound SMS webhook: ${err.message}`);
+      }
+    }
+
+    return { success: true };
   }
 
   /**

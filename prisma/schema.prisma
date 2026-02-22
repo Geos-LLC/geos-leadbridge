@@ -235,8 +235,9 @@ model Message {
   isRead          Boolean  @default(false)
   sentAt          DateTime @default(now())
   deliveredAt     DateTime?
-  rawJson         String?  @db.Text
-  createdAt       DateTime @default(now())
+  rawJson           String?  @db.Text
+  notificationLogId String?  // Links outbound SMS to NotificationLog for delivery status
+  createdAt         DateTime @default(now())
 
   // Relationships
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -246,6 +247,7 @@ model Message {
   @@index([conversationId])
   @@index([userId])
   @@index([sentAt])
+  @@index([notificationLogId])
   @@map("messages")
 }
 
@@ -424,9 +426,11 @@ model NotificationSettings {
   quietHoursStart   String?  // e.g., "22:00"
   quietHoursEnd     String?  // e.g., "08:00"
   quietHoursTimezone String? @default("America/New_York")
-  requirePhone      Boolean  @default(true) // Only notify if lead has phone
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  requirePhone            Boolean  @default(true) // Only notify if lead has phone
+  customerTextingEnabled  Boolean  @default(false) // Separate toggle for customer-facing SMS texting
+  inboundSmsWebhookId     String?  // Sigcore webhook ID for inbound SMS
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
   // Relationships
   user              User?               @relation(fields: [userId], references: [id], onDelete: Cascade)

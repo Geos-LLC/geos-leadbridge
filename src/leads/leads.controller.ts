@@ -20,7 +20,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { LeadsService } from './leads.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Observable, fromEvent } from 'rxjs';
+import { Observable, fromEvent, merge } from 'rxjs';
 import { map } from 'rxjs/operators';
 
 @Controller('v1/leads')
@@ -42,11 +42,23 @@ export class LeadsController {
   leadEvents(@CurrentUser() user: any): Observable<MessageEvent> {
     const userId = user.id;
 
-    // Listen for lead events for this user
-    return fromEvent(this.eventEmitter, `lead.created.${userId}`).pipe(
-      map((lead) => ({
-        data: { type: 'lead.created', lead },
-      })),
+    // Listen for lead events and SMS events for this user
+    return merge(
+      fromEvent(this.eventEmitter, `lead.created.${userId}`).pipe(
+        map((lead) => ({
+          data: { type: 'lead.created', lead },
+        })),
+      ),
+      fromEvent(this.eventEmitter, `sms.inbound.${userId}`).pipe(
+        map((payload) => ({
+          data: { type: 'sms.inbound', ...(payload as any) },
+        })),
+      ),
+      fromEvent(this.eventEmitter, `sms.status.${userId}`).pipe(
+        map((payload) => ({
+          data: { type: 'sms.status', ...(payload as any) },
+        })),
+      ),
     );
   }
 

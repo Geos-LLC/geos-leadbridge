@@ -903,6 +903,39 @@ export class WebhooksService {
           });
 
           this.logger.log(`Updated NotificationLog ${log.id} with status: ${newStatus}`);
+
+          // Also update the linked Message record (for customer-facing SMS in conversation)
+          try {
+            const linkedMessage = await this.prisma.message.findFirst({
+              where: { notificationLogId: log.id },
+            });
+            if (linkedMessage) {
+              await this.prisma.message.update({
+                where: { id: linkedMessage.id },
+                data: {
+                  ...(status === 'delivered' && { deliveredAt: new Date() }),
+                },
+              });
+
+              // Emit SSE event for real-time delivery status in UI
+              if (log.leadId) {
+                const lead = await this.prisma.lead.findUnique({
+                  where: { id: log.leadId },
+                  select: { userId: true },
+                });
+                if (lead) {
+                  this.eventEmitter.emit(`sms.status.${lead.userId}`, {
+                    messageId: linkedMessage.id,
+                    logId: log.id,
+                    status: newStatus,
+                    deliveredAt: status === 'delivered' ? new Date().toISOString() : undefined,
+                  });
+                }
+              }
+            }
+          } catch (err: any) {
+            this.logger.warn(`Failed to update linked Message: ${err.message}`);
+          }
         } else {
           this.logger.warn(`NotificationLog not found for messageId: ${messageId}`);
         }
@@ -920,6 +953,196 @@ export class WebhooksService {
       this.logger.error('Error processing Sigcore webhook', error);
 
       // Mark webhook as failed
+      await this.prisma.webhookEvent.update({
+        where: { id: event.id },
+        data: {
+          processed: true,
+          processedAt: new Date(),
+          processingError: error.message || 'Unknown error',
+        },
+      });
+    }
+  }
+
+  /**
+   * Handle inbound SMS from a customer via Sigcore
+   * Stores the message, cancels pending follow-ups, emits SSE event
+   */
+  async handleInboundSms(params: {
+    eventType: string;
+    timestamp: string;
+    signature: string;
+    accountId: string;
+    payload: any;
+    rawBody: string;
+  }): Promise<void> {
+    const { eventType, timestamp, signature, accountId, payload, rawBody } = params;
+
+    this.logger.log('=== SIGCORE INBOUND SMS WEBHOOK ===');
+    this.logger.log(`Event: ${eventType}, AccountId: ${accountId}`);
+    this.logger.log(`Payload: ${JSON.stringify(payload).substring(0, 500)}`);
+
+    // Log webhook event
+    const event = await this.prisma.webhookEvent.create({
+      data: {
+        platform: 'sigcore',
+        eventType: eventType || 'message.inbound',
+        payload: rawBody,
+        signature,
+        verified: true, // Sigcore manages webhook verification at platform level
+        processed: false,
+      },
+    });
+
+    try {
+      const data = payload?.data || payload;
+      const fromNumber = data?.fromNumber || data?.from;
+      const body = data?.body || data?.text || data?.content || '';
+      const messageId = data?.id || data?.messageId;
+
+      if (!fromNumber || !body) {
+        this.logger.warn('Inbound SMS missing fromNumber or body');
+        return;
+      }
+
+      // Normalize phone for matching (last 10 digits)
+      const normalizedFrom = fromNumber.replace(/\D/g, '').slice(-10);
+
+      // Find the most recent lead matching this phone, scoped by account
+      let leadQuery: any = {
+        customerPhone: { contains: normalizedFrom },
+      };
+
+      // Scope by account's businessId if accountId provided
+      if (accountId) {
+        const savedAccount = await this.prisma.savedAccount.findUnique({
+          where: { id: accountId },
+        });
+        if (savedAccount?.businessId) {
+          leadQuery.businessId = savedAccount.businessId;
+        }
+      }
+
+      const lead = await this.prisma.lead.findFirst({
+        where: leadQuery,
+        orderBy: { createdAt: 'desc' },
+        include: { conversation: true },
+      });
+
+      if (!lead) {
+        this.logger.warn(`No lead found for inbound SMS from ${fromNumber}`);
+        await this.prisma.webhookEvent.update({
+          where: { id: event.id },
+          data: { processed: true, processedAt: new Date(), processingError: 'No lead found for phone' },
+        });
+        return;
+      }
+
+      this.logger.log(`Matched inbound SMS to lead ${lead.id} (${lead.customerName})`);
+
+      // Ensure conversation exists
+      let conversationId = lead.threadId;
+      if (!conversationId && lead.conversation) {
+        conversationId = lead.conversation.id;
+      }
+      if (!conversationId) {
+        // Create conversation if none exists
+        const conversation = await this.prisma.conversation.create({
+          data: {
+            userId: lead.userId,
+            platform: 'sms',
+            externalThreadId: `sms-${lead.id}`,
+            customerName: lead.customerName,
+            lastMessageAt: new Date(),
+            unreadCount: 1,
+          },
+        });
+        conversationId = conversation.id;
+        await this.prisma.lead.update({
+          where: { id: lead.id },
+          data: { threadId: conversationId },
+        });
+      }
+
+      // Store as Message record
+      const message = await this.prisma.message.create({
+        data: {
+          conversationId,
+          userId: lead.userId,
+          platform: 'sms',
+          externalMessageId: messageId || `inbound-${Date.now()}`,
+          sender: 'customer',
+          content: body,
+          isRead: false,
+          sentAt: new Date(),
+        },
+      });
+
+      // Update conversation
+      await this.prisma.conversation.update({
+        where: { id: conversationId },
+        data: {
+          lastMessageAt: new Date(),
+          unreadCount: { increment: 1 },
+        },
+      });
+
+      // Cancel pending customer-texting follow-ups
+      try {
+        await this.notificationsService.cancelPendingNotificationsForLead(
+          lead.id,
+          'Customer replied via SMS',
+        );
+      } catch (err: any) {
+        this.logger.warn(`Failed to cancel pending notifications: ${err.message}`);
+      }
+
+      // Trigger customer_reply notification rules (e.g., forward reply to business owner)
+      try {
+        // Resolve savedAccountId for this lead's business
+        const savedAccount = await this.prisma.savedAccount.findFirst({
+          where: { userId: lead.userId, businessId: lead.businessId || undefined },
+        });
+        if (savedAccount) {
+          await this.notificationsService.handleCustomerReply({
+            userId: lead.userId,
+            savedAccountId: savedAccount.id,
+            leadId: lead.id,
+            lead: {
+              customerName: lead.customerName,
+              customerPhone: lead.customerPhone || fromNumber,
+              category: lead.category,
+              city: lead.city,
+              state: lead.state,
+              postcode: lead.postcode,
+              message: body,
+            },
+            isFirstCustomerReply: false, // Inbound SMS is not the first Thumbtack message
+          });
+        }
+      } catch (err: any) {
+        this.logger.warn(`Failed to handle customer reply rules: ${err.message}`);
+      }
+
+      // Emit SSE event for real-time UI update
+      this.eventEmitter.emit(`sms.inbound.${lead.userId}`, {
+        leadId: lead.id,
+        message: {
+          id: message.id,
+          content: body,
+          sender: 'customer',
+          sentAt: message.sentAt,
+          fromNumber,
+        },
+      });
+
+      // Mark webhook as processed
+      await this.prisma.webhookEvent.update({
+        where: { id: event.id },
+        data: { processed: true, processedAt: new Date() },
+      });
+    } catch (error: any) {
+      this.logger.error('Error processing inbound SMS webhook', error);
       await this.prisma.webhookEvent.update({
         where: { id: event.id },
         data: {

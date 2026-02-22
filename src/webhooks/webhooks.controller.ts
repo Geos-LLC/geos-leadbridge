@@ -114,6 +114,33 @@ export class WebhooksController {
   }
 
   /**
+   * Sigcore webhook endpoint for inbound SMS from customers
+   * Receives message.inbound events when a customer replies via SMS
+   */
+  @Public()
+  @Post('sigcore/inbound-sms')
+  @HttpCode(HttpStatus.OK)
+  async handleSigcoreInboundSms(
+    @Headers('x-callio-event') eventType: string,
+    @Headers('x-callio-timestamp') timestamp: string,
+    @Headers('x-callio-signature') signature: string,
+    @Query('accountId') accountId: string,
+    @Body() payload: any,
+    @Req() req: RawBodyRequest<Request>,
+  ) {
+    await this.webhooksService.handleInboundSms({
+      eventType: eventType || payload?.event,
+      timestamp,
+      signature,
+      accountId,
+      payload,
+      rawBody: req.rawBody?.toString() || JSON.stringify(payload),
+    });
+
+    return { received: true };
+  }
+
+  /**
    * Get webhook events (admin/debugging)
    */
   @UseGuards(JwtAuthGuard)

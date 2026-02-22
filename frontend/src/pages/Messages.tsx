@@ -36,6 +36,9 @@ interface LocalMessage {
   sentAt: Date;
   externalId?: string;
   attachments?: MessageAttachment[];
+  platform?: string;
+  deliveredAt?: string;
+  notificationLogId?: string;
 }
 
 // Helper to get/set last seen timestamps from localStorage
@@ -76,8 +79,24 @@ function mergeTimeline(
   customerPhone?: string | null,
 ): TimelineEvent[] {
   const events: TimelineEvent[] = [];
+  const smsLogIdsFromMessages = new Set<string>(); // Track SMS Message records to avoid duplicates
 
   for (const msg of platformMessages) {
+    // SMS messages stored as Message records (platform: 'sms')
+    if ((msg as any).platform === 'sms') {
+      events.push({
+        id: `sms-msg-${msg.id}`,
+        channel: 'sms',
+        direction: msg.sender === 'customer' ? 'inbound' : 'outbound',
+        content: msg.content,
+        timestamp: msg.sentAt,
+        sender: msg.sender,
+        smsStatus: (msg as any).deliveredAt ? 'delivered' : 'sent',
+      });
+      if ((msg as any).notificationLogId) smsLogIdsFromMessages.add((msg as any).notificationLogId);
+      continue;
+    }
+
     events.push({
       id: `platform-${msg.id}`,
       channel: 'platform',
@@ -91,7 +110,11 @@ function mergeTimeline(
   }
 
   // Only include SMS logs sent TO the customer (filter out internal alerts to business owner)
+  // Also skip logs that already have a Message record (to avoid duplicates)
   for (const log of smsLogs) {
+    // Skip if already added via Message record
+    if (smsLogIdsFromMessages.has(log.id)) continue;
+
     // Skip if no customer phone or SMS wasn't sent to customer
     if (!customerPhone || !log.toPhone) continue;
 
@@ -293,6 +316,28 @@ export function Messages() {
           console.log('[Messages] New lead received via SSE:', data.lead);
           // Add the new lead to the beginning of the list
           setLeads([data.lead as Lead, ...leads]);
+        } else if (data.type === 'sms.inbound') {
+          console.log('[Messages] Inbound SMS received via SSE:', data);
+          // If viewing this lead, add inbound message to timeline in real-time
+          if (selectedLead?.id === data.leadId) {
+            const newEvent: TimelineEvent = {
+              id: `sms-inbound-${data.message?.id || Date.now()}`,
+              channel: 'sms',
+              direction: 'inbound',
+              content: data.message?.content || '',
+              timestamp: new Date(data.message?.sentAt || Date.now()),
+              sender: 'customer',
+            };
+            setTimelineEvents(prev => [...prev, newEvent]);
+          }
+        } else if (data.type === 'sms.status') {
+          // Update delivery status of existing SMS in timeline
+          setTimelineEvents(prev => prev.map(e => {
+            if (e.id.includes(data.messageId) || e.id.includes(data.logId)) {
+              return { ...e, smsStatus: data.status as TimelineEvent['smsStatus'], deliveredAt: data.deliveredAt };
+            }
+            return e;
+          }));
         }
       } catch (err) {
         console.error('[Messages] Error parsing SSE event:', err);
@@ -520,6 +565,9 @@ export function Messages() {
           sentAt: new Date(msg.sentAt),
           externalId: msg.externalMessageId,
           attachments: msg.attachments,
+          platform: msg.platform,
+          deliveredAt: msg.deliveredAt,
+          notificationLogId: msg.notificationLogId,
         };
       });
       setMessages(convertedMessages);
@@ -1209,6 +1257,8 @@ export function Messages() {
                       <div className={`max-w-[85%] sm:max-w-md ${
                         isSmsDisconnected && event.direction === 'outbound'
                           ? 'bg-yellow-50 text-slate-900 border-2 border-yellow-200'
+                          : event.channel === 'sms' && event.direction === 'inbound'
+                          ? 'bg-green-50 text-slate-900'
                           : event.channel === 'sms'
                           ? 'bg-yellow-50 text-slate-900'
                           : event.direction === 'outbound'
@@ -1220,6 +1270,8 @@ export function Messages() {
                         <span className={`text-[10px] font-bold uppercase ${
                           isSmsDisconnected && event.direction === 'outbound'
                             ? 'text-yellow-700'
+                            : event.channel === 'sms' && event.direction === 'inbound'
+                            ? 'text-green-700'
                             : event.channel === 'sms'
                             ? 'text-yellow-700'
                             : event.direction === 'outbound'

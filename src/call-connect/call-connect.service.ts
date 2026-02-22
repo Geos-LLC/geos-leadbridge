@@ -131,19 +131,6 @@ export class CallConnectService {
     return settings;
   }
 
-  // ─── Template variable substitution ─────────────────────────────────────────
-
-  private substituteVars(
-    template: string,
-    vars: { customerName?: string; category?: string; location?: string; summary?: string },
-  ): string {
-    return template
-      .replace(/\{customerName\}/g, vars.customerName || '')
-      .replace(/\{category\}/g, vars.category || '')
-      .replace(/\{location\}/g, vars.location || '')
-      .replace(/\{summary\}/g, vars.summary || '');
-  }
-
   // ─── Sigcore API ─────────────────────────────────────────────────────────────
 
   private buildHeaders(apiKey: string): Record<string, string> {
@@ -164,39 +151,66 @@ export class CallConnectService {
     return ns?.sigcoreApiKey || null;
   }
 
-  /** Push call-connect settings to Sigcore */
+  /** Push call-connect settings to Sigcore and verify they were saved */
   private async pushSettingsToSigcore(savedAccountId: string, settings: any): Promise<void> {
     const apiKey = await this.getSigcoreApiKey(savedAccountId);
-    if (!apiKey) return;
+    if (!apiKey) {
+      this.logger.warn(`[pushSettings] No Sigcore API key for account ${savedAccountId} — skipping`);
+      return;
+    }
 
-    const url = `${this.sigcoreApiUrl}/api/internal/call-connect/settings`;
-    await firstValueFrom(
-      this.httpService.post(
-        url,
-        {
-          enabled: settings.enabled,
-          mode: settings.mode,
-          botNumberE164: settings.botNumberE164,
-          agentPhoneE164: settings.agentPhoneE164,
-          ringTimeoutSeconds: 60,
-          maxAgentAttempts: settings.maxAgentAttempts,
-          agentAcceptDigits: '0123456789',
-          agentWhisperMessage: settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.',
-          leadGreetingMessage: settings.leadGreetingMessage || 'Please hold while we connect you with a specialist.',
-          leadVoicemailEnabled: false,
-          ...(settings.quietHoursEnabled && settings.quietHoursTimezone && settings.quietHoursStart && settings.quietHoursEnd && {
-            quietHours: {
-              timezone: settings.quietHoursTimezone,
-              start: settings.quietHoursStart,
-              end: settings.quietHoursEnd,
-            },
-          }),
+    const payload = {
+      enabled: settings.enabled,
+      mode: settings.mode,
+      botNumberE164: settings.botNumberE164,
+      agentPhoneE164: settings.agentPhoneE164,
+      ringTimeoutSeconds: 60,
+      maxAgentAttempts: settings.maxAgentAttempts,
+      agentAcceptDigits: '0123456789',
+      agentWhisperMessage: settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.',
+      leadGreetingMessage: settings.leadGreetingMessage || 'Please hold while we connect you with a specialist.',
+      leadVoicemailEnabled: false,
+      ...(settings.quietHoursEnabled && settings.quietHoursTimezone && settings.quietHoursStart && settings.quietHoursEnd && {
+        quietHours: {
+          timezone: settings.quietHoursTimezone,
+          start: settings.quietHoursStart,
+          end: settings.quietHoursEnd,
         },
-        { headers: this.buildHeaders(apiKey) },
-      ),
+      }),
+    };
+
+    const settingsUrl = `${this.sigcoreApiUrl}/api/internal/call-connect/settings`;
+    const headers = this.buildHeaders(apiKey);
+
+    this.logger.log(
+      `[pushSettings] POST ${settingsUrl} | agentAcceptDigits=${payload.agentAcceptDigits} | mode=${payload.mode} | bot=${payload.botNumberE164} | agent=${payload.agentPhoneE164}`,
     );
 
-    this.logger.log(`Pushed call-connect settings to Sigcore for account ${savedAccountId}`);
+    const pushResp = await firstValueFrom(
+      this.httpService.post(settingsUrl, payload, { headers }),
+    );
+
+    this.logger.log(
+      `[pushSettings] Sigcore responded ${pushResp.status} — agentAcceptDigits in response: ${pushResp.data?.agentAcceptDigits ?? 'N/A'}`,
+    );
+
+    // Verify with a GET — catch mismatches early
+    try {
+      const getResp = await firstValueFrom(
+        this.httpService.get(settingsUrl, { headers }),
+      );
+      const saved = getResp.data;
+      if (saved?.agentAcceptDigits !== '0123456789') {
+        this.logger.error(
+          `[pushSettings] MISMATCH! Pushed agentAcceptDigits='0123456789' but Sigcore has '${saved?.agentAcceptDigits}'. ` +
+          `Full settings: ${JSON.stringify({ agentAcceptDigits: saved?.agentAcceptDigits, mode: saved?.mode, enabled: saved?.enabled })}`,
+        );
+      } else {
+        this.logger.log(`[pushSettings] Verified: Sigcore settings match (agentAcceptDigits=${saved.agentAcceptDigits})`);
+      }
+    } catch (verifyErr: any) {
+      this.logger.warn(`[pushSettings] Could not verify settings via GET: ${verifyErr.message}`);
+    }
   }
 
   /** Register per-business webhook subscription with Sigcore */
@@ -322,24 +336,16 @@ export class CallConnectService {
       params.leadSummary ||
       [params.customerName, params.category].filter(Boolean).join(' – ');
 
-    // Build final whisper / greeting text with lead data substituted
-    const vars = {
-      customerName: params.customerName,
-      category: params.category ?? '',
-      location: params.location ?? '',
-      summary,
-    };
-
-    const agentWhisperMessage = settings.agentWhisperMessage
-      ? this.substituteVars(settings.agentWhisperMessage, vars)
-      : `New lead: ${summary}. Press any key to connect.`;
-
-    const leadGreetingMessage = settings.leadGreetingMessage
-      ? this.substituteVars(settings.leadGreetingMessage, vars)
-      : 'Please hold while we connect you with a specialist.';
+    // Whisper/greeting messages are read by Sigcore from settings (pushed via pushSettingsToSigcore).
+    // Do NOT send them in the /start body — Sigcore's DTO strips unknown fields (NestJS whitelist).
+    // Template vars like {summary}, {customerName} are substituted by Sigcore per-session.
 
     try {
       const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
+
+      this.logger.log(
+        `[triggerForLead] POST ${url} | businessId=${sigcoreBusinessId} | lead=${params.leadId} | phone=${params.customerPhone}`,
+      );
 
       const response = await firstValueFrom(
         this.httpService.post(
@@ -350,8 +356,6 @@ export class CallConnectService {
             leadPhoneE164: params.customerPhone,
             leadSummary: summary,
             agentHint: settings.agentPhoneE164 || undefined,
-            agentWhisperMessage,
-            leadGreetingMessage,
             source: 'leadbridge',
           },
           { headers: this.buildHeaders(sigcoreApiKey) },
@@ -381,10 +385,13 @@ export class CallConnectService {
         },
       });
 
-      this.logger.log(`Call-connect session started: ${sessionId} for lead ${params.leadId}`);
+      this.logger.log(
+        `[triggerForLead] Session started: ${sessionId} (status=${status}) for lead ${params.leadId}`,
+      );
     } catch (err: any) {
+      const sigcoreMsg = err.response?.data?.message || err.response?.data?.error || err.message;
       this.logger.error(
-        `Failed to start call-connect for lead ${params.leadId}: ${err.message}`,
+        `[triggerForLead] Failed for lead ${params.leadId} (${err.response?.status}): ${sigcoreMsg}`,
       );
     }
   }
@@ -529,59 +536,52 @@ export class CallConnectService {
 
     const sigcoreBusinessId = ns?.sigcoreWorkspaceId || savedAccountId;
 
-    // Always sync settings to Sigcore before test call so agentAcceptDigits is current
+    // Sync settings to Sigcore before test call — fail loudly so the user knows
     try {
       await this.pushSettingsToSigcore(savedAccountId, settings);
     } catch (err: any) {
-      this.logger.warn(`Failed to push settings before test call: ${err.message}`);
+      this.logger.error(`[triggerTestCall] Settings push FAILED: ${err.message}`);
+      throw new BadRequestException(
+        `Failed to sync settings to Sigcore before test call: ${err.message}. ` +
+        `The call would use stale settings. Please check your Sigcore API key and try again.`,
+      );
     }
 
     const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
-
     const leadSummary = 'Test Customer — House Cleaning — Tampa, FL';
 
-    // Build final whisper / greeting text with test data substituted
-    const vars = {
-      customerName: 'Test Customer',
-      category: 'House Cleaning',
-      location: 'Tampa, FL',
-      summary: leadSummary,
+    // Only send fields that Sigcore's StartCallConnectDto accepts.
+    // agentWhisperMessage and leadGreetingMessage are read from settings by Sigcore,
+    // NOT from the /start body (NestJS whitelist strips unknown fields).
+    const startPayload = {
+      businessId: sigcoreBusinessId,
+      leadId: `test-${Date.now()}`,
+      leadPhoneE164: testPhone,
+      leadSummary,
+      agentHint: settings.agentPhoneE164 || undefined,
+      source: 'leadbridge',
     };
 
-    const agentWhisperMessage = settings.agentWhisperMessage
-      ? this.substituteVars(settings.agentWhisperMessage, vars)
-      : `New lead: ${leadSummary}. Press any key to connect.`;
-
-    const leadGreetingMessage = settings.leadGreetingMessage
-      ? this.substituteVars(settings.leadGreetingMessage, vars)
-      : 'Please hold while we connect you with a specialist.';
+    this.logger.log(
+      `[triggerTestCall] POST ${url} | businessId=${sigcoreBusinessId} | leadPhone=${testPhone} | agentHint=${settings.agentPhoneE164}`,
+    );
 
     let response: any;
     try {
       response = await firstValueFrom(
-        this.httpService.post(
-          url,
-          {
-            businessId: sigcoreBusinessId,
-            leadId: `test-${Date.now()}`,
-            leadPhoneE164: testPhone,
-            leadSummary,
-            agentHint: settings.agentPhoneE164 || undefined,
-            agentWhisperMessage,
-            leadGreetingMessage,
-            source: 'leadbridge',
-          },
-          { headers: this.buildHeaders(sigcoreApiKey) },
-        ),
+        this.httpService.post(url, startPayload, { headers: this.buildHeaders(sigcoreApiKey) }),
       );
     } catch (err: any) {
       const sigcoreMsg = err.response?.data?.message || err.response?.data?.error || err.message;
-      this.logger.error(`Sigcore test call failed: ${sigcoreMsg}`);
+      this.logger.error(`[triggerTestCall] Sigcore /start FAILED (${err.response?.status}): ${sigcoreMsg}`);
       throw new BadRequestException(`Sigcore error: ${sigcoreMsg}`);
     }
 
     const sessionId = response.data?.sessionId || null;
-    this.logger.log(`Test call-connect session started: ${sessionId} (test phone: ${testPhone})`);
+    const sessionStatus = response.data?.status || 'unknown';
+    this.logger.log(
+      `[triggerTestCall] Session started: ${sessionId} (status=${sessionStatus}, testPhone=${testPhone})`,
+    );
     return { sessionId };
   }
 

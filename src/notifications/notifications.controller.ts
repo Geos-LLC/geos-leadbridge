@@ -300,6 +300,47 @@ export class NotificationsController {
     };
   }
 
+  // ==========================================
+  // Customer Texting Settings
+  // ==========================================
+
+  /**
+   * Get customer texting settings for an account
+   */
+  @Get('customer-texting/:savedAccountId')
+  async getCustomerTextingSettings(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    const settings = await this.notificationsService.getCustomerTextingSettings(
+      user.id,
+      savedAccountId,
+    );
+    return { success: true, ...settings };
+  }
+
+  /**
+   * Save customer texting settings for an account
+   */
+  @Put('customer-texting/:savedAccountId')
+  async saveCustomerTextingSettings(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+    @Body() body: {
+      enabled: boolean;
+      autoReplyTemplate: string;
+      followUps: Array<{ enabled: boolean; delayMinutes: number; template: string }>;
+      stopOnCustomerReply: boolean;
+    },
+  ) {
+    const result = await this.notificationsService.saveCustomerTextingSettings(
+      user.id,
+      savedAccountId,
+      body,
+    );
+    return { success: result.success };
+  }
+
   /**
    * Validate Sigcore API key and get available phone numbers
    */

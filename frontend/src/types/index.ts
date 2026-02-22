@@ -51,11 +51,19 @@ export interface Message {
   conversationId: string;
   platform: string;
   externalMessageId: string;
-  sender: 'customer' | 'pro';
+  sender: 'customer' | 'pro' | 'system';
   content: string;
   isRead: boolean;
   sentAt: string;
   deliveredAt?: string;
+  notificationLogId?: string;
+}
+
+export interface CustomerTextingSettings {
+  enabled: boolean;
+  autoReplyTemplate: string;
+  followUps: Array<{ id?: string; enabled: boolean; delayMinutes: number; template: string }>;
+  stopOnCustomerReply: boolean;
 }
 
 export interface Platform {

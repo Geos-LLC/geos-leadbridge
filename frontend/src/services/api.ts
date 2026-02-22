@@ -343,12 +343,13 @@ export interface ApiMessage {
   conversationId: string;
   platform: string;
   externalMessageId: string;
-  sender: 'customer' | 'pro';
+  sender: 'customer' | 'pro' | 'system';
   content: string;
   attachments?: MessageAttachment[];
   isRead: boolean;
   sentAt: string;
   deliveredAt?: string;
+  notificationLogId?: string;
 }
 
 // Leads
@@ -620,6 +621,15 @@ export const notificationsApi = {
   },
   disconnectSigcore: async (savedAccountId: string): Promise<{ success: boolean; error?: string }> => {
     const { data } = await api.delete(`/v1/notifications/sigcore/disconnect/${savedAccountId}`);
+    return data;
+  },
+  // Customer Texting
+  getCustomerTextingSettings: async (savedAccountId: string): Promise<{ success: boolean; enabled: boolean; autoReplyTemplate: string; followUps: Array<{ id?: string; enabled: boolean; delayMinutes: number; template: string }>; stopOnCustomerReply: boolean }> => {
+    const { data } = await api.get(`/v1/notifications/customer-texting/${savedAccountId}`);
+    return data;
+  },
+  saveCustomerTextingSettings: async (savedAccountId: string, settings: { enabled: boolean; autoReplyTemplate: string; followUps: Array<{ enabled: boolean; delayMinutes: number; template: string }>; stopOnCustomerReply: boolean }): Promise<{ success: boolean }> => {
+    const { data } = await api.put(`/v1/notifications/customer-texting/${savedAccountId}`, settings);
     return data;
   },
 };
