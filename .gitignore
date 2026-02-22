@@ -41,3 +41,8 @@ lerna-debug.log*
 node_modules
 
 /generated/prisma
+
+# Uploaded files (keep directory structure, ignore content)
+uploads/**
+!uploads/.gitkeep
+!uploads/voicemail/.gitkeep

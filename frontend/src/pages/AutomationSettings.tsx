@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Plus, Pencil, Trash2, Loader2, Save, X, Zap, Clock, Play, Pause, ChevronDown, FileText, Phone, Moon } from 'lucide-react';
+import { ArrowLeft, Plus, Pencil, Trash2, Loader2, Save, X, Zap, Clock, Play, Pause, ChevronDown, FileText, Phone, Moon, Upload, Music } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { automationApi, thumbtackApi, templatesApi, callConnectApi } from '../services/api';
 import type { AutomationRule, SavedAccount, MessageTemplate, CallConnectMode, AgentStrategy } from '../types';
@@ -64,6 +64,9 @@ export function AutomationSettings() {
   const [ccQuietTimezone, setCcQuietTimezone] = useState('America/New_York');
   const [ccQuietStart, setCcQuietStart] = useState('22:00');
   const [ccQuietEnd, setCcQuietEnd] = useState('08:00');
+  const [ccRecordingUrl, setCcRecordingUrl] = useState<string | null>(null);
+  const [ccUploading, setCcUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Quick template creation modal
   const [showTemplateModal, setShowTemplateModal] = useState(false);
@@ -121,6 +124,7 @@ export function AutomationSettings() {
         setCcQuietTimezone(res.settings.quietHoursTimezone || 'America/New_York');
         setCcQuietStart(res.settings.quietHoursStart || '22:00');
         setCcQuietEnd(res.settings.quietHoursEnd || '08:00');
+        setCcRecordingUrl(res.settings.leadVoicemailRecordingUrl || null);
       } else {
         setCcEnabled(false);
         setCcMode('AGENT_FIRST');
@@ -131,6 +135,7 @@ export function AutomationSettings() {
         setCcQuietTimezone('America/New_York');
         setCcQuietStart('22:00');
         setCcQuietEnd('08:00');
+        setCcRecordingUrl(null);
       }
     } catch {
       // non-fatal
@@ -160,6 +165,24 @@ export function AutomationSettings() {
       setError('Failed to save Instant Call Connect settings');
     } finally {
       setCcSaving(false);
+    }
+  }
+
+  async function handleVoicemailUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const effectiveAccountId = selectedAccountId !== 'all' ? selectedAccountId : accounts[0]?.id;
+    if (!effectiveAccountId) return;
+
+    setCcUploading(true);
+    try {
+      const res = await callConnectApi.uploadVoicemail(effectiveAccountId, file);
+      setCcRecordingUrl(res.recordingUrl);
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'Upload failed');
+    } finally {
+      setCcUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
 
@@ -1017,6 +1040,55 @@ export function AutomationSettings() {
                             <p className="form-hint" style={{ marginTop: 0 }}>Calls will not be triggered during quiet hours.</p>
                           </div>
                         )}
+                      </div>
+
+                      {/* Voicemail recording upload */}
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>
+                          <Music size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                          Voicemail Recording (MP3 / WAV)
+                        </label>
+                        <p className="form-hint">Upload a pre-recorded audio file to play as voicemail when the lead doesn't answer.</p>
+
+                        {ccRecordingUrl && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <audio controls src={ccRecordingUrl} style={{ height: 32, flex: 1 }} />
+                            <button
+                              type="button"
+                              className="btn-icon btn-danger-subtle"
+                              title="Remove recording"
+                              onClick={async () => {
+                                const effectiveAccountId = selectedAccountId !== 'all' ? selectedAccountId : accounts[0]?.id;
+                                if (!effectiveAccountId) return;
+                                try {
+                                  await callConnectApi.saveSettings(effectiveAccountId, { leadVoicemailRecordingUrl: '' } as any);
+                                  setCcRecordingUrl(null);
+                                } catch { /* ignore */ }
+                              }}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        )}
+
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept=".mp3,.wav,audio/mpeg,audio/wav"
+                          onChange={handleVoicemailUpload}
+                          style={{ display: 'none' }}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={ccUploading}
+                          style={{ fontSize: 13 }}
+                        >
+                          {ccUploading
+                            ? <><Loader2 size={14} className="spinner" /> Uploading...</>
+                            : <><Upload size={14} /> {ccRecordingUrl ? 'Replace file' : 'Upload file'}</>}
+                        </button>
                       </div>
                     </div>
                   )}
