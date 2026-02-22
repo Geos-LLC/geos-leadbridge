@@ -318,6 +318,22 @@ export class CallConnectService {
       params.leadSummary ||
       [params.customerName, params.category].filter(Boolean).join(' – ');
 
+    // Build final whisper / greeting text with lead data substituted
+    const vars = {
+      customerName: params.customerName,
+      category: params.category ?? '',
+      location: params.location ?? '',
+      summary,
+    };
+
+    const agentWhisperMessage = settings.agentWhisperMessage
+      ? this.substituteVars(settings.agentWhisperMessage, vars)
+      : `New lead: ${summary}. Press any key to connect.`;
+
+    const leadGreetingMessage = settings.leadGreetingMessage
+      ? this.substituteVars(settings.leadGreetingMessage, vars)
+      : 'Please hold while we connect you with a specialist.';
+
     try {
       const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
 
@@ -329,6 +345,8 @@ export class CallConnectService {
             leadId: params.leadId,
             leadPhoneE164: params.customerPhone,
             leadSummary: summary,
+            agentWhisperMessage,
+            leadGreetingMessage,
             source: 'leadbridge',
           },
           { headers: this.buildHeaders(sigcoreApiKey) },
@@ -517,6 +535,22 @@ export class CallConnectService {
 
     const leadSummary = 'Test Customer — House Cleaning — Tampa, FL';
 
+    // Build final whisper / greeting text with test data substituted
+    const vars = {
+      customerName: 'Test Customer',
+      category: 'House Cleaning',
+      location: 'Tampa, FL',
+      summary: leadSummary,
+    };
+
+    const agentWhisperMessage = settings.agentWhisperMessage
+      ? this.substituteVars(settings.agentWhisperMessage, vars)
+      : `New lead: ${leadSummary}. Press any key to connect.`;
+
+    const leadGreetingMessage = settings.leadGreetingMessage
+      ? this.substituteVars(settings.leadGreetingMessage, vars)
+      : 'Please hold while we connect you with a specialist.';
+
     let response: any;
     try {
       response = await firstValueFrom(
@@ -527,6 +561,8 @@ export class CallConnectService {
             leadId: `test-${Date.now()}`,
             leadPhoneE164: testPhone,
             leadSummary,
+            agentWhisperMessage,
+            leadGreetingMessage,
             source: 'leadbridge',
           },
           { headers: this.buildHeaders(sigcoreApiKey) },
