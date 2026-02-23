@@ -172,7 +172,9 @@ export class CallConnectService {
       agentAcceptDigits: '0123456789',
       agentWhisperMessage: settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.',
       leadGreetingMessage: settings.leadGreetingMessage || 'Please hold while we connect you with a specialist.',
-      leadVoicemailEnabled: settings.leadVoicemailEnabled ?? true,
+      // leadVoicemailEnabled intentionally omitted — LeadBridge has no UI for this setting
+      // (DB default is false which would overwrite the user's Sigcore setting via Object.assign).
+      // Users control voicemail drop from the Sigcore UI directly.
       ...(settings.quietHoursEnabled && settings.quietHoursTimezone && settings.quietHoursStart && settings.quietHoursEnd && {
         quietHours: {
           timezone: settings.quietHoursTimezone,
