@@ -513,8 +513,8 @@ export function Services() {
         agentWhisperMessage: ccAgentWhisperMessage || undefined,
         leadGreetingMessage: ccLeadGreetingMessage || undefined,
         leadVoicemailEnabled: ccVoicemailEnabled,
-        leadVoicemailMessage: ccVoicemailEnabled ? ccVoicemailMessage || undefined : undefined,
-        leadVoicemailRecordingUrl: ccVoicemailEnabled ? ccVoicemailRecordingUrl || undefined : undefined,
+        leadVoicemailMessage: ccVoicemailEnabled ? ccVoicemailMessage : undefined,
+        leadVoicemailRecordingUrl: ccVoicemailEnabled ? ccVoicemailRecordingUrl : undefined,
         botNumberE164: ccBotNumber || undefined,
       });
       showSuccess('Instant Call Connect settings saved');
@@ -1414,13 +1414,25 @@ export function Services() {
                 <div className="space-y-5">
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Recording URL <span className="normal-case font-normal text-slate-400">(optional — takes priority over TTS)</span></label>
-                    <input
-                      type="url"
-                      value={ccVoicemailRecordingUrl}
-                      onChange={e => setCcVoicemailRecordingUrl(e.target.value)}
-                      placeholder="https://example.com/voicemail.mp3"
-                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent"
-                    />
+                    <div className="relative">
+                      <input
+                        type="url"
+                        value={ccVoicemailRecordingUrl}
+                        onChange={e => setCcVoicemailRecordingUrl(e.target.value)}
+                        placeholder="https://example.com/voicemail.mp3"
+                        className={`w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent ${ccVoicemailRecordingUrl ? 'pr-10' : ''}`}
+                      />
+                      {ccVoicemailRecordingUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setCcVoicemailRecordingUrl('')}
+                          title="Clear URL"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-500 transition-colors"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">TTS Voicemail Message <span className="normal-case font-normal text-slate-400">(fallback when no recording URL)</span></label>
