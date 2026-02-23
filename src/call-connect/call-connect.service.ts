@@ -348,6 +348,7 @@ export class CallConnectService {
     const agentWhisperMessage = whisperTemplate
       .replace(/\{summary\}/g, summary)
       .replace(/\{customerName\}/g, params.customerName || '')
+      .replace(/\{accountName\}/g, params.customerName || '')  // alias for {customerName}
       .replace(/\{category\}/g, params.category || '')
       .replace(/\{location\}/g, params.location || '');
 
@@ -359,6 +360,7 @@ export class CallConnectService {
       ? voicemailTemplate
           .replace(/\{summary\}/g, summary)
           .replace(/\{customerName\}/g, params.customerName || '')
+          .replace(/\{accountName\}/g, params.customerName || '')  // alias for {customerName}
           .replace(/\{category\}/g, params.category || '')
           .replace(/\{location\}/g, params.location || '')
           .replace(/\{phone\}/g, params.customerPhone || '')
