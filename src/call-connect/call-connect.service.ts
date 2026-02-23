@@ -173,6 +173,8 @@ export class CallConnectService {
       agentWhisperMessage: settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.',
       leadGreetingMessage: settings.leadGreetingMessage || 'Please hold while we connect you with a specialist.',
       leadVoicemailEnabled: true,
+      leadVoicemailMessage: settings.leadVoicemailMessage ?? null,
+      leadVoicemailRecordingUrl: settings.leadVoicemailRecordingUrl ?? null,
       ...(settings.quietHoursEnabled && settings.quietHoursTimezone && settings.quietHoursStart && settings.quietHoursEnd && {
         quietHours: {
           timezone: settings.quietHoursTimezone,
