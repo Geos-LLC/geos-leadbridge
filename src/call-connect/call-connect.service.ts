@@ -351,11 +351,24 @@ export class CallConnectService {
       .replace(/\{category\}/g, params.category || '')
       .replace(/\{location\}/g, params.location || '');
 
+    // Pre-build the voicemail message the same way so Sigcore receives the final text.
+    // Sigcore will use this per-session value (overriding the workspace template) so the
+    // message already has customerName, phone, etc. substituted correctly.
+    const voicemailTemplate = settings.leadVoicemailMessage || '';
+    const leadVoicemailMessage = voicemailTemplate
+      ? voicemailTemplate
+          .replace(/\{summary\}/g, summary)
+          .replace(/\{customerName\}/g, params.customerName || '')
+          .replace(/\{category\}/g, params.category || '')
+          .replace(/\{location\}/g, params.location || '')
+          .replace(/\{phone\}/g, params.customerPhone || '')
+      : undefined;
+
     try {
       const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
 
       this.logger.log(
-        `[triggerForLead] POST ${url} | businessId=${sigcoreBusinessId} | lead=${params.leadId} | phone=${params.customerPhone} | whisper="${agentWhisperMessage}"`,
+        `[triggerForLead] POST ${url} | businessId=${sigcoreBusinessId} | lead=${params.leadId} | phone=${params.customerPhone} | whisper="${agentWhisperMessage}" | voicemail="${leadVoicemailMessage ?? '(settings default)'}"`,
       );
 
       const response = await firstValueFrom(
@@ -367,6 +380,7 @@ export class CallConnectService {
             leadPhoneE164: params.customerPhone,
             leadSummary: summary,
             agentWhisperMessage,
+            ...(leadVoicemailMessage && { leadVoicemailMessage }),
             agentHint: settings.agentPhoneE164 || undefined,
             source: 'leadbridge',
           },
