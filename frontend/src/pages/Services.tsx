@@ -184,10 +184,34 @@ export function Services() {
   const [ccGreetingTemplateId, setCcGreetingTemplateId] = useState<string | null>(null);
   const [ccVoicemailTemplateId, setCcVoicemailTemplateId] = useState<string | null>(null);
 
+  // CC dirty tracking
+  const [ccSavedSnapshot, setCcSavedSnapshot] = useState<{
+    mode: CallConnectMode;
+    agentPhone: string;
+    botNumber: string;
+    agentWhisperMessage: string;
+    leadGreetingMessage: string;
+    voicemailMessage: string;
+    voicemailRecordingUrl: string;
+  } | null>(null);
+  const [ccValidationModalOpen, setCcValidationModalOpen] = useState(false);
+  const [ccUnsavedModalOpen, setCcUnsavedModalOpen] = useState(false);
+
   // Lead Alerts form state (needed for first-time creation)
   const [alertToPhone, setAlertToPhone] = useState('');
   const [alertFromPhone, setAlertFromPhone] = useState('');
 
+
+  // Derived: unsaved CC changes
+  const ccDirty = ccSavedSnapshot !== null && (
+    ccMode !== ccSavedSnapshot.mode ||
+    ccAgentPhone !== ccSavedSnapshot.agentPhone ||
+    ccBotNumber !== ccSavedSnapshot.botNumber ||
+    ccAgentWhisperMessage !== ccSavedSnapshot.agentWhisperMessage ||
+    ccLeadGreetingMessage !== ccSavedSnapshot.leadGreetingMessage ||
+    ccVoicemailMessage !== ccSavedSnapshot.voicemailMessage ||
+    ccVoicemailRecordingUrl !== ccSavedSnapshot.voicemailRecordingUrl
+  );
 
   useEffect(() => {
     loadAccounts();
@@ -324,6 +348,20 @@ export function Services() {
       setCcWhisperTemplateId(allTemplates.find(t => t.content === whisperContent)?.id || whisperTpl?.id || null);
       setCcGreetingTemplateId(allTemplates.find(t => t.content === greetingContent)?.id || greetingTpl?.id || null);
       setCcVoicemailTemplateId(allTemplates.find(t => t.content === voicemailContent)?.id || voicemailTpl?.id || null);
+
+      // Initialize CC snapshot for dirty tracking
+      const snapshotWhisper = ccs?.agentWhisperMessage || whisperTpl?.content || '';
+      const snapshotGreeting = ccs?.leadGreetingMessage || greetingTpl?.content || '';
+      const snapshotVoicemail = ccs?.leadVoicemailMessage || voicemailTpl?.content || '';
+      setCcSavedSnapshot({
+        mode: (ccs?.mode || 'AGENT_FIRST') as CallConnectMode,
+        agentPhone: ccs?.agentPhoneE164 || '',
+        botNumber: ccs?.botNumberE164 || defaultBotNumber,
+        agentWhisperMessage: snapshotWhisper,
+        leadGreetingMessage: snapshotGreeting,
+        voicemailMessage: snapshotVoicemail,
+        voicemailRecordingUrl: ccs?.leadVoicemailRecordingUrl || '',
+      });
 
       // Pre-fill form states from existing rules
       if (leadAlert) {
@@ -518,6 +556,15 @@ export function Services() {
         botNumberE164: ccBotNumber || undefined,
       });
       showSuccess('Instant Call Connect settings saved');
+      setCcSavedSnapshot({
+        mode: ccMode,
+        agentPhone: ccAgentPhone,
+        botNumber: ccBotNumber,
+        agentWhisperMessage: ccAgentWhisperMessage,
+        leadGreetingMessage: ccLeadGreetingMessage,
+        voicemailMessage: ccVoicemailMessage,
+        voicemailRecordingUrl: ccVoicemailRecordingUrl,
+      });
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Failed to save Call Connect settings');
     } finally {
@@ -525,8 +572,8 @@ export function Services() {
     }
   }
 
-  async function handleTestCall() {
-    if (!selectedAccountId || !ccTestPhone.trim()) return;
+  async function doTestCall() {
+    if (!selectedAccountId) return;
     setCcTesting(true);
     try {
       await callConnectApi.testCall(selectedAccountId, ccTestPhone.trim());
@@ -536,6 +583,35 @@ export function Services() {
     } finally {
       setCcTesting(false);
     }
+  }
+
+  async function handleTestCall() {
+    if (!selectedAccountId) return;
+    // Guard 1: required fields must be valid
+    const agentPhoneOk = ccAgentPhone && isValidPhoneE164(ccAgentPhone);
+    const botNumberOk = !!ccBotNumber;
+    const testPhoneOk = ccTestPhone.trim() && isValidPhoneE164(ccTestPhone);
+    if (!agentPhoneOk || !botNumberOk || !testPhoneOk) {
+      setCcValidationModalOpen(true);
+      return;
+    }
+    // Guard 2: no unsaved changes
+    if (ccDirty) {
+      setCcUnsavedModalOpen(true);
+      return;
+    }
+    await doTestCall();
+  }
+
+  function discardCcChanges() {
+    if (!ccSavedSnapshot) return;
+    setCcMode(ccSavedSnapshot.mode);
+    setCcAgentPhone(ccSavedSnapshot.agentPhone);
+    setCcBotNumber(ccSavedSnapshot.botNumber);
+    setCcAgentWhisperMessage(ccSavedSnapshot.agentWhisperMessage);
+    setCcLeadGreetingMessage(ccSavedSnapshot.leadGreetingMessage);
+    setCcVoicemailMessage(ccSavedSnapshot.voicemailMessage);
+    setCcVoicemailRecordingUrl(ccSavedSnapshot.voicemailRecordingUrl);
   }
 
   // --- Auto Reply Handlers ---
@@ -1177,6 +1253,31 @@ export function Services() {
             iconTextColor="text-violet-600"
           >
             <div className={`space-y-6${!ccEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+            {/* Unsaved changes banner */}
+            {ccDirty && (
+              <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+                <div className="flex items-center gap-2 text-amber-700">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span className="text-sm font-medium">You have unsaved changes</span>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    onClick={discardCcChanges}
+                    className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                  >
+                    Discard
+                  </button>
+                  <button
+                    onClick={saveCcSettings}
+                    disabled={ccSaving}
+                    className="px-3 py-1.5 text-xs font-semibold text-white bg-violet-600 rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+                  >
+                    {ccSaving && <Loader2 className="w-3 h-3 animate-spin" />}
+                    Save Settings
+                  </button>
+                </div>
+              </div>
+            )}
             {/* Agent Phone + Send from — always 2 columns */}
             <div className="grid grid-cols-2 gap-4">
               {/* Agent Phone */}
@@ -1185,7 +1286,7 @@ export function Services() {
                 <input
                   type="tel"
                   value={ccAgentPhone}
-                  onChange={e => setCcAgentPhone(e.target.value)}
+                  onChange={e => setCcAgentPhone(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
                   onBlur={e => {
                     const formatted = formatPhoneE164(e.target.value);
                     if (formatted !== e.target.value) setCcAgentPhone(formatted);
@@ -1413,8 +1514,9 @@ export function Services() {
                     type="tel"
                     value={ccTestPhone}
                     onChange={e => {
-                      setCcTestPhone(e.target.value);
-                      localStorage.setItem('cc_test_phone', e.target.value);
+                      const v = e.target.value.replace(/[^\d+\s\-()]/g, '');
+                      setCcTestPhone(v);
+                      localStorage.setItem('cc_test_phone', v);
                     }}
                     onBlur={e => {
                       const formatted = formatPhoneE164(e.target.value);
@@ -1434,8 +1536,14 @@ export function Services() {
                   />
                   <button
                     onClick={handleTestCall}
-                    disabled={ccTesting || !ccTestPhone.trim() || !ccEnabled}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50 whitespace-nowrap"
+                    disabled={ccTesting || !ccEnabled}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all bg-slate-100 text-slate-700 hover:bg-slate-200 whitespace-nowrap ${
+                      ccTesting || !ccEnabled
+                        ? 'opacity-50 cursor-not-allowed'
+                        : (!ccAgentPhone || !isValidPhoneE164(ccAgentPhone) || !ccBotNumber || !ccTestPhone.trim() || !isValidPhoneE164(ccTestPhone))
+                          ? 'opacity-60'
+                          : ''
+                    }`}
                   >
                     {ccTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
                     {ccTesting ? 'Calling…' : 'Test Call'}
@@ -1459,6 +1567,82 @@ export function Services() {
             </div>{/* end disabled overlay */}
           </ServiceCard>
 
+        </div>
+      )}
+
+      {/* Validation Modal — missing required fields for test call */}
+      {ccValidationModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-orange-100 rounded-2xl flex items-center justify-center shrink-0">
+                <AlertCircle className="w-5 h-5 text-orange-600" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900">Missing Required Fields</h3>
+            </div>
+            <p className="text-slate-500 text-sm mb-4">Please fill in the following before running a test call:</p>
+            <ul className="space-y-2 mb-6">
+              {(!ccAgentPhone || !isValidPhoneE164(ccAgentPhone)) && (
+                <li className="flex items-center gap-2 text-sm text-red-600 font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                  Agent Phone (E.164)
+                </li>
+              )}
+              {!ccBotNumber && (
+                <li className="flex items-center gap-2 text-sm text-red-600 font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                  Send from
+                </li>
+              )}
+              {(!ccTestPhone.trim() || !isValidPhoneE164(ccTestPhone)) && (
+                <li className="flex items-center gap-2 text-sm text-red-600 font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                  Test call number
+                </li>
+              )}
+            </ul>
+            <button
+              onClick={() => setCcValidationModalOpen(false)}
+              className="w-full px-6 py-3 bg-slate-100 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-200 transition-all"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Unsaved Changes Modal — warn before test call */}
+      {ccUnsavedModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-amber-100 rounded-2xl flex items-center justify-center shrink-0">
+                <AlertCircle className="w-5 h-5 text-amber-600" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900">Unsaved Changes</h3>
+            </div>
+            <p className="text-slate-500 text-sm mb-6">You have unsaved changes to your Call Connect settings. Save them first to make sure you're testing the latest configuration.</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCcUnsavedModalOpen(false)}
+                className="flex-1 px-6 py-3 bg-slate-100 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-200 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setCcUnsavedModalOpen(false);
+                  await saveCcSettings();
+                  await doTestCall();
+                }}
+                disabled={ccSaving}
+                className="flex-1 px-6 py-3 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {ccSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                Save & Test
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
