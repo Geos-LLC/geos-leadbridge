@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { LeadsService } from './leads/leads.service';
-import { loghubLog } from '@geos/loghub-client';
+import { LoghubLogger } from '@geos/loghub-client';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -19,6 +19,7 @@ dotenv.config();
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true, // Enable raw body for webhook signature verification
+    logger: new LoghubLogger({ service: 'leadbridge-api', app: 'leadbridge' }),
   });
 
   // Get configuration
@@ -102,20 +103,6 @@ async function bootstrap() {
   // Start server
   await app.listen(port);
 
-
-  // logging to grafana
-    await loghubLog({
-    service: 'leadbridge-api',
-    app: 'leadbridge',
-    env: configService.get('nodeEnv') || process.env.NODE_ENV || 'prod',
-    level: 'info',
-    message: 'LeadBridge server started',
-    attrs: {
-      port,
-      frontendUrl: frontendUrl || '',
-      version: process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown',
-    },
-  });
 
   // Run one-time cleanup of synthetic messages on startup
   try {
