@@ -405,7 +405,8 @@ export function Services() {
   }
 
   function isValidPhoneE164(phone: string): boolean {
-    return /^\+[1-9]\d{6,14}$/.test(phone);
+    // US E.164: +1 followed by 10 digits, area code must start with 2-9
+    return /^\+1[2-9]\d{9}$/.test(phone);
   }
 
   // --- Toggle Handlers ---
