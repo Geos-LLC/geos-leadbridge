@@ -14,8 +14,13 @@ import {
 @Injectable()
 export class AnalyticsService {
   private readonly logger = new Logger(AnalyticsService.name);
+  private static readonly CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
   constructor(private prisma: PrismaService) {}
+
+  private buildCacheKey(userId: string, businessId?: string): string {
+    return `${userId}::${businessId ?? '__all__'}`;
+  }
 
   // Basic analytics - Fast metrics only (categories, total leads, engagement)
   async getBasicAnalytics(
@@ -77,8 +82,63 @@ export class AnalyticsService {
   async getAnalytics(
     userId: string,
     query: AnalyticsQueryDto,
+  ): Promise<{ data: AnalyticsResponseDto; calculatedAt: Date | null }> {
+    // Only cache all-time queries (no date filter)
+    const canCache = !query.startDate && !query.endDate;
+
+    if (canCache) {
+      const key = this.buildCacheKey(userId, query.businessId);
+      const cached = await this.prisma.analyticsCache.findUnique({ where: { cacheKey: key } });
+      if (cached) {
+        const ageMs = Date.now() - cached.calculatedAt.getTime();
+        if (ageMs < AnalyticsService.CACHE_TTL_MS) {
+          this.logger.log(`[analytics] cache HIT for ${key} (age ${Math.round(ageMs / 1000)}s)`);
+          return { data: cached.data as unknown as AnalyticsResponseDto, calculatedAt: cached.calculatedAt };
+        }
+        this.logger.log(`[analytics] cache STALE for ${key} (age ${Math.round(ageMs / 1000)}s) — recomputing`);
+      }
+    }
+
+    const data = await this.computeAnalytics(userId, query);
+
+    if (canCache) {
+      const key = this.buildCacheKey(userId, query.businessId);
+      const record = await this.prisma.analyticsCache.upsert({
+        where:  { cacheKey: key },
+        create: { cacheKey: key, userId, data: data as any },
+        update: { data: data as any, calculatedAt: new Date() },
+      });
+      return { data, calculatedAt: record.calculatedAt };
+    }
+
+    return { data, calculatedAt: null };
+  }
+
+  async refreshAnalytics(
+    userId: string,
+    query: AnalyticsQueryDto,
+  ): Promise<{ data: AnalyticsResponseDto; calculatedAt: Date }> {
+    const data = await this.computeAnalytics(userId, query);
+    const key = this.buildCacheKey(userId, query.businessId);
+    const record = await this.prisma.analyticsCache.upsert({
+      where:  { cacheKey: key },
+      create: { cacheKey: key, userId, data: data as any },
+      update: { data: data as any, calculatedAt: new Date() },
+    });
+    return { data, calculatedAt: record.calculatedAt };
+  }
+
+  async getCacheInfo(userId: string, businessId?: string): Promise<{ calculatedAt: Date } | null> {
+    const key = this.buildCacheKey(userId, businessId);
+    const cached = await this.prisma.analyticsCache.findUnique({ where: { cacheKey: key } });
+    return cached ? { calculatedAt: cached.calculatedAt } : null;
+  }
+
+  private async computeAnalytics(
+    userId: string,
+    query: AnalyticsQueryDto,
   ): Promise<AnalyticsResponseDto> {
-    this.logger.log(`Getting analytics for user ${userId}`, query);
+    this.logger.log(`[analytics] computing for user ${userId}`);
     const totalStart = Date.now();
 
     // Build date filter
@@ -128,7 +188,7 @@ export class AnalyticsService {
       this.timed('roomStats', () => this.getRoomStats(baseWhere)),
     ]);
 
-    this.logger.log(`[analytics] getAnalytics TOTAL took ${Date.now() - totalStart}ms`);
+    this.logger.log(`[analytics] computeAnalytics TOTAL took ${Date.now() - totalStart}ms`);
 
     return {
       categoryDistribution: categoryDist,

@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AnalyticsService } from './analytics.service';
@@ -14,15 +14,8 @@ export class AnalyticsController {
     @CurrentUser() user: any,
     @Query() query: AnalyticsQueryDto,
   ) {
-    const analytics = await this.analyticsService.getBasicAnalytics(
-      user.id,
-      query,
-    );
-
-    return {
-      success: true,
-      data: analytics,
-    };
+    const analytics = await this.analyticsService.getBasicAnalytics(user.id, query);
+    return { success: true, data: analytics };
   }
 
   @Get()
@@ -30,14 +23,25 @@ export class AnalyticsController {
     @CurrentUser() user: any,
     @Query() query: AnalyticsQueryDto,
   ) {
-    const analytics = await this.analyticsService.getAnalytics(
-      user.id,
-      query,
-    );
+    const { data, calculatedAt } = await this.analyticsService.getAnalytics(user.id, query);
+    return { success: true, data, calculatedAt };
+  }
 
-    return {
-      success: true,
-      data: analytics,
-    };
+  @Post('refresh')
+  async refreshAnalytics(
+    @CurrentUser() user: any,
+    @Query() query: AnalyticsQueryDto,
+  ) {
+    const { data, calculatedAt } = await this.analyticsService.refreshAnalytics(user.id, query);
+    return { success: true, data, calculatedAt };
+  }
+
+  @Get('cache-info')
+  async getCacheInfo(
+    @CurrentUser() user: any,
+    @Query('businessId') businessId?: string,
+  ) {
+    const info = await this.analyticsService.getCacheInfo(user.id, businessId);
+    return { success: true, data: info };
   }
 }

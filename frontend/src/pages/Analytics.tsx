@@ -33,7 +33,9 @@ export function Analytics() {
   const { savedAccounts, setSavedAccounts, analyticsCache, setAnalyticsCache, analyticsLoading: storeLoading } = useAppStore();
 
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [analytics, setAnalytics] = useState<Partial<AnalyticsData> | null>(analyticsCache);
+  const [calculatedAt, setCalculatedAt] = useState<string | null>(null);
 
   // Filters from URL params
   const businessId = searchParams.get('businessId') || 'all';
@@ -82,9 +84,10 @@ export function Analytics() {
       const { data: basicData } = await analyticsApi.getBasicAnalytics(params);
       setAnalytics(basicData as Partial<AnalyticsData>);
 
-      // Phase 2: Load detailed/slow analytics
-      const { data: fullData } = await analyticsApi.getAnalytics(params);
+      // Phase 2: Load detailed/slow analytics (returns from DB cache if fresh)
+      const { data: fullData, calculatedAt: ts } = await analyticsApi.getAnalytics(params);
       setAnalytics(fullData);
+      if (ts) setCalculatedAt(ts);
 
       // Only cache default filter (all accounts, 30d) for preload
       const isDefaultFilter = businessId === 'all' && timeRange === '30d';
@@ -97,6 +100,32 @@ export function Analytics() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const params: { businessId?: string } = {};
+      if (businessId !== 'all') params.businessId = businessId;
+      const { data: fullData, calculatedAt: ts } = await analyticsApi.refreshAnalytics(params);
+      setAnalytics(fullData);
+      setCalculatedAt(ts);
+      notify.success('Analytics', 'Analytics refreshed successfully.');
+    } catch (err) {
+      console.error('Failed to refresh analytics:', err);
+      notify.error('Analytics', 'Failed to refresh analytics.');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const formatRelativeTime = (iso: string): string => {
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const hours = Math.floor(mins / 60);
+    return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
   };
 
   const buildQueryParams = () => {
@@ -199,7 +228,21 @@ export function Analytics() {
           <h2 className="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">Business <span className="gradient-text">Insights.</span></h2>
           <p className="text-slate-500 mt-2 text-lg">Track your leads, engagement, and response metrics.</p>
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Last updated + Refresh */}
+          {calculatedAt && (
+            <span className="text-xs text-slate-400 whitespace-nowrap">
+              Updated {formatRelativeTime(calculatedAt)}
+            </span>
+          )}
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing || loading}
+            className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            Refresh
+          </button>
           {/* Account Filter */}
           <div className="relative">
             <select

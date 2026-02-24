@@ -733,13 +733,23 @@ export const analyticsApi = {
     businessId?: string;
     startDate?: string;
     endDate?: string;
-  }): Promise<{ success: boolean; data: AnalyticsData }> => {
+  }): Promise<{ success: boolean; data: AnalyticsData; calculatedAt: string | null }> => {
     const queryParams = new URLSearchParams();
     if (params.businessId) queryParams.append('businessId', params.businessId);
     if (params.startDate) queryParams.append('startDate', params.startDate);
     if (params.endDate) queryParams.append('endDate', params.endDate);
 
     const { data } = await api.get(`/v1/analytics?${queryParams.toString()}`);
+    return data;
+  },
+
+  refreshAnalytics: async (params: {
+    businessId?: string;
+  }): Promise<{ success: boolean; data: AnalyticsData; calculatedAt: string }> => {
+    const queryParams = new URLSearchParams();
+    if (params.businessId) queryParams.append('businessId', params.businessId);
+
+    const { data } = await api.post(`/v1/analytics/refresh?${queryParams.toString()}`);
     return data;
   },
 };

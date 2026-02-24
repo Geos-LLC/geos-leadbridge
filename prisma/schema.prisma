@@ -757,3 +757,20 @@ model AdminConfig {
 
   @@map("admin_config")
 }
+
+// ==========================================
+// Analytics Cache
+// ==========================================
+
+model AnalyticsCache {
+  id           String   @id @default(cuid())
+  /// "{userId}::{businessId ?? '__all__'}" — unique lookup key
+  cacheKey     String   @unique @map("cache_key")
+  userId       String   @map("user_id")
+  data         Json
+  calculatedAt DateTime @default(now()) @map("calculated_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("analytics_cache")
+}
