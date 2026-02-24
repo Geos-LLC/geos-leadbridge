@@ -242,18 +242,22 @@ export class AnalyticsService {
   private async getConnectionTime(
     where: any,
   ): Promise<ConnectionTimeMetric> {
-    // Get all leads with conversations
+    // Single query: fetch leads with their first pro message via nested select
     const leads = await this.prisma.lead.findMany({
       where: {
         ...where,
         threadId: { not: null },
       },
       select: {
-        id: true,
         createdAt: true,
         conversation: {
           select: {
-            id: true,
+            messages: {
+              where: { sender: 'pro' },
+              orderBy: { sentAt: 'asc' },
+              take: 1,
+              select: { sentAt: true },
+            },
           },
         },
       },
@@ -261,25 +265,11 @@ export class AnalyticsService {
 
     const connectionTimes: number[] = [];
 
-    // For each lead, find first pro message
     for (const lead of leads) {
-      if (!lead.conversation) continue;
-
-      const firstProMessage = await this.prisma.message.findFirst({
-        where: {
-          conversationId: lead.conversation.id,
-          sender: 'pro',
-        },
-        orderBy: { sentAt: 'asc' },
-        select: { sentAt: true },
-      });
-
-      if (firstProMessage) {
-        const diffMs =
-          firstProMessage.sentAt.getTime() - lead.createdAt.getTime();
-        const diffMinutes = diffMs / (1000 * 60);
-        connectionTimes.push(diffMinutes);
-      }
+      const firstProMessage = lead.conversation?.messages?.[0];
+      if (!firstProMessage) continue;
+      const diffMs = firstProMessage.sentAt.getTime() - lead.createdAt.getTime();
+      connectionTimes.push(diffMs / (1000 * 60));
     }
 
     if (connectionTimes.length === 0) {
@@ -308,15 +298,8 @@ export class AnalyticsService {
   // Pro Response Time - Time between customer messages and next pro reply
   private async getProResponseTime(where: any): Promise<ResponseTimeMetric> {
     const leads = await this.prisma.lead.findMany({
-      where: {
-        ...where,
-        threadId: { not: null },
-      },
-      select: {
-        conversation: {
-          select: { id: true },
-        },
-      },
+      where: { ...where, threadId: { not: null } },
+      select: { conversation: { select: { id: true } } },
     });
 
     const conversationIds = leads
@@ -327,26 +310,31 @@ export class AnalyticsService {
       return { averageMinutes: 0, median: 0, count: 0 };
     }
 
+    // Single bulk query for all messages across all conversations
+    const allMessages = await this.prisma.message.findMany({
+      where: { conversationId: { in: conversationIds } },
+      orderBy: { sentAt: 'asc' },
+      select: { conversationId: true, sender: true, sentAt: true },
+    });
+
+    // Group messages by conversation in memory
+    const byConv = new Map<string, { sender: string; sentAt: Date }[]>();
+    for (const msg of allMessages) {
+      if (!byConv.has(msg.conversationId)) byConv.set(msg.conversationId, []);
+      byConv.get(msg.conversationId)!.push(msg);
+    }
+
     const responseTimes: number[] = [];
 
-    // For each conversation, calculate response times
-    for (const convId of conversationIds) {
-      const messages = await this.prisma.message.findMany({
-        where: { conversationId: convId },
-        orderBy: { sentAt: 'asc' },
-        select: { sender: true, sentAt: true },
-      });
-
+    for (const messages of byConv.values()) {
       // Find customer -> pro message pairs
       for (let i = 0; i < messages.length - 1; i++) {
         if (messages[i].sender === 'customer') {
-          // Find next pro message
           for (let j = i + 1; j < messages.length; j++) {
             if (messages[j].sender === 'pro') {
-              const diffMs =
-                messages[j].sentAt.getTime() - messages[i].sentAt.getTime();
-              const diffMinutes = diffMs / (1000 * 60);
-              responseTimes.push(diffMinutes);
+              responseTimes.push(
+                (messages[j].sentAt.getTime() - messages[i].sentAt.getTime()) / 60000,
+              );
               break;
             }
           }
@@ -373,15 +361,8 @@ export class AnalyticsService {
     where: any,
   ): Promise<ResponseTimeMetric> {
     const leads = await this.prisma.lead.findMany({
-      where: {
-        ...where,
-        threadId: { not: null },
-      },
-      select: {
-        conversation: {
-          select: { id: true },
-        },
-      },
+      where: { ...where, threadId: { not: null } },
+      select: { conversation: { select: { id: true } } },
     });
 
     const conversationIds = leads
@@ -392,26 +373,31 @@ export class AnalyticsService {
       return { averageMinutes: 0, median: 0, count: 0 };
     }
 
+    // Single bulk query for all messages across all conversations
+    const allMessages = await this.prisma.message.findMany({
+      where: { conversationId: { in: conversationIds } },
+      orderBy: { sentAt: 'asc' },
+      select: { conversationId: true, sender: true, sentAt: true },
+    });
+
+    // Group messages by conversation in memory
+    const byConv = new Map<string, { sender: string; sentAt: Date }[]>();
+    for (const msg of allMessages) {
+      if (!byConv.has(msg.conversationId)) byConv.set(msg.conversationId, []);
+      byConv.get(msg.conversationId)!.push(msg);
+    }
+
     const responseTimes: number[] = [];
 
-    // For each conversation, calculate response times
-    for (const convId of conversationIds) {
-      const messages = await this.prisma.message.findMany({
-        where: { conversationId: convId },
-        orderBy: { sentAt: 'asc' },
-        select: { sender: true, sentAt: true },
-      });
-
+    for (const messages of byConv.values()) {
       // Find pro -> customer message pairs
       for (let i = 0; i < messages.length - 1; i++) {
         if (messages[i].sender === 'pro') {
-          // Find next customer message
           for (let j = i + 1; j < messages.length; j++) {
             if (messages[j].sender === 'customer') {
-              const diffMs =
-                messages[j].sentAt.getTime() - messages[i].sentAt.getTime();
-              const diffMinutes = diffMs / (1000 * 60);
-              responseTimes.push(diffMinutes);
+              responseTimes.push(
+                (messages[j].sentAt.getTime() - messages[i].sentAt.getTime()) / 60000,
+              );
               break;
             }
           }
