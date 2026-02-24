@@ -1176,7 +1176,7 @@ export function Services() {
             iconBgColor="bg-violet-50"
             iconTextColor="text-violet-600"
           >
-            <div className={!ccEnabled ? 'opacity-40 pointer-events-none select-none' : ''}>
+            <div className={`space-y-6${!ccEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
             {/* Agent Phone + Send from — always 2 columns */}
             <div className="grid grid-cols-2 gap-4">
               {/* Agent Phone */}
@@ -1367,51 +1367,43 @@ export function Services() {
               </div>
             </div>
 
-            {/* Lead Greeting Message — only relevant in Parallel mode */}
-            <div className={`transition-opacity ${ccMode === 'AGENT_FIRST' ? 'opacity-40 pointer-events-none select-none' : ''}`}>
-              <div className="flex items-center gap-2 mb-2">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Lead Greeting Message</label>
-                {ccMode === 'AGENT_FIRST' && (
-                  <span className="px-2 py-0.5 bg-slate-200 text-slate-500 text-[10px] font-bold rounded uppercase tracking-wide">Parallel only</span>
+            {/* Lead Greeting Message — Parallel mode only */}
+            {ccMode === 'PARALLEL' && (
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Lead Greeting Message</label>
+                <p className="text-xs text-slate-400 mb-3">Played to the lead while they wait for you to answer.</p>
+                <select
+                  value={ccGreetingTemplateId || ''}
+                  onChange={e => {
+                    if (e.target.value === '__create_new__') {
+                      setTemplateEditor({ mode: 'create', ruleId: '', content: ccLeadGreetingMessage, type: 'cc-greeting' });
+                    } else {
+                      const t = templates.find(x => x.id === e.target.value);
+                      if (t) { setCcLeadGreetingMessage(t.content); setCcGreetingTemplateId(t.id); }
+                    }
+                  }}
+                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
+                >
+                  <option value="">Select template…</option>
+                  {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  <option value="__create_new__">+ Create New Template</option>
+                </select>
+                {ccLeadGreetingMessage && (
+                  <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                    {ccLeadGreetingMessage}
+                    <button
+                      onClick={() => {
+                        const tpl = ccGreetingTemplateId ? templates.find(t => t.id === ccGreetingTemplateId) : null;
+                        setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccLeadGreetingMessage, type: 'cc-greeting' });
+                      }}
+                      className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  </div>
                 )}
               </div>
-              <p className="text-xs text-slate-400 mb-3">
-                {ccMode === 'AGENT_FIRST'
-                  ? 'Not used in Agent First mode — the lead is not called until you answer.'
-                  : 'Played to the lead while they wait for you to answer.'
-                }
-              </p>
-              <select
-                value={ccGreetingTemplateId || ''}
-                onChange={e => {
-                  if (e.target.value === '__create_new__') {
-                    setTemplateEditor({ mode: 'create', ruleId: '', content: ccLeadGreetingMessage, type: 'cc-greeting' });
-                  } else {
-                    const t = templates.find(x => x.id === e.target.value);
-                    if (t) { setCcLeadGreetingMessage(t.content); setCcGreetingTemplateId(t.id); }
-                  }
-                }}
-                className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
-              >
-                <option value="">Select template…</option>
-                {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                <option value="__create_new__">+ Create New Template</option>
-              </select>
-              {ccLeadGreetingMessage && (
-                <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
-                  {ccLeadGreetingMessage}
-                  <button
-                    onClick={() => {
-                      const tpl = ccGreetingTemplateId ? templates.find(t => t.id === ccGreetingTemplateId) : null;
-                      setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccLeadGreetingMessage, type: 'cc-greeting' });
-                    }}
-                    className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-            </div>
+            )}
 
             {/* Test Call + Save Settings */}
             <div className="space-y-4 pt-4 border-t border-slate-100">
