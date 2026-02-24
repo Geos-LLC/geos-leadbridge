@@ -118,7 +118,7 @@ export class AnalyticsService {
       this.timed('totalLeads', () => this.getTotalLeads(baseWhere)),
       this.timed('jobStatusDistribution', () => this.getJobStatusDistribution(baseWhere)),
       query.businessId
-        ? this.timed('businessInfo', () => this.getBusinessInfo(userId, query.businessId))
+        ? this.timed('businessInfo', () => this.getBusinessInfo(userId, query.businessId!))
         : Promise.resolve(null),
       this.timed('cleaningTypeDistribution', () => this.getCleaningTypeDistribution(baseWhere)),
       this.timed('addOnsDistribution', () => this.getAddOnsDistribution(baseWhere)),
