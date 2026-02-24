@@ -218,7 +218,7 @@ export class CallConnectService {
     }
   }
 
-  /** Register per-business webhook subscription with Sigcore */
+  /** Register per-business webhook subscription with Sigcore — re-activates paused subscriptions */
   private async ensureWebhookSubscription(savedAccountId: string, settingsId: string): Promise<void> {
     const apiKey = await this.getSigcoreApiKey(savedAccountId);
     if (!apiKey) return;
@@ -228,46 +228,72 @@ export class CallConnectService {
       select: { sigcoreWebhookId: true, sigcoreWebhookSecret: true },
     });
 
-    // Already registered — skip to avoid duplicate subscriptions
-    if (settings?.sigcoreWebhookId) {
-      this.logger.log(`Sigcore webhook already registered (id: ${settings.sigcoreWebhookId}) for account ${savedAccountId}`);
-      return;
-    }
-
-    // Include accountId as query param so webhook handler can look up per-business secret
+    const headers = this.buildHeaders(apiKey);
+    const subscriptionsUrl = `${this.sigcoreApiUrl}/api/webhooks/subscriptions`;
     const webhookUrl = `${this.appBaseUrl}/api/webhooks/sigcore/call-connect?accountId=${savedAccountId}`;
     const secret = settings?.sigcoreWebhookSecret || crypto.randomBytes(32).toString('hex');
 
-    const url = `${this.sigcoreApiUrl}/api/webhooks/subscriptions`;
+    const CC_EVENTS = [
+      'call_connect.session.created',
+      'call_connect.agent.ringing',
+      'call_connect.agent.accepted',
+      'call_connect.lead.ringing',
+      'call_connect.bridged',
+      'call_connect.voicemail_drop',
+      'call_connect.ended',
+      'call_connect.failed',
+    ];
+
+    // If we have an existing subscription ID, verify it's still active in Sigcore
+    if (settings?.sigcoreWebhookId) {
+      try {
+        const getResp = await firstValueFrom(
+          this.httpService.get(`${subscriptionsUrl}/${settings.sigcoreWebhookId}`, { headers }),
+        );
+        const sub = getResp.data?.data ?? getResp.data;
+        if (sub?.status === 'paused') {
+          // Re-activate the paused subscription
+          await firstValueFrom(
+            this.httpService.patch(
+              `${subscriptionsUrl}/${settings.sigcoreWebhookId}`,
+              { status: 'active' },
+              { headers },
+            ),
+          );
+          this.logger.log(`Re-activated paused Sigcore webhook subscription ${settings.sigcoreWebhookId} for account ${savedAccountId}`);
+        } else {
+          this.logger.log(`Sigcore webhook subscription ${settings.sigcoreWebhookId} is active — no action needed`);
+        }
+        return;
+      } catch (err: any) {
+        if (err.response?.status === 404) {
+          // Subscription was deleted on Sigcore side — clear stale ID and re-create below
+          this.logger.warn(`Sigcore webhook subscription ${settings.sigcoreWebhookId} not found (404) — re-creating`);
+          await this.prisma.callConnectSettings.update({
+            where: { id: settingsId },
+            data: { sigcoreWebhookId: null },
+          });
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    // Create new subscription
     const response = await firstValueFrom(
       this.httpService.post(
-        url,
-        {
-          name: 'LeadBridge Call Connect',
-          webhookUrl,
-          secret,
-          events: [
-            'call_connect.session.created',
-            'call_connect.agent.ringing',
-            'call_connect.agent.accepted',
-            'call_connect.lead.ringing',
-            'call_connect.bridged',
-            'call_connect.voicemail_drop',
-            'call_connect.ended',
-            'call_connect.failed',
-          ],
-        },
-        { headers: this.buildHeaders(apiKey) },
+        subscriptionsUrl,
+        { name: 'LeadBridge Call Connect', webhookUrl, secret, events: CC_EVENTS },
+        { headers },
       ),
     );
 
-    const webhookId = response.data?.id || response.data?.webhookId;
+    const webhookId = response.data?.data?.id ?? response.data?.id ?? response.data?.webhookId;
 
     await this.prisma.callConnectSettings.update({
       where: { id: settingsId },
       data: {
         sigcoreWebhookId: webhookId || null,
-        // Store generated secret if it wasn't already set
         ...(!settings?.sigcoreWebhookSecret && { sigcoreWebhookSecret: secret }),
       },
     });
