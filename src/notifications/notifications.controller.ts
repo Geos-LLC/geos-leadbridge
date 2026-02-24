@@ -151,12 +151,13 @@ export class NotificationsController {
   async sendTestNotification(
     @CurrentUser() user: any,
     @Param('savedAccountId') savedAccountId: string,
-    @Body() body?: { ruleId?: string },
+    @Body() body?: { ruleId?: string; toPhone?: string },
   ) {
     const result = await this.notificationsService.sendTestNotification(
       user.id,
       savedAccountId,
       body?.ruleId,
+      body?.toPhone,
     );
 
     if (result.success) {
@@ -328,6 +329,7 @@ export class NotificationsController {
     @Param('savedAccountId') savedAccountId: string,
     @Body() body: {
       enabled: boolean;
+      fromPhone?: string;
       autoReplyTemplate: string;
       followUps: Array<{ enabled: boolean; delayMinutes: number; template: string }>;
       stopOnCustomerReply: boolean;

@@ -1248,6 +1248,7 @@ export class NotificationsService implements OnModuleInit {
     userId: string,
     savedAccountId: string,
     ruleId?: string,
+    toPhoneOverride?: string,
   ): Promise<{ success: boolean; error?: string }> {
     // Get full settings from database (not masked response)
     const account = await this.prisma.savedAccount.findFirst({
@@ -1294,28 +1295,40 @@ export class NotificationsService implements OnModuleInit {
       }
     }
 
-    // Use rule's phone numbers (preferred) or fallback to settings (legacy)
-    const toPhone = rule?.toPhone || settings.destinationPhone;
+    // Use override (CT test), then rule's phone numbers, then settings fallback
+    const toPhone = toPhoneOverride || rule?.toPhone || settings.destinationPhone;
     const fromPhone = rule?.fromPhone || settings.sigcoreFromPhone;
 
     if (!toPhone) {
       return { success: false, error: 'No destination phone configured for this rule' };
     }
 
+    // Load test customer data from admin config (set on Phone Pool admin page)
+    const adminCfg = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
+    const td = (adminCfg?.testData as Record<string, string> | null) ?? {};
+
     const testLead = {
-      customerName: 'Test Customer',
+      customerName: td.customerName || 'Test Customer',
       customerPhone: '+15551234567',
-      category: 'House Cleaning',
-      city: 'Tampa',
-      state: 'FL',
-      postcode: '33602',
-      message: 'I need my house cleaned weekly. Looking for someone reliable.',
+      category: td.category || 'House Cleaning',
+      city: td.city || 'Tampa',
+      state: td.state || 'FL',
+      postcode: td.zip || '33602',
+      message: td.message || 'I need my house cleaned weekly. Looking for someone reliable.',
       rawJson: JSON.stringify({
         request: {
           details: {
-            serviceDescription: 'Weekly house cleaning service',
-            addOns: ['Deep clean', 'Laundry'],
-            frequency: 'Weekly',
+            serviceDescription: td.serviceDescription || 'Weekly house cleaning service',
+            addOns: td.addons
+              ? td.addons.split(',').map((s: string) => s.trim()).filter(Boolean)
+              : ['Deep clean', 'Laundry'],
+            frequency: td.frequency || 'Weekly',
+            ...(td.bedrooms && { bedrooms: td.bedrooms }),
+            ...(td.bathrooms && { bathrooms: td.bathrooms }),
+            ...(td.price && { price: td.price }),
+            ...(td.pets && { pets: td.pets }),
+            ...(td.estimate && { estimate: td.estimate }),
+            ...(td.dates && { dates: td.dates }),
           },
         },
       }),
@@ -2377,6 +2390,7 @@ export class NotificationsService implements OnModuleInit {
     savedAccountId: string,
   ): Promise<{
     enabled: boolean;
+    fromPhone: string | null;
     autoReplyTemplate: string;
     followUps: Array<{ id?: string; enabled: boolean; delayMinutes: number; template: string }>;
     stopOnCustomerReply: boolean;
@@ -2389,6 +2403,17 @@ export class NotificationsService implements OnModuleInit {
     const settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
     });
+
+    // Resolve fromPhone: explicit setting or first pool phone for this user
+    let fromPhone: string | null = settings?.sigcoreFromPhone || null;
+    if (!fromPhone) {
+      const assignment = await this.prisma.phonePoolAssignment.findFirst({
+        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
+        include: { phonePool: true },
+        orderBy: { assignedAt: 'desc' },
+      });
+      if (assignment) fromPhone = assignment.phonePool.phoneNumber;
+    }
 
     // Get customer texting rules (sendToCustomer: true)
     const rules = settings
@@ -2407,6 +2432,7 @@ export class NotificationsService implements OnModuleInit {
 
     return {
       enabled: settings?.customerTextingEnabled ?? false,
+      fromPhone,
       autoReplyTemplate: autoReplyRule?.template || 'Hi {{lead.name}}, this is {{account.name}}. We just received your request for {{lead.service}} in {{lead.location}}. When would be a good time to call you?',
       followUps: followUpRules.length > 0
         ? followUpRules.map(r => ({
@@ -2433,6 +2459,7 @@ export class NotificationsService implements OnModuleInit {
     savedAccountId: string,
     dto: {
       enabled: boolean;
+      fromPhone?: string;
       autoReplyTemplate: string;
       followUps: Array<{ enabled: boolean; delayMinutes: number; template: string }>;
       stopOnCustomerReply: boolean;
@@ -2454,12 +2481,16 @@ export class NotificationsService implements OnModuleInit {
           userId,
           enabled: true,
           customerTextingEnabled: dto.enabled,
+          ...(dto.fromPhone && { sigcoreFromPhone: dto.fromPhone }),
         },
       });
     } else {
       await this.prisma.notificationSettings.update({
         where: { id: settings.id },
-        data: { customerTextingEnabled: dto.enabled },
+        data: {
+          customerTextingEnabled: dto.enabled,
+          ...(dto.fromPhone !== undefined && { sigcoreFromPhone: dto.fromPhone }),
+        },
       });
     }
 

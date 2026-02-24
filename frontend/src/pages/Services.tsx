@@ -201,6 +201,25 @@ export function Services() {
   const [alertToPhone, setAlertToPhone] = useState('');
   const [alertFromPhone, setAlertFromPhone] = useState('');
 
+  // Customer Texting state
+  const [ctEnabled, setCtEnabled] = useState(false);
+  const [ctAutoReplyTemplate, setCtAutoReplyTemplate] = useState(
+    "Hi {customerName}, this is {accountName}. We just received your request for {category}. When would be a good time to call you?"
+  );
+  const [ctFollowUps, setCtFollowUps] = useState<Array<{ enabled: boolean; delayMinutes: number; template: string }>>([
+    { enabled: true, delayMinutes: 10, template: "Hi {customerName}, just checking in — did you get our message? We'd love to help!" },
+    { enabled: true, delayMinutes: 60, template: "Hi {customerName}, this is {accountName} again. We're available to discuss your {category} needs. Feel free to reply anytime!" },
+    { enabled: false, delayMinutes: 1440, template: "Hi {customerName}, we wanted to follow up one more time. Reply anytime and we'll get back to you right away!" },
+  ]);
+  const [ctStopOnReply, setCtStopOnReply] = useState(true);
+  const [ctSaving, setCtSaving] = useState(false);
+  const [ctFromPhone, setCtFromPhone] = useState('');
+  const [ctTestPhone, setCtTestPhone] = useState('');
+  const [ctTestStatus, setCtTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
+  const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string } | null>(null);
+
+  // Derived: unsaved CT changes
+  const ctDirty = ctSavedSnapshot !== null && ctAutoReplyTemplate !== ctSavedSnapshot.autoReplyTemplate;
 
   // Derived: unsaved CC changes
   const ccDirty = ccSavedSnapshot !== null && (
@@ -247,12 +266,13 @@ export function Services() {
       setLoading(true);
       setError(null);
 
-      const [automationRes, notifRes, templatesRes, poolRes, ccRes] = await Promise.all([
+      const [automationRes, notifRes, templatesRes, poolRes, ccRes, ctRes] = await Promise.all([
         automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] })),
         notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] })),
         templatesApi.getTemplates().catch(() => ({ templates: [] as MessageTemplate[] })),
         usersApi.getPoolPhonesForSms().catch(() => ({ phoneNumbers: [] })),
         callConnectApi.getSettings(accountId).catch(() => ({ settings: null })),
+        notificationsApi.getCustomerTextingSettings(accountId).catch(() => null),
       ]);
 
       const ccs = ccRes.settings;
@@ -291,6 +311,16 @@ export function Services() {
         setCcVoicemailMessage('');
         setCcVoicemailRecordingUrl('');
         setCcBotNumber(defaultBotNumber);
+      }
+
+      // Load Customer Texting settings
+      if (ctRes) {
+        setCtEnabled(ctRes.enabled);
+        setCtAutoReplyTemplate(ctRes.autoReplyTemplate);
+        setCtFollowUps(ctRes.followUps);
+        setCtStopOnReply(ctRes.stopOnCustomerReply);
+        setCtFromPhone(ctRes.fromPhone || poolRes.phoneNumbers[0]?.phoneNumber || '');
+        setCtSavedSnapshot({ autoReplyTemplate: ctRes.autoReplyTemplate });
       }
 
       // Collect ALL new_lead automation rules
@@ -573,6 +603,51 @@ export function Services() {
     }
   }
 
+  async function toggleCustomerTexting(enabled: boolean) {
+    if (!selectedAccountId) return;
+    setCtEnabled(enabled); // optimistic
+    setCtSaving(true);
+    try {
+      await notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
+        enabled,
+        fromPhone: ctFromPhone || undefined,
+        autoReplyTemplate: ctAutoReplyTemplate,
+        followUps: ctFollowUps,
+        stopOnCustomerReply: ctStopOnReply,
+      });
+    } catch (err: any) {
+      setCtEnabled(!enabled); // rollback
+      setError(err.response?.data?.message || err.message || 'Failed to toggle Customer Texting');
+    } finally {
+      setCtSaving(false);
+    }
+  }
+
+  async function saveCtSettings() {
+    if (!selectedAccountId) return;
+    setCtSaving(true);
+    try {
+      await notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
+        enabled: ctEnabled,
+        fromPhone: ctFromPhone || undefined,
+        autoReplyTemplate: ctAutoReplyTemplate,
+        followUps: ctFollowUps,
+        stopOnCustomerReply: ctStopOnReply,
+      });
+      showSuccess('Customer Texting settings saved');
+      setCtSavedSnapshot({ autoReplyTemplate: ctAutoReplyTemplate });
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'Failed to save Customer Texting settings');
+    } finally {
+      setCtSaving(false);
+    }
+  }
+
+  function discardCtChanges() {
+    if (!ctSavedSnapshot) return;
+    setCtAutoReplyTemplate(ctSavedSnapshot.autoReplyTemplate);
+  }
+
   async function doTestCall() {
     if (!selectedAccountId) return;
     setCcTesting(true);
@@ -718,8 +793,46 @@ export function Services() {
 
   // --- Customer Texting Handlers ---
 
+  async function saveCtFromPhone(fromPhone: string) {
+    setCtFromPhone(fromPhone);
+    if (!selectedAccountId) return;
+    setCtSaving(true);
+    try {
+      await notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
+        enabled: ctEnabled,
+        fromPhone: fromPhone || undefined,
+        autoReplyTemplate: ctAutoReplyTemplate,
+        followUps: ctFollowUps,
+        stopOnCustomerReply: ctStopOnReply,
+      });
+      showSuccess('Send from number updated');
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'Failed to update send from number');
+    } finally {
+      setCtSaving(false);
+    }
+  }
 
-  // changeTextingFollowUpDelay, addTextingFollowUp, deleteTextingFollowUp, updateStopCondition removed — follow-ups are Coming Soon
+  async function sendCtTest() {
+    if (!selectedAccountId || !ctTestPhone) return;
+    setCtTestStatus('sending');
+    setError(null);
+    try {
+      const result = await notificationsApi.sendTest(selectedAccountId, undefined, ctTestPhone);
+      if (result.success) {
+        setCtTestStatus('delivered');
+        setTimeout(() => setCtTestStatus('idle'), 4000);
+      } else {
+        setCtTestStatus('failed');
+        setError(result.message || 'Failed to send test');
+        setTimeout(() => setCtTestStatus('idle'), 4000);
+      }
+    } catch (err: any) {
+      setCtTestStatus('failed');
+      setError(err.response?.data?.message || err.message || 'Failed to send test SMS');
+      setTimeout(() => setCtTestStatus('idle'), 4000);
+    }
+  }
 
   // --- Template Editor Modal Handlers ---
 
@@ -1230,15 +1343,175 @@ export function Services() {
             );
           })()}
 
-          {/* 3. Customer Texting — Coming Soon */}
+          {/* 3. Customer Texting */}
           <ServiceCard
             icon={<MessageSquare className="w-7 h-7" />}
             title="Customer Texting"
-            description="Direct text routing to bypass platform apps."
-            enabled={false}
-            onToggle={() => {}}
-            comingSoon={true}
-          />
+            description="Automatically text customers when new leads arrive, with follow-up reminders."
+            enabled={ctEnabled}
+            onToggle={ctSaving ? () => {} : toggleCustomerTexting}
+            expanded={expandedCard === 'customer-texting'}
+            onExpand={() => toggleExpand('customer-texting')}
+            statusText={ctEnabled ? 'Active — texting new leads automatically' : undefined}
+            iconBgColor="bg-emerald-50"
+            iconTextColor="text-emerald-600"
+          >
+            <div className={`space-y-6${!ctEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+              {/* Send from */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send from</label>
+                <div className="relative">
+                  <select
+                    value={ctFromPhone}
+                    onChange={e => saveCtFromPhone(e.target.value)}
+                    disabled={ctSaving}
+                    className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
+                  >
+                    <option value="">Select phone number</option>
+                    {ctFromPhone && !poolPhones.some(p => p.phoneNumber === ctFromPhone) && (
+                      <option value={ctFromPhone}>{ctFromPhone} (configured)</option>
+                    )}
+                    {poolPhones.map(p => (
+                      <option key={p.id} value={p.phoneNumber}>
+                        {p.phoneNumber} (LeadBridge)
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                    <ChevronDown className="w-4 h-4" />
+                  </div>
+                </div>
+                <button className="mt-2 px-4 py-2 bg-slate-100 text-slate-400 rounded-xl text-xs font-bold flex items-center gap-2 cursor-not-allowed">
+                  <Phone className="w-3 h-3" />
+                  Get your own number
+                  <span className="px-1.5 py-0.5 bg-slate-200 text-[9px] rounded uppercase">Coming Soon</span>
+                </button>
+              </div>
+
+              {/* Auto-reply message */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Auto-Reply Message</label>
+                <p className="text-xs text-slate-400 mb-2">Sent immediately when a new lead arrives.</p>
+                <textarea
+                  value={ctAutoReplyTemplate}
+                  onChange={e => setCtAutoReplyTemplate(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400 resize-y"
+                  placeholder="Hi {customerName}, this is {accountName}…"
+                />
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {['{customerName}', '{accountName}', '{category}', '{city}', '{state}'].map(v => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setCtAutoReplyTemplate(prev => prev + v)}
+                      className="px-2 py-0.5 text-[11px] font-mono bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 rounded-md border border-slate-200 transition-colors"
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Test SMS */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send Test</label>
+                <div className="flex gap-2">
+                  <input
+                    type="tel"
+                    value={ctTestPhone}
+                    onChange={e => setCtTestPhone(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                    onBlur={e => {
+                      const formatted = formatPhoneE164(e.target.value);
+                      if (formatted !== e.target.value) setCtTestPhone(formatted);
+                    }}
+                    placeholder="+15555550100"
+                    className={`flex-1 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                      ctTestPhone && !isValidPhoneE164(ctTestPhone)
+                        ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                        : ctTestPhone && isValidPhoneE164(ctTestPhone)
+                          ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                          : 'border border-slate-200 focus:ring-emerald-400'
+                    }`}
+                  />
+                  <button
+                    onClick={sendCtTest}
+                    disabled={ctTestStatus === 'sending' || !ctTestPhone || !isValidPhoneE164(ctTestPhone) || !ctFromPhone}
+                    className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed flex items-center gap-2 ${
+                      ctTestStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                      ctTestStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                      ctTestStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                      'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
+                    }`}
+                    title={!ctFromPhone ? 'Set a send-from phone first' : !ctTestPhone ? 'Enter a test phone number' : 'Send a test SMS'}
+                  >
+                    {ctTestStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
+                     ctTestStatus === 'delivered' ? <CheckCircle size={14} /> :
+                     ctTestStatus === 'failed' ? <X size={14} /> :
+                     <Send size={14} />}
+                    {ctTestStatus === 'sending' ? 'Sending...' :
+                     ctTestStatus === 'delivered' ? 'Delivered' :
+                     ctTestStatus === 'failed' ? 'Failed' :
+                     'Send Test'}
+                  </button>
+                </div>
+                {ctTestPhone && !isValidPhoneE164(ctTestPhone) && (
+                  <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    Must be E.164 format, e.g. +12125550100
+                  </p>
+                )}
+              </div>
+
+              {/* Follow-up messages — Coming Soon */}
+              <div className="border-t border-slate-100 pt-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Follow-Up Messages</span>
+                    <p className="text-xs text-slate-400 mt-0.5">Sent if the customer hasn't replied yet.</p>
+                  </div>
+                  <span className="px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest bg-slate-100 text-slate-400 rounded-full">Coming Soon</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Save / unsaved changes */}
+            <div className="pt-4 border-t border-slate-100">
+              {ctDirty ? (
+                <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+                  <div className="flex items-center gap-2 text-amber-700">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span className="text-sm font-medium">You have unsaved changes</span>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={discardCtChanges}
+                      className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                    >
+                      Discard
+                    </button>
+                    <button
+                      onClick={saveCtSettings}
+                      disabled={ctSaving}
+                      className="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {ctSaving && <Loader2 className="w-3 h-3 animate-spin" />}
+                      Save Settings
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={saveCtSettings}
+                  disabled={ctSaving}
+                  className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                >
+                  {ctSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Save Settings
+                </button>
+              )}
+            </div>
+          </ServiceCard>
 
           {/* 4. Instant Call Connect */}
           <ServiceCard
