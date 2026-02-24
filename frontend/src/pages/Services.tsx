@@ -1173,39 +1173,8 @@ export function Services() {
             iconTextColor="text-violet-600"
           >
             <div className={!ccEnabled ? 'opacity-40 pointer-events-none select-none' : ''}>
-            {/* Connection Mode — segmented switcher */}
-            <div>
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Connection Mode</label>
-              <div className="flex bg-slate-100 rounded-2xl p-1 max-w-lg">
-                <button
-                  onClick={() => setCcMode('AGENT_FIRST')}
-                  className={`flex-1 flex flex-col items-center gap-0.5 rounded-xl px-4 py-3 transition-all ${
-                    ccMode === 'AGENT_FIRST'
-                      ? 'bg-white text-violet-700 shadow-sm'
-                      : 'text-slate-400 hover:text-slate-600'
-                  }`}
-                >
-                  <Phone className="w-4 h-4" />
-                  <span className="text-sm font-bold">Agent First</span>
-                  <span className="text-[11px] font-normal text-slate-400 leading-tight text-center">We call you, then bridge the lead</span>
-                </button>
-                <button
-                  onClick={() => setCcMode('PARALLEL')}
-                  className={`flex-1 flex flex-col items-center gap-0.5 rounded-xl px-4 py-3 transition-all ${
-                    ccMode === 'PARALLEL'
-                      ? 'bg-white text-violet-700 shadow-sm'
-                      : 'text-slate-400 hover:text-slate-600'
-                  }`}
-                >
-                  <Zap className="w-4 h-4" />
-                  <span className="text-sm font-bold">Parallel</span>
-                  <span className="text-[11px] font-normal text-slate-400 leading-tight text-center">Call you and lead simultaneously</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Agent Phone + Send from — side by side */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Agent Phone + Send from — always 2 columns */}
+            <div className="grid grid-cols-2 gap-4">
               {/* Agent Phone */}
               <div>
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Agent Phone (E.164)</label>
@@ -1267,7 +1236,6 @@ export function Services() {
               </div>
             </div>
 
-
             {/* Agent Whisper Message */}
             <div>
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Agent Whisper Message</label>
@@ -1297,52 +1265,6 @@ export function Services() {
                     onClick={() => {
                       const tpl = ccWhisperTemplateId ? templates.find(t => t.id === ccWhisperTemplateId) : null;
                       setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccAgentWhisperMessage, type: 'cc-whisper' });
-                    }}
-                    className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Lead Greeting Message — only relevant in Parallel mode */}
-            <div className={`transition-opacity ${ccMode === 'AGENT_FIRST' ? 'opacity-40 pointer-events-none select-none' : ''}`}>
-              <div className="flex items-center gap-2 mb-2">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Lead Greeting Message</label>
-                {ccMode === 'AGENT_FIRST' && (
-                  <span className="px-2 py-0.5 bg-slate-200 text-slate-500 text-[10px] font-bold rounded uppercase tracking-wide">Parallel only</span>
-                )}
-              </div>
-              <p className="text-xs text-slate-400 mb-3">
-                {ccMode === 'AGENT_FIRST'
-                  ? 'Not used in Agent First mode — the lead is not called until you answer.'
-                  : 'Played to the lead while they wait for you to answer.'
-                }
-              </p>
-              <select
-                value={ccGreetingTemplateId || ''}
-                onChange={e => {
-                  if (e.target.value === '__create_new__') {
-                    setTemplateEditor({ mode: 'create', ruleId: '', content: ccLeadGreetingMessage, type: 'cc-greeting' });
-                  } else {
-                    const t = templates.find(x => x.id === e.target.value);
-                    if (t) { setCcLeadGreetingMessage(t.content); setCcGreetingTemplateId(t.id); }
-                  }
-                }}
-                className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
-              >
-                <option value="">Select template…</option>
-                {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                <option value="__create_new__">+ Create New Template</option>
-              </select>
-              {ccLeadGreetingMessage && (
-                <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
-                  {ccLeadGreetingMessage}
-                  <button
-                    onClick={() => {
-                      const tpl = ccGreetingTemplateId ? templates.find(t => t.id === ccGreetingTemplateId) : null;
-                      setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccLeadGreetingMessage, type: 'cc-greeting' });
                     }}
                     className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
                   >
@@ -1408,6 +1330,83 @@ export function Services() {
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* Connection Mode — segmented switcher */}
+            <div>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Connection Mode</label>
+              <div className="flex bg-slate-100 rounded-2xl p-1 max-w-lg">
+                <button
+                  onClick={() => setCcMode('AGENT_FIRST')}
+                  className={`flex-1 flex flex-col items-center gap-0.5 rounded-xl px-4 py-3 transition-all ${
+                    ccMode === 'AGENT_FIRST'
+                      ? 'bg-white text-violet-700 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  <Phone className="w-4 h-4" />
+                  <span className="text-sm font-bold">Agent First</span>
+                  <span className="text-[11px] font-normal text-slate-400 leading-tight text-center">We call you, then bridge the lead</span>
+                </button>
+                <button
+                  onClick={() => setCcMode('PARALLEL')}
+                  className={`flex-1 flex flex-col items-center gap-0.5 rounded-xl px-4 py-3 transition-all ${
+                    ccMode === 'PARALLEL'
+                      ? 'bg-white text-violet-700 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  <Zap className="w-4 h-4" />
+                  <span className="text-sm font-bold">Parallel</span>
+                  <span className="text-[11px] font-normal text-slate-400 leading-tight text-center">Call you and lead simultaneously</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Lead Greeting Message — only relevant in Parallel mode */}
+            <div className={`transition-opacity ${ccMode === 'AGENT_FIRST' ? 'opacity-40 pointer-events-none select-none' : ''}`}>
+              <div className="flex items-center gap-2 mb-2">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Lead Greeting Message</label>
+                {ccMode === 'AGENT_FIRST' && (
+                  <span className="px-2 py-0.5 bg-slate-200 text-slate-500 text-[10px] font-bold rounded uppercase tracking-wide">Parallel only</span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mb-3">
+                {ccMode === 'AGENT_FIRST'
+                  ? 'Not used in Agent First mode — the lead is not called until you answer.'
+                  : 'Played to the lead while they wait for you to answer.'
+                }
+              </p>
+              <select
+                value={ccGreetingTemplateId || ''}
+                onChange={e => {
+                  if (e.target.value === '__create_new__') {
+                    setTemplateEditor({ mode: 'create', ruleId: '', content: ccLeadGreetingMessage, type: 'cc-greeting' });
+                  } else {
+                    const t = templates.find(x => x.id === e.target.value);
+                    if (t) { setCcLeadGreetingMessage(t.content); setCcGreetingTemplateId(t.id); }
+                  }
+                }}
+                className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
+              >
+                <option value="">Select template…</option>
+                {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                <option value="__create_new__">+ Create New Template</option>
+              </select>
+              {ccLeadGreetingMessage && (
+                <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                  {ccLeadGreetingMessage}
+                  <button
+                    onClick={() => {
+                      const tpl = ccGreetingTemplateId ? templates.find(t => t.id === ccGreetingTemplateId) : null;
+                      setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccLeadGreetingMessage, type: 'cc-greeting' });
+                    }}
+                    className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Test Call + Save Settings */}
