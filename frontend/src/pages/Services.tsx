@@ -156,7 +156,7 @@ export function Services() {
     templateId?: string;
     templateName?: string;
     content: string;
-    type: 'autoReply' | 'alert' | 'cc-whisper' | 'cc-greeting' | 'cc-voicemail';
+    type: 'autoReply' | 'alert' | 'cc-whisper' | 'cc-greeting' | 'cc-voicemail' | 'ct';
   } | null>(null);
 
   // Instant Call Connect state
@@ -217,6 +217,7 @@ export function Services() {
   const [ctTestPhone, setCtTestPhone] = useState('');
   const [ctTestStatus, setCtTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
   const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string } | null>(null);
+  const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>('');
 
   // Derived: unsaved CT changes
   const ctDirty = ctSavedSnapshot !== null && ctAutoReplyTemplate !== ctSavedSnapshot.autoReplyTemplate;
@@ -818,7 +819,7 @@ export function Services() {
     setCtTestStatus('sending');
     setError(null);
     try {
-      const result = await notificationsApi.sendTest(selectedAccountId, undefined, ctTestPhone);
+      const result = await notificationsApi.sendTest(selectedAccountId, undefined, ctTestPhone, ctAutoReplyTemplate || undefined);
       if (result.success) {
         setCtTestStatus('delivered');
         setTimeout(() => setCtTestStatus('idle'), 4000);
@@ -852,6 +853,8 @@ export function Services() {
         setCcLeadGreetingMessage(template.content); setCcGreetingTemplateId(template.id);
       } else if (templateEditor.type === 'cc-voicemail') {
         setCcVoicemailMessage(template.content); setCcVoicemailTemplateId(template.id);
+      } else if (templateEditor.type === 'ct') {
+        setCtAutoReplyTemplate(template.content); setCtSelectedTemplateId(template.id);
       }
       setTemplateEditor(null);
       showSuccess('Template created');
@@ -880,6 +883,7 @@ export function Services() {
       if (type === 'cc-whisper') setCcAgentWhisperMessage(template.content);
       else if (type === 'cc-greeting') setCcLeadGreetingMessage(template.content);
       else if (type === 'cc-voicemail') setCcVoicemailMessage(template.content);
+      else if (type === 'ct') setCtAutoReplyTemplate(template.content);
       setTemplateEditor(null);
       showSuccess('Template saved');
     } catch (err: any) {
@@ -905,6 +909,8 @@ export function Services() {
         setCcLeadGreetingMessage(template.content); setCcGreetingTemplateId(template.id);
       } else if (templateEditor.type === 'cc-voicemail') {
         setCcVoicemailMessage(template.content); setCcVoicemailTemplateId(template.id);
+      } else if (templateEditor.type === 'ct') {
+        setCtAutoReplyTemplate(template.content); setCtSelectedTemplateId(template.id);
       }
       setTemplateEditor(null);
       showSuccess('Saved as new template');
@@ -1392,25 +1398,48 @@ export function Services() {
               <div>
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Auto-Reply Message</label>
                 <p className="text-xs text-slate-400 mb-2">Sent immediately when a new lead arrives.</p>
-                <textarea
-                  value={ctAutoReplyTemplate}
-                  onChange={e => setCtAutoReplyTemplate(e.target.value)}
-                  rows={3}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400 resize-y"
-                  placeholder="Hi {customerName}, this is {accountName}…"
-                />
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {['{customerName}', '{accountName}', '{category}', '{city}', '{state}'].map(v => (
-                    <button
-                      key={v}
-                      type="button"
-                      onClick={() => setCtAutoReplyTemplate(prev => prev + v)}
-                      className="px-2 py-0.5 text-[11px] font-mono bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 rounded-md border border-slate-200 transition-colors"
-                    >
-                      {v}
-                    </button>
+                <select
+                  value={ctSelectedTemplateId}
+                  onChange={e => {
+                    if (e.target.value === '__create_new__') {
+                      setTemplateEditor({ mode: 'create', ruleId: '', content: '', type: 'ct' });
+                    } else {
+                      const tpl = templates.find(t => t.id === e.target.value);
+                      if (tpl) {
+                        setCtSelectedTemplateId(tpl.id);
+                        setCtAutoReplyTemplate(tpl.content);
+                      }
+                    }
+                  }}
+                  className="w-full rounded-xl p-3 text-sm font-medium bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                >
+                  <option value="">Select template</option>
+                  {templates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
                   ))}
-                </div>
+                  <option value="__create_new__">+ Create New Template</option>
+                </select>
+                {ctAutoReplyTemplate && (
+                  <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                    {ctAutoReplyTemplate}
+                    <button
+                      type="button"
+                      onClick={() => setTemplateEditor({
+                        mode: ctSelectedTemplateId ? 'service-edit' : 'create',
+                        ruleId: '',
+                        ...(ctSelectedTemplateId && {
+                          templateId: ctSelectedTemplateId,
+                          templateName: templates.find(t => t.id === ctSelectedTemplateId)?.name || 'template',
+                        }),
+                        content: ctAutoReplyTemplate,
+                        type: 'ct',
+                      })}
+                      className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-emerald-600"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Test SMS */}

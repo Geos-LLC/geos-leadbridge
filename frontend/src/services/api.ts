@@ -569,10 +569,11 @@ export const notificationsApi = {
     const { data } = await api.post('/v1/notifications/send-sms', { savedAccountId, leadId, message });
     return data;
   },
-  sendTest: async (savedAccountId: string, ruleId?: string, toPhone?: string): Promise<{ success: boolean; message: string }> => {
-    const body: { ruleId?: string; toPhone?: string } = {};
+  sendTest: async (savedAccountId: string, ruleId?: string, toPhone?: string, template?: string): Promise<{ success: boolean; message: string }> => {
+    const body: { ruleId?: string; toPhone?: string; template?: string } = {};
     if (ruleId) body.ruleId = ruleId;
     if (toPhone) body.toPhone = toPhone;
+    if (template) body.template = template;
     const { data } = await api.post(`/v1/notifications/test/${savedAccountId}`, body);
     return data;
   },

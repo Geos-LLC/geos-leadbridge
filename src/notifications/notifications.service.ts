@@ -1249,6 +1249,7 @@ export class NotificationsService implements OnModuleInit {
     savedAccountId: string,
     ruleId?: string,
     toPhoneOverride?: string,
+    templateOverride?: string,
   ): Promise<{ success: boolean; error?: string }> {
     // Get full settings from database (not masked response)
     const account = await this.prisma.savedAccount.findFirst({
@@ -1334,7 +1335,7 @@ export class NotificationsService implements OnModuleInit {
       }),
     };
 
-    const template = rule?.messageTemplate?.content || rule?.template || settings.template;
+    const template = templateOverride || rule?.messageTemplate?.content || rule?.template || settings.template;
     const ruleName = rule?.name || 'Test';
     const accountLabel = account.businessName ? `[${account.businessName}] ` : '';
     const messageBody = `${accountLabel}${this.renderTemplate(template, testLead, account.businessName)}`;
