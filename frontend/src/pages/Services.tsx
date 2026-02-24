@@ -342,21 +342,25 @@ export function Services() {
       const DEFAULT_CC_WHISPER = 'Hi {customerName}, you have a new lead for {category}. Press any key to connect with the customer.';
       const DEFAULT_CC_GREETING = 'Hi {customerName}! Thanks for your inquiry about {category}. We\'re connecting you with a specialist right now. Please hold for just a moment.';
       const DEFAULT_CC_VOICEMAIL = 'Hi {customerName}, this is {accountName}. We tried to reach you about your {category} request. Please call us back and we\'ll be happy to help!';
+      const DEFAULT_CT_AUTO_REPLY = 'Hi {customerName}, this is {accountName}. We just received your request for {category}. When would be a good time to call you?';
 
       let allTemplates: MessageTemplate[] = [...templatesRes.templates];
       const whisperExists = allTemplates.find(t => t.name === 'CC - Agent Whisper');
       const greetingExists = allTemplates.find(t => t.name === 'CC - Lead Greeting');
       const voicemailExists = allTemplates.find(t => t.name === 'CC - Voicemail TTS');
+      const ctAutoReplyExists = allTemplates.find(t => t.name === 'CT - Auto Reply');
 
-      if (!whisperExists || !greetingExists || !voicemailExists) {
-        const [whisperRes, greetingRes, voicemailRes] = await Promise.all([
+      if (!whisperExists || !greetingExists || !voicemailExists || !ctAutoReplyExists) {
+        const [whisperRes, greetingRes, voicemailRes, ctAutoReplyRes] = await Promise.all([
           whisperExists ? Promise.resolve({ template: whisperExists }) : templatesApi.createTemplate('CC - Agent Whisper', DEFAULT_CC_WHISPER),
           greetingExists ? Promise.resolve({ template: greetingExists }) : templatesApi.createTemplate('CC - Lead Greeting', DEFAULT_CC_GREETING),
           voicemailExists ? Promise.resolve({ template: voicemailExists }) : templatesApi.createTemplate('CC - Voicemail TTS', DEFAULT_CC_VOICEMAIL),
+          ctAutoReplyExists ? Promise.resolve({ template: ctAutoReplyExists }) : templatesApi.createTemplate('CT - Auto Reply', DEFAULT_CT_AUTO_REPLY),
         ]);
         if (!whisperExists) allTemplates = [...allTemplates, whisperRes.template];
         if (!greetingExists) allTemplates = [...allTemplates, greetingRes.template];
         if (!voicemailExists) allTemplates = [...allTemplates, voicemailRes.template];
+        if (!ctAutoReplyExists) allTemplates = [...allTemplates, ctAutoReplyRes.template];
       }
 
       setTemplates(allTemplates);
@@ -379,6 +383,15 @@ export function Services() {
       setCcWhisperTemplateId(allTemplates.find(t => t.content === whisperContent)?.id || whisperTpl?.id || null);
       setCcGreetingTemplateId(allTemplates.find(t => t.content === greetingContent)?.id || greetingTpl?.id || null);
       setCcVoicemailTemplateId(allTemplates.find(t => t.content === voicemailContent)?.id || voicemailTpl?.id || null);
+
+      // Pre-select CT auto-reply template: match saved content, fall back to default by name
+      const ctTpl = allTemplates.find(t => t.name === 'CT - Auto Reply');
+      const ctContent = ctRes?.autoReplyTemplate || ctTpl?.content || '';
+      if (!ctRes && ctTpl) {
+        setCtAutoReplyTemplate(ctTpl.content);
+        setCtSavedSnapshot({ autoReplyTemplate: ctTpl.content });
+      }
+      setCtSelectedTemplateId(allTemplates.find(t => t.content === ctContent)?.id || ctTpl?.id || '');
 
       // Initialize CC snapshot for dirty tracking
       const snapshotWhisper = ccs?.agentWhisperMessage || whisperTpl?.content || '';
