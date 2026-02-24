@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, CheckCircle, X, Clock,
-  Bot, Pencil, Phone, Send, ChevronUp, Trash2, Save, Moon,
+  Bot, Pencil, Phone, Send, ChevronUp, Trash2, Save,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -1267,49 +1267,6 @@ export function Services() {
               </div>
             </div>
 
-            {/* Quiet Hours */}
-            <div>
-              <div className="flex items-center gap-3 mb-3">
-                <Moon className="w-4 h-4 text-slate-400" />
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Quiet Hours</span>
-                <label className="inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={ccQuietEnabled}
-                    onChange={e => setCcQuietEnabled(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="relative w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-violet-600"></div>
-                </label>
-              </div>
-              {ccQuietEnabled && (
-                <div className="space-y-3 pl-7">
-                  <div className="relative max-w-xs">
-                    <select
-                      value={ccQuietTimezone}
-                      onChange={e => setCcQuietTimezone(e.target.value)}
-                      className="w-full appearance-none bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent pr-10"
-                    >
-                      {['America/New_York','America/Chicago','America/Denver','America/Los_Angeles','America/Phoenix','America/Anchorage','Pacific/Honolulu'].map(tz => (
-                        <option key={tz} value={tz}>{tz}</option>
-                      ))}
-                    </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                  </div>
-                  <div className="flex gap-6">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">From</label>
-                      <input type="time" value={ccQuietStart} onChange={e => setCcQuietStart(e.target.value)} className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">To</label>
-                      <input type="time" value={ccQuietEnd} onChange={e => setCcQuietEnd(e.target.value)} className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent" />
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-400">Calls will not be triggered during quiet hours</p>
-                </div>
-              )}
-            </div>
 
             {/* Agent Whisper Message */}
             <div>
@@ -1395,80 +1352,62 @@ export function Services() {
               )}
             </div>
 
-            {/* Auto Voicemail Drop */}
+            {/* Voicemail Message */}
             <div>
-              <div className="flex items-center gap-3 mb-2">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Auto Voicemail Drop</label>
-                <label className="inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={ccVoicemailEnabled}
-                    onChange={e => setCcVoicemailEnabled(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="relative w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-violet-600"></div>
-                </label>
-              </div>
-              <p className="text-xs text-slate-400 mb-4">Automatically leaves a message when the lead doesn't answer.</p>
-              {ccVoicemailEnabled && (
-                <div className="space-y-5">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Recording URL <span className="normal-case font-normal text-slate-400">(optional — takes priority over TTS)</span></label>
-                    <div className="relative">
-                      <input
-                        type="url"
-                        value={ccVoicemailRecordingUrl}
-                        onChange={e => setCcVoicemailRecordingUrl(e.target.value)}
-                        placeholder="https://example.com/voicemail.mp3"
-                        className={`w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent ${ccVoicemailRecordingUrl ? 'pr-10' : ''}`}
-                      />
-                      {ccVoicemailRecordingUrl && (
-                        <button
-                          type="button"
-                          onClick={() => setCcVoicemailRecordingUrl('')}
-                          title="Clear URL"
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-500 transition-colors"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">TTS Voicemail Message <span className="normal-case font-normal text-slate-400">(fallback when no recording URL)</span></label>
-                    <select
-                      value={ccVoicemailTemplateId || ''}
-                      onChange={e => {
-                        if (e.target.value === '__create_new__') {
-                          setTemplateEditor({ mode: 'create', ruleId: '', content: ccVoicemailMessage, type: 'cc-voicemail' });
-                        } else {
-                          const t = templates.find(x => x.id === e.target.value);
-                          if (t) { setCcVoicemailMessage(t.content); setCcVoicemailTemplateId(t.id); }
-                        }
-                      }}
-                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
-                    >
-                      <option value="">Select template…</option>
-                      {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                      <option value="__create_new__">+ Create New Template</option>
-                    </select>
-                    {ccVoicemailMessage && (
-                      <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
-                        {ccVoicemailMessage}
-                        <button
-                          onClick={() => {
-                            const tpl = ccVoicemailTemplateId ? templates.find(t => t.id === ccVoicemailTemplateId) : null;
-                            setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccVoicemailMessage, type: 'cc-voicemail' });
-                          }}
-                          className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Voicemail Message</label>
+              <p className="text-xs text-slate-400 mb-3">Left automatically when the lead doesn't answer.</p>
+              <select
+                value={ccVoicemailTemplateId || ''}
+                onChange={e => {
+                  if (e.target.value === '__create_new__') {
+                    setTemplateEditor({ mode: 'create', ruleId: '', content: ccVoicemailMessage, type: 'cc-voicemail' });
+                  } else {
+                    const t = templates.find(x => x.id === e.target.value);
+                    if (t) { setCcVoicemailMessage(t.content); setCcVoicemailTemplateId(t.id); }
+                  }
+                }}
+                className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
+              >
+                <option value="">Select template…</option>
+                {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                <option value="__create_new__">+ Create New Template</option>
+              </select>
+              {ccVoicemailMessage && (
+                <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                  {ccVoicemailMessage}
+                  <button
+                    onClick={() => {
+                      const tpl = ccVoicemailTemplateId ? templates.find(t => t.id === ccVoicemailTemplateId) : null;
+                      setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccVoicemailMessage, type: 'cc-voicemail' });
+                    }}
+                    className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
                 </div>
               )}
+              <div className="mt-5">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Recording URL <span className="normal-case font-normal text-slate-400">(optional — overrides TTS above)</span></label>
+                <div className="relative">
+                  <input
+                    type="url"
+                    value={ccVoicemailRecordingUrl}
+                    onChange={e => setCcVoicemailRecordingUrl(e.target.value)}
+                    placeholder="https://example.com/voicemail.mp3"
+                    className={`w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent ${ccVoicemailRecordingUrl ? 'pr-10' : ''}`}
+                  />
+                  {ccVoicemailRecordingUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setCcVoicemailRecordingUrl('')}
+                      title="Clear URL"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-500 transition-colors"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Test Call + Save Settings */}
