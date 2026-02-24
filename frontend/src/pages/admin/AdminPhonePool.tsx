@@ -642,52 +642,89 @@ export default function AdminPhonePool() {
       <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-4 md:p-6 border-b border-slate-100">
           <h2 className="text-lg md:text-xl font-bold text-slate-900">Test Customer Setup</h2>
-          <p className="text-sm text-slate-500 mt-1">Placeholder data used when any tenant runs a test call from their Call Connect settings.</p>
+          <p className="text-sm text-slate-500 mt-1">Placeholder data injected into template variables when any tenant runs a test call.</p>
         </div>
-        <div className="p-4 md:p-6 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">Customer Name</label>
+        <div className="p-4 md:p-6 space-y-6">
+
+          {/* Fields */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {/* Customer Name */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-bold text-slate-700">Customer Name</label>
+                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg text-[11px] font-mono border border-blue-100">{'{customerName}'}</span>
+                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg text-[11px] font-mono border border-blue-100">{'{accountName}'}</span>
+              </div>
               <input
                 type="text"
-                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                 value={testConfig.testCustomerName}
                 onChange={e => setTestConfig(prev => ({ ...prev, testCustomerName: e.target.value }))}
                 placeholder="Test Customer"
               />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">Category</label>
+
+            {/* Category */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-bold text-slate-700">Category</label>
+                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg text-[11px] font-mono border border-blue-100">{'{category}'}</span>
+              </div>
               <input
                 type="text"
-                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                 value={testConfig.testCategory}
                 onChange={e => setTestConfig(prev => ({ ...prev, testCategory: e.target.value }))}
                 placeholder="House Cleaning"
               />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">Location</label>
+
+            {/* Location */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-bold text-slate-700">Location</label>
+                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg text-[11px] font-mono border border-blue-100">{'{location}'}</span>
+              </div>
               <input
                 type="text"
-                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                 value={testConfig.testLocation}
                 onChange={e => setTestConfig(prev => ({ ...prev, testLocation: e.target.value }))}
                 placeholder="Tampa, FL"
               />
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 shadow-sm shadow-blue-200 transition-all disabled:opacity-50 flex items-center gap-2"
-              onClick={handleSaveTestConfig}
-              disabled={testConfigSaving}
-            >
-              {testConfigSaving && <Loader2 size={14} className="animate-spin" />}
-              Save
-            </button>
-            <p className="text-xs text-slate-400">Variables in voicemail/whisper templates: <span className="font-mono">{'{customerName}'}</span>, <span className="font-mono">{'{category}'}</span>, <span className="font-mono">{'{location}'}</span></p>
+
+          {/* Live variable preview */}
+          <div className="bg-slate-50 rounded-xl p-4 space-y-2">
+            <p className="text-xs font-bold text-slate-600 mb-3">All template variables — resolved values for test calls</p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { name: '{customerName}', value: testConfig.testCustomerName || 'Test Customer' },
+                { name: '{accountName}',  value: testConfig.testCustomerName || 'Test Customer' },
+                { name: '{category}',     value: testConfig.testCategory    || 'House Cleaning' },
+                { name: '{location}',     value: testConfig.testLocation    || 'Tampa, FL' },
+                { name: '{summary}',      value: `${testConfig.testCustomerName || 'Test Customer'} — ${testConfig.testCategory || 'House Cleaning'} — ${testConfig.testLocation || 'Tampa, FL'}` },
+                { name: '{phone}',        value: 'from test call input' },
+                { name: '{digit}',        value: 'from agent accept digits' },
+              ].map(v => (
+                <div key={v.name} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs">
+                  <span className="font-mono text-blue-700 font-semibold">{v.name}</span>
+                  <span className="text-slate-300">→</span>
+                  <span className="text-slate-600 italic">{v.value}</span>
+                </div>
+              ))}
+            </div>
           </div>
+
+          <button
+            className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 shadow-sm shadow-blue-200 transition-all disabled:opacity-50 flex items-center gap-2"
+            onClick={handleSaveTestConfig}
+            disabled={testConfigSaving}
+          >
+            {testConfigSaving && <Loader2 size={14} className="animate-spin" />}
+            Save
+          </button>
         </div>
       </div>
 
