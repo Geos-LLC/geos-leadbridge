@@ -214,7 +214,7 @@ export function Services() {
   const [ctStopOnReply, setCtStopOnReply] = useState(true);
   const [ctSaving, setCtSaving] = useState(false);
   const [ctFromPhone, setCtFromPhone] = useState('');
-  const [ctTestPhone, setCtTestPhone] = useState('');
+  const [ctTestPhone, setCtTestPhone] = useState(() => localStorage.getItem('ct_test_phone') || '');
   const [ctTestStatus, setCtTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
   const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string } | null>(null);
   const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>('');
@@ -1449,10 +1449,17 @@ export function Services() {
                   <input
                     type="tel"
                     value={ctTestPhone}
-                    onChange={e => setCtTestPhone(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                    onChange={e => {
+                      const v = e.target.value.replace(/[^\d+\s\-()]/g, '');
+                      setCtTestPhone(v);
+                      localStorage.setItem('ct_test_phone', v);
+                    }}
                     onBlur={e => {
                       const formatted = formatPhoneE164(e.target.value);
-                      if (formatted !== e.target.value) setCtTestPhone(formatted);
+                      if (formatted !== e.target.value) {
+                        setCtTestPhone(formatted);
+                        localStorage.setItem('ct_test_phone', formatted);
+                      }
                     }}
                     placeholder="+15555550100"
                     className={`flex-1 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
