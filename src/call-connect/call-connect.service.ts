@@ -579,33 +579,68 @@ export class CallConnectService {
 
     // Load global admin test-customer config (falls back to defaults if not set).
     const adminCfg = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
-    const testCustomerName = adminCfg?.testCustomerName ?? 'Test Customer';
-    const testCategory = adminCfg?.testCategory ?? 'House Cleaning';
-    const testLocation = adminCfg?.testLocation ?? 'Tampa, FL';
-    const leadSummary = `${testCustomerName} — ${testCategory} — ${testLocation}`;
+    const saved = (adminCfg?.testData as Record<string, string> | null) ?? {};
+    const td = {
+      customerName:       'Test Customer',
+      firstName:          'Test',
+      accountName:        'Test Business',
+      category:           'House Cleaning',
+      city:               'Tampa',
+      state:              'FL',
+      location:           'Tampa, FL',
+      zip:                '33601',
+      message:            'Looking for reliable cleaning services',
+      serviceDescription: 'Standard home cleaning',
+      addons:             '',
+      frequency:          'Weekly',
+      bedrooms:           '3',
+      bathrooms:          '2',
+      price:              '$120',
+      pets:               'None',
+      estimate:           '$120',
+      dates:              'Flexible',
+      // backward-compat: old columns override defaults when present
+      ...(adminCfg?.testCustomerName ? { customerName: adminCfg.testCustomerName } : {}),
+      ...(adminCfg?.testCategory     ? { category:      adminCfg.testCategory }     : {}),
+      ...(adminCfg?.testLocation     ? { location:      adminCfg.testLocation }     : {}),
+      // new testData JSON overrides everything
+      ...saved,
+    };
+    const leadSummary = `${td.customerName} — ${td.category} — ${td.location}`;
 
-    // Pre-build the whisper message (same logic as triggerForLead).
+    /** Apply all template variable substitutions to a string */
+    const subst = (tpl: string) =>
+      tpl
+        .replace(/\{summary\}/g,                 leadSummary)
+        .replace(/\{customerName\}/g,             td.customerName)
+        .replace(/\{firstName\}/g,                td.firstName)
+        .replace(/\{accountName\}/g,              td.accountName)
+        .replace(/\{category\}/g,                 td.category)
+        .replace(/\{city\}/g,                     td.city)
+        .replace(/\{state\}/g,                    td.state)
+        .replace(/\{location\}/g,                 td.location)
+        .replace(/\{phone\}/g,                    testPhone)
+        .replace(/\{lead\.name\}/g,               td.customerName)
+        .replace(/\{lead\.phone\}/g,              testPhone)
+        .replace(/\{lead\.location\}/g,           td.location)
+        .replace(/\{lead\.zip\}/g,                td.zip)
+        .replace(/\{lead\.message\}/g,            td.message)
+        .replace(/\{lead\.serviceDescription\}/g, td.serviceDescription)
+        .replace(/\{lead\.addons\}/g,             td.addons)
+        .replace(/\{lead\.frequency\}/g,          td.frequency)
+        .replace(/\{lead\.bedrooms\}/g,           td.bedrooms)
+        .replace(/\{lead\.bathrooms\}/g,          td.bathrooms)
+        .replace(/\{lead\.price\}/g,              td.price)
+        .replace(/\{lead\.pets\}/g,               td.pets)
+        .replace(/\{lead\.estimate\}/g,           td.estimate)
+        .replace(/\{lead\.dates\}/g,              td.dates);
+
+    // Pre-build whisper + voicemail messages with all variables substituted.
     const whisperTemplate = settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.';
-    const agentWhisperMessage = whisperTemplate
-      .replace(/\{summary\}/g, leadSummary)
-      .replace(/\{customerName\}/g, testCustomerName)
-      .replace(/\{accountName\}/g, testCustomerName)
-      .replace(/\{category\}/g, testCategory)
-      .replace(/\{location\}/g, testLocation)
-      .replace(/\{phone\}/g, testPhone);
+    const agentWhisperMessage = subst(whisperTemplate);
 
-    // Pre-build the voicemail message so the test call uses the correct template
-    // with variables already substituted (same logic as triggerForLead).
     const voicemailTemplate = settings.leadVoicemailMessage || '';
-    const leadVoicemailMessage = voicemailTemplate
-      ? voicemailTemplate
-          .replace(/\{summary\}/g, leadSummary)
-          .replace(/\{customerName\}/g, testCustomerName)
-          .replace(/\{accountName\}/g, testCustomerName)
-          .replace(/\{category\}/g, testCategory)
-          .replace(/\{location\}/g, testLocation)
-          .replace(/\{phone\}/g, testPhone)
-      : undefined;
+    const leadVoicemailMessage = voicemailTemplate ? subst(voicemailTemplate) : undefined;
 
     const startPayload = {
       businessId: sigcoreBusinessId,

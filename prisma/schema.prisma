@@ -750,6 +750,8 @@ model AdminConfig {
   testCustomerName String   @default("Test Customer")
   testCategory     String   @default("House Cleaning")
   testLocation     String   @default("Tampa, FL")
+  /// Full map of template variable test values — keys match variable names (without braces)
+  testData         Json?    @map("test_data")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 

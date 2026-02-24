@@ -510,37 +510,50 @@ export class AdminPhonePoolService {
   }
 
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
   // Global Admin Config (singleton row — id = 'global')
   // ---------------------------------------------------------------------------
 
-  async getAdminConfig() {
+  static readonly DEFAULT_TEST_DATA: Record<string, string> = {
+    customerName:       'Test Customer',
+    firstName:          'Test',
+    accountName:        'Test Business',
+    category:           'House Cleaning',
+    city:               'Tampa',
+    state:              'FL',
+    location:           'Tampa, FL',
+    zip:                '33601',
+    message:            'Looking for reliable cleaning services',
+    serviceDescription: 'Standard home cleaning',
+    addons:             '',
+    frequency:          'Weekly',
+    bedrooms:           '3',
+    bathrooms:          '2',
+    price:              '$120',
+    pets:               'None',
+    estimate:           '$120',
+    dates:              'Flexible',
+  };
+
+  async getAdminConfig(): Promise<{ id: string; testData: Record<string, string> }> {
     const config = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
-    return config ?? {
-      id: 'global',
-      testCustomerName: 'Test Customer',
-      testCategory: 'House Cleaning',
-      testLocation: 'Tampa, FL',
+    const saved = (config?.testData as Record<string, string> | null) ?? {};
+    // Merge: defaults → old individual columns → new testData JSON
+    const testData: Record<string, string> = {
+      ...AdminPhonePoolService.DEFAULT_TEST_DATA,
+      ...(config?.testCustomerName ? { customerName: config.testCustomerName } : {}),
+      ...(config?.testCategory     ? { category:      config.testCategory }     : {}),
+      ...(config?.testLocation     ? { location:      config.testLocation }     : {}),
+      ...saved,
     };
+    return { id: 'global', testData };
   }
 
-  async updateAdminConfig(dto: {
-    testCustomerName?: string;
-    testCategory?: string;
-    testLocation?: string;
-  }) {
+  async updateAdminConfig(testData: Record<string, string>) {
     return this.prisma.adminConfig.upsert({
       where: { id: 'global' },
-      create: {
-        id: 'global',
-        testCustomerName: dto.testCustomerName ?? 'Test Customer',
-        testCategory: dto.testCategory ?? 'House Cleaning',
-        testLocation: dto.testLocation ?? 'Tampa, FL',
-      },
-      update: {
-        ...(dto.testCustomerName !== undefined && { testCustomerName: dto.testCustomerName }),
-        ...(dto.testCategory !== undefined && { testCategory: dto.testCategory }),
-        ...(dto.testLocation !== undefined && { testLocation: dto.testLocation }),
-      },
+      create: { id: 'global', testData },
+      update: { testData },
     });
   }
 }

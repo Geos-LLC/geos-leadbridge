@@ -36,7 +36,13 @@ export default function AdminPhonePool() {
   const [searchingUsers, setSearchingUsers] = useState(false);
 
   // Global admin config (test customer setup)
-  const [testConfig, setTestConfig] = useState({ testCustomerName: 'Test Customer', testCategory: 'House Cleaning', testLocation: 'Tampa, FL' });
+  const [testData, setTestData] = useState<Record<string, string>>({
+    customerName: 'Test Customer', firstName: 'Test', accountName: 'Test Business',
+    category: 'House Cleaning', city: 'Tampa', state: 'FL', location: 'Tampa, FL', zip: '33601',
+    message: 'Looking for reliable cleaning services', serviceDescription: 'Standard home cleaning',
+    addons: '', frequency: 'Weekly', bedrooms: '3', bathrooms: '2',
+    price: '$120', pets: 'None', estimate: '$120', dates: 'Flexible',
+  });
   const [testConfigSaving, setTestConfigSaving] = useState(false);
 
   useEffect(() => {
@@ -62,7 +68,7 @@ export default function AdminPhonePool() {
   const loadAdminConfig = async () => {
     try {
       const cfg = await adminApi.getAdminConfig();
-      setTestConfig(cfg);
+      if (cfg?.testData) setTestData(prev => ({ ...prev, ...cfg.testData }));
     } catch {
       // keep defaults
     }
@@ -71,8 +77,8 @@ export default function AdminPhonePool() {
   const handleSaveTestConfig = async () => {
     try {
       setTestConfigSaving(true);
-      const updated = await adminApi.updateAdminConfig(testConfig);
-      setTestConfig(updated);
+      const updated = await adminApi.updateAdminConfig(testData);
+      if (updated?.testData) setTestData(prev => ({ ...prev, ...updated.testData }));
       notify.success('Saved', 'Test customer settings updated');
     } catch {
       notify.error('Error', 'Failed to save test customer settings');
@@ -646,76 +652,110 @@ export default function AdminPhonePool() {
         </div>
         <div className="p-4 md:p-6 space-y-6">
 
-          {/* Fields */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {/* Customer Name */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-bold text-slate-700">Customer Name</label>
-                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg text-[11px] font-mono border border-blue-100">{'{customerName}'}</span>
-                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg text-[11px] font-mono border border-blue-100">{'{accountName}'}</span>
-              </div>
-              <input
-                type="text"
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                value={testConfig.testCustomerName}
-                onChange={e => setTestConfig(prev => ({ ...prev, testCustomerName: e.target.value }))}
-                placeholder="Test Customer"
-              />
-            </div>
-
-            {/* Category */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-bold text-slate-700">Category</label>
-                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg text-[11px] font-mono border border-blue-100">{'{category}'}</span>
-              </div>
-              <input
-                type="text"
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                value={testConfig.testCategory}
-                onChange={e => setTestConfig(prev => ({ ...prev, testCategory: e.target.value }))}
-                placeholder="House Cleaning"
-              />
-            </div>
-
-            {/* Location */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-bold text-slate-700">Location</label>
-                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg text-[11px] font-mono border border-blue-100">{'{location}'}</span>
-              </div>
-              <input
-                type="text"
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                value={testConfig.testLocation}
-                onChange={e => setTestConfig(prev => ({ ...prev, testLocation: e.target.value }))}
-                placeholder="Tampa, FL"
-              />
-            </div>
-          </div>
-
-          {/* Live variable preview */}
-          <div className="bg-slate-50 rounded-xl p-4 space-y-2">
-            <p className="text-xs font-bold text-slate-600 mb-3">All template variables — resolved values for test calls</p>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { name: '{customerName}', value: testConfig.testCustomerName || 'Test Customer' },
-                { name: '{accountName}',  value: testConfig.testCustomerName || 'Test Customer' },
-                { name: '{category}',     value: testConfig.testCategory    || 'House Cleaning' },
-                { name: '{location}',     value: testConfig.testLocation    || 'Tampa, FL' },
-                { name: '{summary}',      value: `${testConfig.testCustomerName || 'Test Customer'} — ${testConfig.testCategory || 'House Cleaning'} — ${testConfig.testLocation || 'Tampa, FL'}` },
-                { name: '{phone}',        value: 'from test call input' },
-                { name: '{digit}',        value: 'from agent accept digits' },
-              ].map(v => (
-                <div key={v.name} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs">
-                  <span className="font-mono text-blue-700 font-semibold">{v.name}</span>
-                  <span className="text-slate-300">→</span>
-                  <span className="text-slate-600 italic">{v.value}</span>
+          {/* Helper to render a single field */}
+          {(() => {
+            const f = (key: string, label: string, vars: string[], placeholder: string) => (
+              <div className="space-y-1.5">
+                <div className="flex items-center flex-wrap gap-1.5">
+                  <label className="text-xs font-bold text-slate-700">{label}</label>
+                  {vars.map(v => (
+                    <span key={v} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg text-[11px] font-mono border border-blue-100">{v}</span>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  value={testData[key] ?? ''}
+                  onChange={e => setTestData(prev => ({ ...prev, [key]: e.target.value }))}
+                  placeholder={placeholder}
+                />
+              </div>
+            );
+            return (
+              <>
+                {/* Customer */}
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Customer</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {f('customerName', 'Full Name',   ['{customerName}', '{lead.name}'], 'Test Customer')}
+                    {f('firstName',    'First Name',  ['{firstName}'],                  'Test')}
+                    {f('accountName',  'Business Name', ['{accountName}'],              'Test Business')}
+                  </div>
+                </div>
+
+                {/* Location */}
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Location</p>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {f('location', 'City, State', ['{location}', '{lead.location}'], 'Tampa, FL')}
+                    {f('city',     'City',        ['{city}'],                        'Tampa')}
+                    {f('state',    'State',       ['{state}'],                       'FL')}
+                    {f('zip',      'ZIP',         ['{lead.zip}'],                    '33601')}
+                  </div>
+                </div>
+
+                {/* Service */}
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Service</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {f('category',           'Category',            ['{category}'],                    'House Cleaning')}
+                    {f('serviceDescription', 'Service Description', ['{lead.serviceDescription}'],     'Standard home cleaning')}
+                    {f('addons',             'Add-ons',             ['{lead.addons}'],                 '')}
+                    {f('frequency',          'Frequency',           ['{lead.frequency}'],              'Weekly')}
+                    {f('price',              'Price',               ['{lead.price}'],                  '$120')}
+                    {f('estimate',           'Estimate',            ['{lead.estimate}'],               '$120')}
+                    {f('dates',              'Dates',               ['{lead.dates}'],                  'Flexible')}
+                  </div>
+                </div>
+
+                {/* Property */}
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Property</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {f('bedrooms',  'Bedrooms',  ['{lead.bedrooms}'],  '3')}
+                    {f('bathrooms', 'Bathrooms', ['{lead.bathrooms}'], '2')}
+                    {f('pets',      'Pets',      ['{lead.pets}'],      'None')}
+                  </div>
+                </div>
+
+                {/* Message */}
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Message</p>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <label className="text-xs font-bold text-slate-700">Customer Message</label>
+                      <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg text-[11px] font-mono border border-blue-100">{'{lead.message}'}</span>
+                    </div>
+                    <textarea
+                      rows={2}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all resize-none"
+                      value={testData['message'] ?? ''}
+                      onChange={e => setTestData(prev => ({ ...prev, message: e.target.value }))}
+                      placeholder="Looking for reliable cleaning services"
+                    />
+                  </div>
+                </div>
+
+                {/* Auto-built / read-only variables */}
+                <div className="bg-slate-50 rounded-xl p-4">
+                  <p className="text-xs font-bold text-slate-600 mb-3">Auto-built variables (read-only)</p>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { name: '{summary}', value: `${testData['customerName'] || 'Test Customer'} — ${testData['category'] || 'House Cleaning'} — ${testData['location'] || 'Tampa, FL'}` },
+                      { name: '{phone}',   value: 'from test call input' },
+                      { name: '{digit}',   value: 'from agent accept digits' },
+                    ].map(v => (
+                      <div key={v.name} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs">
+                        <span className="font-mono text-blue-700 font-semibold">{v.name}</span>
+                        <span className="text-slate-300">→</span>
+                        <span className="text-slate-500 italic">{v.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            );
+          })()}
 
           <button
             className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 shadow-sm shadow-blue-200 transition-all disabled:opacity-50 flex items-center gap-2"
