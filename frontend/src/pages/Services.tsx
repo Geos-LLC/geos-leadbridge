@@ -216,8 +216,10 @@ export function Services() {
   const [ctFromPhone, setCtFromPhone] = useState('');
   const [ctTestPhone, setCtTestPhone] = useState('');
   const [ctTestStatus, setCtTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
-  const [ctFollowUpsExpanded, setCtFollowUpsExpanded] = useState(false);
+  const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string } | null>(null);
 
+  // Derived: unsaved CT changes
+  const ctDirty = ctSavedSnapshot !== null && ctAutoReplyTemplate !== ctSavedSnapshot.autoReplyTemplate;
 
   // Derived: unsaved CC changes
   const ccDirty = ccSavedSnapshot !== null && (
@@ -318,6 +320,7 @@ export function Services() {
         setCtFollowUps(ctRes.followUps);
         setCtStopOnReply(ctRes.stopOnCustomerReply);
         setCtFromPhone(ctRes.fromPhone || poolRes.phoneNumbers[0]?.phoneNumber || '');
+        setCtSavedSnapshot({ autoReplyTemplate: ctRes.autoReplyTemplate });
       }
 
       // Collect ALL new_lead automation rules
@@ -632,11 +635,17 @@ export function Services() {
         stopOnCustomerReply: ctStopOnReply,
       });
       showSuccess('Customer Texting settings saved');
+      setCtSavedSnapshot({ autoReplyTemplate: ctAutoReplyTemplate });
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Failed to save Customer Texting settings');
     } finally {
       setCtSaving(false);
     }
+  }
+
+  function discardCtChanges() {
+    if (!ctSavedSnapshot) return;
+    setCtAutoReplyTemplate(ctSavedSnapshot.autoReplyTemplate);
   }
 
   async function doTestCall() {
@@ -1411,13 +1420,23 @@ export function Services() {
                   <input
                     type="tel"
                     value={ctTestPhone}
-                    onChange={e => setCtTestPhone(e.target.value)}
-                    placeholder="+1 (555) 000-0000"
-                    className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    onChange={e => setCtTestPhone(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                    onBlur={e => {
+                      const formatted = formatPhoneE164(e.target.value);
+                      if (formatted !== e.target.value) setCtTestPhone(formatted);
+                    }}
+                    placeholder="+15555550100"
+                    className={`flex-1 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                      ctTestPhone && !isValidPhoneE164(ctTestPhone)
+                        ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                        : ctTestPhone && isValidPhoneE164(ctTestPhone)
+                          ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                          : 'border border-slate-200 focus:ring-emerald-400'
+                    }`}
                   />
                   <button
                     onClick={sendCtTest}
-                    disabled={ctTestStatus === 'sending' || !ctTestPhone || !ctFromPhone}
+                    disabled={ctTestStatus === 'sending' || !ctTestPhone || !isValidPhoneE164(ctTestPhone) || !ctFromPhone}
                     className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed flex items-center gap-2 ${
                       ctTestStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
                       ctTestStatus === 'failed' ? 'bg-red-100 text-red-700' :
@@ -1436,86 +1455,61 @@ export function Services() {
                      'Send Test'}
                   </button>
                 </div>
+                {ctTestPhone && !isValidPhoneE164(ctTestPhone) && (
+                  <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    Must be E.164 format, e.g. +12125550100
+                  </p>
+                )}
               </div>
 
-              {/* Follow-up messages (collapsible second option) */}
+              {/* Follow-up messages — Coming Soon */}
               <div className="border-t border-slate-100 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setCtFollowUpsExpanded(prev => !prev)}
-                  className="flex items-center justify-between w-full text-left"
-                >
+                <div className="flex items-center justify-between">
                   <div>
                     <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Follow-Up Messages</span>
                     <p className="text-xs text-slate-400 mt-0.5">Sent if the customer hasn't replied yet.</p>
                   </div>
-                  <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${ctFollowUpsExpanded ? 'rotate-180' : ''}`} />
-                </button>
-                {ctFollowUpsExpanded && (
-                  <div className="mt-3 space-y-3">
-                    {ctFollowUps.map((fu, idx) => (
-                      <div
-                        key={idx}
-                        className={`rounded-xl border p-3 transition-colors ${fu.enabled ? 'border-slate-200 bg-slate-50' : 'border-slate-100 bg-white opacity-60'}`}
-                      >
-                        <div className="flex items-center gap-2 mb-2">
-                          <input
-                            type="checkbox"
-                            checked={fu.enabled}
-                            onChange={() => {
-                              const updated = [...ctFollowUps];
-                              updated[idx] = { ...fu, enabled: !fu.enabled };
-                              setCtFollowUps(updated);
-                            }}
-                            className="rounded"
-                          />
-                          <span className="text-xs font-semibold text-slate-500 flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {fu.delayMinutes < 60
-                              ? `${fu.delayMinutes} min after lead`
-                              : fu.delayMinutes < 1440
-                                ? `${fu.delayMinutes / 60} hour${fu.delayMinutes > 60 ? 's' : ''} after lead`
-                                : `${fu.delayMinutes / 1440} day${fu.delayMinutes > 1440 ? 's' : ''} after lead`}
-                          </span>
-                        </div>
-                        {fu.enabled && (
-                          <textarea
-                            value={fu.template}
-                            onChange={e => {
-                              const updated = [...ctFollowUps];
-                              updated[idx] = { ...fu, template: e.target.value };
-                              setCtFollowUps(updated);
-                            }}
-                            rows={2}
-                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400 resize-y"
-                          />
-                        )}
-                      </div>
-                    ))}
-                    <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none pt-1">
-                      <input
-                        type="checkbox"
-                        checked={ctStopOnReply}
-                        onChange={e => setCtStopOnReply(e.target.checked)}
-                        className="rounded"
-                      />
-                      Cancel follow-ups if customer replies
-                    </label>
-                  </div>
-                )}
+                  <span className="px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest bg-slate-100 text-slate-400 rounded-full">Coming Soon</span>
+                </div>
               </div>
             </div>
 
-            {/* Save button */}
+            {/* Save / unsaved changes */}
             <div className="pt-4 border-t border-slate-100">
-              <button
-                onClick={saveCtSettings}
-                disabled={ctSaving}
-                className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-50"
-              >
-                {ctSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                Save Settings
-              </button>
+              {ctDirty ? (
+                <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+                  <div className="flex items-center gap-2 text-amber-700">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span className="text-sm font-medium">You have unsaved changes</span>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={discardCtChanges}
+                      className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                    >
+                      Discard
+                    </button>
+                    <button
+                      onClick={saveCtSettings}
+                      disabled={ctSaving}
+                      className="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {ctSaving && <Loader2 className="w-3 h-3 animate-spin" />}
+                      Save Settings
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={saveCtSettings}
+                  disabled={ctSaving}
+                  className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                >
+                  {ctSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Save Settings
+                </button>
+              )}
             </div>
           </ServiceCard>
 
