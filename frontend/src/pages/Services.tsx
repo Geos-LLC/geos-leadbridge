@@ -939,72 +939,76 @@ export function Services() {
           >
             {/* SMS Alert Configuration */}
             <div className="space-y-6">
-              <div>
-                <label className={`text-[11px] font-bold uppercase tracking-widest mb-2 block ${toPhoneMissing ? 'text-orange-500' : 'text-slate-400'}`}>
-                  Send to (your phone){toPhoneMissing && <span className="ml-1 text-orange-500">*</span>}
-                </label>
-                <input
-                  type="tel"
-                  value={alertToPhone}
-                  onChange={e => setAlertToPhone(e.target.value)}
-                  onBlur={e => {
-                    const formatted = formatPhoneE164(e.target.value);
-                    if (formatted !== e.target.value) setAlertToPhone(formatted);
-                  }}
-                  placeholder="+1234567890"
-                  className={`w-full rounded-xl p-3 text-sm focus:ring-2 focus:outline-none transition-colors ${
-                    toPhoneMissing
-                      ? 'border-2 border-orange-300 bg-orange-50/40 focus:ring-orange-200 focus:border-orange-400 placeholder:text-orange-300'
-                      : alertToPhone && !isValidPhoneE164(alertToPhone)
-                        ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200 focus:border-red-400'
-                        : alertToPhone && isValidPhoneE164(alertToPhone)
-                          ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200 focus:border-emerald-400'
-                          : 'bg-white border border-slate-200 focus:ring-blue-500 focus:border-blue-500'
-                  }`}
-                />
-                {toPhoneMissing && (
-                  <p className="mt-1.5 text-xs text-orange-600 font-medium flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 shrink-0" />
-                    Enter your phone number to receive lead alert SMS messages
-                  </p>
-                )}
-                {!toPhoneMissing && alertToPhone && !isValidPhoneE164(alertToPhone) && (
-                  <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 shrink-0" />
-                    Must be E.164 format, e.g. +12125550100
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send from</label>
-                <div className="relative">
-                  <select
-                    value={alertFromPhone}
-                    onChange={e => saveAlertFromPhone(e.target.value)}
-                    disabled={saving}
-                    className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
-                  >
-                    <option value="">Select phone number</option>
-                    {/* Show current fromPhone even if not in pool list */}
-                    {alertFromPhone && !poolPhones.some(p => p.phoneNumber === alertFromPhone) && (
-                      <option value={alertFromPhone}>{alertFromPhone} (configured)</option>
-                    )}
-                    {poolPhones.map(p => (
-                      <option key={p.id} value={p.phoneNumber}>
-                        {p.phoneNumber} (LeadBridge)
-                      </option>
-                    ))}
-                  </select>
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
-                    <ChevronDown className="w-4 h-4" />
-                  </div>
+              <div className="grid grid-cols-2 gap-4">
+                {/* Send to */}
+                <div>
+                  <label className={`text-[11px] font-bold uppercase tracking-widest mb-2 block ${toPhoneMissing ? 'text-orange-500' : 'text-slate-400'}`}>
+                    Send to (your phone){toPhoneMissing && <span className="ml-1 text-orange-500">*</span>}
+                  </label>
+                  <input
+                    type="tel"
+                    value={alertToPhone}
+                    onChange={e => setAlertToPhone(e.target.value)}
+                    onBlur={e => {
+                      const formatted = formatPhoneE164(e.target.value);
+                      if (formatted !== e.target.value) setAlertToPhone(formatted);
+                    }}
+                    placeholder="+1234567890"
+                    className={`w-full rounded-xl p-3 text-sm focus:ring-2 focus:outline-none transition-colors ${
+                      toPhoneMissing
+                        ? 'border-2 border-orange-300 bg-orange-50/40 focus:ring-orange-200 focus:border-orange-400 placeholder:text-orange-300'
+                        : alertToPhone && !isValidPhoneE164(alertToPhone)
+                          ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200 focus:border-red-400'
+                          : alertToPhone && isValidPhoneE164(alertToPhone)
+                            ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200 focus:border-emerald-400'
+                            : 'bg-white border border-slate-200 focus:ring-blue-500 focus:border-blue-500'
+                    }`}
+                  />
+                  {toPhoneMissing && (
+                    <p className="mt-1.5 text-xs text-orange-600 font-medium flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      Enter your phone number to receive lead alert SMS messages
+                    </p>
+                  )}
+                  {!toPhoneMissing && alertToPhone && !isValidPhoneE164(alertToPhone) && (
+                    <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      Must be E.164 format, e.g. +12125550100
+                    </p>
+                  )}
                 </div>
-                <button className="mt-2 px-4 py-2 bg-slate-100 text-slate-400 rounded-xl text-xs font-bold flex items-center gap-2 cursor-not-allowed">
-                  <Phone className="w-3 h-3" />
-                  Get your own number
-                  <span className="px-1.5 py-0.5 bg-slate-200 text-[9px] rounded uppercase">Coming Soon</span>
-                </button>
+
+                {/* Send from */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send from</label>
+                  <div className="relative">
+                    <select
+                      value={alertFromPhone}
+                      onChange={e => saveAlertFromPhone(e.target.value)}
+                      disabled={saving}
+                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
+                    >
+                      <option value="">Select phone number</option>
+                      {/* Show current fromPhone even if not in pool list */}
+                      {alertFromPhone && !poolPhones.some(p => p.phoneNumber === alertFromPhone) && (
+                        <option value={alertFromPhone}>{alertFromPhone} (configured)</option>
+                      )}
+                      {poolPhones.map(p => (
+                        <option key={p.id} value={p.phoneNumber}>
+                          {p.phoneNumber} (LeadBridge)
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                      <ChevronDown className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <button className="mt-2 px-4 py-2 bg-slate-100 text-slate-400 rounded-xl text-xs font-bold flex items-center gap-2 cursor-not-allowed">
+                    <Phone className="w-3 h-3" />
+                    Get your own number
+                    <span className="px-1.5 py-0.5 bg-slate-200 text-[9px] rounded uppercase">Coming Soon</span>
+                  </button>
+                </div>
               </div>
 
               {leadAlertRule && (
