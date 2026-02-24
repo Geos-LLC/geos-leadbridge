@@ -8,7 +8,7 @@ cmds = ["npm ci --include=dev", "cd frontend && npm ci --include=dev"]
 cmds = ["npm run build", "cd frontend && npm run build"]
 
 [start]
-cmd = "npm run start:prod"
+cmd = "npx prisma migrate deploy && npm run start:prod"
 
 # Make these environment variables available during build
 [variables]
