@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, Search, Loader2, UserPlus, UserMinus, Trash2, RefreshCw, X, Link, Unlink, Download, Users, MessageSquare, CheckCircle, AlertCircle, Send } from 'lucide-react';
+import { Phone, Search, Loader2, UserPlus, UserMinus, Trash2, RefreshCw, X, Link, Unlink, Download, Users } from 'lucide-react';
 import { adminApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
-import type { PhonePoolEntry, PhonePoolStats, NotificationLog } from '../../types';
+import type { PhonePoolEntry, PhonePoolStats } from '../../types';
 
 export default function AdminPhonePool() {
   const user = useAuthStore((state) => state.user);
@@ -35,10 +35,6 @@ export default function AdminPhonePool() {
   const [userResults, setUserResults] = useState<{ id: string; email: string; name: string | null }[]>([]);
   const [searchingUsers, setSearchingUsers] = useState(false);
 
-  // Notification logs
-  const [smsLogs, setSmsLogs] = useState<NotificationLog[]>([]);
-  const [logsLoading, setLogsLoading] = useState(false);
-
   useEffect(() => {
     if (user?.role !== 'ADMIN') {
       notify.error('Access Denied', 'You must be an admin to access this page');
@@ -47,7 +43,6 @@ export default function AdminPhonePool() {
     }
     loadData();
     loadConfig();
-    loadNotificationLogs();
   }, [user, statusFilter, searchQuery]);
 
   const loadConfig = async () => {
@@ -74,18 +69,6 @@ export default function AdminPhonePool() {
       notify.error('Error', 'Failed to load phone pool');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadNotificationLogs = async () => {
-    try {
-      setLogsLoading(true);
-      const { logs } = await adminApi.getNotificationLogs(100);
-      setSmsLogs(logs);
-    } catch (error) {
-      console.error('Failed to load notification logs:', error);
-    } finally {
-      setLogsLoading(false);
     }
   };
 
@@ -624,142 +607,6 @@ export default function AdminPhonePool() {
         {total > 0 && (
           <div className="px-4 md:px-6 py-3 md:py-4 border-t border-slate-100 text-xs md:text-sm text-slate-600">
             Showing {phones.length} of {total} numbers
-          </div>
-        )}
-      </div>
-
-      {/* SMS Message History */}
-      <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between p-4 md:p-6 border-b border-slate-100">
-          <h2 className="text-lg md:text-xl font-bold text-slate-900 flex items-center gap-2">
-            <MessageSquare size={20} />
-            SMS History
-          </h2>
-          <button className="px-3 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center gap-2 disabled:opacity-50" onClick={loadNotificationLogs} disabled={logsLoading}>
-            {logsLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-          </button>
-        </div>
-
-        {logsLoading && smsLogs.length === 0 ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 size={20} className="animate-spin text-blue-600" />
-          </div>
-        ) : smsLogs.length > 0 ? (
-          <>
-            {/* Mobile: Card list */}
-            <div className="md:hidden divide-y divide-slate-100">
-              {smsLogs.map((log: any) => (
-                <div key={log.id} className={`p-4 space-y-1.5 ${log.status === 'failed' ? 'bg-red-50/30' : ''}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-sm font-semibold text-slate-900">{log.toPhone}</span>
-                    {log.status === 'delivered' ? (
-                      <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-[10px] font-bold inline-flex items-center gap-1">
-                        <CheckCircle size={10} /> Delivered
-                      </span>
-                    ) : log.status === 'failed' ? (
-                      <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px] font-bold inline-flex items-center gap-1">
-                        <AlertCircle size={10} /> Failed
-                      </span>
-                    ) : log.status === 'sent' ? (
-                      <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-[10px] font-bold inline-flex items-center gap-1">
-                        <Send size={10} /> Sent
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full text-[10px] font-bold inline-flex items-center gap-1">
-                        <Loader2 size={10} className="animate-spin" /> {log.status}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
-                    <span>{new Date(log.createdAt).toLocaleString()}</span>
-                    {log.savedAccount?.businessName && <span>· {log.savedAccount.businessName}</span>}
-                    {log.ruleName && (
-                      <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full font-bold">{log.ruleName}</span>
-                    )}
-                  </div>
-                  {log.error && (
-                    <p className="text-xs text-red-600 truncate">{log.error}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Desktop: Full table */}
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50">
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Time</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Account</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Rule</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">From</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">To</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Delivered</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {smsLogs.map((log: any) => (
-                    <tr key={log.id} className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${log.status === 'failed' ? 'bg-red-50/30' : ''}`}>
-                      <td className="px-6 py-4 text-slate-700 text-sm">{new Date(log.createdAt).toLocaleString()}</td>
-                      <td className="px-6 py-4">
-                        <span className="px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-bold">
-                          {log.savedAccount?.businessName || 'Unknown'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        {log.ruleName ? (
-                          <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">
-                            {log.ruleName}
-                          </span>
-                        ) : (
-                          <span className="px-3 py-1 bg-slate-100 text-slate-400 rounded-full text-xs font-bold">
-                            Legacy
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 font-mono text-slate-900 text-sm">{log.fromPhone || '-'}</td>
-                      <td className="px-6 py-4 font-mono text-slate-900 text-sm">{log.toPhone}</td>
-                      <td className="px-6 py-4">
-                        {log.status === 'delivered' ? (
-                          <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold inline-flex items-center gap-1">
-                            <CheckCircle size={12} /> Delivered
-                          </span>
-                        ) : log.status === 'failed' ? (
-                          <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold inline-flex items-center gap-1" title={log.error || 'Unknown error'}>
-                            <AlertCircle size={12} /> {log.error ? log.error.substring(0, 30) : 'Failed'}
-                          </span>
-                        ) : log.status === 'sent' ? (
-                          <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold inline-flex items-center gap-1">
-                            <Send size={12} /> Sent
-                          </span>
-                        ) : (
-                          <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-bold inline-flex items-center gap-1">
-                            <Loader2 size={12} className="animate-spin" /> {log.status}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4">
-                        {log.deliveredAt ? (
-                          <span className="text-green-600 flex items-center gap-1 text-sm">
-                            <CheckCircle size={12} />
-                            {new Date(log.deliveredAt).toLocaleString()}
-                          </span>
-                        ) : log.status === 'failed' ? (
-                          <span className="text-slate-400">—</span>
-                        ) : (
-                          <span className="text-slate-500">Pending</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : (
-          <div className="py-12 text-center text-slate-500 text-sm">
-            No SMS messages sent yet. Messages will appear here when notifications are triggered.
           </div>
         )}
       </div>

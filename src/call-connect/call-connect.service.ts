@@ -577,12 +577,32 @@ export class CallConnectService {
 
     const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
     const leadSummary = 'Test Customer — House Cleaning — Tampa, FL';
+    const testCustomerName = 'Test Customer';
+    const testCategory = 'House Cleaning';
+    const testLocation = 'Tampa, FL';
 
-    // Build the full whisper message here so Sigcore receives it pre-built.
-    // This ensures the agent hears the correct, up-to-date summary regardless of
-    // what template may be stored in Sigcore settings.
+    // Pre-build the whisper message (same logic as triggerForLead).
     const whisperTemplate = settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.';
-    const agentWhisperMessage = whisperTemplate.replace(/\{summary\}/g, leadSummary);
+    const agentWhisperMessage = whisperTemplate
+      .replace(/\{summary\}/g, leadSummary)
+      .replace(/\{customerName\}/g, testCustomerName)
+      .replace(/\{accountName\}/g, testCustomerName)
+      .replace(/\{category\}/g, testCategory)
+      .replace(/\{location\}/g, testLocation)
+      .replace(/\{phone\}/g, testPhone);
+
+    // Pre-build the voicemail message so the test call uses the correct template
+    // with variables already substituted (same logic as triggerForLead).
+    const voicemailTemplate = settings.leadVoicemailMessage || '';
+    const leadVoicemailMessage = voicemailTemplate
+      ? voicemailTemplate
+          .replace(/\{summary\}/g, leadSummary)
+          .replace(/\{customerName\}/g, testCustomerName)
+          .replace(/\{accountName\}/g, testCustomerName)
+          .replace(/\{category\}/g, testCategory)
+          .replace(/\{location\}/g, testLocation)
+          .replace(/\{phone\}/g, testPhone)
+      : undefined;
 
     const startPayload = {
       businessId: sigcoreBusinessId,
@@ -590,12 +610,13 @@ export class CallConnectService {
       leadPhoneE164: testPhone,
       leadSummary,
       agentWhisperMessage,
+      ...(leadVoicemailMessage && { leadVoicemailMessage }),
       agentHint: settings.agentPhoneE164 || undefined,
       source: 'leadbridge',
     };
 
     this.logger.log(
-      `[triggerTestCall] POST ${url} | businessId=${sigcoreBusinessId} | leadPhone=${testPhone} | agentHint=${settings.agentPhoneE164}`,
+      `[triggerTestCall] POST ${url} | businessId=${sigcoreBusinessId} | leadPhone=${testPhone} | agentHint=${settings.agentPhoneE164} | voicemail="${leadVoicemailMessage ?? '(settings default)'}"`,
     );
 
     let response: any;
