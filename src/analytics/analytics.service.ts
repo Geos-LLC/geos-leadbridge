@@ -62,11 +62,24 @@ export class AnalyticsService {
     };
   }
 
+  private async timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    const start = Date.now();
+    try {
+      const result = await fn();
+      this.logger.log(`[analytics] ${label} took ${Date.now() - start}ms`);
+      return result;
+    } catch (err: any) {
+      this.logger.error(`[analytics] ${label} FAILED after ${Date.now() - start}ms: ${err.message}`);
+      throw err;
+    }
+  }
+
   async getAnalytics(
     userId: string,
     query: AnalyticsQueryDto,
   ): Promise<AnalyticsResponseDto> {
     this.logger.log(`Getting analytics for user ${userId}`, query);
+    const totalStart = Date.now();
 
     // Build date filter
     const dateFilter = this.buildDateFilter(query);
@@ -96,24 +109,26 @@ export class AnalyticsService {
       zipCodes,
       roomStats,
     ] = await Promise.all([
-      this.getCategoryDistribution(baseWhere),
-      this.getConnectionTime(baseWhere),
-      this.getProResponseTime(baseWhere),
-      this.getCustomerResponseTime(baseWhere),
-      this.getMessagesPerLead(baseWhere),
-      this.getCustomerEngagement(baseWhere),
-      this.getTotalLeads(baseWhere),
-      this.getJobStatusDistribution(baseWhere),
+      this.timed('categoryDistribution', () => this.getCategoryDistribution(baseWhere)),
+      this.timed('connectionTime', () => this.getConnectionTime(baseWhere)),
+      this.timed('proResponseTime', () => this.getProResponseTime(baseWhere)),
+      this.timed('customerResponseTime', () => this.getCustomerResponseTime(baseWhere)),
+      this.timed('messagesPerLead', () => this.getMessagesPerLead(baseWhere)),
+      this.timed('customerEngagement', () => this.getCustomerEngagement(baseWhere)),
+      this.timed('totalLeads', () => this.getTotalLeads(baseWhere)),
+      this.timed('jobStatusDistribution', () => this.getJobStatusDistribution(baseWhere)),
       query.businessId
-        ? this.getBusinessInfo(userId, query.businessId)
-        : null,
-      this.getCleaningTypeDistribution(baseWhere),
-      this.getAddOnsDistribution(baseWhere),
-      this.getFrequencyDistribution(baseWhere),
-      this.getLocationDistribution(baseWhere),
-      this.getZipCodeDistribution(baseWhere),
-      this.getRoomStats(baseWhere),
+        ? this.timed('businessInfo', () => this.getBusinessInfo(userId, query.businessId))
+        : Promise.resolve(null),
+      this.timed('cleaningTypeDistribution', () => this.getCleaningTypeDistribution(baseWhere)),
+      this.timed('addOnsDistribution', () => this.getAddOnsDistribution(baseWhere)),
+      this.timed('frequencyDistribution', () => this.getFrequencyDistribution(baseWhere)),
+      this.timed('locationDistribution', () => this.getLocationDistribution(baseWhere)),
+      this.timed('zipCodeDistribution', () => this.getZipCodeDistribution(baseWhere)),
+      this.timed('roomStats', () => this.getRoomStats(baseWhere)),
     ]);
+
+    this.logger.log(`[analytics] getAnalytics TOTAL took ${Date.now() - totalStart}ms`);
 
     return {
       categoryDistribution: categoryDist,
