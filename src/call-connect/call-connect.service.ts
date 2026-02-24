@@ -248,13 +248,9 @@ export class CallConnectService {
           secret,
           events: [
             'call_connect.session.created',
-            'call_connect.session_created',
             'call_connect.agent.ringing',
-            'call_connect.agent_ringing',
             'call_connect.agent.accepted',
-            'call_connect.agent_accepted',
             'call_connect.lead.ringing',
-            'call_connect.lead_ringing',
             'call_connect.bridged',
             'call_connect.voicemail_drop',
             'call_connect.ended',
