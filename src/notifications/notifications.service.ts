@@ -1303,20 +1303,32 @@ export class NotificationsService implements OnModuleInit {
       return { success: false, error: 'No destination phone configured for this rule' };
     }
 
+    // Load test customer data from admin config (set on Phone Pool admin page)
+    const adminCfg = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
+    const td = (adminCfg?.testData as Record<string, string> | null) ?? {};
+
     const testLead = {
-      customerName: 'Test Customer',
+      customerName: td.customerName || 'Test Customer',
       customerPhone: '+15551234567',
-      category: 'House Cleaning',
-      city: 'Tampa',
-      state: 'FL',
-      postcode: '33602',
-      message: 'I need my house cleaned weekly. Looking for someone reliable.',
+      category: td.category || 'House Cleaning',
+      city: td.city || 'Tampa',
+      state: td.state || 'FL',
+      postcode: td.zip || '33602',
+      message: td.message || 'I need my house cleaned weekly. Looking for someone reliable.',
       rawJson: JSON.stringify({
         request: {
           details: {
-            serviceDescription: 'Weekly house cleaning service',
-            addOns: ['Deep clean', 'Laundry'],
-            frequency: 'Weekly',
+            serviceDescription: td.serviceDescription || 'Weekly house cleaning service',
+            addOns: td.addons
+              ? td.addons.split(',').map((s: string) => s.trim()).filter(Boolean)
+              : ['Deep clean', 'Laundry'],
+            frequency: td.frequency || 'Weekly',
+            ...(td.bedrooms && { bedrooms: td.bedrooms }),
+            ...(td.bathrooms && { bathrooms: td.bathrooms }),
+            ...(td.price && { price: td.price }),
+            ...(td.pets && { pets: td.pets }),
+            ...(td.estimate && { estimate: td.estimate }),
+            ...(td.dates && { dates: td.dates }),
           },
         },
       }),
