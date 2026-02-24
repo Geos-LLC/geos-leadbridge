@@ -213,6 +213,10 @@ export function Services() {
   ]);
   const [ctStopOnReply, setCtStopOnReply] = useState(true);
   const [ctSaving, setCtSaving] = useState(false);
+  const [ctFromPhone, setCtFromPhone] = useState('');
+  const [ctTestPhone, setCtTestPhone] = useState('');
+  const [ctTestStatus, setCtTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
+  const [ctFollowUpsExpanded, setCtFollowUpsExpanded] = useState(false);
 
 
   // Derived: unsaved CC changes
@@ -313,6 +317,7 @@ export function Services() {
         setCtAutoReplyTemplate(ctRes.autoReplyTemplate);
         setCtFollowUps(ctRes.followUps);
         setCtStopOnReply(ctRes.stopOnCustomerReply);
+        setCtFromPhone(ctRes.fromPhone || poolRes.phoneNumbers[0]?.phoneNumber || '');
       }
 
       // Collect ALL new_lead automation rules
@@ -602,6 +607,7 @@ export function Services() {
     try {
       await notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
         enabled,
+        fromPhone: ctFromPhone || undefined,
         autoReplyTemplate: ctAutoReplyTemplate,
         followUps: ctFollowUps,
         stopOnCustomerReply: ctStopOnReply,
@@ -620,6 +626,7 @@ export function Services() {
     try {
       await notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
         enabled: ctEnabled,
+        fromPhone: ctFromPhone || undefined,
         autoReplyTemplate: ctAutoReplyTemplate,
         followUps: ctFollowUps,
         stopOnCustomerReply: ctStopOnReply,
@@ -777,8 +784,46 @@ export function Services() {
 
   // --- Customer Texting Handlers ---
 
+  async function saveCtFromPhone(fromPhone: string) {
+    setCtFromPhone(fromPhone);
+    if (!selectedAccountId) return;
+    setCtSaving(true);
+    try {
+      await notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
+        enabled: ctEnabled,
+        fromPhone: fromPhone || undefined,
+        autoReplyTemplate: ctAutoReplyTemplate,
+        followUps: ctFollowUps,
+        stopOnCustomerReply: ctStopOnReply,
+      });
+      showSuccess('Send from number updated');
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'Failed to update send from number');
+    } finally {
+      setCtSaving(false);
+    }
+  }
 
-  // changeTextingFollowUpDelay, addTextingFollowUp, deleteTextingFollowUp, updateStopCondition removed — follow-ups are Coming Soon
+  async function sendCtTest() {
+    if (!selectedAccountId || !ctTestPhone) return;
+    setCtTestStatus('sending');
+    setError(null);
+    try {
+      const result = await notificationsApi.sendTest(selectedAccountId, undefined, ctTestPhone);
+      if (result.success) {
+        setCtTestStatus('delivered');
+        setTimeout(() => setCtTestStatus('idle'), 4000);
+      } else {
+        setCtTestStatus('failed');
+        setError(result.message || 'Failed to send test');
+        setTimeout(() => setCtTestStatus('idle'), 4000);
+      }
+    } catch (err: any) {
+      setCtTestStatus('failed');
+      setError(err.response?.data?.message || err.message || 'Failed to send test SMS');
+      setTimeout(() => setCtTestStatus('idle'), 4000);
+    }
+  }
 
   // --- Template Editor Modal Handlers ---
 
@@ -1303,6 +1348,37 @@ export function Services() {
             iconTextColor="text-emerald-600"
           >
             <div className={`space-y-6${!ctEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+              {/* Send from */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send from</label>
+                <div className="relative">
+                  <select
+                    value={ctFromPhone}
+                    onChange={e => saveCtFromPhone(e.target.value)}
+                    disabled={ctSaving}
+                    className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
+                  >
+                    <option value="">Select phone number</option>
+                    {ctFromPhone && !poolPhones.some(p => p.phoneNumber === ctFromPhone) && (
+                      <option value={ctFromPhone}>{ctFromPhone} (configured)</option>
+                    )}
+                    {poolPhones.map(p => (
+                      <option key={p.id} value={p.phoneNumber}>
+                        {p.phoneNumber} (LeadBridge)
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                    <ChevronDown className="w-4 h-4" />
+                  </div>
+                </div>
+                <button className="mt-2 px-4 py-2 bg-slate-100 text-slate-400 rounded-xl text-xs font-bold flex items-center gap-2 cursor-not-allowed">
+                  <Phone className="w-3 h-3" />
+                  Get your own number
+                  <span className="px-1.5 py-0.5 bg-slate-200 text-[9px] rounded uppercase">Coming Soon</span>
+                </button>
+              </div>
+
               {/* Auto-reply message */}
               <div>
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Auto-Reply Message</label>
@@ -1328,63 +1404,106 @@ export function Services() {
                 </div>
               </div>
 
-              {/* Follow-up messages */}
+              {/* Test SMS */}
               <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-Up Messages</label>
-                <p className="text-xs text-slate-400 mb-3">Sent if the customer hasn't replied yet.</p>
-                <div className="space-y-3">
-                  {ctFollowUps.map((fu, idx) => (
-                    <div
-                      key={idx}
-                      className={`rounded-xl border p-3 transition-colors ${fu.enabled ? 'border-slate-200 bg-slate-50' : 'border-slate-100 bg-white opacity-60'}`}
-                    >
-                      <div className="flex items-center gap-2 mb-2">
-                        <input
-                          type="checkbox"
-                          checked={fu.enabled}
-                          onChange={() => {
-                            const updated = [...ctFollowUps];
-                            updated[idx] = { ...fu, enabled: !fu.enabled };
-                            setCtFollowUps(updated);
-                          }}
-                          className="rounded"
-                        />
-                        <span className="text-xs font-semibold text-slate-500 flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {fu.delayMinutes < 60
-                            ? `${fu.delayMinutes} min after lead`
-                            : fu.delayMinutes < 1440
-                              ? `${fu.delayMinutes / 60} hour${fu.delayMinutes > 60 ? 's' : ''} after lead`
-                              : `${fu.delayMinutes / 1440} day${fu.delayMinutes > 1440 ? 's' : ''} after lead`}
-                        </span>
-                      </div>
-                      {fu.enabled && (
-                        <textarea
-                          value={fu.template}
-                          onChange={e => {
-                            const updated = [...ctFollowUps];
-                            updated[idx] = { ...fu, template: e.target.value };
-                            setCtFollowUps(updated);
-                          }}
-                          rows={2}
-                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400 resize-y"
-                        />
-                      )}
-                    </div>
-                  ))}
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send Test</label>
+                <div className="flex gap-2">
+                  <input
+                    type="tel"
+                    value={ctTestPhone}
+                    onChange={e => setCtTestPhone(e.target.value)}
+                    placeholder="+1 (555) 000-0000"
+                    className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  />
+                  <button
+                    onClick={sendCtTest}
+                    disabled={ctTestStatus === 'sending' || !ctTestPhone || !ctFromPhone}
+                    className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed flex items-center gap-2 ${
+                      ctTestStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                      ctTestStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                      ctTestStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                      'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
+                    }`}
+                    title={!ctFromPhone ? 'Set a send-from phone first' : !ctTestPhone ? 'Enter a test phone number' : 'Send a test SMS'}
+                  >
+                    {ctTestStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
+                     ctTestStatus === 'delivered' ? <CheckCircle size={14} /> :
+                     ctTestStatus === 'failed' ? <X size={14} /> :
+                     <Send size={14} />}
+                    {ctTestStatus === 'sending' ? 'Sending...' :
+                     ctTestStatus === 'delivered' ? 'Delivered' :
+                     ctTestStatus === 'failed' ? 'Failed' :
+                     'Send Test'}
+                  </button>
                 </div>
               </div>
 
-              {/* Stop on reply */}
-              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={ctStopOnReply}
-                  onChange={e => setCtStopOnReply(e.target.checked)}
-                  className="rounded"
-                />
-                Cancel follow-ups if customer replies
-              </label>
+              {/* Follow-up messages (collapsible second option) */}
+              <div className="border-t border-slate-100 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setCtFollowUpsExpanded(prev => !prev)}
+                  className="flex items-center justify-between w-full text-left"
+                >
+                  <div>
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Follow-Up Messages</span>
+                    <p className="text-xs text-slate-400 mt-0.5">Sent if the customer hasn't replied yet.</p>
+                  </div>
+                  <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${ctFollowUpsExpanded ? 'rotate-180' : ''}`} />
+                </button>
+                {ctFollowUpsExpanded && (
+                  <div className="mt-3 space-y-3">
+                    {ctFollowUps.map((fu, idx) => (
+                      <div
+                        key={idx}
+                        className={`rounded-xl border p-3 transition-colors ${fu.enabled ? 'border-slate-200 bg-slate-50' : 'border-slate-100 bg-white opacity-60'}`}
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <input
+                            type="checkbox"
+                            checked={fu.enabled}
+                            onChange={() => {
+                              const updated = [...ctFollowUps];
+                              updated[idx] = { ...fu, enabled: !fu.enabled };
+                              setCtFollowUps(updated);
+                            }}
+                            className="rounded"
+                          />
+                          <span className="text-xs font-semibold text-slate-500 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {fu.delayMinutes < 60
+                              ? `${fu.delayMinutes} min after lead`
+                              : fu.delayMinutes < 1440
+                                ? `${fu.delayMinutes / 60} hour${fu.delayMinutes > 60 ? 's' : ''} after lead`
+                                : `${fu.delayMinutes / 1440} day${fu.delayMinutes > 1440 ? 's' : ''} after lead`}
+                          </span>
+                        </div>
+                        {fu.enabled && (
+                          <textarea
+                            value={fu.template}
+                            onChange={e => {
+                              const updated = [...ctFollowUps];
+                              updated[idx] = { ...fu, template: e.target.value };
+                              setCtFollowUps(updated);
+                            }}
+                            rows={2}
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400 resize-y"
+                          />
+                        )}
+                      </div>
+                    ))}
+                    <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none pt-1">
+                      <input
+                        type="checkbox"
+                        checked={ctStopOnReply}
+                        onChange={e => setCtStopOnReply(e.target.checked)}
+                        className="rounded"
+                      />
+                      Cancel follow-ups if customer replies
+                    </label>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Save button */}
