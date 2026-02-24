@@ -740,3 +740,18 @@ model ThumbtackLeadId {
   @@index([savedAccountId])
   @@map("thumbtack_lead_ids")
 }
+
+// ==========================================
+// Global Admin Configuration (singleton row)
+// ==========================================
+
+model AdminConfig {
+  id               String   @id @default("global")
+  testCustomerName String   @default("Test Customer")
+  testCategory     String   @default("House Cleaning")
+  testLocation     String   @default("Tampa, FL")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("admin_config")
+}

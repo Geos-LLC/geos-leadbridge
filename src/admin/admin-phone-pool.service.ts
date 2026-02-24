@@ -508,4 +508,39 @@ export class AdminPhonePoolService {
     const match = phoneNumber.replace(/\D/g, '').match(/^1?(\d{3})/);
     return match ? match[1] : null;
   }
+
+  // ---------------------------------------------------------------------------
+  // Global Admin Config (singleton row — id = 'global')
+  // ---------------------------------------------------------------------------
+
+  async getAdminConfig() {
+    const config = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
+    return config ?? {
+      id: 'global',
+      testCustomerName: 'Test Customer',
+      testCategory: 'House Cleaning',
+      testLocation: 'Tampa, FL',
+    };
+  }
+
+  async updateAdminConfig(dto: {
+    testCustomerName?: string;
+    testCategory?: string;
+    testLocation?: string;
+  }) {
+    return this.prisma.adminConfig.upsert({
+      where: { id: 'global' },
+      create: {
+        id: 'global',
+        testCustomerName: dto.testCustomerName ?? 'Test Customer',
+        testCategory: dto.testCategory ?? 'House Cleaning',
+        testLocation: dto.testLocation ?? 'Tampa, FL',
+      },
+      update: {
+        ...(dto.testCustomerName !== undefined && { testCustomerName: dto.testCustomerName }),
+        ...(dto.testCategory !== undefined && { testCategory: dto.testCategory }),
+        ...(dto.testLocation !== undefined && { testLocation: dto.testLocation }),
+      },
+    });
+  }
 }

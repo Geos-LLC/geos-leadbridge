@@ -576,10 +576,13 @@ export class CallConnectService {
     }
 
     const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
-    const leadSummary = 'Test Customer — House Cleaning — Tampa, FL';
-    const testCustomerName = 'Test Customer';
-    const testCategory = 'House Cleaning';
-    const testLocation = 'Tampa, FL';
+
+    // Load global admin test-customer config (falls back to defaults if not set).
+    const adminCfg = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
+    const testCustomerName = adminCfg?.testCustomerName ?? 'Test Customer';
+    const testCategory = adminCfg?.testCategory ?? 'House Cleaning';
+    const testLocation = adminCfg?.testLocation ?? 'Tampa, FL';
+    const leadSummary = `${testCustomerName} — ${testCategory} — ${testLocation}`;
 
     // Pre-build the whisper message (same logic as triggerForLead).
     const whisperTemplate = settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.';

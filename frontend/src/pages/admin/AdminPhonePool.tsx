@@ -35,6 +35,10 @@ export default function AdminPhonePool() {
   const [userResults, setUserResults] = useState<{ id: string; email: string; name: string | null }[]>([]);
   const [searchingUsers, setSearchingUsers] = useState(false);
 
+  // Global admin config (test customer setup)
+  const [testConfig, setTestConfig] = useState({ testCustomerName: 'Test Customer', testCategory: 'House Cleaning', testLocation: 'Tampa, FL' });
+  const [testConfigSaving, setTestConfigSaving] = useState(false);
+
   useEffect(() => {
     if (user?.role !== 'ADMIN') {
       notify.error('Access Denied', 'You must be an admin to access this page');
@@ -43,6 +47,7 @@ export default function AdminPhonePool() {
     }
     loadData();
     loadConfig();
+    loadAdminConfig();
   }, [user, statusFilter, searchQuery]);
 
   const loadConfig = async () => {
@@ -51,6 +56,28 @@ export default function AdminPhonePool() {
       setTenantKeyConfigured(config.configured);
     } catch {
       setTenantKeyConfigured(false);
+    }
+  };
+
+  const loadAdminConfig = async () => {
+    try {
+      const cfg = await adminApi.getAdminConfig();
+      setTestConfig(cfg);
+    } catch {
+      // keep defaults
+    }
+  };
+
+  const handleSaveTestConfig = async () => {
+    try {
+      setTestConfigSaving(true);
+      const updated = await adminApi.updateAdminConfig(testConfig);
+      setTestConfig(updated);
+      notify.success('Saved', 'Test customer settings updated');
+    } catch {
+      notify.error('Error', 'Failed to save test customer settings');
+    } finally {
+      setTestConfigSaving(false);
     }
   };
 
@@ -609,6 +636,59 @@ export default function AdminPhonePool() {
             Showing {phones.length} of {total} numbers
           </div>
         )}
+      </div>
+
+      {/* Test Customer Setup */}
+      <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="p-4 md:p-6 border-b border-slate-100">
+          <h2 className="text-lg md:text-xl font-bold text-slate-900">Test Customer Setup</h2>
+          <p className="text-sm text-slate-500 mt-1">Placeholder data used when any tenant runs a test call from their Call Connect settings.</p>
+        </div>
+        <div className="p-4 md:p-6 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Customer Name</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={testConfig.testCustomerName}
+                onChange={e => setTestConfig(prev => ({ ...prev, testCustomerName: e.target.value }))}
+                placeholder="Test Customer"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Category</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={testConfig.testCategory}
+                onChange={e => setTestConfig(prev => ({ ...prev, testCategory: e.target.value }))}
+                placeholder="House Cleaning"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Location</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={testConfig.testLocation}
+                onChange={e => setTestConfig(prev => ({ ...prev, testLocation: e.target.value }))}
+                placeholder="Tampa, FL"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 shadow-sm shadow-blue-200 transition-all disabled:opacity-50 flex items-center gap-2"
+              onClick={handleSaveTestConfig}
+              disabled={testConfigSaving}
+            >
+              {testConfigSaving && <Loader2 size={14} className="animate-spin" />}
+              Save
+            </button>
+            <p className="text-xs text-slate-400">Variables in voicemail/whisper templates: <span className="font-mono">{'{customerName}'}</span>, <span className="font-mono">{'{category}'}</span>, <span className="font-mono">{'{location}'}</span></p>
+          </div>
+        </div>
       </div>
 
       {/* Assign Modal */}

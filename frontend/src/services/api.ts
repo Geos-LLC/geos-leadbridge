@@ -895,6 +895,14 @@ export const adminApi = {
     const { data } = await api.get(`/v1/admin/phone-pool/users${params}`);
     return data;
   },
+  getAdminConfig: async (): Promise<{ testCustomerName: string; testCategory: string; testLocation: string }> => {
+    const { data } = await api.get('/v1/admin/phone-pool/admin-config');
+    return data.data;
+  },
+  updateAdminConfig: async (updates: { testCustomerName?: string; testCategory?: string; testLocation?: string }): Promise<{ testCustomerName: string; testCategory: string; testLocation: string }> => {
+    const { data } = await api.patch('/v1/admin/phone-pool/admin-config', updates);
+    return data.data;
+  },
 };
 
 // API Test / Webhook Simulation

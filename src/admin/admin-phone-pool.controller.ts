@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Param, Query, Body, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Query, Body, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from './guards/admin.guard';
 import { AdminPhonePoolService } from './admin-phone-pool.service';
@@ -41,6 +41,26 @@ export class AdminPhonePoolController {
   async getConfig() {
     const status = this.phonePoolService.getTenantKeyStatus();
     return { success: true, data: status };
+  }
+
+  /**
+   * Get global admin config (test customer data, etc.)
+   */
+  @Get('admin-config')
+  async getAdminConfig() {
+    const config = await this.phonePoolService.getAdminConfig();
+    return { success: true, data: config };
+  }
+
+  /**
+   * Update global admin config
+   */
+  @Patch('admin-config')
+  async updateAdminConfig(
+    @Body() body: { testCustomerName?: string; testCategory?: string; testLocation?: string },
+  ) {
+    const config = await this.phonePoolService.updateAdminConfig(body);
+    return { success: true, data: config };
   }
 
   /**
