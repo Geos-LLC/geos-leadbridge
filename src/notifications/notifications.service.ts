@@ -2311,9 +2311,21 @@ export class NotificationsService implements OnModuleInit {
       this.logger.log(`[fetchOpenPhoneNumbers] Result: ${JSON.stringify(result).substring(0, 500)}`);
 
       const phones = result.data || result.phoneNumbers || result || [];
+      // Deduplicate by id first, then by phoneNumber, to guard against the /numbers
+      // endpoint returning the same number in multiple contexts (e.g. shared phone numbers
+      // across OpenPhone users, or multiple integrations returning overlapping numbers).
+      const seenIds = new Set<string>();
+      const seenNumbers = new Set<string>();
       return phones
         .map((phone: any) => this.mapSigcorePhoneNumber(phone))
-        .filter((p: any) => p.phoneNumber && p.phoneNumber.length > 5);
+        .filter((p: any) => {
+          if (!p.phoneNumber || p.phoneNumber.length <= 5) return false;
+          if (seenIds.has(p.id)) return false;
+          if (seenNumbers.has(p.phoneNumber)) return false;
+          seenIds.add(p.id);
+          seenNumbers.add(p.phoneNumber);
+          return true;
+        });
     } catch (error: any) {
       this.logger.error(`[fetchOpenPhoneNumbers] Error: ${error.message}`);
       return [];
