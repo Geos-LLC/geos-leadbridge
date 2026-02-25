@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Phone, Loader2, X, ChevronDown, AlertCircle, PhoneCall, Building2 } from 'lucide-react';
+import { Phone, Loader2, X, ChevronDown, AlertCircle, PhoneCall, Building2, Key, Unplug, CheckCircle2, ExternalLink, Link2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { usersApi, thumbtackApi } from '../services/api';
-import type { SavedAccount, PhonePoolEntry } from '../types';
+import { usersApi, thumbtackApi, notificationsApi } from '../services/api';
+import type { SavedAccount, PhonePoolEntry, SigcorePhoneNumber } from '../types';
 import { useAppStore } from '../store/appStore';
 
 export function PhoneSettings() {
@@ -19,10 +19,26 @@ export function PhoneSettings() {
   const [poolPhones, setPoolPhones] = useState<PhonePoolEntry[]>([]);
   const [loadingPoolPhone, setLoadingPoolPhone] = useState(true);
 
+  // Own provider connection state
+  const [openPhoneApiKey, setOpenPhoneApiKey] = useState('');
+  const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [sigcoreConnected, setSigcoreConnected] = useState(false);
+  const [sigcoreProvider, setSigcoreProvider] = useState<string | null>(null);
+  const [ownPhoneNumbers, setOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>([]);
+  const [loadingConnectionStatus, setLoadingConnectionStatus] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+
   useEffect(() => {
     loadAccounts();
     loadPoolPhone();
   }, []);
+
+  useEffect(() => {
+    if (selectedAccountId) {
+      loadConnectionStatus(selectedAccountId);
+    }
+  }, [selectedAccountId]);
 
   async function loadPoolPhone() {
     try {
@@ -51,6 +67,70 @@ export function PhoneSettings() {
       }
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadConnectionStatus(accountId: string) {
+    setLoadingConnectionStatus(true);
+    setConnectError(null);
+    try {
+      const settingsRes = await notificationsApi.getSettings(accountId);
+      const connected = !!settingsRes.settings?.sigcoreConnected;
+      setSigcoreConnected(connected);
+      setSigcoreProvider(settingsRes.settings?.sigcoreProvider || null);
+      if (connected) {
+        const { phoneNumbers } = await notificationsApi.getSigcorePhoneNumbers(accountId);
+        setOwnPhoneNumbers(phoneNumbers);
+      } else {
+        setOwnPhoneNumbers([]);
+      }
+    } catch (err) {
+      console.error('Failed to load connection status:', err);
+    } finally {
+      setLoadingConnectionStatus(false);
+    }
+  }
+
+  async function handleConnect() {
+    if (!openPhoneApiKey.trim()) {
+      setConnectError('Please enter your OpenPhone API key');
+      return;
+    }
+    setConnecting(true);
+    setConnectError(null);
+    try {
+      const result = await notificationsApi.connectSigcore(
+        selectedAccountId,
+        'openphone',
+        { apiKey: openPhoneApiKey },
+      );
+      if (result.success) {
+        setSigcoreConnected(true);
+        setSigcoreProvider('openphone');
+        setOwnPhoneNumbers(result.phoneNumbers);
+        setOpenPhoneApiKey('');
+      } else {
+        setConnectError(result.error || 'Failed to connect OpenPhone');
+      }
+    } catch (err: any) {
+      setConnectError(err.message || 'Failed to connect OpenPhone');
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  async function handleDisconnect() {
+    setDisconnecting(true);
+    setConnectError(null);
+    try {
+      await notificationsApi.disconnectSigcore(selectedAccountId);
+      setSigcoreConnected(false);
+      setSigcoreProvider(null);
+      setOwnPhoneNumbers([]);
+    } catch (err: any) {
+      setConnectError(err.message || 'Failed to disconnect');
+    } finally {
+      setDisconnecting(false);
     }
   }
 
@@ -141,7 +221,7 @@ export function PhoneSettings() {
       {/* Options Info */}
       <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 text-blue-700 text-sm">
         <p className="font-medium">
-          You have two options for sending SMS: use a phone number assigned by your administrator, or connect your own provider (coming soon).
+          You have two options for sending SMS: use a phone number assigned by your administrator, or connect your own OpenPhone account.
         </p>
       </div>
 
@@ -194,24 +274,104 @@ export function PhoneSettings() {
         )}
       </section>
 
-      {/* Option 2: Connect Your Own Provider - Coming Soon */}
-      <section className="space-y-6 opacity-60">
-        <div className="flex items-center justify-between px-2">
-          <div className="flex items-center gap-3">
-            <Phone className="w-5 h-5 text-slate-400" />
-            <h3 className="text-xl font-bold text-slate-400">Option 2: Connect Your Own Provider</h3>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="px-2 py-1 bg-slate-200 text-slate-500 text-[10px] font-bold rounded uppercase">Coming Soon</span>
-            <div className="w-14 h-7 bg-slate-100 rounded-full cursor-not-allowed"></div>
-          </div>
+      {/* Option 2: Connect Your Own Provider */}
+      <section className="space-y-6">
+        <div className="flex items-center gap-3 px-2">
+          <Phone className="w-5 h-5 text-blue-600" />
+          <h3 className="text-xl font-bold text-slate-900">Option 2: Connect Your Own OpenPhone</h3>
+          {sigcoreConnected && (
+            <span className="px-2 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-bold rounded uppercase">Connected</span>
+          )}
         </div>
 
-        <div className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100">
-          <p className="text-slate-500 text-sm">
-            Connect your own OpenPhone or Twilio account to use your own phone numbers for SMS notifications and customer communication.
-          </p>
-        </div>
+        {connectError && (
+          <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-3 text-red-600 text-sm font-medium">
+            <AlertCircle size={16} className="shrink-0" />
+            <span className="flex-1">{connectError}</span>
+            <button onClick={() => setConnectError(null)} className="p-1 hover:bg-red-100 rounded-lg transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
+        {loadingConnectionStatus ? (
+          <div className="flex justify-center py-10">
+            <Loader2 size={24} className="animate-spin text-blue-600" />
+          </div>
+        ) : sigcoreConnected ? (
+          <div className="space-y-4">
+            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3 text-emerald-700 text-sm">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>OpenPhone account connected. Your phone numbers are available for customer texting.</span>
+            </div>
+            {ownPhoneNumbers.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {ownPhoneNumbers.map(phone => (
+                  <div key={phone.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 hover:border-blue-200 transition-all">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+                        <Phone className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-bold text-slate-900 text-sm">{phone.phoneNumber}</div>
+                        <div className="text-xs text-slate-400">{phone.friendlyName || 'OpenPhone'}</div>
+                      </div>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-slate-100">
+                      <span className="px-2 py-1 bg-blue-50 text-blue-600 text-[10px] font-bold rounded uppercase">OpenPhone</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 border border-red-200 rounded-xl transition-all disabled:opacity-50"
+            >
+              {disconnecting ? <Loader2 size={16} className="animate-spin" /> : <Unplug size={16} />}
+              {disconnecting ? 'Disconnecting...' : 'Disconnect OpenPhone'}
+            </button>
+          </div>
+        ) : (
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-4">
+            <div>
+              <h4 className="font-semibold text-slate-900 mb-1">Connect your OpenPhone account</h4>
+              <p className="text-slate-500 text-sm">
+                Enter your OpenPhone API key to use your own phone numbers for customer texting.{' '}
+                <a
+                  href="https://app.openphone.com/settings/api"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline inline-flex items-center gap-1"
+                >
+                  Get your API key <ExternalLink size={12} />
+                </a>
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <div className="relative flex-1">
+                <Key size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="password"
+                  value={openPhoneApiKey}
+                  onChange={e => setOpenPhoneApiKey(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleConnect()}
+                  placeholder="OpenPhone API key"
+                  className="w-full pl-9 pr-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+                />
+              </div>
+              <button
+                onClick={handleConnect}
+                disabled={connecting || !openPhoneApiKey.trim()}
+                className="px-5 py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg shadow-blue-200 transition-all"
+              >
+                {connecting ? <Loader2 size={16} className="animate-spin" /> : <Link2 size={16} />}
+                {connecting ? 'Connecting...' : 'Connect'}
+              </button>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );

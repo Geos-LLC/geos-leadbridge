@@ -10,7 +10,7 @@ import {
 } from '../services/api';
 import type {
   AutomationRule, NotificationRule, SavedAccount, MessageTemplate,
-  CallConnectMode, AgentStrategy,
+  CallConnectMode, AgentStrategy, SigcorePhoneNumber,
 } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
 import { useAppStore } from '../store/appStore';
@@ -146,6 +146,8 @@ export function Services() {
   // Supporting data
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [poolPhones, setPoolPhones] = useState<{ id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }[]>([]);
+  const [ctOwnPhoneNumbers, setCtOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>([]);
+  const [ctSigcoreConnected, setCtSigcoreConnected] = useState(false);
 
   // UI state
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
@@ -273,13 +275,14 @@ export function Services() {
       setLoading(true);
       setError(null);
 
-      const [automationRes, notifRes, templatesRes, poolRes, ccRes, ctRes] = await Promise.all([
+      const [automationRes, notifRes, templatesRes, poolRes, ccRes, ctRes, notifSettingsRes] = await Promise.all([
         automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] })),
         notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] })),
         templatesApi.getTemplates().catch(() => ({ templates: [] as MessageTemplate[] })),
         usersApi.getPoolPhonesForSms().catch(() => ({ phoneNumbers: [] })),
         callConnectApi.getSettings(accountId).catch(() => ({ settings: null })),
         notificationsApi.getCustomerTextingSettings(accountId).catch(() => null),
+        notificationsApi.getSettings(accountId).catch(() => null),
       ]);
 
       const ccs = ccRes.settings;
@@ -342,6 +345,15 @@ export function Services() {
 
       setLeadAlertRule(leadAlert);
       setPoolPhones(poolRes.phoneNumbers);
+
+      // Load own provider connection status for CT Option 2
+      const connected = !!notifSettingsRes?.settings?.sigcoreConnected;
+      setCtSigcoreConnected(connected);
+      if (connected) {
+        notificationsApi.getSigcorePhoneNumbers(accountId).then(r => setCtOwnPhoneNumbers(r.phoneNumbers)).catch(() => {});
+      } else {
+        setCtOwnPhoneNumbers([]);
+      }
 
       // Seed CC default templates for every user on first page visit
       const DEFAULT_CC_WHISPER = 'Hi {customerName}, you have a new lead for {category}. Press any key to connect with the customer.';
@@ -1421,28 +1433,53 @@ export function Services() {
                   </div>
                 </div>
 
-                {/* Option 2: Own provider — Coming Soon */}
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 p-4 cursor-not-allowed select-none">
-                  <div className="flex items-center justify-between mb-2">
+                {/* Option 2: Own provider */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Option 2</span>
-                      <span className="text-xs font-semibold text-slate-400">Connect Your Own Provider</span>
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">Option 2</span>
+                      <span className="text-xs font-semibold text-slate-600">Use Your Own OpenPhone Number</span>
                     </div>
-                    <span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-400 rounded-full">Coming Soon</span>
+                    {ctSigcoreConnected && (
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Connected</span>
+                    )}
                   </div>
-                  <p className="text-xs text-slate-400 leading-relaxed mb-3">
-                    Connect your own OpenPhone or Twilio account to use your own phone numbers for SMS notifications and customer communication. Managed through the Sigcore integration.
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg opacity-50">
-                      <Link2 className="w-3 h-3 text-slate-400" />
-                      <span className="text-[11px] font-semibold text-slate-400">OpenPhone</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg opacity-50">
-                      <Link2 className="w-3 h-3 text-slate-400" />
-                      <span className="text-[11px] font-semibold text-slate-400">Twilio</span>
-                    </div>
-                  </div>
+                  {ctSigcoreConnected ? (
+                    ctOwnPhoneNumbers.length > 0 ? (
+                      <div className="relative">
+                        <select
+                          value={ctFromPhone}
+                          onChange={e => saveCtFromPhone(e.target.value)}
+                          disabled={ctSaving}
+                          className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
+                        >
+                          <option value="">Select your OpenPhone number</option>
+                          {ctOwnPhoneNumbers.map(p => (
+                            <option key={p.id} value={p.phoneNumber}>
+                              {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} (OpenPhone)
+                            </option>
+                          ))}
+                        </select>
+                        <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                          <ChevronDown className="w-4 h-4" />
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500">No phone numbers found in your OpenPhone account.</p>
+                    )
+                  ) : (
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      Connect your OpenPhone account in{' '}
+                      <button
+                        type="button"
+                        onClick={() => navigate('/phone-settings')}
+                        className="text-blue-600 hover:underline font-medium"
+                      >
+                        Business Line settings
+                      </button>{' '}
+                      to use your own phone numbers here.
+                    </p>
+                  )}
                 </div>
               </div>
 
