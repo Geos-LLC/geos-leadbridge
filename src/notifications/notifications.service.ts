@@ -1973,10 +1973,10 @@ export class NotificationsService implements OnModuleInit {
       phoneNumber?: string; // Twilio
     },
   ): Promise<{ success: boolean; error?: string; data?: any }> {
-    const baseUrl = 'https://sigcore-production.up.railway.app';
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
 
     if (provider === 'openphone') {
-      const endpoint = `${baseUrl}/api/integrations/openphone/connect`;
+      const endpoint = `${sigcoreUrl}/integrations/openphone/connect`;
       this.logger.log(`[connectProvider] Connecting OpenPhone via: ${endpoint}`);
 
       try {
@@ -2006,7 +2006,7 @@ export class NotificationsService implements OnModuleInit {
       }
     } else {
       // Twilio
-      const endpoint = `${baseUrl}/api/integrations/twilio`;
+      const endpoint = `${sigcoreUrl}/integrations/twilio`;
       this.logger.log(`[connectProvider] Connecting Twilio via: ${endpoint}`);
 
       try {
@@ -2198,13 +2198,7 @@ export class NotificationsService implements OnModuleInit {
       return { success: false, phoneNumbers: [], error: 'No API key configured. Contact your administrator.' };
     }
 
-    // 2. Validate the API key
-    const validation = await this.validateSigcoreApiKey(effectiveApiKey);
-    if (!validation.valid) {
-      return { success: false, phoneNumbers: [], error: 'Invalid API key. Please check your API key.' };
-    }
-
-    // 3. Connect provider if specified
+    // 2. Connect provider if specified
     if (provider && providerCredentials) {
       const providerResult = await this.connectProviderViaSigcore(effectiveApiKey, provider, providerCredentials);
       if (!providerResult.success) {
@@ -2212,7 +2206,7 @@ export class NotificationsService implements OnModuleInit {
       }
     }
 
-    // 4. Create webhook for delivery status
+    // 3. Create webhook for delivery status
     const webhookUrl = `${webhookBaseUrl}/api/webhooks/sigcore/delivery-status`;
     const webhookResult = await this.createSigcoreWebhook(effectiveApiKey, webhookUrl);
 
@@ -2221,7 +2215,7 @@ export class NotificationsService implements OnModuleInit {
       // Continue anyway - webhook can be created manually later
     }
 
-    // 5. Store the provider, webhook ID, and Twilio phone number
+    // 4. Store the provider, webhook ID, and Twilio phone number
     const fromPhone = (provider === 'twilio' && providerCredentials?.phoneNumber) ? providerCredentials.phoneNumber : null;
     await this.prisma.notificationSettings.upsert({
       where: { savedAccountId },
@@ -2244,7 +2238,7 @@ export class NotificationsService implements OnModuleInit {
 
     this.logger.log(`[connectSigcore] Connected successfully. Provider: ${provider}, WebhookId: ${webhookResult.webhookId}`);
 
-    // 6. Fetch phone numbers for the connected provider
+    // 5. Fetch phone numbers for the connected provider
     let phoneNumbers: SigcorePhoneNumber[] = [];
     if (provider === 'openphone') {
       phoneNumbers = await this.fetchOpenPhoneNumbers(effectiveApiKey);
