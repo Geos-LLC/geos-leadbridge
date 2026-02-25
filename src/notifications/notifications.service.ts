@@ -2285,7 +2285,9 @@ export class NotificationsService implements OnModuleInit {
    */
   private async fetchOpenPhoneNumbers(tenantApiKey: string): Promise<SigcorePhoneNumber[]> {
     const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
-    const endpoint = `${sigcoreUrl}/integrations/openphone/conversations?days=1`;
+    // Use the dedicated phone-numbers endpoint so ALL configured numbers appear,
+    // not just those with recent conversations (conversations?days=1 missed inactive numbers).
+    const endpoint = `${sigcoreUrl}/integrations/openphone/numbers`;
     this.logger.log(`[fetchOpenPhoneNumbers] Fetching from: ${endpoint}`);
 
     try {
@@ -2308,19 +2310,10 @@ export class NotificationsService implements OnModuleInit {
       const result = await response.json();
       this.logger.log(`[fetchOpenPhoneNumbers] Result: ${JSON.stringify(result).substring(0, 500)}`);
 
-      // Extract phone numbers from conversations data.
-      // The conversations endpoint returns one entry per participant, so deduplicate
-      // by phoneNumberId to get one card per OpenPhone number instead of one per conversation.
       const phones = result.data || result.phoneNumbers || result || [];
-      const seen = new Set<string>();
       return phones
         .map((phone: any) => this.mapSigcorePhoneNumber(phone))
-        .filter((p: any) => {
-          if (!p.phoneNumber || p.phoneNumber.length <= 5) return false;
-          if (seen.has(p.id)) return false;
-          seen.add(p.id);
-          return true;
-        });
+        .filter((p: any) => p.phoneNumber && p.phoneNumber.length > 5);
     } catch (error: any) {
       this.logger.error(`[fetchOpenPhoneNumbers] Error: ${error.message}`);
       return [];
