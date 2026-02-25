@@ -2181,22 +2181,27 @@ export class NotificationsService implements OnModuleInit {
 
     // 1. Use provided API key, or fall back to stored one, or fall back to app-level key
     let effectiveApiKey = apiKey;
+    let keySource = 'body';
     if (!effectiveApiKey) {
       const settings = await this.prisma.notificationSettings.findUnique({
         where: { savedAccountId },
         select: { sigcoreApiKey: true },
       });
       effectiveApiKey = settings?.sigcoreApiKey || null;
+      keySource = 'notificationSettings';
     }
 
     // Fall back to app-level SIGCORE_API_KEY (same key used by admin for pool phones)
     if (!effectiveApiKey) {
       effectiveApiKey = this.appSigcoreApiKey || null;
+      keySource = 'SIGCORE_API_KEY env';
     }
 
     if (!effectiveApiKey) {
       return { success: false, phoneNumbers: [], error: 'No API key configured. Contact your administrator.' };
     }
+
+    this.logger.log(`[connectSigcore] Using key source: ${keySource}, key prefix: ${effectiveApiKey.substring(0, 8)}...`);
 
     // 2. Connect provider if specified
     if (provider && providerCredentials) {
@@ -2271,7 +2276,7 @@ export class NotificationsService implements OnModuleInit {
       const response = await fetch(endpoint, {
         method: 'GET',
         headers: {
-          'X-Sigcore-Key': tenantApiKey,
+          'x-api-key': tenantApiKey,
           'Content-Type': 'application/json',
         },
       });
