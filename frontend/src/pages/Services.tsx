@@ -216,14 +216,17 @@ export function Services() {
   const [ctFromPhone, setCtFromPhone] = useState('');
   const [ctTestPhone, setCtTestPhone] = useState(() => localStorage.getItem('ct_test_phone') || '');
   const [ctTestStatus, setCtTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
-  const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string } | null>(null);
+  const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string; fromPhone: string } | null>(null);
   const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>('');
 
   // Derived: unsaved Lead Alert changes (only alertToPhone is pending — from-phone saves immediately)
   const alertDirty = !!leadAlertRule && alertToPhone !== (leadAlertRule.toPhone || '');
 
   // Derived: unsaved CT changes
-  const ctDirty = ctSavedSnapshot !== null && ctAutoReplyTemplate !== ctSavedSnapshot.autoReplyTemplate;
+  const ctDirty = ctSavedSnapshot !== null && (
+    ctAutoReplyTemplate !== ctSavedSnapshot.autoReplyTemplate ||
+    ctFromPhone !== ctSavedSnapshot.fromPhone
+  );
 
   // Derived: unsaved CC changes
   const ccDirty = ccSavedSnapshot !== null && (
@@ -324,7 +327,6 @@ export function Services() {
         setCtFollowUps(ctRes.followUps);
         setCtStopOnReply(ctRes.stopOnCustomerReply);
         setCtFromPhone(ctRes.fromPhone || poolRes.phoneNumbers[0]?.phoneNumber || '');
-        setCtSavedSnapshot({ autoReplyTemplate: ctRes.autoReplyTemplate });
       }
 
       // Collect ALL new_lead automation rules
@@ -389,12 +391,15 @@ export function Services() {
 
       // Pre-select CT auto-reply template: match saved content, fall back to default by name
       const ctTpl = allTemplates.find(t => t.name === 'CT - Auto Reply');
+      const ctResolvedFromPhone = ctRes?.fromPhone || poolRes.phoneNumbers[0]?.phoneNumber || '';
       const ctContent = ctRes?.autoReplyTemplate || ctTpl?.content || '';
       if (!ctRes && ctTpl) {
         setCtAutoReplyTemplate(ctTpl.content);
-        setCtSavedSnapshot({ autoReplyTemplate: ctTpl.content });
+        setCtFromPhone(ctResolvedFromPhone);
       }
       setCtSelectedTemplateId(allTemplates.find(t => t.content === ctContent)?.id || ctTpl?.id || '');
+      // Initialize CT snapshot for dirty tracking (always, same as CC)
+      setCtSavedSnapshot({ autoReplyTemplate: ctContent, fromPhone: ctResolvedFromPhone });
 
       // Initialize CC snapshot for dirty tracking
       const snapshotWhisper = ccs?.agentWhisperMessage || whisperTpl?.content || '';
@@ -652,7 +657,7 @@ export function Services() {
         stopOnCustomerReply: ctStopOnReply,
       });
       showSuccess('Customer Texting settings saved');
-      setCtSavedSnapshot({ autoReplyTemplate: ctAutoReplyTemplate });
+      setCtSavedSnapshot({ autoReplyTemplate: ctAutoReplyTemplate, fromPhone: ctFromPhone });
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Failed to save Customer Texting settings');
     } finally {
@@ -667,6 +672,8 @@ export function Services() {
   function discardCtChanges() {
     if (!ctSavedSnapshot) return;
     setCtAutoReplyTemplate(ctSavedSnapshot.autoReplyTemplate);
+    setCtFromPhone(ctSavedSnapshot.fromPhone);
+    setCtSelectedTemplateId(templates.find(t => t.content === ctSavedSnapshot.autoReplyTemplate)?.id || '');
   }
 
   async function doTestCall() {
@@ -814,24 +821,8 @@ export function Services() {
 
   // --- Customer Texting Handlers ---
 
-  async function saveCtFromPhone(fromPhone: string) {
-    setCtFromPhone(fromPhone);
-    if (!selectedAccountId) return;
-    setCtSaving(true);
-    try {
-      await notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
-        enabled: ctEnabled,
-        fromPhone: fromPhone || undefined,
-        autoReplyTemplate: ctAutoReplyTemplate,
-        followUps: ctFollowUps,
-        stopOnCustomerReply: ctStopOnReply,
-      });
-      showSuccess('Send from number updated');
-    } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Failed to update send from number');
-    } finally {
-      setCtSaving(false);
-    }
+  function saveCtFromPhone(fromPhone: string) {
+    setCtFromPhone(fromPhone); // tracked in ctDirty — saved when user clicks Save Settings
   }
 
   async function sendCtTest() {
