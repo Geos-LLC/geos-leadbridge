@@ -91,7 +91,7 @@ export function PhoneSettings() {
 
   async function handleConnect() {
     if (!openPhoneApiKey.trim()) {
-      setConnectError('Please enter your OpenPhone API key');
+      setConnectError('Please enter your QUO API key');
       return;
     }
     setConnecting(true);
@@ -107,10 +107,10 @@ export function PhoneSettings() {
         setOwnPhoneNumbers(result.phoneNumbers);
         setOpenPhoneApiKey('');
       } else {
-        setConnectError(result.error || 'Failed to connect OpenPhone');
+        setConnectError(result.error || 'Failed to connect QUO');
       }
     } catch (err: any) {
-      setConnectError(err.message || 'Failed to connect OpenPhone');
+      setConnectError(err.message || 'Failed to connect QUO');
     } finally {
       setConnecting(false);
     }
@@ -217,7 +217,7 @@ export function PhoneSettings() {
       {/* Options Info */}
       <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 text-blue-700 text-sm">
         <p className="font-medium">
-          You have two options for sending SMS: use a phone number assigned by your administrator, or connect your own OpenPhone account.
+          You have two options for sending SMS: use a phone number assigned by your administrator, or connect your own QUO account.
         </p>
       </div>
 
@@ -274,7 +274,7 @@ export function PhoneSettings() {
       <section className="space-y-6">
         <div className="flex items-center gap-3 px-2">
           <Phone className="w-5 h-5 text-blue-600" />
-          <h3 className="text-xl font-bold text-slate-900">Option 2: Connect Your Own OpenPhone</h3>
+          <h3 className="text-xl font-bold text-slate-900">Option 2: Connect Your Own QUO</h3>
           {sigcoreConnected && (
             <span className="px-2 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-bold rounded uppercase">Connected</span>
           )}
@@ -298,7 +298,7 @@ export function PhoneSettings() {
           <div className="space-y-4">
             <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3 text-emerald-700 text-sm">
               <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>OpenPhone account connected. Your phone numbers are available for customer texting.</span>
+              <span>QUO account connected. Your phone numbers are available for customer texting.</span>
             </div>
             {ownPhoneNumbers.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -310,11 +310,11 @@ export function PhoneSettings() {
                       </div>
                       <div className="flex-1">
                         <div className="font-bold text-slate-900 text-sm">{phone.phoneNumber}</div>
-                        <div className="text-xs text-slate-400">{phone.friendlyName || 'OpenPhone'}</div>
+                        <div className="text-xs text-slate-400">{phone.friendlyName || 'QUO'}</div>
                       </div>
                     </div>
                     <div className="mt-3 pt-3 border-t border-slate-100">
-                      <span className="px-2 py-1 bg-blue-50 text-blue-600 text-[10px] font-bold rounded uppercase">OpenPhone</span>
+                      <span className="px-2 py-1 bg-blue-50 text-blue-600 text-[10px] font-bold rounded uppercase">QUO</span>
                     </div>
                   </div>
                 ))}
@@ -326,17 +326,17 @@ export function PhoneSettings() {
               className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 border border-red-200 rounded-xl transition-all disabled:opacity-50"
             >
               {disconnecting ? <Loader2 size={16} className="animate-spin" /> : <Unplug size={16} />}
-              {disconnecting ? 'Disconnecting...' : 'Disconnect OpenPhone'}
+              {disconnecting ? 'Disconnecting...' : 'Disconnect QUO'}
             </button>
           </div>
         ) : (
           <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-4">
             <div>
-              <h4 className="font-semibold text-slate-900 mb-1">Connect your OpenPhone account</h4>
+              <h4 className="font-semibold text-slate-900 mb-1">Connect your QUO account</h4>
               <p className="text-slate-500 text-sm">
-                Enter your OpenPhone API key to use your own phone numbers for customer texting.{' '}
+                Enter your QUO API key to use your own phone numbers for customer texting.{' '}
                 <a
-                  href="https://app.openphone.com/settings/api"
+                  href="https://my.quo.com/settings/api"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-blue-600 hover:underline inline-flex items-center gap-1"
@@ -353,7 +353,7 @@ export function PhoneSettings() {
                   value={openPhoneApiKey}
                   onChange={e => setOpenPhoneApiKey(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleConnect()}
-                  placeholder="OpenPhone API key"
+                  placeholder="QUO API key"
                   className="w-full pl-9 pr-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
                 />
               </div>

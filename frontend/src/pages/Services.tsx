@@ -1438,7 +1438,7 @@ export function Services() {
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">Option 2</span>
-                      <span className="text-xs font-semibold text-slate-600">Use Your Own OpenPhone Number</span>
+                      <span className="text-xs font-semibold text-slate-600">Use Your Own QUO Number</span>
                     </div>
                     {ctSigcoreConnected && (
                       <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Connected</span>
@@ -1453,10 +1453,10 @@ export function Services() {
                           disabled={ctSaving}
                           className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
                         >
-                          <option value="">Select your OpenPhone number</option>
+                          <option value="">Select your QUO number</option>
                           {ctOwnPhoneNumbers.map(p => (
                             <option key={p.id} value={p.phoneNumber}>
-                              {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} (OpenPhone)
+                              {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} (QUO)
                             </option>
                           ))}
                         </select>
@@ -1465,11 +1465,11 @@ export function Services() {
                         </div>
                       </div>
                     ) : (
-                      <p className="text-xs text-slate-500">No phone numbers found in your OpenPhone account.</p>
+                      <p className="text-xs text-slate-500">No phone numbers found in your QUO account.</p>
                     )
                   ) : (
                     <p className="text-xs text-slate-500 leading-relaxed">
-                      Connect your OpenPhone account in{' '}
+                      Connect your QUO account in{' '}
                       <button
                         type="button"
                         onClick={() => navigate('/phone-settings')}
