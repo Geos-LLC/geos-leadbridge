@@ -1914,10 +1914,10 @@ export class NotificationsService implements OnModuleInit {
     }
 
     return {
-      id: phone.id || phone._id || phoneNumber || String(Math.random()),
+      id: phone.phoneNumberId || phone.id || phone._id || phoneNumber || String(Math.random()),
       phoneNumber: phoneNumber,
       provider: phone.provider || phone.carrier || phone.type || 'unknown',
-      friendlyName: phone.friendlyName || phone.friendly_name || phone.name || phone.label || '',
+      friendlyName: phone.phoneNumberName || phone.friendlyName || phone.friendly_name || phone.name || phone.label || '',
       capabilities: Array.isArray(caps) ? caps : Object.keys(caps).filter(k => caps[k]),
       // A2P Compliance
       a2pStatus,
@@ -2308,11 +2308,19 @@ export class NotificationsService implements OnModuleInit {
       const result = await response.json();
       this.logger.log(`[fetchOpenPhoneNumbers] Result: ${JSON.stringify(result).substring(0, 500)}`);
 
-      // Extract phone numbers from conversations data
+      // Extract phone numbers from conversations data.
+      // The conversations endpoint returns one entry per participant, so deduplicate
+      // by phoneNumberId to get one card per OpenPhone number instead of one per conversation.
       const phones = result.data || result.phoneNumbers || result || [];
+      const seen = new Set<string>();
       return phones
         .map((phone: any) => this.mapSigcorePhoneNumber(phone))
-        .filter((p: any) => p.phoneNumber && p.phoneNumber.length > 5);
+        .filter((p: any) => {
+          if (!p.phoneNumber || p.phoneNumber.length <= 5) return false;
+          if (seen.has(p.id)) return false;
+          seen.add(p.id);
+          return true;
+        });
     } catch (error: any) {
       this.logger.error(`[fetchOpenPhoneNumbers] Error: ${error.message}`);
       return [];
