@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, CheckCircle, X, Clock,
-  Bot, Pencil, Phone, Send, ChevronUp, Trash2, Save,
+  Bot, Pencil, Phone, Send, ChevronUp, Trash2, Save, Link2,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -1388,35 +1388,62 @@ export function Services() {
             iconTextColor="text-emerald-600"
           >
             <div className={`space-y-6${!ctEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-              {/* Send from */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send from</label>
-                <div className="relative">
-                  <select
-                    value={ctFromPhone}
-                    onChange={e => saveCtFromPhone(e.target.value)}
-                    disabled={ctSaving}
-                    className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
-                  >
-                    <option value="">Select phone number</option>
-                    {ctFromPhone && !poolPhones.some(p => p.phoneNumber === ctFromPhone) && (
-                      <option value={ctFromPhone}>{ctFromPhone} (configured)</option>
-                    )}
-                    {poolPhones.map(p => (
-                      <option key={p.id} value={p.phoneNumber}>
-                        {p.phoneNumber} (LeadBridge)
-                      </option>
-                    ))}
-                  </select>
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
-                    <ChevronDown className="w-4 h-4" />
+              {/* Phone number options */}
+              <div className="space-y-3">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Send from</label>
+
+                {/* Option 1: LeadBridge shared pool */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Option 1</span>
+                    <span className="text-xs font-semibold text-slate-600">Use a LeadBridge shared number</span>
+                  </div>
+                  <div className="relative">
+                    <select
+                      value={ctFromPhone}
+                      onChange={e => saveCtFromPhone(e.target.value)}
+                      disabled={ctSaving}
+                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
+                    >
+                      <option value="">Select phone number</option>
+                      {ctFromPhone && !poolPhones.some(p => p.phoneNumber === ctFromPhone) && (
+                        <option value={ctFromPhone}>{ctFromPhone} (configured)</option>
+                      )}
+                      {poolPhones.map(p => (
+                        <option key={p.id} value={p.phoneNumber}>
+                          {p.phoneNumber} (LeadBridge)
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                      <ChevronDown className="w-4 h-4" />
+                    </div>
                   </div>
                 </div>
-                <button className="mt-2 px-4 py-2 bg-slate-100 text-slate-400 rounded-xl text-xs font-bold flex items-center gap-2 cursor-not-allowed">
-                  <Phone className="w-3 h-3" />
-                  Get your own number
-                  <span className="px-1.5 py-0.5 bg-slate-200 text-[9px] rounded uppercase">Coming Soon</span>
-                </button>
+
+                {/* Option 2: Own provider — Coming Soon */}
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 p-4 cursor-not-allowed select-none">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Option 2</span>
+                      <span className="text-xs font-semibold text-slate-400">Connect Your Own Provider</span>
+                    </div>
+                    <span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-400 rounded-full">Coming Soon</span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed mb-3">
+                    Connect your own OpenPhone or Twilio account to use your own phone numbers for SMS notifications and customer communication. Managed through the Sigcore integration.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg opacity-50">
+                      <Link2 className="w-3 h-3 text-slate-400" />
+                      <span className="text-[11px] font-semibold text-slate-400">OpenPhone</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg opacity-50">
+                      <Link2 className="w-3 h-3 text-slate-400" />
+                      <span className="text-[11px] font-semibold text-slate-400">Twilio</span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Auto-reply message */}
