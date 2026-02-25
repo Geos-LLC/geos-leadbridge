@@ -1994,7 +1994,7 @@ export class NotificationsService implements OnModuleInit {
         if (!response.ok) {
           const errorText = await response.text();
           this.logger.error(`[connectProvider] OpenPhone connect failed: ${response.status} - ${errorText}`);
-          return { success: false, error: `Failed to connect OpenPhone: ${response.status}` };
+          return { success: false, error: `Failed to connect OpenPhone: ${response.status} — ${errorText}` };
         }
 
         const result = await response.json();
@@ -2028,7 +2028,7 @@ export class NotificationsService implements OnModuleInit {
         if (!response.ok) {
           const errorText = await response.text();
           this.logger.error(`[connectProvider] Twilio connect failed: ${response.status} - ${errorText}`);
-          return { success: false, error: `Failed to connect Twilio: ${response.status}` };
+          return { success: false, error: `Failed to connect Twilio: ${response.status} — ${errorText}` };
         }
 
         const result = await response.json();
@@ -2263,14 +2263,15 @@ export class NotificationsService implements OnModuleInit {
    * Fetch phone numbers from OpenPhone via Sigcore conversations endpoint
    */
   private async fetchOpenPhoneNumbers(tenantApiKey: string): Promise<SigcorePhoneNumber[]> {
-    const endpoint = 'https://sigcore-production.up.railway.app/api/integrations/openphone/conversations?days=1';
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    const endpoint = `${sigcoreUrl}/integrations/openphone/conversations?days=1`;
     this.logger.log(`[fetchOpenPhoneNumbers] Fetching from: ${endpoint}`);
 
     try {
       const response = await fetch(endpoint, {
         method: 'GET',
         headers: {
-          'x-api-key': tenantApiKey,
+          'X-Sigcore-Key': tenantApiKey,
           'Content-Type': 'application/json',
         },
       });
