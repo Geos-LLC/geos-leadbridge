@@ -219,6 +219,9 @@ export function Services() {
   const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string } | null>(null);
   const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>('');
 
+  // Derived: unsaved Lead Alert changes (only alertToPhone is pending — from-phone saves immediately)
+  const alertDirty = !!leadAlertRule && alertToPhone !== (leadAlertRule.toPhone || '');
+
   // Derived: unsaved CT changes
   const ctDirty = ctSavedSnapshot !== null && ctAutoReplyTemplate !== ctSavedSnapshot.autoReplyTemplate;
 
@@ -655,6 +658,10 @@ export function Services() {
     } finally {
       setCtSaving(false);
     }
+  }
+
+  function discardAlertChanges() {
+    setAlertToPhone(leadAlertRule?.toPhone || '');
   }
 
   function discardCtChanges() {
@@ -1306,16 +1313,30 @@ export function Services() {
                         </span>
                       )}
                     </div>
-                    <div className="flex justify-end">
-                      <button
-                        onClick={() => { if (leadAlertRule && alertToPhone !== leadAlertRule.toPhone) saveAlertToPhone(alertToPhone); }}
-                        disabled={saving || !alertToPhone || alertToPhone === leadAlertRule.toPhone}
-                        className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                      >
-                        {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                        Save Changes
-                      </button>
-                    </div>
+                    {alertDirty && (
+                      <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+                        <div className="flex items-center gap-2 text-amber-700">
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          <span className="text-sm font-medium">You have unsaved changes</span>
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button
+                            onClick={discardAlertChanges}
+                            className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                          >
+                            Discard
+                          </button>
+                          <button
+                            onClick={() => saveAlertToPhone(alertToPhone)}
+                            disabled={saving || !alertToPhone}
+                            className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+                          >
+                            {saving && <Loader2 className="w-3 h-3 animate-spin" />}
+                            Save Changes
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </>
               )}
