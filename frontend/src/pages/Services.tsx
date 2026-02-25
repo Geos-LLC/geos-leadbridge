@@ -10,7 +10,7 @@ import {
 } from '../services/api';
 import type {
   AutomationRule, NotificationRule, SavedAccount, MessageTemplate,
-  CallConnectMode, AgentStrategy,
+  CallConnectMode, AgentStrategy, SigcorePhoneNumber,
 } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
 import { useAppStore } from '../store/appStore';
@@ -146,6 +146,8 @@ export function Services() {
   // Supporting data
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [poolPhones, setPoolPhones] = useState<{ id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }[]>([]);
+  const [ctOwnPhoneNumbers, setCtOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>([]);
+  const [ctSigcoreConnected, setCtSigcoreConnected] = useState(false);
 
   // UI state
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
@@ -273,13 +275,14 @@ export function Services() {
       setLoading(true);
       setError(null);
 
-      const [automationRes, notifRes, templatesRes, poolRes, ccRes, ctRes] = await Promise.all([
+      const [automationRes, notifRes, templatesRes, poolRes, ccRes, ctRes, notifSettingsRes] = await Promise.all([
         automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] })),
         notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] })),
         templatesApi.getTemplates().catch(() => ({ templates: [] as MessageTemplate[] })),
         usersApi.getPoolPhonesForSms().catch(() => ({ phoneNumbers: [] })),
         callConnectApi.getSettings(accountId).catch(() => ({ settings: null })),
         notificationsApi.getCustomerTextingSettings(accountId).catch(() => null),
+        notificationsApi.getSettings(accountId).catch(() => null),
       ]);
 
       const ccs = ccRes.settings;
@@ -342,6 +345,15 @@ export function Services() {
 
       setLeadAlertRule(leadAlert);
       setPoolPhones(poolRes.phoneNumbers);
+
+      // Load own provider connection status for CT Option 2
+      const connected = !!notifSettingsRes?.settings?.sigcoreConnected;
+      setCtSigcoreConnected(connected);
+      if (connected) {
+        notificationsApi.getSigcorePhoneNumbers(accountId).then(r => setCtOwnPhoneNumbers(r.phoneNumbers)).catch(() => {});
+      } else {
+        setCtOwnPhoneNumbers([]);
+      }
 
       // Seed CC default templates for every user on first page visit
       const DEFAULT_CC_WHISPER = 'Hi {customerName}, you have a new lead for {category}. Press any key to connect with the customer.';
@@ -1388,35 +1400,87 @@ export function Services() {
             iconTextColor="text-emerald-600"
           >
             <div className={`space-y-6${!ctEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-              {/* Send from */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send from</label>
-                <div className="relative">
-                  <select
-                    value={ctFromPhone}
-                    onChange={e => saveCtFromPhone(e.target.value)}
-                    disabled={ctSaving}
-                    className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
-                  >
-                    <option value="">Select phone number</option>
-                    {ctFromPhone && !poolPhones.some(p => p.phoneNumber === ctFromPhone) && (
-                      <option value={ctFromPhone}>{ctFromPhone} (configured)</option>
-                    )}
-                    {poolPhones.map(p => (
-                      <option key={p.id} value={p.phoneNumber}>
-                        {p.phoneNumber} (LeadBridge)
-                      </option>
-                    ))}
-                  </select>
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
-                    <ChevronDown className="w-4 h-4" />
+              {/* Phone number options */}
+              <div className="space-y-3">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Send from</label>
+
+                {/* Option 1: LeadBridge shared pool */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Option 1</span>
+                    <span className="text-xs font-semibold text-slate-600">Use a LeadBridge shared number</span>
+                  </div>
+                  <div className="relative">
+                    <select
+                      value={ctFromPhone}
+                      onChange={e => saveCtFromPhone(e.target.value)}
+                      disabled={ctSaving}
+                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
+                    >
+                      <option value="">Select phone number</option>
+                      {ctFromPhone && !poolPhones.some(p => p.phoneNumber === ctFromPhone) && (
+                        <option value={ctFromPhone}>{ctFromPhone} (configured)</option>
+                      )}
+                      {poolPhones.map(p => (
+                        <option key={p.id} value={p.phoneNumber}>
+                          {p.phoneNumber} (LeadBridge)
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                      <ChevronDown className="w-4 h-4" />
+                    </div>
                   </div>
                 </div>
-                <button className="mt-2 px-4 py-2 bg-slate-100 text-slate-400 rounded-xl text-xs font-bold flex items-center gap-2 cursor-not-allowed">
-                  <Phone className="w-3 h-3" />
-                  Get your own number
-                  <span className="px-1.5 py-0.5 bg-slate-200 text-[9px] rounded uppercase">Coming Soon</span>
-                </button>
+
+                {/* Option 2: Own provider */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">Option 2</span>
+                      <span className="text-xs font-semibold text-slate-600">Use Your Own QUO Number</span>
+                    </div>
+                    {ctSigcoreConnected && (
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Connected</span>
+                    )}
+                  </div>
+                  {ctSigcoreConnected ? (
+                    ctOwnPhoneNumbers.length > 0 ? (
+                      <div className="relative">
+                        <select
+                          value={ctFromPhone}
+                          onChange={e => saveCtFromPhone(e.target.value)}
+                          disabled={ctSaving}
+                          className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
+                        >
+                          <option value="">Select your QUO number</option>
+                          {ctOwnPhoneNumbers.map(p => (
+                            <option key={p.id} value={p.phoneNumber}>
+                              {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} (QUO)
+                            </option>
+                          ))}
+                        </select>
+                        <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                          <ChevronDown className="w-4 h-4" />
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500">No phone numbers found in your QUO account.</p>
+                    )
+                  ) : (
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      Connect your QUO account in{' '}
+                      <button
+                        type="button"
+                        onClick={() => navigate('/phone-settings')}
+                        className="text-blue-600 hover:underline font-medium"
+                      >
+                        Business Line settings
+                      </button>{' '}
+                      to use your own phone numbers here.
+                    </p>
+                  )}
+                </div>
               </div>
 
               {/* Auto-reply message */}

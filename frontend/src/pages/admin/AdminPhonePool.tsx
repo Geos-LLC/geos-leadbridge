@@ -22,7 +22,7 @@ export default function AdminPhonePool() {
 
   // Connect provider form
   const [showConnect, setShowConnect] = useState(false);
-  const [connectProvider, setConnectProvider] = useState<'openphone' | 'twilio'>('openphone');
+  const [connectProvider] = useState<'openphone' | 'twilio'>('twilio');
   const [connectFields, setConnectFields] = useState({ apiKey: '', accountSid: '', authToken: '', phoneNumber: '' });
   const [connecting, setConnecting] = useState(false);
 
@@ -108,13 +108,11 @@ export default function AdminPhonePool() {
   const handleConnect = async () => {
     try {
       setConnecting(true);
-      const credentials = connectProvider === 'openphone'
-        ? { apiKey: connectFields.apiKey }
-        : { accountSid: connectFields.accountSid, authToken: connectFields.authToken, phoneNumber: connectFields.phoneNumber };
+      const credentials = { accountSid: connectFields.accountSid, authToken: connectFields.authToken, phoneNumber: connectFields.phoneNumber };
 
       const result = await adminApi.connectPoolProvider(connectProvider, credentials);
       if (result.success) {
-        notify.success('Connected', `${connectProvider === 'openphone' ? 'OpenPhone' : 'Twilio'} connected successfully`);
+        notify.success('Connected', 'Twilio connected successfully');
         setShowConnect(false);
         setConnectFields({ apiKey: '', accountSid: '', authToken: '', phoneNumber: '' });
         // Auto-sync after connecting
@@ -131,11 +129,11 @@ export default function AdminPhonePool() {
   };
 
   const handleDisconnect = async (provider: 'openphone' | 'twilio') => {
-    if (!confirm(`Disconnect ${provider === 'openphone' ? 'OpenPhone' : 'Twilio'}? All pool numbers from this provider will be released.`)) return;
+    if (!confirm(`Disconnect Twilio? All pool numbers from this provider will be released.`)) return;
     try {
       const result = await adminApi.disconnectPoolProvider(provider);
       if (result.success) {
-        notify.success('Disconnected', `${provider === 'openphone' ? 'OpenPhone' : 'Twilio'} disconnected`);
+        notify.success('Disconnected', 'Twilio disconnected');
         loadData();
       } else {
         notify.error('Error', result.error || 'Failed to disconnect');
@@ -357,21 +355,12 @@ export default function AdminPhonePool() {
           <div className="flex items-center gap-2">
             <button
               className="flex-1 sm:flex-none px-4 py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl font-semibold hover:bg-red-100 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              onClick={() => handleDisconnect('openphone')}
-              disabled={tenantKeyConfigured === false}
-              title="Disconnect OpenPhone"
-            >
-              <Unlink size={14} />
-              <span>OpenPhone</span>
-            </button>
-            <button
-              className="flex-1 sm:flex-none px-4 py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl font-semibold hover:bg-red-100 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={() => handleDisconnect('twilio')}
               disabled={tenantKeyConfigured === false}
               title="Disconnect Twilio"
             >
               <Unlink size={14} />
-              <span>Twilio</span>
+              <span>Disconnect Twilio</span>
             </button>
           </div>
         </div>
@@ -387,78 +376,47 @@ export default function AdminPhonePool() {
             </button>
           </div>
           <div className="space-y-6">
-            {/* Provider Tabs */}
-            <div className="flex gap-2">
-              <button
-                className={`px-6 py-2 rounded-xl font-semibold transition-all ${connectProvider === 'openphone' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-                onClick={() => setConnectProvider('openphone')}
-              >
-                OpenPhone
-              </button>
-              <button
-                className={`px-6 py-2 rounded-xl font-semibold transition-all ${connectProvider === 'twilio' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-                onClick={() => setConnectProvider('twilio')}
-              >
-                Twilio
-              </button>
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-slate-700">Account SID</label>
+              <input
+                type="text"
+                placeholder="AC..."
+                value={connectFields.accountSid}
+                onChange={e => setConnectFields({ ...connectFields, accountSid: e.target.value })}
+                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              />
             </div>
-
-            {connectProvider === 'openphone' ? (
-              <div className="space-y-2">
-                <label className="block text-sm font-semibold text-slate-700">OpenPhone API Key</label>
-                <input
-                  type="password"
-                  placeholder="Enter your OpenPhone API key"
-                  value={connectFields.apiKey}
-                  onChange={e => setConnectFields({ ...connectFields, apiKey: e.target.value })}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                />
-              </div>
-            ) : (
-              <>
-                <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-slate-700">Account SID</label>
-                  <input
-                    type="text"
-                    placeholder="AC..."
-                    value={connectFields.accountSid}
-                    onChange={e => setConnectFields({ ...connectFields, accountSid: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-slate-700">Auth Token</label>
-                  <input
-                    type="password"
-                    placeholder="Enter your Twilio auth token"
-                    value={connectFields.authToken}
-                    onChange={e => setConnectFields({ ...connectFields, authToken: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-slate-700">Phone Number</label>
-                  <input
-                    type="text"
-                    placeholder="+1234567890"
-                    value={connectFields.phoneNumber}
-                    onChange={e => setConnectFields({ ...connectFields, phoneNumber: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  />
-                </div>
-              </>
-            )}
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-slate-700">Auth Token</label>
+              <input
+                type="password"
+                placeholder="Enter your Twilio auth token"
+                value={connectFields.authToken}
+                onChange={e => setConnectFields({ ...connectFields, authToken: e.target.value })}
+                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-slate-700">Phone Number</label>
+              <input
+                type="text"
+                placeholder="+1234567890"
+                value={connectFields.phoneNumber}
+                onChange={e => setConnectFields({ ...connectFields, phoneNumber: e.target.value })}
+                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              />
+            </div>
 
             <div className="flex gap-2 pt-4">
               <button
                 className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 onClick={handleConnect}
-                disabled={connecting || (connectProvider === 'openphone' ? !connectFields.apiKey : (!connectFields.accountSid || !connectFields.authToken))}
+                disabled={connecting || !connectFields.accountSid || !connectFields.authToken}
               >
                 {connecting ? (
                   <><Loader2 size={16} className="animate-spin" /> Connecting...</>
                 ) : (
-                  <><Link size={16} /> Connect {connectProvider === 'openphone' ? 'OpenPhone' : 'Twilio'}</>
+                  <><Link size={16} /> Connect Twilio</>
                 )}
               </button>
               <button className="px-6 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all" onClick={() => setShowConnect(false)}>Cancel</button>

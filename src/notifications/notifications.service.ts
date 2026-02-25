@@ -1914,10 +1914,10 @@ export class NotificationsService implements OnModuleInit {
     }
 
     return {
-      id: phone.id || phone._id || phoneNumber || String(Math.random()),
+      id: phone.phoneNumberId || phone.id || phone._id || phoneNumber || String(Math.random()),
       phoneNumber: phoneNumber,
       provider: phone.provider || phone.carrier || phone.type || 'unknown',
-      friendlyName: phone.friendlyName || phone.friendly_name || phone.name || phone.label || '',
+      friendlyName: phone.phoneNumberName || phone.friendlyName || phone.friendly_name || phone.name || phone.label || '',
       capabilities: Array.isArray(caps) ? caps : Object.keys(caps).filter(k => caps[k]),
       // A2P Compliance
       a2pStatus,
@@ -1972,11 +1972,11 @@ export class NotificationsService implements OnModuleInit {
       authToken?: string; // Twilio
       phoneNumber?: string; // Twilio
     },
-  ): Promise<{ success: boolean; error?: string; data?: any }> {
-    const baseUrl = 'https://sigcore-production.up.railway.app';
+  ): Promise<{ success: boolean; error?: string; data?: any; sigcoreAuthFailed?: boolean }> {
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
 
     if (provider === 'openphone') {
-      const endpoint = `${baseUrl}/api/integrations/openphone/connect`;
+      const endpoint = `${sigcoreUrl}/integrations/openphone/connect`;
       this.logger.log(`[connectProvider] Connecting OpenPhone via: ${endpoint}`);
 
       try {
@@ -1994,7 +1994,11 @@ export class NotificationsService implements OnModuleInit {
         if (!response.ok) {
           const errorText = await response.text();
           this.logger.error(`[connectProvider] OpenPhone connect failed: ${response.status} - ${errorText}`);
-          return { success: false, error: `Failed to connect OpenPhone: ${response.status}` };
+          // 401 means the Sigcore API key is invalid/expired — not an OpenPhone key problem.
+          if (response.status === 401) {
+            return { success: false, sigcoreAuthFailed: true, error: `Sigcore API key rejected (401). The stored key may be expired.` };
+          }
+          return { success: false, error: `Failed to connect OpenPhone: ${response.status} — ${errorText}` };
         }
 
         const result = await response.json();
@@ -2006,7 +2010,7 @@ export class NotificationsService implements OnModuleInit {
       }
     } else {
       // Twilio
-      const endpoint = `${baseUrl}/api/integrations/twilio`;
+      const endpoint = `${sigcoreUrl}/integrations/twilio`;
       this.logger.log(`[connectProvider] Connecting Twilio via: ${endpoint}`);
 
       try {
@@ -2028,7 +2032,10 @@ export class NotificationsService implements OnModuleInit {
         if (!response.ok) {
           const errorText = await response.text();
           this.logger.error(`[connectProvider] Twilio connect failed: ${response.status} - ${errorText}`);
-          return { success: false, error: `Failed to connect Twilio: ${response.status}` };
+          if (response.status === 401) {
+            return { success: false, sigcoreAuthFailed: true, error: `Sigcore API key rejected (401). The stored key may be expired.` };
+          }
+          return { success: false, error: `Failed to connect Twilio: ${response.status} — ${errorText}` };
         }
 
         const result = await response.json();
@@ -2181,38 +2188,46 @@ export class NotificationsService implements OnModuleInit {
 
     // 1. Use provided API key, or fall back to stored one, or fall back to app-level key
     let effectiveApiKey = apiKey;
+    let keySource = 'body';
     if (!effectiveApiKey) {
       const settings = await this.prisma.notificationSettings.findUnique({
         where: { savedAccountId },
         select: { sigcoreApiKey: true },
       });
       effectiveApiKey = settings?.sigcoreApiKey || null;
+      keySource = 'notificationSettings';
     }
 
     // Fall back to app-level SIGCORE_API_KEY (same key used by admin for pool phones)
     if (!effectiveApiKey) {
       effectiveApiKey = this.appSigcoreApiKey || null;
+      keySource = 'SIGCORE_API_KEY env';
     }
 
     if (!effectiveApiKey) {
       return { success: false, phoneNumbers: [], error: 'No API key configured. Contact your administrator.' };
     }
 
-    // 2. Validate the API key
-    const validation = await this.validateSigcoreApiKey(effectiveApiKey);
-    if (!validation.valid) {
-      return { success: false, phoneNumbers: [], error: 'Invalid API key. Please check your API key.' };
-    }
+    this.logger.log(`[connectSigcore] Using key source: ${keySource}, key prefix: ${effectiveApiKey.substring(0, 8)}...`);
 
-    // 3. Connect provider if specified
+    // 2. Connect provider if specified
     if (provider && providerCredentials) {
-      const providerResult = await this.connectProviderViaSigcore(effectiveApiKey, provider, providerCredentials);
+      let providerResult = await this.connectProviderViaSigcore(effectiveApiKey, provider, providerCredentials);
+
+      // If the stored API key is stale/expired (401), retry once with the app-level key.
+      if (!providerResult.success && providerResult.sigcoreAuthFailed && keySource === 'notificationSettings' && this.appSigcoreApiKey) {
+        this.logger.warn(`[connectSigcore] Stored key rejected (401), retrying with SIGCORE_API_KEY env fallback`);
+        effectiveApiKey = this.appSigcoreApiKey;
+        keySource = 'SIGCORE_API_KEY env (fallback)';
+        providerResult = await this.connectProviderViaSigcore(effectiveApiKey, provider, providerCredentials);
+      }
+
       if (!providerResult.success) {
         return { success: false, phoneNumbers: [], error: providerResult.error || `Failed to connect ${provider}` };
       }
     }
 
-    // 4. Create webhook for delivery status
+    // 3. Create webhook for delivery status
     const webhookUrl = `${webhookBaseUrl}/api/webhooks/sigcore/delivery-status`;
     const webhookResult = await this.createSigcoreWebhook(effectiveApiKey, webhookUrl);
 
@@ -2221,7 +2236,7 @@ export class NotificationsService implements OnModuleInit {
       // Continue anyway - webhook can be created manually later
     }
 
-    // 5. Store the provider, webhook ID, and Twilio phone number
+    // 4. Store the provider, webhook ID, and Twilio phone number
     const fromPhone = (provider === 'twilio' && providerCredentials?.phoneNumber) ? providerCredentials.phoneNumber : null;
     await this.prisma.notificationSettings.upsert({
       where: { savedAccountId },
@@ -2244,7 +2259,7 @@ export class NotificationsService implements OnModuleInit {
 
     this.logger.log(`[connectSigcore] Connected successfully. Provider: ${provider}, WebhookId: ${webhookResult.webhookId}`);
 
-    // 6. Fetch phone numbers for the connected provider
+    // 5. Fetch phone numbers for the connected provider
     let phoneNumbers: SigcorePhoneNumber[] = [];
     if (provider === 'openphone') {
       phoneNumbers = await this.fetchOpenPhoneNumbers(effectiveApiKey);
@@ -2269,7 +2284,10 @@ export class NotificationsService implements OnModuleInit {
    * Fetch phone numbers from OpenPhone via Sigcore conversations endpoint
    */
   private async fetchOpenPhoneNumbers(tenantApiKey: string): Promise<SigcorePhoneNumber[]> {
-    const endpoint = 'https://sigcore-production.up.railway.app/api/integrations/openphone/conversations?days=1';
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    // Use the dedicated phone-numbers endpoint so ALL configured numbers appear,
+    // not just those with recent conversations (conversations?days=1 missed inactive numbers).
+    const endpoint = `${sigcoreUrl}/integrations/openphone/numbers`;
     this.logger.log(`[fetchOpenPhoneNumbers] Fetching from: ${endpoint}`);
 
     try {
@@ -2292,7 +2310,6 @@ export class NotificationsService implements OnModuleInit {
       const result = await response.json();
       this.logger.log(`[fetchOpenPhoneNumbers] Result: ${JSON.stringify(result).substring(0, 500)}`);
 
-      // Extract phone numbers from conversations data
       const phones = result.data || result.phoneNumbers || result || [];
       return phones
         .map((phone: any) => this.mapSigcorePhoneNumber(phone))
