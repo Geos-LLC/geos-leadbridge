@@ -418,7 +418,7 @@ export class SigcoreService {
       phoneNumber?: string;
     },
   ): Promise<{ success: boolean; error?: string; data?: any }> {
-    const headers = this.buildTenantHeaders();
+    const headers = this.buildHeaders();
 
     if (provider === 'openphone') {
       const url = this.buildUrl('/integrations/openphone/connect');
@@ -461,7 +461,7 @@ export class SigcoreService {
    * Fetch phone numbers from admin's connected OpenPhone account
    */
   async adminFetchOpenPhoneNumbers(): Promise<any[]> {
-    const headers = this.buildTenantHeaders();
+    const headers = this.buildHeaders();
     const url = this.buildUrl('/integrations/openphone/numbers');
     this.logger.log(`[adminFetchOpenPhoneNumbers] Fetching from: ${url}`);
 
@@ -486,7 +486,7 @@ export class SigcoreService {
    * Fetch phone numbers from admin's connected Twilio account
    */
   async adminFetchTwilioNumbers(): Promise<any[]> {
-    const headers = this.buildTenantHeaders();
+    const headers = this.buildHeaders();
     const url = this.buildUrl('/integrations/twilio/phone-numbers');
     this.logger.log(`[adminFetchTwilioNumbers] Fetching from: ${url}`);
 
@@ -511,7 +511,7 @@ export class SigcoreService {
    * Disconnect admin's provider account via Sigcore
    */
   async adminDisconnectProvider(provider: 'openphone' | 'twilio'): Promise<{ success: boolean; error?: string }> {
-    const headers = this.buildTenantHeaders();
+    const headers = this.buildHeaders();
     const url = provider === 'openphone'
       ? this.buildUrl('/integrations/openphone/disconnect')
       : this.buildUrl('/integrations/twilio');
