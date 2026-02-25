@@ -1972,7 +1972,7 @@ export class NotificationsService implements OnModuleInit {
       authToken?: string; // Twilio
       phoneNumber?: string; // Twilio
     },
-  ): Promise<{ success: boolean; error?: string; data?: any }> {
+  ): Promise<{ success: boolean; error?: string; data?: any; sigcoreAuthFailed?: boolean }> {
     const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
 
     if (provider === 'openphone') {
@@ -1994,6 +1994,10 @@ export class NotificationsService implements OnModuleInit {
         if (!response.ok) {
           const errorText = await response.text();
           this.logger.error(`[connectProvider] OpenPhone connect failed: ${response.status} - ${errorText}`);
+          // 401 means the Sigcore API key is invalid/expired — not an OpenPhone key problem.
+          if (response.status === 401) {
+            return { success: false, sigcoreAuthFailed: true, error: `Sigcore API key rejected (401). The stored key may be expired.` };
+          }
           return { success: false, error: `Failed to connect OpenPhone: ${response.status} — ${errorText}` };
         }
 
@@ -2028,6 +2032,9 @@ export class NotificationsService implements OnModuleInit {
         if (!response.ok) {
           const errorText = await response.text();
           this.logger.error(`[connectProvider] Twilio connect failed: ${response.status} - ${errorText}`);
+          if (response.status === 401) {
+            return { success: false, sigcoreAuthFailed: true, error: `Sigcore API key rejected (401). The stored key may be expired.` };
+          }
           return { success: false, error: `Failed to connect Twilio: ${response.status} — ${errorText}` };
         }
 
@@ -2205,7 +2212,16 @@ export class NotificationsService implements OnModuleInit {
 
     // 2. Connect provider if specified
     if (provider && providerCredentials) {
-      const providerResult = await this.connectProviderViaSigcore(effectiveApiKey, provider, providerCredentials);
+      let providerResult = await this.connectProviderViaSigcore(effectiveApiKey, provider, providerCredentials);
+
+      // If the stored API key is stale/expired (401), retry once with the app-level key.
+      if (!providerResult.success && providerResult.sigcoreAuthFailed && keySource === 'notificationSettings' && this.appSigcoreApiKey) {
+        this.logger.warn(`[connectSigcore] Stored key rejected (401), retrying with SIGCORE_API_KEY env fallback`);
+        effectiveApiKey = this.appSigcoreApiKey;
+        keySource = 'SIGCORE_API_KEY env (fallback)';
+        providerResult = await this.connectProviderViaSigcore(effectiveApiKey, provider, providerCredentials);
+      }
+
       if (!providerResult.success) {
         return { success: false, phoneNumbers: [], error: providerResult.error || `Failed to connect ${provider}` };
       }
