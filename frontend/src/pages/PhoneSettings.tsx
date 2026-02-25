@@ -24,7 +24,6 @@ export function PhoneSettings() {
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [sigcoreConnected, setSigcoreConnected] = useState(false);
-  const [sigcoreProvider, setSigcoreProvider] = useState<string | null>(null);
   const [ownPhoneNumbers, setOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>([]);
   const [loadingConnectionStatus, setLoadingConnectionStatus] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
@@ -77,7 +76,6 @@ export function PhoneSettings() {
       const settingsRes = await notificationsApi.getSettings(accountId);
       const connected = !!settingsRes.settings?.sigcoreConnected;
       setSigcoreConnected(connected);
-      setSigcoreProvider(settingsRes.settings?.sigcoreProvider || null);
       if (connected) {
         const { phoneNumbers } = await notificationsApi.getSigcorePhoneNumbers(accountId);
         setOwnPhoneNumbers(phoneNumbers);
@@ -106,7 +104,6 @@ export function PhoneSettings() {
       );
       if (result.success) {
         setSigcoreConnected(true);
-        setSigcoreProvider('openphone');
         setOwnPhoneNumbers(result.phoneNumbers);
         setOpenPhoneApiKey('');
       } else {
@@ -125,7 +122,6 @@ export function PhoneSettings() {
     try {
       await notificationsApi.disconnectSigcore(selectedAccountId);
       setSigcoreConnected(false);
-      setSigcoreProvider(null);
       setOwnPhoneNumbers([]);
     } catch (err: any) {
       setConnectError(err.message || 'Failed to disconnect');

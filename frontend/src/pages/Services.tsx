@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, CheckCircle, X, Clock,
-  Bot, Pencil, Phone, Send, ChevronUp, Trash2, Save, Link2,
+  Bot, Pencil, Phone, Send, ChevronUp, Trash2, Save,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
