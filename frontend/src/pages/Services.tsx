@@ -156,7 +156,7 @@ export function Services() {
     templateId?: string;
     templateName?: string;
     content: string;
-    type: 'autoReply' | 'alert' | 'cc-whisper' | 'cc-greeting' | 'cc-voicemail';
+    type: 'autoReply' | 'alert' | 'cc-whisper' | 'cc-greeting' | 'cc-voicemail' | 'ct';
   } | null>(null);
 
   // Instant Call Connect state
@@ -214,12 +214,19 @@ export function Services() {
   const [ctStopOnReply, setCtStopOnReply] = useState(true);
   const [ctSaving, setCtSaving] = useState(false);
   const [ctFromPhone, setCtFromPhone] = useState('');
-  const [ctTestPhone, setCtTestPhone] = useState('');
+  const [ctTestPhone, setCtTestPhone] = useState(() => localStorage.getItem('ct_test_phone') || '');
   const [ctTestStatus, setCtTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
-  const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string } | null>(null);
+  const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string; fromPhone: string } | null>(null);
+  const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>('');
+
+  // Derived: unsaved Lead Alert changes (only alertToPhone is pending — from-phone saves immediately)
+  const alertDirty = !!leadAlertRule && alertToPhone !== (leadAlertRule.toPhone || '');
 
   // Derived: unsaved CT changes
-  const ctDirty = ctSavedSnapshot !== null && ctAutoReplyTemplate !== ctSavedSnapshot.autoReplyTemplate;
+  const ctDirty = ctSavedSnapshot !== null && (
+    ctAutoReplyTemplate !== ctSavedSnapshot.autoReplyTemplate ||
+    ctFromPhone !== ctSavedSnapshot.fromPhone
+  );
 
   // Derived: unsaved CC changes
   const ccDirty = ccSavedSnapshot !== null && (
@@ -320,7 +327,6 @@ export function Services() {
         setCtFollowUps(ctRes.followUps);
         setCtStopOnReply(ctRes.stopOnCustomerReply);
         setCtFromPhone(ctRes.fromPhone || poolRes.phoneNumbers[0]?.phoneNumber || '');
-        setCtSavedSnapshot({ autoReplyTemplate: ctRes.autoReplyTemplate });
       }
 
       // Collect ALL new_lead automation rules
@@ -341,21 +347,25 @@ export function Services() {
       const DEFAULT_CC_WHISPER = 'Hi {customerName}, you have a new lead for {category}. Press any key to connect with the customer.';
       const DEFAULT_CC_GREETING = 'Hi {customerName}! Thanks for your inquiry about {category}. We\'re connecting you with a specialist right now. Please hold for just a moment.';
       const DEFAULT_CC_VOICEMAIL = 'Hi {customerName}, this is {accountName}. We tried to reach you about your {category} request. Please call us back and we\'ll be happy to help!';
+      const DEFAULT_CT_AUTO_REPLY = 'Hi {customerName}, this is {accountName}. We just received your request for {category}. When would be a good time to call you?';
 
       let allTemplates: MessageTemplate[] = [...templatesRes.templates];
       const whisperExists = allTemplates.find(t => t.name === 'CC - Agent Whisper');
       const greetingExists = allTemplates.find(t => t.name === 'CC - Lead Greeting');
       const voicemailExists = allTemplates.find(t => t.name === 'CC - Voicemail TTS');
+      const ctAutoReplyExists = allTemplates.find(t => t.name === 'CT - Auto Reply');
 
-      if (!whisperExists || !greetingExists || !voicemailExists) {
-        const [whisperRes, greetingRes, voicemailRes] = await Promise.all([
+      if (!whisperExists || !greetingExists || !voicemailExists || !ctAutoReplyExists) {
+        const [whisperRes, greetingRes, voicemailRes, ctAutoReplyRes] = await Promise.all([
           whisperExists ? Promise.resolve({ template: whisperExists }) : templatesApi.createTemplate('CC - Agent Whisper', DEFAULT_CC_WHISPER),
           greetingExists ? Promise.resolve({ template: greetingExists }) : templatesApi.createTemplate('CC - Lead Greeting', DEFAULT_CC_GREETING),
           voicemailExists ? Promise.resolve({ template: voicemailExists }) : templatesApi.createTemplate('CC - Voicemail TTS', DEFAULT_CC_VOICEMAIL),
+          ctAutoReplyExists ? Promise.resolve({ template: ctAutoReplyExists }) : templatesApi.createTemplate('CT - Auto Reply', DEFAULT_CT_AUTO_REPLY),
         ]);
         if (!whisperExists) allTemplates = [...allTemplates, whisperRes.template];
         if (!greetingExists) allTemplates = [...allTemplates, greetingRes.template];
         if (!voicemailExists) allTemplates = [...allTemplates, voicemailRes.template];
+        if (!ctAutoReplyExists) allTemplates = [...allTemplates, ctAutoReplyRes.template];
       }
 
       setTemplates(allTemplates);
@@ -378,6 +388,18 @@ export function Services() {
       setCcWhisperTemplateId(allTemplates.find(t => t.content === whisperContent)?.id || whisperTpl?.id || null);
       setCcGreetingTemplateId(allTemplates.find(t => t.content === greetingContent)?.id || greetingTpl?.id || null);
       setCcVoicemailTemplateId(allTemplates.find(t => t.content === voicemailContent)?.id || voicemailTpl?.id || null);
+
+      // Pre-select CT auto-reply template: match saved content, fall back to default by name
+      const ctTpl = allTemplates.find(t => t.name === 'CT - Auto Reply');
+      const ctResolvedFromPhone = ctRes?.fromPhone || poolRes.phoneNumbers[0]?.phoneNumber || '';
+      const ctContent = ctRes?.autoReplyTemplate || ctTpl?.content || '';
+      if (!ctRes && ctTpl) {
+        setCtAutoReplyTemplate(ctTpl.content);
+        setCtFromPhone(ctResolvedFromPhone);
+      }
+      setCtSelectedTemplateId(allTemplates.find(t => t.content === ctContent)?.id || ctTpl?.id || '');
+      // Initialize CT snapshot for dirty tracking (always, same as CC)
+      setCtSavedSnapshot({ autoReplyTemplate: ctContent, fromPhone: ctResolvedFromPhone });
 
       // Initialize CC snapshot for dirty tracking
       const snapshotWhisper = ccs?.agentWhisperMessage || whisperTpl?.content || '';
@@ -635,7 +657,7 @@ export function Services() {
         stopOnCustomerReply: ctStopOnReply,
       });
       showSuccess('Customer Texting settings saved');
-      setCtSavedSnapshot({ autoReplyTemplate: ctAutoReplyTemplate });
+      setCtSavedSnapshot({ autoReplyTemplate: ctAutoReplyTemplate, fromPhone: ctFromPhone });
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Failed to save Customer Texting settings');
     } finally {
@@ -643,9 +665,15 @@ export function Services() {
     }
   }
 
+  function discardAlertChanges() {
+    setAlertToPhone(leadAlertRule?.toPhone || '');
+  }
+
   function discardCtChanges() {
     if (!ctSavedSnapshot) return;
     setCtAutoReplyTemplate(ctSavedSnapshot.autoReplyTemplate);
+    setCtFromPhone(ctSavedSnapshot.fromPhone);
+    setCtSelectedTemplateId(templates.find(t => t.content === ctSavedSnapshot.autoReplyTemplate)?.id || '');
   }
 
   async function doTestCall() {
@@ -793,24 +821,8 @@ export function Services() {
 
   // --- Customer Texting Handlers ---
 
-  async function saveCtFromPhone(fromPhone: string) {
-    setCtFromPhone(fromPhone);
-    if (!selectedAccountId) return;
-    setCtSaving(true);
-    try {
-      await notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
-        enabled: ctEnabled,
-        fromPhone: fromPhone || undefined,
-        autoReplyTemplate: ctAutoReplyTemplate,
-        followUps: ctFollowUps,
-        stopOnCustomerReply: ctStopOnReply,
-      });
-      showSuccess('Send from number updated');
-    } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Failed to update send from number');
-    } finally {
-      setCtSaving(false);
-    }
+  function saveCtFromPhone(fromPhone: string) {
+    setCtFromPhone(fromPhone); // tracked in ctDirty — saved when user clicks Save Settings
   }
 
   async function sendCtTest() {
@@ -818,7 +830,7 @@ export function Services() {
     setCtTestStatus('sending');
     setError(null);
     try {
-      const result = await notificationsApi.sendTest(selectedAccountId, undefined, ctTestPhone);
+      const result = await notificationsApi.sendTest(selectedAccountId, undefined, ctTestPhone, ctAutoReplyTemplate || undefined);
       if (result.success) {
         setCtTestStatus('delivered');
         setTimeout(() => setCtTestStatus('idle'), 4000);
@@ -852,6 +864,8 @@ export function Services() {
         setCcLeadGreetingMessage(template.content); setCcGreetingTemplateId(template.id);
       } else if (templateEditor.type === 'cc-voicemail') {
         setCcVoicemailMessage(template.content); setCcVoicemailTemplateId(template.id);
+      } else if (templateEditor.type === 'ct') {
+        setCtAutoReplyTemplate(template.content); setCtSelectedTemplateId(template.id);
       }
       setTemplateEditor(null);
       showSuccess('Template created');
@@ -880,6 +894,7 @@ export function Services() {
       if (type === 'cc-whisper') setCcAgentWhisperMessage(template.content);
       else if (type === 'cc-greeting') setCcLeadGreetingMessage(template.content);
       else if (type === 'cc-voicemail') setCcVoicemailMessage(template.content);
+      else if (type === 'ct') setCtAutoReplyTemplate(template.content);
       setTemplateEditor(null);
       showSuccess('Template saved');
     } catch (err: any) {
@@ -905,6 +920,8 @@ export function Services() {
         setCcLeadGreetingMessage(template.content); setCcGreetingTemplateId(template.id);
       } else if (templateEditor.type === 'cc-voicemail') {
         setCcVoicemailMessage(template.content); setCcVoicemailTemplateId(template.id);
+      } else if (templateEditor.type === 'ct') {
+        setCtAutoReplyTemplate(template.content); setCtSelectedTemplateId(template.id);
       }
       setTemplateEditor(null);
       showSuccess('Saved as new template');
@@ -1287,16 +1304,30 @@ export function Services() {
                         </span>
                       )}
                     </div>
-                    <div className="flex justify-end">
-                      <button
-                        onClick={() => { if (leadAlertRule && alertToPhone !== leadAlertRule.toPhone) saveAlertToPhone(alertToPhone); }}
-                        disabled={saving || !alertToPhone || alertToPhone === leadAlertRule.toPhone}
-                        className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                      >
-                        {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                        Save Changes
-                      </button>
-                    </div>
+                    {alertDirty && (
+                      <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+                        <div className="flex items-center gap-2 text-amber-700">
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          <span className="text-sm font-medium">You have unsaved changes</span>
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button
+                            onClick={discardAlertChanges}
+                            className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                          >
+                            Discard
+                          </button>
+                          <button
+                            onClick={() => saveAlertToPhone(alertToPhone)}
+                            disabled={saving || !alertToPhone}
+                            className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+                          >
+                            {saving && <Loader2 className="w-3 h-3 animate-spin" />}
+                            Save Changes
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -1392,25 +1423,48 @@ export function Services() {
               <div>
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Auto-Reply Message</label>
                 <p className="text-xs text-slate-400 mb-2">Sent immediately when a new lead arrives.</p>
-                <textarea
-                  value={ctAutoReplyTemplate}
-                  onChange={e => setCtAutoReplyTemplate(e.target.value)}
-                  rows={3}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400 resize-y"
-                  placeholder="Hi {customerName}, this is {accountName}…"
-                />
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {['{customerName}', '{accountName}', '{category}', '{city}', '{state}'].map(v => (
-                    <button
-                      key={v}
-                      type="button"
-                      onClick={() => setCtAutoReplyTemplate(prev => prev + v)}
-                      className="px-2 py-0.5 text-[11px] font-mono bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 rounded-md border border-slate-200 transition-colors"
-                    >
-                      {v}
-                    </button>
+                <select
+                  value={ctSelectedTemplateId}
+                  onChange={e => {
+                    if (e.target.value === '__create_new__') {
+                      setTemplateEditor({ mode: 'create', ruleId: '', content: '', type: 'ct' });
+                    } else {
+                      const tpl = templates.find(t => t.id === e.target.value);
+                      if (tpl) {
+                        setCtSelectedTemplateId(tpl.id);
+                        setCtAutoReplyTemplate(tpl.content);
+                      }
+                    }
+                  }}
+                  className="w-full rounded-xl p-3 text-sm font-medium bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                >
+                  <option value="">Select template</option>
+                  {templates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
                   ))}
-                </div>
+                  <option value="__create_new__">+ Create New Template</option>
+                </select>
+                {ctAutoReplyTemplate && (
+                  <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                    {ctAutoReplyTemplate}
+                    <button
+                      type="button"
+                      onClick={() => setTemplateEditor({
+                        mode: ctSelectedTemplateId ? 'service-edit' : 'create',
+                        ruleId: '',
+                        ...(ctSelectedTemplateId && {
+                          templateId: ctSelectedTemplateId,
+                          templateName: templates.find(t => t.id === ctSelectedTemplateId)?.name || 'template',
+                        }),
+                        content: ctAutoReplyTemplate,
+                        type: 'ct',
+                      })}
+                      className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-emerald-600"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Test SMS */}
@@ -1420,10 +1474,17 @@ export function Services() {
                   <input
                     type="tel"
                     value={ctTestPhone}
-                    onChange={e => setCtTestPhone(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                    onChange={e => {
+                      const v = e.target.value.replace(/[^\d+\s\-()]/g, '');
+                      setCtTestPhone(v);
+                      localStorage.setItem('ct_test_phone', v);
+                    }}
                     onBlur={e => {
                       const formatted = formatPhoneE164(e.target.value);
-                      if (formatted !== e.target.value) setCtTestPhone(formatted);
+                      if (formatted !== e.target.value) {
+                        setCtTestPhone(formatted);
+                        localStorage.setItem('ct_test_phone', formatted);
+                      }
                     }}
                     placeholder="+15555550100"
                     className={`flex-1 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${

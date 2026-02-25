@@ -151,13 +151,14 @@ export class NotificationsController {
   async sendTestNotification(
     @CurrentUser() user: any,
     @Param('savedAccountId') savedAccountId: string,
-    @Body() body?: { ruleId?: string; toPhone?: string },
+    @Body() body?: { ruleId?: string; toPhone?: string; template?: string },
   ) {
     const result = await this.notificationsService.sendTestNotification(
       user.id,
       savedAccountId,
       body?.ruleId,
       body?.toPhone,
+      body?.template,
     );
 
     if (result.success) {
