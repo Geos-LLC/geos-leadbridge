@@ -27,6 +27,8 @@ export function PhoneSettings() {
   const [ownPhoneNumbers, setOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>([]);
   const [loadingConnectionStatus, setLoadingConnectionStatus] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [sigcoreProvisioned, setSigcoreProvisioned] = useState(false);
+  const [provisioning, setProvisioning] = useState(false);
 
   useEffect(() => {
     loadAccounts();
@@ -75,7 +77,9 @@ export function PhoneSettings() {
     try {
       const settingsRes = await notificationsApi.getSettings(accountId);
       const connected = !!settingsRes.settings?.sigcoreConnected;
+      const provisioned = !!settingsRes.settings?.sigcoreProvisioned;
       setSigcoreConnected(connected);
+      setSigcoreProvisioned(provisioned);
       if (connected) {
         const { phoneNumbers } = await notificationsApi.getSigcorePhoneNumbers(accountId);
         setOwnPhoneNumbers(phoneNumbers);
@@ -127,6 +131,19 @@ export function PhoneSettings() {
       setConnectError(err.message || 'Failed to disconnect');
     } finally {
       setDisconnecting(false);
+    }
+  }
+
+  async function handleProvision() {
+    setProvisioning(true);
+    setConnectError(null);
+    try {
+      await notificationsApi.provisionSigcoreWorkspace(selectedAccountId);
+      setSigcoreProvisioned(true);
+    } catch (err: any) {
+      setConnectError(err.message || 'Failed to enable phone workspace');
+    } finally {
+      setProvisioning(false);
     }
   }
 
@@ -327,6 +344,21 @@ export function PhoneSettings() {
             >
               {disconnecting ? <Loader2 size={16} className="animate-spin" /> : <Unplug size={16} />}
               {disconnecting ? 'Disconnecting...' : 'Disconnect QUO'}
+            </button>
+          </div>
+        ) : !sigcoreProvisioned ? (
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-4">
+            <div>
+              <h4 className="font-semibold text-slate-900 mb-1">Enable Phone Workspace</h4>
+              <p className="text-slate-500 text-sm">Set up your isolated phone workspace before connecting QUO.</p>
+            </div>
+            <button
+              onClick={handleProvision}
+              disabled={provisioning}
+              className="px-5 py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-200 transition-all"
+            >
+              {provisioning ? <Loader2 size={16} className="animate-spin" /> : <Building2 size={16} />}
+              {provisioning ? 'Setting up...' : 'Enable Phone Workspace'}
             </button>
           </div>
         ) : (

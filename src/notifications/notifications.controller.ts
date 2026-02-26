@@ -14,6 +14,9 @@ import {
   Query,
   UseGuards,
   Req,
+  HttpException,
+  HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -28,6 +31,8 @@ import {
 @Controller('v1/notifications')
 @UseGuards(JwtAuthGuard)
 export class NotificationsController {
+  private readonly logger = new Logger(NotificationsController.name);
+
   constructor(private notificationsService: NotificationsService) {}
 
   /**
@@ -56,6 +61,34 @@ export class NotificationsController {
       success: true,
       settings,
     };
+  }
+
+  /**
+   * Provision a Sigcore tenant workspace for a saved account.
+   * Idempotent — safe to call multiple times; returns existing tenant key if already provisioned.
+   * POST /v1/notifications/sigcore/provision/:savedAccountId
+   */
+  @Post('sigcore/provision/:savedAccountId')
+  async provisionSigcoreWorkspace(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    try {
+      const result = await this.notificationsService.ensureSigcoreTenantProvisioned(
+        user.id,
+        savedAccountId,
+      );
+      return {
+        success: true,
+        data: { provisioned: true, tenantId: result.tenantId },
+      };
+    } catch (err: any) {
+      this.logger.error(`[provisionSigcoreWorkspace] Failed: ${err.message}`, err.stack);
+      throw new HttpException(
+        err.message || 'Failed to provision Sigcore workspace',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
   }
 
   /**

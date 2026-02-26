@@ -131,7 +131,8 @@ export interface NotificationSettingsResponse {
   sigcoreApiKey: string | null; // Will be masked in response
   sigcoreFromPhone: string | null;
   sigcoreWorkspaceId: string | null;
-  sigcoreConnected: boolean; // Whether API key + provider are configured
+  sigcoreConnected: boolean; // Whether provider is connected and tenant is provisioned
+  sigcoreProvisioned: boolean; // Whether Sigcore tenant has been provisioned for this account
   sigcoreProvider: string | null; // 'openphone' | 'twilio' | null
   template: string;
   quietHoursStart: string | null;
@@ -437,9 +438,9 @@ export class NotificationsService implements OnModuleInit {
       return { success: false, error: 'No SMS settings configured. Set up SMS in Notification Settings.' };
     }
 
-    const apiKey = this.appSigcoreApiKey || settings.sigcoreApiKey;
+    const apiKey = settings.sigcoreApiKey;
     if (!apiKey) {
-      return { success: false, error: 'No Sigcore API key configured' };
+      return { success: false, error: 'No Sigcore API key configured. Please provision your phone workspace first.' };
     }
 
     // Resolve fromPhone: settings phone or pool phone
@@ -895,8 +896,8 @@ export class NotificationsService implements OnModuleInit {
       return;
     }
 
-    if (!this.appSigcoreApiKey && !settings.sigcoreApiKey) {
-      this.logger.warn(`No Sigcore API key configured for account ${savedAccountId} (no app-level or account-level key). Connect Sigcore in SMS Alerts settings.`);
+    if (!settings.sigcoreApiKey) {
+      this.logger.warn(`No Sigcore API key configured for account ${savedAccountId}. Provision Sigcore workspace in SMS Alerts settings.`);
       return;
     }
 
@@ -1056,8 +1057,8 @@ export class NotificationsService implements OnModuleInit {
       return;
     }
 
-    if (!this.appSigcoreApiKey && !settings.sigcoreApiKey) {
-      this.logger.warn(`No Sigcore API key configured for account ${savedAccountId} (no app-level or account-level key). Connect Sigcore in SMS Alerts settings.`);
+    if (!settings.sigcoreApiKey) {
+      this.logger.warn(`No Sigcore API key configured for account ${savedAccountId}. Provision Sigcore workspace in SMS Alerts settings.`);
       return;
     }
 
@@ -1149,11 +1150,10 @@ export class NotificationsService implements OnModuleInit {
 
     // Send via Sigcore
     try {
-      // Resolve API key: use app-level SIGCORE_API_KEY (pool phones), fall back to tenant's own key
-      const apiKey = this.appSigcoreApiKey || settings.sigcoreApiKey;
+      const apiKey = settings.sigcoreApiKey;
       if (!apiKey) {
-        this.logger.error(`No Sigcore API key for rule ${ruleName} - neither app nor tenant key configured`);
-        throw new Error('No Sigcore API key configured');
+        this.logger.error(`No Sigcore API key for rule ${ruleName} - tenant key not configured`);
+        throw new Error('No Sigcore API key configured. Please provision your phone workspace first.');
       }
 
       const result = await this.sendViaSigcore({
@@ -1277,11 +1277,10 @@ export class NotificationsService implements OnModuleInit {
       this.logger.log(`[sendTestNotification] Auto-fixed enabled=false for account ${savedAccountId}`);
     }
 
-    // Resolve API key: use app-level SIGCORE_API_KEY (pool phones), fall back to tenant's own key
-    const sigcoreApiKey = this.appSigcoreApiKey || settings.sigcoreApiKey;
-    this.logger.log(`[sendTestNotification] Using ${this.appSigcoreApiKey ? 'app-level' : 'tenant'} Sigcore API key (key starts: ${sigcoreApiKey?.substring(0, 8)}...)`);
+    const sigcoreApiKey = settings.sigcoreApiKey;
+    this.logger.log(`[sendTestNotification] Using tenant Sigcore API key (key starts: ${sigcoreApiKey?.substring(0, 8)}...)`);
     if (!sigcoreApiKey) {
-      return { success: false, error: 'No Sigcore API key configured. Contact your administrator.' };
+      return { success: false, error: 'No Sigcore API key configured. Please provision your phone workspace first.' };
     }
 
     // Get rule if specified
@@ -1852,8 +1851,7 @@ export class NotificationsService implements OnModuleInit {
       return [];
     }
 
-    // Resolve API key: stored key or app-level fallback
-    const effectiveApiKey = settings.sigcoreApiKey || this.appSigcoreApiKey;
+    const effectiveApiKey = settings.sigcoreApiKey;
     if (!effectiveApiKey) {
       this.logger.warn(`[getSigcorePhoneNumbers] No API key found for account ${savedAccountId}`);
       return [];
@@ -2123,6 +2121,74 @@ export class NotificationsService implements OnModuleInit {
   }
 
   /**
+   * Provision a Sigcore tenant for a saved account (idempotent).
+   * Uses the workspace-level SIGCORE_API_KEY to call Sigcore's provision endpoint.
+   * Stores the resulting tenant API key in NotificationSettings for future use.
+   */
+  async ensureSigcoreTenantProvisioned(
+    userId: string,
+    savedAccountId: string,
+  ): Promise<{ apiKey: string; tenantId: string }> {
+    // Check if already provisioned
+    let settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+    });
+
+    if (settings?.sigcoreTenantId && settings?.sigcoreApiKey) {
+      this.logger.log(`[ensureSigcoreTenantProvisioned] Already provisioned for account ${savedAccountId} (tenantId: ${settings.sigcoreTenantId})`);
+      return { apiKey: settings.sigcoreApiKey, tenantId: settings.sigcoreTenantId };
+    }
+
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+
+    if (!platformKey) {
+      throw new Error('SIGCORE_API_KEY not configured. Cannot provision Sigcore tenant.');
+    }
+
+    this.logger.log(`[ensureSigcoreTenantProvisioned] Provisioning Sigcore tenant for account ${savedAccountId}`);
+
+    const resp = await fetch(`${sigcoreUrl}/tenants/provision`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': platformKey,
+      },
+      body: JSON.stringify({
+        externalTenantId: savedAccountId,
+        displayName: `Account ${savedAccountId}`,
+      }),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Sigcore provision failed (${resp.status}): ${text}`);
+    }
+
+    const { data } = await resp.json();
+
+    // Upsert settings with the new tenant credentials
+    settings = await this.prisma.notificationSettings.upsert({
+      where: { savedAccountId },
+      update: {
+        sigcoreApiKey: data.apiKey,
+        sigcoreTenantId: data.tenantId,
+        sigcoreProvisionedAt: new Date(),
+      },
+      create: {
+        savedAccountId,
+        sigcoreApiKey: data.apiKey,
+        sigcoreTenantId: data.tenantId,
+        sigcoreProvisionedAt: new Date(),
+        enabled: false,
+      },
+    });
+
+    this.logger.log(`[ensureSigcoreTenantProvisioned] Provisioned tenant ${data.tenantId} for account ${savedAccountId}`);
+    return { apiKey: data.apiKey, tenantId: data.tenantId };
+  }
+
+  /**
    * Save/validate API key separately (one-time setup)
    */
   async saveApiKey(
@@ -2136,35 +2202,12 @@ export class NotificationsService implements OnModuleInit {
       return { success: false, error: 'Invalid API key. Please check your key and try again.' };
     }
 
-    // Save to this account
+    // Save to this account only (tenant isolation: each account has its own key)
     await this.prisma.notificationSettings.upsert({
       where: { savedAccountId },
       update: { sigcoreApiKey: apiKey, enabled: true },
       create: { savedAccountId, sigcoreApiKey: apiKey, enabled: true },
     });
-
-    // Propagate to other accounts of the same user
-    const savedAccount = await this.prisma.savedAccount.findUnique({
-      where: { id: savedAccountId },
-      select: { userId: true },
-    });
-
-    if (savedAccount?.userId) {
-      const otherAccounts = await this.prisma.savedAccount.findMany({
-        where: { userId: savedAccount.userId, id: { not: savedAccountId } },
-        include: { notificationSettings: true },
-      });
-
-      for (const other of otherAccounts) {
-        if (other.notificationSettings && !other.notificationSettings.sigcoreApiKey) {
-          await this.prisma.notificationSettings.update({
-            where: { id: other.notificationSettings.id },
-            data: { sigcoreApiKey: apiKey },
-          });
-          this.logger.log(`[saveApiKey] Propagated API key to account ${other.id}`);
-        }
-      }
-    }
 
     return { success: true };
   }
@@ -2186,41 +2229,25 @@ export class NotificationsService implements OnModuleInit {
   ): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[]; error?: string }> {
     this.logger.log(`[connectSigcore] Connecting account ${savedAccountId} with provider ${provider || 'none'}`);
 
-    // 1. Use provided API key, or fall back to stored one, or fall back to app-level key
+    // 1. Use provided API key, or fall back to stored tenant key. App-level key is NOT used here.
     let effectiveApiKey = apiKey;
-    let keySource = 'body';
     if (!effectiveApiKey) {
       const settings = await this.prisma.notificationSettings.findUnique({
         where: { savedAccountId },
         select: { sigcoreApiKey: true },
       });
       effectiveApiKey = settings?.sigcoreApiKey || null;
-      keySource = 'notificationSettings';
-    }
-
-    // Fall back to app-level SIGCORE_API_KEY (same key used by admin for pool phones)
-    if (!effectiveApiKey) {
-      effectiveApiKey = this.appSigcoreApiKey || null;
-      keySource = 'SIGCORE_API_KEY env';
     }
 
     if (!effectiveApiKey) {
-      return { success: false, phoneNumbers: [], error: 'No API key configured. Contact your administrator.' };
+      return { success: false, phoneNumbers: [], error: 'No API key configured. Please provision your phone workspace first.' };
     }
 
-    this.logger.log(`[connectSigcore] Using key source: ${keySource}, key prefix: ${effectiveApiKey.substring(0, 8)}...`);
+    this.logger.log(`[connectSigcore] Using tenant API key prefix: ${effectiveApiKey.substring(0, 8)}...`);
 
     // 2. Connect provider if specified
     if (provider && providerCredentials) {
-      let providerResult = await this.connectProviderViaSigcore(effectiveApiKey, provider, providerCredentials);
-
-      // If the stored API key is stale/expired (401), retry once with the app-level key.
-      if (!providerResult.success && providerResult.sigcoreAuthFailed && keySource === 'notificationSettings' && this.appSigcoreApiKey) {
-        this.logger.warn(`[connectSigcore] Stored key rejected (401), retrying with SIGCORE_API_KEY env fallback`);
-        effectiveApiKey = this.appSigcoreApiKey;
-        keySource = 'SIGCORE_API_KEY env (fallback)';
-        providerResult = await this.connectProviderViaSigcore(effectiveApiKey, provider, providerCredentials);
-      }
+      const providerResult = await this.connectProviderViaSigcore(effectiveApiKey, provider, providerCredentials);
 
       if (!providerResult.success) {
         return { success: false, phoneNumbers: [], error: providerResult.error || `Failed to connect ${provider}` };
@@ -2311,9 +2338,21 @@ export class NotificationsService implements OnModuleInit {
       this.logger.log(`[fetchOpenPhoneNumbers] Result: ${JSON.stringify(result).substring(0, 500)}`);
 
       const phones = result.data || result.phoneNumbers || result || [];
+      // Deduplicate by id first, then by phoneNumber, to guard against the /numbers
+      // endpoint returning the same number in multiple contexts (e.g. shared phone numbers
+      // across OpenPhone users, or multiple integrations returning overlapping numbers).
+      const seenIds = new Set<string>();
+      const seenNumbers = new Set<string>();
       return phones
         .map((phone: any) => this.mapSigcorePhoneNumber(phone))
-        .filter((p: any) => p.phoneNumber && p.phoneNumber.length > 5);
+        .filter((p: any) => {
+          if (!p.phoneNumber || p.phoneNumber.length <= 5) return false;
+          if (seenIds.has(p.id)) return false;
+          if (seenNumbers.has(p.phoneNumber)) return false;
+          seenIds.add(p.id);
+          seenNumbers.add(p.phoneNumber);
+          return true;
+        });
     } catch (error: any) {
       this.logger.error(`[fetchOpenPhoneNumbers] Error: ${error.message}`);
       return [];
@@ -2334,8 +2373,7 @@ export class NotificationsService implements OnModuleInit {
       return { success: true }; // Already disconnected
     }
 
-    // Resolve API key: stored key or app-level fallback
-    const effectiveApiKey = settings.sigcoreApiKey || this.appSigcoreApiKey;
+    const effectiveApiKey = settings.sigcoreApiKey;
 
     // 1. Disconnect provider integration via Sigcore API
     if (effectiveApiKey && settings.sigcoreProvider) {
@@ -2571,7 +2609,7 @@ export class NotificationsService implements OnModuleInit {
     // Register inbound SMS webhook with Sigcore (if not already registered)
     if (!settings.inboundSmsWebhookId) {
       try {
-        const apiKey = this.appSigcoreApiKey || settings.sigcoreApiKey;
+        const apiKey = settings.sigcoreApiKey;
         if (apiKey) {
           const appBaseUrl = this.configService.get<string>('APP_BASE_URL', 'https://leadbridge360.com');
           const webhookUrl = `${appBaseUrl}/api/webhooks/sigcore/inbound-sms?accountId=${savedAccountId}`;
@@ -2688,7 +2726,8 @@ export class NotificationsService implements OnModuleInit {
       sigcoreApiKey: maskedApiKey,
       sigcoreFromPhone: settings.sigcoreFromPhone,
       sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
-      sigcoreConnected: !!settings.sigcoreApiKey && !!settings.sigcoreProvider,
+      sigcoreConnected: !!settings.sigcoreTenantId && !!settings.sigcoreProvider,
+      sigcoreProvisioned: !!settings.sigcoreTenantId,
       sigcoreProvider: settings.sigcoreProvider || null,
       template: settings.template,
       quietHoursStart: settings.quietHoursStart,
