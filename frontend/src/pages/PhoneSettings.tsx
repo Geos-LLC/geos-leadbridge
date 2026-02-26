@@ -34,6 +34,7 @@ export function PhoneSettings() {
   const [sigcoreFromPhone, setSigcoreFromPhone] = useState<string | null>(null);
   const [sigcoreProvider, setSigcoreProvider] = useState<string | null>(null);
   const [searchAreaCode, setSearchAreaCode] = useState('');
+  const [searchLocality, setSearchLocality] = useState('');
   const [searchLoading, setSearchLoading] = useState(false);
   const [availableNumbers, setAvailableNumbers] = useState<AvailablePhoneNumber[]>([]);
   const [purchasingNumber, setPurchasingNumber] = useState<string | null>(null);
@@ -164,7 +165,7 @@ export function PhoneSettings() {
     setAvailableNumbers([]);
     try {
       const result = await notificationsApi.searchAvailableNumbers(
-        selectedAccountId, 'US', searchAreaCode || undefined,
+        selectedAccountId, 'US', searchAreaCode || undefined, searchLocality || undefined,
       );
       setAvailableNumbers(result.data || []);
       if ((result.data || []).length === 0) {
@@ -494,15 +495,23 @@ export function PhoneSettings() {
               <h4 className="font-semibold text-slate-900 mb-1">Search Available Numbers</h4>
               <p className="text-slate-500 text-sm">Pick a dedicated US phone number for your account. Standard Twilio rates apply.</p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <input
                 type="text"
                 value={searchAreaCode}
                 onChange={e => setSearchAreaCode(e.target.value.replace(/\D/g, '').slice(0, 3))}
                 onKeyDown={e => e.key === 'Enter' && handleSearchNumbers()}
-                placeholder="Area code (optional)"
+                placeholder="Area code (e.g. 415)"
                 maxLength={3}
-                className="w-44 px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono tracking-widest"
+                className="w-36 px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono tracking-widest"
+              />
+              <input
+                type="text"
+                value={searchLocality}
+                onChange={e => setSearchLocality(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSearchNumbers()}
+                placeholder="City (e.g. San Francisco)"
+                className="flex-1 min-w-40 px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
               <button
                 onClick={handleSearchNumbers}

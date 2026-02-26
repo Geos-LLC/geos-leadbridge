@@ -2208,6 +2208,7 @@ export class NotificationsService implements OnModuleInit {
     savedAccountId: string,
     country: string = 'US',
     areaCode?: string,
+    locality?: string,
   ): Promise<any[]> {
     const settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
@@ -2219,6 +2220,7 @@ export class NotificationsService implements OnModuleInit {
     const platformKey = this.configService.get<string>('SIGCORE_API_KEY') || '';
     const params = new URLSearchParams({ country, smsCapable: 'true', voiceCapable: 'true' });
     if (areaCode) params.append('areaCode', areaCode);
+    if (locality) params.append('locality', locality);
 
     const resp = await fetch(`${sigcoreUrl}/tenants/phone-numbers/search?${params}`, {
       headers: { 'x-api-key': platformKey, 'Content-Type': 'application/json' },

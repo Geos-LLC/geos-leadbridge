@@ -101,10 +101,11 @@ export class NotificationsController {
     @Param('savedAccountId') savedAccountId: string,
     @Query('country') country: string = 'US',
     @Query('areaCode') areaCode?: string,
+    @Query('locality') locality?: string,
   ) {
     try {
       const numbers = await this.notificationsService.searchSigcoreAvailableNumbers(
-        user.id, savedAccountId, country, areaCode,
+        user.id, savedAccountId, country, areaCode, locality,
       );
       return { success: true, data: numbers };
     } catch (err: any) {

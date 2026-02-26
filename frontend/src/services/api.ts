@@ -635,9 +635,11 @@ export const notificationsApi = {
     savedAccountId: string,
     country: string = 'US',
     areaCode?: string,
+    locality?: string,
   ): Promise<{ success: boolean; data: AvailablePhoneNumber[] }> => {
     const params = new URLSearchParams({ country });
     if (areaCode) params.append('areaCode', areaCode);
+    if (locality) params.append('locality', locality);
     const { data } = await api.get(`/v1/notifications/sigcore/available-numbers/${savedAccountId}?${params}`);
     return data;
   },
