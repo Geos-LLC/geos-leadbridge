@@ -657,13 +657,14 @@ export class NotificationsService implements OnModuleInit {
     });
 
     if (!existingSettings) {
-      // Try to copy sigcoreApiKey from another account of the same user
+      // Try to copy sigcoreApiKey + sigcoreTenantId from another account of the same user
       const otherSettings = await this.prisma.notificationSettings.findFirst({
         where: {
           savedAccount: { userId },
           sigcoreApiKey: { not: null },
+          sigcoreTenantId: { not: null },
         },
-        select: { sigcoreApiKey: true, sigcoreWorkspaceId: true },
+        select: { sigcoreApiKey: true, sigcoreWorkspaceId: true, sigcoreTenantId: true },
       });
 
       if (otherSettings?.sigcoreApiKey) {
@@ -676,6 +677,7 @@ export class NotificationsService implements OnModuleInit {
           enabled: true,
           sigcoreApiKey: otherSettings?.sigcoreApiKey || null,
           sigcoreWorkspaceId: otherSettings?.sigcoreWorkspaceId || null,
+          sigcoreTenantId: otherSettings?.sigcoreTenantId || null,
         },
       });
     } else if (!existingSettings.enabled) {
@@ -2166,6 +2168,12 @@ export class NotificationsService implements OnModuleInit {
 
     if (!resp.ok) {
       const text = await resp.text();
+      if (resp.status === 403 && text.includes('Tenant keys cannot provision')) {
+        throw new Error(
+          'SIGCORE_API_KEY is a tenant-scoped key. A workspace-level API key is required. ' +
+          'Please update SIGCORE_API_KEY in Railway environment variables.',
+        );
+      }
       throw new Error(`Sigcore provision failed (${resp.status}): ${text}`);
     }
 
