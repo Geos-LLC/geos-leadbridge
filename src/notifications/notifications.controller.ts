@@ -92,6 +92,48 @@ export class NotificationsController {
   }
 
   /**
+   * Search available Twilio phone numbers via Sigcore
+   * GET /v1/notifications/sigcore/available-numbers/:savedAccountId?country=US&areaCode=415
+   */
+  @Get('sigcore/available-numbers/:savedAccountId')
+  async searchAvailableNumbers(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+    @Query('country') country: string = 'US',
+    @Query('areaCode') areaCode?: string,
+  ) {
+    try {
+      const numbers = await this.notificationsService.searchSigcoreAvailableNumbers(
+        user.id, savedAccountId, country, areaCode,
+      );
+      return { success: true, data: numbers };
+    } catch (err: any) {
+      throw new HttpException(err.message || 'Failed to search phone numbers', HttpStatus.BAD_GATEWAY);
+    }
+  }
+
+  /**
+   * Purchase a Twilio phone number for a tenant via Sigcore
+   * POST /v1/notifications/sigcore/purchase-number/:savedAccountId
+   */
+  @Post('sigcore/purchase-number/:savedAccountId')
+  async purchasePhoneNumber(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+    @Body() dto: { phoneNumber: string; friendlyName?: string },
+  ) {
+    try {
+      const result = await this.notificationsService.purchaseSigcorePhoneNumber(
+        user.id, savedAccountId, dto.phoneNumber, dto.friendlyName,
+      );
+      return { success: true, data: result };
+    } catch (err: any) {
+      this.logger.error(`[purchasePhoneNumber] ${err.message}`, err.stack);
+      throw new HttpException(err.message || 'Failed to purchase phone number', HttpStatus.BAD_GATEWAY);
+    }
+  }
+
+  /**
    * Create or update notification settings for a saved account
    */
   @Put('settings/:savedAccountId')

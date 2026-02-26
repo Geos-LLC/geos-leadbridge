@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog, NotificationRule, SubscriptionDetails, AdminUser, AdminUserDetails, AdminStats, AdminLog, PhonePoolEntry, PhonePoolStats } from '../types';
+import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog, NotificationRule, SubscriptionDetails, AdminUser, AdminUserDetails, AdminStats, AdminLog, PhonePoolEntry, PhonePoolStats, AvailablePhoneNumber } from '../types';
 import { notify } from '../store/notificationStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
@@ -629,6 +629,24 @@ export const notificationsApi = {
   },
   provisionSigcoreWorkspace: async (savedAccountId: string): Promise<{ success: boolean; data: { provisioned: boolean; tenantId: string } }> => {
     const { data } = await api.post(`/v1/notifications/sigcore/provision/${savedAccountId}`);
+    return data;
+  },
+  searchAvailableNumbers: async (
+    savedAccountId: string,
+    country: string = 'US',
+    areaCode?: string,
+  ): Promise<{ success: boolean; data: AvailablePhoneNumber[] }> => {
+    const params = new URLSearchParams({ country });
+    if (areaCode) params.append('areaCode', areaCode);
+    const { data } = await api.get(`/v1/notifications/sigcore/available-numbers/${savedAccountId}?${params}`);
+    return data;
+  },
+  purchasePhoneNumber: async (
+    savedAccountId: string,
+    phoneNumber: string,
+    friendlyName?: string,
+  ): Promise<{ success: boolean; data: { phoneNumber: string; allocationId: string } }> => {
+    const { data } = await api.post(`/v1/notifications/sigcore/purchase-number/${savedAccountId}`, { phoneNumber, friendlyName });
     return data;
   },
   // Customer Texting

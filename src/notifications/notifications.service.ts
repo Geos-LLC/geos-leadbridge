@@ -2193,6 +2193,75 @@ export class NotificationsService implements OnModuleInit {
   }
 
   /**
+   * Search available Twilio phone numbers via Sigcore (workspace key)
+   */
+  async searchSigcoreAvailableNumbers(
+    _userId: string,
+    savedAccountId: string,
+    country: string = 'US',
+    areaCode?: string,
+  ): Promise<any[]> {
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { sigcoreTenantId: true },
+    });
+    if (!settings?.sigcoreTenantId) throw new Error('SIGCORE_TENANT_NOT_PROVISIONED');
+
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    const params = new URLSearchParams({ country, smsCapable: 'true', voiceCapable: 'true' });
+    if (areaCode) params.append('areaCode', areaCode);
+
+    const resp = await fetch(`${sigcoreUrl}/tenants/phone-numbers/search?${params}`, {
+      headers: { 'x-api-key': platformKey, 'Content-Type': 'application/json' },
+    });
+    if (!resp.ok) throw new Error(`Sigcore search failed: ${resp.status}`);
+    const json = await resp.json();
+    return json.data || [];
+  }
+
+  /**
+   * Purchase a Twilio phone number for a tenant via Sigcore (workspace key)
+   */
+  async purchaseSigcorePhoneNumber(
+    _userId: string,
+    savedAccountId: string,
+    phoneNumber: string,
+    friendlyName?: string,
+  ): Promise<{ phoneNumber: string; allocationId: string }> {
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { sigcoreTenantId: true },
+    });
+    if (!settings?.sigcoreTenantId) throw new Error('SIGCORE_TENANT_NOT_PROVISIONED');
+
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+
+    const resp = await fetch(`${sigcoreUrl}/tenants/${settings.sigcoreTenantId}/phone-numbers/purchase`, {
+      method: 'POST',
+      headers: { 'x-api-key': platformKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phoneNumber, friendlyName }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Sigcore purchase failed: ${resp.status} — ${text}`);
+    }
+    const json = await resp.json();
+    const allocation = json.data?.allocation || json.data;
+    const allocationId = allocation?.id || allocation?.allocationId || '';
+
+    await this.prisma.notificationSettings.upsert({
+      where: { savedAccountId },
+      update: { sigcoreFromPhone: phoneNumber, sigcoreProvider: 'twilio' },
+      create: { savedAccountId, sigcoreFromPhone: phoneNumber, sigcoreProvider: 'twilio' },
+    });
+
+    this.logger.log(`[purchaseSigcorePhoneNumber] Purchased ${phoneNumber} for account ${savedAccountId}`);
+    return { phoneNumber, allocationId };
+  }
+
+  /**
    * Save/validate API key separately (one-time setup)
    */
   async saveApiKey(

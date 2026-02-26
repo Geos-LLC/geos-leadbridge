@@ -211,6 +211,16 @@ export interface SigcorePhoneNumber {
   voiceEnabled?: boolean;
 }
 
+export interface AvailablePhoneNumber {
+  phoneNumber: string;
+  locality?: string;
+  region?: string;
+  country?: string;
+  capabilities?: string[];
+  totalMonthlyPrice?: number;
+  setupFee?: number;
+}
+
 export interface NotificationLog {
   id: string;
   leadId: string | null;

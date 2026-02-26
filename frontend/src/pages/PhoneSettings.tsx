@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Phone, Loader2, X, ChevronDown, AlertCircle, PhoneCall, Building2, Key, Unplug, CheckCircle2, ExternalLink, Link2 } from 'lucide-react';
+import { Phone, Loader2, X, ChevronDown, AlertCircle, PhoneCall, Building2, Key, Unplug, CheckCircle2, ExternalLink, Link2, Hash } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { usersApi, thumbtackApi, notificationsApi } from '../services/api';
-import type { SavedAccount, PhonePoolEntry, SigcorePhoneNumber } from '../types';
+import type { SavedAccount, PhonePoolEntry, SigcorePhoneNumber, AvailablePhoneNumber } from '../types';
 import { useAppStore } from '../store/appStore';
 
 export function PhoneSettings() {
@@ -29,6 +29,15 @@ export function PhoneSettings() {
   const [connectError, setConnectError] = useState<string | null>(null);
   const [sigcoreProvisioned, setSigcoreProvisioned] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
+
+  // Option 3: provisioned Twilio number
+  const [sigcoreFromPhone, setSigcoreFromPhone] = useState<string | null>(null);
+  const [sigcoreProvider, setSigcoreProvider] = useState<string | null>(null);
+  const [searchAreaCode, setSearchAreaCode] = useState('');
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [availableNumbers, setAvailableNumbers] = useState<AvailablePhoneNumber[]>([]);
+  const [purchasingNumber, setPurchasingNumber] = useState<string | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   useEffect(() => {
     loadAccounts();
@@ -80,6 +89,8 @@ export function PhoneSettings() {
       const provisioned = !!settingsRes.settings?.sigcoreProvisioned;
       setSigcoreConnected(connected);
       setSigcoreProvisioned(provisioned);
+      setSigcoreFromPhone(settingsRes.settings?.sigcoreFromPhone || null);
+      setSigcoreProvider(settingsRes.settings?.sigcoreProvider || null);
       if (connected) {
         const { phoneNumbers } = await notificationsApi.getSigcorePhoneNumbers(accountId);
         setOwnPhoneNumbers(phoneNumbers);
@@ -144,6 +155,40 @@ export function PhoneSettings() {
       setConnectError(err.message || 'Failed to enable phone workspace');
     } finally {
       setProvisioning(false);
+    }
+  }
+
+  async function handleSearchNumbers() {
+    setSearchLoading(true);
+    setSearchError(null);
+    setAvailableNumbers([]);
+    try {
+      const result = await notificationsApi.searchAvailableNumbers(
+        selectedAccountId, 'US', searchAreaCode || undefined,
+      );
+      setAvailableNumbers(result.data || []);
+      if ((result.data || []).length === 0) {
+        setSearchError('No numbers found. Try a different area code.');
+      }
+    } catch (err: any) {
+      setSearchError(err.message || 'Failed to search numbers');
+    } finally {
+      setSearchLoading(false);
+    }
+  }
+
+  async function handlePurchaseNumber(phoneNumber: string) {
+    setPurchasingNumber(phoneNumber);
+    setSearchError(null);
+    try {
+      await notificationsApi.purchasePhoneNumber(selectedAccountId, phoneNumber);
+      setSigcoreFromPhone(phoneNumber);
+      setSigcoreProvider('twilio');
+      setAvailableNumbers([]);
+    } catch (err: any) {
+      setSearchError(err.message || 'Failed to purchase number');
+    } finally {
+      setPurchasingNumber(null);
     }
   }
 
@@ -234,7 +279,7 @@ export function PhoneSettings() {
       {/* Options Info */}
       <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 text-blue-700 text-sm">
         <p className="font-medium">
-          You have two options for sending SMS: use a phone number assigned by your administrator, or connect your own QUO account.
+          You have three options for sending SMS: use a phone number assigned by your administrator, connect your own QUO account, or get a dedicated Twilio number.
         </p>
       </div>
 
@@ -398,6 +443,103 @@ export function PhoneSettings() {
                 {connecting ? 'Connecting...' : 'Connect'}
               </button>
             </div>
+          </div>
+        )}
+      </section>
+
+      {/* Option 3: Get a Dedicated Twilio Number */}
+      <section className="space-y-6">
+        <div className="flex items-center gap-3 px-2">
+          <Hash className="w-5 h-5 text-blue-600" />
+          <h3 className="text-xl font-bold text-slate-900">Option 3: Get a Dedicated Number</h3>
+          {sigcoreProvider === 'twilio' && sigcoreFromPhone && (
+            <span className="px-2 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-bold rounded uppercase">Active</span>
+          )}
+        </div>
+
+        {searchError && (
+          <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-3 text-red-600 text-sm font-medium">
+            <AlertCircle size={16} className="shrink-0" />
+            <span className="flex-1">{searchError}</span>
+            <button onClick={() => setSearchError(null)} className="p-1 hover:bg-red-100 rounded-lg transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
+        {!sigcoreProvisioned ? (
+          <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-8 text-center">
+            <Hash className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+            <p className="text-slate-500 text-sm">Enable your Phone Workspace (Option 2 above) first to get a dedicated number.</p>
+          </div>
+        ) : sigcoreProvider === 'twilio' && sigcoreFromPhone ? (
+          <div className="space-y-4">
+            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3 text-emerald-700 text-sm">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>Dedicated Twilio number active. Used automatically for outbound SMS.</span>
+            </div>
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 inline-flex items-center gap-4">
+              <div className="w-10 h-10 bg-violet-50 text-violet-600 rounded-xl flex items-center justify-center">
+                <Phone className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="font-bold text-slate-900 font-mono">{sigcoreFromPhone}</div>
+                <div className="text-xs text-slate-400">Twilio · Dedicated</div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-6">
+            <div>
+              <h4 className="font-semibold text-slate-900 mb-1">Search Available Numbers</h4>
+              <p className="text-slate-500 text-sm">Pick a dedicated US phone number for your account. Standard Twilio rates apply.</p>
+            </div>
+            <div className="flex gap-3">
+              <input
+                type="text"
+                value={searchAreaCode}
+                onChange={e => setSearchAreaCode(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                onKeyDown={e => e.key === 'Enter' && handleSearchNumbers()}
+                placeholder="Area code (optional)"
+                maxLength={3}
+                className="w-44 px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono tracking-widest"
+              />
+              <button
+                onClick={handleSearchNumbers}
+                disabled={searchLoading}
+                className="px-5 py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-200 transition-all"
+              >
+                {searchLoading ? <Loader2 size={16} className="animate-spin" /> : <Hash size={16} />}
+                {searchLoading ? 'Searching...' : 'Search Numbers'}
+              </button>
+            </div>
+
+            {availableNumbers.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {availableNumbers.map(num => (
+                  <div key={num.phoneNumber} className="bg-slate-50 rounded-2xl border border-slate-200 p-4 flex flex-col gap-3 hover:border-blue-200 transition-all">
+                    <div>
+                      <div className="font-bold text-slate-900 font-mono text-sm">{num.phoneNumber}</div>
+                      <div className="text-xs text-slate-500 mt-0.5">
+                        {[num.locality, num.region].filter(Boolean).join(', ') || 'US'}
+                      </div>
+                      {num.totalMonthlyPrice !== undefined && (
+                        <div className="text-xs text-slate-400 mt-1">${num.totalMonthlyPrice.toFixed(2)}/mo</div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handlePurchaseNumber(num.phoneNumber)}
+                      disabled={purchasingNumber !== null}
+                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold text-xs hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
+                    >
+                      {purchasingNumber === num.phoneNumber ? (
+                        <><Loader2 size={14} className="animate-spin" /> Getting...</>
+                      ) : 'Get this number'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </section>
