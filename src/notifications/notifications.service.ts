@@ -2208,7 +2208,7 @@ export class NotificationsService implements OnModuleInit {
     if (!settings?.sigcoreTenantId) throw new Error('SIGCORE_TENANT_NOT_PROVISIONED');
 
     const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
-    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY') || '';
     const params = new URLSearchParams({ country, smsCapable: 'true', voiceCapable: 'true' });
     if (areaCode) params.append('areaCode', areaCode);
 
@@ -2236,7 +2236,7 @@ export class NotificationsService implements OnModuleInit {
     if (!settings?.sigcoreTenantId) throw new Error('SIGCORE_TENANT_NOT_PROVISIONED');
 
     const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
-    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY') || '';
 
     const resp = await fetch(`${sigcoreUrl}/tenants/${settings.sigcoreTenantId}/phone-numbers/purchase`, {
       method: 'POST',
