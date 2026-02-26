@@ -892,52 +892,60 @@ export class WebhooksService {
             newStatus = 'sent';
           }
 
-          // Update the log with delivery status
-          await this.prisma.notificationLog.update({
-            where: { id: log.id },
-            data: {
-              status: newStatus,
-              ...(status === 'delivered' && { deliveredAt: new Date() }),
-              ...(status === 'failed' && { error: errorMessage || `Error code: ${errorCode}` }),
-            },
-          });
-
-          this.logger.log(`Updated NotificationLog ${log.id} with status: ${newStatus}`);
-
-          // Also update the linked Message record (for customer-facing SMS in conversation)
-          try {
-            const linkedMessage = await this.prisma.message.findFirst({
-              where: { notificationLogId: log.id },
+          // Idempotency: skip if the log is already at the target status
+          // (can happen when multiple webhook subscriptions fire for the same event)
+          if (log.status === newStatus) {
+            this.logger.log(`[idempotent] NotificationLog ${log.id} already at status ${newStatus}, skipping`);
+          } else {
+            // Update the log with delivery status
+            await this.prisma.notificationLog.update({
+              where: { id: log.id },
+              data: {
+                status: newStatus,
+                ...(status === 'delivered' && { deliveredAt: new Date() }),
+                ...(status === 'failed' && { error: errorMessage || `Error code: ${errorCode}` }),
+              },
             });
-            if (linkedMessage) {
-              await this.prisma.message.update({
-                where: { id: linkedMessage.id },
-                data: {
-                  ...(status === 'delivered' && { deliveredAt: new Date() }),
-                },
-              });
 
-              // Emit SSE event for real-time delivery status in UI
-              if (log.leadId) {
-                const lead = await this.prisma.lead.findUnique({
-                  where: { id: log.leadId },
-                  select: { userId: true },
+            this.logger.log(`Updated NotificationLog ${log.id} with status: ${newStatus}`);
+
+            // Also update the linked Message record (for customer-facing SMS in conversation)
+            try {
+              const linkedMessage = await this.prisma.message.findFirst({
+                where: { notificationLogId: log.id },
+              });
+              if (linkedMessage) {
+                await this.prisma.message.update({
+                  where: { id: linkedMessage.id },
+                  data: {
+                    ...(status === 'delivered' && { deliveredAt: new Date() }),
+                  },
                 });
-                if (lead) {
-                  this.eventEmitter.emit(`sms.status.${lead.userId}`, {
-                    messageId: linkedMessage.id,
-                    logId: log.id,
-                    status: newStatus,
-                    deliveredAt: status === 'delivered' ? new Date().toISOString() : undefined,
+
+                // Emit SSE event for real-time delivery status in UI
+                if (log.leadId) {
+                  const lead = await this.prisma.lead.findUnique({
+                    where: { id: log.leadId },
+                    select: { userId: true },
                   });
+                  if (lead) {
+                    this.eventEmitter.emit(`sms.status.${lead.userId}`, {
+                      messageId: linkedMessage.id,
+                      logId: log.id,
+                      status: newStatus,
+                      deliveredAt: status === 'delivered' ? new Date().toISOString() : undefined,
+                    });
+                  }
                 }
               }
+            } catch (err: any) {
+              this.logger.warn(`Failed to update linked Message: ${err.message}`);
             }
-          } catch (err: any) {
-            this.logger.warn(`Failed to update linked Message: ${err.message}`);
           }
         } else {
-          this.logger.warn(`NotificationLog not found for messageId: ${messageId}`);
+          // Not found is expected when a workspace-level subscription fires for a message
+          // sent by a different tenant in the same workspace. Log at debug level.
+          this.logger.debug(`NotificationLog not found for messageId: ${messageId} (cross-tenant or already processed)`);
         }
       }
 

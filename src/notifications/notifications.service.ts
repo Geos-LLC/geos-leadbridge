@@ -2327,13 +2327,24 @@ export class NotificationsService implements OnModuleInit {
       }
     }
 
-    // 3. Create webhook for delivery status
-    const webhookUrl = `${webhookBaseUrl}/api/webhooks/sigcore/delivery-status`;
-    const webhookResult = await this.createSigcoreWebhook(effectiveApiKey, webhookUrl);
+    // 3. Create webhook for delivery status — skip if one is already registered for this account
+    //    to prevent accumulating duplicate subscriptions when connectSigcore is called repeatedly.
+    const existingSettings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { sigcoreWebhookId: true },
+    });
 
-    if (webhookResult.error) {
-      this.logger.warn(`[connectSigcore] Webhook creation failed: ${webhookResult.error}`);
-      // Continue anyway - webhook can be created manually later
+    let deliveryWebhookId: string | null = existingSettings?.sigcoreWebhookId || null;
+    if (!deliveryWebhookId) {
+      const webhookUrl = `${webhookBaseUrl}/api/webhooks/sigcore/delivery-status`;
+      const webhookResult = await this.createSigcoreWebhook(effectiveApiKey, webhookUrl);
+      if (webhookResult.error) {
+        this.logger.warn(`[connectSigcore] Webhook creation failed: ${webhookResult.error}`);
+        // Continue anyway - webhook can be created manually later
+      }
+      deliveryWebhookId = webhookResult.webhookId;
+    } else {
+      this.logger.log(`[connectSigcore] Delivery webhook already registered (${deliveryWebhookId}), skipping creation`);
     }
 
     // 4. Store the provider, webhook ID, and Twilio phone number
@@ -2343,7 +2354,7 @@ export class NotificationsService implements OnModuleInit {
       update: {
         sigcoreApiKey: effectiveApiKey,
         sigcoreProvider: provider || null,
-        sigcoreWebhookId: webhookResult.webhookId,
+        sigcoreWebhookId: deliveryWebhookId,
         ...(fromPhone && { sigcoreFromPhone: fromPhone }),
         enabled: true,
       },
@@ -2351,13 +2362,13 @@ export class NotificationsService implements OnModuleInit {
         savedAccountId,
         sigcoreApiKey: effectiveApiKey,
         sigcoreProvider: provider || null,
-        sigcoreWebhookId: webhookResult.webhookId,
+        sigcoreWebhookId: deliveryWebhookId,
         sigcoreFromPhone: fromPhone,
         enabled: true,
       },
     });
 
-    this.logger.log(`[connectSigcore] Connected successfully. Provider: ${provider}, WebhookId: ${webhookResult.webhookId}`);
+    this.logger.log(`[connectSigcore] Connected successfully. Provider: ${provider}, WebhookId: ${deliveryWebhookId}`);
 
     // 5. Fetch phone numbers for the connected provider
     let phoneNumbers: SigcorePhoneNumber[] = [];
