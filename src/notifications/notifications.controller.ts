@@ -59,6 +59,27 @@ export class NotificationsController {
   }
 
   /**
+   * Provision a Sigcore tenant workspace for a saved account.
+   * Idempotent — safe to call multiple times; returns existing tenant key if already provisioned.
+   * POST /v1/notifications/sigcore/provision/:savedAccountId
+   */
+  @Post('sigcore/provision/:savedAccountId')
+  async provisionSigcoreWorkspace(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    const result = await this.notificationsService.ensureSigcoreTenantProvisioned(
+      user.id,
+      savedAccountId,
+    );
+
+    return {
+      success: true,
+      data: { provisioned: true, tenantId: result.tenantId },
+    };
+  }
+
+  /**
    * Create or update notification settings for a saved account
    */
   @Put('settings/:savedAccountId')

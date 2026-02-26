@@ -421,7 +421,9 @@ model NotificationSettings {
   sigcoreFromPhone   String?  @map("callioFromPhone") // Selected phone number from Sigcore to send from
   sigcoreWorkspaceId String?  @map("callioWorkspaceId") // Sigcore workspace ID for this tenant
   sigcoreWebhookId   String?  @map("callioWebhookId") // Sigcore webhook ID for delivery status updates
-  sigcoreProvider    String?  // Connected provider: "openphone" | "twilio"
+  sigcoreProvider      String?  // Connected provider: "openphone" | "twilio"
+  sigcoreTenantId      String?  @map("sigcore_tenant_id")       // Sigcore Tenant UUID for this account
+  sigcoreProvisionedAt DateTime? @map("sigcore_provisioned_at") // When the tenant was provisioned in Sigcore
   template          String   @db.Text @default("New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}")
   quietHoursStart   String?  // e.g., "22:00"
   quietHoursEnd     String?  // e.g., "08:00"

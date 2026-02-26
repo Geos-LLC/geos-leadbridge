@@ -627,6 +627,10 @@ export const notificationsApi = {
     const { data } = await api.delete(`/v1/notifications/sigcore/disconnect/${savedAccountId}`);
     return data;
   },
+  provisionSigcoreWorkspace: async (savedAccountId: string): Promise<{ success: boolean; data: { provisioned: boolean; tenantId: string } }> => {
+    const { data } = await api.post(`/v1/notifications/sigcore/provision/${savedAccountId}`);
+    return data;
+  },
   // Customer Texting
   getCustomerTextingSettings: async (savedAccountId: string): Promise<{ success: boolean; enabled: boolean; fromPhone: string | null; autoReplyTemplate: string; followUps: Array<{ id?: string; enabled: boolean; delayMinutes: number; template: string }>; stopOnCustomerReply: boolean }> => {
     const { data } = await api.get(`/v1/notifications/customer-texting/${savedAccountId}`);
