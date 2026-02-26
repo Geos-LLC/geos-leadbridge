@@ -52,7 +52,7 @@ export class CallConnectService {
     const rawBaseUrl =
       this.configService.get<string>('APP_BASE_URL') ||
       this.configService.get<string>('FRONTEND_URL') ||
-      'https://leadbridge360.com';
+      'https://www.leadbridge360.com';
     this.appBaseUrl = rawBaseUrl.trim();
   }
 

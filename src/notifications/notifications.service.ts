@@ -2049,7 +2049,11 @@ export class NotificationsService implements OnModuleInit {
   /**
    * Create a webhook subscription in Sigcore for delivery status updates
    */
-  async createSigcoreWebhook(apiKey: string, webhookUrl: string): Promise<{ webhookId: string | null; error?: string }> {
+  async createSigcoreWebhook(
+    apiKey: string,
+    webhookUrl: string,
+    options?: { name?: string; events?: string[] },
+  ): Promise<{ webhookId: string | null; error?: string }> {
     const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
     const endpoint = `${sigcoreUrl}/v1/webhook-subscriptions`;
     this.logger.log(`[createSigcoreWebhook] Creating webhook subscription at: ${endpoint}`);
@@ -2063,9 +2067,9 @@ export class NotificationsService implements OnModuleInit {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name: 'LeadBridge Delivery Notifications',
+          name: options?.name ?? 'LeadBridge Delivery Notifications',
           webhookUrl: webhookUrl,
-          events: ['message.sent', 'message.delivered', 'message.failed'],
+          events: options?.events ?? ['message.sent', 'message.delivered', 'message.failed'],
         }),
       });
 
@@ -2611,9 +2615,12 @@ export class NotificationsService implements OnModuleInit {
       try {
         const apiKey = settings.sigcoreApiKey;
         if (apiKey) {
-          const appBaseUrl = this.configService.get<string>('APP_BASE_URL', 'https://leadbridge360.com');
+          const appBaseUrl = this.configService.get<string>('APP_BASE_URL', 'https://www.leadbridge360.com');
           const webhookUrl = `${appBaseUrl}/api/webhooks/sigcore/inbound-sms?accountId=${savedAccountId}`;
-          const result = await this.createSigcoreWebhook(apiKey, webhookUrl);
+          const result = await this.createSigcoreWebhook(apiKey, webhookUrl, {
+            name: 'LeadBridge Inbound SMS',
+            events: ['message.received'],
+          });
           if (result.webhookId) {
             await this.prisma.notificationSettings.update({
               where: { id: settings.id },
