@@ -216,6 +216,7 @@ export function Services() {
   const [ctStopOnReply, setCtStopOnReply] = useState(true);
   const [ctSaving, setCtSaving] = useState(false);
   const [ctFromPhone, setCtFromPhone] = useState('');
+  const [ctSigcoreFromPhone, setCtSigcoreFromPhone] = useState<string | null>(null);
   const [ctTestPhone, setCtTestPhone] = useState(() => localStorage.getItem('ct_test_phone') || '');
   const [ctTestStatus, setCtTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
   const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string; fromPhone: string } | null>(null);
@@ -349,6 +350,7 @@ export function Services() {
       // Load own provider connection status for CT Option 2
       const connected = !!notifSettingsRes?.settings?.sigcoreConnected;
       setCtSigcoreConnected(connected);
+      setCtSigcoreFromPhone(notifSettingsRes?.settings?.sigcoreFromPhone || null);
       if (connected) {
         notificationsApi.getSigcorePhoneNumbers(accountId).then(r => setCtOwnPhoneNumbers(r.phoneNumbers)).catch(() => {});
       } else {
@@ -1208,25 +1210,39 @@ export function Services() {
                       className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
                     >
                       <option value="">Select phone number</option>
-                      {/* Show current fromPhone even if not in pool list */}
-                      {alertFromPhone && !poolPhones.some(p => p.phoneNumber === alertFromPhone) && (
-                        <option value={alertFromPhone}>{alertFromPhone} (configured)</option>
+                      {/* Legacy: currently configured number not found in any list */}
+                      {alertFromPhone &&
+                        !poolPhones.some(p => p.phoneNumber === alertFromPhone) &&
+                        !ctOwnPhoneNumbers.some(p => p.phoneNumber === alertFromPhone) &&
+                        alertFromPhone !== ctSigcoreFromPhone && (
+                          <option value={alertFromPhone}>{alertFromPhone} (configured)</option>
                       )}
                       {poolPhones.map(p => (
                         <option key={p.id} value={p.phoneNumber}>
-                          {p.phoneNumber} (LeadBridge)
+                          {p.phoneNumber} (LeadBridge shared)
                         </option>
                       ))}
+                      {ctOwnPhoneNumbers.map(p => (
+                        <option key={p.id} value={p.phoneNumber}>
+                          {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider === 'openphone' ? 'OpenPhone/QUO' : p.provider})
+                        </option>
+                      ))}
+                      {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && (
+                        <option value={ctSigcoreFromPhone}>
+                          {ctSigcoreFromPhone} (Twilio · Dedicated)
+                        </option>
+                      )}
                     </select>
                     <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
                       <ChevronDown className="w-4 h-4" />
                     </div>
                   </div>
-                  <button className="mt-2 px-4 py-2 bg-slate-100 text-slate-400 rounded-xl text-xs font-bold flex items-center gap-2 cursor-not-allowed">
-                    <Phone className="w-3 h-3" />
-                    Get your own number
-                    <span className="px-1.5 py-0.5 bg-slate-200 text-[9px] rounded uppercase">Coming Soon</span>
-                  </button>
+                  {alertFromPhone && alertToPhone && alertFromPhone === alertToPhone && (
+                    <p className="mt-1.5 text-xs text-amber-600 font-medium flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      Send-from and send-to are the same number
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -1400,87 +1416,52 @@ export function Services() {
             iconTextColor="text-emerald-600"
           >
             <div className={`space-y-6${!ctEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-              {/* Phone number options */}
-              <div className="space-y-3">
+              {/* Phone number — unified Send From dropdown */}
+              <div className="space-y-2">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Send from</label>
-
-                {/* Option 1: LeadBridge shared pool */}
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Option 1</span>
-                    <span className="text-xs font-semibold text-slate-600">Use a LeadBridge shared number</span>
-                  </div>
-                  <div className="relative">
-                    <select
-                      value={ctFromPhone}
-                      onChange={e => saveCtFromPhone(e.target.value)}
-                      disabled={ctSaving}
-                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
-                    >
-                      <option value="">Select phone number</option>
-                      {ctFromPhone && !poolPhones.some(p => p.phoneNumber === ctFromPhone) && (
+                <div className="relative">
+                  <select
+                    value={ctFromPhone}
+                    onChange={e => saveCtFromPhone(e.target.value)}
+                    disabled={ctSaving}
+                    className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
+                  >
+                    <option value="">Select phone number</option>
+                    {/* Legacy: currently configured number not found in any list */}
+                    {ctFromPhone &&
+                      !poolPhones.some(p => p.phoneNumber === ctFromPhone) &&
+                      !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctFromPhone) &&
+                      ctFromPhone !== ctSigcoreFromPhone && (
                         <option value={ctFromPhone}>{ctFromPhone} (configured)</option>
-                      )}
-                      {poolPhones.map(p => (
-                        <option key={p.id} value={p.phoneNumber}>
-                          {p.phoneNumber} (LeadBridge)
-                        </option>
-                      ))}
-                    </select>
-                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
-                      <ChevronDown className="w-4 h-4" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Option 2: Own provider */}
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">Option 2</span>
-                      <span className="text-xs font-semibold text-slate-600">Use Your Own QUO Number</span>
-                    </div>
-                    {ctSigcoreConnected && (
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Connected</span>
                     )}
+                    {poolPhones.map(p => (
+                      <option key={p.id} value={p.phoneNumber}>
+                        {p.phoneNumber} (LeadBridge shared)
+                      </option>
+                    ))}
+                    {ctOwnPhoneNumbers.map(p => (
+                      <option key={p.id} value={p.phoneNumber}>
+                        {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider === 'openphone' ? 'OpenPhone/QUO' : p.provider})
+                      </option>
+                    ))}
+                    {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && (
+                      <option value={ctSigcoreFromPhone}>
+                        {ctSigcoreFromPhone} (Twilio · Dedicated)
+                      </option>
+                    )}
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                    <ChevronDown className="w-4 h-4" />
                   </div>
-                  {ctSigcoreConnected ? (
-                    ctOwnPhoneNumbers.length > 0 ? (
-                      <div className="relative">
-                        <select
-                          value={ctFromPhone}
-                          onChange={e => saveCtFromPhone(e.target.value)}
-                          disabled={ctSaving}
-                          className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
-                        >
-                          <option value="">Select your QUO number</option>
-                          {ctOwnPhoneNumbers.map(p => (
-                            <option key={p.id} value={p.phoneNumber}>
-                              {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} (QUO)
-                            </option>
-                          ))}
-                        </select>
-                        <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
-                          <ChevronDown className="w-4 h-4" />
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-500">No phone numbers found in your QUO account.</p>
-                    )
-                  ) : (
-                    <p className="text-xs text-slate-500 leading-relaxed">
-                      Connect your QUO account in{' '}
-                      <button
-                        type="button"
-                        onClick={() => navigate('/phone-settings')}
-                        className="text-blue-600 hover:underline font-medium"
-                      >
-                        Business Line settings
-                      </button>{' '}
-                      to use your own phone numbers here.
-                    </p>
-                  )}
                 </div>
+                {poolPhones.length === 0 && !ctSigcoreConnected && !ctSigcoreFromPhone && (
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    No numbers available.{' '}
+                    <button type="button" onClick={() => navigate('/phone-settings')} className="text-blue-600 hover:underline font-medium">
+                      Set up a number in Business Line settings.
+                    </button>
+                  </p>
+                )}
               </div>
 
               {/* Auto-reply message */}
@@ -1584,6 +1565,12 @@ export function Services() {
                   <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
                     <AlertCircle className="w-3 h-3 shrink-0" />
                     Must be E.164 format, e.g. +12125550100
+                  </p>
+                )}
+                {ctTestPhone && isValidPhoneE164(ctTestPhone) && ctFromPhone && ctFromPhone === ctTestPhone && (
+                  <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    Test phone matches the send-from number
                   </p>
                 )}
               </div>

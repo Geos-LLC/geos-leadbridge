@@ -582,6 +582,12 @@ export function NotificationSettings() {
                       disabled={!ruleForm.accountId && !editingRule}
                     />
                     <p className="form-hint">E.164 format required (e.g., +12473462681)</p>
+                    {ruleForm.fromPhone && ruleForm.toPhone && ruleForm.fromPhone === ruleForm.toPhone && (
+                      <p className="form-hint" style={{ color: '#d97706', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <AlertCircle size={12} />
+                        Send-from and send-to are the same number
+                      </p>
+                    )}
                   </div>
 
                   <div className="form-group">
@@ -841,6 +847,12 @@ export function NotificationSettings() {
                               placeholder="+12473462681"
                             />
                             <p className="form-hint">E.164 format required (e.g., +12473462681)</p>
+                            {ruleForm.fromPhone && ruleForm.toPhone && ruleForm.fromPhone === ruleForm.toPhone && (
+                              <p className="form-hint" style={{ color: '#d97706', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <AlertCircle size={12} />
+                                Send-from and send-to are the same number
+                              </p>
+                            )}
                           </div>
 
                           <div className="form-group">
