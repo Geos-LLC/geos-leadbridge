@@ -510,8 +510,11 @@ export class CallConnectService {
     });
 
     if (!existing) {
-      // Unknown session — create a stub and continue
-      this.logger.warn(`Received webhook for unknown session ${sessionId} — creating stub`);
+      // Unknown session — fan-out noise from another account's subscription, or a test call.
+      // triggerForLead always pre-creates the LeadCallConnect record, so if it's missing
+      // this event doesn't belong to us. Skip silently to avoid FK violations.
+      this.logger.debug(`Received webhook for unknown session ${sessionId} — skipping (not owned by this account)`);
+      return;
     }
 
     const existingTimeline: any[] = Array.isArray((existing as any)?.timeline)
@@ -519,20 +522,9 @@ export class CallConnectService {
       : [];
     const newTimelineEntry = { event, timestamp: timestamp || new Date().toISOString(), data };
 
-    await this.prisma.leadCallConnect.upsert({
+    await this.prisma.leadCallConnect.update({
       where: { sigcoreSessionId: sessionId },
-      create: {
-        leadId: data.leadId || 'unknown',
-        businessId: data.businessId ?? null,
-        sigcoreSessionId: sessionId,
-        status,
-        attempt: attempt ?? 0,
-        lastEventAt: new Date(data.updatedAt || Date.now()),
-        failureReason,
-        recordingUrl: data.recordingUrl ?? null,
-        timeline: [newTimelineEntry],
-      },
-      update: {
+      data: {
         status,
         ...(attempt !== undefined && { attempt }),
         lastEventAt: new Date(data.updatedAt || Date.now()),
