@@ -119,6 +119,7 @@ model User {
   thumbtackSnapshots       ThumbtackSettingsSnapshot[]
   thumbtackLeadIds         ThumbtackLeadId[]
   callConnectSettings      CallConnectSettings[]
+  tenantPhoneNumbers       TenantPhoneNumber[]
 
   @@map("users")
 }
@@ -754,6 +755,12 @@ model AdminConfig {
   testLocation     String   @default("Tampa, FL")
   /// Full map of template variable test values — keys match variable names (without braces)
   testData         Json?    @map("test_data")
+
+  // Phone number reselling pricing
+  phonePriceMonthly    Decimal?  @db.Decimal(10, 2) @map("phone_price_monthly")
+  phoneGracePeriodDays Int       @default(30)        @map("phone_grace_period_days")
+  stripePriceId        String?                       @map("stripe_price_id")
+
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
@@ -775,4 +782,39 @@ model AnalyticsCache {
 
   @@index([userId])
   @@map("analytics_cache")
+}
+
+// ==========================================
+// Tenant Purchased Phone Numbers
+// ==========================================
+
+enum TenantPhoneStatus {
+  ACTIVE
+  GRACE_PERIOD
+  RELEASED
+}
+
+model TenantPhoneNumber {
+  id                  String            @id @default(uuid())
+  userId              String
+  savedAccountId      String?
+  phoneNumber         String            @unique
+  friendlyName        String?
+  areaCode            String?
+  sigcoreAllocationId String?           @map("sigcore_allocation_id")
+  stripeSubItemId     String?           @map("stripe_sub_item_id")
+  status              TenantPhoneStatus @default(ACTIVE)
+  purchasedAt         DateTime          @default(now()) @map("purchased_at")
+  cancelledAt         DateTime?         @map("cancelled_at")
+  gracePeriodEndsAt   DateTime?         @map("grace_period_ends_at")
+  releasedAt          DateTime?         @map("released_at")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([savedAccountId])
+  @@index([status])
+  @@map("tenant_phone_numbers")
 }

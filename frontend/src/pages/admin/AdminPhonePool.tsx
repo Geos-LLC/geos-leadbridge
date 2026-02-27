@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, Search, Loader2, UserPlus, UserMinus, Trash2, RefreshCw, X, Link, Unlink, Download, Users } from 'lucide-react';
+import { Phone, Search, Loader2, UserPlus, UserMinus, Trash2, RefreshCw, X, Link, Unlink, Download, Users, DollarSign } from 'lucide-react';
 import { adminApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
@@ -45,6 +45,12 @@ export default function AdminPhonePool() {
   });
   const [testConfigSaving, setTestConfigSaving] = useState(false);
 
+  // Phone pricing config
+  const [phonePriceMonthly, setPhonePriceMonthly] = useState<string>('');
+  const [phoneGracePeriodDays, setPhoneGracePeriodDays] = useState<string>('30');
+  const [phonePricingSaving, setPhonePricingSaving] = useState(false);
+  const [currentStripePriceId, setCurrentStripePriceId] = useState<string | null>(null);
+
   useEffect(() => {
     if (user?.role !== 'ADMIN') {
       notify.error('Access Denied', 'You must be an admin to access this page');
@@ -54,6 +60,7 @@ export default function AdminPhonePool() {
     loadData();
     loadConfig();
     loadAdminConfig();
+    loadPhonePricing();
   }, [user, statusFilter, searchQuery]);
 
   const loadConfig = async () => {
@@ -84,6 +91,40 @@ export default function AdminPhonePool() {
       notify.error('Error', 'Failed to save test customer settings');
     } finally {
       setTestConfigSaving(false);
+    }
+  };
+
+  const loadPhonePricing = async () => {
+    try {
+      const pricing = await adminApi.getPhonePricing();
+      if (pricing.priceMonthly != null) setPhonePriceMonthly(pricing.priceMonthly.toString());
+      setPhoneGracePeriodDays(pricing.gracePeriodDays.toString());
+      setCurrentStripePriceId(pricing.stripePriceId);
+    } catch {
+      // keep defaults
+    }
+  };
+
+  const handleSavePhonePricing = async () => {
+    const price = parseFloat(phonePriceMonthly);
+    const grace = parseInt(phoneGracePeriodDays, 10);
+    if (isNaN(price) || price <= 0) {
+      notify.error('Invalid', 'Price must be a positive number');
+      return;
+    }
+    if (isNaN(grace) || grace < 0) {
+      notify.error('Invalid', 'Grace period must be 0 or more days');
+      return;
+    }
+    try {
+      setPhonePricingSaving(true);
+      const result = await adminApi.updatePhonePricing(price, grace);
+      setCurrentStripePriceId(result.stripePriceId);
+      notify.success('Saved', `Phone pricing updated: $${result.priceMonthly}/mo, ${result.gracePeriodDays}d grace`);
+    } catch (err: any) {
+      notify.error('Error', err.response?.data?.message || 'Failed to save phone pricing');
+    } finally {
+      setPhonePricingSaving(false);
     }
   };
 
@@ -600,6 +641,60 @@ export default function AdminPhonePool() {
             Showing {phones.length} of {total} numbers
           </div>
         )}
+      </div>
+
+      {/* Phone Number Pricing */}
+      <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="p-4 md:p-6 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <DollarSign className="w-5 h-5 text-emerald-600" />
+            <h2 className="text-lg md:text-xl font-bold text-slate-900">Phone Number Pricing</h2>
+          </div>
+          <p className="text-sm text-slate-500 mt-1">Set the monthly price and grace period for tenant dedicated phone numbers.</p>
+        </div>
+        <div className="p-4 md:p-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-slate-700">Monthly Price ($)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={phonePriceMonthly}
+                onChange={e => setPhonePriceMonthly(e.target.value)}
+                placeholder="5.00"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-slate-700">Grace Period (days)</label>
+              <input
+                type="number"
+                min="0"
+                value={phoneGracePeriodDays}
+                onChange={e => setPhoneGracePeriodDays(e.target.value)}
+                placeholder="30"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              />
+              <p className="text-xs text-slate-400">Days to keep number after tenant cancels</p>
+            </div>
+            <div>
+              <button
+                onClick={handleSavePhonePricing}
+                disabled={phonePricingSaving}
+                className="w-full px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {phonePricingSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <DollarSign className="w-4 h-4" />}
+                Save Pricing
+              </button>
+            </div>
+          </div>
+          {currentStripePriceId && (
+            <div className="mt-3 text-xs text-slate-400">
+              Stripe Price ID: <code className="bg-slate-50 px-1.5 py-0.5 rounded">{currentStripePriceId}</code>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Test Customer Setup */}

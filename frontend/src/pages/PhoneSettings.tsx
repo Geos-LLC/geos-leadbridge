@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Phone, Loader2, X, ChevronDown, AlertCircle, PhoneCall, Building2, Key, Unplug, CheckCircle2, ExternalLink, Link2, Hash } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { usersApi, thumbtackApi, notificationsApi } from '../services/api';
+import type { TenantPhoneNumber } from '../services/api';
 import type { SavedAccount, PhonePoolEntry, SigcorePhoneNumber, AvailablePhoneNumber } from '../types';
 import { useAppStore } from '../store/appStore';
 
@@ -40,9 +41,17 @@ export function PhoneSettings() {
   const [purchasingNumber, setPurchasingNumber] = useState<string | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
 
+  // Tenant purchased numbers
+  const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
+  const [loadingTenantPhones, setLoadingTenantPhones] = useState(false);
+  const [cancellingPhoneId, setCancellingPhoneId] = useState<string | null>(null);
+  const [phonePriceMonthly, setPhonePriceMonthly] = useState<number | null>(null);
+
   useEffect(() => {
     loadAccounts();
     loadPoolPhone();
+    loadTenantPhones();
+    loadPhonePricing();
   }, []);
 
   useEffect(() => {
@@ -178,18 +187,61 @@ export function PhoneSettings() {
     }
   }
 
+  async function loadTenantPhones() {
+    try {
+      setLoadingTenantPhones(true);
+      const result = await notificationsApi.listTenantPhones();
+      if (result.success) setTenantPhones(result.data);
+    } catch {
+      console.error('Failed to load tenant phones');
+    } finally {
+      setLoadingTenantPhones(false);
+    }
+  }
+
+  async function loadPhonePricing() {
+    try {
+      const result = await notificationsApi.getPhonePricing();
+      if (result.success) setPhonePriceMonthly(result.data.priceMonthly);
+    } catch {
+      // keep null
+    }
+  }
+
   async function handlePurchaseNumber(phoneNumber: string) {
     setPurchasingNumber(phoneNumber);
     setSearchError(null);
     try {
-      await notificationsApi.purchasePhoneNumber(selectedAccountId, phoneNumber);
-      setSigcoreFromPhone(phoneNumber);
-      setSigcoreProvider('twilio');
-      setAvailableNumbers([]);
+      const result = await notificationsApi.purchaseTenantPhone(selectedAccountId, phoneNumber);
+      if (result.success) {
+        setSigcoreFromPhone(phoneNumber);
+        setSigcoreProvider('twilio');
+        setAvailableNumbers([]);
+        await loadTenantPhones(); // Refresh list
+      } else {
+        setSearchError(result.error || 'Failed to purchase number');
+      }
     } catch (err: any) {
       setSearchError(err.message || 'Failed to purchase number');
     } finally {
       setPurchasingNumber(null);
+    }
+  }
+
+  async function handleCancelTenantPhone(tenantPhoneId: string) {
+    if (!confirm('Cancel this phone number? Billing will stop immediately. The number will be kept during the grace period.')) return;
+    setCancellingPhoneId(tenantPhoneId);
+    try {
+      const result = await notificationsApi.cancelTenantPhone(tenantPhoneId);
+      if (result.success) {
+        await loadTenantPhones();
+      } else {
+        setSearchError(result.error || 'Failed to cancel number');
+      }
+    } catch (err: any) {
+      setSearchError(err.message || 'Failed to cancel number');
+    } finally {
+      setCancellingPhoneId(null);
     }
   }
 
@@ -453,8 +505,10 @@ export function PhoneSettings() {
         <div className="flex items-center gap-3 px-2">
           <Hash className="w-5 h-5 text-blue-600" />
           <h3 className="text-xl font-bold text-slate-900">Option 3: Get a Dedicated Number</h3>
-          {sigcoreProvider === 'twilio' && sigcoreFromPhone && (
-            <span className="px-2 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-bold rounded uppercase">Active</span>
+          {tenantPhones.filter(t => t.status === 'ACTIVE').length > 0 && (
+            <span className="px-2 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-bold rounded uppercase">
+              {tenantPhones.filter(t => t.status === 'ACTIVE').length} Active
+            </span>
           )}
         </div>
 
@@ -473,82 +527,117 @@ export function PhoneSettings() {
             <Hash className="w-10 h-10 text-slate-300 mx-auto mb-3" />
             <p className="text-slate-500 text-sm">Enable your Phone Workspace (Option 2 above) first to get a dedicated number.</p>
           </div>
-        ) : sigcoreProvider === 'twilio' && sigcoreFromPhone ? (
-          <div className="space-y-4">
-            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3 text-emerald-700 text-sm">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>Dedicated Twilio number active. Used automatically for outbound SMS.</span>
-            </div>
-            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 inline-flex items-center gap-4">
-              <div className="w-10 h-10 bg-violet-50 text-violet-600 rounded-xl flex items-center justify-center">
-                <Phone className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="font-bold text-slate-900 font-mono">{sigcoreFromPhone}</div>
-                <div className="text-xs text-slate-400">Twilio · Dedicated</div>
-              </div>
-            </div>
-          </div>
         ) : (
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-6">
-            <div>
-              <h4 className="font-semibold text-slate-900 mb-1">Search Available Numbers</h4>
-              <p className="text-slate-500 text-sm">Pick a dedicated US phone number for your account. Standard Twilio rates apply.</p>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <input
-                type="text"
-                value={searchAreaCode}
-                onChange={e => setSearchAreaCode(e.target.value.replace(/\D/g, '').slice(0, 3))}
-                onKeyDown={e => e.key === 'Enter' && handleSearchNumbers()}
-                placeholder="Area code (e.g. 415)"
-                maxLength={3}
-                className="w-36 px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono tracking-widest"
-              />
-              <input
-                type="text"
-                value={searchLocality}
-                onChange={e => setSearchLocality(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSearchNumbers()}
-                placeholder="City (e.g. San Francisco)"
-                className="flex-1 min-w-40 px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-              <button
-                onClick={handleSearchNumbers}
-                disabled={searchLoading}
-                className="px-5 py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-200 transition-all"
-              >
-                {searchLoading ? <Loader2 size={16} className="animate-spin" /> : <Hash size={16} />}
-                {searchLoading ? 'Searching...' : 'Search Numbers'}
-              </button>
-            </div>
-
-            {availableNumbers.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {availableNumbers.map(num => (
-                  <div key={num.phoneNumber} className="bg-slate-50 rounded-2xl border border-slate-200 p-4 flex flex-col gap-3 hover:border-blue-200 transition-all">
-                    <div>
-                      <div className="font-bold text-slate-900 font-mono text-sm">{num.phoneNumber}</div>
-                      <div className="text-xs text-slate-500 mt-0.5">
-                        {[num.locality, num.region].filter(Boolean).join(', ') || 'US'}
-                      </div>
-                      {num.totalMonthlyPrice !== undefined && (
-                        <div className="text-xs text-slate-400 mt-1">${num.totalMonthlyPrice.toFixed(2)}/mo</div>
-                      )}
+          <div className="space-y-6">
+            {/* Existing tenant phone numbers */}
+            {tenantPhones.length > 0 && (
+              <div className="space-y-3">
+                <h4 className="font-semibold text-slate-900 text-sm">Your Dedicated Numbers</h4>
+                {tenantPhones.map(tp => (
+                  <div key={tp.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-4">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${tp.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                      <Phone className="w-5 h-5" />
                     </div>
-                    <button
-                      onClick={() => handlePurchaseNumber(num.phoneNumber)}
-                      disabled={purchasingNumber !== null}
-                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold text-xs hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
-                    >
-                      {purchasingNumber === num.phoneNumber ? (
-                        <><Loader2 size={14} className="animate-spin" /> Getting...</>
-                      ) : 'Get this number'}
-                    </button>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-slate-900 font-mono text-sm">{tp.phoneNumber}</div>
+                      <div className="text-xs text-slate-400 flex items-center gap-2">
+                        <span>Twilio · Dedicated</span>
+                        {tp.status === 'ACTIVE' && (
+                          <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded text-[10px] font-bold uppercase">Active</span>
+                        )}
+                        {tp.status === 'GRACE_PERIOD' && (
+                          <span className="px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded text-[10px] font-bold uppercase">
+                            Grace Period{tp.gracePeriodEndsAt ? ` — expires ${new Date(tp.gracePeriodEndsAt).toLocaleDateString()}` : ''}
+                          </span>
+                        )}
+                        {phonePriceMonthly != null && tp.status === 'ACTIVE' && (
+                          <span className="text-slate-300">·</span>
+                        )}
+                        {phonePriceMonthly != null && tp.status === 'ACTIVE' && (
+                          <span>${phonePriceMonthly.toFixed(2)}/mo</span>
+                        )}
+                      </div>
+                    </div>
+                    {tp.status === 'ACTIVE' && (
+                      <button
+                        onClick={() => handleCancelTenantPhone(tp.id)}
+                        disabled={cancellingPhoneId === tp.id}
+                        className="px-3 py-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                      >
+                        {cancellingPhoneId === tp.id ? <Loader2 size={12} className="animate-spin" /> : 'Cancel'}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
             )}
+
+            {/* Search & purchase new numbers */}
+            <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-6">
+              <div>
+                <h4 className="font-semibold text-slate-900 mb-1">
+                  {tenantPhones.filter(t => t.status === 'ACTIVE').length > 0 ? 'Get Another Number' : 'Search Available Numbers'}
+                </h4>
+                <p className="text-slate-500 text-sm">
+                  Pick a dedicated US phone number for your account.
+                  {phonePriceMonthly != null && <span className="font-medium"> ${phonePriceMonthly.toFixed(2)}/mo per number.</span>}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <input
+                  type="text"
+                  value={searchAreaCode}
+                  onChange={e => setSearchAreaCode(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                  onKeyDown={e => e.key === 'Enter' && handleSearchNumbers()}
+                  placeholder="Area code (e.g. 415)"
+                  maxLength={3}
+                  className="w-36 px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono tracking-widest"
+                />
+                <input
+                  type="text"
+                  value={searchLocality}
+                  onChange={e => setSearchLocality(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSearchNumbers()}
+                  placeholder="City (e.g. San Francisco)"
+                  className="flex-1 min-w-40 px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+                <button
+                  onClick={handleSearchNumbers}
+                  disabled={searchLoading}
+                  className="px-5 py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-200 transition-all"
+                >
+                  {searchLoading ? <Loader2 size={16} className="animate-spin" /> : <Hash size={16} />}
+                  {searchLoading ? 'Searching...' : 'Search Numbers'}
+                </button>
+              </div>
+
+              {availableNumbers.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {availableNumbers.map(num => (
+                    <div key={num.phoneNumber} className="bg-slate-50 rounded-2xl border border-slate-200 p-4 flex flex-col gap-3 hover:border-blue-200 transition-all">
+                      <div>
+                        <div className="font-bold text-slate-900 font-mono text-sm">{num.phoneNumber}</div>
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          {[num.locality, num.region].filter(Boolean).join(', ') || 'US'}
+                        </div>
+                        {phonePriceMonthly != null && (
+                          <div className="text-xs text-slate-400 mt-1">${phonePriceMonthly.toFixed(2)}/mo</div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handlePurchaseNumber(num.phoneNumber)}
+                        disabled={purchasingNumber !== null}
+                        className="w-full px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold text-xs hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
+                      >
+                        {purchasingNumber === num.phoneNumber ? (
+                          <><Loader2 size={14} className="animate-spin" /> Getting...</>
+                        ) : 'Get this number'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </section>

@@ -62,6 +62,27 @@ export class AdminPhonePoolController {
   }
 
   /**
+   * Get phone number pricing config
+   */
+  @Get('phone-pricing')
+  async getPhonePricing() {
+    const pricing = await this.phonePoolService.getPhonePricing();
+    return { success: true, data: pricing };
+  }
+
+  /**
+   * Update phone number pricing config (creates/updates Stripe Price)
+   */
+  @Patch('phone-pricing')
+  async updatePhonePricing(@Body() body: { priceMonthly: number; gracePeriodDays: number }) {
+    const pricing = await this.phonePoolService.updatePhonePricing(
+      body.priceMonthly,
+      body.gracePeriodDays,
+    );
+    return { success: true, data: pricing };
+  }
+
+  /**
    * List users for assignment dropdown
    * MUST be before parameterized routes to avoid NestJS matching 'users' as :phonePoolId
    */

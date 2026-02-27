@@ -2687,4 +2687,208 @@ export class NotificationsService {
     }
     return null;
   }
+
+  // ==========================================
+  // Tenant Phone Number Management
+  // ==========================================
+
+  async getPhonePricing(): Promise<{ priceMonthly: number | null; gracePeriodDays: number }> {
+    const config = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
+    return {
+      priceMonthly: config?.phonePriceMonthly ? Number(config.phonePriceMonthly) : null,
+      gracePeriodDays: config?.phoneGracePeriodDays ?? 30,
+    };
+  }
+
+  async listTenantPhoneNumbers(userId: string) {
+    return this.prisma.tenantPhoneNumber.findMany({
+      where: { userId, status: { not: 'RELEASED' } },
+      orderBy: { purchasedAt: 'desc' },
+    });
+  }
+
+  async purchaseTenantPhoneNumber(
+    userId: string,
+    savedAccountId: string,
+    phoneNumber: string,
+    friendlyName?: string,
+  ): Promise<{ success: boolean; tenantPhone?: any; error?: string }> {
+    this.logger.log(`[purchaseTenantPhone] userId=${userId}, account=${savedAccountId}, phone=${phoneNumber}`);
+
+    // 1. Provision via Sigcore (reuse existing method)
+    let allocationId: string;
+    try {
+      const result = await this.purchaseSigcorePhoneNumber(userId, savedAccountId, phoneNumber, friendlyName);
+      allocationId = result.allocationId;
+    } catch (err) {
+      this.logger.error(`[purchaseTenantPhone] Sigcore provision failed: ${err.message}`);
+      return { success: false, error: `Failed to provision number: ${err.message}` };
+    }
+
+    // 2. Get admin pricing config
+    const config = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
+    const stripePriceId = config?.stripePriceId;
+
+    // 3. Add to Stripe subscription (if user has one and pricing is configured)
+    let stripeSubItemId: string | null = null;
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { stripeSubscriptionId: true, stripeCustomerId: true, email: true },
+    });
+
+    if (stripePriceId && user?.stripeSubscriptionId) {
+      try {
+        const Stripe = (await import('stripe')).default;
+        const stripe = new Stripe(this.configService.get<string>('STRIPE_SECRET_KEY')!, {
+          apiVersion: '2026-01-28.clover',
+        });
+        const subItem = await stripe.subscriptionItems.create({
+          subscription: user.stripeSubscriptionId,
+          price: stripePriceId,
+          quantity: 1,
+        });
+        stripeSubItemId = subItem.id;
+        this.logger.log(`[purchaseTenantPhone] Created Stripe sub item: ${stripeSubItemId}`);
+      } catch (err) {
+        this.logger.warn(`[purchaseTenantPhone] Stripe billing failed (number still provisioned): ${err.message}`);
+      }
+    }
+
+    // 4. Extract area code from phone number
+    const areaCode = phoneNumber.replace(/\D/g, '').slice(1, 4); // +1XXXYYYZZZZ → XXX
+
+    // 5. Create TenantPhoneNumber record
+    const tenantPhone = await this.prisma.tenantPhoneNumber.create({
+      data: {
+        userId,
+        savedAccountId,
+        phoneNumber,
+        friendlyName: friendlyName || phoneNumber,
+        areaCode,
+        sigcoreAllocationId: allocationId,
+        stripeSubItemId,
+        status: 'ACTIVE',
+      },
+    });
+
+    this.logger.log(`[purchaseTenantPhone] Created tenant phone: ${tenantPhone.id} — ${phoneNumber}`);
+    return { success: true, tenantPhone };
+  }
+
+  async cancelTenantPhoneNumber(
+    userId: string,
+    tenantPhoneId: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    const tenantPhone = await this.prisma.tenantPhoneNumber.findUnique({
+      where: { id: tenantPhoneId },
+    });
+
+    if (!tenantPhone || tenantPhone.userId !== userId) {
+      return { success: false, error: 'Phone number not found' };
+    }
+
+    if (tenantPhone.status !== 'ACTIVE') {
+      return { success: false, error: 'Phone number is not active' };
+    }
+
+    // Get grace period from admin config
+    const config = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
+    const gracePeriodDays = config?.phoneGracePeriodDays ?? 30;
+    const gracePeriodEndsAt = new Date();
+    gracePeriodEndsAt.setDate(gracePeriodEndsAt.getDate() + gracePeriodDays);
+
+    // Remove Stripe subscription item (stop billing immediately)
+    if (tenantPhone.stripeSubItemId) {
+      try {
+        const Stripe = (await import('stripe')).default;
+        const stripe = new Stripe(this.configService.get<string>('STRIPE_SECRET_KEY')!, {
+          apiVersion: '2026-01-28.clover',
+        });
+        await stripe.subscriptionItems.del(tenantPhone.stripeSubItemId);
+        this.logger.log(`[cancelTenantPhone] Removed Stripe sub item: ${tenantPhone.stripeSubItemId}`);
+      } catch (err) {
+        this.logger.warn(`[cancelTenantPhone] Failed to remove Stripe item: ${err.message}`);
+      }
+    }
+
+    // Update status to grace period
+    await this.prisma.tenantPhoneNumber.update({
+      where: { id: tenantPhoneId },
+      data: {
+        status: 'GRACE_PERIOD',
+        cancelledAt: new Date(),
+        gracePeriodEndsAt,
+      },
+    });
+
+    this.logger.log(`[cancelTenantPhone] ${tenantPhone.phoneNumber} → GRACE_PERIOD until ${gracePeriodEndsAt.toISOString()}`);
+    return { success: true };
+  }
+
+  async releaseTenantPhoneNumber(tenantPhoneId: string): Promise<{ success: boolean; error?: string }> {
+    const tenantPhone = await this.prisma.tenantPhoneNumber.findUnique({
+      where: { id: tenantPhoneId },
+    });
+
+    if (!tenantPhone) {
+      return { success: false, error: 'Phone number not found' };
+    }
+
+    // Release via Sigcore if we have an allocation ID
+    if (tenantPhone.sigcoreAllocationId) {
+      try {
+        const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+        const platformKey = this.configService.get<string>('SIGCORE_API_KEY') || '';
+        await fetch(`${sigcoreUrl}/tenants/${tenantPhone.sigcoreAllocationId}/phone-numbers/release`, {
+          method: 'POST',
+          headers: { 'x-api-key': platformKey, 'Content-Type': 'application/json' },
+        });
+        this.logger.log(`[releaseTenantPhone] Released via Sigcore: ${tenantPhone.phoneNumber}`);
+      } catch (err) {
+        this.logger.warn(`[releaseTenantPhone] Sigcore release failed: ${err.message}`);
+      }
+    }
+
+    // Mark as released
+    await this.prisma.tenantPhoneNumber.update({
+      where: { id: tenantPhoneId },
+      data: { status: 'RELEASED', releasedAt: new Date() },
+    });
+
+    // If this was the user's active fromPhone, clear it
+    if (tenantPhone.savedAccountId) {
+      const settings = await this.prisma.notificationSettings.findUnique({
+        where: { savedAccountId: tenantPhone.savedAccountId },
+      });
+      if (settings?.sigcoreFromPhone === tenantPhone.phoneNumber) {
+        await this.prisma.notificationSettings.update({
+          where: { savedAccountId: tenantPhone.savedAccountId },
+          data: { sigcoreFromPhone: null },
+        });
+      }
+    }
+
+    this.logger.log(`[releaseTenantPhone] ${tenantPhone.phoneNumber} → RELEASED`);
+    return { success: true };
+  }
+
+  async processGracePeriodExpirations(): Promise<number> {
+    const expired = await this.prisma.tenantPhoneNumber.findMany({
+      where: {
+        status: 'GRACE_PERIOD',
+        gracePeriodEndsAt: { lt: new Date() },
+      },
+    });
+
+    let released = 0;
+    for (const phone of expired) {
+      const result = await this.releaseTenantPhoneNumber(phone.id);
+      if (result.success) released++;
+    }
+
+    if (released > 0) {
+      this.logger.log(`[processGracePeriodExpirations] Released ${released} expired numbers`);
+    }
+    return released;
+  }
 }

@@ -549,4 +549,43 @@ export class NotificationsController {
       error: result.error,
     };
   }
+
+  // ==========================================
+  // Tenant Phone Numbers (Dedicated Numbers)
+  // ==========================================
+
+  @Get('phone-pricing')
+  async getPhonePricing() {
+    const pricing = await this.notificationsService.getPhonePricing();
+    return { success: true, data: pricing };
+  }
+
+  @Get('tenant-phones')
+  async listTenantPhones(@CurrentUser() user: any) {
+    const phones = await this.notificationsService.listTenantPhoneNumbers(user.id);
+    return { success: true, data: phones };
+  }
+
+  @Post('tenant-phones/purchase')
+  async purchaseTenantPhone(
+    @CurrentUser() user: any,
+    @Body() body: { savedAccountId: string; phoneNumber: string; friendlyName?: string },
+  ) {
+    const result = await this.notificationsService.purchaseTenantPhoneNumber(
+      user.id,
+      body.savedAccountId,
+      body.phoneNumber,
+      body.friendlyName,
+    );
+    return result;
+  }
+
+  @Post('tenant-phones/:id/cancel')
+  async cancelTenantPhone(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    const result = await this.notificationsService.cancelTenantPhoneNumber(user.id, id);
+    return result;
+  }
 }

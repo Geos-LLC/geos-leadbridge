@@ -548,6 +548,22 @@ export interface SigcorePhoneNumber {
   voiceEnabled?: boolean;
 }
 
+export interface TenantPhoneNumber {
+  id: string;
+  userId: string;
+  savedAccountId: string | null;
+  phoneNumber: string;
+  friendlyName: string | null;
+  areaCode: string | null;
+  sigcoreAllocationId: string | null;
+  stripeSubItemId: string | null;
+  status: 'ACTIVE' | 'GRACE_PERIOD' | 'RELEASED';
+  purchasedAt: string;
+  cancelledAt: string | null;
+  gracePeriodEndsAt: string | null;
+  releasedAt: string | null;
+}
+
 // SMS Notifications (Sigcore Integration)
 export const notificationsApi = {
   getSettings: async (savedAccountId: string): Promise<{ success: boolean; settings: NotificationSettings | null }> => {
@@ -657,6 +673,23 @@ export const notificationsApi = {
     friendlyName?: string,
   ): Promise<{ success: boolean; data: { phoneNumber: string; allocationId: string } }> => {
     const { data } = await api.post(`/v1/notifications/sigcore/purchase-number/${savedAccountId}`, { phoneNumber, friendlyName });
+    return data;
+  },
+  // Tenant Phone Numbers (Dedicated Numbers)
+  getPhonePricing: async (): Promise<{ success: boolean; data: { priceMonthly: number | null; gracePeriodDays: number } }> => {
+    const { data } = await api.get('/v1/notifications/phone-pricing');
+    return data;
+  },
+  listTenantPhones: async (): Promise<{ success: boolean; data: TenantPhoneNumber[] }> => {
+    const { data } = await api.get('/v1/notifications/tenant-phones');
+    return data;
+  },
+  purchaseTenantPhone: async (savedAccountId: string, phoneNumber: string, friendlyName?: string): Promise<{ success: boolean; tenantPhone?: TenantPhoneNumber; error?: string }> => {
+    const { data } = await api.post('/v1/notifications/tenant-phones/purchase', { savedAccountId, phoneNumber, friendlyName });
+    return data;
+  },
+  cancelTenantPhone: async (tenantPhoneId: string): Promise<{ success: boolean; error?: string }> => {
+    const { data } = await api.post(`/v1/notifications/tenant-phones/${tenantPhoneId}/cancel`);
     return data;
   },
   // Customer Texting
@@ -947,6 +980,15 @@ export const adminApi = {
   },
   updateAdminConfig: async (testData: Record<string, string>): Promise<{ id: string; testData: Record<string, string> }> => {
     const { data } = await api.patch('/v1/admin/phone-pool/admin-config', { testData });
+    return data.data;
+  },
+  // Phone Pricing
+  getPhonePricing: async (): Promise<{ priceMonthly: number | null; gracePeriodDays: number; stripePriceId: string | null }> => {
+    const { data } = await api.get('/v1/admin/phone-pool/phone-pricing');
+    return data.data;
+  },
+  updatePhonePricing: async (priceMonthly: number, gracePeriodDays: number): Promise<{ priceMonthly: number; gracePeriodDays: number; stripePriceId: string }> => {
+    const { data } = await api.patch('/v1/admin/phone-pool/phone-pricing', { priceMonthly, gracePeriodDays });
     return data.data;
   },
 };

@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import Stripe from 'stripe';
 import { PrismaService } from '../common/utils/prisma.service';
 import { SigcoreService } from '../sigcore/sigcore.service';
 import { AdminService } from './admin.service';
@@ -556,5 +557,92 @@ export class AdminPhonePoolService {
       create: { id: 'global', testData },
       update: { testData },
     });
+  }
+
+  // ==========================================
+  // Phone Number Pricing
+  // ==========================================
+
+  async getPhonePricing(): Promise<{
+    priceMonthly: number | null;
+    gracePeriodDays: number;
+    stripePriceId: string | null;
+  }> {
+    const config = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
+    return {
+      priceMonthly: config?.phonePriceMonthly ? Number(config.phonePriceMonthly) : null,
+      gracePeriodDays: config?.phoneGracePeriodDays ?? 30,
+      stripePriceId: config?.stripePriceId ?? null,
+    };
+  }
+
+  async updatePhonePricing(priceMonthly: number, gracePeriodDays: number): Promise<{
+    priceMonthly: number;
+    gracePeriodDays: number;
+    stripePriceId: string;
+  }> {
+    const secretKey = this.configService.get<string>('STRIPE_SECRET_KEY');
+    if (!secretKey) throw new BadRequestException('STRIPE_SECRET_KEY not configured');
+
+    const stripe = new Stripe(secretKey, { apiVersion: '2026-01-28.clover' });
+
+    // Check if we already have a Stripe product for phone numbers
+    const config = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
+    let stripePriceId = config?.stripePriceId;
+
+    // Always create a new Price (Stripe prices are immutable — archive old one)
+    // First, find or create the product
+    const productName = 'Dedicated Phone Number';
+    const products = await stripe.products.search({ query: `name:'${productName}' active:'true'` });
+    let productId: string;
+
+    if (products.data.length > 0) {
+      productId = products.data[0].id;
+    } else {
+      const product = await stripe.products.create({
+        name: productName,
+        description: 'Dedicated Twilio phone number for SMS and voice',
+      });
+      productId = product.id;
+    }
+
+    // Archive old price if it exists
+    if (stripePriceId) {
+      try {
+        await stripe.prices.update(stripePriceId, { active: false });
+      } catch (e) {
+        this.logger.warn(`Failed to archive old price ${stripePriceId}: ${e.message}`);
+      }
+    }
+
+    // Create new recurring price
+    const price = await stripe.prices.create({
+      product: productId,
+      unit_amount: Math.round(priceMonthly * 100), // Convert dollars to cents
+      currency: 'usd',
+      recurring: { interval: 'month' },
+    });
+
+    stripePriceId = price.id;
+
+    // Save to AdminConfig
+    await this.prisma.adminConfig.upsert({
+      where: { id: 'global' },
+      create: {
+        id: 'global',
+        phonePriceMonthly: priceMonthly,
+        phoneGracePeriodDays: gracePeriodDays,
+        stripePriceId,
+      },
+      update: {
+        phonePriceMonthly: priceMonthly,
+        phoneGracePeriodDays: gracePeriodDays,
+        stripePriceId,
+      },
+    });
+
+    this.logger.log(`[updatePhonePricing] Price: $${priceMonthly}/mo, Grace: ${gracePeriodDays}d, Stripe Price: ${stripePriceId}`);
+
+    return { priceMonthly, gracePeriodDays, stripePriceId };
   }
 }

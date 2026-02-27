@@ -8,6 +8,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   automationApi, notificationsApi, thumbtackApi, templatesApi, usersApi, callConnectApi,
 } from '../services/api';
+import type { TenantPhoneNumber } from '../services/api';
 import type {
   AutomationRule, NotificationRule, SavedAccount, MessageTemplate,
   CallConnectMode, AgentStrategy, SigcorePhoneNumber,
@@ -145,6 +146,7 @@ export function Services() {
   const [poolPhones, setPoolPhones] = useState<{ id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }[]>([]);
   const [ctOwnPhoneNumbers, setCtOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>([]);
   const [ctSigcoreConnected, setCtSigcoreConnected] = useState(false);
+  const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
 
   // UI state
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
@@ -335,6 +337,11 @@ export function Services() {
 
       setLeadAlertRule(leadAlert);
       setPoolPhones(poolRes.phoneNumbers);
+
+      // Load tenant purchased phone numbers
+      notificationsApi.listTenantPhones().then(r => {
+        if (r.success) setTenantPhones(r.data.filter(tp => tp.status === 'ACTIVE'));
+      }).catch(() => {});
 
       // Load own provider connection status for CT Option 2
       const connected = !!notifSettingsRes?.settings?.sigcoreConnected;
@@ -1194,12 +1201,17 @@ export function Services() {
                           {p.phoneNumber} (LeadBridge shared)
                         </option>
                       ))}
-                      {ctOwnPhoneNumbers.filter(p => p.provider !== 'openphone').map(p => (
+                      {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).map(tp => (
+                        <option key={tp.id} value={tp.phoneNumber}>
+                          {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''} (Dedicated)
+                        </option>
+                      ))}
+                      {ctOwnPhoneNumbers.filter(p => p.provider !== 'openphone' && !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => (
                         <option key={p.id} value={p.phoneNumber}>
                           {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider})
                         </option>
                       ))}
-                      {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && (
+                      {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
                         <option value={ctSigcoreFromPhone}>
                           {ctSigcoreFromPhone} (Twilio · Dedicated)
                         </option>
@@ -1411,12 +1423,17 @@ export function Services() {
                         {p.phoneNumber} (LeadBridge shared)
                       </option>
                     ))}
-                    {ctOwnPhoneNumbers.map(p => (
+                    {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).map(tp => (
+                      <option key={tp.id} value={tp.phoneNumber}>
+                        {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''} (Dedicated)
+                      </option>
+                    ))}
+                    {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => (
                       <option key={p.id} value={p.phoneNumber}>
                         {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider === 'openphone' ? 'OpenPhone/QUO' : p.provider})
                       </option>
                     ))}
-                    {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && (
+                    {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
                       <option value={ctSigcoreFromPhone}>
                         {ctSigcoreFromPhone} (Twilio · Dedicated)
                       </option>
@@ -1668,7 +1685,7 @@ export function Services() {
                     className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium appearance-none"
                   >
                     <option value="">Select phone number</option>
-                    {ccBotNumber && !poolPhones.some(p => p.phoneNumber === ccBotNumber) && (
+                    {ccBotNumber && !poolPhones.some(p => p.phoneNumber === ccBotNumber) && !tenantPhones.some(tp => tp.phoneNumber === ccBotNumber) && (
                       <option value={ccBotNumber}>{ccBotNumber} (configured)</option>
                     )}
                     {poolPhones.map(p => (
@@ -1676,16 +1693,16 @@ export function Services() {
                         {p.phoneNumber} (LeadBridge)
                       </option>
                     ))}
+                    {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).map(tp => (
+                      <option key={tp.id} value={tp.phoneNumber}>
+                        {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''} (Dedicated)
+                      </option>
+                    ))}
                   </select>
                   <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
                     <ChevronDown className="w-4 h-4" />
                   </div>
                 </div>
-                <button className="mt-2 px-4 py-2 bg-slate-100 text-slate-400 rounded-xl text-xs font-bold flex items-center gap-2 cursor-not-allowed">
-                  <Phone className="w-3 h-3" />
-                  Get your own number
-                  <span className="px-1.5 py-0.5 bg-slate-200 text-[9px] rounded uppercase">Coming Soon</span>
-                </button>
               </div>
             </div>
 
