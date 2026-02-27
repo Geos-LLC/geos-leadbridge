@@ -546,7 +546,7 @@ export class PlatformService {
       encryptedCredentials = EncryptionUtil.encryptObject(credentials, this.encryptionKey);
     }
 
-    await this.prisma.savedAccount.upsert({
+    const savedAccount = await this.prisma.savedAccount.upsert({
       where: {
         userId_platform_businessId: {
           userId,
@@ -573,6 +573,69 @@ export class PlatformService {
         lastUsedAt: new Date(),
       },
     });
+
+    // Auto-provision Sigcore workspace for this account (idempotent, non-blocking)
+    this.autoProvisionSigcore(savedAccount.id, businessName).catch((err) => {
+      this.logger.warn(`[saveAccount] Sigcore auto-provision failed for ${savedAccount.id}: ${err.message}`);
+    });
+  }
+
+  /**
+   * Auto-provision a Sigcore tenant workspace for a saved account.
+   * Idempotent — skips if already provisioned.
+   */
+  private async autoProvisionSigcore(savedAccountId: string, displayName?: string): Promise<void> {
+    // Check if already provisioned
+    const existing = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { sigcoreTenantId: true, sigcoreApiKey: true },
+    });
+    if (existing?.sigcoreTenantId && existing?.sigcoreApiKey) {
+      return; // already provisioned
+    }
+
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (!platformKey) {
+      this.logger.warn('[autoProvisionSigcore] SIGCORE_API_KEY not configured — skipping');
+      return;
+    }
+
+    const resp = await fetch(`${sigcoreUrl}/tenants/provision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey },
+      body: JSON.stringify({
+        externalTenantId: savedAccountId,
+        displayName: displayName || `Account ${savedAccountId}`,
+      }),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Sigcore provision failed (${resp.status}): ${text}`);
+    }
+
+    const { data } = await resp.json();
+
+    await this.prisma.notificationSettings.upsert({
+      where: { savedAccountId },
+      update: {
+        sigcoreApiKey: data.apiKey,
+        sigcoreTenantId: data.tenantId,
+        sigcoreWorkspaceId: data.tenantId,
+        sigcoreProvisionedAt: new Date(),
+      },
+      create: {
+        savedAccountId,
+        sigcoreApiKey: data.apiKey,
+        sigcoreTenantId: data.tenantId,
+        sigcoreWorkspaceId: data.tenantId,
+        sigcoreProvisionedAt: new Date(),
+        enabled: false,
+      },
+    });
+
+    this.logger.log(`[autoProvisionSigcore] Provisioned tenant ${data.tenantId} for account ${savedAccountId}`);
   }
 
   /**

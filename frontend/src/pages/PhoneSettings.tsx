@@ -46,6 +46,7 @@ export function PhoneSettings() {
   const [, setLoadingTenantPhones] = useState(false);
   const [cancellingPhoneId, setCancellingPhoneId] = useState<string | null>(null);
   const [phonePriceMonthly, setPhonePriceMonthly] = useState<number | null>(null);
+  const [smsConsentAccepted, setSmsConsentAccepted] = useState(false);
 
   useEffect(() => {
     loadAccounts();
@@ -572,6 +573,27 @@ export function PhoneSettings() {
               </div>
             )}
 
+            {/* SMS Consent */}
+            <div className={`rounded-2xl border p-4 ${smsConsentAccepted ? 'bg-emerald-50/50 border-emerald-200' : 'bg-amber-50/50 border-amber-200'}`}>
+              <label className="flex items-start gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={smsConsentAccepted}
+                  onChange={e => setSmsConsentAccepted(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-xs text-slate-600 leading-relaxed">
+                  I agree to receive SMS notifications from Geos LLC regarding account alerts and new leads. Message frequency varies. Message and data rates may apply. Reply STOP to unsubscribe or HELP for assistance.
+                </span>
+              </label>
+              {!smsConsentAccepted && (
+                <div className="mt-2 ml-7 flex items-center gap-1.5 text-amber-600 text-xs font-medium">
+                  <AlertCircle size={12} className="shrink-0" />
+                  You must accept the SMS consent to purchase a phone number.
+                </div>
+              )}
+            </div>
+
             {/* Search & purchase new numbers */}
             <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-6">
               <div>
@@ -626,7 +648,7 @@ export function PhoneSettings() {
                       </div>
                       <button
                         onClick={() => handlePurchaseNumber(num.phoneNumber)}
-                        disabled={purchasingNumber !== null}
+                        disabled={purchasingNumber !== null || !smsConsentAccepted}
                         className="w-full px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold text-xs hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
                       >
                         {purchasingNumber === num.phoneNumber ? (
