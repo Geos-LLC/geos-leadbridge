@@ -242,6 +242,13 @@ export class CallConnectService {
       return;
     }
 
+    // Prefix messages with a brief TTS pause ("... ,") so Twilio doesn't clip
+    // the first ~1 second of audio when the call leg connects.
+    const pausePrefix = '... , ';
+    const whisperRaw = settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.';
+    const greetingRaw = settings.leadGreetingMessage || 'Please hold while we connect you with a specialist.';
+    const vmRaw = settings.leadVoicemailMessage ?? null;
+
     const payload = {
       enabled: settings.enabled,
       mode: settings.mode,
@@ -249,11 +256,11 @@ export class CallConnectService {
       agentPhoneE164: settings.agentPhoneE164,
       ringTimeoutSeconds: 60,
       maxAgentAttempts: settings.maxAgentAttempts,
-      agentAcceptDigits: '0123456789',
-      agentWhisperMessage: settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.',
-      leadGreetingMessage: settings.leadGreetingMessage || 'Please hold while we connect you with a specialist.',
+      agentAcceptDigits: settings.agentAcceptDigits || '0123456789',
+      agentWhisperMessage: pausePrefix + whisperRaw,
+      leadGreetingMessage: pausePrefix + greetingRaw,
       leadVoicemailEnabled: true,
-      leadVoicemailMessage: settings.leadVoicemailMessage ?? null,
+      leadVoicemailMessage: vmRaw ? pausePrefix + vmRaw : null,
       leadVoicemailRecordingUrl: settings.leadVoicemailRecordingUrl ?? null,
       ...(settings.quietHoursEnabled && settings.quietHoursTimezone && settings.quietHoursStart && settings.quietHoursEnd && {
         quietHours: {
@@ -475,14 +482,16 @@ export class CallConnectService {
         .replace(/\{lead\.message\}/g, '')
         .replace(/\{lead\.serviceDescription\}/g, params.category || '');
 
-    const agentWhisperMessage = subst(whisperTemplate);
+    // Prefix with a brief TTS pause so Twilio doesn't clip the first ~1s of audio
+    const pausePrefix = '... , ';
+    const agentWhisperMessage = pausePrefix + subst(whisperTemplate);
 
     // Pre-build the voicemail message the same way so Sigcore receives the final text.
     // Sigcore will use this per-session value (overriding the workspace template) so the
     // message already has customerName, phone, etc. substituted correctly.
     const voicemailTemplate = settings.leadVoicemailMessage || '';
     const leadVoicemailMessage = voicemailTemplate
-      ? subst(voicemailTemplate)
+      ? pausePrefix + subst(voicemailTemplate)
       : undefined;
 
     try {
