@@ -62,8 +62,6 @@ export interface Message {
 export interface CustomerTextingSettings {
   enabled: boolean;
   autoReplyTemplate: string;
-  followUps: Array<{ id?: string; enabled: boolean; delayMinutes: number; template: string }>;
-  stopOnCustomerReply: boolean;
 }
 
 export interface Platform {

@@ -1096,16 +1096,6 @@ export class WebhooksService {
         },
       });
 
-      // Cancel pending customer-texting follow-ups
-      try {
-        await this.notificationsService.cancelPendingNotificationsForLead(
-          lead.id,
-          'Customer replied via SMS',
-        );
-      } catch (err: any) {
-        this.logger.warn(`Failed to cancel pending notifications: ${err.message}`);
-      }
-
       // Trigger customer_reply notification rules (e.g., forward reply to business owner)
       try {
         // Resolve savedAccountId for this lead's business

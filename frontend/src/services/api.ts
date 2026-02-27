@@ -660,11 +660,11 @@ export const notificationsApi = {
     return data;
   },
   // Customer Texting
-  getCustomerTextingSettings: async (savedAccountId: string): Promise<{ success: boolean; enabled: boolean; fromPhone: string | null; autoReplyTemplate: string; followUps: Array<{ id?: string; enabled: boolean; delayMinutes: number; template: string }>; stopOnCustomerReply: boolean }> => {
+  getCustomerTextingSettings: async (savedAccountId: string): Promise<{ success: boolean; enabled: boolean; fromPhone: string | null; autoReplyTemplate: string }> => {
     const { data } = await api.get(`/v1/notifications/customer-texting/${savedAccountId}`);
     return data;
   },
-  saveCustomerTextingSettings: async (savedAccountId: string, settings: { enabled: boolean; fromPhone?: string; autoReplyTemplate: string; followUps: Array<{ enabled: boolean; delayMinutes: number; template: string }>; stopOnCustomerReply: boolean }): Promise<{ success: boolean }> => {
+  saveCustomerTextingSettings: async (savedAccountId: string, settings: { enabled: boolean; fromPhone?: string; autoReplyTemplate: string }): Promise<{ success: boolean }> => {
     const { data } = await api.put(`/v1/notifications/customer-texting/${savedAccountId}`, settings);
     return data;
   },

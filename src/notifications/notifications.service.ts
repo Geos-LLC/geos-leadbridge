@@ -3,7 +3,7 @@
  * Manages SMS notification settings and sends notifications via Sigcore
  */
 
-import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 
@@ -177,9 +177,8 @@ export interface SendNotificationContext {
 }
 
 @Injectable()
-export class NotificationsService implements OnModuleInit {
+export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
-  private pendingNotifTimers = new Map<string, NodeJS.Timeout>();
 
   private readonly appSigcoreApiKey: string;
 
@@ -188,10 +187,6 @@ export class NotificationsService implements OnModuleInit {
     private configService: ConfigService,
   ) {
     this.appSigcoreApiKey = this.configService.get<string>('SIGCORE_API_KEY', '');
-  }
-
-  async onModuleInit(): Promise<void> {
-    await this.restorePendingNotificationMessages();
   }
 
   /**
@@ -932,15 +927,9 @@ export class NotificationsService implements OnModuleInit {
 
     this.logger.log(`Found ${rules.length} new_lead rules`);
 
-    // Send notification for each enabled rule
+    // Send notification for each enabled rule (always immediate, no follow-ups)
     for (const rule of rules) {
-      // If rule has a delay, schedule it instead of sending immediately
-      if (rule.delayMinutes > 0 && rule.sendToCustomer) {
-        await this.scheduleNotificationMessage(settings, rule, context);
-      } else {
-        // Send immediately (delayMinutes === 0 or non-customer rules)
-        await this.sendNotificationWithRule(settings, rule, context);
-      }
+      await this.sendNotificationWithRule(settings, rule, context);
     }
   }
 
@@ -952,48 +941,6 @@ export class NotificationsService implements OnModuleInit {
     const { userId, savedAccountId, leadId, lead, isFirstCustomerReply, isSecondCustomerMessage } = context;
 
     this.logger.log(`Checking customer reply notification rules for account ${savedAccountId}`);
-
-    // Stop condition: cancel pending customer texting follow-ups if customer replied
-    // Check if any pending notifications for this lead have stopOnCustomerReply enabled
-    const pendingForLead = await this.prisma.pendingNotificationMessage.findMany({
-      where: { leadId, status: 'pending' },
-      include: { notificationRule: true },
-    });
-    for (const p of pendingForLead) {
-      if (p.notificationRule.stopOnCustomerReply) {
-        const timer = this.pendingNotifTimers.get(p.id);
-        if (timer) {
-          clearTimeout(timer);
-          this.pendingNotifTimers.delete(p.id);
-        }
-        await this.prisma.pendingNotificationMessage.update({
-          where: { id: p.id },
-          data: { status: 'cancelled', failureReason: 'Customer replied' },
-        });
-        this.logger.log(`Cancelled pending notification ${p.id}: customer replied`);
-      }
-    }
-
-    // Also check for opt-out (STOP keyword)
-    const replyText = (lead.message || '').trim().toUpperCase();
-    if (['STOP', 'UNSUBSCRIBE', 'CANCEL', 'QUIT'].includes(replyText)) {
-      for (const p of pendingForLead) {
-        if (p.notificationRule.stopOnOptOut && p.status === 'pending') {
-          // Already cancelled above if stopOnCustomerReply was true
-          // This handles the case where stopOnOptOut is true but stopOnCustomerReply is false
-          const timer = this.pendingNotifTimers.get(p.id);
-          if (timer) {
-            clearTimeout(timer);
-            this.pendingNotifTimers.delete(p.id);
-          }
-          await this.prisma.pendingNotificationMessage.update({
-            where: { id: p.id },
-            data: { status: 'cancelled', failureReason: 'Customer opted out (STOP)' },
-          });
-          this.logger.log(`Cancelled pending notification ${p.id}: customer opted out`);
-        }
-      }
-    }
 
     // Skip the first customer message - only trigger on actual replies (2nd+ messages)
     if (isFirstCustomerReply) {
@@ -1409,231 +1356,6 @@ export class NotificationsService implements OnModuleInit {
       });
 
       return { success: false, error: error.message || 'Failed to send test notification' };
-    }
-  }
-
-  // ==========================================
-  // Notification Follow-Up Scheduling
-  // ==========================================
-
-  /**
-   * Schedule a delayed notification message
-   */
-  private async scheduleNotificationMessage(
-    settings: any,
-    rule: any,
-    context: SendNotificationContext,
-  ): Promise<void> {
-    const { savedAccountId, leadId } = context;
-
-    // Check for duplicate (same rule + lead)
-    const existing = await this.prisma.pendingNotificationMessage.findFirst({
-      where: {
-        notificationRuleId: rule.id,
-        leadId,
-        status: 'pending',
-      },
-    });
-
-    if (existing) {
-      this.logger.log(`Skipping duplicate: rule ${rule.id} already has pending notification for lead ${leadId}`);
-      return;
-    }
-
-    const scheduledFor = new Date(Date.now() + rule.delayMinutes * 60 * 1000);
-
-    const pending = await this.prisma.pendingNotificationMessage.create({
-      data: {
-        notificationRuleId: rule.id,
-        leadId,
-        savedAccountId,
-        scheduledFor,
-        status: 'pending',
-      },
-    });
-
-    this.logger.log(`Created pending notification: ${pending.id}, scheduled for ${scheduledFor.toISOString()}`);
-
-    // Schedule execution
-    const delayMs = rule.delayMinutes * 60 * 1000;
-    this.scheduleNotifTimer(pending.id, delayMs, settings, rule, context);
-  }
-
-  /**
-   * Execute a pending notification message (send it via SMS)
-   */
-  private async executePendingNotification(
-    pendingId: string,
-    settings: any,
-    rule: any,
-    context: SendNotificationContext,
-  ): Promise<void> {
-    this.logger.log(`Executing pending notification: ${pendingId}`);
-
-    try {
-      // Re-fetch pending to check it's still valid
-      const pending = await this.prisma.pendingNotificationMessage.findUnique({
-        where: { id: pendingId },
-        include: { notificationRule: true, lead: true },
-      });
-
-      if (!pending || pending.status !== 'pending') {
-        this.logger.log(`Pending notification ${pendingId} no longer pending (status: ${pending?.status})`);
-        return;
-      }
-
-      // Check stop conditions
-      if (pending.notificationRule.stopOnLeadClosed) {
-        const lead = await this.prisma.lead.findUnique({ where: { id: pending.leadId } });
-        if (lead && ['booked', 'lost'].includes(lead.status)) {
-          this.logger.log(`Cancelling notification ${pendingId}: lead ${pending.leadId} is ${lead.status}`);
-          await this.prisma.pendingNotificationMessage.update({
-            where: { id: pendingId },
-            data: { status: 'cancelled', failureReason: `Lead status: ${lead.status}` },
-          });
-          return;
-        }
-      }
-
-      // Check rule still enabled
-      if (!pending.notificationRule.enabled) {
-        this.logger.log(`Cancelling notification ${pendingId}: rule disabled`);
-        await this.prisma.pendingNotificationMessage.update({
-          where: { id: pendingId },
-          data: { status: 'cancelled', failureReason: 'Rule disabled' },
-        });
-        return;
-      }
-
-      // Use template from messageTemplate if available, otherwise fall back to rule.template
-      const templateContent = rule.messageTemplate?.content || rule.template;
-      const ruleForSend = { ...rule, template: templateContent };
-
-      // Send the SMS
-      await this.sendNotificationWithRule(settings, ruleForSend, context);
-
-      // Mark as sent
-      await this.prisma.pendingNotificationMessage.update({
-        where: { id: pendingId },
-        data: { status: 'sent', sentAt: new Date() },
-      });
-
-      this.logger.log(`Successfully sent scheduled notification: ${pendingId}`);
-    } catch (error: any) {
-      this.logger.error(`Failed to send scheduled notification: ${pendingId}`, error.message);
-      await this.prisma.pendingNotificationMessage.update({
-        where: { id: pendingId },
-        data: { status: 'failed', failureReason: error.message },
-      });
-    }
-  }
-
-  /**
-   * Schedule a timer for a pending notification
-   */
-  private scheduleNotifTimer(
-    pendingId: string,
-    delayMs: number,
-    settings: any,
-    rule: any,
-    context: SendNotificationContext,
-  ): void {
-    const timer = setTimeout(async () => {
-      this.pendingNotifTimers.delete(pendingId);
-      await this.executePendingNotification(pendingId, settings, rule, context);
-    }, delayMs);
-
-    this.pendingNotifTimers.set(pendingId, timer);
-    this.logger.log(`Scheduled notification timer for ${pendingId}, delay: ${delayMs}ms`);
-  }
-
-  /**
-   * Cancel pending notification messages for a lead (stop condition triggered)
-   */
-  async cancelPendingNotificationsForLead(leadId: string, reason: string): Promise<number> {
-    const pending = await this.prisma.pendingNotificationMessage.findMany({
-      where: { leadId, status: 'pending' },
-    });
-
-    for (const p of pending) {
-      // Cancel the timer
-      const timer = this.pendingNotifTimers.get(p.id);
-      if (timer) {
-        clearTimeout(timer);
-        this.pendingNotifTimers.delete(p.id);
-      }
-
-      // Update status
-      await this.prisma.pendingNotificationMessage.update({
-        where: { id: p.id },
-        data: { status: 'cancelled', failureReason: reason },
-      });
-    }
-
-    if (pending.length > 0) {
-      this.logger.log(`Cancelled ${pending.length} pending notifications for lead ${leadId}: ${reason}`);
-    }
-
-    return pending.length;
-  }
-
-  /**
-   * Restore pending notification messages on startup
-   */
-  private async restorePendingNotificationMessages(): Promise<void> {
-    this.logger.log('Restoring pending notification messages...');
-
-    const pendingMessages = await this.prisma.pendingNotificationMessage.findMany({
-      where: { status: 'pending' },
-      include: {
-        notificationRule: {
-          include: {
-            messageTemplate: true,
-            notificationSettings: true,
-          },
-        },
-        lead: true,
-      },
-    });
-
-    this.logger.log(`Found ${pendingMessages.length} pending notification messages to restore`);
-
-    const now = Date.now();
-
-    for (const pending of pendingMessages) {
-      const scheduledTime = pending.scheduledFor.getTime();
-      const delayMs = Math.max(0, scheduledTime - now);
-
-      const settings = pending.notificationRule.notificationSettings;
-      const rule = pending.notificationRule;
-
-      const savedAccount = await this.prisma.savedAccount.findUnique({
-        where: { id: pending.savedAccountId },
-        select: { businessName: true },
-      });
-
-      const context: SendNotificationContext = {
-        userId: settings.userId || '',
-        savedAccountId: pending.savedAccountId,
-        leadId: pending.leadId,
-        accountName: savedAccount?.businessName || undefined,
-        lead: {
-          customerName: pending.lead.customerName,
-          customerPhone: pending.lead.customerPhone,
-          category: pending.lead.category || undefined,
-          city: pending.lead.city || undefined,
-          state: pending.lead.state || undefined,
-          postcode: pending.lead.postcode || undefined,
-          message: pending.lead.message || undefined,
-        },
-      };
-
-      if (delayMs === 0) {
-        this.logger.log(`Executing overdue notification: ${pending.id}`);
-        await this.executePendingNotification(pending.id, settings, rule, context);
-      } else {
-        this.scheduleNotifTimer(pending.id, delayMs, settings, rule, context);
-      }
     }
   }
 
@@ -2559,8 +2281,6 @@ export class NotificationsService implements OnModuleInit {
     enabled: boolean;
     fromPhone: string | null;
     autoReplyTemplate: string;
-    followUps: Array<{ id?: string; enabled: boolean; delayMinutes: number; template: string }>;
-    stopOnCustomerReply: boolean;
   }> {
     const account = await this.prisma.savedAccount.findFirst({
       where: { id: savedAccountId, userId },
@@ -2582,38 +2302,21 @@ export class NotificationsService implements OnModuleInit {
       if (assignment) fromPhone = assignment.phonePool.phoneNumber;
     }
 
-    // Get customer texting rules (sendToCustomer: true)
-    const rules = settings
-      ? await this.prisma.notificationRule.findMany({
+    // Get customer texting auto-reply rule (sendToCustomer: true, delayMinutes: 0)
+    const autoReplyRule = settings
+      ? await this.prisma.notificationRule.findFirst({
           where: {
             notificationSettingsId: settings.id,
             sendToCustomer: true,
+            delayMinutes: 0,
           },
-          orderBy: { delayMinutes: 'asc' },
         })
-      : [];
-
-    // Extract auto-reply (delay 0) and follow-ups (delay > 0)
-    const autoReplyRule = rules.find(r => r.delayMinutes === 0);
-    const followUpRules = rules.filter(r => r.delayMinutes > 0);
+      : null;
 
     return {
       enabled: settings?.customerTextingEnabled ?? false,
       fromPhone,
       autoReplyTemplate: autoReplyRule?.template || 'Hi {{lead.name}}, this is {{account.name}}. We just received your request for {{lead.service}} in {{lead.location}}. When would be a good time to call you?',
-      followUps: followUpRules.length > 0
-        ? followUpRules.map(r => ({
-            id: r.id,
-            enabled: r.enabled,
-            delayMinutes: r.delayMinutes,
-            template: r.template,
-          }))
-        : [
-            { enabled: true, delayMinutes: 10, template: 'Hi {{lead.name}}, just checking in — did you get our message about your {{lead.service}} request? We\'d love to help!' },
-            { enabled: true, delayMinutes: 60, template: 'Hi {{lead.name}}, this is {{account.name}} again. We\'re available to discuss your {{lead.service}} needs. Feel free to reply with a good time to chat!' },
-            { enabled: false, delayMinutes: 1440, template: 'Hi {{lead.name}}, we wanted to follow up one more time about your {{lead.service}} request. Reply anytime and we\'ll get back to you right away!' },
-          ],
-      stopOnCustomerReply: autoReplyRule?.stopOnCustomerReply ?? true,
     };
   }
 
@@ -2628,8 +2331,6 @@ export class NotificationsService implements OnModuleInit {
       enabled: boolean;
       fromPhone?: string;
       autoReplyTemplate: string;
-      followUps: Array<{ enabled: boolean; delayMinutes: number; template: string }>;
-      stopOnCustomerReply: boolean;
     },
   ): Promise<{ success: boolean }> {
     const account = await this.prisma.savedAccount.findFirst({
@@ -2684,7 +2385,7 @@ export class NotificationsService implements OnModuleInit {
       if (assignment) fromPhone = assignment.phonePool.phoneNumber;
     }
 
-    // Create auto-reply rule (delay 0)
+    // Create auto-reply rule (immediate, no follow-ups)
     await this.prisma.notificationRule.create({
       data: {
         notificationSettingsId: settings.id,
@@ -2694,28 +2395,9 @@ export class NotificationsService implements OnModuleInit {
         sendToCustomer: true,
         template: dto.autoReplyTemplate,
         delayMinutes: 0,
-        stopOnCustomerReply: dto.stopOnCustomerReply,
         enabled: true,
       },
     });
-
-    // Create follow-up rules
-    for (const fu of dto.followUps) {
-      if (fu.delayMinutes <= 0) continue;
-      await this.prisma.notificationRule.create({
-        data: {
-          notificationSettingsId: settings.id,
-          name: `Follow-Up (${fu.delayMinutes >= 60 ? `${fu.delayMinutes / 60}hr` : `${fu.delayMinutes}min`})`,
-          triggerType: 'new_lead',
-          fromPhone,
-          sendToCustomer: true,
-          template: fu.template,
-          delayMinutes: fu.delayMinutes,
-          stopOnCustomerReply: dto.stopOnCustomerReply,
-          enabled: fu.enabled,
-        },
-      });
-    }
 
     // Register inbound SMS webhook with Sigcore (if not already registered)
     if (!settings.inboundSmsWebhookId) {

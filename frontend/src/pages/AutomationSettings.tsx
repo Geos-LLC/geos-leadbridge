@@ -75,13 +75,6 @@ export function AutomationSettings() {
   const [ctAutoReplyTemplate, setCtAutoReplyTemplate] = useState(
     'Hi {{lead.name}}, this is {{account.name}}. We just received your request for {{lead.service}} in {{lead.location}}. When would be a good time to call you?'
   );
-  const [ctFollowUps, setCtFollowUps] = useState([
-    { enabled: true, delayMinutes: 10, template: 'Hi {{lead.name}}, just checking in — did you get our message about your {{lead.service}} request? We\'d love to help!' },
-    { enabled: true, delayMinutes: 60, template: 'Hi {{lead.name}}, this is {{account.name}} again. We\'re available to discuss your {{lead.service}} needs. Feel free to reply with a good time to chat!' },
-    { enabled: false, delayMinutes: 1440, template: 'Hi {{lead.name}}, we wanted to follow up one more time about your {{lead.service}} request. Reply anytime and we\'ll get back to you right away!' },
-  ]);
-  const [ctStopOnReply, setCtStopOnReply] = useState(true);
-
   // Quick template creation modal
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState('');
@@ -209,8 +202,6 @@ export function AutomationSettings() {
       const res = await notificationsApi.getCustomerTextingSettings(accountId);
       setCtEnabled(res.enabled);
       setCtAutoReplyTemplate(res.autoReplyTemplate);
-      setCtFollowUps(res.followUps);
-      setCtStopOnReply(res.stopOnCustomerReply);
     } catch {
       // non-fatal — keep defaults
     } finally {
@@ -226,8 +217,6 @@ export function AutomationSettings() {
       await notificationsApi.saveCustomerTextingSettings(effectiveAccountId, {
         enabled: ctEnabled,
         autoReplyTemplate: ctAutoReplyTemplate,
-        followUps: ctFollowUps,
-        stopOnCustomerReply: ctStopOnReply,
       });
     } catch {
       setError('Failed to save Customer Texting settings');
@@ -987,7 +976,7 @@ export function AutomationSettings() {
                     <h3>Customer Texting</h3>
                   </div>
                   <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>
-                    Automatically text customers when new leads arrive, with follow-up reminders.
+                    Automatically text customers when new leads arrive.
                   </p>
 
                   {ctEnabled && (
@@ -1017,68 +1006,6 @@ export function AutomationSettings() {
                         </div>
                       </div>
 
-                      {/* Follow-up schedule */}
-                      <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label>Follow-Up Messages</label>
-                        <p className="form-hint">Scheduled messages sent if the customer hasn't replied.</p>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                          {ctFollowUps.map((fu, idx) => (
-                            <div
-                              key={idx}
-                              style={{
-                                padding: '10px 12px',
-                                borderRadius: 8,
-                                border: '1px solid',
-                                borderColor: fu.enabled ? '#d1d5db' : '#e5e7eb',
-                                background: fu.enabled ? '#f9fafb' : '#fafafa',
-                                opacity: fu.enabled ? 1 : 0.7,
-                              }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: fu.enabled ? 8 : 0 }}>
-                                <button
-                                  className={`toggle-btn ${fu.enabled ? 'on' : 'off'}`}
-                                  style={{ transform: 'scale(0.8)', flexShrink: 0 }}
-                                  onClick={() => {
-                                    const updated = [...ctFollowUps];
-                                    updated[idx] = { ...fu, enabled: !fu.enabled };
-                                    setCtFollowUps(updated);
-                                  }}
-                                >
-                                  {fu.enabled ? <Play size={12} /> : <Pause size={12} />}
-                                </button>
-                                <span style={{ fontSize: 13, fontWeight: 500 }}>
-                                  <Clock size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} />
-                                  {fu.delayMinutes < 60 ? `${fu.delayMinutes} min` : `${fu.delayMinutes / 60} hour${fu.delayMinutes > 60 ? 's' : ''}`}
-                                </span>
-                              </div>
-                              {fu.enabled && (
-                                <textarea
-                                  value={fu.template}
-                                  onChange={e => {
-                                    const updated = [...ctFollowUps];
-                                    updated[idx] = { ...fu, template: e.target.value };
-                                    setCtFollowUps(updated);
-                                  }}
-                                  rows={2}
-                                  style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }}
-                                />
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Stop on reply */}
-                      <div className="form-group checkbox-group" style={{ marginBottom: 0 }}>
-                        <label className="checkbox-label">
-                          <input
-                            type="checkbox"
-                            checked={ctStopOnReply}
-                            onChange={e => setCtStopOnReply(e.target.checked)}
-                          />
-                          Cancel follow-ups if customer replies
-                        </label>
-                      </div>
                     </div>
                   )}
 

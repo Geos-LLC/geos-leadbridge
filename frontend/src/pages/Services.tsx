@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
-  Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X, Clock,
+  Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
   Bot, Pencil, Phone, Send, ChevronUp, Trash2, Save,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -135,9 +135,6 @@ export function Services() {
   const [autoReplyRules, setAutoReplyRules] = useState<AutomationRule[]>([]);
   const autoReplyEnabled = autoReplyRules.some(r => r.enabled);
   const firstReplyRule = autoReplyRules.find(r => r.delayMinutes === 0 || !r.delayMinutes) || null;
-  const followUpRules = autoReplyRules
-    .filter(r => r.delayMinutes > 0)
-    .sort((a, b) => a.delayMinutes - b.delayMinutes);
 
   // Other service rules
   const [leadAlertRule, setLeadAlertRule] = useState<NotificationRule | null>(null);
@@ -208,12 +205,6 @@ export function Services() {
   const [ctAutoReplyTemplate, setCtAutoReplyTemplate] = useState(
     "Hi {customerName}, this is {accountName}. We just received your request for {category}. When would be a good time to call you?"
   );
-  const [ctFollowUps, setCtFollowUps] = useState<Array<{ enabled: boolean; delayMinutes: number; template: string }>>([
-    { enabled: true, delayMinutes: 10, template: "Hi {customerName}, just checking in — did you get our message? We'd love to help!" },
-    { enabled: true, delayMinutes: 60, template: "Hi {customerName}, this is {accountName} again. We're available to discuss your {category} needs. Feel free to reply anytime!" },
-    { enabled: false, delayMinutes: 1440, template: "Hi {customerName}, we wanted to follow up one more time. Reply anytime and we'll get back to you right away!" },
-  ]);
-  const [ctStopOnReply, setCtStopOnReply] = useState(true);
   const [ctSaving, setCtSaving] = useState(false);
   const [ctFromPhone, setCtFromPhone] = useState('');
   const [ctSigcoreFromPhone, setCtSigcoreFromPhone] = useState<string | null>(null);
@@ -328,8 +319,6 @@ export function Services() {
       if (ctRes) {
         setCtEnabled(ctRes.enabled);
         setCtAutoReplyTemplate(ctRes.autoReplyTemplate);
-        setCtFollowUps(ctRes.followUps);
-        setCtStopOnReply(ctRes.stopOnCustomerReply);
         setCtFromPhone(ctRes.fromPhone || poolRes.phoneNumbers[0]?.phoneNumber || '');
       }
 
@@ -648,8 +637,6 @@ export function Services() {
         enabled,
         fromPhone: ctFromPhone || undefined,
         autoReplyTemplate: ctAutoReplyTemplate,
-        followUps: ctFollowUps,
-        stopOnCustomerReply: ctStopOnReply,
       });
     } catch (err: any) {
       setCtEnabled(!enabled); // rollback
@@ -667,8 +654,6 @@ export function Services() {
         enabled: ctEnabled,
         fromPhone: ctFromPhone || undefined,
         autoReplyTemplate: ctAutoReplyTemplate,
-        followUps: ctFollowUps,
-        stopOnCustomerReply: ctStopOnReply,
       });
       showSuccess('Customer Texting settings saved');
       setCtSavedSnapshot({ autoReplyTemplate: ctAutoReplyTemplate, fromPhone: ctFromPhone });
@@ -755,8 +740,6 @@ export function Services() {
       setSaving(false);
     }
   }
-
-  // changeFollowUpDelay, addFollowUp, deleteFollowUp removed — follow-ups are Coming Soon
 
   // --- Lead Alert Handlers ---
 
@@ -1047,16 +1030,16 @@ export function Services() {
       ) : (
         <div className="grid grid-cols-1 gap-6">
 
-          {/* 1. Auto Reply & Follow-Ups */}
+          {/* 1. Auto Reply */}
           <ServiceCard
             icon={<Zap className="w-7 h-7" />}
-            title="Auto Reply & Follow-Ups"
+            title="Auto Reply"
             description="Automatically respond to new leads as they arrive."
             enabled={autoReplyEnabled}
             onToggle={toggleAutoReply}
             expanded={expandedCard === 'auto-reply'}
             onExpand={() => toggleExpand('auto-reply')}
-            statusText={autoReplyEnabled ? `Active: ${1 + followUpRules.length} message${followUpRules.length > 0 ? 's' : ''} in sequence` : undefined}
+            statusText={autoReplyEnabled ? 'Active' : undefined}
           >
             {/* AI Optimization Banner — Coming Soon */}
             <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-6 text-white flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
@@ -1120,26 +1103,6 @@ export function Services() {
               </div>
             )}
 
-            {/* Follow-Up Messages - Coming Soon */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 text-slate-400">
-                <Clock className="w-4 h-4" />
-                <span className="font-bold">Follow-Up Messages</span>
-                <span className="px-2 py-0.5 bg-slate-200 text-[10px] font-bold rounded uppercase">Coming Soon</span>
-              </div>
-              {followUpRules.length > 0 ? (
-                followUpRules.map((rule, idx) => (
-                  <div key={rule.id} className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100 opacity-50">
-                    <div className="text-sm font-bold text-slate-600 mb-3">Message {idx + 2}</div>
-                    <div className="text-xs text-slate-500">Delay: {rule.delayMinutes} minutes</div>
-                  </div>
-                ))
-              ) : (
-                <div className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100 border-dashed opacity-50 text-center">
-                  <p className="text-sm text-slate-400">Scheduled follow-up messages will appear here</p>
-                </div>
-              )}
-            </div>
           </ServiceCard>
 
           {/* 2. Lead Alerts */}
@@ -1415,7 +1378,7 @@ export function Services() {
           <ServiceCard
             icon={<MessageSquare className="w-7 h-7" />}
             title="Customer Texting"
-            description="Automatically text customers when new leads arrive, with follow-up reminders."
+            description="Automatically text customers when new leads arrive."
             enabled={ctEnabled}
             onToggle={ctSaving ? () => {} : toggleCustomerTexting}
             expanded={expandedCard === 'customer-texting'}
@@ -1584,16 +1547,6 @@ export function Services() {
                 )}
               </div>
 
-              {/* Follow-up messages — Coming Soon */}
-              <div className="border-t border-slate-100 pt-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Follow-Up Messages</span>
-                    <p className="text-xs text-slate-400 mt-0.5">Sent if the customer hasn't replied yet.</p>
-                  </div>
-                  <span className="px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest bg-slate-100 text-slate-400 rounded-full">Coming Soon</span>
-                </div>
-              </div>
             </div>
 
             {/* Save / unsaved changes */}
