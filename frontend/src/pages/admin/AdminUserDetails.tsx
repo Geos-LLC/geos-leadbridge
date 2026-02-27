@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { AlertTriangle, X, ArrowLeft, Pencil, Loader2, Trash2, User, CreditCard, Activity, Hash } from 'lucide-react';
+import { AlertTriangle, X, ArrowLeft, Pencil, Loader2, Trash2, User, CreditCard, Activity, Hash, Eye } from 'lucide-react';
 import { adminApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
+import { useAppStore } from '../../store/appStore';
 import type { AdminUserDetails } from '../../types';
 
 const tierLabel: Record<string, string> = {
@@ -30,6 +31,10 @@ export default function AdminUserDetailsPage() {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.user);
+  const startImpersonation = useAuthStore((state) => state.startImpersonation);
+  const setSavedAccounts = useAppStore((state) => state.setSavedAccounts);
+  const setDashboardStats = useAppStore((state) => state.setDashboardStats);
+  const setAnalyticsCache = useAppStore((state) => state.setAnalyticsCache);
   const [user, setUser] = useState<AdminUserDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
@@ -148,6 +153,15 @@ export default function AdminUserDetailsPage() {
     }
   };
 
+  const handleViewAsUser = () => {
+    if (!user) return;
+    setSavedAccounts([]);
+    setDashboardStats(null);
+    setAnalyticsCache(null);
+    startImpersonation({ id: user.id, name: user.name, email: user.email });
+    navigate('/dashboard');
+  };
+
   if (loading || !user) {
     return (
       <div className="p-4 md:p-6 lg:p-10 max-w-5xl mx-auto">
@@ -170,13 +184,22 @@ export default function AdminUserDetailsPage() {
           </Link>
           <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight">User Details</h1>
         </div>
-        <button
-          onClick={openDeleteModal}
-          className="px-4 py-2.5 bg-red-50 text-red-600 rounded-xl text-sm font-semibold hover:bg-red-100 transition-all flex items-center gap-2 self-start"
-        >
-          <Trash2 size={16} />
-          Delete User
-        </button>
+        <div className="flex gap-2 self-start">
+          <button
+            onClick={handleViewAsUser}
+            className="px-4 py-2.5 bg-amber-50 text-amber-700 rounded-xl text-sm font-semibold hover:bg-amber-100 transition-all flex items-center gap-2"
+          >
+            <Eye size={16} />
+            View As User
+          </button>
+          <button
+            onClick={openDeleteModal}
+            className="px-4 py-2.5 bg-red-50 text-red-600 rounded-xl text-sm font-semibold hover:bg-red-100 transition-all flex items-center gap-2"
+          >
+            <Trash2 size={16} />
+            Delete User
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -9,6 +9,7 @@ import { useAppStore } from '../store/appStore';
 import TrialBanner from './TrialBanner';
 import TrialExpiredModal from './TrialExpiredModal';
 import CancelledSubscriptionBanner from './CancelledSubscriptionBanner';
+import ImpersonationBanner from './ImpersonationBanner';
 
 export function Layout() {
   const navigate = useNavigate();
@@ -183,6 +184,7 @@ export function Layout() {
 
       {/* Main Content */}
       <main className="flex-1 lg:ml-72 min-h-screen">
+        <ImpersonationBanner />
         {/* Top Navbar */}
         <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-100 px-6 py-4">
           <div className="flex items-center justify-between">

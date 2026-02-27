@@ -43,7 +43,7 @@ async function bootstrap() {
     origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'x-callio-signature', 'x-callio-event', 'x-callio-timestamp', 'x-thumbtack-signature'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'x-callio-signature', 'x-callio-event', 'x-callio-timestamp', 'x-thumbtack-signature', 'x-impersonate-user'],
     preflightContinue: false,
     optionsSuccessStatus: 204,
   });

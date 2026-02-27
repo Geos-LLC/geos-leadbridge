@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog, NotificationRule, SubscriptionDetails, AdminUser, AdminUserDetails, AdminStats, AdminLog, PhonePoolEntry, PhonePoolStats, AvailablePhoneNumber } from '../types';
 import { notify } from '../store/notificationStore';
+import { useAuthStore } from '../store/authStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -11,12 +12,19 @@ const api = axios.create({
   },
 });
 
-// Add auth token to requests
+// Add auth token + impersonation header to requests
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+
+  // Inject impersonation header for admin "View As" feature
+  const impersonatingUser = useAuthStore.getState().impersonatingUser;
+  if (impersonatingUser?.id && !config.url?.includes('/admin/')) {
+    config.headers['X-Impersonate-User'] = impersonatingUser.id;
+  }
+
   return config;
 });
 

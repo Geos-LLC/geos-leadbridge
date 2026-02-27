@@ -23,6 +23,7 @@ import { TestModule } from './test/test.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { CallConnectModule } from './call-connect/call-connect.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { ImpersonationGuard } from './common/guards/impersonation.guard';
 import { PrismaService } from './common/utils/prisma.service';
 
 @Module({
@@ -53,6 +54,10 @@ import { PrismaService } from './common/utils/prisma.service';
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ImpersonationGuard,
     },
   ],
 })
