@@ -938,10 +938,12 @@ export class NotificationsService {
       return;
     }
 
-    this.logger.log(`Found ${rules.length} new_lead rules`);
+    // Filter out follow-up rules (delayMinutes > 0) — only immediate rules should fire
+    const immediateRules = rules.filter(r => !r.delayMinutes || r.delayMinutes <= 0);
+    const skippedCount = rules.length - immediateRules.length;
+    this.logger.log(`Found ${rules.length} new_lead rules (${immediateRules.length} immediate, ${skippedCount} follow-ups skipped)`);
 
-    // Send notification for each enabled rule (always immediate, no follow-ups)
-    for (const rule of rules) {
+    for (const rule of immediateRules) {
       await this.sendNotificationWithRule(settings, rule, context);
     }
   }
