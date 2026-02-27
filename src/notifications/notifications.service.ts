@@ -652,18 +652,28 @@ export class NotificationsService {
     });
 
     if (!existingSettings) {
-      // Try to copy sigcoreApiKey + sigcoreTenantId from another account of the same user
+      // Try to copy Sigcore config from another account of the same user
       const otherSettings = await this.prisma.notificationSettings.findFirst({
         where: {
           savedAccount: { userId },
           sigcoreApiKey: { not: null },
           sigcoreTenantId: { not: null },
         },
-        select: { sigcoreApiKey: true, sigcoreWorkspaceId: true, sigcoreTenantId: true },
+        select: {
+          sigcoreApiKey: true,
+          sigcoreWorkspaceId: true,
+          sigcoreTenantId: true,
+          sigcoreFromPhone: true,
+          sigcoreProvider: true,
+          senderMode: true,
+        },
       });
 
       if (otherSettings?.sigcoreApiKey) {
-        this.logger.log(`[createRule] Auto-copying Sigcore API key from another account for user ${userId}`);
+        this.logger.log(
+          `[createRule] Auto-copying Sigcore config from another account for user ${userId}` +
+          ` (fromPhone=${otherSettings.sigcoreFromPhone}, provider=${otherSettings.sigcoreProvider}, senderMode=${otherSettings.senderMode})`,
+        );
       }
 
       existingSettings = await this.prisma.notificationSettings.create({
@@ -673,6 +683,9 @@ export class NotificationsService {
           sigcoreApiKey: otherSettings?.sigcoreApiKey || null,
           sigcoreWorkspaceId: otherSettings?.sigcoreWorkspaceId || null,
           sigcoreTenantId: otherSettings?.sigcoreTenantId || null,
+          sigcoreFromPhone: otherSettings?.sigcoreFromPhone || null,
+          sigcoreProvider: otherSettings?.sigcoreProvider || null,
+          senderMode: otherSettings?.senderMode || 'shared',
         },
       });
     } else if (!existingSettings.enabled) {
