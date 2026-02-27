@@ -69,7 +69,7 @@ export class SigcoreService {
    */
   private buildHeaders(): Record<string, string> {
     return {
-      'X-Sigcore-Key': this.sigcoreApiKey!,
+      'x-api-key': this.sigcoreApiKey!,
       'Content-Type': 'application/json',
     };
   }
