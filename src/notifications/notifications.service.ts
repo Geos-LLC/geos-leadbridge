@@ -2180,17 +2180,20 @@ export class NotificationsService implements OnModuleInit {
     const { data } = await resp.json();
 
     // Upsert settings with the new tenant credentials
+    // Also set sigcoreWorkspaceId so Call Connect can use it as businessId
     settings = await this.prisma.notificationSettings.upsert({
       where: { savedAccountId },
       update: {
         sigcoreApiKey: data.apiKey,
         sigcoreTenantId: data.tenantId,
+        sigcoreWorkspaceId: data.tenantId,
         sigcoreProvisionedAt: new Date(),
       },
       create: {
         savedAccountId,
         sigcoreApiKey: data.apiKey,
         sigcoreTenantId: data.tenantId,
+        sigcoreWorkspaceId: data.tenantId,
         sigcoreProvisionedAt: new Date(),
         enabled: false,
       },

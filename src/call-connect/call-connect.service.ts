@@ -117,6 +117,13 @@ export class CallConnectService {
       },
     });
 
+    // Auto-provision Sigcore workspace if not already done — required for CC to work
+    try {
+      await this.ensureSigcoreProvisioned(savedAccountId);
+    } catch (err: any) {
+      this.logger.warn(`[saveSettings] Auto-provision Sigcore workspace failed: ${err.message}`);
+    }
+
     // Push settings to Sigcore (best effort)
     try {
       await this.pushSettingsToSigcore(savedAccountId, settings);
@@ -135,6 +142,79 @@ export class CallConnectService {
   }
 
   // ─── Sigcore API ─────────────────────────────────────────────────────────────
+
+  /**
+   * Ensure a Sigcore tenant/workspace exists for this account.
+   * Required for CC to resolve a valid businessId that Sigcore recognizes.
+   * Idempotent — skips if already provisioned.
+   */
+  private async ensureSigcoreProvisioned(savedAccountId: string): Promise<void> {
+    const ns = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { sigcoreTenantId: true, sigcoreWorkspaceId: true },
+    });
+
+    // Already provisioned — make sure sigcoreWorkspaceId is in sync
+    if (ns?.sigcoreTenantId) {
+      if (!ns.sigcoreWorkspaceId) {
+        await this.prisma.notificationSettings.update({
+          where: { savedAccountId },
+          data: { sigcoreWorkspaceId: ns.sigcoreTenantId },
+        });
+        this.logger.log(`[ensureSigcoreProvisioned] Back-filled sigcoreWorkspaceId=${ns.sigcoreTenantId} for ${savedAccountId}`);
+      }
+      return;
+    }
+
+    // Need to provision — requires platform-level API key
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (!platformKey) {
+      this.logger.warn(`[ensureSigcoreProvisioned] No SIGCORE_API_KEY — cannot auto-provision for ${savedAccountId}`);
+      return;
+    }
+
+    const sigcoreUrl =
+      this.configService.get<string>('SIGCORE_API_URL') ||
+      'https://sigcore-production.up.railway.app/api';
+
+    const resp = await firstValueFrom(
+      this.httpService.post(
+        `${sigcoreUrl}/tenants/provision`,
+        { externalTenantId: savedAccountId, displayName: `Account ${savedAccountId}` },
+        { headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey } },
+      ),
+    );
+
+    const data = resp.data?.data ?? resp.data;
+    const tenantId = data?.tenantId;
+    const tenantApiKey = data?.apiKey;
+
+    if (!tenantId) {
+      this.logger.warn(`[ensureSigcoreProvisioned] Provision response missing tenantId for ${savedAccountId}`);
+      return;
+    }
+
+    // Upsert notification settings with workspace + tenant IDs
+    await this.prisma.notificationSettings.upsert({
+      where: { savedAccountId },
+      update: {
+        sigcoreTenantId: tenantId,
+        sigcoreWorkspaceId: tenantId,
+        ...(tenantApiKey && { sigcoreApiKey: tenantApiKey }),
+        sigcoreProvisionedAt: new Date(),
+      },
+      create: {
+        savedAccountId,
+        sigcoreTenantId: tenantId,
+        sigcoreWorkspaceId: tenantId,
+        ...(tenantApiKey && { sigcoreApiKey: tenantApiKey }),
+        sigcoreProvisionedAt: new Date(),
+        enabled: false,
+      },
+    });
+
+    this.logger.log(`[ensureSigcoreProvisioned] Auto-provisioned tenant ${tenantId} for account ${savedAccountId}`);
+  }
 
   private buildHeaders(apiKey: string): Record<string, string> {
     return {
@@ -331,7 +411,7 @@ export class CallConnectService {
     // Get API key from NotificationSettings (single source of truth)
     const ns = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId: params.savedAccountId },
-      select: { sigcoreApiKey: true, sigcoreWorkspaceId: true },
+      select: { sigcoreApiKey: true, sigcoreWorkspaceId: true, sigcoreTenantId: true },
     });
     const sigcoreApiKey =
       this.configService.get<string>('SIGCORE_API_KEY') || ns?.sigcoreApiKey || null;
@@ -357,7 +437,7 @@ export class CallConnectService {
     }
 
     // Resolve workspace/business ID from NotificationSettings
-    const sigcoreBusinessId = ns?.sigcoreWorkspaceId || params.businessId || params.savedAccountId;
+    const sigcoreBusinessId = ns?.sigcoreWorkspaceId || ns?.sigcoreTenantId || params.businessId || params.savedAccountId;
 
     const summary =
       params.leadSummary ||
@@ -552,7 +632,7 @@ export class CallConnectService {
   async triggerTestCall(savedAccountId: string, testPhone: string): Promise<{ sessionId: string | null }> {
     const ns = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
-      select: { sigcoreApiKey: true, sigcoreWorkspaceId: true },
+      select: { sigcoreApiKey: true, sigcoreWorkspaceId: true, sigcoreTenantId: true },
     });
 
     const accountKey = ns?.sigcoreApiKey;
@@ -576,7 +656,7 @@ export class CallConnectService {
       throw new BadRequestException('Instant Call Connect is not enabled for this account');
     }
 
-    const sigcoreBusinessId = ns?.sigcoreWorkspaceId || savedAccountId;
+    const sigcoreBusinessId = ns?.sigcoreWorkspaceId || ns?.sigcoreTenantId || savedAccountId;
 
     // Sync settings to Sigcore before test call — fail loudly so the user knows
     try {
