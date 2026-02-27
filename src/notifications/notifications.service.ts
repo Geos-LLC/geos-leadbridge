@@ -1292,7 +1292,7 @@ export class NotificationsService {
 
     // Use override (CT test), then rule's phone numbers, then settings fallback
     const toPhone = toPhoneOverride || rule?.toPhone || settings.destinationPhone;
-    const fromPhone = rule?.fromPhone || settings.sigcoreFromPhone;
+    let fromPhone = rule?.fromPhone || settings.sigcoreFromPhone;
 
     if (!toPhone) {
       return { success: false, error: 'No destination phone configured for this rule' };
@@ -1334,7 +1334,36 @@ export class NotificationsService {
     const accountLabel = account.businessName ? `[${account.businessName}] ` : '';
     const messageBody = `${accountLabel}${this.renderTemplate(template, testLead, account.businessName)}`;
 
-    // Create notification log entry
+    // Apply the same pool-phone / OpenPhone fallback as sendNotificationWithRule
+    let effectiveApiKey = sigcoreApiKey;
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (fromPhone && platformKey) {
+      const isPoolPhone = await this.prisma.phonePool.findFirst({
+        where: { phoneNumber: fromPhone, status: { not: 'RELEASED' } },
+        select: { id: true },
+      });
+      if (isPoolPhone) {
+        this.logger.log(`[sendTestNotification] fromPhone ${fromPhone} is a pool number — using platform key`);
+        effectiveApiKey = platformKey;
+      }
+      // OpenPhone numbers can't route non-customer SMS correctly — fall back to pool phone
+      if (!isPoolPhone && !rule?.sendToCustomer && settings.sigcoreProvider === 'openphone') {
+        const poolAssignment = await this.prisma.phonePoolAssignment.findFirst({
+          where: { userId, phonePool: { status: { not: 'RELEASED' } } },
+          include: { phonePool: true },
+          orderBy: { assignedAt: 'desc' },
+        });
+        if (poolAssignment) {
+          this.logger.warn(
+            `[sendTestNotification] OpenPhone fromPhone ${fromPhone} — falling back to pool phone ${poolAssignment.phonePool.phoneNumber}`,
+          );
+          fromPhone = poolAssignment.phonePool.phoneNumber;
+          effectiveApiKey = platformKey;
+        }
+      }
+    }
+
+    // Create notification log entry (after fallback so fromPhone is correct)
     const logEntry = await this.prisma.notificationLog.create({
       data: {
         notificationSettingsId: settings.id,
@@ -1353,7 +1382,7 @@ export class NotificationsService {
         to: toPhone,
         body: `[TEST] ${messageBody}`,
         fromPhone: fromPhone,
-        apiKey: sigcoreApiKey,
+        apiKey: effectiveApiKey,
         senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
         sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
         metadata: {
