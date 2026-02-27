@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Loader2, CheckCircle, AlertCircle, ExternalLink, RefreshCw } from 'lucide-react';
+import { X, Loader2, CheckCircle, AlertCircle, ExternalLink, RefreshCw, LogOut } from 'lucide-react';
 import { platformsApi, thumbtackApi } from '../services/api';
 import type { SavedAccount, Business } from '../types';
 
@@ -7,10 +7,11 @@ interface ConnectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   accountToReconnect?: SavedAccount | null;
+  savedAccounts?: SavedAccount[];
   onSuccess?: () => void;
 }
 
-export default function ConnectionModal({ isOpen, onClose, accountToReconnect, onSuccess }: ConnectionModalProps) {
+export default function ConnectionModal({ isOpen, onClose, accountToReconnect, savedAccounts = [], onSuccess }: ConnectionModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [businesses, setBusinesses] = useState<Business[]>([]);
@@ -19,8 +20,13 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, o
 
   useEffect(() => {
     if (isOpen && !accountToReconnect) {
-      // Load available businesses if not reconnecting specific account
       loadBusinesses();
+    }
+    if (!isOpen) {
+      // Reset state when modal closes
+      setError(null);
+      setReconnectSuccess(false);
+      setBusinesses([]);
     }
   }, [isOpen, accountToReconnect]);
 
@@ -29,14 +35,12 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, o
       setLoading(true);
       setError(null);
       const res = await thumbtackApi.getBusinesses();
-      // Backend returns needsReauth when token is expired/invalid
       if (res.needsReauth) {
         setBusinesses([]);
       } else {
         setBusinesses(res.businesses || []);
       }
     } catch (err: any) {
-      // If no businesses or auth issue, user needs to OAuth first
       if (err.response?.status === 401 || err.response?.status === 404 || err.response?.status === 500) {
         setBusinesses([]);
       } else {
@@ -59,6 +63,23 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, o
     }
   };
 
+  const handleSwitchAccount = async () => {
+    // Disconnect current platform token, then open Thumbtack logout + start OAuth
+    try {
+      setLoading(true);
+      setError(null);
+      // Revoke the stored token so OAuth gives a fresh login
+      await platformsApi.disconnect().catch(() => {}); // OK if fails
+      // Open Thumbtack logout in new tab so their session cookie clears
+      window.open('https://www.thumbtack.com/logout', '_blank', 'noopener');
+      // Small delay then redirect to OAuth
+      setTimeout(handleStartOAuth, 1500);
+    } catch (err: any) {
+      setError(err.message || 'Failed to switch account');
+      setLoading(false);
+    }
+  };
+
   const handleReconnect = async () => {
     if (!accountToReconnect) return;
 
@@ -66,18 +87,15 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, o
     try {
       setReconnecting(true);
       setError(null);
-      console.log('[Reconnect] Calling reconnectAccount API...');
       const result = await thumbtackApi.reconnectAccount(accountToReconnect.id);
       console.log('[Reconnect] API success, result:', result);
       setReconnectSuccess(true);
       setTimeout(() => {
-        console.log('[Reconnect] Calling onSuccess and closing modal');
         onSuccess?.();
         onClose();
       }, 1500);
     } catch (err: any) {
       console.error('[Reconnect] API failed:', err?.response?.status, err?.response?.data || err?.message);
-      // Any failure to reconnect requires re-authentication via OAuth
       setError('Could not reconnect automatically. Redirecting to Thumbtack to re-authorize...');
       setTimeout(handleStartOAuth, 2000);
     } finally {
@@ -100,6 +118,11 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, o
   };
 
   if (!isOpen) return null;
+
+  // Figure out which businesses are already saved
+  const savedBusinessIds = new Set(savedAccounts.map(a => a.businessId));
+  const newBusinesses = businesses.filter(b => !savedBusinessIds.has(b.businessID));
+  const alreadyConnected = businesses.filter(b => savedBusinessIds.has(b.businessID));
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -180,11 +203,11 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, o
                 <Loader2 size={32} className="animate-spin text-blue-600 mb-4" />
                 <p className="text-slate-500">Loading your businesses...</p>
               </div>
-            ) : businesses.length > 0 ? (
+            ) : newBusinesses.length > 0 ? (
               <>
                 <p className="text-sm text-slate-600 mb-4">Select a business to connect:</p>
                 <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {businesses.map((business) => (
+                  {newBusinesses.map((business) => (
                     <div
                       key={business.businessID}
                       className="p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-blue-200 transition-all cursor-pointer group"
@@ -207,8 +230,78 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, o
                     </div>
                   ))}
                 </div>
+
+                {/* Already connected businesses (greyed out) */}
+                {alreadyConnected.length > 0 && (
+                  <div className="pt-2">
+                    <p className="text-xs text-slate-400 font-medium uppercase tracking-wider mb-2">Already connected</p>
+                    {alreadyConnected.map((business) => (
+                      <div key={business.businessID} className="p-3 bg-slate-50/50 rounded-xl border border-slate-100 opacity-50">
+                        <div className="flex items-center gap-3">
+                          {business.imageURL ? (
+                            <img src={business.imageURL} alt={business.name} className="w-10 h-10 rounded-lg" />
+                          ) : (
+                            <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 font-bold">
+                              {business.name[0]}
+                            </div>
+                          )}
+                          <div className="flex-1">
+                            <h3 className="font-semibold text-slate-600 text-sm">{business.name}</h3>
+                          </div>
+                          <CheckCircle size={14} className="text-emerald-500" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Switch to different Thumbtack account */}
+                <div className="pt-3 border-t border-slate-100">
+                  <button
+                    onClick={handleSwitchAccount}
+                    disabled={loading}
+                    className="w-full px-4 py-3 text-sm text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all flex items-center justify-center gap-2 font-medium"
+                  >
+                    <LogOut size={14} />
+                    Connect a different Thumbtack account
+                  </button>
+                  <p className="text-xs text-slate-400 text-center mt-1">
+                    This will open Thumbtack logout, then redirect you to sign in with a different account.
+                  </p>
+                </div>
+              </>
+            ) : businesses.length > 0 && newBusinesses.length === 0 ? (
+              /* All businesses already connected */
+              <>
+                <div className="text-center py-6">
+                  <div className="w-16 h-16 bg-emerald-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                    <CheckCircle size={24} className="text-emerald-600" />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900 mb-2">All businesses connected</h3>
+                  <p className="text-sm text-slate-600 mb-2 max-w-md mx-auto">
+                    All Thumbtack businesses on this account are already connected to LeadBridge.
+                  </p>
+                </div>
+
+                <div className="border-t border-slate-100 pt-4">
+                  <button
+                    onClick={handleSwitchAccount}
+                    disabled={loading}
+                    className="w-full px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+                  >
+                    {loading ? (
+                      <><Loader2 size={16} className="animate-spin" /> Switching...</>
+                    ) : (
+                      <><LogOut size={16} /> Connect a different Thumbtack account</>
+                    )}
+                  </button>
+                  <p className="text-xs text-slate-400 text-center mt-2">
+                    This will log you out of Thumbtack and let you sign in with a different account.
+                  </p>
+                </div>
               </>
             ) : (
+              /* No token / needs OAuth */
               <>
                 <div className="text-center py-8">
                   <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-4">

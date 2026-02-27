@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Users, Send, Clock, TrendingUp, Plus, ChevronRight,
-  Briefcase, Sparkles, AlertCircle, ExternalLink, Loader2, CheckCircle, BellOff
+  Briefcase, Sparkles, AlertCircle, ExternalLink, Loader2, CheckCircle, BellOff,
+  MoreVertical, Unlink, Trash2, RefreshCw,
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import type { DashboardStats } from '../store/appStore';
@@ -36,6 +37,19 @@ export function Dashboard() {
   const [connectionModalOpen, setConnectionModalOpen] = useState(false);
   const [accountToReconnect, setAccountToReconnect] = useState<SavedAccount | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!menuOpenId) return;
+    const close = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-account-menu]')) setMenuOpenId(null);
+    };
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [menuOpenId]);
 
   useEffect(() => {
     loadAccounts();
@@ -177,6 +191,54 @@ export function Dashboard() {
       navigate('/services?expand=lead-alerts');
     } else {
       navigate(`/messages?account=${account.businessId}`);
+    }
+  };
+
+  const handleDisconnectWebhook = async (account: SavedAccount) => {
+    if (!confirm(`Disconnect "${account.businessName}"? This will stop receiving new leads from this account.`)) return;
+    setActionLoading(account.id);
+    setMenuOpenId(null);
+    try {
+      await thumbtackApi.disconnectAccount(account.id);
+      await loadAccounts(true);
+    } catch (err) {
+      console.error('Failed to disconnect:', err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleReconnectWebhook = async (account: SavedAccount) => {
+    setActionLoading(account.id);
+    setMenuOpenId(null);
+    try {
+      await thumbtackApi.reconnectAccount(account.id);
+      await loadAccounts(true);
+    } catch (err: any) {
+      console.error('Failed to reconnect:', err);
+      // If reconnect fails, open the connection modal
+      setAccountToReconnect(account);
+      setConnectionModalOpen(true);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleRemoveAccount = async (account: SavedAccount) => {
+    const deleteLeads = confirm(
+      `Remove "${account.businessName}" entirely?\n\nClick OK to also delete all leads from this account, or Cancel to keep leads.`
+    );
+    // Second confirm for the actual removal
+    if (!confirm(`Are you sure you want to remove "${account.businessName}"? This cannot be undone.`)) return;
+    setActionLoading(account.id);
+    setMenuOpenId(null);
+    try {
+      await thumbtackApi.removeSavedAccount(account.id, deleteLeads);
+      await loadAccounts(true);
+    } catch (err) {
+      console.error('Failed to remove account:', err);
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -362,15 +424,61 @@ export function Dashboard() {
                           )}
                         </div>
                       </div>
-                      {isCheckingDiag ? (
-                        <div className="w-5 h-5" />
-                      ) : hasConnectionIssues ? (
-                        <AlertCircle className="w-5 h-5 text-amber-500 group-hover:text-amber-600" />
-                      ) : hasConfigIssues ? (
-                        <BellOff className="w-5 h-5 text-orange-400 group-hover:text-orange-500" />
-                      ) : (
-                        <ExternalLink className="w-5 h-5 text-slate-300 group-hover:text-blue-500" />
-                      )}
+                      <div className="flex items-center gap-2">
+                        {/* Status icon */}
+                        {isCheckingDiag ? (
+                          <div className="w-5 h-5" />
+                        ) : hasConnectionIssues ? (
+                          <AlertCircle className="w-5 h-5 text-amber-500 group-hover:text-amber-600" />
+                        ) : hasConfigIssues ? (
+                          <BellOff className="w-5 h-5 text-orange-400 group-hover:text-orange-500" />
+                        ) : (
+                          <ExternalLink className="w-5 h-5 text-slate-300 group-hover:text-blue-500" />
+                        )}
+
+                        {/* Actions menu */}
+                        <div className="relative" data-account-menu>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === account.id ? null : account.id); }}
+                            className="w-8 h-8 flex items-center justify-center text-slate-300 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all"
+                            disabled={actionLoading === account.id}
+                          >
+                            {actionLoading === account.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <MoreVertical className="w-4 h-4" />
+                            )}
+                          </button>
+                          {menuOpenId === account.id && (
+                            <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg py-1 z-20 min-w-[180px]">
+                              {account.webhookId ? (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleDisconnectWebhook(account); }}
+                                  className="w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
+                                >
+                                  <Unlink className="w-4 h-4 text-slate-400" />
+                                  Disconnect
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleReconnectWebhook(account); }}
+                                  className="w-full px-4 py-2.5 text-left text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-2.5 transition-colors"
+                                >
+                                  <RefreshCw className="w-4 h-4" />
+                                  Reconnect
+                                </button>
+                              )}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleRemoveAccount(account); }}
+                                className="w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2.5 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                Remove Account
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   );
                 });
@@ -599,6 +707,7 @@ export function Dashboard() {
           setAccountToReconnect(null);
         }}
         accountToReconnect={accountToReconnect}
+        savedAccounts={savedAccounts}
         onSuccess={handleConnectionSuccess}
       />
     </div>

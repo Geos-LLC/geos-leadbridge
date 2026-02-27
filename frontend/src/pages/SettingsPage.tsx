@@ -1516,6 +1516,7 @@ export default function SettingsPage() {
           setAccountToReconnect(null);
         }}
         accountToReconnect={accountToReconnect}
+        savedAccounts={accounts}
         onSuccess={handleConnectionSuccess}
       />
     </div>
