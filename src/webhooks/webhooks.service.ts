@@ -446,6 +446,7 @@ export class WebhooksService {
         leadId: lead.id,
         customerPhone: customer.phone ?? null,
         customerName,
+        accountName: savedAccount?.businessName ?? null,
         category: request.category?.name ?? null,
         location: [location.city, location.state].filter(Boolean).join(', ') || null,
         leadSummary: `${customerName} — ${request.category?.name || 'Service'} — ${[location.city, location.state].filter(Boolean).join(', ')}`,

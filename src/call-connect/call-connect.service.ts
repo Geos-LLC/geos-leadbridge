@@ -396,6 +396,7 @@ export class CallConnectService {
     leadId: string;
     customerPhone: string | null;
     customerName: string;
+    accountName?: string | null;
     category?: string | null;
     location?: string | null;
     leadSummary?: string;
@@ -447,25 +448,31 @@ export class CallConnectService {
     // the final text directly — no template substitution needed on Sigcore's end.
     // If settings has a custom template, apply vars here; otherwise use default.
     const whisperTemplate = settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.';
-    const agentWhisperMessage = whisperTemplate
-      .replace(/\{summary\}/g, summary)
-      .replace(/\{customerName\}/g, params.customerName || '')
-      .replace(/\{accountName\}/g, params.customerName || '')  // alias for {customerName}
-      .replace(/\{category\}/g, params.category || '')
-      .replace(/\{location\}/g, params.location || '');
+
+    /** Apply all template variable substitutions to a string */
+    const subst = (tpl: string) =>
+      tpl
+        .replace(/\{summary\}/g, summary)
+        .replace(/\{customerName\}/g, params.customerName || '')
+        .replace(/\{accountName\}/g, params.accountName || '')
+        .replace(/\{firstName\}/g, (params.customerName || '').split(' ')[0])
+        .replace(/\{category\}/g, params.category || '')
+        .replace(/\{location\}/g, params.location || '')
+        .replace(/\{phone\}/g, params.customerPhone || '')
+        .replace(/\{lead\.name\}/g, params.customerName || '')
+        .replace(/\{lead\.phone\}/g, params.customerPhone || '')
+        .replace(/\{lead\.location\}/g, params.location || '')
+        .replace(/\{lead\.message\}/g, '')
+        .replace(/\{lead\.serviceDescription\}/g, params.category || '');
+
+    const agentWhisperMessage = subst(whisperTemplate);
 
     // Pre-build the voicemail message the same way so Sigcore receives the final text.
     // Sigcore will use this per-session value (overriding the workspace template) so the
     // message already has customerName, phone, etc. substituted correctly.
     const voicemailTemplate = settings.leadVoicemailMessage || '';
     const leadVoicemailMessage = voicemailTemplate
-      ? voicemailTemplate
-          .replace(/\{summary\}/g, summary)
-          .replace(/\{customerName\}/g, params.customerName || '')
-          .replace(/\{accountName\}/g, params.customerName || '')  // alias for {customerName}
-          .replace(/\{category\}/g, params.category || '')
-          .replace(/\{location\}/g, params.location || '')
-          .replace(/\{phone\}/g, params.customerPhone || '')
+      ? subst(voicemailTemplate)
       : undefined;
 
     try {
