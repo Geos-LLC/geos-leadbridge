@@ -3,13 +3,15 @@
  * Allows ADMIN users to "view as" any other user by sending
  * the X-Impersonate-User header with the target user's ID.
  *
- * Registered as a global APP_GUARD after JwtAuthGuard so request.user
- * is already populated. Runs before route-level guards (AdminGuard,
- * FeatureGateGuard) so the swap takes effect everywhere.
+ * Stores the impersonated user in request.impersonatedAs (NOT request.user)
+ * because many controllers have @UseGuards(JwtAuthGuard) at the class level,
+ * which re-runs the Passport JWT strategy and overwrites request.user.
+ * The @CurrentUser() decorator checks request.impersonatedAs first.
  */
 
-import { Injectable, CanActivate, ExecutionContext, Logger } from '@nestjs/common';
+import { Injectable, CanActivate, ExecutionContext, Logger, NestInterceptor, CallHandler } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { Observable } from 'rxjs';
 import { PrismaService } from '../utils/prisma.service';
 
 @Injectable()
@@ -51,11 +53,10 @@ export class ImpersonationGuard implements CanActivate {
       return true;
     }
 
-    // Store original admin for audit trail
+    // Store impersonated user separately so controller-level @UseGuards(JwtAuthGuard)
+    // can't overwrite it (Passport re-runs the JWT strategy and resets request.user).
     request.impersonator = { ...user };
-
-    // Replace request.user with target user (same shape as JwtStrategy.validate())
-    request.user = {
+    request.impersonatedAs = {
       id: targetUser.id,
       email: targetUser.email,
       name: targetUser.name,
@@ -71,5 +72,24 @@ export class ImpersonationGuard implements CanActivate {
     );
 
     return true;
+  }
+}
+
+/**
+ * Interceptor that runs AFTER all guards (global + controller + route).
+ * Copies request.impersonatedAs → request.user so that controllers using
+ * req.user directly (not just @CurrentUser()) also see the impersonated user.
+ *
+ * Guard execution order:  Global JwtAuth → Global Impersonation → Controller JwtAuth
+ * Interceptor runs AFTER all guards, so controller-level JwtAuth can't undo this.
+ */
+@Injectable()
+export class ImpersonationInterceptor implements NestInterceptor {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+    const request = context.switchToHttp().getRequest();
+    if (request.impersonatedAs) {
+      request.user = request.impersonatedAs;
+    }
+    return next.handle();
   }
 }
