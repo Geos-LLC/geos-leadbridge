@@ -1152,7 +1152,21 @@ export class NotificationsService implements OnModuleInit {
 
     // Send via Sigcore
     try {
-      const apiKey = settings.sigcoreApiKey;
+      // Determine the correct API key: if fromPhone is a shared pool number (Twilio),
+      // use the platform key so Sigcore routes through Twilio — not the tenant's provider
+      // (which may be OpenPhone and would replace the fromNumber with its own number).
+      let apiKey = settings.sigcoreApiKey;
+      const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+      if (fromPhone && platformKey) {
+        const isPoolPhone = await this.prisma.phonePool.findFirst({
+          where: { phoneNumber: fromPhone, status: { not: 'RELEASED' } },
+          select: { id: true },
+        });
+        if (isPoolPhone) {
+          this.logger.log(`[sendNotificationWithRule] fromPhone ${fromPhone} is a shared pool number — using platform key`);
+          apiKey = platformKey;
+        }
+      }
       if (!apiKey) {
         this.logger.error(`No Sigcore API key for rule ${ruleName} - tenant key not configured`);
         throw new Error('No Sigcore API key configured. Please provision your phone workspace first.');
