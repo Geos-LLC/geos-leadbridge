@@ -52,7 +52,9 @@ export function Dashboard() {
   }, [menuOpenId]);
 
   useEffect(() => {
-    loadAccounts();
+    // Always force-refresh diagnostics on mount so stale warnings don't persist
+    // (e.g. after setting up alerts on Services page and navigating back)
+    loadAccounts(true);
     loadDashboardStats();
   }, []);
 
