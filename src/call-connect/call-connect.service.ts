@@ -437,6 +437,16 @@ export class CallConnectService {
       return;
     }
 
+    // Guard: prevent calling when bot number matches the customer phone
+    const normBot = (settings.botNumberE164 || '').replace(/\D/g, '').slice(-10);
+    const normCustomer = (params.customerPhone || '').replace(/\D/g, '').slice(-10);
+    if (normBot.length >= 10 && normBot === normCustomer) {
+      this.logger.warn(
+        `[triggerForLead] BLOCKED: botNumber=${settings.botNumberE164} matches customerPhone=${params.customerPhone} — skipping`,
+      );
+      return;
+    }
+
     // Resolve workspace/business ID from NotificationSettings
     const sigcoreBusinessId = ns?.sigcoreWorkspaceId || ns?.sigcoreTenantId || params.businessId || params.savedAccountId;
 
@@ -661,6 +671,17 @@ export class CallConnectService {
     });
     if (!settings?.enabled) {
       throw new BadRequestException('Instant Call Connect is not enabled for this account');
+    }
+
+    // Guard: prevent test call when bot or agent number matches the test phone
+    const normTest = testPhone.replace(/\D/g, '').slice(-10);
+    const normBotTest = (settings.botNumberE164 || '').replace(/\D/g, '').slice(-10);
+    const normAgentTest = (settings.agentPhoneE164 || '').replace(/\D/g, '').slice(-10);
+    if (normTest.length >= 10 && normTest === normBotTest) {
+      throw new BadRequestException('Test phone cannot be the same as the bot number');
+    }
+    if (normTest.length >= 10 && normTest === normAgentTest) {
+      throw new BadRequestException('Test phone cannot be the same as the agent phone');
     }
 
     const sigcoreBusinessId = ns?.sigcoreWorkspaceId || ns?.sigcoreTenantId || savedAccountId;

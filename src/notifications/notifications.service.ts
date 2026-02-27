@@ -2764,6 +2764,19 @@ export class NotificationsService implements OnModuleInit {
   }> {
     this.logger.log(`Sending via Sigcore to: ${params.to}`);
 
+    // Guard: prevent sending SMS from a number to the same number
+    if (params.fromPhone && params.to) {
+      const normFrom = params.fromPhone.replace(/\D/g, '').slice(-10);
+      const normTo = params.to.replace(/\D/g, '').slice(-10);
+      if (normFrom.length >= 10 && normFrom === normTo) {
+        this.logger.error(
+          `[sendViaSigcore] BLOCKED: from=${params.fromPhone} and to=${params.to} are the same number. ` +
+          `Rule: ${params.metadata?.ruleName || 'unknown'}`,
+        );
+        throw new Error(`Cannot send SMS: from (${params.fromPhone}) and to (${params.to}) are the same phone number`);
+      }
+    }
+
     const requestBody: any = {
       toNumber: params.to,
       body: params.body,

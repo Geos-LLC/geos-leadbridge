@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
-  Zap, Briefcase, AlertCircle, CheckCircle, X, Clock,
+  Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X, Clock,
   Bot, Pencil, Phone, Send, ChevronUp, Trash2, Save,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -703,6 +703,10 @@ export function Services() {
     }
   }
 
+  const ccSamePhoneError = ccTestPhone.trim() && isValidPhoneE164(ccTestPhone) && (
+    ccBotNumber === ccTestPhone.trim() || ccAgentPhone === ccTestPhone.trim()
+  );
+
   async function handleTestCall() {
     if (!selectedAccountId) return;
     // Guard 1: required fields must be valid
@@ -713,7 +717,12 @@ export function Services() {
       setCcValidationModalOpen(true);
       return;
     }
-    // Guard 2: no unsaved changes
+    // Guard 2: same-phone check
+    if (ccSamePhoneError) {
+      setError('Test phone cannot be the same as the bot number or agent phone');
+      return;
+    }
+    // Guard 3: no unsaved changes
     if (ccDirty) {
       setCcUnsavedModalOpen(true);
       return;
@@ -1305,7 +1314,7 @@ export function Services() {
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                       <button
                         onClick={sendTestAlert}
-                        disabled={testStatus === 'sending' || saving || !leadAlertRule.toPhone || !alertFromPhone}
+                        disabled={testStatus === 'sending' || saving || !leadAlertRule.toPhone || !alertFromPhone || (alertFromPhone === alertToPhone)}
                         className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed flex items-center gap-2 ${
                           testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
                           testStatus === 'failed' ? 'bg-red-100 text-red-700' :
@@ -1542,7 +1551,7 @@ export function Services() {
                   />
                   <button
                     onClick={sendCtTest}
-                    disabled={ctTestStatus === 'sending' || !ctTestPhone || !isValidPhoneE164(ctTestPhone) || !ctFromPhone}
+                    disabled={ctTestStatus === 'sending' || !ctTestPhone || !isValidPhoneE164(ctTestPhone) || !ctFromPhone || ctFromPhone === ctTestPhone}
                     className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed flex items-center gap-2 ${
                       ctTestStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
                       ctTestStatus === 'failed' ? 'bg-red-100 text-red-700' :
@@ -1913,18 +1922,20 @@ export function Services() {
                     }}
                     placeholder="+15559876543"
                     className={`rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent min-w-[160px] transition-colors ${
-                      ccTestPhone && !isValidPhoneE164(ccTestPhone)
-                        ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
-                        : ccTestPhone && isValidPhoneE164(ccTestPhone)
-                          ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
-                          : 'bg-slate-50 border border-slate-200 focus:ring-violet-500'
+                      ccSamePhoneError
+                        ? 'border-2 border-amber-400 bg-amber-50/30 focus:ring-amber-200'
+                        : ccTestPhone && !isValidPhoneE164(ccTestPhone)
+                          ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                          : ccTestPhone && isValidPhoneE164(ccTestPhone)
+                            ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                            : 'bg-slate-50 border border-slate-200 focus:ring-violet-500'
                     }`}
                   />
                   <button
                     onClick={handleTestCall}
-                    disabled={ccTesting || !ccEnabled}
+                    disabled={ccTesting || !ccEnabled || !!ccSamePhoneError}
                     className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all bg-slate-100 text-slate-700 hover:bg-slate-200 whitespace-nowrap ${
-                      ccTesting || !ccEnabled
+                      ccTesting || !ccEnabled || ccSamePhoneError
                         ? 'opacity-50 cursor-not-allowed'
                         : (!ccAgentPhone || !isValidPhoneE164(ccAgentPhone) || !ccBotNumber || !ccTestPhone.trim() || !isValidPhoneE164(ccTestPhone))
                           ? 'opacity-60'
@@ -1937,6 +1948,12 @@ export function Services() {
                 </div>
                 {!ccEnabled && (
                   <p className="text-xs text-orange-500">Enable Call Connect first to run a test.</p>
+                )}
+                {ccSamePhoneError && (
+                  <p className="text-xs text-amber-600 flex items-center gap-1">
+                    <AlertTriangle size={12} />
+                    Test phone cannot be the same as the bot number or agent phone.
+                  </p>
                 )}
               </div>
               <div className="flex justify-end">
