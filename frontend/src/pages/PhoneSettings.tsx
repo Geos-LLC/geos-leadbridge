@@ -32,8 +32,8 @@ export function PhoneSettings() {
   const [provisioning, setProvisioning] = useState(false);
 
   // Option 3: provisioned Twilio number
-  const [sigcoreFromPhone, setSigcoreFromPhone] = useState<string | null>(null);
-  const [sigcoreProvider, setSigcoreProvider] = useState<string | null>(null);
+  const [, setSigcoreFromPhone] = useState<string | null>(null);
+  const [, setSigcoreProvider] = useState<string | null>(null);
   const [searchAreaCode, setSearchAreaCode] = useState('');
   const [searchLocality, setSearchLocality] = useState('');
   const [searchLoading, setSearchLoading] = useState(false);
@@ -43,7 +43,7 @@ export function PhoneSettings() {
 
   // Tenant purchased numbers
   const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
-  const [loadingTenantPhones, setLoadingTenantPhones] = useState(false);
+  const [, setLoadingTenantPhones] = useState(false);
   const [cancellingPhoneId, setCancellingPhoneId] = useState<string | null>(null);
   const [phonePriceMonthly, setPhonePriceMonthly] = useState<number | null>(null);
 
