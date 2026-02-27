@@ -1194,9 +1194,9 @@ export function Services() {
                           {p.phoneNumber} (LeadBridge shared)
                         </option>
                       ))}
-                      {ctOwnPhoneNumbers.map(p => (
+                      {ctOwnPhoneNumbers.filter(p => p.provider !== 'openphone').map(p => (
                         <option key={p.id} value={p.phoneNumber}>
-                          {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider === 'openphone' ? 'OpenPhone/QUO' : p.provider})
+                          {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider})
                         </option>
                       ))}
                       {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && (
