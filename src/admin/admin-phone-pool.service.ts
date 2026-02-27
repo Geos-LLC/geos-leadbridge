@@ -164,13 +164,14 @@ export class AdminPhonePoolService {
   async syncProviderNumbers(adminId: string) {
     const results: { provider: string; synced: number; errors: string[] }[] = [];
 
-    for (const provider of ['openphone', 'twilio'] as const) {
+    // Only sync Twilio numbers into the shared pool.
+    // OpenPhone numbers belong to tenants and route through OpenPhone's infrastructure,
+    // so they should NOT be in the admin shared pool.
+    for (const provider of ['twilio'] as const) {
       const providerResult = { provider, synced: 0, errors: [] as string[] };
 
       try {
-        const numbers = provider === 'openphone'
-          ? await this.sigcoreService.adminFetchOpenPhoneNumbers()
-          : await this.sigcoreService.adminFetchTwilioNumbers();
+        const numbers = await this.sigcoreService.adminFetchTwilioNumbers();
 
         this.logger.log(`[syncProviderNumbers] Fetched ${numbers.length} numbers from ${provider}`);
         if (numbers.length > 0) {
