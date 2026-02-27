@@ -36,12 +36,12 @@ interface AppState {
 
   // Cached dashboard stats (persisted for instant load)
   dashboardStats: DashboardStats | null;
-  setDashboardStats: (stats: DashboardStats) => void;
+  setDashboardStats: (stats: DashboardStats | null) => void;
 
   // Cached analytics data (persisted for instant load)
   analyticsCache: Partial<AnalyticsData> | null;
   analyticsLoading: boolean;
-  setAnalyticsCache: (data: Partial<AnalyticsData>) => void;
+  setAnalyticsCache: (data: Partial<AnalyticsData> | null) => void;
   loadAnalytics: (force?: boolean) => Promise<void>;
 
   // Account diagnostics (shared across pages, not persisted)
