@@ -1693,6 +1693,12 @@ export class NotificationsService {
       }
     }
 
+    // Toll-free numbers (800, 833, 844, 855, 866, 877, 888) require separate
+    // SMS verification — default smsEnabled to false for them unless explicitly set.
+    const digits = (phoneNumber || '').replace(/\D/g, '');
+    const isTollFree = /^1?(800|833|844|855|866|877|888)/.test(digits);
+    const smsDefault = isTollFree ? false : true;
+
     return {
       id: phone.phoneNumberId || phone.id || phone._id || phoneNumber || String(Math.random()),
       phoneNumber: phoneNumber,
@@ -1704,7 +1710,7 @@ export class NotificationsService {
       a2pBrandId: a2p.brandId || a2p.brand_id,
       a2pCampaignId: a2p.campaignId || a2p.campaign_id || a2p.messagingServiceSid,
       // Capabilities as booleans
-      smsEnabled: caps.sms ?? caps.SMS ?? phone.smsEnabled ?? true,
+      smsEnabled: caps.sms ?? caps.SMS ?? phone.smsEnabled ?? smsDefault,
       mmsEnabled: caps.mms ?? caps.MMS ?? phone.mmsEnabled ?? false,
       voiceEnabled: caps.voice ?? caps.Voice ?? phone.voiceEnabled ?? true,
     };
