@@ -879,22 +879,9 @@ export class NotificationsService {
       this.logger.log(`Using account-specific settings for ${savedAccountId} (enabled: ${settings.enabled}, sigcoreApiKey: ${settings.sigcoreApiKey ? 'set' : 'NOT SET'}, rules: ${settings.notificationRules.length})`);
     }
 
-    // Fallback 2: If still no settings, try to use settings from another account of the same user
-    if (!settings) {
-      this.logger.log(`No user-level defaults either. Checking other accounts for user ${userId}...`);
-      settings = await this.prisma.notificationSettings.findFirst({
-        where: {
-          savedAccount: { userId },
-          sigcoreApiKey: { not: null },
-          enabled: true,
-        },
-        include: notifRuleInclude,
-      });
-
-      if (settings) {
-        this.logger.log(`Using settings from another account (${settings.savedAccountId}) as fallback for ${savedAccountId}`);
-      }
-    }
+    // NOTE: Previously had a Fallback 2 that used settings from another account of the same user.
+    // This caused cross-account contamination (e.g., Lavanda Cleaning receiving Spotless Homes leads).
+    // Each account must use its own settings — no cross-account fallback.
 
     if (!settings) {
       this.logger.warn(`No notification settings found for account ${savedAccountId} or user ${userId}. SMS alerts not configured for this account.`);
@@ -994,22 +981,7 @@ export class NotificationsService {
       this.logger.log(`Using account-specific settings for ${savedAccountId} (enabled: ${settings.enabled}, sigcoreApiKey: ${settings.sigcoreApiKey ? 'set' : 'NOT SET'}, rules: ${settings.notificationRules.length})`);
     }
 
-    // Fallback 2: If still no settings, try to use settings from another account of the same user
-    if (!settings) {
-      this.logger.log(`No user-level defaults either. Checking other accounts for user ${userId}...`);
-      settings = await this.prisma.notificationSettings.findFirst({
-        where: {
-          savedAccount: { userId },
-          sigcoreApiKey: { not: null },
-          enabled: true,
-        },
-        include: replyRuleInclude,
-      });
-
-      if (settings) {
-        this.logger.log(`Using settings from another account (${settings.savedAccountId}) as fallback for ${savedAccountId}`);
-      }
-    }
+    // NOTE: No cross-account fallback — each account must use its own settings.
 
     if (!settings) {
       this.logger.warn(`No notification settings found for account ${savedAccountId} or user ${userId}. SMS alerts not configured for this account.`);

@@ -384,11 +384,12 @@ export class WebhooksService {
       },
       include: { notificationSettings: { select: { id: true } } },
     });
-    // Prefer: 1) account with settings matching userId, 2) any account with settings, 3) account matching userId, 4) first
+    // Prefer: 1) account with settings matching userId, 2) account matching userId, 3) account with settings, 4) first
+    // IMPORTANT: prioritize userId match over having settings to avoid cross-account contamination
     const savedAccount =
       savedAccounts.find((a: any) => a.notificationSettings && a.userId === userId) ||
-      savedAccounts.find((a: any) => a.notificationSettings) ||
       savedAccounts.find((a: any) => a.userId === userId) ||
+      savedAccounts.find((a: any) => a.notificationSettings) ||
       savedAccounts[0] || null;
     if (savedAccounts.length > 1) {
       this.logger.warn(`Multiple savedAccounts for business ${business.businessID}: ${savedAccounts.map(a => `${a.id}(user=${a.userId},settings=${!!a.notificationSettings})`).join(', ')}. Using ${savedAccount?.id}`);
