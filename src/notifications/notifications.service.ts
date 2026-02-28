@@ -418,7 +418,7 @@ export class NotificationsService {
       where: { savedAccountId },
     });
 
-    // Fallback: try other accounts of the same user
+    // Fallback: copy API credentials (not fromPhone) from another account of the same user
     if (!settings || !settings.sigcoreApiKey) {
       const fallback = await this.prisma.notificationSettings.findFirst({
         where: {
@@ -426,7 +426,14 @@ export class NotificationsService {
           sigcoreApiKey: { not: null },
         },
       });
-      if (fallback) settings = fallback;
+      if (fallback) {
+        // Use fallback credentials but keep original fromPhone to avoid cross-account contamination
+        const originalFromPhone = settings?.sigcoreFromPhone || null;
+        settings = fallback;
+        if (originalFromPhone) {
+          (settings as any).sigcoreFromPhone = originalFromPhone;
+        }
+      }
     }
 
     if (!settings) {
@@ -671,8 +678,8 @@ export class NotificationsService {
 
       if (otherSettings?.sigcoreApiKey) {
         this.logger.log(
-          `[createRule] Auto-copying Sigcore config from another account for user ${userId}` +
-          ` (fromPhone=${otherSettings.sigcoreFromPhone}, provider=${otherSettings.sigcoreProvider}, senderMode=${otherSettings.senderMode})`,
+          `[createRule] Auto-copying Sigcore credentials (NOT fromPhone) from another account for user ${userId}` +
+          ` (provider=${otherSettings.sigcoreProvider}, senderMode=${otherSettings.senderMode})`,
         );
       }
 
@@ -683,7 +690,9 @@ export class NotificationsService {
           sigcoreApiKey: otherSettings?.sigcoreApiKey || null,
           sigcoreWorkspaceId: otherSettings?.sigcoreWorkspaceId || null,
           sigcoreTenantId: otherSettings?.sigcoreTenantId || null,
-          sigcoreFromPhone: otherSettings?.sigcoreFromPhone || null,
+          // NOTE: Do NOT copy sigcoreFromPhone — it's account-specific.
+          // Each account must select its own Send From number to avoid cross-account contamination.
+          sigcoreFromPhone: null,
           sigcoreProvider: otherSettings?.sigcoreProvider || null,
           senderMode: otherSettings?.senderMode || 'shared',
         },
