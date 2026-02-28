@@ -123,8 +123,11 @@ export class AdminPhonePoolService {
     } catch (error: any) {
       const httpStatus = error.response?.status || error.status;
       const errorMsg = error.response?.data?.message || error.message || 'Unknown error';
+      const lowerMsg = errorMsg.toLowerCase();
 
-      if (httpStatus === 404) {
+      // Sigcore returns 404 when Twilio isn't connected, but adminFetchTwilioNumbers
+      // wraps it into a BadRequestException — so also check the error message text
+      if (httpStatus === 404 || lowerMsg.includes('not found') || lowerMsg.includes('not connected')) {
         return { status: 'disconnected', phoneCount: 0, message: 'Twilio integration not connected in Sigcore', checkedAt };
       }
       if (httpStatus === 401) {

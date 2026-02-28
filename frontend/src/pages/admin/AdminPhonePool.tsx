@@ -537,17 +537,6 @@ export default function AdminPhonePool() {
                 className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
               />
             </div>
-            <div className="space-y-2">
-              <label className="block text-sm font-semibold text-slate-700">Phone Number</label>
-              <input
-                type="text"
-                placeholder="+1234567890"
-                value={connectFields.phoneNumber}
-                onChange={e => setConnectFields({ ...connectFields, phoneNumber: e.target.value })}
-                className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-              />
-            </div>
-
             <div className="flex gap-2 pt-4">
               <button
                 className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
