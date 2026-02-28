@@ -26,6 +26,9 @@ export default function AdminPhonePool() {
   const [connectFields, setConnectFields] = useState({ apiKey: '', accountSid: '', authToken: '', phoneNumber: '' });
   const [connecting, setConnecting] = useState(false);
 
+  // Assigning
+  const [assigning, setAssigning] = useState(false);
+
   // Sync
   const [syncing, setSyncing] = useState(false);
 
@@ -262,6 +265,8 @@ export default function AdminPhonePool() {
   }, [userSearch, assigningPhoneId, searchUsers]);
 
   const handleAssign = async (phonePoolId: string, userId: string) => {
+    if (assigning) return;
+    setAssigning(true);
     try {
       await adminApi.assignPhone(phonePoolId, userId);
       notify.success('Assigned', 'Phone assigned to user');
@@ -271,11 +276,15 @@ export default function AdminPhonePool() {
       loadData();
     } catch (error: any) {
       notify.error('Error', error.response?.data?.message || 'Failed to assign phone');
+    } finally {
+      setAssigning(false);
     }
   };
 
   const handleAssignAll = async (phonePoolId: string) => {
     if (!confirm('Assign this phone number to ALL tenants?')) return;
+    if (assigning) return;
+    setAssigning(true);
     try {
       await adminApi.assignPhoneToAll(phonePoolId);
       notify.success('Assigned', 'Phone assigned to all tenants');
@@ -285,6 +294,8 @@ export default function AdminPhonePool() {
       loadData();
     } catch (error: any) {
       notify.error('Error', error.response?.data?.message || 'Failed to assign phone to all');
+    } finally {
+      setAssigning(false);
     }
   };
 
@@ -950,10 +961,11 @@ export default function AdminPhonePool() {
             <div className="space-y-6">
               {/* Assign to All */}
               <button
-                className="w-full px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2"
+                className="w-full px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 onClick={() => handleAssignAll(assigningPhoneId)}
+                disabled={assigning}
               >
-                <Users size={16} />
+                {assigning ? <Loader2 size={16} className="animate-spin" /> : <Users size={16} />}
                 Assign to All Tenants
               </button>
 
@@ -985,19 +997,29 @@ export default function AdminPhonePool() {
                     <Loader2 size={20} className="animate-spin text-blue-600" />
                   </div>
                 ) : userResults.length > 0 ? (
-                  userResults.map(u => (
-                    <button
-                      key={u.id}
-                      className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 rounded-xl transition-all"
-                      onClick={() => handleAssign(assigningPhoneId, u.id)}
-                    >
-                      <div className="flex flex-col items-start">
-                        <span className="font-medium text-slate-900">{u.email}</span>
-                        {u.name && <span className="text-sm text-slate-500">{u.name}</span>}
-                      </div>
-                      <UserPlus size={16} className="text-blue-600" />
-                    </button>
-                  ))
+                  userResults.map(u => {
+                    const alreadyAssigned = phones.find(p => p.id === assigningPhoneId)?.assignments?.some((a: any) => a.user?.id === u.id);
+                    return (
+                      <button
+                        key={u.id}
+                        className={`w-full flex items-center justify-between p-4 rounded-xl transition-all ${alreadyAssigned ? 'bg-green-50 cursor-default' : 'bg-slate-50 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed'}`}
+                        onClick={() => !alreadyAssigned && handleAssign(assigningPhoneId, u.id)}
+                        disabled={assigning || alreadyAssigned}
+                      >
+                        <div className="flex flex-col items-start">
+                          <span className={`font-medium ${alreadyAssigned ? 'text-green-700' : 'text-slate-900'}`}>{u.email}</span>
+                          {u.name && <span className="text-sm text-slate-500">{u.name}</span>}
+                        </div>
+                        {alreadyAssigned ? (
+                          <span className="text-xs font-semibold text-green-600 bg-green-100 px-2 py-1 rounded-full">Already assigned</span>
+                        ) : assigning ? (
+                          <Loader2 size={16} className="animate-spin text-blue-600" />
+                        ) : (
+                          <UserPlus size={16} className="text-blue-600" />
+                        )}
+                      </button>
+                    );
+                  })
                 ) : userSearch.trim() ? (
                   <p className="text-center py-8 text-slate-500">No users found</p>
                 ) : (
