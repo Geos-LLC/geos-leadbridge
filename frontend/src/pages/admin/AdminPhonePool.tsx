@@ -186,8 +186,9 @@ export default function AdminPhonePool() {
         notify.success('Connected', 'Twilio connected successfully');
         setShowConnect(false);
         setConnectFields({ apiKey: '', accountSid: '', authToken: '', phoneNumber: '' });
-        // Auto-sync after connecting
+        // Auto-sync after connecting, then refresh health
         await handleSync();
+        checkTwilioHealth();
       } else {
         notify.error('Connection Failed', result.error || 'Failed to connect provider');
       }
@@ -206,6 +207,7 @@ export default function AdminPhonePool() {
       if (result.success) {
         notify.success('Disconnected', 'Twilio disconnected');
         loadData();
+        checkTwilioHealth();
       } else {
         notify.error('Error', result.error || 'Failed to disconnect');
       }
@@ -236,6 +238,7 @@ export default function AdminPhonePool() {
     } finally {
       setSyncing(false);
       await loadData();
+      checkTwilioHealth();
     }
   };
 
