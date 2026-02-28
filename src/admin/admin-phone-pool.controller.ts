@@ -146,6 +146,15 @@ export class AdminPhonePoolController {
     return { success: result.success, data: result, error: result.error };
   }
 
+  @Patch(':phonePoolId/sms-approved')
+  async updateSmsApproved(
+    @Param('phonePoolId') phonePoolId: string,
+    @Body() body: { smsApproved: boolean },
+  ) {
+    const phone = await this.phonePoolService.updateSmsApproved(phonePoolId, body.smsApproved);
+    return { success: true, data: phone };
+  }
+
   @Post(':phonePoolId/assign-all')
   async assignToAllUsers(
     @Req() req: any,

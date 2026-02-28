@@ -334,7 +334,7 @@ export function Messages() {
           // Update delivery status of existing SMS in timeline
           setTimelineEvents(prev => prev.map(e => {
             if (e.id.includes(data.messageId) || e.id.includes(data.logId)) {
-              return { ...e, smsStatus: data.status as TimelineEvent['smsStatus'], deliveredAt: data.deliveredAt };
+              return { ...e, smsStatus: data.status as TimelineEvent['smsStatus'], deliveredAt: data.deliveredAt, smsError: data.error || e.smsError };
             }
             return e;
           }));
@@ -1354,11 +1354,16 @@ export function Messages() {
                           </span>
                         )}
                         {event.channel === 'sms' && event.smsError && (
-                          <span title={event.smsError}>
+                          <span title={event.smsError} className="text-red-500 flex items-center gap-0.5">
                             <AlertCircle size={12} />
                           </span>
                         )}
                       </div>
+                      {event.channel === 'sms' && event.smsStatus === 'failed' && event.smsError && (
+                        <div className="text-[10px] text-red-500 mt-0.5 leading-tight max-w-[300px] truncate" title={event.smsError}>
+                          {event.smsError}
+                        </div>
+                      )}
                     </div>
                   </div>
                   );

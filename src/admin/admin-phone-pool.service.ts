@@ -236,6 +236,19 @@ export class AdminPhonePoolService {
   }
 
   /**
+   * Toggle SMS Approved (A2P 10DLC) status for a pool phone
+   */
+  async updateSmsApproved(phonePoolId: string, smsApproved: boolean) {
+    const phone = await this.prisma.phonePool.findUnique({ where: { id: phonePoolId } });
+    if (!phone) throw new NotFoundException('Pool phone not found');
+
+    return this.prisma.phonePool.update({
+      where: { id: phonePoolId },
+      data: { smsApproved },
+    });
+  }
+
+  /**
    * Assign a pool phone to a user (many-to-many: same phone can be assigned to multiple users)
    */
   async assignToUser(adminId: string, phonePoolId: string, userId: string) {

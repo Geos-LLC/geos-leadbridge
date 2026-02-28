@@ -598,6 +598,7 @@ model PhonePool {
   assignedAt          DateTime?       // Legacy: kept for backward compat
   provisionedAt       DateTime        @default(now())
   releasedAt          DateTime?
+  smsApproved         Boolean         @default(true)  // A2P 10DLC approved for SMS
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 

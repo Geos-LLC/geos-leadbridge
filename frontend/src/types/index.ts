@@ -367,6 +367,7 @@ export interface PhonePoolEntry {
   friendlyName: string | null;
   sigcoreAllocationId: string | null;
   status: 'AVAILABLE' | 'ASSIGNED' | 'RESERVED' | 'RELEASED';
+  smsApproved: boolean;
   assignments?: PhonePoolAssignment[];
   provisionedAt: string;
   createdAt: string;

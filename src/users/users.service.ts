@@ -116,8 +116,8 @@ export class UsersService {
     return {
       success: true,
       phoneNumbers: [
-        ...assignments.map(a => ({ id: a.phonePool.id, phoneNumber: a.phonePool.phoneNumber, provider: a.phonePool.provider, friendlyName: a.phonePool.friendlyName, assigned: true })),
-        ...available.filter(p => !assignedIds.has(p.id)).map(p => ({ id: p.id, phoneNumber: p.phoneNumber, provider: p.provider, friendlyName: p.friendlyName, assigned: false })),
+        ...assignments.map(a => ({ id: a.phonePool.id, phoneNumber: a.phonePool.phoneNumber, provider: a.phonePool.provider, friendlyName: a.phonePool.friendlyName, assigned: true, smsApproved: a.phonePool.smsApproved })),
+        ...available.filter(p => !assignedIds.has(p.id)).map(p => ({ id: p.id, phoneNumber: p.phoneNumber, provider: p.provider, friendlyName: p.friendlyName, assigned: false, smsApproved: p.smsApproved })),
       ],
     };
   }

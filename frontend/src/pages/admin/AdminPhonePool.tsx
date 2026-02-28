@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, Search, Loader2, UserPlus, UserMinus, Trash2, RefreshCw, X, Link, Unlink, Download, Users, DollarSign } from 'lucide-react';
+import { Phone, Search, Loader2, UserPlus, UserMinus, Trash2, RefreshCw, X, Link, Unlink, Download, Users, DollarSign, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { adminApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
@@ -272,6 +272,16 @@ export default function AdminPhonePool() {
     }
   };
 
+  const handleToggleSmsApproved = async (phonePoolId: string, currentValue: boolean) => {
+    try {
+      await adminApi.updateSmsApproved(phonePoolId, !currentValue);
+      setPhones(prev => prev.map(p => p.id === phonePoolId ? { ...p, smsApproved: !currentValue } : p));
+      notify.success('Updated', !currentValue ? 'SMS sending approved' : 'SMS sending disabled');
+    } catch (error: any) {
+      notify.error('Error', error.response?.data?.message || 'Failed to update SMS status');
+    }
+  };
+
   const handleRelease = async (phonePoolId: string, phoneNumber: string) => {
     if (!confirm(`Remove ${phoneNumber} from the pool?`)) return;
     try {
@@ -493,6 +503,18 @@ export default function AdminPhonePool() {
                   <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-bold uppercase">{phone.provider}</span>
                   {phone.areaCode && <span>Area {phone.areaCode}</span>}
                   <span>· {new Date(phone.provisionedAt).toLocaleDateString()}</span>
+                  <button
+                    onClick={() => handleToggleSmsApproved(phone.id, phone.smsApproved)}
+                    className={`px-2 py-0.5 rounded-full font-bold uppercase flex items-center gap-1 ${
+                      phone.smsApproved
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-red-100 text-red-700'
+                    }`}
+                    title={phone.smsApproved ? 'A2P approved — click to disable SMS' : 'Not A2P approved — click to enable SMS'}
+                  >
+                    {phone.smsApproved ? <ShieldCheck size={10} /> : <ShieldAlert size={10} />}
+                    {phone.smsApproved ? 'SMS OK' : 'No SMS'}
+                  </button>
                 </div>
                 {phone.assignments && phone.assignments.length > 0 && (
                   <div className="space-y-1">
@@ -546,6 +568,7 @@ export default function AdminPhonePool() {
                 <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Area Code</th>
                 <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Provider</th>
                 <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">SMS</th>
                 <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Assigned To</th>
                 <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Added</th>
                 <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Actions</th>
@@ -554,7 +577,7 @@ export default function AdminPhonePool() {
             <tbody>
               {phones.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
+                  <td colSpan={8} className="px-6 py-12 text-center text-slate-500">
                     {loading ? 'Loading...' : 'No phone numbers in pool. Connect a provider and sync to get started.'}
                   </td>
                 </tr>
@@ -577,6 +600,20 @@ export default function AdminPhonePool() {
                       }`}>
                         {phone.status}
                       </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <button
+                        onClick={() => handleToggleSmsApproved(phone.id, phone.smsApproved)}
+                        className={`px-3 py-1 rounded-full text-xs font-bold uppercase flex items-center gap-1.5 transition-all ${
+                          phone.smsApproved
+                            ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                            : 'bg-red-100 text-red-700 hover:bg-red-200'
+                        }`}
+                        title={phone.smsApproved ? 'A2P approved — click to disable SMS' : 'Not A2P approved — click to enable SMS'}
+                      >
+                        {phone.smsApproved ? <ShieldCheck size={12} /> : <ShieldAlert size={12} />}
+                        {phone.smsApproved ? 'Approved' : 'Not Approved'}
+                      </button>
                     </td>
                     <td className="px-6 py-4">
                       {phone.assignments && phone.assignments.length > 0 ? (

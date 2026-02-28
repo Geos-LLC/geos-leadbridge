@@ -143,7 +143,7 @@ export function Services() {
 
   // Supporting data
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
-  const [poolPhones, setPoolPhones] = useState<{ id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }[]>([]);
+  const [poolPhones, setPoolPhones] = useState<{ id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean; smsApproved?: boolean }[]>([]);
   const [ctOwnPhoneNumbers, setCtOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>([]);
   const [ctSigcoreConnected, setCtSigcoreConnected] = useState(false);
   const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
@@ -1197,8 +1197,8 @@ export function Services() {
                           <option value={alertFromPhone}>{alertFromPhone} (configured)</option>
                       )}
                       {poolPhones.map(p => (
-                        <option key={p.id} value={p.phoneNumber}>
-                          {p.phoneNumber} (LeadBridge shared)
+                        <option key={p.id} value={p.phoneNumber} disabled={p.smsApproved === false}>
+                          {p.phoneNumber} (LeadBridge shared){p.smsApproved === false ? ' — NOT A2P APPROVED' : ''}
                         </option>
                       ))}
                       {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).map(tp => (
@@ -1225,6 +1225,12 @@ export function Services() {
                     <p className="mt-1.5 text-xs text-amber-600 font-medium flex items-center gap-1">
                       <AlertCircle className="w-3 h-3 shrink-0" />
                       Send-from and send-to are the same number
+                    </p>
+                  )}
+                  {alertFromPhone && poolPhones.find(p => p.phoneNumber === alertFromPhone && p.smsApproved === false) && (
+                    <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      This number is not A2P 10DLC approved — SMS will fail to deliver
                     </p>
                   )}
                 </div>
@@ -1419,8 +1425,8 @@ export function Services() {
                         <option value={ctFromPhone}>{ctFromPhone} (configured)</option>
                     )}
                     {poolPhones.map(p => (
-                      <option key={p.id} value={p.phoneNumber}>
-                        {p.phoneNumber} (LeadBridge shared)
+                      <option key={p.id} value={p.phoneNumber} disabled={p.smsApproved === false}>
+                        {p.phoneNumber} (LeadBridge shared){p.smsApproved === false ? ' — NOT A2P APPROVED' : ''}
                       </option>
                     ))}
                     {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).map(tp => (
@@ -1449,6 +1455,12 @@ export function Services() {
                     <button type="button" onClick={() => navigate('/phone-settings')} className="text-blue-600 hover:underline font-medium">
                       Set up a number in Business Line settings.
                     </button>
+                  </p>
+                )}
+                {ctFromPhone && poolPhones.find(p => p.phoneNumber === ctFromPhone && p.smsApproved === false) && (
+                  <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    This number is not A2P 10DLC approved — SMS will fail to deliver
                   </p>
                 )}
               </div>

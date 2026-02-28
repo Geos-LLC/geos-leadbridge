@@ -870,11 +870,15 @@ export class WebhooksService {
       const data = payload?.data || payload;
       const messageId = data?.messageId;
       const status = data?.status;
-      const errorCode = data?.errorCode;
-      const errorMessage = data?.errorMessage;
+      // Extract error details — Sigcore/Twilio may use various field names
+      const errorCode = data?.errorCode ?? data?.error_code ?? data?.error?.code;
+      const errorMessage = data?.errorMessage ?? data?.error_message ?? data?.error?.message ?? data?.failureReason ?? data?.reason;
       const leadId = data?.leadId;
 
       this.logger.log(`Processing delivery status: messageId=${messageId}, status=${status}, leadId=${leadId}`);
+      if (status === 'failed') {
+        this.logger.warn(`[delivery-failed] messageId=${messageId} errorCode=${errorCode} errorMessage=${errorMessage} providerMessageId=${data?.providerMessageId}`);
+      }
 
       // Find the NotificationLog by sigcoreMessageId
       if (messageId) {
@@ -904,7 +908,7 @@ export class WebhooksService {
               data: {
                 status: newStatus,
                 ...(status === 'delivered' && { deliveredAt: new Date() }),
-                ...(status === 'failed' && { error: errorMessage || `Error code: ${errorCode}` }),
+                ...(status === 'failed' && { error: errorMessage || (errorCode ? `Error code: ${errorCode}` : 'Delivery failed (no details from provider)') }),
               },
             });
 
@@ -935,6 +939,7 @@ export class WebhooksService {
                       logId: log.id,
                       status: newStatus,
                       deliveredAt: status === 'delivered' ? new Date().toISOString() : undefined,
+                      error: status === 'failed' ? (errorMessage || `Error code: ${errorCode}`) : undefined,
                     });
                   }
                 }

@@ -969,6 +969,10 @@ export const adminApi = {
   releasePhone: async (phonePoolId: string): Promise<void> => {
     await api.delete(`/v1/admin/phone-pool/${phonePoolId}`);
   },
+  updateSmsApproved: async (phonePoolId: string, smsApproved: boolean): Promise<PhonePoolEntry> => {
+    const { data } = await api.patch(`/v1/admin/phone-pool/${phonePoolId}/sms-approved`, { smsApproved });
+    return data.data;
+  },
   getPhonePoolUsers: async (search?: string): Promise<{ data: { id: string; email: string; name: string | null }[] }> => {
     const params = search ? `?search=${encodeURIComponent(search)}` : '';
     const { data } = await api.get(`/v1/admin/phone-pool/users${params}`);
