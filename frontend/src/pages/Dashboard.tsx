@@ -68,8 +68,15 @@ export function Dashboard() {
       console.log('[Dashboard] Webhook setup failed after OAuth:', webhookError);
       setOauthError(`Thumbtack authorization succeeded but webhook setup failed: ${webhookError}. Please try reconnecting again.`);
     } else if (error) {
-      console.log('[Dashboard] OAuth error:', error, searchParams.get('error_description'));
-      setOauthError(searchParams.get('error_description') || error);
+      const desc = searchParams.get('error_description') || error;
+      // "consent verifier already used" = user double-clicked the authorize button on Thumbtack.
+      // The first click usually succeeded, so ignore this error silently.
+      if (desc.toLowerCase().includes('consent verifier')) {
+        console.log('[Dashboard] Ignoring consent-verifier error (likely double-click):', desc);
+      } else {
+        console.log('[Dashboard] OAuth error:', error, desc);
+        setOauthError(desc);
+      }
     }
 
     if (reconnect === '1' && savedAccounts.length > 0) {

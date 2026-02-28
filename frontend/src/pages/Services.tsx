@@ -1406,63 +1406,75 @@ export function Services() {
             iconTextColor="text-emerald-600"
           >
             <div className={`space-y-6${!ctEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-              {/* Phone number — unified Send From dropdown */}
+              {/* Phone number — only own/dedicated numbers (no shared pool — consent required) */}
               <div className="space-y-2">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Send from</label>
-                <div className="relative">
-                  <select
-                    value={ctFromPhone}
-                    onChange={e => saveCtFromPhone(e.target.value)}
-                    disabled={ctSaving}
-                    className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
-                  >
-                    <option value="">Select phone number</option>
-                    {/* Legacy: currently configured number not found in any list */}
-                    {ctFromPhone &&
-                      !poolPhones.some(p => p.phoneNumber === ctFromPhone) &&
-                      !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctFromPhone) &&
-                      ctFromPhone !== ctSigcoreFromPhone && (
-                        <option value={ctFromPhone}>{ctFromPhone} (configured)</option>
-                    )}
-                    {poolPhones.map(p => (
-                      <option key={p.id} value={p.phoneNumber} disabled={p.smsApproved === false}>
-                        {p.phoneNumber} (LeadBridge shared){p.smsApproved === false ? ' — NOT A2P APPROVED' : ''}
-                      </option>
-                    ))}
-                    {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).map(tp => (
-                      <option key={tp.id} value={tp.phoneNumber}>
-                        {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''} (Dedicated)
-                      </option>
-                    ))}
-                    {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => (
-                      <option key={p.id} value={p.phoneNumber}>
-                        {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider === 'openphone' ? 'OpenPhone/QUO' : p.provider})
-                      </option>
-                    ))}
-                    {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
-                      <option value={ctSigcoreFromPhone}>
-                        {ctSigcoreFromPhone} (Twilio · Dedicated)
-                      </option>
-                    )}
-                  </select>
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
-                    <ChevronDown className="w-4 h-4" />
-                  </div>
-                </div>
-                {poolPhones.length === 0 && !ctSigcoreConnected && !ctSigcoreFromPhone && (
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    No numbers available.{' '}
-                    <button type="button" onClick={() => navigate('/phone-settings')} className="text-blue-600 hover:underline font-medium">
-                      Set up a number in Business Line settings.
-                    </button>
-                  </p>
-                )}
-                {ctFromPhone && poolPhones.find(p => p.phoneNumber === ctFromPhone && p.smsApproved === false) && (
-                  <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 shrink-0" />
-                    This number is not A2P 10DLC approved — SMS will fail to deliver
-                  </p>
-                )}
+                {(() => {
+                  const hasOwnNumbers = ctOwnPhoneNumbers.length > 0 || tenantPhones.length > 0 || !!ctSigcoreFromPhone;
+                  if (!hasOwnNumbers) {
+                    return (
+                      <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                        <p className="text-sm text-amber-800 font-medium mb-1">No dedicated number set up</p>
+                        <p className="text-xs text-amber-700 leading-relaxed">
+                          Customer texting requires your own phone number (not a shared pool number) for consent compliance. Set one up in Business Line settings:
+                        </p>
+                        <div className="mt-3 flex flex-col gap-1.5">
+                          <button type="button" onClick={() => navigate('/phone-settings')} className="text-xs text-blue-600 hover:underline font-medium text-left">
+                            Connect your OpenPhone number (Option 2)
+                          </button>
+                          <button type="button" onClick={() => navigate('/phone-settings')} className="text-xs text-blue-600 hover:underline font-medium text-left">
+                            Buy a dedicated number (Option 3)
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <>
+                      <div className="relative">
+                        <select
+                          value={ctFromPhone}
+                          onChange={e => saveCtFromPhone(e.target.value)}
+                          disabled={ctSaving}
+                          className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
+                        >
+                          <option value="">Select phone number</option>
+                          {/* Legacy: currently configured number not in any known list */}
+                          {ctFromPhone &&
+                            !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctFromPhone) &&
+                            !tenantPhones.some(tp => tp.phoneNumber === ctFromPhone) &&
+                            ctFromPhone !== ctSigcoreFromPhone && (
+                              <option value={ctFromPhone}>{ctFromPhone} (configured)</option>
+                          )}
+                          {tenantPhones.map(tp => (
+                            <option key={tp.id} value={tp.phoneNumber}>
+                              {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''} (Dedicated)
+                            </option>
+                          ))}
+                          {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => (
+                            <option key={p.id} value={p.phoneNumber}>
+                              {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider === 'openphone' ? 'OpenPhone/QUO' : p.provider})
+                            </option>
+                          ))}
+                          {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
+                            <option value={ctSigcoreFromPhone}>
+                              {ctSigcoreFromPhone} (Twilio · Dedicated)
+                            </option>
+                          )}
+                        </select>
+                        <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
+                          <ChevronDown className="w-4 h-4" />
+                        </div>
+                      </div>
+                      {ctFromPhone && poolPhones.some(p => p.phoneNumber === ctFromPhone) && (
+                        <p className="mt-1.5 text-xs text-amber-600 font-medium flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3 shrink-0" />
+                          This is a shared pool number — switch to a dedicated number for consent compliance
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Auto-reply message */}
