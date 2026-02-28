@@ -805,25 +805,30 @@ export class CallConnectService {
       `[triggerTestCall] Session started: ${sessionId} (status=${sessionStatus}, testPhone=${testPhone})`,
     );
 
-    // Create local LeadCallConnect record so webhook handler can find this session.
-    // Without this, all webhooks for test calls are skipped as "unknown session".
+    // Try to create a local LeadCallConnect record so webhook handler can track this session.
+    // This may fail for test calls because leadId is a fake ID with no matching Lead record (FK constraint).
+    // That's OK — the call itself works fine via Sigcore; we just won't track webhooks locally.
     if (sessionId) {
-      await this.prisma.leadCallConnect.upsert({
-        where: { sigcoreSessionId: sessionId },
-        create: {
-          leadId: startPayload.leadId,
-          businessId: sigcoreBusinessId,
-          sigcoreSessionId: sessionId,
-          status: this.mapStatus(sessionStatus || 'CREATED'),
-          attempt: 0,
-          timeline: [],
-          lastEventAt: new Date(),
-        },
-        update: {
-          status: this.mapStatus(sessionStatus || 'CREATED'),
-          lastEventAt: new Date(),
-        },
-      });
+      try {
+        await this.prisma.leadCallConnect.upsert({
+          where: { sigcoreSessionId: sessionId },
+          create: {
+            leadId: startPayload.leadId,
+            businessId: sigcoreBusinessId,
+            sigcoreSessionId: sessionId,
+            status: this.mapStatus(sessionStatus || 'CREATED'),
+            attempt: 0,
+            timeline: [],
+            lastEventAt: new Date(),
+          },
+          update: {
+            status: this.mapStatus(sessionStatus || 'CREATED'),
+            lastEventAt: new Date(),
+          },
+        });
+      } catch (err: any) {
+        this.logger.warn(`[triggerTestCall] Could not create local session record (FK constraint): ${err.message}`);
+      }
     }
 
     return { sessionId };
