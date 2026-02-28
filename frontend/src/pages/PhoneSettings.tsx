@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Phone, Loader2, X, ChevronDown, AlertCircle, PhoneCall, Building2, Key, Unplug, CheckCircle2, ExternalLink, Link2, Hash } from 'lucide-react';
+import { Phone, Loader2, X, ChevronDown, AlertCircle, PhoneCall, Building2, Key, Unplug, CheckCircle2, ExternalLink, Link2, Hash, ShieldCheck, ShieldAlert, MessageSquare } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { usersApi, thumbtackApi, notificationsApi } from '../services/api';
 import type { TenantPhoneNumber } from '../services/api';
@@ -365,8 +365,17 @@ export function PhoneSettings() {
                   {phone.friendlyName && (
                     <div className="text-xs text-slate-500 mt-2">{phone.friendlyName}</div>
                   )}
-                  <div className="mt-3 pt-3 border-t border-slate-100">
+                  <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2 flex-wrap">
                     <span className="px-2 py-1 bg-blue-50 text-blue-600 text-[10px] font-bold rounded uppercase">LeadBridge</span>
+                    {phone.smsApproved ? (
+                      <span className="px-2 py-1 bg-green-50 text-green-700 text-[10px] font-bold rounded uppercase flex items-center gap-1">
+                        <ShieldCheck size={10} /> SMS OK
+                      </span>
+                    ) : (
+                      <span className="px-2 py-1 bg-red-50 text-red-600 text-[10px] font-bold rounded uppercase flex items-center gap-1">
+                        <ShieldAlert size={10} /> No SMS
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}
@@ -421,7 +430,7 @@ export function PhoneSettings() {
                 {ownPhoneNumbers.map(phone => (
                   <div key={phone.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 hover:border-blue-200 transition-all">
                     <div className="flex items-center gap-3 mb-3">
-                      <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${phone.smsEnabled ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-500'}`}>
                         <Phone className="w-5 h-5" />
                       </div>
                       <div className="flex-1">
@@ -429,8 +438,27 @@ export function PhoneSettings() {
                         <div className="text-xs text-slate-400">{phone.friendlyName || 'QUO'}</div>
                       </div>
                     </div>
-                    <div className="mt-3 pt-3 border-t border-slate-100">
+                    <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2 flex-wrap">
                       <span className="px-2 py-1 bg-blue-50 text-blue-600 text-[10px] font-bold rounded uppercase">QUO</span>
+                      {phone.smsEnabled ? (
+                        <span className="px-2 py-1 bg-green-50 text-green-700 text-[10px] font-bold rounded uppercase flex items-center gap-1">
+                          <ShieldCheck size={10} /> SMS OK
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 bg-red-50 text-red-600 text-[10px] font-bold rounded uppercase flex items-center gap-1" title="SMS not available on this number">
+                          <ShieldAlert size={10} /> No SMS
+                        </span>
+                      )}
+                      {phone.voiceEnabled && (
+                        <span className="px-2 py-1 bg-slate-50 text-slate-500 text-[10px] font-bold rounded uppercase flex items-center gap-1">
+                          <PhoneCall size={10} /> Voice
+                        </span>
+                      )}
+                      {phone.mmsEnabled && (
+                        <span className="px-2 py-1 bg-slate-50 text-slate-500 text-[10px] font-bold rounded uppercase flex items-center gap-1">
+                          <MessageSquare size={10} /> MMS
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -541,10 +569,15 @@ export function PhoneSettings() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-bold text-slate-900 font-mono text-sm">{tp.phoneNumber}</div>
-                      <div className="text-xs text-slate-400 flex items-center gap-2">
+                      <div className="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
                         <span>Twilio · Dedicated</span>
                         {tp.status === 'ACTIVE' && (
                           <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded text-[10px] font-bold uppercase">Active</span>
+                        )}
+                        {tp.status === 'ACTIVE' && (
+                          <span className="px-1.5 py-0.5 bg-green-50 text-green-700 rounded text-[10px] font-bold uppercase flex items-center gap-0.5">
+                            <ShieldCheck size={9} /> SMS OK
+                          </span>
                         )}
                         {tp.status === 'GRACE_PERIOD' && (
                           <span className="px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded text-[10px] font-bold uppercase">
