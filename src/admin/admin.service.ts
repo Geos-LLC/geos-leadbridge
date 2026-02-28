@@ -370,4 +370,64 @@ export class AdminService {
 
     return { count: flatLogs.length, logs: flatLogs };
   }
+
+  async getTenantErrorFeed(query: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const { limit = 50, offset = 0 } = query;
+    const statusFilter = query.status || 'failed';
+
+    const where: any = {};
+    if (statusFilter !== 'all') {
+      where.status = statusFilter;
+    }
+
+    const [logs, total, failedCount24h] = await Promise.all([
+      this.prisma.notificationLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: Number(offset),
+        take: Number(limit),
+        include: {
+          notificationSettings: {
+            select: {
+              savedAccount: {
+                select: {
+                  id: true,
+                  businessId: true,
+                  businessName: true,
+                  user: {
+                    select: {
+                      id: true,
+                      email: true,
+                      name: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.notificationLog.count({ where }),
+      this.prisma.notificationLog.count({
+        where: {
+          status: 'failed',
+          createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        },
+      }),
+    ]);
+
+    const flatLogs = logs.map(log => {
+      const { notificationSettings, ...rest } = log;
+      return {
+        ...rest,
+        savedAccount: notificationSettings?.savedAccount || null,
+      };
+    });
+
+    return { logs: flatLogs, total, offset: Number(offset), limit: Number(limit), failedCount24h };
+  }
 }

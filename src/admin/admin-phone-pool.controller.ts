@@ -138,6 +138,15 @@ export class AdminPhonePoolController {
   }
 
   /**
+   * Check Twilio connection health
+   */
+  @Get('twilio-health')
+  async checkTwilioHealth() {
+    const result = await this.phonePoolService.checkTwilioHealth();
+    return { success: true, data: result };
+  }
+
+  /**
    * Register webhook subscription with Sigcore for delivery notifications
    */
   @Post('setup-webhook')

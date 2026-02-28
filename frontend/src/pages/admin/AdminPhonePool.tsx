@@ -45,6 +45,15 @@ export default function AdminPhonePool() {
   });
   const [testConfigSaving, setTestConfigSaving] = useState(false);
 
+  // Twilio health check
+  const [twilioHealth, setTwilioHealth] = useState<{
+    status: 'connected' | 'disconnected' | 'error';
+    phoneCount: number;
+    message: string;
+    checkedAt: string;
+  } | null>(null);
+  const [healthChecking, setHealthChecking] = useState(false);
+
   // Phone pricing config
   const [phonePriceMonthly, setPhonePriceMonthly] = useState<string>('');
   const [phoneGracePeriodDays, setPhoneGracePeriodDays] = useState<string>('30');
@@ -61,6 +70,7 @@ export default function AdminPhonePool() {
     loadConfig();
     loadAdminConfig();
     loadPhonePricing();
+    checkTwilioHealth();
   }, [user, statusFilter, searchQuery]);
 
   const loadConfig = async () => {
@@ -69,6 +79,23 @@ export default function AdminPhonePool() {
       setTenantKeyConfigured(config.configured);
     } catch {
       setTenantKeyConfigured(false);
+    }
+  };
+
+  const checkTwilioHealth = async () => {
+    try {
+      setHealthChecking(true);
+      const result = await adminApi.checkTwilioHealth();
+      setTwilioHealth(result);
+    } catch {
+      setTwilioHealth({
+        status: 'error',
+        phoneCount: 0,
+        message: 'Failed to check Twilio connection',
+        checkedAt: new Date().toISOString(),
+      });
+    } finally {
+      setHealthChecking(false);
     }
   };
 
@@ -325,6 +352,60 @@ export default function AdminPhonePool() {
           </div>
         </div>
       )}
+
+      {/* Twilio Health Check */}
+      <div className={`rounded-2xl md:rounded-3xl border shadow-sm p-4 md:p-5 ${
+        twilioHealth?.status === 'connected' ? 'bg-emerald-50 border-emerald-200' :
+        twilioHealth?.status === 'error' ? 'bg-red-50 border-red-200' :
+        twilioHealth?.status === 'disconnected' ? 'bg-amber-50 border-amber-200' :
+        'bg-white border-slate-100'
+      }`}>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div className={`w-3 h-3 rounded-full shrink-0 ${
+              twilioHealth?.status === 'connected' ? 'bg-emerald-500' :
+              twilioHealth?.status === 'disconnected' ? 'bg-amber-500' :
+              twilioHealth?.status === 'error' ? 'bg-red-500' :
+              'bg-slate-300 animate-pulse'
+            }`} />
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">Twilio Connection</h3>
+              <p className={`text-xs mt-0.5 ${
+                twilioHealth?.status === 'connected' ? 'text-emerald-700' :
+                twilioHealth?.status === 'error' ? 'text-red-700' :
+                twilioHealth?.status === 'disconnected' ? 'text-amber-700' :
+                'text-slate-500'
+              }`}>
+                {twilioHealth?.message || 'Checking connection...'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {twilioHealth?.status === 'connected' && (
+              <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">
+                {twilioHealth.phoneCount} number{twilioHealth.phoneCount !== 1 ? 's' : ''}
+              </span>
+            )}
+            {twilioHealth?.checkedAt && (
+              <span className="text-[10px] text-slate-400 hidden sm:inline">
+                Checked {new Date(twilioHealth.checkedAt).toLocaleTimeString()}
+              </span>
+            )}
+            <button
+              onClick={checkTwilioHealth}
+              disabled={healthChecking}
+              className="px-3 py-1.5 bg-white/80 border border-slate-200 text-slate-700 rounded-lg text-xs font-semibold hover:bg-white transition-all flex items-center gap-1.5 disabled:opacity-50"
+            >
+              {healthChecking ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <RefreshCw size={12} />
+              )}
+              Check Now
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Stats Cards */}
       {stats && (

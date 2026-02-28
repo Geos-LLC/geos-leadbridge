@@ -995,6 +995,33 @@ export const adminApi = {
     const { data } = await api.patch('/v1/admin/phone-pool/phone-pricing', { priceMonthly, gracePeriodDays });
     return data.data;
   },
+  checkTwilioHealth: async (): Promise<{
+    status: 'connected' | 'disconnected' | 'error';
+    phoneCount: number;
+    message: string;
+    checkedAt: string;
+  }> => {
+    const { data } = await api.get('/v1/admin/phone-pool/twilio-health');
+    return data.data;
+  },
+  getTenantErrors: async (params?: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    logs: any[];
+    total: number;
+    offset: number;
+    limit: number;
+    failedCount24h: number;
+  }> => {
+    const qp = new URLSearchParams();
+    if (params?.status) qp.append('status', params.status);
+    if (params?.limit !== undefined) qp.append('limit', params.limit.toString());
+    if (params?.offset !== undefined) qp.append('offset', params.offset.toString());
+    const { data } = await api.get(`/v1/admin/tenant-errors?${qp.toString()}`);
+    return data.data;
+  },
 };
 
 // API Test / Webhook Simulation

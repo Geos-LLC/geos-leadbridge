@@ -98,6 +98,43 @@ export class AdminPhonePoolService {
   }
 
   /**
+   * Check Twilio connection health by fetching numbers from Sigcore
+   */
+  async checkTwilioHealth(): Promise<{
+    status: 'connected' | 'disconnected' | 'error';
+    phoneCount: number;
+    message: string;
+    checkedAt: string;
+  }> {
+    const checkedAt = new Date().toISOString();
+
+    if (!this.sigcoreService.isConfigured()) {
+      return { status: 'disconnected', phoneCount: 0, message: 'SIGCORE_API_KEY not configured', checkedAt };
+    }
+
+    try {
+      const numbers = await this.sigcoreService.adminFetchTwilioNumbers();
+      return {
+        status: 'connected',
+        phoneCount: numbers.length,
+        message: `Twilio connected with ${numbers.length} phone number(s)`,
+        checkedAt,
+      };
+    } catch (error: any) {
+      const httpStatus = error.response?.status || error.status;
+      const errorMsg = error.response?.data?.message || error.message || 'Unknown error';
+
+      if (httpStatus === 404) {
+        return { status: 'disconnected', phoneCount: 0, message: 'Twilio integration not connected in Sigcore', checkedAt };
+      }
+      if (httpStatus === 401) {
+        return { status: 'error', phoneCount: 0, message: 'Sigcore API key invalid or expired', checkedAt };
+      }
+      return { status: 'error', phoneCount: 0, message: `Connection check failed: ${errorMsg}`, checkedAt };
+    }
+  }
+
+  /**
    * Connect admin's provider account (OpenPhone or Twilio) via Sigcore
    */
   async connectProvider(
