@@ -391,6 +391,15 @@ export default function AdminPhonePool() {
                 Checked {new Date(twilioHealth.checkedAt).toLocaleTimeString()}
               </span>
             )}
+            {(twilioHealth?.status === 'disconnected' || twilioHealth?.status === 'error') && (
+              <button
+                onClick={() => setShowConnect(true)}
+                className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-all flex items-center gap-1.5 shadow-sm"
+              >
+                <Link size={12} />
+                Reconnect
+              </button>
+            )}
             <button
               onClick={checkTwilioHealth}
               disabled={healthChecking}
