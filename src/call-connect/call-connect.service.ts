@@ -292,9 +292,9 @@ export class CallConnectService {
         this.httpService.get(settingsUrl, { headers }),
       );
       const saved = getResp.data;
-      if (saved?.agentAcceptDigits !== '0123456789') {
+      if (saved?.agentAcceptDigits !== payload.agentAcceptDigits) {
         this.logger.error(
-          `[pushSettings] MISMATCH! Pushed agentAcceptDigits='0123456789' but Sigcore has '${saved?.agentAcceptDigits}'. ` +
+          `[pushSettings] MISMATCH! Pushed agentAcceptDigits='${payload.agentAcceptDigits}' but Sigcore has '${saved?.agentAcceptDigits}'. ` +
           `Full settings: ${JSON.stringify({ agentAcceptDigits: saved?.agentAcceptDigits, mode: saved?.mode, enabled: saved?.enabled })}`,
         );
       } else {
