@@ -804,6 +804,28 @@ export class CallConnectService {
     this.logger.log(
       `[triggerTestCall] Session started: ${sessionId} (status=${sessionStatus}, testPhone=${testPhone})`,
     );
+
+    // Create local LeadCallConnect record so webhook handler can find this session.
+    // Without this, all webhooks for test calls are skipped as "unknown session".
+    if (sessionId) {
+      await this.prisma.leadCallConnect.upsert({
+        where: { sigcoreSessionId: sessionId },
+        create: {
+          leadId: startPayload.leadId,
+          businessId: sigcoreBusinessId,
+          sigcoreSessionId: sessionId,
+          status: this.mapStatus(sessionStatus || 'CREATED'),
+          attempt: 0,
+          timeline: [],
+          lastEventAt: new Date(),
+        },
+        update: {
+          status: this.mapStatus(sessionStatus || 'CREATED'),
+          lastEventAt: new Date(),
+        },
+      });
+    }
+
     return { sessionId };
   }
 
