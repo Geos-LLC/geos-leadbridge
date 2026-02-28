@@ -656,10 +656,20 @@ export class CallConnectService {
    * Uses a caller-supplied test customer phone so the agent can verify the bridge works.
    */
   async triggerTestCall(savedAccountId: string, testPhone: string): Promise<{ sessionId: string | null }> {
-    const ns = await this.prisma.notificationSettings.findUnique({
-      where: { savedAccountId },
-      select: { sigcoreApiKey: true, sigcoreWorkspaceId: true, sigcoreTenantId: true },
-    });
+    const [ns, savedAccount] = await Promise.all([
+      this.prisma.notificationSettings.findUnique({
+        where: { savedAccountId },
+        select: { sigcoreApiKey: true, sigcoreWorkspaceId: true, sigcoreTenantId: true },
+      }),
+      this.prisma.savedAccount.findUnique({
+        where: { id: savedAccountId },
+        select: { userId: true, businessName: true },
+      }),
+    ]);
+
+    if (!savedAccount) {
+      throw new BadRequestException('Saved account not found');
+    }
 
     const accountKey = ns?.sigcoreApiKey;
     const envKey = this.configService.get<string>('SIGCORE_API_KEY');
@@ -805,30 +815,47 @@ export class CallConnectService {
       `[triggerTestCall] Session started: ${sessionId} (status=${sessionStatus}, testPhone=${testPhone})`,
     );
 
-    // Try to create a local LeadCallConnect record so webhook handler can track this session.
-    // This may fail for test calls because leadId is a fake ID with no matching Lead record (FK constraint).
-    // That's OK — the call itself works fine via Sigcore; we just won't track webhooks locally.
+    // Create (or reuse) a persistent test lead for this tenant so the LeadCallConnect FK is satisfied.
     if (sessionId) {
-      try {
-        await this.prisma.leadCallConnect.upsert({
-          where: { sigcoreSessionId: sessionId },
-          create: {
-            leadId: startPayload.leadId,
-            businessId: sigcoreBusinessId,
-            sigcoreSessionId: sessionId,
-            status: this.mapStatus(sessionStatus || 'CREATED'),
-            attempt: 0,
-            timeline: [],
-            lastEventAt: new Date(),
-          },
-          update: {
-            status: this.mapStatus(sessionStatus || 'CREATED'),
-            lastEventAt: new Date(),
-          },
-        });
-      } catch (err: any) {
-        this.logger.warn(`[triggerTestCall] Could not create local session record (FK constraint): ${err.message}`);
-      }
+      const testExternalId = `cc-test-${savedAccountId}`;
+      const testLead = await this.prisma.lead.upsert({
+        where: { platform_externalRequestId: { platform: 'test', externalRequestId: testExternalId } },
+        create: {
+          userId: savedAccount.userId,
+          platform: 'test',
+          businessId: savedAccountId,
+          externalRequestId: testExternalId,
+          customerName: td.customerName,
+          customerPhone: testPhone,
+          message: 'Call Connect test call',
+          category: td.category,
+          city: td.city,
+          state: td.state,
+          rawJson: '{}',
+          status: 'new',
+        },
+        update: {
+          customerPhone: testPhone,
+          updatedAt: new Date(),
+        },
+      });
+
+      await this.prisma.leadCallConnect.upsert({
+        where: { sigcoreSessionId: sessionId },
+        create: {
+          leadId: testLead.id,
+          businessId: sigcoreBusinessId,
+          sigcoreSessionId: sessionId,
+          status: this.mapStatus(sessionStatus || 'CREATED'),
+          attempt: 0,
+          timeline: [],
+          lastEventAt: new Date(),
+        },
+        update: {
+          status: this.mapStatus(sessionStatus || 'CREATED'),
+          lastEventAt: new Date(),
+        },
+      });
     }
 
     return { sessionId };
