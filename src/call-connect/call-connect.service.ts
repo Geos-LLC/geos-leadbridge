@@ -256,7 +256,7 @@ export class CallConnectService {
       agentPhoneE164: settings.agentPhoneE164,
       ringTimeoutSeconds: 60,
       maxAgentAttempts: settings.maxAgentAttempts,
-      agentAcceptDigits: settings.agentAcceptDigits || '0123456789',
+      agentAcceptDigits: (!settings.agentAcceptDigits || settings.agentAcceptDigits === '1') ? '0123456789*#' : settings.agentAcceptDigits,
       agentWhisperMessage: pausePrefix + whisperRaw,
       leadGreetingMessage: pausePrefix + greetingRaw,
       leadVoicemailEnabled: true,

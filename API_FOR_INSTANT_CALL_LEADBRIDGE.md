@@ -74,7 +74,7 @@ Content-Type: application/json
 | `botNumberE164` | string | — | Shared bot number used as caller ID (required) |
 | `agentPhoneE164` | string | — | Agent's phone number (required for MVP) |
 | `maxAgentAttempts` | int | 2 | How many times to retry calling the agent |
-| `agentAcceptDigits` | string | `"1"` | Digit agent presses to accept |
+| `agentAcceptDigits` | string | `"0123456789*#"` | Digits agent can press to accept (any key) |
 | `agentWhisperMessage` | string | built-in | Supports `{summary}` and `{digit}` placeholders |
 | `leadGreetingMessage` | string | built-in | Played to lead while waiting |
 | `leadVoicemailEnabled` | boolean | false | Auto-drop voicemail if lead doesn't answer |

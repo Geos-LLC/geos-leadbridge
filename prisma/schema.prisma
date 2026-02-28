@@ -680,7 +680,7 @@ model CallConnectSettings {
   quietHoursTimezone        String?
   quietHoursStart           String?         // "HH:MM"
   quietHoursEnd             String?         // "HH:MM"
-  agentAcceptDigits         String?         @default("1") // Digit agent presses to accept the bridge
+  agentAcceptDigits         String?         @default("0123456789*#") // Digits agent can press to accept the bridge (any key)
   agentWhisperMessage       String?         // TTS played to agent before bridge; supports {summary} {digit}
   leadGreetingMessage       String?         // TTS played to lead while waiting for agent
   leadVoicemailEnabled      Boolean         @default(false) // Auto Voicemail Drop
