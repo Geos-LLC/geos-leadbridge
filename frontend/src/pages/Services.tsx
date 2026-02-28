@@ -145,7 +145,7 @@ export function Services() {
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [poolPhones, setPoolPhones] = useState<{ id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean; smsApproved?: boolean }[]>([]);
   const [ctOwnPhoneNumbers, setCtOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>([]);
-  const [ctSigcoreConnected, setCtSigcoreConnected] = useState(false);
+  // ctSigcoreConnected tracked via local var in loadServiceData (no longer needed in JSX)
   const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
 
   // UI state
@@ -345,7 +345,7 @@ export function Services() {
 
       // Load own provider connection status for CT Option 2
       const connected = !!notifSettingsRes?.settings?.sigcoreConnected;
-      setCtSigcoreConnected(connected);
+      // connected state no longer needed in JSX — just used locally here
       setCtSigcoreFromPhone(notifSettingsRes?.settings?.sigcoreFromPhone || null);
       if (connected) {
         notificationsApi.getSigcorePhoneNumbers(accountId).then(r => setCtOwnPhoneNumbers(r.phoneNumbers)).catch(() => {});
