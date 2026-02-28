@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { billingApi } from '../services/api';
 
 // Routes that should be accessible even with expired trial
-const TRIAL_EXEMPT_ROUTES = ['/pricing', '/billing'];
+const TRIAL_EXEMPT_ROUTES = ['/pricing', '/billing', '/settings'];
 
 export function ProtectedRoute() {
   const location = useLocation();
@@ -13,8 +13,12 @@ export function ProtectedRoute() {
   const [shouldBlockAccess, setShouldBlockAccess] = useState(false);
 
   useEffect(() => {
+    // Reset state on every route change so stale values don't persist
+    setTrialChecked(false);
+    setShouldBlockAccess(false);
+
     async function checkTrialStatus() {
-      // Skip trial check for exempt routes
+      // Skip trial check for exempt routes — always allow access
       if (TRIAL_EXEMPT_ROUTES.includes(location.pathname)) {
         setTrialChecked(true);
         return;
@@ -34,6 +38,7 @@ export function ProtectedRoute() {
         }
       } catch (error) {
         console.error('Failed to check trial status:', error);
+        // Don't block access on API errors — let user through
       } finally {
         setTrialChecked(true);
       }
