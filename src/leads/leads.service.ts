@@ -214,6 +214,7 @@ export class LeadsService {
         isRead: msg.isRead,
         sentAt: msg.sentAt.toISOString(),
         deliveredAt: msg.deliveredAt?.toISOString(),
+        notificationLogId: (msg as any).notificationLogId || null,
         attachments: raw.attachments || [],
         raw,
       };
