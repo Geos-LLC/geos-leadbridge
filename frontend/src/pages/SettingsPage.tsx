@@ -87,7 +87,7 @@ export default function SettingsPage() {
     loadData();
   }, []);
 
-  // Detect Chrome extension
+  // Detect Chrome extension — recheck on tab focus and when the attribute is set
   useEffect(() => {
     const check = () => {
       const installed = document.documentElement.getAttribute('data-leadbridge-extension') === 'true';
@@ -95,7 +95,13 @@ export default function SettingsPage() {
     };
     check();
     const timer = setTimeout(check, 1500);
-    return () => clearTimeout(timer);
+    // Recheck when user returns to this tab (e.g. after installing the extension)
+    const onVisibility = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    // Watch for the attribute being set by the content script
+    const observer = new MutationObserver(check);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-leadbridge-extension'] });
+    return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibility); observer.disconnect(); };
   }, []);
 
   // Listen for extension refresh event (avoids full page reload when returning from extension)

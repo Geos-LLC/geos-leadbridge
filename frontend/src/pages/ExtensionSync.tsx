@@ -86,7 +86,13 @@ export function ExtensionSync() {
     // Check immediately and after a short delay (content script may not have run yet)
     check();
     const timer = setTimeout(check, 1500);
-    return () => clearTimeout(timer);
+    // Recheck when user returns to this tab (e.g. after installing the extension)
+    const onVisibility = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    // Watch for the attribute being set by the content script
+    const observer = new MutationObserver(check);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-leadbridge-extension'] });
+    return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibility); observer.disconnect(); };
   }, []);
 
   // Load saved accounts
