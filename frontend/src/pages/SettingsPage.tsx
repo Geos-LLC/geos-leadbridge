@@ -84,7 +84,8 @@ export default function SettingsPage() {
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
 
   useEffect(() => {
-    loadData();
+    // Always force-refresh diagnostics on mount so stale data doesn't persist
+    loadData(true);
   }, []);
 
   // Detect Chrome extension — recheck on tab focus and when the attribute is set

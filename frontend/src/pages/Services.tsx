@@ -122,6 +122,7 @@ export function Services() {
   const [searchParams] = useSearchParams();
   const storedAccounts = useAppStore(state => state.savedAccounts);
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
+  const setAccountDiagnostics = useAppStore(state => state.setAccountDiagnostics);
 
   // Account state — seed from Zustand store so there's no loading flash
   const [accounts, setAccounts] = useState<SavedAccount[]>(storedAccounts);
@@ -573,6 +574,8 @@ export function Services() {
         setExpandedCard('lead-alerts');
         showSuccess('Lead Alerts enabled — configure your alert phone number');
       }
+      // Invalidate diagnostics cache so Dashboard/Settings show fresh data
+      setAccountDiagnostics({});
     } catch (err: any) {
       // Rollback on error
       setLeadAlertRule(prevAlertRule);
