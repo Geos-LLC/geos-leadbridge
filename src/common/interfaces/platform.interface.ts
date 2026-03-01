@@ -21,7 +21,7 @@ export interface IPlatformAdapter {
    * @param state - CSRF protection state parameter
    * @returns Authorization URL
    */
-  getAuthUrl(userId: string, state: string): string;
+  getAuthUrl(userId: string, state: string, forceLogin?: boolean): string;
 
   /**
    * Handle OAuth callback and exchange code for tokens

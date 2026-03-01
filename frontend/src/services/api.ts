@@ -240,8 +240,8 @@ export const platformsApi = {
     const { data } = await api.get('/v1/platforms/health');
     return data;
   },
-  getAuthUrl: async (): Promise<{ authUrl: string }> => {
-    const { data } = await api.get('/v1/thumbtack/auth/url');
+  getAuthUrl: async (forceLogin = false): Promise<{ authUrl: string }> => {
+    const { data } = await api.get('/v1/thumbtack/auth/url', { params: forceLogin ? { forceLogin: 'true' } : undefined });
     return data;
   },
   disconnect: async (): Promise<void> => {

@@ -51,11 +51,11 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
     }
   };
 
-  const handleStartOAuth = async () => {
+  const handleStartOAuth = async (forceLogin = false) => {
     try {
       setLoading(true);
       setError(null);
-      const { authUrl } = await platformsApi.getAuthUrl();
+      const { authUrl } = await platformsApi.getAuthUrl(forceLogin);
       window.location.href = authUrl;
     } catch (err: any) {
       setError(err.message || 'Failed to start connection');
@@ -64,16 +64,14 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
   };
 
   const handleSwitchAccount = async () => {
-    // Disconnect current platform token, then open Thumbtack logout + start OAuth
     try {
       setLoading(true);
       setError(null);
       // Revoke the stored token so OAuth gives a fresh login
       await platformsApi.disconnect().catch(() => {}); // OK if fails
-      // Open Thumbtack logout in new tab so their session cookie clears
-      window.open('https://www.thumbtack.com/logout', '_blank', 'noopener');
-      // Small delay then redirect to OAuth
-      setTimeout(handleStartOAuth, 1500);
+      // Use prompt=login to force Thumbtack to show the login page
+      // even if there's an existing session — no more race with logout
+      handleStartOAuth(true);
     } catch (err: any) {
       setError(err.message || 'Failed to switch account');
       setLoading(false);

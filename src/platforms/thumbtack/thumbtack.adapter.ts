@@ -59,7 +59,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   // OAuth & Connection Management
   // ==========================================
 
-  getAuthUrl(_userId: string, state: string): string {
+  getAuthUrl(_userId: string, state: string, forceLogin = false): string {
     const params = new URLSearchParams({
       client_id: this.clientId,
       redirect_uri: this.redirectUri,
@@ -69,6 +69,11 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       state,
       audience: 'urn:partner-api',
     });
+
+    // Force login prompt when switching accounts (OIDC standard param)
+    if (forceLogin) {
+      params.set('prompt', 'login');
+    }
 
     return `${this.authBaseUrl}/auth?${params.toString()}`;
   }

@@ -28,7 +28,7 @@ export class PlatformService {
   /**
    * Get OAuth authorization URL
    */
-  async getAuthUrl(userId: string, platformName: string): Promise<string> {
+  async getAuthUrl(userId: string, platformName: string, forceLogin = false): Promise<string> {
     const adapter = this.platformFactory.getAdapter(platformName);
     const state = EncryptionUtil.generateSecureRandom(16);
 
@@ -41,7 +41,7 @@ export class PlatformService {
     // Clean up expired states
     this.cleanupExpiredStates();
 
-    return adapter.getAuthUrl(userId, state);
+    return adapter.getAuthUrl(userId, state, forceLogin);
   }
 
   /**
