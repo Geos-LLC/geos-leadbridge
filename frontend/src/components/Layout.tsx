@@ -137,11 +137,19 @@ export function Layout() {
                   <span>Phone Pool</span>
                 </NavLink>
                 <NavLink
-                  to="/sms-history"
+                  to="/admin/tenant-numbers"
                   className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   <Smartphone size={20} />
+                  <span>Tenant Numbers</span>
+                </NavLink>
+                <NavLink
+                  to="/sms-history"
+                  className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <MessageSquare size={20} />
                   <span>SMS History</span>
                 </NavLink>
                 <NavLink

@@ -1025,6 +1025,25 @@ export const adminApi = {
     const { data } = await api.get(`/v1/admin/tenant-errors?${qp.toString()}`);
     return data.data;
   },
+  getTenantNumbers: async (params?: {
+    search?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    phones: any[];
+    total: number;
+    offset: number;
+    limit: number;
+  }> => {
+    const qp = new URLSearchParams();
+    if (params?.search) qp.append('search', params.search);
+    if (params?.status) qp.append('status', params.status);
+    if (params?.limit !== undefined) qp.append('limit', params.limit.toString());
+    if (params?.offset !== undefined) qp.append('offset', params.offset.toString());
+    const { data } = await api.get(`/v1/admin/tenant-numbers?${qp.toString()}`);
+    return data.data;
+  },
 };
 
 // API Test / Webhook Simulation

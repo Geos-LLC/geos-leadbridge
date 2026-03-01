@@ -127,6 +127,22 @@ export class AdminController {
     };
   }
 
+  @Get('tenant-numbers')
+  async getTenantNumbers(
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    const result = await this.adminService.getTenantNumbers({
+      search,
+      status,
+      limit: limit ? parseInt(limit, 10) : 50,
+      offset: offset ? parseInt(offset, 10) : 0,
+    });
+    return { success: true, data: result };
+  }
+
   @Get('tenant-errors')
   async getTenantErrorFeed(
     @Query('status') status?: string,

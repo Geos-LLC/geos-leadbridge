@@ -430,4 +430,62 @@ export class AdminService {
 
     return { logs: flatLogs, total, offset: Number(offset), limit: Number(limit), failedCount24h };
   }
+
+  async getTenantNumbers(query: {
+    search?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const { search, limit = 50, offset = 0 } = query;
+    const statusFilter = query.status || undefined;
+
+    const where: any = {};
+    if (statusFilter) where.status = statusFilter;
+    if (search) {
+      where.OR = [
+        { phoneNumber: { contains: search } },
+        { friendlyName: { contains: search, mode: 'insensitive' } },
+        { user: { email: { contains: search, mode: 'insensitive' } } },
+        { user: { name: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [phones, total] = await Promise.all([
+      this.prisma.tenantPhoneNumber.findMany({
+        where,
+        orderBy: { purchasedAt: 'desc' },
+        skip: Number(offset),
+        take: Number(limit),
+        include: {
+          user: { select: { id: true, email: true, name: true } },
+        },
+      }),
+      this.prisma.tenantPhoneNumber.count({ where }),
+    ]);
+
+    // Enrich with savedAccount info and notification settings
+    const enriched = await Promise.all(
+      phones.map(async (phone) => {
+        let savedAccount: any = null;
+        let notificationSettings: any = null;
+        if (phone.savedAccountId) {
+          const sa = await this.prisma.savedAccount.findUnique({
+            where: { id: phone.savedAccountId },
+            select: { id: true, businessId: true, businessName: true },
+          });
+          savedAccount = sa;
+          const ns = await this.prisma.notificationSettings.findUnique({
+            where: { savedAccountId: phone.savedAccountId },
+            select: { sigcoreProvider: true, sigcoreFromPhone: true, senderMode: true },
+          });
+          notificationSettings = ns;
+        }
+        const { user, ...rest } = phone;
+        return { ...rest, user, savedAccount, notificationSettings };
+      }),
+    );
+
+    return { phones: enriched, total, offset: Number(offset), limit: Number(limit) };
+  }
 }
