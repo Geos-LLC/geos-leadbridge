@@ -422,7 +422,12 @@ export function Analytics() {
             {displayData.jobStatusDistribution && displayData.jobStatusDistribution.length > 0 && (
               <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
                 <div className="flex items-center justify-between mb-6 md:mb-8">
-                  <h3 className="text-lg md:text-xl font-bold text-slate-900">Job Status</h3>
+                  <div>
+                    <h3 className="text-lg md:text-xl font-bold text-slate-900">Job Status</h3>
+                    {calculatedAt && (
+                      <p className="text-[10px] text-slate-400 mt-0.5">Updated {formatRelativeTime(calculatedAt)}</p>
+                    )}
+                  </div>
                   <Users className="w-5 h-5 text-slate-400" />
                 </div>
                 <div className="space-y-4">
