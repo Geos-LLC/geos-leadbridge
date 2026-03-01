@@ -1220,11 +1220,14 @@ export function Services() {
                           {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''} (Dedicated)
                         </option>
                       ))}
-                      {ctOwnPhoneNumbers.filter(p => p.provider !== 'openphone' && !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => (
-                        <option key={p.id} value={p.phoneNumber}>
-                          {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider})
-                        </option>
-                      ))}
+                      {ctOwnPhoneNumbers.filter(p => p.provider !== 'openphone' && !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => {
+                        const smsOk = p.smsEnabled !== false;
+                        return (
+                          <option key={p.id} value={p.phoneNumber} disabled={!smsOk}>
+                            {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider}){!smsOk ? ' — SMS NOT ENABLED' : ''}
+                          </option>
+                        );
+                      })}
                       {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
                         <option value={ctSigcoreFromPhone}>
                           {ctSigcoreFromPhone} (Twilio · Dedicated)
@@ -1466,11 +1469,14 @@ export function Services() {
                               {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''} (Dedicated)
                             </option>
                           ))}
-                          {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => (
-                            <option key={p.id} value={p.phoneNumber}>
-                              {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider === 'openphone' ? 'OpenPhone/QUO' : p.provider})
-                            </option>
-                          ))}
+                          {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => {
+                            const smsOk = p.smsEnabled !== false;
+                            return (
+                              <option key={p.id} value={p.phoneNumber} disabled={!smsOk}>
+                                {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider === 'openphone' ? 'OpenPhone' : p.provider}){!smsOk ? ' — SMS NOT ENABLED' : ''}
+                              </option>
+                            );
+                          })}
                           {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
                             <option value={ctSigcoreFromPhone}>
                               {ctSigcoreFromPhone} (Twilio · Dedicated)
@@ -1495,6 +1501,12 @@ export function Services() {
                         <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
                           <AlertCircle className="w-3 h-3 shrink-0" />
                           This number is not A2P 10DLC approved — SMS will fail to deliver
+                        </p>
+                      )}
+                      {ctFromPhone && ctOwnPhoneNumbers.find(p => p.phoneNumber === ctFromPhone && p.smsEnabled === false) && (
+                        <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3 shrink-0" />
+                          SMS is not enabled on this number — messages will fail to deliver
                         </p>
                       )}
                       {ctFromPhone && poolPhones.some(p => p.phoneNumber === ctFromPhone) && (
