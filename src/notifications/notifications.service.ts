@@ -1112,24 +1112,7 @@ export class NotificationsService {
           apiKey = platformKey;
         }
 
-        // If fromPhone is NOT a pool phone and the tenant uses OpenPhone,
-        // non-customer SMS (lead alerts) will misroute through OpenPhone's internal proxy.
-        // Fall back to a pool phone with the platform key for direct Twilio delivery.
-        if (!isPoolPhone && !rule?.sendToCustomer && settings.sigcoreProvider === 'openphone') {
-          const poolAssignment = await this.prisma.phonePoolAssignment.findFirst({
-            where: { userId, phonePool: { status: { not: 'RELEASED' } } },
-            include: { phonePool: true },
-            orderBy: { assignedAt: 'desc' },
-          });
-          if (poolAssignment) {
-            this.logger.warn(
-              `[sendNotificationWithRule] OpenPhone fromPhone ${fromPhone} can't route lead alerts — ` +
-              `falling back to pool phone ${poolAssignment.phonePool.phoneNumber}`,
-            );
-            fromPhone = poolAssignment.phonePool.phoneNumber;
-            apiKey = platformKey;
-          }
-        }
+        // OpenPhone numbers use the tenant's own Sigcore API key (already set above)
       }
       if (!apiKey) {
         this.logger.error(`No Sigcore API key for rule ${ruleName} - tenant key not configured`);
@@ -1331,21 +1314,7 @@ export class NotificationsService {
         this.logger.log(`[sendTestNotification] fromPhone ${fromPhone} is a pool number — using platform key`);
         effectiveApiKey = platformKey;
       }
-      // OpenPhone numbers can't route non-customer SMS correctly — fall back to pool phone
-      if (!isPoolPhone && !rule?.sendToCustomer && settings.sigcoreProvider === 'openphone') {
-        const poolAssignment = await this.prisma.phonePoolAssignment.findFirst({
-          where: { userId, phonePool: { status: { not: 'RELEASED' } } },
-          include: { phonePool: true },
-          orderBy: { assignedAt: 'desc' },
-        });
-        if (poolAssignment) {
-          this.logger.warn(
-            `[sendTestNotification] OpenPhone fromPhone ${fromPhone} — falling back to pool phone ${poolAssignment.phonePool.phoneNumber}`,
-          );
-          fromPhone = poolAssignment.phonePool.phoneNumber;
-          effectiveApiKey = platformKey;
-        }
-      }
+      // OpenPhone numbers use the tenant's own Sigcore API key (already set above)
     }
 
     // Create notification log entry (after fallback so fromPhone is correct)
