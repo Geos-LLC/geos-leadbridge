@@ -58,6 +58,9 @@ export class AnalyticsResponseDto {
   // Job status from Thumbtack UI (Hired, Not hired, etc.)
   jobStatusDistribution?: ServiceDetailDistribution[];
 
+  // When the last lead was synced (extension or webhook)
+  lastLeadSyncAt?: string | null;
+
   // Service detail analytics
   cleaningTypeDistribution?: ServiceDetailDistribution[];
   addOnsDistribution?: ServiceDetailDistribution[];

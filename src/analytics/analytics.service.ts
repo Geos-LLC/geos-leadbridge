@@ -40,7 +40,7 @@ export class AnalyticsService {
     };
 
     // Execute only fast metrics in parallel
-    const [categoryDist, engagement, totalLeads, jobStatusDist, businessInfo] =
+    const [categoryDist, engagement, totalLeads, jobStatusDist, businessInfo, lastLead] =
       await Promise.all([
         this.getCategoryDistribution(baseWhere),
         this.getCustomerEngagement(baseWhere),
@@ -49,6 +49,11 @@ export class AnalyticsService {
         query.businessId
           ? this.getBusinessInfo(userId, query.businessId)
           : null,
+        this.prisma.lead.findFirst({
+          where: { userId, ...(query.businessId && { businessId: query.businessId }) },
+          orderBy: { createdAt: 'desc' },
+          select: { createdAt: true },
+        }),
       ]);
 
     return {
@@ -56,6 +61,7 @@ export class AnalyticsService {
       customerEngagement: engagement,
       totalLeads,
       jobStatusDistribution: jobStatusDist,
+      lastLeadSyncAt: lastLead?.createdAt?.toISOString() || null,
       dateRange: {
         start: query.startDate || 'all-time',
         end: query.endDate || 'now',

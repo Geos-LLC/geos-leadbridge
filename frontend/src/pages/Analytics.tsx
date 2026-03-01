@@ -424,8 +424,8 @@ export function Analytics() {
                 <div className="flex items-center justify-between mb-6 md:mb-8">
                   <div>
                     <h3 className="text-lg md:text-xl font-bold text-slate-900">Job Status</h3>
-                    {calculatedAt && (
-                      <p className="text-[10px] text-slate-400 mt-0.5">Updated {formatRelativeTime(calculatedAt)}</p>
+                    {displayData.lastLeadSyncAt && (
+                      <p className="text-[10px] text-slate-400 mt-0.5">Last sync {formatRelativeTime(displayData.lastLeadSyncAt)}</p>
                     )}
                   </div>
                   <Users className="w-5 h-5 text-slate-400" />

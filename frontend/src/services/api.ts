@@ -764,6 +764,9 @@ export interface AnalyticsData {
   // Job status from Thumbtack UI
   jobStatusDistribution?: ServiceDetailDistribution[];
 
+  // When the last lead was synced (extension or webhook)
+  lastLeadSyncAt?: string | null;
+
   // Service detail analytics
   cleaningTypeDistribution?: ServiceDetailDistribution[];
   addOnsDistribution?: ServiceDetailDistribution[];
