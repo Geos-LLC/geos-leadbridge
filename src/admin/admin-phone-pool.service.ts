@@ -301,12 +301,20 @@ export class AdminPhonePoolService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    // Check if already assigned to this user
+    // Check if already assigned to this user — idempotent: return existing
     const existing = await this.prisma.phonePoolAssignment.findUnique({
       where: { phonePoolId_userId: { phonePoolId, userId } },
     });
     if (existing) {
-      throw new BadRequestException('Phone is already assigned to this user');
+      return this.prisma.phonePool.findUnique({
+        where: { id: phonePoolId },
+        include: {
+          assignments: {
+            include: { user: { select: { id: true, email: true, name: true } } },
+            orderBy: { assignedAt: 'desc' },
+          },
+        },
+      });
     }
 
     // Create assignment (phone stays AVAILABLE for other assignments)
@@ -466,6 +474,15 @@ export class AdminPhonePoolService {
     if (!phone) {
       this.logger.log(`No available pool phones for user ${userId}`);
       return null;
+    }
+
+    // Idempotent: skip if already assigned to this user
+    const existing = await this.prisma.phonePoolAssignment.findUnique({
+      where: { phonePoolId_userId: { phonePoolId: phone.id, userId } },
+    });
+    if (existing) {
+      this.logger.log(`Pool phone ${phone.phoneNumber} already assigned to user ${userId} — skipping`);
+      return phone;
     }
 
     // Create assignment (phone stays AVAILABLE)

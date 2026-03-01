@@ -26,6 +26,8 @@ import {
 } from 'recharts';
 import { analyticsApi, thumbtackApi, type AnalyticsData } from '../services/api';
 import { useAppStore } from '../store/appStore';
+import { useAuthStore } from '../store/authStore';
+import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import { notify } from '../store/notificationStore';
 
 export function Analytics() {
@@ -208,6 +210,18 @@ export function Analytics() {
             </div>
           ))}
         </div>
+      </div>
+    );
+  }
+
+  if (savedAccounts.length === 0 && useAuthStore.getState().user?.role === 'ADMIN') {
+    return (
+      <div className="p-6 lg:p-10">
+        <div className="mb-6">
+          <p className="text-blue-600 font-semibold mb-1 uppercase tracking-wider text-xs">Performance Reports</p>
+          <h2 className="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">Business <span className="gradient-text">Insights.</span></h2>
+        </div>
+        <AdminNoAccountsState />
       </div>
     );
   }

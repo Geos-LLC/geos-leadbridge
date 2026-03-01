@@ -10,12 +10,13 @@ import type { DashboardStats } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import { thumbtackApi, analyticsApi } from '../services/api';
 import ConnectionModal from '../components/ConnectionModal';
+import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import type { SavedAccount } from '../types';
 
 export function Dashboard() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user } = useAuthStore();
+  const { user, impersonatingUser } = useAuthStore();
   const { savedAccounts, setSavedAccounts, dashboardStats: cachedStats, setDashboardStats, accountDiagnostics, diagnosticsLoading: loadingDiagnostics, loadDiagnostics } = useAppStore();
 
   // Start with cached stats (instant) — zeros only if nothing cached yet
@@ -261,6 +262,32 @@ export function Dashboard() {
     // Reload accounts and diagnostics (force refresh after reconnection)
     await loadAccounts(true);
   };
+
+  const isAdmin = user?.role === 'ADMIN';
+  const hasNoAccounts = savedAccounts.length === 0;
+
+  // Admin with no accounts and not impersonating — show empty state
+  if (isAdmin && hasNoAccounts && !impersonatingUser && !loading) {
+    return (
+      <div className="p-6 lg:p-10 max-w-7xl mx-auto">
+        <section className="mb-8">
+          <p className="text-blue-600 font-semibold mb-1 uppercase tracking-wider text-xs">
+            Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, {user?.name || 'Admin'}
+          </p>
+          <h2 className="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">
+            Admin Dashboard
+          </h2>
+        </section>
+        <AdminNoAccountsState onConnectAccount={() => setConnectionModalOpen(true)} />
+        <ConnectionModal
+          isOpen={connectionModalOpen}
+          onClose={() => setConnectionModalOpen(false)}
+          savedAccounts={savedAccounts}
+          onSuccess={() => { setConnectionModalOpen(false); loadAccounts(true); }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 lg:p-10 max-w-7xl mx-auto flex flex-col gap-6 md:gap-10">

@@ -27,6 +27,8 @@ import {
 } from 'lucide-react';
 import { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, type MessageAttachment } from '../services/api';
 import { useAppStore } from '../store/appStore';
+import { useAuthStore } from '../store/authStore';
+import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import type { Lead, MessageTemplate, BulkMessagePreview, NotificationLog, TimelineEvent, TimelineChannel, CommunicationSummary } from '../types';
 
 interface LocalMessage {
@@ -928,6 +930,18 @@ export function Messages() {
       <div className="flex flex-col items-center justify-center min-h-screen">
         <Loader2 className="w-12 h-12 animate-spin text-blue-600" />
         <p className="mt-4 text-slate-500">Loading leads...</p>
+      </div>
+    );
+  }
+
+  if (savedAccounts.length === 0 && useAuthStore.getState().user?.role === 'ADMIN') {
+    return (
+      <div className="p-6 lg:p-10">
+        <div className="flex items-center gap-3 mb-6">
+          <MessageSquare className="w-6 h-6 text-blue-600" />
+          <h1 className="text-2xl font-bold text-slate-900">Lead Activity</h1>
+        </div>
+        <AdminNoAccountsState />
       </div>
     );
   }

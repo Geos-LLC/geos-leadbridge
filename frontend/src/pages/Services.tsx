@@ -14,7 +14,9 @@ import type {
   CallConnectMode, AgentStrategy, SigcorePhoneNumber,
 } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
+import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import { useAppStore } from '../store/appStore';
+import { useAuthStore } from '../store/authStore';
 
 // Combined variables — same set for all card types (matches Templates page)
 const ALL_VARIABLES = [...AUTO_REPLY_VARIABLES, ...SMS_VARIABLES.filter(
@@ -967,23 +969,28 @@ export function Services() {
   }
 
   if (accounts.length === 0) {
+    const isAdmin = useAuthStore.getState().user?.role === 'ADMIN';
     return (
       <div className="p-6 lg:p-10">
         <div className="flex items-center gap-3 mb-6">
           <Briefcase className="w-6 h-6 text-blue-600" />
           <h1 className="text-2xl font-bold text-slate-900">Automation</h1>
         </div>
-        <div className="max-w-md mx-auto bg-white rounded-3xl border border-slate-100 shadow-sm p-10 text-center mt-10">
-          <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
-          <h3 className="text-xl font-bold text-slate-900 mb-2">No Accounts Connected</h3>
-          <p className="text-slate-500 mb-6">You need to connect an account first.</p>
-          <button
-            className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all"
-            onClick={() => navigate('/dashboard')}
-          >
-            Go to Dashboard
-          </button>
-        </div>
+        {isAdmin ? (
+          <AdminNoAccountsState />
+        ) : (
+          <div className="max-w-md mx-auto bg-white rounded-3xl border border-slate-100 shadow-sm p-10 text-center mt-10">
+            <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
+            <h3 className="text-xl font-bold text-slate-900 mb-2">No Accounts Connected</h3>
+            <p className="text-slate-500 mb-6">You need to connect an account first.</p>
+            <button
+              className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all"
+              onClick={() => navigate('/dashboard')}
+            >
+              Go to Dashboard
+            </button>
+          </div>
+        )}
       </div>
     );
   }
