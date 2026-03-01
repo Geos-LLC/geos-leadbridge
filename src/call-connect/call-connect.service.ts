@@ -223,15 +223,14 @@ export class CallConnectService {
     };
   }
 
-  /** Get Sigcore API key — env-level first (authoritative), then account-level fallback */
+  /** Get Sigcore API key — account tenant key first (isolates per-account), env-level as fallback */
   private async getSigcoreApiKey(savedAccountId: string): Promise<string | null> {
-    const envKey = this.configService.get<string>('SIGCORE_API_KEY');
-    if (envKey) return envKey;
     const ns = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
       select: { sigcoreApiKey: true },
     });
-    return ns?.sigcoreApiKey || null;
+    if (ns?.sigcoreApiKey) return ns.sigcoreApiKey;
+    return this.configService.get<string>('SIGCORE_API_KEY') || null;
   }
 
   /** Push call-connect settings to Sigcore and verify they were saved */
@@ -416,13 +415,14 @@ export class CallConnectService {
     });
     if (!settings?.enabled) return;
 
-    // Get API key from NotificationSettings (single source of truth)
+    // Get API key from NotificationSettings — prefer account's own tenant key
+    // so each account's Call Connect operates in its own isolated Sigcore workspace.
     const ns = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId: params.savedAccountId },
       select: { sigcoreApiKey: true, sigcoreWorkspaceId: true, sigcoreTenantId: true },
     });
     const sigcoreApiKey =
-      this.configService.get<string>('SIGCORE_API_KEY') || ns?.sigcoreApiKey || null;
+      ns?.sigcoreApiKey || this.configService.get<string>('SIGCORE_API_KEY') || null;
     if (!sigcoreApiKey) {
       this.logger.log('Skipping call-connect — no Sigcore API key configured');
       return;

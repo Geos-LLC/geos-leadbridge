@@ -659,44 +659,46 @@ export class NotificationsService {
     });
 
     if (!existingSettings) {
-      // Try to copy Sigcore config from another account of the same user
+      // Provision a dedicated Sigcore tenant for this account.
+      // Each account gets its own workspace so Call Connect settings, phone numbers,
+      // and webhooks are isolated — no cross-account contamination.
+      try {
+        await this.ensureSigcoreTenantProvisioned(userId, savedAccountId);
+        this.logger.log(`[createRule] Provisioned dedicated Sigcore tenant for account ${savedAccountId}`);
+      } catch (err: any) {
+        this.logger.warn(`[createRule] Sigcore tenant provisioning failed (will create basic settings): ${err.message}`);
+      }
+
+      existingSettings = await this.prisma.notificationSettings.findUnique({
+        where: { savedAccountId },
+      });
+
+      if (!existingSettings) {
+        existingSettings = await this.prisma.notificationSettings.create({
+          data: { savedAccountId, enabled: true },
+        });
+      }
+
+      // Copy user preferences (provider, senderMode) from another account — but NOT credentials.
+      // Credentials are per-tenant from provisioning above.
       const otherSettings = await this.prisma.notificationSettings.findFirst({
         where: {
           savedAccount: { userId },
-          sigcoreApiKey: { not: null },
-          sigcoreTenantId: { not: null },
+          NOT: { savedAccountId },
         },
-        select: {
-          sigcoreApiKey: true,
-          sigcoreWorkspaceId: true,
-          sigcoreTenantId: true,
-          sigcoreFromPhone: true,
-          sigcoreProvider: true,
-          senderMode: true,
-        },
+        select: { sigcoreProvider: true, senderMode: true },
       });
 
-      if (otherSettings?.sigcoreApiKey) {
-        this.logger.log(
-          `[createRule] Auto-copying Sigcore credentials (NOT fromPhone) from another account for user ${userId}` +
-          ` (provider=${otherSettings.sigcoreProvider}, senderMode=${otherSettings.senderMode})`,
-        );
+      if (otherSettings?.sigcoreProvider || otherSettings?.senderMode) {
+        existingSettings = await this.prisma.notificationSettings.update({
+          where: { savedAccountId },
+          data: {
+            enabled: true,
+            ...(otherSettings.sigcoreProvider && { sigcoreProvider: otherSettings.sigcoreProvider }),
+            ...(otherSettings.senderMode && { senderMode: otherSettings.senderMode }),
+          },
+        });
       }
-
-      existingSettings = await this.prisma.notificationSettings.create({
-        data: {
-          savedAccountId,
-          enabled: true,
-          sigcoreApiKey: otherSettings?.sigcoreApiKey || null,
-          sigcoreWorkspaceId: otherSettings?.sigcoreWorkspaceId || null,
-          sigcoreTenantId: otherSettings?.sigcoreTenantId || null,
-          // NOTE: Do NOT copy sigcoreFromPhone — it's account-specific.
-          // Each account must select its own Send From number to avoid cross-account contamination.
-          sigcoreFromPhone: null,
-          sigcoreProvider: otherSettings?.sigcoreProvider || null,
-          senderMode: otherSettings?.senderMode || 'shared',
-        },
-      });
     } else if (!existingSettings.enabled) {
       existingSettings = await this.prisma.notificationSettings.update({
         where: { savedAccountId },
@@ -1927,8 +1929,24 @@ export class NotificationsService {
     });
 
     if (settings?.sigcoreTenantId && settings?.sigcoreApiKey) {
-      this.logger.log(`[ensureSigcoreTenantProvisioned] Already provisioned for account ${savedAccountId} (tenantId: ${settings.sigcoreTenantId})`);
-      return { apiKey: settings.sigcoreApiKey, tenantId: settings.sigcoreTenantId };
+      // Check if this tenant ID is shared with another account (from old auto-copy logic).
+      // Each account must have its OWN tenant to avoid Call Connect / SMS cross-contamination.
+      const sharedCount = await this.prisma.notificationSettings.count({
+        where: {
+          sigcoreTenantId: settings.sigcoreTenantId,
+          NOT: { savedAccountId },
+        },
+      });
+
+      if (sharedCount === 0) {
+        this.logger.log(`[ensureSigcoreTenantProvisioned] Already provisioned for account ${savedAccountId} (tenantId: ${settings.sigcoreTenantId})`);
+        return { apiKey: settings.sigcoreApiKey, tenantId: settings.sigcoreTenantId };
+      }
+
+      // Shared tenant detected — force re-provision with a dedicated tenant
+      this.logger.warn(
+        `[ensureSigcoreTenantProvisioned] Account ${savedAccountId} shares tenantId ${settings.sigcoreTenantId} with ${sharedCount} other account(s) — re-provisioning`,
+      );
     }
 
     const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
