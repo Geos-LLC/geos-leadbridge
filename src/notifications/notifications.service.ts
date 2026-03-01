@@ -2442,8 +2442,10 @@ export class NotificationsService {
       return { success: true };
     }
 
-    // Resolve fromPhone: settings phone or pool phone
-    let fromPhone = settings.sigcoreFromPhone;
+    // Resolve fromPhone: use the phone the user just selected (dto.fromPhone),
+    // then fall back to settings sigcoreFromPhone, then pool phone as last resort.
+    // dto.fromPhone takes priority because settings object was loaded before the update above.
+    let fromPhone = dto.fromPhone || settings.sigcoreFromPhone;
     if (!fromPhone) {
       const assignment = await this.prisma.phonePoolAssignment.findFirst({
         where: { userId, phonePool: { status: { not: 'RELEASED' } } },
