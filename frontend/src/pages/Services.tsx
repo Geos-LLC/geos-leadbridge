@@ -840,6 +840,10 @@ export function Services() {
   // --- Customer Texting Handlers ---
 
   function saveCtFromPhone(fromPhone: string) {
+    if (fromPhone === '__add_phone__') {
+      navigate('/phone-settings');
+      return;
+    }
     setCtFromPhone(fromPhone); // tracked in ctDirty — saved when user clicks Save Settings
   }
 
@@ -1471,11 +1475,16 @@ export function Services() {
                               {ctSigcoreFromPhone} (Twilio · Dedicated)
                             </option>
                           )}
+                          <option value="__add_phone__">+ Add phone number</option>
                         </select>
                         <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
                           <ChevronDown className="w-4 h-4" />
                         </div>
                       </div>
+                      <p className="mt-1.5 text-xs text-slate-400">
+                        Customer texting requires a dedicated number for consent compliance. Connect your own or buy one in{' '}
+                        <button type="button" onClick={() => navigate('/phone-settings')} className="text-blue-500 hover:underline font-medium">Phone Settings</button>.
+                      </p>
                       {ctFromPhone && poolPhones.some(p => p.phoneNumber === ctFromPhone) && (
                         <p className="mt-1.5 text-xs text-amber-600 font-medium flex items-center gap-1">
                           <AlertCircle className="w-3 h-3 shrink-0" />
