@@ -9,7 +9,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
-import { PrismaService } from '../common/utils/prisma.service';
 import { SigcoreModule } from '../sigcore/sigcore.module';
 import { AdminModule } from '../admin/admin.module';
 
@@ -30,7 +29,7 @@ import { AdminModule } from '../admin/admin.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, PrismaService],
+  providers: [AuthService, JwtStrategy],
   exports: [AuthService],
 })
 export class AuthModule {}

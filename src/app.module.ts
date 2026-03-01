@@ -24,7 +24,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
 import { CallConnectModule } from './call-connect/call-connect.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { ImpersonationGuard, ImpersonationInterceptor } from './common/guards/impersonation.guard';
-import { PrismaService } from './common/utils/prisma.service';
+import { PrismaModule } from './common/utils/prisma.module';
 
 @Module({
   imports: [
@@ -33,6 +33,7 @@ import { PrismaService } from './common/utils/prisma.service';
       load: [configuration],
     }),
     EventEmitterModule.forRoot(),
+    PrismaModule,
     AuthModule,
     PlatformsModule,
     LeadsModule,
@@ -50,7 +51,6 @@ import { PrismaService } from './common/utils/prisma.service';
     CallConnectModule,
   ],
   providers: [
-    PrismaService,
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,

@@ -6,7 +6,6 @@ import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { WebhooksController } from './webhooks.controller';
 import { WebhooksService } from './webhooks.service';
-import { PrismaService } from '../common/utils/prisma.service';
 import { PlatformsModule } from '../platforms/platforms.module';
 import { AutomationModule } from '../automation/automation.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -21,7 +20,7 @@ import { CallConnectModule } from '../call-connect/call-connect.module';
     forwardRef(() => CallConnectModule),
   ],
   controllers: [WebhooksController],
-  providers: [WebhooksService, PrismaService],
+  providers: [WebhooksService],
   exports: [WebhooksService],
 })
 export class WebhooksModule {}

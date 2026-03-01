@@ -9,13 +9,12 @@ import { ThumbtackController } from './thumbtack/thumbtack.controller';
 import { PlatformsController } from './platforms.controller';
 import { PlatformFactory } from './platform.factory';
 import { PlatformService } from './platform.service';
-import { PrismaService } from '../common/utils/prisma.service';
 import { LeadsModule } from '../leads/leads.module';
 
 @Module({
   imports: [ConfigModule, forwardRef(() => LeadsModule)],
   controllers: [ThumbtackController, PlatformsController],
-  providers: [ThumbtackAdapter, PlatformFactory, PlatformService, PrismaService],
+  providers: [ThumbtackAdapter, PlatformFactory, PlatformService],
   exports: [PlatformFactory, PlatformService],
 })
 export class PlatformsModule {}
