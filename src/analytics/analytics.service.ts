@@ -174,6 +174,7 @@ export class AnalyticsService {
       locations,
       zipCodes,
       roomStats,
+      lastLead,
     ] = await Promise.all([
       this.timed('categoryDistribution', () => this.getCategoryDistribution(baseWhere)),
       this.timed('connectionTime', () => this.getConnectionTime(baseWhere)),
@@ -192,6 +193,11 @@ export class AnalyticsService {
       this.timed('locationDistribution', () => this.getLocationDistribution(baseWhere)),
       this.timed('zipCodeDistribution', () => this.getZipCodeDistribution(baseWhere)),
       this.timed('roomStats', () => this.getRoomStats(baseWhere)),
+      this.prisma.lead.findFirst({
+        where: { userId, ...(query.businessId && { businessId: query.businessId }) },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      }),
     ]);
 
     this.logger.log(`[analytics] computeAnalytics TOTAL took ${Date.now() - totalStart}ms`);
@@ -205,6 +211,7 @@ export class AnalyticsService {
       customerEngagement: engagement,
       totalLeads,
       jobStatusDistribution: jobStatusDist,
+      lastLeadSyncAt: lastLead?.createdAt?.toISOString() || null,
       cleaningTypeDistribution: cleaningTypes,
       addOnsDistribution: addOns,
       frequencyDistribution: frequencies,
