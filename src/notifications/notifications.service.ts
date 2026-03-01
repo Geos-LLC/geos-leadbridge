@@ -699,6 +699,22 @@ export class NotificationsService {
           },
         });
       }
+    } else if (existingSettings.sigcoreTenantId) {
+      // Re-provision if this account shares a tenant with another account (self-heal)
+      const sharedCount = await this.prisma.notificationSettings.count({
+        where: {
+          sigcoreTenantId: existingSettings.sigcoreTenantId,
+          NOT: { savedAccountId },
+        },
+      });
+      if (sharedCount > 0) {
+        try {
+          await this.ensureSigcoreTenantProvisioned(userId, savedAccountId);
+          this.logger.log(`[createRule] Re-provisioned shared tenant for account ${savedAccountId}`);
+        } catch (err: any) {
+          this.logger.warn(`[createRule] Sigcore re-provisioning failed: ${err.message}`);
+        }
+      }
     } else if (!existingSettings.enabled) {
       existingSettings = await this.prisma.notificationSettings.update({
         where: { savedAccountId },
@@ -761,6 +777,25 @@ export class NotificationsService {
 
     if (!settings) {
       throw new NotFoundException('Settings not found');
+    }
+
+    // Re-provision if this account still shares a Sigcore tenant with another account
+    // (from the old auto-copy logic). This self-heals on any rule save.
+    if (settings.sigcoreTenantId) {
+      const sharedCount = await this.prisma.notificationSettings.count({
+        where: {
+          sigcoreTenantId: settings.sigcoreTenantId,
+          NOT: { savedAccountId },
+        },
+      });
+      if (sharedCount > 0) {
+        try {
+          await this.ensureSigcoreTenantProvisioned(userId, savedAccountId);
+          this.logger.log(`[updateRule] Re-provisioned shared tenant for account ${savedAccountId}`);
+        } catch (err: any) {
+          this.logger.warn(`[updateRule] Sigcore re-provisioning failed: ${err.message}`);
+        }
+      }
     }
 
     const existing = await this.prisma.notificationRule.findFirst({
