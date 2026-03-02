@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info, Eye, EyeOff, DollarSign, Clock, ArrowUpRight, List } from 'lucide-react';
+import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info, Eye, EyeOff, DollarSign, Clock, ArrowUpRight, List, Trash2, AlertTriangle } from 'lucide-react';
 import { authApi, billingApi, thumbtackApi, leadsApi, usersApi, integrationsApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
@@ -72,6 +72,12 @@ export default function SettingsPage() {
   const [showCollectedModal, setShowCollectedModal] = useState(false);
   const [collectedLeads, setCollectedLeads] = useState<any[]>([]);
   const [collectedLoading, setCollectedLoading] = useState(false);
+  const [collectedSelected, setCollectedSelected] = useState<Set<string>>(new Set());
+  const [collectedDeleting, setCollectedDeleting] = useState(false);
+  const [collectedDeleteConfirm, setCollectedDeleteConfirm] = useState<{
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
 
   // Budget snapshots
   const [budgetSnapshots, setBudgetSnapshots] = useState<Array<{ id: string; weeklyBudget: string; currency: string; capturedAt: string; effectiveFrom: string; effectiveTo: string | null; active: boolean; scopeCategory: string | null; scopeLocation: string | null }>>([]);
@@ -1371,8 +1377,8 @@ export default function SettingsPage() {
 
       {/* Collected Leads Modal */}
       {showCollectedModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowCollectedModal(false)}>
-          <div className="bg-white rounded-3xl p-6 max-w-3xl w-full shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowCollectedModal(false); setCollectedSelected(new Set()); }}>
+          <div className="relative bg-white rounded-3xl p-6 max-w-3xl w-full shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-xl font-bold text-slate-900">Collected Leads</h3>
@@ -1382,12 +1388,65 @@ export default function SettingsPage() {
                   </p>
                 )}
               </div>
-              <button
-                className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
-                onClick={() => setShowCollectedModal(false)}
-              >
-                <X size={18} />
-              </button>
+              <div className="flex items-center gap-2">
+                {collectedSelected.size > 0 && (
+                  <button
+                    disabled={collectedDeleting}
+                    onClick={() => {
+                      const count = collectedSelected.size;
+                      setCollectedDeleteConfirm({
+                        message: `Delete ${count} selected lead${count !== 1 ? 's' : ''}? This cannot be undone.`,
+                        onConfirm: async () => {
+                          setCollectedDeleteConfirm(null);
+                          setCollectedDeleting(true);
+                          try {
+                            await integrationsApi.deleteCollectedLeads(Array.from(collectedSelected));
+                            setCollectedLeads(prev => prev.filter(l => !collectedSelected.has(l.thumbtackId)));
+                            setCollectedSelected(new Set());
+                            notify({ type: 'success', message: `Deleted ${count} leads` });
+                          } catch { notify({ type: 'error', message: 'Delete failed' }); }
+                          setCollectedDeleting(false);
+                        },
+                      });
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 inline-flex items-center gap-1.5"
+                  >
+                    {collectedDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                    Delete ({collectedSelected.size})
+                  </button>
+                )}
+                {!collectedLoading && collectedLeads.length > 0 && (
+                  <button
+                    disabled={collectedDeleting}
+                    onClick={() => {
+                      const count = collectedLeads.length;
+                      setCollectedDeleteConfirm({
+                        message: `Delete all ${count} collected lead${count !== 1 ? 's' : ''}? This cannot be undone.`,
+                        onConfirm: async () => {
+                          setCollectedDeleteConfirm(null);
+                          setCollectedDeleting(true);
+                          try {
+                            const res = await integrationsApi.deleteCollectedLeads();
+                            setCollectedLeads([]);
+                            setCollectedSelected(new Set());
+                            notify({ type: 'success', message: `Deleted ${res.deletedCount} leads` });
+                          } catch { notify({ type: 'error', message: 'Delete failed' }); }
+                          setCollectedDeleting(false);
+                        },
+                      });
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold text-red-600 bg-white border border-red-200 hover:bg-red-50 disabled:opacity-50 inline-flex items-center gap-1.5"
+                  >
+                    <Trash2 size={13} /> Delete All
+                  </button>
+                )}
+                <button
+                  className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
+                  onClick={() => { setShowCollectedModal(false); setCollectedSelected(new Set()); }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
             <div className="overflow-y-auto flex-1">
@@ -1401,6 +1460,20 @@ export default function SettingsPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-slate-100">
+                      <th className="py-2.5 px-2 w-8">
+                        <input
+                          type="checkbox"
+                          checked={collectedSelected.size > 0 && collectedSelected.size === collectedLeads.length}
+                          onChange={() => {
+                            if (collectedSelected.size === collectedLeads.length) {
+                              setCollectedSelected(new Set());
+                            } else {
+                              setCollectedSelected(new Set(collectedLeads.map(l => l.thumbtackId)));
+                            }
+                          }}
+                          className="rounded border-slate-300"
+                        />
+                      </th>
                       <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Customer</th>
                       <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Thumbtack ID</th>
                       <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Lead Date</th>
@@ -1411,6 +1484,21 @@ export default function SettingsPage() {
                   <tbody>
                     {collectedLeads.map((lead: any) => (
                       <tr key={lead.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                        <td className="py-2.5 px-2">
+                          <input
+                            type="checkbox"
+                            checked={collectedSelected.has(lead.thumbtackId)}
+                            onChange={() => {
+                              setCollectedSelected(prev => {
+                                const next = new Set(prev);
+                                if (next.has(lead.thumbtackId)) next.delete(lead.thumbtackId);
+                                else next.add(lead.thumbtackId);
+                                return next;
+                              });
+                            }}
+                            className="rounded border-slate-300"
+                          />
+                        </td>
                         <td className="py-2.5 px-3 text-sm font-medium text-slate-900">{lead.customerName || '-'}</td>
                         <td className="py-2.5 px-3">
                           <code className="text-xs font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded">{lead.thumbtackId}</code>
@@ -1440,6 +1528,35 @@ export default function SettingsPage() {
                 </table>
               )}
             </div>
+
+            {/* Delete Confirm Dialog */}
+            {collectedDeleteConfirm && (
+              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm rounded-3xl flex items-center justify-center z-10">
+                <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full mx-4 p-5 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-red-100 rounded-full">
+                      <AlertTriangle className="w-5 h-5 text-red-600" />
+                    </div>
+                    <h4 className="text-base font-bold text-slate-900">Delete Leads</h4>
+                  </div>
+                  <p className="text-sm text-slate-600">{collectedDeleteConfirm.message}</p>
+                  <div className="flex justify-end gap-3">
+                    <button
+                      onClick={() => setCollectedDeleteConfirm(null)}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={collectedDeleteConfirm.onConfirm}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
