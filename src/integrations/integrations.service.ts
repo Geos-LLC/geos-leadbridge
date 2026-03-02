@@ -167,7 +167,7 @@ export class IntegrationsService {
 
     const leads = await this.prisma.thumbtackLeadId.findMany({
       where,
-      orderBy: { collectedAt: 'desc' },
+      orderBy: [{ leadDate: 'desc' }, { collectedAt: 'desc' }],
       ...(filters.limit ? { take: filters.limit } : {}),
     });
 
