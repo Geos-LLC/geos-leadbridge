@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { PrismaService } from '../common/utils/prisma.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 import { BudgetSnapshotDto } from './dto/budget-snapshot.dto';
 import { CollectLeadsDto } from './dto/collect-leads.dto';
 
@@ -8,7 +9,10 @@ import { CollectLeadsDto } from './dto/collect-leads.dto';
 export class IntegrationsService {
   private readonly logger = new Logger(IntegrationsService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private analyticsService: AnalyticsService,
+  ) {}
 
   /**
    * Save a budget snapshot with windowing logic.
@@ -319,6 +323,11 @@ export class IntegrationsService {
     this.logger.log(
       `Deleted ${result.count} collected leads + ${leadsDeleted} leads for user ${userId}`,
     );
+
+    // Invalidate analytics cache so insights reflects the deletion immediately
+    if (leadsDeleted > 0) {
+      await this.analyticsService.invalidateCache(userId);
+    }
 
     return { ok: true, deletedCount: result.count, leadsDeleted };
   }

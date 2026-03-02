@@ -10,6 +10,7 @@ import { PlatformService } from '../platforms/platform.service';
 import { PlatformFactory } from '../platforms/platform.factory';
 import { NormalizedLead } from '../common/dto/normalized.dto';
 import { TemplatesService } from '../templates/templates.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 @Injectable()
 export class LeadsService {
@@ -19,6 +20,7 @@ export class LeadsService {
     private platformFactory: PlatformFactory,
     private configService: ConfigService,
     private templatesService: TemplatesService,
+    private analyticsService: AnalyticsService,
   ) {}
 
   /**
@@ -647,6 +649,11 @@ export class LeadsService {
 
     // Also import messages for this negotiation using account-specific credentials if available
     await this.importMessagesForNegotiation(userId, 'thumbtack', negotiationId, storedLead.customerName, accountCredentials || undefined);
+
+    // Invalidate analytics cache so insights reflects the new lead immediately
+    if (isNew) {
+      await this.analyticsService.invalidateCache(userId);
+    }
 
     return { lead: this.convertToNormalizedLead(storedLead), isNew };
   }

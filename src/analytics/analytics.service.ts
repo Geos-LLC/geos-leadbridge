@@ -134,6 +134,13 @@ export class AnalyticsService {
     return { data, calculatedAt: record.calculatedAt };
   }
 
+  async invalidateCache(userId: string) {
+    const result = await this.prisma.analyticsCache.deleteMany({ where: { userId } });
+    if (result.count > 0) {
+      this.logger.log(`[analytics] invalidated ${result.count} cache entries for user ${userId}`);
+    }
+  }
+
   async getCacheInfo(userId: string, businessId?: string): Promise<{ calculatedAt: Date } | null> {
     const key = this.buildCacheKey(userId, businessId);
     const cached = await this.prisma.analyticsCache.findUnique({ where: { cacheKey: key } });
