@@ -55,7 +55,6 @@ export default function SettingsPage() {
   const [searchParams] = useSearchParams();
   const [importCollapsed, setImportCollapsed] = useState(() => searchParams.get('import') !== 'open');
   const [importAccountId, setImportAccountId] = useState<string | null>(null);
-  const [importIds, setImportIds] = useState('');
   const [importing, setImporting] = useState(false);
   const [importResults, setImportResults] = useState<{ id: string; success: boolean; isNew?: boolean; error?: string }[]>([]);
   const [importTotal, setImportTotal] = useState(0);
@@ -84,7 +83,6 @@ export default function SettingsPage() {
   const [showBudgetModal, setShowBudgetModal] = useState(false);
 
   // Manual paste toggle
-  const [showManualPaste, setShowManualPaste] = useState(false);
 
   // Extension detection
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
@@ -197,6 +195,24 @@ export default function SettingsPage() {
     }
   };
 
+  const refreshExtensionCounts = () => {
+    if (!importAccountId) {
+      setExtensionPendingCount(0); setExtensionPendingIds([]); setExtensionImportedCount(0); setExtensionTotalCount(0);
+      return;
+    }
+    integrationsApi.getCollectedLeads({ accountId: importAccountId }).then((res) => {
+      const allLeads = res.leads || [];
+      const pending = allLeads.filter((l: any) => !l.imported);
+      const imported = allLeads.filter((l: any) => l.imported);
+      setExtensionPendingCount(pending.length);
+      setExtensionPendingIds(pending.map((l: any) => l.thumbtackId));
+      setExtensionImportedCount(imported.length);
+      setExtensionTotalCount(allLeads.length);
+    }).catch(() => {
+      setExtensionPendingCount(0); setExtensionPendingIds([]); setExtensionImportedCount(0); setExtensionTotalCount(0);
+    });
+  };
+
   const handleReconnect = (account?: SavedAccount) => {
     if (account) {
       setAccountToReconnect(account);
@@ -274,57 +290,6 @@ export default function SettingsPage() {
       setPasswordError(error.response?.data?.message || 'Failed to change password');
     } finally {
       setSavingPassword(false);
-    }
-  };
-
-  const handleImportNegotiations = async () => {
-    if (!importAccountId) { setImportError('Select an account first'); return; }
-    const ids = importIds.split(/[,\n\t\s]+/).map(id => id.trim()).filter(id => id.length > 0);
-    if (ids.length === 0) { setImportError('Enter at least one negotiation ID'); return; }
-
-    setImporting(true);
-    setImportError('');
-    setImportResults([]);
-
-    // Validate token first
-    try {
-      const validation = await thumbtackApi.validateToken(importAccountId);
-      if (!validation.valid) {
-        setImportError('Session expired. Please reconnect this account from the Overview page, then try again.');
-        setImporting(false);
-        return;
-      }
-    } catch {
-      setImportError('Session expired. Please reconnect this account from the Overview page, then try again.');
-      setImporting(false);
-      return;
-    }
-
-    setImportTotal(ids.length);
-    setShowImportResults(true);
-
-    const results: typeof importResults = [];
-    for (const id of ids) {
-      try {
-        const result = await leadsApi.importNegotiation(id, importAccountId);
-        results.push({ id, success: true, isNew: result.isNew });
-      } catch (err: any) {
-        const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to import';
-        results.push({ id, success: false, error: errorMsg });
-      }
-      setImportResults([...results]);
-    }
-
-    setImporting(false);
-    const newCount = results.filter(r => r.success && r.isNew).length;
-    const failCount = results.filter(r => !r.success).length;
-    if (newCount > 0 && failCount === 0) {
-      notify.success('Import Complete', `Successfully imported ${newCount} negotiation(s)`);
-      setImportIds('');
-    } else if (failCount > 0 && newCount > 0) {
-      notify.warning('Import Partial', `${newCount} imported, ${failCount} failed`);
-    } else if (failCount > 0) {
-      setImportError(`Failed to import all ${failCount} negotiation(s)`);
     }
   };
 
@@ -934,51 +899,6 @@ export default function SettingsPage() {
                       </div>
                     )}
 
-                    {/* Manual Paste (collapsible) */}
-                    {importAccountId && (
-                      <div className="border-t border-blue-100 pt-2">
-                        <button
-                          onClick={() => setShowManualPaste(!showManualPaste)}
-                          className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-600 transition-colors"
-                        >
-                          {showManualPaste ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                          Paste IDs manually
-                        </button>
-                        {showManualPaste && (
-                          <div className="mt-2 space-y-2">
-                            <textarea
-                              placeholder="Paste negotiation IDs here (comma or newline separated)&#10;&#10;Example: abc123, def456, ghi789"
-                              value={importIds}
-                              onChange={(e) => setImportIds(e.target.value)}
-                              disabled={importing}
-                              rows={3}
-                              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300 disabled:bg-slate-50 disabled:text-slate-400"
-                            />
-                            <div className="flex gap-2">
-                              <button
-                                className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                onClick={handleImportNegotiations}
-                                disabled={importing || !importIds.trim() || !importAccountId}
-                              >
-                                {importing ? (
-                                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Importing...</>
-                                ) : (
-                                  <><Download className="w-3.5 h-3.5" /> Import</>
-                                )}
-                              </button>
-                              {importIds && !importing && (
-                                <button
-                                  className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-200 transition-colors"
-                                  onClick={() => { setImportIds(''); setImportResults([]); setShowImportResults(false); setImportError(''); }}
-                                >
-                                  <X className="w-3.5 h-3.5" /> Clear
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
                 )}
               </div>
@@ -1403,6 +1323,7 @@ export default function SettingsPage() {
                             await integrationsApi.deleteCollectedLeads(Array.from(collectedSelected));
                             setCollectedLeads(prev => prev.filter(l => !collectedSelected.has(l.thumbtackId)));
                             setCollectedSelected(new Set());
+                            refreshExtensionCounts();
                             notify.success('Deleted', `Deleted ${count} leads`);
                           } catch { notify.error('Error', 'Delete failed'); }
                           setCollectedDeleting(false);
@@ -1429,6 +1350,7 @@ export default function SettingsPage() {
                             const res = await integrationsApi.deleteCollectedLeads();
                             setCollectedLeads([]);
                             setCollectedSelected(new Set());
+                            refreshExtensionCounts();
                             notify.success('Deleted', `Deleted ${res.deletedCount} leads`);
                           } catch { notify.error('Error', 'Delete failed'); }
                           setCollectedDeleting(false);
