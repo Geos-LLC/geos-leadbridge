@@ -71,7 +71,7 @@ export function ExtensionSync() {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [deleteResult, setDeleteResult] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const selected = new Set<string>(); // kept for delete API compat
   const [filter, setFilter] = useState<LeadFilter>('all');
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
   const [accounts, setAccounts] = useState<{ id: string; businessName: string }[]>([]);
@@ -147,23 +147,6 @@ export function ExtensionSync() {
   const importedLeads = leads.filter((l) => l.imported);
   const refetchLeads = leads.filter((l) => l.needsRefetch);
 
-  const toggleSelect = (thumbtackId: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(thumbtackId)) next.delete(thumbtackId);
-      else next.add(thumbtackId);
-      return next;
-    });
-  };
-
-  const toggleSelectAll = () => {
-    const pendingFiltered = filteredLeads.filter((l) => !l.imported);
-    if (selected.size === pendingFiltered.length && pendingFiltered.length > 0) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(pendingFiltered.map((l) => l.thumbtackId)));
-    }
-  };
 
   const handleDelete = (thumbtackIds?: string[]) => {
     const count = thumbtackIds?.length || leads.length;
@@ -180,7 +163,6 @@ export function ExtensionSync() {
           setDeleteResult(null);
           const result = await integrationsApi.deleteCollectedLeads(thumbtackIds, accountFilter);
           setDeleteResult(`Deleted ${result.deletedCount} leads`);
-          setSelected(new Set());
           await loadData();
         } catch (err: any) {
           setDeleteResult(`Delete failed: ${err.message}`);
@@ -191,7 +173,6 @@ export function ExtensionSync() {
     });
   };
 
-  const handleDeleteSelected = () => handleDelete(Array.from(selected));
   const handleDeleteAll = () => handleDelete();
 
   const formatDate = (dateStr: string) => {
@@ -409,16 +390,6 @@ export function ExtensionSync() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 ml-auto">
-              {selected.size > 0 && (
-                <button
-                  onClick={handleDeleteSelected}
-                  disabled={deleting}
-                  className="px-4 py-2 rounded-xl text-sm font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 inline-flex items-center gap-2"
-                >
-                  {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                  Delete Selected ({selected.size})
-                </button>
-              )}
               {leads.length > 0 && (
                 <button
                   onClick={handleDeleteAll}
@@ -451,14 +422,6 @@ export function ExtensionSync() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-slate-100">
-                      <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">
-                        <input
-                          type="checkbox"
-                          checked={selected.size > 0 && selected.size === filteredLeads.filter(l => !l.imported).length}
-                          onChange={toggleSelectAll}
-                          className="rounded border-slate-300"
-                        />
-                      </th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Customer</th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Thumbtack ID</th>
                       {showAccountColumn && <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Account</th>}
@@ -472,16 +435,6 @@ export function ExtensionSync() {
                   <tbody>
                     {filteredLeads.map((lead) => (
                       <tr key={lead.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
-                        <td className="py-3 px-4">
-                          {!lead.imported && (
-                            <input
-                              type="checkbox"
-                              checked={selected.has(lead.thumbtackId)}
-                              onChange={() => toggleSelect(lead.thumbtackId)}
-                              className="rounded border-slate-300"
-                            />
-                          )}
-                        </td>
                         <td className="py-3 px-4 text-sm font-medium text-slate-900">{lead.customerName || '-'}</td>
                         <td className="py-3 px-4">
                           <code className="text-sm font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded">
@@ -510,14 +463,6 @@ export function ExtensionSync() {
                   <div key={lead.id} className="bg-white rounded-2xl border border-slate-100 p-4 space-y-3">
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-2">
-                        {!lead.imported && (
-                          <input
-                            type="checkbox"
-                            checked={selected.has(lead.thumbtackId)}
-                            onChange={() => toggleSelect(lead.thumbtackId)}
-                            className="rounded border-slate-300"
-                          />
-                        )}
                         <div>
                           {lead.customerName && <span className="text-sm font-medium text-slate-900 block">{lead.customerName}</span>}
                           <code className="text-xs font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded break-all">
