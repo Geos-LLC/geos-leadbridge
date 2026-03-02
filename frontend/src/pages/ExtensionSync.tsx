@@ -209,7 +209,7 @@ export function ExtensionSync() {
 
   const accountMap = new Map(accounts.map((a) => [a.id, a.businessName]));
   const getAccountName = (id: string | null) => (id ? accountMap.get(id) || null : null);
-  const showAccountColumn = selectedAccountId === 'all' && accounts.length > 1;
+  const showAccountColumn = selectedAccountId === 'all' && accounts.length > 0;
 
 
   return (
@@ -380,7 +380,7 @@ export function ExtensionSync() {
 
           {/* Filter + Actions */}
           <div className="flex flex-wrap items-center gap-3">
-            {accounts.length > 1 && (
+            {accounts.length > 0 && (
               <div className="relative">
                 <select
                   value={selectedAccountId}
