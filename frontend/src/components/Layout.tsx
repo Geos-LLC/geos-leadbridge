@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Outlet, Link as RouterLink, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   MessageSquare, BarChart3, Settings, LogOut, Phone, Shield, FlaskConical,
-  Menu, Bell, Zap, AlertTriangle, Workflow, LayoutGrid, Smartphone, Plug
+  Menu, Bell, Zap, AlertTriangle, Workflow, LayoutGrid, Smartphone
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -64,7 +64,6 @@ export function Layout() {
     if (path === '/pricing') return 'Pricing';
     if (path === '/admin') return 'Admin Dashboard';
     if (path === '/admin/phone-pool') return 'Phone Pool';
-    if (path === '/extension-sync') return 'Extension Sync';
     if (path === '/api-test') return 'API Test';
     if (path.startsWith('/admin/users/')) return 'User Details';
 
@@ -151,14 +150,6 @@ export function Layout() {
                 >
                   <MessageSquare size={20} />
                   <span>SMS History</span>
-                </NavLink>
-                <NavLink
-                  to="/extension-sync"
-                  className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  <Plug size={20} />
-                  <span>Extension Sync</span>
                 </NavLink>
                 <NavLink
                   to="/api-test"

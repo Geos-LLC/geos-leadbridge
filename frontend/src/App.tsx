@@ -17,7 +17,6 @@ import { Services } from './pages/Services';
 import { ApiTest } from './pages/ApiTest';
 import { Analytics } from './pages/Analytics';
 import { SmsHistory } from './pages/SmsHistory';
-import { ExtensionSync } from './pages/ExtensionSync';
 import Pricing from './pages/Pricing';
 import SettingsPage from './pages/SettingsPage';
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -80,7 +79,6 @@ function App() {
             <Route path="/phone-settings" element={<PhoneSettings />} />
             <Route path="/sms-history" element={<SmsHistory />} />
             <Route path="/services" element={<Services />} />
-            <Route path="/extension-sync" element={<ExtensionSync />} />
             <Route path="/api-test" element={<ApiTest />} />
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/settings" element={<SettingsPage />} />

@@ -167,7 +167,7 @@ export class IntegrationsService {
 
     const leads = await this.prisma.thumbtackLeadId.findMany({
       where,
-      orderBy: [{ leadDate: 'desc' }, { collectedAt: 'desc' }],
+      orderBy: { collectedAt: 'desc' },
       ...(filters.limit ? { take: filters.limit } : {}),
     });
 
@@ -294,13 +294,33 @@ export class IntegrationsService {
       where.savedAccountId = savedAccountId;
     }
 
+    // Collect thumbtackIds before deleting so we can cascade to the leads table
+    const toDelete = await this.prisma.thumbtackLeadId.findMany({
+      where,
+      select: { thumbtackId: true },
+    });
+    const externalIds = toDelete.map((t) => t.thumbtackId);
+
     const result = await this.prisma.thumbtackLeadId.deleteMany({ where });
 
+    // Also delete corresponding leads from the main leads table
+    let leadsDeleted = 0;
+    if (externalIds.length > 0) {
+      const leadsResult = await this.prisma.lead.deleteMany({
+        where: {
+          userId,
+          platform: 'THUMBTACK',
+          externalRequestId: { in: externalIds },
+        },
+      });
+      leadsDeleted = leadsResult.count;
+    }
+
     this.logger.log(
-      `Deleted ${result.count} collected leads for user ${userId}`,
+      `Deleted ${result.count} collected leads + ${leadsDeleted} leads for user ${userId}`,
     );
 
-    return { ok: true, deletedCount: result.count };
+    return { ok: true, deletedCount: result.count, leadsDeleted };
   }
 
   /**
