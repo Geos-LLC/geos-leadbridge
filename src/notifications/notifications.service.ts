@@ -1166,6 +1166,7 @@ export class NotificationsService {
       ? (lead?.customerPhone || null)
       : (rule?.toPhone || settings.destinationPhone);
     let fromPhone = rule?.fromPhone || settings.sigcoreFromPhone;
+    let fromPhoneSource = rule?.fromPhone ? 'rule' : settings.sigcoreFromPhone ? 'settings' : 'none';
 
     // Fallback: use admin-assigned pool phone if no explicit fromPhone configured
     if (!fromPhone) {
@@ -1176,6 +1177,7 @@ export class NotificationsService {
       });
       if (assignment) {
         fromPhone = assignment.phonePool.phoneNumber;
+        fromPhoneSource = 'pool';
         this.logger.log(`Using pool phone ${fromPhone} as fromPhone for rule`);
       }
     }
@@ -1193,7 +1195,13 @@ export class NotificationsService {
     // Render the message template
     const messageBody = this.renderTemplate(template, lead, context.accountName);
 
-    this.logger.log(`Sending notification for rule: ${ruleName} from ${fromPhone} to ${toPhone}`);
+    this.logger.log(
+      `[sendNotificationWithRule] rule=${ruleName} sendToCustomer=${!!rule?.sendToCustomer} ` +
+      `fromPhone=${fromPhone} (source=${fromPhoneSource}) toPhone=${toPhone} ` +
+      `senderMode=${settings.senderMode} sigcoreProvider=${settings.sigcoreProvider} ` +
+      `rule.fromPhone=${rule?.fromPhone || 'null'} settings.sigcoreFromPhone=${settings.sigcoreFromPhone || 'null'} ` +
+      `apiKeyType=${settings.sigcoreApiKey ? 'tenant' : 'MISSING'}`,
+    );
 
     // Create notification log entry
     const logEntry = await this.prisma.notificationLog.create({
@@ -1233,6 +1241,12 @@ export class NotificationsService {
         this.logger.error(`No Sigcore API key for rule ${ruleName} - tenant key not configured`);
         throw new Error('No Sigcore API key configured. Please provision your phone workspace first.');
       }
+
+      const keyType = apiKey === platformKey ? 'platform' : 'tenant';
+      this.logger.log(
+        `[sendNotificationWithRule] Sending via Sigcore: keyType=${keyType} fromPhone=${fromPhone} ` +
+        `keyPrefix=${apiKey.substring(0, 12)}...`,
+      );
 
       const result = await this.sendViaSigcore({
         to: toPhone,
@@ -2012,6 +2026,9 @@ export class NotificationsService {
       where: { savedAccountId },
     });
 
+    // Remember the old tenantId before potential re-provisioning (needed for integration migration)
+    const oldTenantId = settings?.sigcoreTenantId || null;
+
     if (settings?.sigcoreTenantId && settings?.sigcoreApiKey) {
       // Check if this tenant ID is shared with another account (from old auto-copy logic).
       // Each account must have its OWN tenant to avoid Call Connect / SMS cross-contamination.
@@ -2088,6 +2105,33 @@ export class NotificationsService {
     });
 
     this.logger.log(`[ensureSigcoreTenantProvisioned] Provisioned tenant ${data.tenantId} for account ${savedAccountId}`);
+
+    // If re-provisioning from a shared tenant, copy integrations (OpenPhone, etc.) from the
+    // old tenant to the new one. Without this, the TenantIntegration in Sigcore still references
+    // the old tenantId, and messages would fall back to Twilio instead of OpenPhone.
+    if (oldTenantId && oldTenantId !== data.tenantId) {
+      try {
+        const copyResp = await fetch(`${sigcoreUrl}/tenants/${data.tenantId}/copy-integrations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': platformKey,
+          },
+          body: JSON.stringify({ fromTenantId: oldTenantId }),
+        });
+        if (copyResp.ok) {
+          const copyResult = await copyResp.json();
+          this.logger.log(
+            `[ensureSigcoreTenantProvisioned] Copied ${copyResult.data?.copied || 0} integrations from tenant ${oldTenantId} to ${data.tenantId}`,
+          );
+        } else {
+          this.logger.warn(`[ensureSigcoreTenantProvisioned] Failed to copy integrations: ${copyResp.status}`);
+        }
+      } catch (err: any) {
+        this.logger.warn(`[ensureSigcoreTenantProvisioned] Could not copy integrations: ${err.message}`);
+      }
+    }
+
     return { apiKey: data.apiKey, tenantId: data.tenantId };
   }
 
@@ -2443,17 +2487,6 @@ export class NotificationsService {
       where: { savedAccountId },
     });
 
-    // Resolve fromPhone: explicit setting or first pool phone for this user
-    let fromPhone: string | null = settings?.sigcoreFromPhone || null;
-    if (!fromPhone) {
-      const assignment = await this.prisma.phonePoolAssignment.findFirst({
-        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
-        include: { phonePool: true },
-        orderBy: { assignedAt: 'desc' },
-      });
-      if (assignment) fromPhone = assignment.phonePool.phoneNumber;
-    }
-
     // Get customer texting auto-reply rule (sendToCustomer: true, delayMinutes: 0)
     const autoReplyRule = settings
       ? await this.prisma.notificationRule.findFirst({
@@ -2464,6 +2497,18 @@ export class NotificationsService {
           },
         })
       : null;
+
+    // Resolve fromPhone: prefer the rule's fromPhone (what actually fires at send time),
+    // then settings.sigcoreFromPhone, then first pool phone as last resort.
+    let fromPhone: string | null = autoReplyRule?.fromPhone || settings?.sigcoreFromPhone || null;
+    if (!fromPhone) {
+      const assignment = await this.prisma.phonePoolAssignment.findFirst({
+        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
+        include: { phonePool: true },
+        orderBy: { assignedAt: 'desc' },
+      });
+      if (assignment) fromPhone = assignment.phonePool.phoneNumber;
+    }
 
     return {
       enabled: settings?.customerTextingEnabled ?? false,
