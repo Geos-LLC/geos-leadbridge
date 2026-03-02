@@ -71,7 +71,6 @@ export function ExtensionSync() {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [deleteResult, setDeleteResult] = useState<string | null>(null);
-  const selected = new Set<string>(); // kept for delete API compat
   const [filter, setFilter] = useState<LeadFilter>('all');
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
   const [accounts, setAccounts] = useState<{ id: string; businessName: string }[]>([]);
@@ -361,7 +360,7 @@ export function ExtensionSync() {
               <div className="relative">
                 <select
                   value={selectedAccountId}
-                  onChange={(e) => { setSelectedAccountId(e.target.value); setSelected(new Set()); }}
+                  onChange={(e) => setSelectedAccountId(e.target.value)}
                   className="appearance-none bg-white border border-slate-200 rounded-xl px-3 py-1.5 pr-7 text-xs font-semibold text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer"
                 >
                   <option value="all">All Accounts</option>
@@ -377,7 +376,7 @@ export function ExtensionSync() {
               {(['all', 'pending', 'imported', 'refetch'] as LeadFilter[]).map((f) => (
                 <button
                   key={f}
-                  onClick={() => { setFilter(f); setSelected(new Set()); }}
+                  onClick={() => setFilter(f)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                     filter === f
                       ? 'bg-blue-100 text-blue-700'
