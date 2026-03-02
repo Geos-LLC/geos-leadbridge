@@ -1194,6 +1194,7 @@ export const integrationsApi = {
       collectedAt: string;
       source: string | null;
       thumbtackStatus: string | null;
+      leadDate: string | null;
       imported: boolean;
       importedAt: string | null;
       needsRefetch: boolean;

@@ -1403,7 +1403,7 @@ export default function SettingsPage() {
                     <tr className="border-b border-slate-100">
                       <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Customer</th>
                       <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Thumbtack ID</th>
-                      <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Collected</th>
+                      <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Lead Date</th>
                       <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">TT Status</th>
                       <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Status</th>
                     </tr>
@@ -1416,7 +1416,7 @@ export default function SettingsPage() {
                           <code className="text-xs font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded">{lead.thumbtackId}</code>
                         </td>
                         <td className="py-2.5 px-3 text-sm text-slate-600">
-                          {new Date(lead.collectedAt || lead.capturedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                          {lead.leadDate || new Date(lead.collectedAt || lead.capturedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                         </td>
                         <td className="py-2.5 px-3 text-sm text-slate-500">{lead.thumbtackStatus || '-'}</td>
                         <td className="py-2.5 px-3">
