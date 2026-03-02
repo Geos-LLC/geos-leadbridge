@@ -3,8 +3,7 @@ import {
   RefreshCw, Loader2, CheckCircle, Download, Package,
   Clock, DollarSign, ArrowUpRight, Filter, Chrome, Trash2, Building2, ChevronDown, AlertTriangle,
 } from 'lucide-react';
-import { integrationsApi, thumbtackApi } from '../services/api';
-import type { SavedAccount } from '../types';
+import { integrationsApi } from '../services/api';
 
 type CollectedLead = {
   id: string;
@@ -75,7 +74,7 @@ export function ExtensionSync() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<LeadFilter>('all');
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
-  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
+  const [accounts, setAccounts] = useState<{ id: string; businessName: string }[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
   const [confirmModal, setConfirmModal] = useState<{
     title: string;
@@ -101,13 +100,6 @@ export function ExtensionSync() {
     return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibility); observer.disconnect(); };
   }, []);
 
-  // Load saved accounts
-  useEffect(() => {
-    thumbtackApi.getSavedAccounts().then((res) => {
-      setAccounts(res.accounts || []);
-    }).catch(() => {});
-  }, []);
-
   const prevTotalsRef = useRef({ leads: 0, snapshots: 0 });
 
   const accountFilter = selectedAccountId === 'all' ? undefined : selectedAccountId;
@@ -121,6 +113,10 @@ export function ExtensionSync() {
       ]);
       setLeads(leadsRes.leads);
       setSnapshots(snapshotsRes.snapshots);
+      // Update accounts list from the leads response (only on unfiltered load to get all accounts)
+      if (!accountFilter && leadsRes.accounts?.length) {
+        setAccounts(leadsRes.accounts);
+      }
       prevTotalsRef.current = { leads: leadsRes.total, snapshots: snapshotsRes.total };
     } catch (err) {
       if (!silent) console.error('Failed to load extension data:', err);
@@ -266,7 +262,7 @@ export function ExtensionSync() {
                 onClick={() => {
                   const acc = accounts.find((a) => a.id === selectedAccountId);
                   document.dispatchEvent(new CustomEvent('leadbridge-launch', {
-                    detail: { action: 'collect-leads', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: acc?.emailHint || null },
+                    detail: { action: 'collect-leads', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: null },
                   }));
                 }}
                 className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-2"
@@ -278,7 +274,7 @@ export function ExtensionSync() {
                 onClick={() => {
                   const acc = accounts.find((a) => a.id === selectedAccountId);
                   document.dispatchEvent(new CustomEvent('leadbridge-launch', {
-                    detail: { action: 'sync-budget', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: acc?.emailHint || null },
+                    detail: { action: 'sync-budget', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: null },
                   }));
                 }}
                 className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-2"

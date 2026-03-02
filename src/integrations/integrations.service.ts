@@ -171,6 +171,17 @@ export class IntegrationsService {
       ...(filters.limit ? { take: filters.limit } : {}),
     });
 
+    // Collect distinct savedAccountIds from leads for filter dropdown
+    const accountIds = [...new Set(leads.map((l) => l.savedAccountId).filter(Boolean))] as string[];
+    let referencedAccounts: { id: string; businessName: string }[] = [];
+    if (accountIds.length > 0) {
+      const accs = await this.prisma.savedAccount.findMany({
+        where: { id: { in: accountIds } },
+        select: { id: true, businessName: true },
+      });
+      referencedAccounts = accs.map((a) => ({ id: a.id, businessName: a.businessName }));
+    }
+
     return {
       ok: true,
       leads: leads.map((l) => ({
@@ -190,6 +201,7 @@ export class IntegrationsService {
         lastActivityAt: l.lastActivityAt,
       })),
       total: leads.length,
+      accounts: referencedAccounts,
     };
   }
 

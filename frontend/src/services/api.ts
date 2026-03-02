@@ -1203,6 +1203,7 @@ export const integrationsApi = {
       lastActivityAt: string | null;
     }>;
     total: number;
+    accounts?: Array<{ id: string; businessName: string }>;
   }> => {
     const params = new URLSearchParams();
     if (filters?.pending) params.append('pending', 'true');
