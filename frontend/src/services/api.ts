@@ -1238,8 +1238,13 @@ export const integrationsApi = {
     const { data } = await api.get(`/integrations/thumbtack/snapshots${query}`);
     return data;
   },
-  deleteCollectedLeads: async (thumbtackIds?: string[]): Promise<{ ok: boolean; deletedCount: number }> => {
-    const { data } = await api.delete('/integrations/thumbtack/leads', { data: thumbtackIds?.length ? { thumbtackIds } : {} });
+  deleteCollectedLeads: async (thumbtackIds?: string[], savedAccountId?: string): Promise<{ ok: boolean; deletedCount: number }> => {
+    const { data } = await api.delete('/integrations/thumbtack/leads', {
+      data: {
+        ...(thumbtackIds?.length ? { thumbtackIds } : {}),
+        ...(savedAccountId ? { savedAccountId } : {}),
+      },
+    });
     return data;
   },
   deleteBudgetSnapshots: async (): Promise<{ ok: boolean; deletedCount: number }> => {

@@ -273,10 +273,13 @@ export class IntegrationsService {
   /**
    * Delete collected lead IDs. If thumbtackIds provided, delete those; otherwise delete all.
    */
-  async deleteLeadIds(userId: string, thumbtackIds?: string[]) {
+  async deleteLeadIds(userId: string, thumbtackIds?: string[], savedAccountId?: string) {
     const where: any = { userId };
     if (thumbtackIds?.length) {
       where.thumbtackId = { in: thumbtackIds };
+    }
+    if (savedAccountId) {
+      where.savedAccountId = savedAccountId;
     }
 
     const result = await this.prisma.thumbtackLeadId.deleteMany({ where });

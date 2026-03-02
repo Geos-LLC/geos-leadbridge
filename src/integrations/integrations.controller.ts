@@ -111,9 +111,9 @@ export class IntegrationsController {
   @Delete('leads')
   async deleteLeadIds(
     @CurrentUser() user: any,
-    @Body() body: { thumbtackIds?: string[] },
+    @Body() body: { thumbtackIds?: string[]; savedAccountId?: string },
   ) {
-    return this.integrationsService.deleteLeadIds(user.id, body.thumbtackIds);
+    return this.integrationsService.deleteLeadIds(user.id, body.thumbtackIds, body.savedAccountId);
   }
 
   /**

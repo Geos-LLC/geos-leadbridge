@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   RefreshCw, Loader2, CheckCircle, Download, Package,
-  Clock, DollarSign, ArrowUpRight, Filter, Chrome, Trash2, Building2, ChevronDown,
+  Clock, DollarSign, ArrowUpRight, Filter, Chrome, Trash2, Building2, ChevronDown, AlertTriangle,
 } from 'lucide-react';
 import { integrationsApi, thumbtackApi } from '../services/api';
 import type { SavedAccount } from '../types';
@@ -77,6 +77,11 @@ export function ExtensionSync() {
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
+  const [confirmModal, setConfirmModal] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
   // Detect if the Chrome extension is installed
   // The extension's leadbridgeAuth.js sets data-leadbridge-extension="true" on <html>
   useEffect(() => {
@@ -164,21 +169,30 @@ export function ExtensionSync() {
     }
   };
 
-  const handleDelete = async (thumbtackIds?: string[]) => {
+  const handleDelete = (thumbtackIds?: string[]) => {
     const count = thumbtackIds?.length || leads.length;
-    if (!confirm(`Delete ${count} collected lead${count !== 1 ? 's' : ''}? This cannot be undone.`)) return;
-    try {
-      setDeleting(true);
-      setDeleteResult(null);
-      const result = await integrationsApi.deleteCollectedLeads(thumbtackIds);
-      setDeleteResult(`Deleted ${result.deletedCount} leads`);
-      setSelected(new Set());
-      await loadData();
-    } catch (err: any) {
-      setDeleteResult(`Delete failed: ${err.message}`);
-    } finally {
-      setDeleting(false);
-    }
+    const accountName = accountFilter ? getAccountName(accountFilter) : null;
+    const scope = accountName ? ` for "${accountName}"` : '';
+
+    setConfirmModal({
+      title: 'Delete Collected Leads',
+      message: `Are you sure you want to delete ${count} lead${count !== 1 ? 's' : ''}${scope}? This cannot be undone.`,
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          setDeleting(true);
+          setDeleteResult(null);
+          const result = await integrationsApi.deleteCollectedLeads(thumbtackIds, accountFilter);
+          setDeleteResult(`Deleted ${result.deletedCount} leads`);
+          setSelected(new Set());
+          await loadData();
+        } catch (err: any) {
+          setDeleteResult(`Delete failed: ${err.message}`);
+        } finally {
+          setDeleting(false);
+        }
+      },
+    });
   };
 
   const handleDeleteSelected = () => handleDelete(Array.from(selected));
@@ -628,6 +642,35 @@ export function ExtensionSync() {
             </>
           )}
         </>
+      )}
+
+      {/* Confirm Delete Modal */}
+      {confirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full mx-4 p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-red-100 rounded-full">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900">{confirmModal.title}</h3>
+            </div>
+            <p className="text-sm text-slate-600">{confirmModal.message}</p>
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setConfirmModal(null)}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmModal.onConfirm}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>
