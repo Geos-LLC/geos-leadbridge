@@ -497,6 +497,8 @@ export interface UpdateNotificationSettingsDto {
   quietHoursEnd?: string;
   quietHoursTimezone?: string;
   requirePhone?: boolean;
+  smsForwardingNumber?: string | null;
+  callForwardingNumber?: string | null;
 }
 
 // Notification Rule DTOs

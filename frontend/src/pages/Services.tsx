@@ -197,6 +197,7 @@ export function Services() {
     leadGreetingMessage: string;
     voicemailMessage: string;
     voicemailRecordingUrl: string;
+    callForwardingNumber: string;
   } | null>(null);
   const [ccValidationModalOpen, setCcValidationModalOpen] = useState(false);
   const [ccUnsavedModalOpen, setCcUnsavedModalOpen] = useState(false);
@@ -215,8 +216,10 @@ export function Services() {
   const [ctSigcoreFromPhone, setCtSigcoreFromPhone] = useState<string | null>(null);
   const [ctTestPhone, setCtTestPhone] = useState(() => localStorage.getItem('ct_test_phone') || '');
   const [ctTestStatus, setCtTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
-  const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string; fromPhone: string } | null>(null);
+  const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string; fromPhone: string; smsForwardingNumber: string } | null>(null);
   const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>('');
+  const [ctSmsForwardingNumber, setCtSmsForwardingNumber] = useState('');
+  const [ccCallForwardingNumber, setCcCallForwardingNumber] = useState('');
 
   // Derived: unsaved Lead Alert changes (only alertToPhone is pending — from-phone saves immediately)
   const alertDirty = !!leadAlertRule && alertToPhone !== (leadAlertRule.toPhone || '');
@@ -224,7 +227,8 @@ export function Services() {
   // Derived: unsaved CT changes
   const ctDirty = ctSavedSnapshot !== null && (
     ctAutoReplyTemplate !== ctSavedSnapshot.autoReplyTemplate ||
-    ctFromPhone !== ctSavedSnapshot.fromPhone
+    ctFromPhone !== ctSavedSnapshot.fromPhone ||
+    ctSmsForwardingNumber !== ctSavedSnapshot.smsForwardingNumber
   );
 
   // Derived: unsaved CC changes
@@ -235,7 +239,8 @@ export function Services() {
     ccAgentWhisperMessage !== ccSavedSnapshot.agentWhisperMessage ||
     ccLeadGreetingMessage !== ccSavedSnapshot.leadGreetingMessage ||
     ccVoicemailMessage !== ccSavedSnapshot.voicemailMessage ||
-    ccVoicemailRecordingUrl !== ccSavedSnapshot.voicemailRecordingUrl
+    ccVoicemailRecordingUrl !== ccSavedSnapshot.voicemailRecordingUrl ||
+    ccCallForwardingNumber !== ccSavedSnapshot.callForwardingNumber
   );
 
   useEffect(() => {
@@ -350,6 +355,8 @@ export function Services() {
       const connected = !!notifSettingsRes?.settings?.sigcoreConnected;
       // connected state no longer needed in JSX — just used locally here
       setCtSigcoreFromPhone(notifSettingsRes?.settings?.sigcoreFromPhone || null);
+      setCtSmsForwardingNumber(notifSettingsRes?.settings?.smsForwardingNumber || '');
+      setCcCallForwardingNumber(notifSettingsRes?.settings?.callForwardingNumber || '');
       if (connected) {
         notificationsApi.getSigcorePhoneNumbers(accountId).then(r => setCtOwnPhoneNumbers(r.phoneNumbers)).catch(() => {});
       } else {
@@ -412,7 +419,7 @@ export function Services() {
       }
       setCtSelectedTemplateId(allTemplates.find(t => t.content === ctContent)?.id || ctTpl?.id || '');
       // Initialize CT snapshot for dirty tracking (always, same as CC)
-      setCtSavedSnapshot({ autoReplyTemplate: ctContent, fromPhone: ctResolvedFromPhone });
+      setCtSavedSnapshot({ autoReplyTemplate: ctContent, fromPhone: ctResolvedFromPhone, smsForwardingNumber: notifSettingsRes?.settings?.smsForwardingNumber || '' });
 
       // Initialize CC snapshot for dirty tracking
       const snapshotWhisper = ccs?.agentWhisperMessage || whisperTpl?.content || '';
@@ -426,6 +433,7 @@ export function Services() {
         leadGreetingMessage: snapshotGreeting,
         voicemailMessage: snapshotVoicemail,
         voicemailRecordingUrl: ccs?.leadVoicemailRecordingUrl || '',
+        callForwardingNumber: notifSettingsRes?.settings?.callForwardingNumber || '',
       });
 
       // Pre-fill form states from existing rules
@@ -605,24 +613,29 @@ export function Services() {
     if (!selectedAccountId) return;
     setCcSaving(true);
     try {
-      await callConnectApi.saveSettings(selectedAccountId, {
-        enabled: ccEnabled,
-        mode: ccMode,
-        agentStrategy: ccAgentStrategy,
-        agentPhoneE164: ccAgentPhone || undefined,
-        maxAgentAttempts: ccMaxAttempts,
-        quietHoursEnabled: ccQuietEnabled,
-        quietHoursTimezone: ccQuietEnabled ? ccQuietTimezone : undefined,
-        quietHoursStart: ccQuietEnabled ? ccQuietStart : undefined,
-        quietHoursEnd: ccQuietEnabled ? ccQuietEnd : undefined,
-        agentAcceptDigits: ccAgentAcceptDigits || '0123456789*#',
-        agentWhisperMessage: ccAgentWhisperMessage || undefined,
-        leadGreetingMessage: ccLeadGreetingMessage || undefined,
-        leadVoicemailEnabled: ccVoicemailEnabled,
-        leadVoicemailMessage: ccVoicemailEnabled ? ccVoicemailMessage : undefined,
-        leadVoicemailRecordingUrl: ccVoicemailEnabled ? ccVoicemailRecordingUrl : undefined,
-        botNumberE164: ccBotNumber || undefined,
-      });
+      await Promise.all([
+        callConnectApi.saveSettings(selectedAccountId, {
+          enabled: ccEnabled,
+          mode: ccMode,
+          agentStrategy: ccAgentStrategy,
+          agentPhoneE164: ccAgentPhone || undefined,
+          maxAgentAttempts: ccMaxAttempts,
+          quietHoursEnabled: ccQuietEnabled,
+          quietHoursTimezone: ccQuietEnabled ? ccQuietTimezone : undefined,
+          quietHoursStart: ccQuietEnabled ? ccQuietStart : undefined,
+          quietHoursEnd: ccQuietEnabled ? ccQuietEnd : undefined,
+          agentAcceptDigits: ccAgentAcceptDigits || '0123456789*#',
+          agentWhisperMessage: ccAgentWhisperMessage || undefined,
+          leadGreetingMessage: ccLeadGreetingMessage || undefined,
+          leadVoicemailEnabled: ccVoicemailEnabled,
+          leadVoicemailMessage: ccVoicemailEnabled ? ccVoicemailMessage : undefined,
+          leadVoicemailRecordingUrl: ccVoicemailEnabled ? ccVoicemailRecordingUrl : undefined,
+          botNumberE164: ccBotNumber || undefined,
+        }),
+        notificationsApi.updateSettings(selectedAccountId, {
+          callForwardingNumber: ccCallForwardingNumber || null,
+        }),
+      ]);
       showSuccess('Instant Call Connect settings saved');
       setCcSavedSnapshot({
         mode: ccMode,
@@ -632,6 +645,7 @@ export function Services() {
         leadGreetingMessage: ccLeadGreetingMessage,
         voicemailMessage: ccVoicemailMessage,
         voicemailRecordingUrl: ccVoicemailRecordingUrl,
+        callForwardingNumber: ccCallForwardingNumber,
       });
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Failed to save Call Connect settings');
@@ -662,13 +676,18 @@ export function Services() {
     if (!selectedAccountId) return;
     setCtSaving(true);
     try {
-      await notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
-        enabled: ctEnabled,
-        fromPhone: ctFromPhone || undefined,
-        autoReplyTemplate: ctAutoReplyTemplate,
-      });
+      await Promise.all([
+        notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
+          enabled: ctEnabled,
+          fromPhone: ctFromPhone || undefined,
+          autoReplyTemplate: ctAutoReplyTemplate,
+        }),
+        notificationsApi.updateSettings(selectedAccountId, {
+          smsForwardingNumber: ctSmsForwardingNumber || null,
+        }),
+      ]);
       showSuccess('Customer Texting settings saved');
-      setCtSavedSnapshot({ autoReplyTemplate: ctAutoReplyTemplate, fromPhone: ctFromPhone });
+      setCtSavedSnapshot({ autoReplyTemplate: ctAutoReplyTemplate, fromPhone: ctFromPhone, smsForwardingNumber: ctSmsForwardingNumber });
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Failed to save Customer Texting settings');
     } finally {
@@ -684,6 +703,7 @@ export function Services() {
     if (!ctSavedSnapshot) return;
     setCtAutoReplyTemplate(ctSavedSnapshot.autoReplyTemplate);
     setCtFromPhone(ctSavedSnapshot.fromPhone);
+    setCtSmsForwardingNumber(ctSavedSnapshot.smsForwardingNumber);
     setCtSelectedTemplateId(templates.find(t => t.content === ctSavedSnapshot.autoReplyTemplate)?.id || '');
   }
 
@@ -736,6 +756,7 @@ export function Services() {
     setCcLeadGreetingMessage(ccSavedSnapshot.leadGreetingMessage);
     setCcVoicemailMessage(ccSavedSnapshot.voicemailMessage);
     setCcVoicemailRecordingUrl(ccSavedSnapshot.voicemailRecordingUrl);
+    setCcCallForwardingNumber(ccSavedSnapshot.callForwardingNumber);
   }
 
   // --- Auto Reply Handlers ---
@@ -1631,6 +1652,36 @@ export function Services() {
                 )}
               </div>
 
+              {/* Forward Replies To */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Forward Replies To</label>
+                <input
+                  type="tel"
+                  value={ctSmsForwardingNumber}
+                  onChange={e => setCtSmsForwardingNumber(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                  onBlur={e => {
+                    const formatted = formatPhoneE164(e.target.value);
+                    if (formatted !== e.target.value) setCtSmsForwardingNumber(formatted);
+                  }}
+                  placeholder="+15555550100"
+                  className={`w-full rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                    ctSmsForwardingNumber && !isValidPhoneE164(ctSmsForwardingNumber)
+                      ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                      : ctSmsForwardingNumber && isValidPhoneE164(ctSmsForwardingNumber)
+                        ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                        : 'border border-slate-200 focus:ring-emerald-400'
+                  }`}
+                />
+                {ctSmsForwardingNumber && !isValidPhoneE164(ctSmsForwardingNumber) ? (
+                  <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    Must be E.164 format, e.g. +12125550100
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-400 mt-1.5">Customer SMS replies will be forwarded to this number (e.g. OpenPhone)</p>
+                )}
+              </div>
+
             </div>
 
             {/* Save / unsaved changes */}
@@ -1771,6 +1822,36 @@ export function Services() {
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* Forward Inbound Calls To */}
+            <div>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Forward Inbound Calls To</label>
+              <input
+                type="tel"
+                value={ccCallForwardingNumber}
+                onChange={e => setCcCallForwardingNumber(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                onBlur={e => {
+                  const formatted = formatPhoneE164(e.target.value);
+                  if (formatted !== e.target.value) setCcCallForwardingNumber(formatted);
+                }}
+                placeholder="+15555550100"
+                className={`w-full rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                  ccCallForwardingNumber && !isValidPhoneE164(ccCallForwardingNumber)
+                    ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                    : ccCallForwardingNumber && isValidPhoneE164(ccCallForwardingNumber)
+                      ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                      : 'bg-white border border-slate-200 focus:ring-violet-300'
+                }`}
+              />
+              {ccCallForwardingNumber && !isValidPhoneE164(ccCallForwardingNumber) ? (
+                <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3 shrink-0" />
+                  Must be E.164 format, e.g. +12125550100
+                </p>
+              ) : (
+                <p className="text-xs text-slate-400 mt-1.5">Customers calling your dedicated number will be connected to this phone (e.g. OpenPhone)</p>
+              )}
             </div>
 
             {/* Agent Whisper Message */}

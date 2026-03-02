@@ -190,6 +190,8 @@ export interface NotificationSettings {
   quietHoursEnd: string | null;
   quietHoursTimezone: string | null;
   requirePhone: boolean;
+  smsForwardingNumber: string | null;
+  callForwardingNumber: string | null;
   createdAt: string;
   updatedAt: string;
 }

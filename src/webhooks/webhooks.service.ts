@@ -1129,6 +1129,18 @@ export class WebhooksService {
         this.logger.warn(`Failed to handle customer reply rules: ${err.message}`);
       }
 
+      // Forward SMS to tenant's forwarding number if configured
+      try {
+        const fwdAccount = await this.prisma.savedAccount.findFirst({
+          where: { userId: lead.userId, businessId: lead.businessId || undefined },
+        });
+        if (fwdAccount) {
+          await this.notificationsService.forwardInboundSms(fwdAccount.id, lead.customerName, fromNumber, body);
+        }
+      } catch (err: any) {
+        this.logger.warn(`SMS forwarding failed: ${err.message}`);
+      }
+
       // Emit SSE event for real-time UI update
       this.eventEmitter.emit(`sms.inbound.${lead.userId}`, {
         leadId: lead.id,

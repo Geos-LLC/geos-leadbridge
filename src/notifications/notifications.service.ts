@@ -19,6 +19,8 @@ export interface UpdateNotificationSettingsDto {
   quietHoursEnd?: string;
   quietHoursTimezone?: string;
   requirePhone?: boolean;
+  smsForwardingNumber?: string | null;
+  callForwardingNumber?: string | null;
 }
 
 // Notification Rule DTOs
@@ -139,6 +141,8 @@ export interface NotificationSettingsResponse {
   quietHoursEnd: string | null;
   quietHoursTimezone: string | null;
   requirePhone: boolean;
+  smsForwardingNumber: string | null;
+  callForwardingNumber: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -258,6 +262,8 @@ export class NotificationsService {
         quietHoursEnd: data.quietHoursEnd,
         quietHoursTimezone: data.quietHoursTimezone ?? 'America/New_York',
         requirePhone: data.requirePhone ?? true,
+        smsForwardingNumber: data.smsForwardingNumber,
+        callForwardingNumber: data.callForwardingNumber,
       },
       update: {
         ...(data.enabled !== undefined && { enabled: data.enabled }),
@@ -271,8 +277,17 @@ export class NotificationsService {
         ...(data.quietHoursEnd !== undefined && { quietHoursEnd: data.quietHoursEnd }),
         ...(data.quietHoursTimezone !== undefined && { quietHoursTimezone: data.quietHoursTimezone }),
         ...(data.requirePhone !== undefined && { requirePhone: data.requirePhone }),
+        ...(data.smsForwardingNumber !== undefined && { smsForwardingNumber: data.smsForwardingNumber }),
+        ...(data.callForwardingNumber !== undefined && { callForwardingNumber: data.callForwardingNumber }),
       },
     });
+
+    // Sync call forwarding number to Sigcore tenant metadata
+    if (data.callForwardingNumber !== undefined && settings.sigcoreTenantId) {
+      this.syncCallForwardingToSigcore(settings.sigcoreTenantId, data.callForwardingNumber).catch(err => {
+        this.logger.warn(`[upsertSettings] Failed to sync callForwardingNumber to Sigcore: ${err.message}`);
+      });
+    }
 
     return this.formatSettings(settings);
   }
@@ -979,6 +994,71 @@ export class NotificationsService {
     for (const rule of immediateRules) {
       await this.sendNotificationWithRule(settings, rule, context);
     }
+  }
+
+  /**
+   * Forward an inbound SMS to the tenant's configured forwarding number (e.g. OpenPhone).
+   * No-ops if no forwarding number is configured.
+   */
+  async forwardInboundSms(
+    savedAccountId: string,
+    customerName: string,
+    fromNumber: string,
+    body: string,
+  ): Promise<void> {
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+    });
+    if (!settings?.smsForwardingNumber || !settings.sigcoreApiKey) return;
+
+    const fromPhone = settings.sigcoreFromPhone;
+    if (!fromPhone) {
+      this.logger.warn(`[forwardInboundSms] No fromPhone configured for account ${savedAccountId}`);
+      return;
+    }
+
+    const forwardBody = `SMS from ${customerName} (${fromNumber}):\n${body}`;
+    this.logger.log(`[forwardInboundSms] Forwarding to ${settings.smsForwardingNumber} for account ${savedAccountId}`);
+
+    await this.sendViaSigcore({
+      to: settings.smsForwardingNumber,
+      body: forwardBody,
+      fromPhone,
+      apiKey: settings.sigcoreApiKey,
+      senderMode: (settings.senderMode as 'shared' | 'dedicated' | 'openphone') || 'dedicated',
+      sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
+      metadata: { type: 'sms_forwarding', savedAccountId },
+    });
+  }
+
+  /**
+   * Sync callForwardingNumber to the Sigcore tenant's metadata so incoming calls
+   * can be forwarded without LeadBridge being in the loop.
+   */
+  private async syncCallForwardingToSigcore(
+    sigcoreTenantId: string,
+    callForwardingNumber: string | null,
+  ): Promise<void> {
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (!platformKey) return;
+
+    const resp = await fetch(`${sigcoreUrl}/tenants/${sigcoreTenantId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': platformKey,
+      },
+      body: JSON.stringify({
+        metadata: { callForwardingNumber: callForwardingNumber || null },
+      }),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Sigcore tenant update failed (${resp.status}): ${text}`);
+    }
+    this.logger.log(`[syncCallForwardingToSigcore] Synced callForwardingNumber=${callForwardingNumber || 'none'} to tenant ${sigcoreTenantId}`);
   }
 
   /**
@@ -2617,6 +2697,8 @@ export class NotificationsService {
       quietHoursEnd: settings.quietHoursEnd,
       quietHoursTimezone: settings.quietHoursTimezone,
       requirePhone: settings.requirePhone,
+      smsForwardingNumber: settings.smsForwardingNumber || null,
+      callForwardingNumber: settings.callForwardingNumber || null,
       createdAt: settings.createdAt.toISOString(),
       updatedAt: settings.updatedAt.toISOString(),
     };

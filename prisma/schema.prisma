@@ -432,6 +432,8 @@ model NotificationSettings {
   requirePhone            Boolean  @default(true) // Only notify if lead has phone
   customerTextingEnabled  Boolean  @default(false) // Separate toggle for customer-facing SMS texting
   inboundSmsWebhookId     String?  // Sigcore webhook ID for inbound SMS
+  smsForwardingNumber     String?  // E.164 phone to forward inbound SMS to (e.g. OpenPhone)
+  callForwardingNumber    String?  // E.164 phone to forward inbound calls to
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
