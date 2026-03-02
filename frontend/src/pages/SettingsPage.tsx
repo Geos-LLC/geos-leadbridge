@@ -1403,8 +1403,8 @@ export default function SettingsPage() {
                             await integrationsApi.deleteCollectedLeads(Array.from(collectedSelected));
                             setCollectedLeads(prev => prev.filter(l => !collectedSelected.has(l.thumbtackId)));
                             setCollectedSelected(new Set());
-                            notify({ type: 'success', message: `Deleted ${count} leads` });
-                          } catch { notify({ type: 'error', message: 'Delete failed' }); }
+                            notify.success('Deleted', `Deleted ${count} leads`);
+                          } catch { notify.error('Error', 'Delete failed'); }
                           setCollectedDeleting(false);
                         },
                       });
@@ -1429,8 +1429,8 @@ export default function SettingsPage() {
                             const res = await integrationsApi.deleteCollectedLeads();
                             setCollectedLeads([]);
                             setCollectedSelected(new Set());
-                            notify({ type: 'success', message: `Deleted ${res.deletedCount} leads` });
-                          } catch { notify({ type: 'error', message: 'Delete failed' }); }
+                            notify.success('Deleted', `Deleted ${res.deletedCount} leads`);
+                          } catch { notify.error('Error', 'Delete failed'); }
                           setCollectedDeleting(false);
                         },
                       });
