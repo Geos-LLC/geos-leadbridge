@@ -380,6 +380,21 @@ export function ExtensionSync() {
 
           {/* Filter + Actions */}
           <div className="flex flex-wrap items-center gap-3">
+            {accounts.length > 1 && (
+              <div className="relative">
+                <select
+                  value={selectedAccountId}
+                  onChange={(e) => { setSelectedAccountId(e.target.value); setSelected(new Set()); }}
+                  className="appearance-none bg-white border border-slate-200 rounded-xl px-3 py-1.5 pr-7 text-xs font-semibold text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer"
+                >
+                  <option value="all">All Accounts</option>
+                  {accounts.map((acc) => (
+                    <option key={acc.id} value={acc.id}>{acc.businessName}</option>
+                  ))}
+                </select>
+                <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Filter size={16} className="text-slate-400" />
               {(['all', 'pending', 'imported', 'refetch'] as LeadFilter[]).map((f) => (
