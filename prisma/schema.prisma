@@ -732,6 +732,7 @@ model ThumbtackLeadId {
   pageTitle       String?
   thumbtackStatus String?
   customerName    String?
+  leadDate        String?   // Lead date from Thumbtack page (e.g. "Feb 23")
   imported        Boolean   @default(false)
   importedAt      DateTime?
   needsRefetch    Boolean   @default(false)

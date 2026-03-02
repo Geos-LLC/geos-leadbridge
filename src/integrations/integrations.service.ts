@@ -89,6 +89,7 @@ export class IntegrationsService {
     for (const thumbtackId of dto.leadIds) {
       const status = dto.leadStatuses?.[thumbtackId] || null;
       const customerName = dto.leadNames?.[thumbtackId] || null;
+      const leadDate = dto.leadDates?.[thumbtackId] || null;
       const existing = await this.prisma.thumbtackLeadId.findUnique({
         where: { userId_thumbtackId: { userId, thumbtackId } },
       });
@@ -104,6 +105,7 @@ export class IntegrationsService {
             lastActivityAt: capturedAt,
             ...(status ? { thumbtackStatus: status } : {}),
             ...(customerName ? { customerName } : {}),
+            ...(leadDate ? { leadDate } : {}),
             ...(dto.savedAccountId ? { savedAccountId: dto.savedAccountId } : {}),
           },
         });
@@ -122,6 +124,7 @@ export class IntegrationsService {
             pageTitle: dto.page?.title || null,
             thumbtackStatus: status,
             customerName,
+            leadDate,
           },
         });
         newCount++;
@@ -180,6 +183,7 @@ export class IntegrationsService {
         source: l.source,
         thumbtackStatus: l.thumbtackStatus,
         customerName: l.customerName,
+        leadDate: l.leadDate,
         imported: l.imported,
         importedAt: l.importedAt,
         needsRefetch: l.needsRefetch,

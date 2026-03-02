@@ -15,6 +15,7 @@ type CollectedLead = {
   collectedAt: string;
   source: string | null;
   thumbtackStatus: string | null;
+  leadDate: string | null;
   imported: boolean;
   importedAt: string | null;
   needsRefetch: boolean;
@@ -436,7 +437,7 @@ export function ExtensionSync() {
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Customer</th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Thumbtack ID</th>
                       {showAccountColumn && <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Account</th>}
-                      <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Collected</th>
+                      <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Lead Date</th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">TT Status</th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Source</th>
                       <th className="text-left py-3 px-4 text-xs font-bold text-slate-400 uppercase tracking-wide">Status</th>
@@ -467,7 +468,7 @@ export function ExtensionSync() {
                             {getAccountName(lead.savedAccountId) || <span className="text-slate-300">-</span>}
                           </td>
                         )}
-                        <td className="py-3 px-4 text-sm text-slate-600">{formatDate(lead.collectedAt)}</td>
+                        <td className="py-3 px-4 text-sm text-slate-600">{lead.leadDate || formatDate(lead.collectedAt)}</td>
                         <td className="py-3 px-4 text-sm text-slate-500">{lead.thumbtackStatus || '-'}</td>
                         <td className="py-3 px-4 text-sm text-slate-500">{lead.source || '-'}</td>
                         <td className="py-3 px-4"><LeadStatusBadge lead={lead} /></td>
@@ -502,7 +503,7 @@ export function ExtensionSync() {
                       <LeadStatusBadge lead={lead} />
                     </div>
                     <div className="flex items-center justify-between text-xs text-slate-500">
-                      <span>{formatDate(lead.collectedAt)}</span>
+                      <span>{lead.leadDate || formatDate(lead.collectedAt)}</span>
                       <span>{lead.thumbtackStatus || lead.source || 'No source'}</span>
                     </div>
                     {lead.importedAt && (
