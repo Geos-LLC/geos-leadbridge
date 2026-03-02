@@ -117,16 +117,23 @@ export class CallConnectService {
       },
     });
 
-    // Auto-provision Sigcore workspace if not already done — required for CC to work
+    // Auto-provision Sigcore workspace if not already done — required for CC to work.
+    // Also self-heals shared tenants: if this account shares a workspace with another,
+    // ensureSigcoreProvisioned will re-provision a dedicated tenant and return true.
+    let reProvisioned = false;
     try {
-      await this.ensureSigcoreProvisioned(savedAccountId);
+      reProvisioned = await this.ensureSigcoreProvisioned(savedAccountId);
     } catch (err: any) {
       this.logger.warn(`[saveSettings] Auto-provision Sigcore workspace failed: ${err.message}`);
     }
 
-    // Push settings to Sigcore (best effort)
+    // Push settings to Sigcore (best effort).
+    // Always push — if re-provisioned, the new workspace needs settings from scratch.
     try {
       await this.pushSettingsToSigcore(savedAccountId, settings);
+      if (reProvisioned) {
+        this.logger.log(`[saveSettings] Re-pushed CC settings after shared-tenant re-provision for ${savedAccountId}`);
+      }
     } catch (err: any) {
       this.logger.warn(`Failed to push call-connect settings to Sigcore: ${err.message}`);
     }
@@ -146,16 +153,20 @@ export class CallConnectService {
   /**
    * Ensure a Sigcore tenant/workspace exists for this account.
    * Required for CC to resolve a valid businessId that Sigcore recognizes.
-   * Idempotent — skips if already provisioned.
+   * Idempotent — skips if already provisioned with a DEDICATED (non-shared) tenant.
+   * Returns true if re-provisioning occurred (caller should re-push settings).
    */
-  private async ensureSigcoreProvisioned(savedAccountId: string): Promise<void> {
+  private async ensureSigcoreProvisioned(savedAccountId: string): Promise<boolean> {
     const ns = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
       select: { sigcoreTenantId: true, sigcoreWorkspaceId: true },
     });
 
-    // Already provisioned — make sure sigcoreWorkspaceId is in sync
+    const oldTenantId = ns?.sigcoreTenantId || null;
+
+    // Already provisioned — check for shared tenants (from old auto-copy logic)
     if (ns?.sigcoreTenantId) {
+      // Back-fill sigcoreWorkspaceId if missing
       if (!ns.sigcoreWorkspaceId) {
         await this.prisma.notificationSettings.update({
           where: { savedAccountId },
@@ -163,14 +174,31 @@ export class CallConnectService {
         });
         this.logger.log(`[ensureSigcoreProvisioned] Back-filled sigcoreWorkspaceId=${ns.sigcoreTenantId} for ${savedAccountId}`);
       }
-      return;
+
+      // Check if this tenant is shared — each account MUST have its own workspace
+      // to avoid cross-account CC setting contamination.
+      const sharedCount = await this.prisma.notificationSettings.count({
+        where: {
+          sigcoreTenantId: ns.sigcoreTenantId,
+          NOT: { savedAccountId },
+        },
+      });
+
+      if (sharedCount === 0) {
+        return false; // Dedicated tenant — all good
+      }
+
+      this.logger.warn(
+        `[ensureSigcoreProvisioned] Account ${savedAccountId} shares tenantId ${ns.sigcoreTenantId} ` +
+        `with ${sharedCount} other account(s) — re-provisioning with dedicated tenant`,
+      );
     }
 
     // Need to provision — requires platform-level API key
     const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
     if (!platformKey) {
       this.logger.warn(`[ensureSigcoreProvisioned] No SIGCORE_API_KEY — cannot auto-provision for ${savedAccountId}`);
-      return;
+      return false;
     }
 
     const sigcoreUrl =
@@ -191,7 +219,7 @@ export class CallConnectService {
 
     if (!tenantId) {
       this.logger.warn(`[ensureSigcoreProvisioned] Provision response missing tenantId for ${savedAccountId}`);
-      return;
+      return false;
     }
 
     // Upsert notification settings with workspace + tenant IDs
@@ -214,6 +242,24 @@ export class CallConnectService {
     });
 
     this.logger.log(`[ensureSigcoreProvisioned] Auto-provisioned tenant ${tenantId} for account ${savedAccountId}`);
+
+    // Copy integrations from old tenant to new tenant (OpenPhone, etc.)
+    if (oldTenantId && oldTenantId !== tenantId) {
+      try {
+        await firstValueFrom(
+          this.httpService.post(
+            `${sigcoreUrl}/tenants/${tenantId}/copy-integrations`,
+            { fromTenantId: oldTenantId },
+            { headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey } },
+          ),
+        );
+        this.logger.log(`[ensureSigcoreProvisioned] Copied integrations from tenant ${oldTenantId} → ${tenantId}`);
+      } catch (err: any) {
+        this.logger.warn(`[ensureSigcoreProvisioned] Could not copy integrations: ${err.message}`);
+      }
+    }
+
+    return true; // Re-provisioned — caller should re-push settings
   }
 
   private buildHeaders(apiKey: string): Record<string, string> {
@@ -414,6 +460,24 @@ export class CallConnectService {
       where: { savedAccountId: params.savedAccountId },
     });
     if (!settings?.enabled) return;
+
+    // Self-heal shared tenants before anything else — ensures this account has
+    // its own dedicated Sigcore workspace so CC settings don't leak across accounts.
+    try {
+      const reProvisioned = await this.ensureSigcoreProvisioned(params.savedAccountId);
+      if (reProvisioned) {
+        // Re-push CC settings to the new dedicated workspace
+        const freshSettings = await this.prisma.callConnectSettings.findUnique({
+          where: { savedAccountId: params.savedAccountId },
+        });
+        if (freshSettings) {
+          await this.pushSettingsToSigcore(params.savedAccountId, freshSettings);
+          this.logger.log(`[triggerForLead] Re-pushed CC settings after shared-tenant re-provision for ${params.savedAccountId}`);
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`[triggerForLead] Shared-tenant self-heal failed: ${err.message}`);
+    }
 
     // Get API key from NotificationSettings — prefer account's own tenant key
     // so each account's Call Connect operates in its own isolated Sigcore workspace.
