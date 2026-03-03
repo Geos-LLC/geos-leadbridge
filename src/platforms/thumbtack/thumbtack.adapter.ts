@@ -59,10 +59,10 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   // OAuth & Connection Management
   // ==========================================
 
-  getAuthUrl(_userId: string, state: string, forceLogin = false): string {
+  getAuthUrl(_userId: string, state: string, forceLogin = false, callbackUrl?: string): string {
     const params = new URLSearchParams({
       client_id: this.clientId,
-      redirect_uri: this.redirectUri,
+      redirect_uri: callbackUrl || this.redirectUri,
       response_type: 'code',
       // Include openid email profile scopes to get ID token with user info
       scope: 'openid email profile supply::businesses.list supply::messages.read supply::messages.write supply::negotiations.read supply::users.read supply::webhooks.read supply::webhooks.write offline_access',
@@ -78,13 +78,13 @@ export class ThumbtackAdapter implements IPlatformAdapter {
     return `${this.authBaseUrl}/auth?${params.toString()}`;
   }
 
-  async handleCallback(code: string, _userId: string): Promise<PlatformCredentials> {
+  async handleCallback(code: string, _userId: string, callbackUrl?: string): Promise<PlatformCredentials> {
     try {
       // OAuth2 token endpoint requires form-urlencoded format
       const params = new URLSearchParams();
       params.append('grant_type', 'authorization_code');
       params.append('code', code);
-      params.append('redirect_uri', this.redirectUri);
+      params.append('redirect_uri', callbackUrl || this.redirectUri);
 
       // Thumbtack requires client_secret_basic authentication (credentials in header)
       const basicAuth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');

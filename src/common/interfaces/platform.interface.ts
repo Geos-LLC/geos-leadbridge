@@ -21,7 +21,7 @@ export interface IPlatformAdapter {
    * @param state - CSRF protection state parameter
    * @returns Authorization URL
    */
-  getAuthUrl(userId: string, state: string, forceLogin?: boolean): string;
+  getAuthUrl(userId: string, state: string, forceLogin?: boolean, callbackUrl?: string): string;
 
   /**
    * Handle OAuth callback and exchange code for tokens
@@ -29,7 +29,7 @@ export interface IPlatformAdapter {
    * @param userId - Internal user ID
    * @returns Platform credentials (access_token, refresh_token, etc.)
    */
-  handleCallback(code: string, userId: string): Promise<PlatformCredentials>;
+  handleCallback(code: string, userId: string, callbackUrl?: string): Promise<PlatformCredentials>;
 
   /**
    * Refresh expired access token
