@@ -1504,7 +1504,6 @@ export function Services() {
                           {ctFromPhone &&
                             !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctFromPhone) &&
                             !tenantPhones.some(tp => tp.phoneNumber === ctFromPhone) &&
-                            !poolPhones.some(p => p.phoneNumber === ctFromPhone) &&
                             ctFromPhone !== ctSigcoreFromPhone && (
                               <option value={ctFromPhone}>{ctFromPhone} (configured)</option>
                           )}
@@ -1532,15 +1531,6 @@ export function Services() {
                               })}
                             </optgroup>
                           )}
-                          {poolPhones.length > 0 && (
-                            <optgroup label="Pool Numbers (Shared)">
-                              {poolPhones.map(p => (
-                                <option key={p.id} value={p.phoneNumber} disabled={p.smsApproved === false}>
-                                  {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''}{p.smsApproved === false ? ' — NOT APPROVED' : ''}
-                                </option>
-                              ))}
-                            </optgroup>
-                          )}
                           <option value="__add_phone__">+ Add phone number</option>
                         </select>
                         <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
@@ -1551,12 +1541,6 @@ export function Services() {
                         Customer texting requires a dedicated number for consent compliance. Connect your own or buy one in{' '}
                         <button type="button" onClick={() => navigate('/phone-settings')} className="text-blue-500 hover:underline font-medium">Phone Settings</button>.
                       </p>
-                      {ctFromPhone && poolPhones.find(p => p.phoneNumber === ctFromPhone && p.smsApproved === false) && (
-                        <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
-                          <AlertCircle className="w-3 h-3 shrink-0" />
-                          This number is not A2P 10DLC approved — SMS will fail to deliver
-                        </p>
-                      )}
                       {ctFromPhone && ctOwnPhoneNumbers.find(p => p.phoneNumber === ctFromPhone && p.smsEnabled === false) && (
                         <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
                           <AlertCircle className="w-3 h-3 shrink-0" />
