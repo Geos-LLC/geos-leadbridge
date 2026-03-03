@@ -377,14 +377,16 @@ export function Dashboard() {
           <div className="order-2 lg:order-none space-y-6">
           <div className="flex items-center justify-between px-2">
             <h3 className="text-xl font-bold text-slate-900">Connected Platforms</h3>
-            <button
-              onClick={() => setConnectionModalOpen(true)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">New Account</span>
-              <span className="sm:hidden">Add</span>
-            </button>
+            {savedAccounts.length > 0 && (
+              <button
+                onClick={() => setConnectionModalOpen(true)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span className="hidden sm:inline">New Account</span>
+                <span className="sm:hidden">Add</span>
+              </button>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
