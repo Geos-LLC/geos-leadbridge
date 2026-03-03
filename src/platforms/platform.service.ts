@@ -15,8 +15,6 @@ import { NotificationsService } from '../notifications/notifications.service';
 export class PlatformService {
   private readonly logger = new Logger(PlatformService.name);
   private readonly encryptionKey: string;
-  // In-memory state storage (use Redis in production)
-  private stateToUserMap: Map<string, { userId: string; expires: number }> = new Map();
 
   constructor(
     private prisma: PrismaService,
@@ -30,54 +28,37 @@ export class PlatformService {
 
   /**
    * Get OAuth authorization URL
+   * State is an encrypted token containing userId + expiry — survives server restarts.
    */
   async getAuthUrl(userId: string, platformName: string, forceLogin = false): Promise<string> {
     const adapter = this.platformFactory.getAdapter(platformName);
-    const state = EncryptionUtil.generateSecureRandom(16);
 
-    // Store state -> userId mapping (expires in 10 minutes)
-    this.stateToUserMap.set(state, {
-      userId,
-      expires: Date.now() + 10 * 60 * 1000,
-    });
-
-    // Clean up expired states
-    this.cleanupExpiredStates();
+    // Encode userId + expiry into the state param itself (no in-memory Map needed)
+    const statePayload = JSON.stringify({ userId, exp: Date.now() + 10 * 60 * 1000 });
+    const state = encodeURIComponent(EncryptionUtil.encrypt(statePayload, this.encryptionKey));
 
     return adapter.getAuthUrl(userId, state, forceLogin);
   }
 
   /**
    * Get userId from OAuth state parameter
+   * Decrypts the state token — works even after server restarts/redeploys.
    */
   async getUserIdFromState(state: string): Promise<string | null> {
-    const entry = this.stateToUserMap.get(state);
+    try {
+      const decoded = decodeURIComponent(state);
+      const payload = JSON.parse(EncryptionUtil.decrypt(decoded, this.encryptionKey));
 
-    if (!entry) {
-      return null;
-    }
-
-    // Check if expired
-    if (Date.now() > entry.expires) {
-      this.stateToUserMap.delete(state);
-      return null;
-    }
-
-    // Remove state after use (one-time use)
-    this.stateToUserMap.delete(state);
-
-    return entry.userId;
-  }
-
-  /**
-   * Clean up expired OAuth states
-   */
-  private cleanupExpiredStates(): void {
-    const now = Date.now();
-    for (const [state, entry] of this.stateToUserMap.entries()) {
-      if (now > entry.expires) {
-        this.stateToUserMap.delete(state);
+      if (!payload.userId || !payload.exp) return null;
+      if (Date.now() > payload.exp) {
+        this.logger.warn('OAuth state expired');
+        return null;
       }
+
+      return payload.userId;
+    } catch (err) {
+      this.logger.error('Failed to decrypt OAuth state:', err.message);
+      return null;
     }
   }
 
@@ -208,16 +189,10 @@ export class PlatformService {
 
     await adapter.disconnect(userId);
 
-    await this.prisma.platform.update({
-      where: {
-        userId_platformName: {
-          userId,
-          platformName,
-        },
-      },
-      data: {
-        connected: false,
-      },
+    // Use updateMany to avoid P2025 when no Platform record exists (first-time users)
+    await this.prisma.platform.updateMany({
+      where: { userId, platformName },
+      data: { connected: false },
     });
   }
 
