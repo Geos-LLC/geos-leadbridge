@@ -1303,7 +1303,7 @@ export function Services() {
                               {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''}
                             </option>
                           ))}
-                          {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
+                          {ctSigcoreFromPhone && !poolPhones.some(p => p.phoneNumber === ctSigcoreFromPhone) && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
                             <option value={ctSigcoreFromPhone}>{ctSigcoreFromPhone} (Twilio)</option>
                           )}
                         </optgroup>
@@ -1539,7 +1539,9 @@ export function Services() {
               <div className="space-y-2">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Send from</label>
                 {(() => {
-                  const hasOwnNumbers = ctOwnPhoneNumbers.length > 0 || tenantPhones.length > 0 || !!ctSigcoreFromPhone;
+                  // Pool phones must not count as "own numbers" — consent compliance requires a dedicated/OpenPhone number
+                  const ctSigcoreIsPool = !!ctSigcoreFromPhone && poolPhones.some(p => p.phoneNumber === ctSigcoreFromPhone);
+                  const hasOwnNumbers = ctOwnPhoneNumbers.length > 0 || tenantPhones.length > 0 || (!!ctSigcoreFromPhone && !ctSigcoreIsPool);
                   if (!hasOwnNumbers) {
                     return (
                       <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
@@ -1574,14 +1576,14 @@ export function Services() {
                             ctFromPhone !== ctSigcoreFromPhone && (
                               <option value={ctFromPhone}>{ctFromPhone} (configured)</option>
                           )}
-                          {(tenantPhones.length > 0 || (ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone))) && (
+                          {(tenantPhones.length > 0 || (ctSigcoreFromPhone && !ctSigcoreIsPool && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone))) && (
                             <optgroup label="Dedicated Numbers">
                               {tenantPhones.map(tp => (
                                 <option key={tp.id} value={tp.phoneNumber}>
                                   {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''}
                                 </option>
                               ))}
-                              {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
+                              {ctSigcoreFromPhone && !ctSigcoreIsPool && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
                                 <option value={ctSigcoreFromPhone}>{ctSigcoreFromPhone} (Twilio)</option>
                               )}
                             </optgroup>
