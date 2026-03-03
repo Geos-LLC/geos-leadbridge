@@ -1050,7 +1050,11 @@ export function Services() {
     setExpandedCard(isExpanding ? card : null);
     if (isExpanding) {
       setTimeout(() => {
-        cardRefs.current[card]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const el = cardRefs.current[card];
+        if (!el) return;
+        const HEADER_OFFSET = 80;
+        const top = el.getBoundingClientRect().top + window.scrollY - HEADER_OFFSET;
+        window.scrollTo({ top, behavior: 'smooth' });
       }, 50);
     }
   }
