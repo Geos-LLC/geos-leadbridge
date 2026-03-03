@@ -201,4 +201,29 @@ export class AdminPhonePoolController {
     await this.phonePoolService.removeFromPool(req.user.id, phonePoolId);
     return { success: true, message: 'Phone removed from pool' };
   }
+
+  /**
+   * Convert a pool number to a tenant-dedicated number
+   */
+  @Post(':phonePoolId/convert-to-tenant')
+  async convertToTenant(
+    @Req() req: any,
+    @Param('phonePoolId') phonePoolId: string,
+    @Body() body: { userId: string },
+  ) {
+    const result = await this.phonePoolService.convertPoolToTenant(req.user.id, phonePoolId, body.userId);
+    return { success: true, data: result };
+  }
+
+  /**
+   * Convert a tenant-dedicated number back to the pool
+   */
+  @Post('convert-tenant-to-pool/:tenantPhoneId')
+  async convertTenantToPool(
+    @Req() req: any,
+    @Param('tenantPhoneId') tenantPhoneId: string,
+  ) {
+    const result = await this.phonePoolService.convertTenantToPool(req.user.id, tenantPhoneId);
+    return { success: true, data: result };
+  }
 }

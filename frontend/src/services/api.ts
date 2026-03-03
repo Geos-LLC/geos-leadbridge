@@ -1046,6 +1046,14 @@ export const adminApi = {
     const { data } = await api.get(`/v1/admin/tenant-numbers?${qp.toString()}`);
     return data.data;
   },
+  convertPoolToTenant: async (poolId: string, userId: string): Promise<any> => {
+    const { data } = await api.post(`/v1/admin/phone-pool/${poolId}/convert-to-tenant`, { userId });
+    return data.data;
+  },
+  convertTenantToPool: async (tenantPhoneId: string): Promise<any> => {
+    const { data } = await api.post(`/v1/admin/phone-pool/convert-tenant-to-pool/${tenantPhoneId}`);
+    return data.data;
+  },
 };
 
 // API Test / Webhook Simulation

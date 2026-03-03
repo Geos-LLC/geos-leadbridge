@@ -63,7 +63,7 @@ export function Layout() {
     if (path === '/settings') return 'Settings';
     if (path === '/pricing') return 'Pricing';
     if (path === '/admin') return 'Admin Dashboard';
-    if (path === '/admin/phone-pool') return 'Phone Pool';
+    if (path === '/admin/tenant-numbers') return 'Tenant Numbers';
     if (path === '/api-test') return 'API Test';
     if (path.startsWith('/admin/users/')) return 'User Details';
 
@@ -126,14 +126,6 @@ export function Layout() {
                 >
                   <Shield size={20} />
                   <span>Admin Dashboard</span>
-                </NavLink>
-                <NavLink
-                  to="/admin/phone-pool"
-                  className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  <Phone size={20} />
-                  <span>Phone Pool</span>
                 </NavLink>
                 <NavLink
                   to="/admin/tenant-numbers"

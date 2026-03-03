@@ -574,6 +574,104 @@ export class AdminPhonePoolService {
   }
 
   /**
+   * Convert a pool phone to a tenant-dedicated number
+   */
+  async convertPoolToTenant(adminId: string, phonePoolId: string, userId: string) {
+    const poolPhone = await this.prisma.phonePool.findUnique({ where: { id: phonePoolId } });
+    if (!poolPhone) throw new NotFoundException('Pool phone not found');
+    if (poolPhone.status === 'RELEASED') throw new BadRequestException('Phone has been released');
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    // Check no tenant number already exists with this phone
+    const existingTenant = await this.prisma.tenantPhoneNumber.findUnique({
+      where: { phoneNumber: poolPhone.phoneNumber },
+    });
+    if (existingTenant && existingTenant.status !== 'RELEASED') {
+      throw new BadRequestException('A tenant number with this phone already exists');
+    }
+
+    // Create tenant number
+    const tenantPhone = await this.prisma.tenantPhoneNumber.create({
+      data: {
+        userId,
+        phoneNumber: poolPhone.phoneNumber,
+        friendlyName: poolPhone.friendlyName,
+        areaCode: poolPhone.areaCode,
+        sigcoreAllocationId: poolPhone.sigcoreAllocationId,
+        status: 'ACTIVE',
+      },
+    });
+
+    // Remove pool assignments and mark as released
+    await this.prisma.phonePoolAssignment.deleteMany({ where: { phonePoolId } });
+    await this.prisma.phonePool.update({
+      where: { id: phonePoolId },
+      data: { status: 'RELEASED', releasedAt: new Date() },
+    });
+
+    await this.adminService.logAdminAction(adminId, 'CONVERT_POOL_TO_TENANT', userId, {
+      phoneNumber: poolPhone.phoneNumber,
+      phonePoolId,
+      tenantPhoneId: tenantPhone.id,
+    });
+
+    this.logger.log(`Converted pool phone ${poolPhone.phoneNumber} to tenant number for user ${user.email}`);
+    return tenantPhone;
+  }
+
+  /**
+   * Convert a tenant-dedicated number back to the pool
+   */
+  async convertTenantToPool(adminId: string, tenantPhoneId: string) {
+    const tenantPhone = await this.prisma.tenantPhoneNumber.findUnique({ where: { id: tenantPhoneId } });
+    if (!tenantPhone) throw new NotFoundException('Tenant phone not found');
+    if (tenantPhone.status !== 'ACTIVE') throw new BadRequestException('Only active tenant numbers can be moved to pool');
+
+    // Check no pool entry already exists with this phone
+    const existingPool = await this.prisma.phonePool.findUnique({
+      where: { phoneNumber: tenantPhone.phoneNumber },
+    });
+
+    let poolPhone;
+    if (existingPool) {
+      // Re-activate existing released pool entry
+      poolPhone = await this.prisma.phonePool.update({
+        where: { id: existingPool.id },
+        data: { status: 'AVAILABLE', releasedAt: null, friendlyName: tenantPhone.friendlyName },
+      });
+    } else {
+      poolPhone = await this.prisma.phonePool.create({
+        data: {
+          phoneNumber: tenantPhone.phoneNumber,
+          provider: 'twilio',
+          areaCode: tenantPhone.areaCode,
+          friendlyName: tenantPhone.friendlyName,
+          sigcoreAllocationId: tenantPhone.sigcoreAllocationId,
+          status: 'AVAILABLE',
+          smsApproved: false,
+        },
+      });
+    }
+
+    // Mark tenant number as released
+    await this.prisma.tenantPhoneNumber.update({
+      where: { id: tenantPhoneId },
+      data: { status: 'RELEASED', cancelledAt: new Date(), releasedAt: new Date() },
+    });
+
+    await this.adminService.logAdminAction(adminId, 'CONVERT_TENANT_TO_POOL', tenantPhone.userId, {
+      phoneNumber: tenantPhone.phoneNumber,
+      tenantPhoneId,
+      poolPhoneId: poolPhone.id,
+    });
+
+    this.logger.log(`Converted tenant phone ${tenantPhone.phoneNumber} to pool`);
+    return poolPhone;
+  }
+
+  /**
    * Extract area code from E.164 phone number
    */
   private extractAreaCode(phoneNumber: string): string | null {
