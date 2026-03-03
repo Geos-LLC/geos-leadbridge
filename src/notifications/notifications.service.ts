@@ -2406,7 +2406,7 @@ export class NotificationsService {
   /**
    * Fetch phone numbers from OpenPhone via Sigcore conversations endpoint
    */
-  private async fetchOpenPhoneNumbers(tenantApiKey: string): Promise<SigcorePhoneNumber[]> {
+  async fetchOpenPhoneNumbers(tenantApiKey: string): Promise<SigcorePhoneNumber[]> {
     const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
     // Use the dedicated phone-numbers endpoint so ALL configured numbers appear,
     // not just those with recent conversations (conversations?days=1 missed inactive numbers).

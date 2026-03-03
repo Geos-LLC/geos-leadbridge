@@ -155,6 +155,30 @@ export class AdminPhonePoolController {
     return { success: result.success, data: result, error: result.error };
   }
 
+  /**
+   * Get all OpenPhone numbers across tenants (informational)
+   * MUST be before parameterized routes
+   */
+  @Get('openphone-numbers')
+  async getOpenPhoneNumbers() {
+    const numbers = await this.phonePoolService.getAllOpenPhoneNumbers();
+    return { success: true, data: numbers };
+  }
+
+  /**
+   * Reassign a dedicated tenant number to a different user
+   * MUST be before parameterized :phonePoolId routes
+   */
+  @Patch('tenant/:tenantPhoneId/reassign')
+  async reassignTenantPhone(
+    @Req() req: any,
+    @Param('tenantPhoneId') tenantPhoneId: string,
+    @Body() body: { userId: string },
+  ) {
+    const result = await this.phonePoolService.reassignTenantPhone(req.user.id, tenantPhoneId, body.userId);
+    return { success: true, data: result };
+  }
+
   @Patch(':phonePoolId/sms-approved')
   async updateSmsApproved(
     @Param('phonePoolId') phonePoolId: string,

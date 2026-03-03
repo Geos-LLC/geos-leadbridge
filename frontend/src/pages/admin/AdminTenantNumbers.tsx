@@ -140,6 +140,18 @@ export default function AdminTenantNumbers() {
   const [searchingConvertUsers, setSearchingConvertUsers] = useState(false);
   const [converting, setConverting] = useState(false);
 
+  // ── Reassign modal (tenant → different user) ──
+  const [reassigningTenantId, setReassigningTenantId] = useState<string | null>(null);
+  const [reassigningTenantPhone, setReassigningTenantPhone] = useState('');
+  const [reassignUserSearch, setReassignUserSearch] = useState('');
+  const [reassignUserResults, setReassignUserResults] = useState<{ id: string; email: string; name: string | null }[]>([]);
+  const [searchingReassignUsers, setSearchingReassignUsers] = useState(false);
+  const [reassigning, setReassigning] = useState(false);
+
+  // ── OpenPhone numbers (informational) ──
+  const [openPhoneNumbers, setOpenPhoneNumbers] = useState<{ phoneNumber: string; friendlyName?: string; provider: string; userName: string | null; userEmail: string; accountName: string }[]>([]);
+  const [openPhoneLoading, setOpenPhoneLoading] = useState(false);
+
   // ── Init ──
   useEffect(() => {
     if (user?.role !== 'ADMIN') {
@@ -151,6 +163,7 @@ export default function AdminTenantNumbers() {
     loadPoolData();
     loadPoolConfig();
     checkTwilioHealth();
+    loadOpenPhoneNumbers();
   }, [user]);
 
   // ── Tenant data loading ──
@@ -224,6 +237,18 @@ export default function AdminTenantNumbers() {
       setTwilioHealth({ status: 'error', phoneCount: 0, message: 'Failed to check Twilio connection', checkedAt: new Date().toISOString() });
     } finally {
       setHealthChecking(false);
+    }
+  };
+
+  const loadOpenPhoneNumbers = async () => {
+    try {
+      setOpenPhoneLoading(true);
+      const numbers = await adminApi.getOpenPhoneNumbers();
+      setOpenPhoneNumbers(numbers);
+    } catch {
+      // Silent fail — informational only
+    } finally {
+      setOpenPhoneLoading(false);
     }
   };
 
@@ -464,6 +489,39 @@ export default function AdminTenantNumbers() {
     }
   };
 
+  // ── Reassign Operations ──
+
+  const searchReassignUsers = useCallback(async (query: string) => {
+    if (!query.trim()) { setReassignUserResults([]); return; }
+    try {
+      setSearchingReassignUsers(true);
+      const result = await adminApi.getPhonePoolUsers(query);
+      setReassignUserResults(result.data);
+    } catch { /* ignore */ } finally {
+      setSearchingReassignUsers(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => { if (reassigningTenantId) searchReassignUsers(reassignUserSearch); }, 300);
+    return () => clearTimeout(timer);
+  }, [reassignUserSearch, reassigningTenantId, searchReassignUsers]);
+
+  const handleReassignTenant = async (tenantPhoneId: string, userId: string) => {
+    if (reassigning) return;
+    setReassigning(true);
+    try {
+      await adminApi.reassignTenantPhone(tenantPhoneId, userId);
+      notify.success('Reassigned', 'Dedicated number reassigned to new user');
+      setReassigningTenantId(null);
+      loadTenantData();
+    } catch (error: any) {
+      notify.error('Error', error.response?.data?.message || 'Failed to reassign number');
+    } finally {
+      setReassigning(false);
+    }
+  };
+
   // ── Badge Renderers ──
 
   const tenantStatusBadge = (status: string) => {
@@ -639,6 +697,7 @@ export default function AdminTenantNumbers() {
                         <th className="px-5 py-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider">Provider</th>
                         <th className="px-5 py-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
                         <th className="px-5 py-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider">Purchased</th>
+                        <th className="px-5 py-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider w-20">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
@@ -650,6 +709,22 @@ export default function AdminTenantNumbers() {
                           <td className="px-5 py-3.5">{providerBadge(phone.notificationSettings?.sigcoreProvider)}</td>
                           <td className="px-5 py-3.5">{tenantStatusBadge(phone.status)}</td>
                           <td className="px-5 py-3.5 text-sm text-slate-500">{formatDate(phone.purchasedAt)}</td>
+                          <td className="px-5 py-3.5">
+                            {phone.status === 'ACTIVE' && (
+                              <button
+                                onClick={() => {
+                                  setReassigningTenantId(phone.id);
+                                  setReassigningTenantPhone(phone.phoneNumber);
+                                  setReassignUserSearch('');
+                                  setReassignUserResults([]);
+                                }}
+                                className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                                title="Reassign to different user"
+                              >
+                                <UserPlus size={14} />
+                              </button>
+                            )}
+                          </td>
                         </DraggableRow>
                       ))}
                     </tbody>
@@ -918,6 +993,74 @@ export default function AdminTenantNumbers() {
             </div>
           </div>
         </DroppableZone>
+
+        {/* ═══════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 3: OpenPhone Numbers (Informational)                       */}
+        {/* ═══════════════════════════════════════════════════════════════════ */}
+
+        <div className="space-y-4">
+          <h2 className="text-lg md:text-xl font-bold text-slate-900 flex items-center gap-2">
+            <Phone size={20} className="text-purple-600" /> OpenPhone Numbers
+            <span className="text-sm font-normal text-slate-500">({openPhoneNumbers.length})</span>
+            <span className="px-2 py-0.5 bg-purple-50 text-purple-600 text-[10px] font-bold rounded uppercase tracking-wider">Informational</span>
+          </h2>
+
+          <div className="rounded-2xl md:rounded-3xl bg-white border border-purple-100 shadow-sm overflow-hidden">
+            {openPhoneLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 size={20} className="animate-spin text-purple-600 mr-3" />
+                <span className="text-slate-500">Loading OpenPhone numbers...</span>
+              </div>
+            ) : openPhoneNumbers.length === 0 ? (
+              <div className="text-center py-12">
+                <p className="text-slate-500">No OpenPhone numbers connected by any tenant.</p>
+              </div>
+            ) : (
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-purple-100 bg-purple-50/50">
+                      <th className="px-5 py-3.5 text-left text-xs font-bold text-purple-700 uppercase tracking-wider">Phone Number</th>
+                      <th className="px-5 py-3.5 text-left text-xs font-bold text-purple-700 uppercase tracking-wider">Name</th>
+                      <th className="px-5 py-3.5 text-left text-xs font-bold text-purple-700 uppercase tracking-wider">User</th>
+                      <th className="px-5 py-3.5 text-left text-xs font-bold text-purple-700 uppercase tracking-wider">Account</th>
+                      <th className="px-5 py-3.5 text-left text-xs font-bold text-purple-700 uppercase tracking-wider">Provider</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-purple-50">
+                    {openPhoneNumbers.map((phone, idx) => (
+                      <tr key={`${phone.phoneNumber}-${idx}`} className="hover:bg-purple-50/30 transition-colors">
+                        <td className="px-5 py-3.5 font-mono text-sm font-bold text-slate-900">{formatPhone(phone.phoneNumber)}</td>
+                        <td className="px-5 py-3.5 text-sm text-slate-600">{phone.friendlyName || '—'}</td>
+                        <td className="px-5 py-3.5 text-sm text-slate-600">{phone.userEmail}</td>
+                        <td className="px-5 py-3.5 text-sm text-slate-600">{phone.accountName}</td>
+                        <td className="px-5 py-3.5">
+                          <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-[11px] font-bold">OpenPhone</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Mobile cards for OpenPhone */}
+            {!openPhoneLoading && openPhoneNumbers.length > 0 && (
+              <div className="md:hidden divide-y divide-purple-50">
+                {openPhoneNumbers.map((phone, idx) => (
+                  <div key={`${phone.phoneNumber}-${idx}`} className="p-4 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-sm font-bold text-slate-900">{formatPhone(phone.phoneNumber)}</span>
+                      <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-[10px] font-bold">OpenPhone</span>
+                    </div>
+                    <p className="text-xs text-slate-500">{phone.userEmail} · {phone.accountName}</p>
+                    {phone.friendlyName && <p className="text-xs text-slate-400">{phone.friendlyName}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* ── Drag Overlay ── */}
@@ -1017,6 +1160,46 @@ export default function AdminTenantNumbers() {
                     </button>
                   ))
                 ) : convertUserSearch.trim() ? (
+                  <p className="text-center py-8 text-slate-500">No users found</p>
+                ) : (
+                  <p className="text-center py-8 text-slate-500">Type to search for users</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reassign Tenant Phone Modal ── */}
+      {reassigningTenantId && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setReassigningTenantId(null)}>
+          <div className="bg-white rounded-2xl md:rounded-3xl p-4 md:p-8 max-w-lg w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-slate-900">Reassign Dedicated Number</h3>
+              <button className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all" onClick={() => setReassigningTenantId(null)}><X size={18} /></button>
+            </div>
+            <p className="text-sm text-slate-600 mb-4">
+              Reassign <span className="font-mono font-bold">{formatPhone(reassigningTenantPhone)}</span> to a different user:
+            </p>
+            <div className="space-y-4">
+              <div className="relative flex items-center">
+                <Search size={16} className="absolute left-4 text-slate-400" />
+                <input type="text" placeholder="Search by email or name..." value={reassignUserSearch} onChange={e => setReassignUserSearch(e.target.value)} autoFocus className="w-full pl-11 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all" />
+              </div>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {searchingReassignUsers ? (
+                  <div className="flex items-center justify-center py-8"><Loader2 size={20} className="animate-spin text-blue-600" /></div>
+                ) : reassignUserResults.length > 0 ? (
+                  reassignUserResults.map(u => (
+                    <button key={u.id} className="w-full flex items-center justify-between p-4 rounded-xl bg-slate-50 hover:bg-slate-100 transition-all disabled:opacity-50" onClick={() => handleReassignTenant(reassigningTenantId, u.id)} disabled={reassigning}>
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium text-slate-900">{u.email}</span>
+                        {u.name && <span className="text-sm text-slate-500">{u.name}</span>}
+                      </div>
+                      {reassigning ? <Loader2 size={16} className="animate-spin text-blue-600" /> : <UserPlus size={16} className="text-blue-600" />}
+                    </button>
+                  ))
+                ) : reassignUserSearch.trim() ? (
                   <p className="text-center py-8 text-slate-500">No users found</p>
                 ) : (
                   <p className="text-center py-8 text-slate-500">Type to search for users</p>

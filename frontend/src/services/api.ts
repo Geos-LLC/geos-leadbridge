@@ -867,6 +867,19 @@ export const usersApi = {
     const { data } = await api.patch('/v1/users/me', updates);
     return data;
   },
+  claimPoolAsDedicated: async (phonePoolId: string): Promise<{ success: boolean; tenantPhone: TenantPhoneNumber }> => {
+    const { data } = await api.post(`/v1/users/me/claim-dedicated/${phonePoolId}`);
+    return data;
+  },
+  getAllPhoneOptions: async (): Promise<{
+    success: boolean;
+    dedicated: { id: string; phoneNumber: string; friendlyName: string | null; provider: string; type: 'dedicated' }[];
+    pool: { id: string; phoneNumber: string; provider: string; friendlyName: string | null; smsApproved: boolean }[];
+    openphone: { id: string; phoneNumber: string; friendlyName?: string; provider: string }[];
+  }> => {
+    const { data } = await api.get('/v1/users/me/phone-options');
+    return data;
+  },
 };
 
 // Admin API
@@ -1052,6 +1065,14 @@ export const adminApi = {
   },
   convertTenantToPool: async (tenantPhoneId: string): Promise<any> => {
     const { data } = await api.post(`/v1/admin/phone-pool/convert-tenant-to-pool/${tenantPhoneId}`);
+    return data.data;
+  },
+  reassignTenantPhone: async (tenantPhoneId: string, userId: string): Promise<any> => {
+    const { data } = await api.patch(`/v1/admin/phone-pool/tenant/${tenantPhoneId}/reassign`, { userId });
+    return data.data;
+  },
+  getOpenPhoneNumbers: async (): Promise<{ phoneNumber: string; friendlyName?: string; provider: string; userName: string | null; userEmail: string; accountName: string }[]> => {
+    const { data } = await api.get('/v1/admin/phone-pool/openphone-numbers');
     return data.data;
   },
 };

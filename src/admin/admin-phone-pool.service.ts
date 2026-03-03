@@ -4,6 +4,7 @@ import Stripe from 'stripe';
 import { PrismaService } from '../common/utils/prisma.service';
 import { SigcoreService } from '../sigcore/sigcore.service';
 import { AdminService } from './admin.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PhonePoolStatus } from '../../generated/prisma';
 
 @Injectable()
@@ -15,6 +16,7 @@ export class AdminPhonePoolService {
     private sigcoreService: SigcoreService,
     private adminService: AdminService,
     private configService: ConfigService,
+    private notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -669,6 +671,86 @@ export class AdminPhonePoolService {
 
     this.logger.log(`Converted tenant phone ${tenantPhone.phoneNumber} to pool`);
     return poolPhone;
+  }
+
+  /**
+   * Reassign a dedicated tenant number to a different user
+   */
+  async reassignTenantPhone(adminId: string, tenantPhoneId: string, newUserId: string) {
+    const tenantPhone = await this.prisma.tenantPhoneNumber.findUnique({ where: { id: tenantPhoneId } });
+    if (!tenantPhone) throw new NotFoundException('Tenant phone not found');
+    if (tenantPhone.status !== 'ACTIVE') throw new BadRequestException('Only active tenant numbers can be reassigned');
+
+    const newUser = await this.prisma.user.findUnique({ where: { id: newUserId } });
+    if (!newUser) throw new NotFoundException('User not found');
+
+    const updated = await this.prisma.tenantPhoneNumber.update({
+      where: { id: tenantPhoneId },
+      data: { userId: newUserId },
+      include: { user: { select: { id: true, email: true, name: true } } },
+    });
+
+    await this.adminService.logAdminAction(adminId, 'REASSIGN_TENANT_PHONE', newUserId, {
+      phoneNumber: tenantPhone.phoneNumber,
+      tenantPhoneId,
+      previousUserId: tenantPhone.userId,
+    });
+
+    this.logger.log(`Reassigned tenant phone ${tenantPhone.phoneNumber} from user ${tenantPhone.userId} to ${newUser.email}`);
+    return updated;
+  }
+
+  /**
+   * Get all OpenPhone numbers across all tenants (informational)
+   */
+  async getAllOpenPhoneNumbers() {
+    const settings = await this.prisma.notificationSettings.findMany({
+      where: {
+        sigcoreProvider: 'openphone',
+        sigcoreTenantId: { not: null },
+      },
+      include: {
+        savedAccount: {
+          include: {
+            user: { select: { id: true, email: true, name: true } },
+          },
+        },
+      },
+    });
+
+    const results: {
+      phoneNumber: string;
+      friendlyName?: string;
+      provider: string;
+      userName: string | null;
+      userEmail: string;
+      accountName: string;
+    }[] = [];
+
+    const seenKeys = new Set<string>();
+    for (const ns of settings) {
+      const apiKey = ns.sigcoreTenantId!;
+      if (seenKeys.has(apiKey)) continue;
+      seenKeys.add(apiKey);
+
+      try {
+        const numbers = await this.notificationsService.fetchOpenPhoneNumbers(apiKey);
+        for (const num of numbers) {
+          results.push({
+            phoneNumber: num.phoneNumber,
+            friendlyName: num.friendlyName,
+            provider: 'openphone',
+            userName: ns.savedAccount?.user?.name || null,
+            userEmail: ns.savedAccount?.user?.email || 'Unknown',
+            accountName: ns.savedAccount?.businessName || 'Unknown',
+          });
+        }
+      } catch (err: any) {
+        this.logger.warn(`Failed to fetch OpenPhone numbers for tenant ${apiKey}: ${err.message}`);
+      }
+    }
+
+    return results;
   }
 
   /**
