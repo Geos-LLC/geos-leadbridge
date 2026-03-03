@@ -319,14 +319,14 @@ export class AdminPhonePoolService {
       });
     }
 
-    // Create assignment (phone stays AVAILABLE for other assignments)
+    // Create assignment and mark phone as ASSIGNED
     await this.prisma.phonePoolAssignment.create({
       data: { phonePoolId, userId },
     });
 
-    // Return the phone with all assignments
-    const updated = await this.prisma.phonePool.findUnique({
+    const updated = await this.prisma.phonePool.update({
       where: { id: phonePoolId },
+      data: { status: 'ASSIGNED' },
       include: {
         assignments: {
           include: { user: { select: { id: true, email: true, name: true } } },
@@ -375,9 +375,10 @@ export class AdminPhonePoolService {
       await this.prisma.phonePoolAssignment.createMany({ data: newAssignments });
     }
 
-    // Return the phone with all assignments
-    const updated = await this.prisma.phonePool.findUnique({
+    // Mark as ASSIGNED and return with all assignments
+    const updated = await this.prisma.phonePool.update({
       where: { id: phonePoolId },
+      data: { status: 'ASSIGNED' },
       include: {
         assignments: {
           include: { user: { select: { id: true, email: true, name: true } } },
@@ -415,13 +416,20 @@ export class AdminPhonePoolService {
       where: { id: assignment.id },
     });
 
+    // If no assignments remain, reset status to AVAILABLE
+    const remaining = await this.prisma.phonePoolAssignment.count({ where: { phonePoolId } });
+    const updated = await this.prisma.phonePool.update({
+      where: { id: phonePoolId },
+      data: { status: remaining === 0 ? 'AVAILABLE' : 'ASSIGNED' },
+    });
+
     await this.adminService.logAdminAction(adminId, 'UNASSIGN_POOL_PHONE', userId, {
       phoneNumber: phone.phoneNumber,
       phonePoolId,
     });
 
     this.logger.log(`Unassigned pool phone ${phone.phoneNumber} from user ${userId}`);
-    return phone;
+    return updated;
   }
 
   /**
