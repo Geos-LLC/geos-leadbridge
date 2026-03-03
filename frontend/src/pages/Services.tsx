@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
@@ -40,11 +40,12 @@ interface ServiceCardProps {
   children?: React.ReactNode;
   iconBgColor?: string;
   iconTextColor?: string;
+  cardRef?: (el: HTMLDivElement | null) => void;
 }
 
-function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, expanded, onExpand, statusText, warningText, setupRequired, children, iconBgColor = 'bg-blue-50', iconTextColor = 'text-blue-600' }: ServiceCardProps) {
+function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, expanded, onExpand, statusText, warningText, setupRequired, children, iconBgColor = 'bg-blue-50', iconTextColor = 'text-blue-600', cardRef }: ServiceCardProps) {
   return (
-    <div className={`bg-white rounded-3xl border shadow-sm overflow-hidden transition-all ${comingSoon ? 'opacity-75 bg-slate-50/50 border-slate-100' : setupRequired ? 'border-orange-200 hover:border-orange-300' : 'border-slate-100 hover:border-blue-200'}`}>
+    <div ref={cardRef} className={`bg-white rounded-3xl border shadow-sm overflow-hidden transition-all ${comingSoon ? 'opacity-75 bg-slate-50/50 border-slate-100' : setupRequired ? 'border-orange-200 hover:border-orange-300' : 'border-slate-100 hover:border-blue-200'}`}>
       <div className="p-6 md:p-8">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
           <div className="flex gap-5">
@@ -162,6 +163,7 @@ export function Services() {
   // UI state
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [showPhoneSetupModal, setShowPhoneSetupModal] = useState(false);
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Template editor modal state
   const [templateEditor, setTemplateEditor] = useState<{
     mode: 'create' | 'service-edit';
@@ -1044,7 +1046,13 @@ export function Services() {
   }
 
   function toggleExpand(card: string) {
-    setExpandedCard(expandedCard === card ? null : card);
+    const isExpanding = expandedCard !== card;
+    setExpandedCard(isExpanding ? card : null);
+    if (isExpanding) {
+      setTimeout(() => {
+        cardRefs.current[card]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 50);
+    }
   }
 
   // --- Render ---
@@ -1136,6 +1144,7 @@ export function Services() {
             expanded={expandedCard === 'auto-reply'}
             onExpand={() => toggleExpand('auto-reply')}
             statusText={autoReplyEnabled ? 'Active' : undefined}
+            cardRef={el => { cardRefs.current['auto-reply'] = el; }}
           >
             {/* AI Optimization Banner — Coming Soon */}
             <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-6 text-white flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
@@ -1225,6 +1234,7 @@ export function Services() {
             statusText={!leadAlertsIncomplete && leadAlertRule?.enabled ? `Destination: ${leadAlertRule.toPhone}` : undefined}
             iconBgColor="bg-amber-50"
             iconTextColor="text-amber-600"
+            cardRef={el => { cardRefs.current['lead-alerts'] = el; }}
           >
             {/* SMS Alert Configuration */}
             <div className={`space-y-6${!(leadAlertRule?.enabled) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
@@ -1522,6 +1532,7 @@ export function Services() {
             statusText={ctEnabled ? 'Active — texting new leads automatically' : undefined}
             iconBgColor="bg-emerald-50"
             iconTextColor="text-emerald-600"
+            cardRef={el => { cardRefs.current['customer-texting'] = el; }}
           >
             <div className={`space-y-6${!ctEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
               {/* Phone number — only own/dedicated numbers (no shared pool — consent required) */}
@@ -1807,6 +1818,7 @@ export function Services() {
             statusText={ccEnabled ? 'Active — bridging calls for new leads' : undefined}
             iconBgColor="bg-violet-50"
             iconTextColor="text-violet-600"
+            cardRef={el => { cardRefs.current['call-connect'] = el; }}
           >
             <div className={`space-y-6${!ccEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
             {/* Unsaved changes banner */}
