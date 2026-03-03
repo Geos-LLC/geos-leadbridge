@@ -491,12 +491,19 @@ export class AdminService {
         });
         originProvider = poolEntry?.provider || null;
 
+        // Use origin provider as fallback when notificationSettings has no provider set
+        const resolvedProvider = notificationSettings?.sigcoreProvider || originProvider || null;
+
         const { user, ...rest } = phone;
         return {
           ...rest,
           user,
           savedAccount,
-          notificationSettings: notificationSettings || { sigcoreProvider: originProvider, sigcoreFromPhone: null, senderMode: null },
+          notificationSettings: {
+            sigcoreProvider: resolvedProvider,
+            sigcoreFromPhone: notificationSettings?.sigcoreFromPhone || null,
+            senderMode: notificationSettings?.senderMode || null,
+          },
         };
       }),
     );
