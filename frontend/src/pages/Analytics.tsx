@@ -28,6 +28,7 @@ import { analyticsApi, thumbtackApi, type AnalyticsData } from '../services/api'
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
+import NoAccountsOverlay from '../components/NoAccountsOverlay';
 import { notify } from '../store/notificationStore';
 
 export function Analytics() {
@@ -230,6 +231,7 @@ export function Analytics() {
 
   return (
     <div className="p-6 lg:p-10 max-w-7xl mx-auto space-y-10">
+      {savedAccounts.length === 0 && useAuthStore.getState().user?.role !== 'ADMIN' && <NoAccountsOverlay />}
       {/* Updating indicator */}
       {isUpdating && (
         <div className="fixed top-0 left-0 right-0 h-1 bg-blue-600 z-50 animate-pulse" />

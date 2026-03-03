@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Plus, Pencil, Trash2, Loader2, Save, X, Zap, Clock, Play, Pause, ChevronDown, FileText, Phone, Moon, Upload, Music, MessageSquare } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { automationApi, thumbtackApi, templatesApi, callConnectApi, notificationsApi } from '../services/api';
+import NoAccountsOverlay from '../components/NoAccountsOverlay';
 import type { AutomationRule, SavedAccount, MessageTemplate, CallConnectMode, AgentStrategy } from '../types';
 
 // Available variables for templates
@@ -418,27 +419,6 @@ export function AutomationSettings() {
   }
 
   // Show message if no accounts or templates
-  if (accounts.length === 0) {
-    return (
-      <div className="automation-settings">
-        <div className="settings-header">
-          <button className="btn-icon" onClick={() => navigate(-1)}>
-            <ArrowLeft size={20} />
-          </button>
-          <h1>
-            <Zap size={24} />
-            Automations
-          </h1>
-        </div>
-        <div className="empty-state">
-          <p>You need to connect a Thumbtack account before creating automations.</p>
-          <button className="btn btn-primary" onClick={() => navigate('/')}>
-            Go to Dashboard
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   if (templates.length === 0 && !showTemplateModal) {
     return (
@@ -533,6 +513,7 @@ export function AutomationSettings() {
 
   return (
     <div className="automation-settings">
+      {accounts.length === 0 && <NoAccountsOverlay />}
       <div className="settings-header">
         <button className="btn-icon" onClick={() => navigate(-1)}>
           <ArrowLeft size={20} />

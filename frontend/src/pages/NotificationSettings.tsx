@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Bell, Loader2, X, ChevronDown, Send, Phone, MessageSquare, AlertCircle, CheckCircle, Plus, Edit2, Trash2, Zap, Save } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { notificationsApi, thumbtackApi, usersApi, type CreateNotificationRuleDto, type UpdateNotificationRuleDto } from '../services/api';
+import NoAccountsOverlay from '../components/NoAccountsOverlay';
 import type { NotificationRule, SavedAccount } from '../types';
 
 // Available variables for SMS template
@@ -382,30 +383,9 @@ export function NotificationSettings() {
     );
   }
 
-  if (accounts.length === 0) {
-    return (
-      <div className="notification-settings">
-        <div className="settings-header">
-          <button className="btn-icon" onClick={() => navigate(-1)}>
-            <ArrowLeft size={20} />
-          </button>
-          <h1>
-            <Bell size={24} />
-            SMS Alerts
-          </h1>
-        </div>
-        <div className="empty-state">
-          <p>You need to connect a Thumbtack account before setting up alerts.</p>
-          <button className="btn btn-primary" onClick={() => navigate('/')}>
-            Go to Dashboard
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="notification-settings">
+      {accounts.length === 0 && <NoAccountsOverlay />}
       <div className="settings-header">
         <button className="btn-icon" onClick={() => navigate(-1)}>
           <ArrowLeft size={20} />
