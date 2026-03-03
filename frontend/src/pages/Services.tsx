@@ -1645,14 +1645,14 @@ export function Services() {
                                 <Phone className="w-3.5 h-3.5" />
                               </div>
                               <div className="flex-1">
-                                <p className="font-semibold text-slate-900 text-xs">Option 2 — OpenPhone</p>
-                                <p className="text-xs text-slate-500 mt-1 leading-relaxed">Connect your existing OpenPhone workspace. Your numbers stay in OpenPhone.</p>
+                                <p className="font-semibold text-slate-900 text-xs">Option 2 — Bring Your Own Phone</p>
+                                <p className="text-xs text-slate-500 mt-1 leading-relaxed">Connect your Quo, OpenPhone, or other provider. Your numbers stay in your account.</p>
                                 <button
                                   type="button"
                                   onClick={() => { setShowOpenPhoneModal(true); }}
                                   className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
                                 >
-                                  Connect OpenPhone →
+                                  Connect your phone →
                                 </button>
                               </div>
                             </div>
@@ -2398,8 +2398,8 @@ export function Services() {
                 <div className="flex items-start gap-3">
                   <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5"><Phone className="w-4 h-4" /></div>
                   <div>
-                    <p className="font-semibold text-slate-900 text-sm">Option 2 — OpenPhone</p>
-                    <p className="text-xs text-slate-500 mt-1">Connect your existing OpenPhone workspace.</p>
+                    <p className="font-semibold text-slate-900 text-sm">Option 2 — Bring Your Own Phone</p>
+                    <p className="text-xs text-slate-500 mt-1">Connect your Quo, OpenPhone, or other provider.</p>
                   </div>
                 </div>
               </div>
@@ -2425,12 +2425,9 @@ export function Services() {
             <button onClick={() => setShowOpenPhoneModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors">
               <X className="w-5 h-5" />
             </button>
-            <h3 className="text-xl font-bold text-slate-900 mb-2">Connect OpenPhone</h3>
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Bring Your Own Phone</h3>
             <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-              Enter your OpenPhone API key to use your own phone numbers for customer texting.{' '}
-              <a href="https://app.openphone.com/settings/api" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline inline-flex items-center gap-1">
-                Get your API key <ExternalLink size={11} />
-              </a>
+              Enter your Quo, OpenPhone, or compatible provider API key to use your own phone numbers for customer texting.
             </p>
             {opConnectError && (
               <div className="mb-4 bg-red-50 border border-red-100 rounded-xl p-3 flex items-center gap-2 text-red-600 text-sm">
