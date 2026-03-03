@@ -46,24 +46,30 @@ export class PlatformService {
 
   /**
    * Get userId from OAuth state parameter
+   * Supports both in-memory Map (local flows) and encrypted state (cross-server flows from staging)
    */
   async getUserIdFromState(state: string): Promise<string | null> {
+    // Try in-memory Map first (for locally-initiated flows)
     const entry = this.stateToUserMap.get(state);
-
-    if (!entry) {
-      return null;
-    }
-
-    // Check if expired
-    if (Date.now() > entry.expires) {
+    if (entry) {
+      if (Date.now() > entry.expires) {
+        this.stateToUserMap.delete(state);
+        return null;
+      }
       this.stateToUserMap.delete(state);
-      return null;
+      return entry.userId;
     }
 
-    // Remove state after use (one-time use)
-    this.stateToUserMap.delete(state);
-
-    return entry.userId;
+    // Fallback: try decrypting encrypted state (for cross-server flows, e.g. staging → production callback)
+    try {
+      const decoded = decodeURIComponent(state);
+      const payload = JSON.parse(EncryptionUtil.decrypt(decoded, this.encryptionKey));
+      if (!payload.userId || !payload.exp) return null;
+      if (Date.now() > payload.exp) return null;
+      return payload.userId;
+    } catch {
+      return null;
+    }
   }
 
   /**
