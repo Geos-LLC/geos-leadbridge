@@ -11,7 +11,6 @@ import {
   Delete,
   Query,
   UseGuards,
-  Req,
   Res,
   Body,
   Param,
@@ -21,7 +20,7 @@ import {
   Header,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -47,18 +46,6 @@ export class ThumbtackController {
     const rawUrl = this.configService.get<string>('frontendUrl') || 'http://localhost:5173';
     this.frontendUrl = rawUrl.trim().replace(/\/+$/, '');
     console.log('[ThumbtackController] frontendUrl configured as:', this.frontendUrl);
-  }
-
-  /**
-   * Derive the OAuth callback URL from the incoming request.
-   * Handles reverse proxies (Railway, etc.) via X-Forwarded-* headers
-   * so the redirect_uri always matches the actual deployment.
-   */
-  private getCallbackUrl(req: Request): string {
-    const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() || req.protocol || 'https';
-    const host = (req.headers['x-forwarded-host'] as string) || req.get('host') || 'localhost:3000';
-    // Global prefix is "api" (set in main.ts), so callback path is /api/v1/...
-    return `${proto}://${host}/api/v1/thumbtack/auth/callback`;
   }
 
   /**
@@ -182,10 +169,8 @@ export class ThumbtackController {
   // ==========================================
 
   @Get('auth/url')
-  async getAuthUrl(@CurrentUser() user: any, @Query('forceLogin') forceLogin?: string, @Req() req?: Request) {
-    const callbackUrl = req ? this.getCallbackUrl(req) : undefined;
-    console.log('[ThumbtackController] Dynamic callbackUrl:', callbackUrl);
-    const authUrl = await this.platformService.getAuthUrl(user.id, PlatformName.THUMBTACK, forceLogin === 'true', callbackUrl);
+  async getAuthUrl(@CurrentUser() user: any, @Query('forceLogin') forceLogin?: string) {
+    const authUrl = await this.platformService.getAuthUrl(user.id, PlatformName.THUMBTACK, forceLogin === 'true');
     return { authUrl };
   }
 
@@ -196,7 +181,6 @@ export class ThumbtackController {
     @Query('state') state: string,
     @Query('error') error: string,
     @Query('error_description') errorDescription: string,
-    @Req() req: Request,
     @Res() res: Response,
   ) {
     // Handle OAuth errors - redirect to frontend with error
@@ -220,10 +204,8 @@ export class ThumbtackController {
         return res.redirect(`${this.frontendUrl}/dashboard?error=invalid_state&error_description=OAuth state expired or invalid. Please try connecting again.`);
       }
 
-      // Exchange code for tokens — use the dynamic callback URL so the redirect_uri matches
-      const callbackUrl = this.getCallbackUrl(req);
-      console.log('[ThumbtackController] Callback exchange using callbackUrl:', callbackUrl);
-      await this.platformService.handleCallback(userId, PlatformName.THUMBTACK, code, callbackUrl);
+      // Exchange code for tokens
+      await this.platformService.handleCallback(userId, PlatformName.THUMBTACK, code);
 
       // Auto-setup webhooks for all businesses
       const { skippedAlreadyConnected, webhookErrors } = await this.autoSetupWebhooks(userId);
