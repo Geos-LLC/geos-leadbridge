@@ -1215,31 +1215,42 @@ export function Services() {
                       {alertFromPhone &&
                         !poolPhones.some(p => p.phoneNumber === alertFromPhone) &&
                         !ctOwnPhoneNumbers.some(p => p.phoneNumber === alertFromPhone) &&
+                        !tenantPhones.some(tp => tp.phoneNumber === alertFromPhone) &&
                         alertFromPhone !== ctSigcoreFromPhone && (
                           <option value={alertFromPhone}>{alertFromPhone} (configured)</option>
                       )}
-                      {poolPhones.map(p => (
-                        <option key={p.id} value={p.phoneNumber} disabled={p.smsApproved === false}>
-                          {p.phoneNumber} (LeadBridge shared){p.smsApproved === false ? ' — NOT A2P APPROVED' : ''}
-                        </option>
-                      ))}
-                      {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).map(tp => (
-                        <option key={tp.id} value={tp.phoneNumber}>
-                          {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''} (Dedicated)
-                        </option>
-                      ))}
-                      {ctOwnPhoneNumbers.filter(p => p.provider !== 'openphone' && !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => {
-                        const smsOk = p.smsEnabled !== false;
-                        return (
-                          <option key={p.id} value={p.phoneNumber} disabled={!smsOk}>
-                            {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider}){!smsOk ? ' — SMS NOT ENABLED' : ''}
-                          </option>
-                        );
-                      })}
-                      {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
-                        <option value={ctSigcoreFromPhone}>
-                          {ctSigcoreFromPhone} (Twilio · Dedicated)
-                        </option>
+                      {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).length > 0 && (
+                        <optgroup label="Dedicated Numbers">
+                          {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).map(tp => (
+                            <option key={tp.id} value={tp.phoneNumber}>
+                              {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''}
+                            </option>
+                          ))}
+                          {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
+                            <option value={ctSigcoreFromPhone}>{ctSigcoreFromPhone} (Twilio)</option>
+                          )}
+                        </optgroup>
+                      )}
+                      {poolPhones.length > 0 && (
+                        <optgroup label="Pool Numbers">
+                          {poolPhones.map(p => (
+                            <option key={p.id} value={p.phoneNumber} disabled={p.smsApproved === false}>
+                              {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''}{p.smsApproved === false ? ' — NOT A2P APPROVED' : ''}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).length > 0 && (
+                        <optgroup label="OpenPhone Numbers">
+                          {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => {
+                            const smsOk = p.smsEnabled !== false;
+                            return (
+                              <option key={p.id} value={p.phoneNumber} disabled={!smsOk}>
+                                {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''}{!smsOk ? ' — SMS NOT ENABLED' : ''}
+                              </option>
+                            );
+                          })}
+                        </optgroup>
                       )}
                     </select>
                     <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
@@ -1472,29 +1483,39 @@ export function Services() {
                             ctFromPhone !== ctSigcoreFromPhone && (
                               <option value={ctFromPhone}>{ctFromPhone} (configured)</option>
                           )}
-                          {tenantPhones.map(tp => (
-                            <option key={tp.id} value={tp.phoneNumber}>
-                              {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''} (Dedicated)
-                            </option>
-                          ))}
-                          {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => {
-                            const smsOk = p.smsEnabled !== false;
-                            return (
-                              <option key={p.id} value={p.phoneNumber} disabled={!smsOk}>
-                                {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider === 'openphone' ? 'OpenPhone' : p.provider}){!smsOk ? ' — SMS NOT ENABLED' : ''}
-                              </option>
-                            );
-                          })}
-                          {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
-                            <option value={ctSigcoreFromPhone}>
-                              {ctSigcoreFromPhone} (Twilio · Dedicated)
-                            </option>
+                          {(tenantPhones.length > 0 || (ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone))) && (
+                            <optgroup label="Dedicated Numbers">
+                              {tenantPhones.map(tp => (
+                                <option key={tp.id} value={tp.phoneNumber}>
+                                  {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''}
+                                </option>
+                              ))}
+                              {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
+                                <option value={ctSigcoreFromPhone}>{ctSigcoreFromPhone} (Twilio)</option>
+                              )}
+                            </optgroup>
                           )}
-                          {poolPhones.map(p => (
-                            <option key={p.id} value={p.phoneNumber} disabled={p.smsApproved === false}>
-                              {p.phoneNumber} (Shared){p.smsApproved === false ? ' — SMS NOT APPROVED' : ' — SMS Approved'}
-                            </option>
-                          ))}
+                          {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).length > 0 && (
+                            <optgroup label="OpenPhone Numbers">
+                              {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => {
+                                const smsOk = p.smsEnabled !== false;
+                                return (
+                                  <option key={p.id} value={p.phoneNumber} disabled={!smsOk}>
+                                    {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''}{!smsOk ? ' — SMS NOT ENABLED' : ''}
+                                  </option>
+                                );
+                              })}
+                            </optgroup>
+                          )}
+                          {poolPhones.length > 0 && (
+                            <optgroup label="Pool Numbers (Shared)">
+                              {poolPhones.map(p => (
+                                <option key={p.id} value={p.phoneNumber} disabled={p.smsApproved === false}>
+                                  {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''}{p.smsApproved === false ? ' — NOT APPROVED' : ''}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
                           <option value="__add_phone__">+ Add phone number</option>
                         </select>
                         <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
@@ -1793,16 +1814,24 @@ export function Services() {
                     {ccBotNumber && !poolPhones.some(p => p.phoneNumber === ccBotNumber) && !tenantPhones.some(tp => tp.phoneNumber === ccBotNumber) && (
                       <option value={ccBotNumber}>{ccBotNumber} (configured)</option>
                     )}
-                    {poolPhones.map(p => (
-                      <option key={p.id} value={p.phoneNumber}>
-                        {p.phoneNumber} (LeadBridge){p.smsApproved === false ? ' — SMS NOT APPROVED' : ''}
-                      </option>
-                    ))}
-                    {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).map(tp => (
-                      <option key={tp.id} value={tp.phoneNumber}>
-                        {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''} (Dedicated)
-                      </option>
-                    ))}
+                    {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).length > 0 && (
+                      <optgroup label="Dedicated Numbers">
+                        {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).map(tp => (
+                          <option key={tp.id} value={tp.phoneNumber}>
+                            {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {poolPhones.length > 0 && (
+                      <optgroup label="Pool Numbers">
+                        {poolPhones.map(p => (
+                          <option key={p.id} value={p.phoneNumber}>
+                            {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''}{p.smsApproved === false ? ' — NOT APPROVED' : ''}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                   <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
                     <ChevronDown className="w-4 h-4" />

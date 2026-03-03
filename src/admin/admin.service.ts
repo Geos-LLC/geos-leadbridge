@@ -441,7 +441,9 @@ export class AdminService {
     const statusFilter = query.status || undefined;
 
     const where: any = {};
+    // Hide RELEASED tenant numbers by default (they've been moved back to pool)
     if (statusFilter) where.status = statusFilter;
+    else where.status = { not: 'RELEASED' };
     if (search) {
       where.OR = [
         { phoneNumber: { contains: search } },
