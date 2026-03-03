@@ -32,7 +32,9 @@ export class AdminPhonePoolService {
     const { status, areaCode, search, offset = 0, limit = 50 } = query;
 
     const where: any = {};
+    // When no status filter is specified, hide RELEASED numbers (they're defunct)
     if (status) where.status = status;
+    else where.status = { not: 'RELEASED' };
     if (areaCode) where.areaCode = areaCode;
     if (search) {
       where.OR = [
@@ -177,24 +179,22 @@ export class AdminPhonePoolService {
     const result = await this.sigcoreService.adminDisconnectProvider(provider);
 
     if (result.success) {
-      // Delete all assignments for phones from this provider
-      const phonesToRelease = await this.prisma.phonePool.findMany({
-        where: { provider, status: { not: 'RELEASED' } },
+      // Delete all assignments and pool records for this provider
+      const phonesToDelete = await this.prisma.phonePool.findMany({
+        where: { provider },
         select: { id: true },
       });
-      if (phonesToRelease.length > 0) {
+      if (phonesToDelete.length > 0) {
         await this.prisma.phonePoolAssignment.deleteMany({
-          where: { phonePoolId: { in: phonesToRelease.map(p => p.id) } },
+          where: { phonePoolId: { in: phonesToDelete.map(p => p.id) } },
+        });
+        await this.prisma.phonePool.deleteMany({
+          where: { id: { in: phonesToDelete.map(p => p.id) } },
         });
       }
-      // Mark pool phones from this provider as RELEASED
-      await this.prisma.phonePool.updateMany({
-        where: { provider, status: { not: 'RELEASED' } },
-        data: { status: 'RELEASED', releasedAt: new Date() },
-      });
 
-      await this.adminService.logAdminAction(adminId, 'DISCONNECT_PROVIDER', null, { provider });
-      this.logger.log(`Admin ${adminId} disconnected ${provider}`);
+      await this.adminService.logAdminAction(adminId, 'DISCONNECT_PROVIDER', null, { provider, deletedNumbers: phonesToDelete.length });
+      this.logger.log(`Admin ${adminId} disconnected ${provider}, deleted ${phonesToDelete.length} pool numbers`);
     }
 
     return result;

@@ -858,7 +858,6 @@ export default function AdminTenantNumbers() {
                   <option value="AVAILABLE">Available</option>
                   <option value="ASSIGNED">Assigned</option>
                   <option value="RESERVED">Reserved</option>
-                  <option value="RELEASED">Released</option>
                 </select>
               </div>
               <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
