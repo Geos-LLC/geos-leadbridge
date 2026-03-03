@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Smartphone, Phone, Search, Loader2, RefreshCw, UserPlus, UserMinus,
-  Trash2, X, Link, Unlink, Download, Users, ShieldCheck, ShieldAlert, GripVertical,
+  Trash2, X, Link, Unlink, Download, Users, ShieldCheck, ShieldAlert, GripVertical, MessageSquare, PhoneCall,
 } from 'lucide-react';
 import {
   DndContext, DragOverlay, useDraggable, useDroppable,
@@ -883,10 +883,12 @@ export default function AdminTenantNumbers() {
                       <tr className="border-b border-slate-100 bg-slate-50">
                         <th className="px-3 py-4 w-8"></th>
                         <th className="px-5 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Phone Number</th>
+                        <th className="px-5 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Friendly Name</th>
                         <th className="px-5 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Area Code</th>
                         <th className="px-5 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Provider</th>
                         <th className="px-5 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Status</th>
-                        <th className="px-5 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">SMS</th>
+                        <th className="px-5 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Capabilities</th>
+                        <th className="px-5 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">A2P SMS</th>
                         <th className="px-5 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Assigned To</th>
                         <th className="px-5 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">Actions</th>
                       </tr>
@@ -895,11 +897,22 @@ export default function AdminTenantNumbers() {
                       {poolPhones.map(phone => (
                         <DraggableRow key={phone.id} id={phone.id} type="pool">
                           <td className="px-5 py-3.5 font-mono text-slate-900">{formatPhone(phone.phoneNumber)}</td>
+                          <td className="px-5 py-3.5 text-sm text-slate-600">{phone.friendlyName || '—'}</td>
                           <td className="px-5 py-3.5 text-slate-700">{phone.areaCode || '—'}</td>
                           <td className="px-5 py-3.5">
                             <span className="px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-bold uppercase">{phone.provider}</span>
                           </td>
                           <td className="px-5 py-3.5">{poolStatusBadge(phone.status)}</td>
+                          <td className="px-5 py-3.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${phone.smsCapable ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-400'}`} title={phone.smsCapable ? 'SMS capable' : 'No SMS'}>
+                                <MessageSquare size={10} /> SMS
+                              </span>
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${phone.voiceCapable ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-400'}`} title={phone.voiceCapable ? 'Voice capable' : 'No voice'}>
+                                <PhoneCall size={10} /> Voice
+                              </span>
+                            </div>
+                          </td>
                           <td className="px-5 py-3.5">
                             <button onClick={() => handleToggleSmsApproved(phone.id, phone.smsApproved)} className={`px-3 py-1 rounded-full text-xs font-bold uppercase flex items-center gap-1.5 transition-all ${phone.smsApproved ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'}`} title={phone.smsApproved ? 'A2P approved — click to disable SMS' : 'Not A2P approved — click to enable SMS'}>
                               {phone.smsApproved ? <ShieldCheck size={12} /> : <ShieldAlert size={12} />}
@@ -951,9 +964,14 @@ export default function AdminTenantNumbers() {
                       <span className="font-mono text-sm font-semibold text-slate-900">{formatPhone(phone.phoneNumber)}</span>
                       {poolStatusBadge(phone.status)}
                     </div>
+                    {phone.friendlyName && (
+                      <p className="text-xs text-slate-500">{phone.friendlyName}</p>
+                    )}
                     <div className="flex items-center gap-2 text-xs text-slate-500">
                       <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-bold uppercase">{phone.provider}</span>
                       {phone.areaCode && <span>Area {phone.areaCode}</span>}
+                      {phone.smsCapable && <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full font-bold">SMS</span>}
+                      {phone.voiceCapable && <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full font-bold">Voice</span>}
                     </div>
                     {phone.assignments && phone.assignments.length > 0 && (
                       <div className="space-y-1">

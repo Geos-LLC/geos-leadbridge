@@ -601,6 +601,8 @@ model PhonePool {
   provisionedAt       DateTime        @default(now())
   releasedAt          DateTime?
   smsApproved         Boolean         @default(true)  // A2P 10DLC approved for SMS
+  smsCapable          Boolean         @default(false) // Twilio capability: can send/receive SMS
+  voiceCapable        Boolean         @default(false) // Twilio capability: can make/receive calls
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 

@@ -230,8 +230,11 @@ export class AdminPhonePoolService {
           }
 
           const friendlyName = num.friendlyName || num.friendly_name || num.name || num.label || null;
+          const capabilities = num.capabilities || {};
+          const smsCapable = !!capabilities.sms;
+          const voiceCapable = !!capabilities.voice;
 
-          // Upsert: create if new, skip if already exists (don't overwrite assignment)
+          // Upsert: create if new, update capabilities/friendlyName if exists
           const existing = await this.prisma.phonePool.findUnique({
             where: { phoneNumber },
           });
@@ -243,6 +246,8 @@ export class AdminPhonePoolService {
                 provider,
                 areaCode: this.extractAreaCode(phoneNumber),
                 friendlyName,
+                smsCapable,
+                voiceCapable,
                 status: 'AVAILABLE',
               },
             });
@@ -251,11 +256,16 @@ export class AdminPhonePoolService {
             // Re-activate released numbers
             await this.prisma.phonePool.update({
               where: { id: existing.id },
-              data: { status: 'AVAILABLE', friendlyName, releasedAt: null },
+              data: { status: 'AVAILABLE', friendlyName, smsCapable, voiceCapable, releasedAt: null },
             });
             providerResult.synced++;
+          } else {
+            // Update capabilities and friendlyName on existing active numbers
+            await this.prisma.phonePool.update({
+              where: { id: existing.id },
+              data: { friendlyName, smsCapable, voiceCapable },
+            });
           }
-          // If AVAILABLE or ASSIGNED, keep as-is (don't disturb assignments)
         }
       } catch (err: any) {
         const msg = err.message || 'Unknown error';

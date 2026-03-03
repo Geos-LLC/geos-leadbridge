@@ -370,6 +370,8 @@ export interface PhonePoolEntry {
   sigcoreAllocationId: string | null;
   status: 'AVAILABLE' | 'ASSIGNED' | 'RESERVED' | 'RELEASED';
   smsApproved: boolean;
+  smsCapable: boolean;
+  voiceCapable: boolean;
   assignments?: PhonePoolAssignment[];
   provisionedAt: string;
   createdAt: string;
