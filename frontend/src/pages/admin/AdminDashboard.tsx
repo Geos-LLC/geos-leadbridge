@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Users, DollarSign, Activity, TrendingDown, Eye, Trash2, Plus, Minus, ChevronRight, AlertTriangle } from 'lucide-react';
+import { Users, DollarSign, Activity, TrendingDown, Eye, Trash2, Plus, Minus, ChevronRight } from 'lucide-react';
 import { adminApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
@@ -42,15 +42,6 @@ export default function AdminDashboard() {
   const [limit] = useState(50);
   const [offset, setOffset] = useState(0);
 
-  // Tenant error feed
-  const [tenantErrors, setTenantErrors] = useState<any[]>([]);
-  const [tenantErrorsTotal, setTenantErrorsTotal] = useState(0);
-  const [failedCount24h, setFailedCount24h] = useState(0);
-  const [errorsLoading, setErrorsLoading] = useState(true);
-  const [errorsLimit] = useState(10);
-  const [errorsOffset, setErrorsOffset] = useState(0);
-  const [errorStatusFilter, setErrorStatusFilter] = useState('failed');
-  const [expandedErrorId, setExpandedErrorId] = useState<string | null>(null);
 
   useEffect(() => {
     if (user?.role !== 'ADMIN') {
@@ -80,29 +71,6 @@ export default function AdminDashboard() {
     }
   };
 
-  const loadTenantErrors = async () => {
-    try {
-      setErrorsLoading(true);
-      const result = await adminApi.getTenantErrors({
-        status: errorStatusFilter,
-        limit: errorsLimit,
-        offset: errorsOffset,
-      });
-      setTenantErrors(result.logs);
-      setTenantErrorsTotal(result.total);
-      setFailedCount24h(result.failedCount24h);
-    } catch {
-      console.error('Failed to load tenant errors');
-    } finally {
-      setErrorsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (user?.role === 'ADMIN') {
-      loadTenantErrors();
-    }
-  }, [errorsOffset, errorStatusFilter]);
 
   const handleSearch = (value: string) => {
     setSearch(value);
@@ -210,140 +178,8 @@ export default function AdminDashboard() {
             <h3 className="text-2xl md:text-3xl font-bold text-slate-900 mt-1">{stats.churnRate}%</h3>
           </div>
 
-          <div className={`bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border shadow-sm hover:shadow-md transition-all ${failedCount24h > 0 ? 'border-red-200' : 'border-slate-100'}`}>
-            <div className={`w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4 ${failedCount24h > 0 ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-400'}`}>
-              <AlertTriangle className="w-5 h-5 md:w-6 md:h-6" />
-            </div>
-            <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Failed SMS (24h)</p>
-            <h3 className={`text-2xl md:text-3xl font-bold mt-1 ${failedCount24h > 0 ? 'text-red-600' : 'text-slate-900'}`}>{failedCount24h}</h3>
-          </div>
         </section>
       )}
-
-      {/* SMS Error Feed */}
-      <section className="bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm p-4 md:p-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-          <div>
-            <h2 className="text-xl md:text-2xl font-bold text-slate-900">SMS Error Feed</h2>
-            <p className="text-sm text-slate-500 mt-1">{tenantErrorsTotal} total {errorStatusFilter === 'all' ? 'entries' : errorStatusFilter}</p>
-          </div>
-          <select
-            value={errorStatusFilter}
-            onChange={(e) => { setErrorStatusFilter(e.target.value); setErrorsOffset(0); }}
-            className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
-          >
-            <option value="failed">Failed Only</option>
-            <option value="all">All Statuses</option>
-            <option value="pending">Pending</option>
-            <option value="sent">Sent</option>
-            <option value="delivered">Delivered</option>
-          </select>
-        </div>
-
-        {errorsLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <p className="text-slate-500">Loading...</p>
-          </div>
-        ) : tenantErrors.length === 0 ? (
-          <div className="text-center py-12">
-            <p className="text-slate-500">No {errorStatusFilter === 'all' ? 'notifications' : errorStatusFilter + ' notifications'} found</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {tenantErrors.map((log: any) => (
-              <div
-                key={log.id}
-                className="border border-slate-100 rounded-xl p-4 hover:bg-slate-50 transition-colors cursor-pointer"
-                onClick={() => setExpandedErrorId(expandedErrorId === log.id ? null : log.id)}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase shrink-0 ${
-                      log.status === 'failed' ? 'bg-red-100 text-red-700' :
-                      log.status === 'delivered' ? 'bg-green-100 text-green-700' :
-                      log.status === 'sent' ? 'bg-blue-100 text-blue-700' :
-                      'bg-yellow-100 text-yellow-700'
-                    }`}>
-                      {log.status}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-900 truncate">
-                        {log.savedAccount?.businessName || 'Unknown Account'}
-                      </p>
-                      <p className="text-xs text-slate-500 truncate">
-                        {log.savedAccount?.user?.email || 'Unknown user'} &middot; {log.ruleName || 'Manual SMS'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0 ml-4">
-                    <p className="text-xs text-slate-500">
-                      {new Date(log.createdAt).toLocaleDateString()}{' '}
-                      {new Date(log.createdAt).toLocaleTimeString()}
-                    </p>
-                    <p className="text-xs font-mono text-slate-400">{log.toPhone}</p>
-                  </div>
-                </div>
-                {expandedErrorId === log.id && (
-                  <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
-                    {log.error && (
-                      <div className="bg-red-50 border border-red-100 rounded-lg p-3">
-                        <p className="text-xs font-semibold text-red-700">Error</p>
-                        <p className="text-xs text-red-600 mt-1">{log.error}</p>
-                      </div>
-                    )}
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div>
-                        <span className="text-slate-500">From:</span>{' '}
-                        <span className="font-mono text-slate-700">{log.fromPhone || 'N/A'}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500">To:</span>{' '}
-                        <span className="font-mono text-slate-700">{log.toPhone}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500">Provider:</span>{' '}
-                        <span className="text-slate-700">{log.provider || 'N/A'}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500">Rule:</span>{' '}
-                        <span className="text-slate-700">{log.ruleName || 'N/A'}</span>
-                      </div>
-                    </div>
-                    {log.messageBody && (
-                      <div className="bg-slate-50 rounded-lg p-3">
-                        <p className="text-xs font-semibold text-slate-600">Message</p>
-                        <p className="text-xs text-slate-500 mt-1 whitespace-pre-wrap line-clamp-4">{log.messageBody}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {tenantErrorsTotal > errorsLimit && (
-          <div className="flex items-center justify-between mt-6 pt-6 border-t border-slate-100">
-            <button
-              onClick={() => setErrorsOffset(Math.max(0, errorsOffset - errorsLimit))}
-              disabled={errorsOffset === 0}
-              className="px-4 md:px-6 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-            >
-              Previous
-            </button>
-            <span className="text-xs md:text-sm text-slate-600">
-              {errorsOffset + 1}–{Math.min(errorsOffset + errorsLimit, tenantErrorsTotal)} of {tenantErrorsTotal}
-            </span>
-            <button
-              onClick={() => setErrorsOffset(errorsOffset + errorsLimit)}
-              disabled={errorsOffset + errorsLimit >= tenantErrorsTotal}
-              className="px-4 md:px-6 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-            >
-              Next
-            </button>
-          </div>
-        )}
-      </section>
 
       {/* Users Section */}
       <section className="bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm p-4 md:p-8">
