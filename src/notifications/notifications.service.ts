@@ -468,15 +468,14 @@ export class NotificationsService {
       return { success: false, error: 'No Sigcore API key configured. Please provision your phone workspace first.' };
     }
 
-    // Resolve fromPhone: settings phone or pool phone
+    // Resolve fromPhone: settings phone or any pool phone (pool numbers are shared)
     let fromPhone = settings.sigcoreFromPhone;
     if (!fromPhone) {
-      const assignment = await this.prisma.phonePoolAssignment.findFirst({
-        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
-        include: { phonePool: true },
-        orderBy: { assignedAt: 'desc' },
+      const poolPhone = await this.prisma.phonePool.findFirst({
+        where: { status: { not: 'RELEASED' } },
+        orderBy: { provisionedAt: 'desc' },
       });
-      if (assignment) fromPhone = assignment.phonePool.phoneNumber;
+      if (poolPhone) fromPhone = poolPhone.phoneNumber;
     }
 
     // 4. Create log entry
@@ -1179,14 +1178,11 @@ export class NotificationsService {
    * Checks pool assignments, tenant (purchased) phones, and notification settings.
    */
   private async validatePhoneOwnership(userId: string, phoneNumber: string): Promise<boolean> {
-    // 1. Check pool phone assignments
-    const poolAssignment = await this.prisma.phonePoolAssignment.findFirst({
-      where: {
-        userId,
-        phonePool: { phoneNumber, status: { not: 'RELEASED' } },
-      },
+    // 1. Pool phones are shared across all tenants — any non-released pool number is valid for any user
+    const poolPhone = await this.prisma.phonePool.findFirst({
+      where: { phoneNumber, status: { not: 'RELEASED' } },
     });
-    if (poolAssignment) return true;
+    if (poolPhone) return true;
 
     // 2. Check user-purchased tenant phones
     const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
@@ -1224,15 +1220,14 @@ export class NotificationsService {
     let fromPhone = rule?.fromPhone || settings.sigcoreFromPhone;
     let fromPhoneSource = rule?.fromPhone ? 'rule' : settings.sigcoreFromPhone ? 'settings' : 'none';
 
-    // Fallback: use admin-assigned pool phone if no explicit fromPhone configured
+    // Fallback: use any pool phone if no explicit fromPhone configured (pool phones are shared)
     if (!fromPhone) {
-      const assignment = await this.prisma.phonePoolAssignment.findFirst({
-        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
-        include: { phonePool: true },
-        orderBy: { assignedAt: 'desc' },
+      const poolPhone = await this.prisma.phonePool.findFirst({
+        where: { status: { not: 'RELEASED' } },
+        orderBy: { provisionedAt: 'desc' },
       });
-      if (assignment) {
-        fromPhone = assignment.phonePool.phoneNumber;
+      if (poolPhone) {
+        fromPhone = poolPhone.phoneNumber;
         fromPhoneSource = 'pool';
         this.logger.log(`Using pool phone ${fromPhone} as fromPhone for rule`);
       }
@@ -2605,12 +2600,11 @@ export class NotificationsService {
     // then settings.sigcoreFromPhone, then first pool phone as last resort.
     let fromPhone: string | null = autoReplyRule?.fromPhone || settings?.sigcoreFromPhone || null;
     if (!fromPhone) {
-      const assignment = await this.prisma.phonePoolAssignment.findFirst({
-        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
-        include: { phonePool: true },
-        orderBy: { assignedAt: 'desc' },
+      const poolPhone = await this.prisma.phonePool.findFirst({
+        where: { status: { not: 'RELEASED' } },
+        orderBy: { provisionedAt: 'desc' },
       });
-      if (assignment) fromPhone = assignment.phonePool.phoneNumber;
+      if (poolPhone) fromPhone = poolPhone.phoneNumber;
     }
 
     return {
@@ -2679,12 +2673,11 @@ export class NotificationsService {
     // dto.fromPhone takes priority because settings object was loaded before the update above.
     let fromPhone = dto.fromPhone || settings.sigcoreFromPhone;
     if (!fromPhone) {
-      const assignment = await this.prisma.phonePoolAssignment.findFirst({
-        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
-        include: { phonePool: true },
-        orderBy: { assignedAt: 'desc' },
+      const poolPhone = await this.prisma.phonePool.findFirst({
+        where: { status: { not: 'RELEASED' } },
+        orderBy: { provisionedAt: 'desc' },
       });
-      if (assignment) fromPhone = assignment.phonePool.phoneNumber;
+      if (poolPhone) fromPhone = poolPhone.phoneNumber;
     }
 
     // Create auto-reply rule (immediate, no follow-ups)
