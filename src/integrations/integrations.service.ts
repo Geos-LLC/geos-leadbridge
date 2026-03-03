@@ -313,7 +313,7 @@ export class IntegrationsService {
       const leadsResult = await this.prisma.lead.deleteMany({
         where: {
           userId,
-          platform: 'THUMBTACK',
+          platform: 'thumbtack',
           externalRequestId: { in: externalIds },
         },
       });

@@ -11,6 +11,7 @@ import { PlatformFactory } from '../platforms/platform.factory';
 import { AutomationService } from '../automation/automation.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CallConnectService } from '../call-connect/call-connect.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 @Injectable()
 export class WebhooksService {
@@ -32,6 +33,7 @@ export class WebhooksService {
     private notificationsService: NotificationsService,
     @Inject(forwardRef(() => CallConnectService))
     private callConnectService: CallConnectService,
+    private analyticsService: AnalyticsService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -364,6 +366,9 @@ export class WebhooksService {
 
     this.logger.log('Lead stored successfully', { negotiationId });
 
+    // Invalidate analytics cache so insights reflects the new lead immediately
+    await this.analyticsService.invalidateCache(userId);
+
     // Emit SSE event for real-time frontend updates
     this.eventEmitter.emit(`lead.created.${userId}`, lead);
 
@@ -626,6 +631,9 @@ export class WebhooksService {
     });
 
     this.logger.log('Lead ensured via upsert', { negotiationId, leadId: lead.id });
+
+    // Invalidate analytics cache (lead may have been created by this upsert)
+    await this.analyticsService.invalidateCache(userId);
 
     // Ensure conversation exists using upsert to handle race conditions
     const messageTimestampForConv = new Date(data.sentAt || data.createTimestamp || Date.now());
