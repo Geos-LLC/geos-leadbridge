@@ -2427,7 +2427,10 @@ export function Services() {
             </button>
             <h3 className="text-xl font-bold text-slate-900 mb-2">Bring Your Own Phone</h3>
             <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-              Enter your Quo, OpenPhone, or compatible provider API key to use your own phone numbers for customer texting.
+              Enter your Quo, OpenPhone, or compatible provider API key to use your own phone numbers for customer texting.{' '}
+              <a href="https://my.quo.com/settings/api" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline inline-flex items-center gap-1">
+                Get your Quo API key <ExternalLink size={11} />
+              </a>
             </p>
             {opConnectError && (
               <div className="mb-4 bg-red-50 border border-red-100 rounded-xl p-3 flex items-center gap-2 text-red-600 text-sm">
