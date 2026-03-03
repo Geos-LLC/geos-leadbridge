@@ -69,9 +69,17 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
       setError(null);
       // Revoke the stored token so OAuth gives a fresh login
       await platformsApi.disconnect().catch(() => {}); // OK if fails
-      // Use prompt=login to force Thumbtack to show the login page
-      // even if there's an existing session — no more race with logout
-      handleStartOAuth(true);
+      // Open Thumbtack logout in a popup to clear their session cookie
+      const logoutWin = window.open(
+        'https://www.thumbtack.com/logout',
+        'tt_logout',
+        'width=500,height=400',
+      );
+      // Wait for logout to complete, then close popup and start OAuth
+      setTimeout(() => {
+        try { logoutWin?.close(); } catch (_) { /* popup may be blocked */ }
+        handleStartOAuth(true);
+      }, 2000);
     } catch (err: any) {
       setError(err.message || 'Failed to switch account');
       setLoading(false);
