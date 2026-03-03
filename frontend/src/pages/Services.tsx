@@ -222,8 +222,14 @@ export function Services() {
   const [ctSmsForwardingNumber, setCtSmsForwardingNumber] = useState('');
   const [ccCallForwardingNumber, setCcCallForwardingNumber] = useState('');
 
-  // Derived: unsaved Lead Alert changes (only alertToPhone is pending — from-phone saves immediately)
-  const alertDirty = !!leadAlertRule && alertToPhone !== (leadAlertRule.toPhone || '');
+  // Lead Alert saved snapshot for dirty tracking
+  const [alertSavedSnapshot, setAlertSavedSnapshot] = useState<{ toPhone: string; fromPhone: string } | null>(null);
+
+  // Derived: unsaved Lead Alert changes
+  const alertDirty = alertSavedSnapshot !== null && (
+    alertToPhone !== alertSavedSnapshot.toPhone ||
+    alertFromPhone !== alertSavedSnapshot.fromPhone
+  );
 
   // Derived: unsaved CT changes
   const ctDirty = ctSavedSnapshot !== null && (
@@ -438,13 +444,18 @@ export function Services() {
       });
 
       // Pre-fill form states from existing rules
+      const alertTo = leadAlert?.toPhone || '';
+      const alertFrom = leadAlert?.fromPhone || poolRes.phoneNumbers[0]?.phoneNumber || '';
       if (leadAlert) {
-        setAlertToPhone(leadAlert.toPhone || '');
-        setAlertFromPhone(leadAlert.fromPhone || '');
+        setAlertToPhone(alertTo);
+        setAlertFromPhone(alertFrom);
+      } else {
+        setAlertFromPhone(alertFrom);
       }
-      // Default from phone to first pool phone
-      const defaultFrom = poolRes.phoneNumbers[0]?.phoneNumber || '';
-      if (!leadAlert) setAlertFromPhone(defaultFrom);
+      // Initialize alert snapshot for dirty tracking
+      if (leadAlert) {
+        setAlertSavedSnapshot({ toPhone: alertTo, fromPhone: alertFrom });
+      }
 
       // Auto-expand Lead Alerts card if setup is incomplete OR directed here from Dashboard alert
       const toPhoneMissing = leadAlert && !leadAlert.toPhone;
@@ -579,7 +590,9 @@ export function Services() {
           enabled: true,
         });
         setLeadAlertRule(rule);
+        const resolvedFrom = alertFromPhone || defaultFrom;
         if (!alertFromPhone && defaultFrom) setAlertFromPhone(defaultFrom);
+        setAlertSavedSnapshot({ toPhone: alertToPhone, fromPhone: resolvedFrom });
         setExpandedCard('lead-alerts');
         showSuccess('Lead Alerts enabled — configure your alert phone number');
       }
@@ -697,7 +710,9 @@ export function Services() {
   }
 
   function discardAlertChanges() {
-    setAlertToPhone(leadAlertRule?.toPhone || '');
+    if (!alertSavedSnapshot) return;
+    setAlertToPhone(alertSavedSnapshot.toPhone);
+    setAlertFromPhone(alertSavedSnapshot.fromPhone);
   }
 
   function discardCtChanges() {
@@ -790,31 +805,25 @@ export function Services() {
     }
   }
 
-  async function saveAlertToPhone(toPhone: string) {
-    setAlertToPhone(toPhone);
-    if (!leadAlertRule) return;
-    setSaving(true);
-    try {
-      const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { toPhone });
-      setLeadAlertRule(rule);
-      showSuccess('Alert destination updated');
-    } catch (err: any) {
-      setError(err.message || 'Failed to update alert destination');
-    } finally {
-      setSaving(false);
-    }
+  // saveAlertToPhone removed — now handled by saveAlertSettings()
+
+  function setAlertFrom(fromPhone: string) {
+    setAlertFromPhone(fromPhone); // tracked in alertDirty — saved when user clicks Save Settings
   }
 
-  async function saveAlertFromPhone(fromPhone: string) {
-    setAlertFromPhone(fromPhone);
-    if (!leadAlertRule) return;
+  async function saveAlertSettings() {
+    if (!leadAlertRule || !selectedAccountId) return;
     setSaving(true);
     try {
-      const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { fromPhone });
+      const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, {
+        toPhone: alertToPhone,
+        fromPhone: alertFromPhone,
+      });
       setLeadAlertRule(rule);
-      showSuccess('Send from number updated');
+      setAlertSavedSnapshot({ toPhone: alertToPhone, fromPhone: alertFromPhone });
+      showSuccess('Lead Alert settings saved');
     } catch (err: any) {
-      setError(err.message || 'Failed to update from phone');
+      setError(err.response?.data?.message || err.message || 'Failed to save alert settings');
     } finally {
       setSaving(false);
     }
@@ -1160,7 +1169,7 @@ export function Services() {
             iconTextColor="text-amber-600"
           >
             {/* SMS Alert Configuration */}
-            <div className="space-y-6">
+            <div className={`space-y-6${!(leadAlertRule?.enabled) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
               <div className="grid grid-cols-2 gap-4">
                 {/* Send to */}
                 <div>
@@ -1206,7 +1215,7 @@ export function Services() {
                   <div className="relative">
                     <select
                       value={alertFromPhone}
-                      onChange={e => saveAlertFromPhone(e.target.value)}
+                      onChange={e => setAlertFrom(e.target.value)}
                       disabled={saving}
                       className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
                     >
@@ -1358,33 +1367,49 @@ export function Services() {
                         </span>
                       )}
                     </div>
-                    {alertDirty && (
-                      <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
-                        <div className="flex items-center gap-2 text-amber-700">
-                          <AlertCircle className="w-4 h-4 shrink-0" />
-                          <span className="text-sm font-medium">You have unsaved changes</span>
-                        </div>
-                        <div className="flex gap-2 shrink-0">
-                          <button
-                            onClick={discardAlertChanges}
-                            className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-                          >
-                            Discard
-                          </button>
-                          <button
-                            onClick={() => saveAlertToPhone(alertToPhone)}
-                            disabled={saving || !alertToPhone}
-                            className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1"
-                          >
-                            {saving && <Loader2 className="w-3 h-3 animate-spin" />}
-                            Save Changes
-                          </button>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </>
               )}
+            </div>
+
+            {/* Save / unsaved changes */}
+            {leadAlertRule && (
+              <div className="pt-4 border-t border-slate-100">
+                {alertDirty ? (
+                  <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+                    <div className="flex items-center gap-2 text-amber-700">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span className="text-sm font-medium">You have unsaved changes</span>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        onClick={discardAlertChanges}
+                        className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                      >
+                        Discard
+                      </button>
+                      <button
+                        onClick={saveAlertSettings}
+                        disabled={saving || !alertToPhone}
+                        className="px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+                      >
+                        {saving && <Loader2 className="w-3 h-3 animate-spin" />}
+                        Save Settings
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={saveAlertSettings}
+                    disabled={saving}
+                    className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-amber-600 rounded-xl hover:bg-amber-700 transition-colors disabled:opacity-50"
+                  >
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    Save Settings
+                  </button>
+                )}
+              </div>
+            )}
 
               {/* Delete / Reset rule */}
               {leadAlertRule && (
