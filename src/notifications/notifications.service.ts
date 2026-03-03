@@ -2703,7 +2703,7 @@ export class NotificationsService {
           const webhookUrl = `${appBaseUrl}/api/webhooks/sigcore/inbound-sms?accountId=${savedAccountId}`;
           const result = await this.createSigcoreWebhook(apiKey, webhookUrl, {
             name: 'LeadBridge Inbound SMS',
-            events: ['message.received'],
+            events: ['sms.message.received', 'message.inbound'],
           });
           if (result.webhookId) {
             await this.prisma.notificationSettings.update({
