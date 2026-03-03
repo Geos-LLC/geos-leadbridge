@@ -54,7 +54,7 @@ export default function SettingsPage() {
   // Import negotiations state
   const [searchParams] = useSearchParams();
   const [importCollapsed, setImportCollapsed] = useState(() => searchParams.get('import') !== 'open');
-  const [importAccountId, setImportAccountId] = useState<string | null>(null);
+  const [importAccountId, setImportAccountId] = useState<string | null>(() => localStorage.getItem('lb_importAccountId'));
   const [importing, setImporting] = useState(false);
   const [importResults, setImportResults] = useState<{ id: string; success: boolean; isNew?: boolean; error?: string }[]>([]);
   const [importTotal, setImportTotal] = useState(0);
@@ -170,6 +170,17 @@ export default function SettingsPage() {
       setSubscription(subResult);
       setAccounts(acctResult.accounts);
       setSavedAccounts(acctResult.accounts); // Update app store
+
+      // Auto-select the first account if none is selected (or if saved selection no longer exists)
+      if (acctResult.accounts.length > 0) {
+        const saved = localStorage.getItem('lb_importAccountId');
+        const stillExists = saved && acctResult.accounts.some((a: SavedAccount) => a.id === saved);
+        if (!stillExists) {
+          const firstId = acctResult.accounts[0].id;
+          setImportAccountId(firstId);
+          localStorage.setItem('lb_importAccountId', firstId);
+        }
+      }
 
       // Load diagnostics via shared store (skips if already loaded unless forced)
       if (acctResult.accounts.length > 0) {
@@ -704,7 +715,12 @@ export default function SettingsPage() {
                       </label>
                       <select
                         value={importAccountId || ''}
-                        onChange={(e) => setImportAccountId(e.target.value || null)}
+                        onChange={(e) => {
+                          const val = e.target.value || null;
+                          setImportAccountId(val);
+                          if (val) localStorage.setItem('lb_importAccountId', val);
+                          else localStorage.removeItem('lb_importAccountId');
+                        }}
                         className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
                       >
                         <option value="">Choose account...</option>
