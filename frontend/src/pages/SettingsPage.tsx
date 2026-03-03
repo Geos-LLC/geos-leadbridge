@@ -82,8 +82,6 @@ export default function SettingsPage() {
   const [budgetSnapshots, setBudgetSnapshots] = useState<Array<{ id: string; weeklyBudget: string; currency: string; capturedAt: string; effectiveFrom: string; effectiveTo: string | null; active: boolean; scopeCategory: string | null; scopeLocation: string | null }>>([]);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
 
-  // Manual paste toggle
-
   // Extension detection
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
 

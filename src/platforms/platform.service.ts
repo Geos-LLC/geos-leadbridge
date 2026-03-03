@@ -3,12 +3,13 @@
  * Manages platform connections and credentials
  */
 
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { PlatformFactory } from './platform.factory';
 import { PlatformCredentials } from '../common/interfaces/platform.interface';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class PlatformService {
@@ -21,6 +22,8 @@ export class PlatformService {
     private prisma: PrismaService,
     private platformFactory: PlatformFactory,
     private configService: ConfigService,
+    @Inject(forwardRef(() => NotificationsService))
+    private notificationsService: NotificationsService,
   ) {
     this.encryptionKey = this.configService.get<string>('encryption.key') || 'default-32-char-encryption-key';
   }
@@ -813,12 +816,19 @@ export class PlatformService {
       console.log(`[PlatformService] Deleted ${leads.length} leads for account ${account.businessName}`);
     }
 
-    // Delete the saved account
+    // Clean up Sigcore tenant before deleting locally (cascades phone numbers, integrations, API keys)
+    try {
+      await this.notificationsService.deleteSigcoreTenant(accountId);
+    } catch (err: any) {
+      this.logger.warn(`[removeSavedAccount] Sigcore tenant cleanup failed: ${err.message}`);
+    }
+
+    // Delete the saved account (cascades to NotificationSettings, CallConnectSettings, etc.)
     await this.prisma.savedAccount.delete({
       where: { id: accountId },
     });
 
-    console.log(`[PlatformService] Removed account ${account.businessName}`);
+    this.logger.log(`[removeSavedAccount] Removed account ${account.businessName}`);
     return { deletedLeads: deletedLeadsCount };
   }
 

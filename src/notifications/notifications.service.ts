@@ -2499,6 +2499,42 @@ export class NotificationsService {
   }
 
   /**
+   * Delete the Sigcore tenant for a saved account.
+   * Called before account deletion to cascade-clean phone numbers, integrations, and API keys.
+   */
+  async deleteSigcoreTenant(savedAccountId: string): Promise<void> {
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { sigcoreTenantId: true },
+    });
+
+    if (!settings?.sigcoreTenantId) return;
+
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (!platformKey) {
+      this.logger.warn('[deleteSigcoreTenant] No SIGCORE_API_KEY — skipping');
+      return;
+    }
+
+    const baseUrl = this.configService.get<string>('SIGCORE_API_URL') || 'https://sigcore-production.up.railway.app';
+    const url = `${baseUrl}/api/tenants/${settings.sigcoreTenantId}`;
+
+    try {
+      const resp = await fetch(url, {
+        method: 'DELETE',
+        headers: { 'x-api-key': platformKey },
+      });
+      if (resp.ok || resp.status === 404) {
+        this.logger.log(`[deleteSigcoreTenant] Deleted Sigcore tenant ${settings.sigcoreTenantId} for account ${savedAccountId}`);
+      } else {
+        this.logger.warn(`[deleteSigcoreTenant] Failed: ${resp.status} ${resp.statusText}`);
+      }
+    } catch (err: any) {
+      this.logger.warn(`[deleteSigcoreTenant] Error: ${err.message}`);
+    }
+  }
+
+  /**
    * Disconnect provider integration via Sigcore API
    */
   private async disconnectProviderViaSigcore(tenantApiKey: string, provider: string): Promise<void> {
