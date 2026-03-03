@@ -798,6 +798,13 @@ export class PlatformService {
       this.logger.warn(`[removeSavedAccount] Sigcore tenant cleanup failed: ${err.message}`);
     }
 
+    // Unlink any TenantPhoneNumbers that reference this saved account
+    // (no FK cascade since savedAccountId is a plain string)
+    await this.prisma.tenantPhoneNumber.updateMany({
+      where: { savedAccountId: accountId },
+      data: { savedAccountId: null },
+    });
+
     // Delete the saved account (cascades to NotificationSettings, CallConnectSettings, etc.)
     await this.prisma.savedAccount.delete({
       where: { id: accountId },
