@@ -3,6 +3,7 @@ import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
   Bot, Pencil, Phone, Send, ChevronUp, Trash2, Save,
+  Key, Hash, ExternalLink, Link2,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -11,7 +12,7 @@ import {
 import type { TenantPhoneNumber } from '../services/api';
 import type {
   AutomationRule, NotificationRule, SavedAccount, MessageTemplate,
-  CallConnectMode, AgentStrategy, SigcorePhoneNumber,
+  CallConnectMode, AgentStrategy, SigcorePhoneNumber, AvailablePhoneNumber,
 } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
@@ -163,6 +164,21 @@ export function Services() {
   // UI state
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [showPhoneSetupModal, setShowPhoneSetupModal] = useState(false);
+  // OpenPhone setup modal
+  const [showOpenPhoneModal, setShowOpenPhoneModal] = useState(false);
+  const [opApiKey, setOpApiKey] = useState('');
+  const [opConnecting, setOpConnecting] = useState(false);
+  const [opConnectError, setOpConnectError] = useState<string | null>(null);
+  // Dedicated number setup modal
+  const [showDedicatedModal, setShowDedicatedModal] = useState(false);
+  const [dpAreaCode, setDpAreaCode] = useState('');
+  const [dpLocality, setDpLocality] = useState('');
+  const [dpSearchLoading, setDpSearchLoading] = useState(false);
+  const [dpAvailableNumbers, setDpAvailableNumbers] = useState<AvailablePhoneNumber[]>([]);
+  const [dpPurchasingNumber, setDpPurchasingNumber] = useState<string | null>(null);
+  const [dpSearchError, setDpSearchError] = useState<string | null>(null);
+  const [dpSmsConsent, setDpSmsConsent] = useState(false);
+  const [dpPhonePrice, setDpPhonePrice] = useState<number | null>(null);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Template editor modal state
   const [templateEditor, setTemplateEditor] = useState<{
@@ -938,6 +954,76 @@ export function Services() {
     setCtFromPhone(fromPhone); // tracked in ctDirty — saved when user clicks Save Settings
   }
 
+  function openDedicatedModal() {
+    setShowDedicatedModal(true);
+    setShowPhoneSetupModal(false);
+    notificationsApi.getPhonePricing().then(r => { if (r.success) setDpPhonePrice(r.data.priceMonthly); }).catch(() => {});
+  }
+
+  async function handleOpConnect() {
+    if (!selectedAccountId || !opApiKey.trim()) return;
+    setOpConnecting(true);
+    setOpConnectError(null);
+    try {
+      const result = await notificationsApi.connectSigcore(selectedAccountId, 'openphone', { apiKey: opApiKey.trim() });
+      if (result.success) {
+        const nums = await notificationsApi.getSigcorePhoneNumbers(selectedAccountId);
+        setCtOwnPhoneNumbers(nums.phoneNumbers);
+        setShowOpenPhoneModal(false);
+        setOpApiKey('');
+        showSuccess('OpenPhone connected successfully');
+      } else {
+        setOpConnectError((result as any).error || 'Failed to connect');
+      }
+    } catch (err: any) {
+      setOpConnectError(err.response?.data?.message || err.message || 'Failed to connect');
+    } finally {
+      setOpConnecting(false);
+    }
+  }
+
+  async function handleDpSearch() {
+    if (!selectedAccountId) return;
+    setDpSearchLoading(true);
+    setDpSearchError(null);
+    try {
+      const result = await notificationsApi.searchAvailableNumbers(selectedAccountId, 'US', dpAreaCode || undefined, dpLocality || undefined);
+      if (result.success) {
+        setDpAvailableNumbers(result.data);
+      } else {
+        setDpSearchError('Search failed — try a different area code or city');
+      }
+    } catch (err: any) {
+      setDpSearchError(err.response?.data?.message || err.message || 'Search failed');
+    } finally {
+      setDpSearchLoading(false);
+    }
+  }
+
+  async function handleDpPurchase(phoneNumber: string) {
+    if (!selectedAccountId || !dpSmsConsent) return;
+    setDpPurchasingNumber(phoneNumber);
+    setDpSearchError(null);
+    try {
+      const result = await notificationsApi.purchaseTenantPhone(selectedAccountId, phoneNumber);
+      if (result.success && result.tenantPhone) {
+        const refreshed = await notificationsApi.listTenantPhones();
+        if (refreshed.success) setTenantPhones(refreshed.data);
+        setShowDedicatedModal(false);
+        setDpAvailableNumbers([]);
+        setDpAreaCode('');
+        setDpLocality('');
+        showSuccess('Dedicated number provisioned successfully');
+      } else {
+        setDpSearchError((result as any).error || 'Purchase failed');
+      }
+    } catch (err: any) {
+      setDpSearchError(err.response?.data?.message || err.message || 'Purchase failed');
+    } finally {
+      setDpPurchasingNumber(null);
+    }
+  }
+
   async function sendCtTest() {
     if (!selectedAccountId || !ctTestPhone) return;
     setCtTestStatus('sending');
@@ -1548,18 +1634,48 @@ export function Services() {
                   const hasOwnNumbers = ctOwnPhoneNumbers.length > 0 || tenantPhones.length > 0 || (!!ctSigcoreFromPhone && !ctSigcoreIsPool);
                   if (!hasOwnNumbers) {
                     return (
-                      <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                        <p className="text-sm text-amber-800 font-medium mb-1">No dedicated number set up</p>
-                        <p className="text-xs text-amber-700 leading-relaxed">
-                          Customer texting requires your own phone number for consent compliance.
+                      <div className="space-y-3">
+                        <p className="text-xs text-slate-500 leading-relaxed">
+                          Customer texting requires your own phone number for consent compliance. Choose an option to set one up:
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => setShowPhoneSetupModal(true)}
-                          className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
-                        >
-                          See setup options →
-                        </button>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="border border-slate-200 rounded-2xl p-4 hover:border-blue-200 transition-all">
+                            <div className="flex items-start gap-3">
+                              <div className="w-7 h-7 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5">
+                                <Phone className="w-3.5 h-3.5" />
+                              </div>
+                              <div className="flex-1">
+                                <p className="font-semibold text-slate-900 text-xs">Option 2 — OpenPhone</p>
+                                <p className="text-xs text-slate-500 mt-1 leading-relaxed">Connect your existing OpenPhone workspace. Your numbers stay in OpenPhone.</p>
+                                <button
+                                  type="button"
+                                  onClick={() => { setShowOpenPhoneModal(true); }}
+                                  className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+                                >
+                                  Connect OpenPhone →
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="border border-slate-200 rounded-2xl p-4 hover:border-indigo-200 transition-all">
+                            <div className="flex items-start gap-3">
+                              <div className="w-7 h-7 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5">
+                                <Briefcase className="w-3.5 h-3.5" />
+                              </div>
+                              <div className="flex-1">
+                                <p className="font-semibold text-slate-900 text-xs">Option 3 — Dedicated Number</p>
+                                <p className="text-xs text-slate-500 mt-1 leading-relaxed">Get a Twilio number exclusively assigned to your account.</p>
+                                <button
+                                  type="button"
+                                  onClick={openDedicatedModal}
+                                  className="mt-2 text-xs font-semibold text-indigo-600 hover:text-indigo-700 hover:underline"
+                                >
+                                  Get a number →
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     );
                   }
@@ -2266,71 +2382,177 @@ export function Services() {
         </div>
       )}
 
-      {/* Phone Setup Modal — shown when customer texting has no dedicated/OpenPhone number */}
+      {/* Phone type selector — shown from "+ Add phone number" dropdown */}
       {showPhoneSetupModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowPhoneSetupModal(false)}>
           <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 relative" onClick={e => e.stopPropagation()}>
-            <button
-              onClick={() => setShowPhoneSetupModal(false)}
-              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors"
-            >
+            <button onClick={() => setShowPhoneSetupModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors">
               <X className="w-5 h-5" />
             </button>
-
-            <h3 className="text-xl font-bold text-slate-900 mb-2">Set Up a Send-From Number</h3>
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Add a Phone Number</h3>
             <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-              Customer texting requires your own phone number — not a shared pool number — for consent and compliance reasons. Choose one of the options below:
+              Choose how you want to add a send-from number for customer texting:
             </p>
-
             <div className="space-y-4">
-              {/* Option 2 — OpenPhone */}
-              <div className="border border-slate-200 rounded-2xl p-5">
+              <div className="border border-slate-200 rounded-2xl p-5 hover:border-blue-200 transition-all cursor-pointer" onClick={() => { setShowPhoneSetupModal(false); setShowOpenPhoneModal(true); }}>
                 <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5">
-                    <Phone className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-semibold text-slate-900 text-sm">Option 2 — OpenPhone Number</p>
-                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                      Connect your existing OpenPhone workspace. Your numbers stay in OpenPhone and route through your account.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => { setShowPhoneSetupModal(false); navigate('/phone-settings?tab=openphone'); }}
-                      className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
-                    >
-                      Connect OpenPhone →
-                    </button>
+                  <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5"><Phone className="w-4 h-4" /></div>
+                  <div>
+                    <p className="font-semibold text-slate-900 text-sm">Option 2 — OpenPhone</p>
+                    <p className="text-xs text-slate-500 mt-1">Connect your existing OpenPhone workspace.</p>
                   </div>
                 </div>
               </div>
-
-              {/* Option 3 — Dedicated Number */}
-              <div className="border border-slate-200 rounded-2xl p-5">
+              <div className="border border-slate-200 rounded-2xl p-5 hover:border-indigo-200 transition-all cursor-pointer" onClick={() => openDedicatedModal()}>
                 <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5">
-                    <Briefcase className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1">
+                  <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5"><Briefcase className="w-4 h-4" /></div>
+                  <div>
                     <p className="font-semibold text-slate-900 text-sm">Option 3 — Dedicated Number</p>
-                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                      Get a dedicated Twilio number assigned exclusively to your account — from the admin phone pool or self-provisioned.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => { setShowPhoneSetupModal(false); navigate('/phone-settings?tab=dedicated'); }}
-                      className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
-                    >
-                      Get a dedicated number →
-                    </button>
+                    <p className="text-xs text-slate-500 mt-1">Get a Twilio number exclusively assigned to your account.</p>
                   </div>
                 </div>
               </div>
             </div>
+            <p className="mt-5 text-xs text-slate-400 text-center">Shared pool numbers (Option 1) cannot be used for customer texting.</p>
+          </div>
+        </div>
+      )}
 
-            <p className="mt-5 text-xs text-slate-400 text-center">
-              Shared Business Line numbers (Option 1) cannot be used for customer texting.
+      {/* OpenPhone Setup Modal */}
+      {showOpenPhoneModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowOpenPhoneModal(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 relative" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setShowOpenPhoneModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Connect OpenPhone</h3>
+            <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+              Enter your OpenPhone API key to use your own phone numbers for customer texting.{' '}
+              <a href="https://app.openphone.com/settings/api" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline inline-flex items-center gap-1">
+                Get your API key <ExternalLink size={11} />
+              </a>
             </p>
+            {opConnectError && (
+              <div className="mb-4 bg-red-50 border border-red-100 rounded-xl p-3 flex items-center gap-2 text-red-600 text-sm">
+                <AlertCircle size={14} className="shrink-0" />
+                <span className="flex-1">{opConnectError}</span>
+                <button onClick={() => setOpConnectError(null)}><X size={14} /></button>
+              </div>
+            )}
+            <div className="flex gap-3">
+              <div className="relative flex-1">
+                <Key size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="password"
+                  value={opApiKey}
+                  onChange={e => setOpApiKey(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleOpConnect()}
+                  placeholder="OpenPhone API key"
+                  className="w-full pl-8 pr-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+                />
+              </div>
+              <button
+                onClick={handleOpConnect}
+                disabled={opConnecting || !opApiKey.trim()}
+                className="px-5 py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-200 transition-all"
+              >
+                {opConnecting ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+                {opConnecting ? 'Connecting...' : 'Connect'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dedicated Number Setup Modal */}
+      {showDedicatedModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowDedicatedModal(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-xl w-full p-8 relative" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setShowDedicatedModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Get a Dedicated Number</h3>
+            <p className="text-sm text-slate-500 mb-5 leading-relaxed">Search for an available number by area code or city, then purchase it for your account.</p>
+
+            {dpSearchError && (
+              <div className="mb-4 bg-red-50 border border-red-100 rounded-xl p-3 flex items-center gap-2 text-red-600 text-sm">
+                <AlertCircle size={14} className="shrink-0" />
+                <span className="flex-1">{dpSearchError}</span>
+                <button onClick={() => setDpSearchError(null)}><X size={14} /></button>
+              </div>
+            )}
+
+            {/* SMS Consent */}
+            <div className={`rounded-xl border p-3 mb-4 ${dpSmsConsent ? 'bg-emerald-50/50 border-emerald-200' : 'bg-amber-50/50 border-amber-200'}`}>
+              <label className="flex items-start gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={dpSmsConsent}
+                  onChange={e => setDpSmsConsent(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-xs text-slate-600 leading-relaxed">
+                  I agree to receive SMS notifications from Geos LLC regarding account alerts and new leads. Message frequency varies. Message and data rates may apply. Reply STOP to unsubscribe or HELP for assistance.
+                </span>
+              </label>
+              {!dpSmsConsent && (
+                <div className="mt-2 ml-7 flex items-center gap-1.5 text-amber-600 text-xs font-medium">
+                  <AlertCircle size={11} className="shrink-0" />
+                  You must accept the SMS consent to purchase a number.
+                </div>
+              )}
+            </div>
+
+            {/* Search inputs */}
+            <div className="flex flex-wrap gap-3 mb-4">
+              <input
+                type="text"
+                value={dpAreaCode}
+                onChange={e => setDpAreaCode(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                onKeyDown={e => e.key === 'Enter' && handleDpSearch()}
+                placeholder="Area code (e.g. 415)"
+                maxLength={3}
+                className="w-36 px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono tracking-widest"
+              />
+              <input
+                type="text"
+                value={dpLocality}
+                onChange={e => setDpLocality(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleDpSearch()}
+                placeholder="City (e.g. San Francisco)"
+                className="flex-1 min-w-40 px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <button
+                onClick={handleDpSearch}
+                disabled={dpSearchLoading}
+                className="px-5 py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-200 transition-all"
+              >
+                {dpSearchLoading ? <Loader2 size={14} className="animate-spin" /> : <Hash size={14} />}
+                {dpSearchLoading ? 'Searching...' : 'Search Numbers'}
+              </button>
+            </div>
+
+            {/* Available numbers grid */}
+            {dpAvailableNumbers.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
+                {dpAvailableNumbers.map(num => (
+                  <div key={num.phoneNumber} className="bg-slate-50 rounded-xl border border-slate-200 p-3 flex flex-col gap-2 hover:border-blue-200 transition-all">
+                    <div>
+                      <div className="font-bold text-slate-900 font-mono text-sm">{num.phoneNumber}</div>
+                      <div className="text-xs text-slate-500">{[num.locality, num.region].filter(Boolean).join(', ') || 'US'}</div>
+                      {dpPhonePrice != null && <div className="text-xs text-slate-400">${dpPhonePrice.toFixed(2)}/mo</div>}
+                    </div>
+                    <button
+                      onClick={() => handleDpPurchase(num.phoneNumber)}
+                      disabled={dpPurchasingNumber !== null || !dpSmsConsent}
+                      className="w-full px-3 py-2 bg-blue-600 text-white rounded-lg font-semibold text-xs hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
+                    >
+                      {dpPurchasingNumber === num.phoneNumber ? <><Loader2 size={12} className="animate-spin" /> Getting...</> : 'Get this number'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
