@@ -26,9 +26,12 @@ const FILTER_TABS: { key: TemplateFilter; label: string }[] = [
   { key: 'call-connect', label: 'Call Connect' },
 ];
 
+// Module-level cache — survives navigation unmounts
+let _templatesCache: MessageTemplate[] | null = null;
+
 export function MessageSettings() {
-  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [templates, setTemplates] = useState<MessageTemplate[]>(_templatesCache ?? []);
+  const [loading, setLoading] = useState(!_templatesCache);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedTemplates, setExpandedTemplates] = useState<Set<string>>(new Set());
@@ -47,10 +50,11 @@ export function MessageSettings() {
 
   async function loadTemplates() {
     try {
-      setLoading(true);
+      if (!_templatesCache) setLoading(true);
       setError(null);
       const { templates } = await templatesApi.getTemplates();
       setTemplates(templates);
+      _templatesCache = templates;
     } catch (err: any) {
       setError(err.message || 'Failed to load templates');
     } finally {
@@ -80,14 +84,14 @@ export function MessageSettings() {
 
       if (editorMode === 'create') {
         const { template } = await templatesApi.createTemplate(name, content, isDefault);
-        setTemplates(prev => [template, ...prev]);
+        setTemplates(prev => { const next = [template, ...prev]; _templatesCache = next; return next; });
       } else if (editingTemplate) {
         const { template } = await templatesApi.updateTemplate(editingTemplate.id, {
           name,
           content,
           isDefault,
         });
-        setTemplates(prev => prev.map(t => (t.id === template.id ? template : t)));
+        setTemplates(prev => { const next = prev.map(t => (t.id === template.id ? template : t)); _templatesCache = next; return next; });
       }
 
       closeEditor();
@@ -102,7 +106,7 @@ export function MessageSettings() {
     try {
       setSaving(true);
       await templatesApi.deleteTemplate(id);
-      setTemplates(prev => prev.filter(t => t.id !== id));
+      setTemplates(prev => { const next = prev.filter(t => t.id !== id); _templatesCache = next; return next; });
       setDeletingId(null);
     } catch (err: any) {
       setError(err.message || 'Failed to delete template');

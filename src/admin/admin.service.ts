@@ -53,6 +53,9 @@ export class AdminService {
           trialEndDate: true,
           createdAt: true,
           updatedAt: true,
+          savedAccounts: {
+            select: { id: true, businessName: true, platform: true },
+          },
           _count: {
             select: { leads: true },
           },
@@ -65,9 +68,14 @@ export class AdminService {
     ]);
 
     // Flatten _count into leadsCount
-    const users = rawUsers.map(({ _count, ...user }) => ({
+    const users = rawUsers.map(({ _count, savedAccounts, ...user }) => ({
       ...user,
       leadsCount: _count.leads,
+      connectedAccounts: savedAccounts.map((a) => ({
+        id: a.id,
+        businessName: a.businessName,
+        platform: a.platform,
+      })),
     }));
 
     return {
@@ -240,11 +248,15 @@ export class AdminService {
       ? ((cancelledInLastMonth / activeSubscriptions) * 100).toFixed(2)
       : '0.00';
 
+    // Count total connected accounts (SavedAccounts)
+    const totalConnectedAccounts = await this.prisma.savedAccount.count();
+
     return {
       totalUsers,
       activeSubscriptions,
       monthlyRevenue,
       churnRate: parseFloat(churnRate),
+      totalConnectedAccounts,
       usersByTier: usersByTier.map((item: any) => ({
         tier: item.subscriptionTier,
         count: item._count,

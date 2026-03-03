@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Users, DollarSign, Activity, TrendingDown, Eye, Trash2, Plus, Minus, ChevronRight, Loader2 } from 'lucide-react';
+import { Users, DollarSign, Activity, TrendingDown, Eye, Trash2, Plus, Minus, ChevronRight, Loader2, Building2 } from 'lucide-react';
 import { adminApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
@@ -251,6 +251,14 @@ export default function AdminDashboard() {
             <h3 className="text-2xl md:text-3xl font-bold text-slate-900 mt-1">{stats.churnRate}%</h3>
           </div>
 
+          <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div className="w-10 h-10 md:w-12 md:h-12 bg-cyan-50 text-cyan-600 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
+              <Building2 className="w-5 h-5 md:w-6 md:h-6" />
+            </div>
+            <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Connected Accounts</p>
+            <h3 className="text-2xl md:text-3xl font-bold text-slate-900 mt-1">{stats.totalConnectedAccounts}</h3>
+          </div>
+
         </section>
       )}
 
@@ -296,6 +304,11 @@ export default function AdminDashboard() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-slate-900 truncate">{u.name || u.email.split('@')[0]}</p>
                   <p className="text-xs text-slate-500 truncate">{u.email}</p>
+                  {u.connectedAccounts.length > 0 && (
+                    <p className="text-xs text-blue-600 truncate mt-0.5">
+                      {u.connectedAccounts.map((a) => a.businessName).join(', ')}
+                    </p>
+                  )}
                 </div>
                 <span className={tier.className}>{tier.label}</span>
                 <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
@@ -311,6 +324,7 @@ export default function AdminDashboard() {
               <tr className="border-b border-slate-100">
                 <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Email</th>
                 <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Name</th>
+                <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Accounts</th>
                 <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Tier</th>
                 <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Leads</th>
                 <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
@@ -326,6 +340,20 @@ export default function AdminDashboard() {
                   <tr key={u.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                     <td className="py-4 px-4 text-sm text-slate-900">{u.email}</td>
                     <td className="py-4 px-4 text-sm text-slate-700">{u.name || '—'}</td>
+                    <td className="py-4 px-4">
+                      {u.connectedAccounts.length > 0 ? (
+                        <div className="flex flex-col gap-1">
+                          {u.connectedAccounts.map((a) => (
+                            <div key={a.id} className="flex items-center gap-1.5">
+                              <Building2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                              <span className="text-xs text-slate-700 truncate max-w-[180px]" title={a.businessName}>{a.businessName}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                      )}
+                    </td>
                     <td className="py-4 px-4">
                       <span className={tier.className}>{tier.label}</span>
                     </td>

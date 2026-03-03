@@ -20,6 +20,9 @@ const tierPrices: Record<string, number> = {
   ENTERPRISE: 129,
 };
 
+// Module-level cache — survives navigation unmounts
+let _settingsCache: { subscription: SubscriptionDetails | null; accounts: SavedAccount[] } | null = null;
+
 export default function SettingsPage() {
   const navigate = useNavigate();
   const user = useAuthStore(state => state.user);
@@ -28,9 +31,9 @@ export default function SettingsPage() {
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
   const accountDiagnostics = useAppStore(state => state.accountDiagnostics);
   const loadDiagnostics = useAppStore(state => state.loadDiagnostics);
-  const [subscription, setSubscription] = useState<SubscriptionDetails | null>(null);
-  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [subscription, setSubscription] = useState<SubscriptionDetails | null>(_settingsCache?.subscription ?? null);
+  const [accounts, setAccounts] = useState<SavedAccount[]>(_settingsCache?.accounts ?? []);
+  const [loading, setLoading] = useState(!_settingsCache);
   const [portalLoading, setPortalLoading] = useState(false);
   const [selectedAccountForInfo, setSelectedAccountForInfo] = useState<string | null>(null);
   const [connectionModalOpen, setConnectionModalOpen] = useState(false);
@@ -166,7 +169,7 @@ export default function SettingsPage() {
 
   const loadData = async (forceDiagnostics = false) => {
     try {
-      setLoading(true);
+      if (!_settingsCache) setLoading(true);
       const [subResult, acctResult] = await Promise.all([
         billingApi.getSubscription().catch(() => null),
         thumbtackApi.getSavedAccounts().catch(() => ({ accounts: [] as SavedAccount[], count: 0 })),
@@ -174,6 +177,7 @@ export default function SettingsPage() {
       setSubscription(subResult);
       setAccounts(acctResult.accounts);
       setSavedAccounts(acctResult.accounts); // Update app store
+      _settingsCache = { subscription: subResult, accounts: acctResult.accounts };
 
       // Auto-select the first account if none is selected (or if saved selection no longer exists)
       if (acctResult.accounts.length > 0) {

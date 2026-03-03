@@ -120,6 +120,7 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
 // Module-level cache — survives navigation unmounts within SPA session
 // Keyed by accountId so switching accounts still fetches fresh data
 const _svcCache = new Map<string, Record<string, any>>();
+let _svcLoaded = false; // true once we've fetched at least once (even if no accounts)
 
 // -- Main Services Page --
 export function Services() {
@@ -134,7 +135,7 @@ export function Services() {
   const initialAccountId = storedAccounts[0]?.id || '';
   const [selectedAccountId, setSelectedAccountId] = useState(initialAccountId);
   const sc = _svcCache.get(initialAccountId); // cached service data for this account
-  const [loading, setLoading] = useState(storedAccounts.length === 0 && !sc);
+  const [loading, setLoading] = useState(!_svcLoaded && storedAccounts.length === 0 && !sc);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -282,13 +283,14 @@ export function Services() {
       }
     } finally {
       setLoading(false);
+      _svcLoaded = true;
     }
   }
 
   async function loadServiceData(accountId: string) {
     try {
       // Only show loading spinner on first load — cached data renders instantly
-      if (!_svcCache.has(accountId)) setLoading(true);
+      if (!_svcLoaded && !_svcCache.has(accountId)) setLoading(true);
       setError(null);
 
       const [automationRes, notifRes, templatesRes, poolRes, ccRes, ctRes, notifSettingsRes] = await Promise.all([
@@ -523,6 +525,7 @@ export function Services() {
       setError(err.message || 'Failed to load services data');
     } finally {
       setLoading(false);
+      _svcLoaded = true;
     }
   }
 

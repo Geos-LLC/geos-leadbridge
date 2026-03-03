@@ -25,12 +25,15 @@ const DELAY_OPTIONS = [
   { value: 120, label: '2 hours' },
 ];
 
+// Module-level cache — survives navigation unmounts
+let _autoCache: { rules: AutomationRule[]; accounts: SavedAccount[]; templates: MessageTemplate[] } | null = null;
+
 export function AutomationSettings() {
   const navigate = useNavigate();
-  const [rules, setRules] = useState<AutomationRule[]>([]);
-  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
-  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [rules, setRules] = useState<AutomationRule[]>(_autoCache?.rules ?? []);
+  const [accounts, setAccounts] = useState<SavedAccount[]>(_autoCache?.accounts ?? []);
+  const [templates, setTemplates] = useState<MessageTemplate[]>(_autoCache?.templates ?? []);
+  const [loading, setLoading] = useState(!_autoCache);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,7 +100,7 @@ export function AutomationSettings() {
 
   async function loadData() {
     try {
-      setLoading(true);
+      if (!_autoCache) setLoading(true);
       setError(null);
 
       const [rulesRes, accountsRes, templatesRes] = await Promise.all([
@@ -109,6 +112,7 @@ export function AutomationSettings() {
       setRules(rulesRes.rules);
       setAccounts(accountsRes.accounts);
       setTemplates(templatesRes.templates);
+      _autoCache = { rules: rulesRes.rules, accounts: accountsRes.accounts, templates: templatesRes.templates };
 
       // Pre-select first account if available
       if (accountsRes.accounts.length > 0 && !formAccountId) {

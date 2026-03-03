@@ -62,6 +62,9 @@ function setLastSeenTimestamp(leadId: string, timestamp: string): void {
   localStorage.setItem(LAST_SEEN_KEY, JSON.stringify(timestamps));
 }
 
+// Module-level flag — once we've fetched leads at least once, don't show loading spinner on re-mount
+let _messagesLoaded = false;
+
 function hasNewUpdates(lead: Lead, lastSeenTimestamps: Record<string, string>): boolean {
   const lastSeen = lastSeenTimestamps[lead.id];
   // Use lastMessageAt if available, otherwise fall back to createdAt
@@ -165,7 +168,7 @@ export function Messages() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { leads, setLeads, selectedLead, setSelectedLead, configuredBusinessId, savedAccounts, setSavedAccounts } = useAppStore();
-  const [loading, setLoading] = useState(leads.length === 0);
+  const [loading, setLoading] = useState(!_messagesLoaded && leads.length === 0);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [resyncingMessages, setResyncingMessages] = useState(false);
@@ -496,7 +499,7 @@ export function Messages() {
   }, [selectedLead, savedAccounts]);
 
   const loadLeads = async () => {
-    if (leads.length === 0) setLoading(true);
+    if (!_messagesLoaded && leads.length === 0) setLoading(true);
     console.log('[Messages] Loading leads...');
     try {
       // Load all leads (no limit) to support date filtering across full history
@@ -509,6 +512,7 @@ export function Messages() {
         return new Date(bTime).getTime() - new Date(aTime).getTime();
       });
       setLeads(sortedLeads);
+      _messagesLoaded = true;
       // Selection will be handled by the savedAccounts effect
     } catch (err) {
       console.error('[Messages] Failed to load leads:', err);

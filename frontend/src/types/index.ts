@@ -307,6 +307,7 @@ export interface AdminUser {
   trialLeadsLimit: number;
   trialEndDate: string | null;
   leadsCount: number;
+  connectedAccounts: { id: string; businessName: string; platform: string }[];
   createdAt: string;
   updatedAt: string;
 }
@@ -328,6 +329,7 @@ export interface AdminStats {
   activeSubscriptions: number;
   monthlyRevenue: number;
   churnRate: number;
+  totalConnectedAccounts: number;
   usersByTier: {
     tier: 'STARTER' | 'PRO' | 'ENTERPRISE';
     count: number;
