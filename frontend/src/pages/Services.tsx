@@ -1448,7 +1448,6 @@ export function Services() {
                   )}
                 </div>
               )}
-            </div>
           </ServiceCard>
             );
           })()}
