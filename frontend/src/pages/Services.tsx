@@ -161,6 +161,7 @@ export function Services() {
 
   // UI state
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  const [showPhoneSetupModal, setShowPhoneSetupModal] = useState(false);
   // Template editor modal state
   const [templateEditor, setTemplateEditor] = useState<{
     mode: 'create' | 'service-edit';
@@ -929,7 +930,7 @@ export function Services() {
 
   function saveCtFromPhone(fromPhone: string) {
     if (fromPhone === '__add_phone__') {
-      navigate('/phone-settings');
+      setShowPhoneSetupModal(true);
       return;
     }
     setCtFromPhone(fromPhone); // tracked in ctDirty — saved when user clicks Save Settings
@@ -1533,16 +1534,15 @@ export function Services() {
                       <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
                         <p className="text-sm text-amber-800 font-medium mb-1">No dedicated number set up</p>
                         <p className="text-xs text-amber-700 leading-relaxed">
-                          Customer texting requires your own phone number (not a shared pool number) for consent compliance. Set one up in Business Line settings:
+                          Customer texting requires your own phone number for consent compliance.
                         </p>
-                        <div className="mt-3 flex flex-col gap-1.5">
-                          <button type="button" onClick={() => navigate('/phone-settings')} className="text-xs text-blue-600 hover:underline font-medium text-left">
-                            Connect your OpenPhone number (Option 2)
-                          </button>
-                          <button type="button" onClick={() => navigate('/phone-settings')} className="text-xs text-blue-600 hover:underline font-medium text-left">
-                            Buy a dedicated number (Option 3)
-                          </button>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowPhoneSetupModal(true)}
+                          className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+                        >
+                          See setup options →
+                        </button>
                       </div>
                     );
                   }
@@ -2244,6 +2244,75 @@ export function Services() {
                 Save & Test
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Phone Setup Modal — shown when customer texting has no dedicated/OpenPhone number */}
+      {showPhoneSetupModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowPhoneSetupModal(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 relative" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => setShowPhoneSetupModal(false)}
+              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Set Up a Send-From Number</h3>
+            <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+              Customer texting requires your own phone number — not a shared pool number — for consent and compliance reasons. Choose one of the options below:
+            </p>
+
+            <div className="space-y-4">
+              {/* Option 2 — OpenPhone */}
+              <div className="border border-slate-200 rounded-2xl p-5">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5">
+                    <Phone className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-slate-900 text-sm">Option 2 — OpenPhone Number</p>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      Connect your existing OpenPhone workspace. Your numbers stay in OpenPhone and route through your account.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => { setShowPhoneSetupModal(false); navigate('/phone-settings?tab=openphone'); }}
+                      className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+                    >
+                      Connect OpenPhone →
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Option 3 — Dedicated Number */}
+              <div className="border border-slate-200 rounded-2xl p-5">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5">
+                    <Briefcase className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-slate-900 text-sm">Option 3 — Dedicated Number</p>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      Get a dedicated Twilio number assigned exclusively to your account — from the admin phone pool or self-provisioned.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => { setShowPhoneSetupModal(false); navigate('/phone-settings?tab=dedicated'); }}
+                      className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+                    >
+                      Get a dedicated number →
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <p className="mt-5 text-xs text-slate-400 text-center">
+              Shared Business Line numbers (Option 1) cannot be used for customer texting.
+            </p>
           </div>
         </div>
       )}
