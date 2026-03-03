@@ -880,6 +880,10 @@ export const usersApi = {
     const { data } = await api.get('/v1/users/me/phone-options');
     return data;
   },
+  deleteOwnAccount: async (): Promise<{ success: boolean }> => {
+    const { data } = await api.delete('/v1/users/me');
+    return data;
+  },
 };
 
 // Admin API

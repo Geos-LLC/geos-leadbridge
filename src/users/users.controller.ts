@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Query, Request, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Query, Request, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { UsersService } from './users.service';
 import { SigcoreSearchResult } from '../sigcore/sigcore.service';
@@ -72,5 +72,15 @@ export class UsersController {
   @Get('me/phone-options')
   async getPhoneOptions(@Request() req: any) {
     return this.usersService.getAllPhoneOptions(req.user.id);
+  }
+
+  /**
+   * Delete the current user's own account
+   * DELETE /v1/users/me
+   */
+  @Delete('me')
+  async deleteOwnAccount(@Request() req: any) {
+    const result = await this.usersService.deleteOwnAccount(req.user.id);
+    return { success: true, data: result };
   }
 }

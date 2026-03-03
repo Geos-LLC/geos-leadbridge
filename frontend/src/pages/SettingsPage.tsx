@@ -24,6 +24,7 @@ export default function SettingsPage() {
   const navigate = useNavigate();
   const user = useAuthStore(state => state.user);
   const setAuth = useAuthStore(state => state.setAuth);
+  const logout = useAuthStore(state => state.logout);
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
   const accountDiagnostics = useAppStore(state => state.accountDiagnostics);
   const loadDiagnostics = useAppStore(state => state.loadDiagnostics);
@@ -81,6 +82,11 @@ export default function SettingsPage() {
   // Budget snapshots
   const [budgetSnapshots, setBudgetSnapshots] = useState<Array<{ id: string; weeklyBudget: string; currency: string; capturedAt: string; effectiveFrom: string; effectiveTo: string | null; active: boolean; scopeCategory: string | null; scopeLocation: string | null }>>([]);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
+
+  // Delete account
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   // Extension detection
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
@@ -1177,6 +1183,91 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+
+      {/* Danger Zone */}
+      {user?.role !== 'ADMIN' && (
+        <div className="bg-white rounded-3xl shadow-sm border border-red-100 overflow-hidden">
+          <div className="p-8">
+            <h2 className="text-xl font-bold text-red-600 mb-1">Danger Zone</h2>
+            <p className="text-sm text-slate-500 mb-6">
+              Permanently delete your account and all associated data. This action cannot be undone.
+            </p>
+
+            {!showDeleteConfirm ? (
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="px-6 py-3 bg-red-50 text-red-600 border border-red-200 rounded-xl font-semibold hover:bg-red-100 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <Trash2 size={16} />
+                  Delete Account
+                </span>
+              </button>
+            ) : (
+              <div className="p-6 bg-red-50 border border-red-200 rounded-2xl space-y-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-red-900">This will permanently delete:</p>
+                    <ul className="text-sm text-red-700 mt-1 list-disc list-inside space-y-0.5">
+                      <li>Your account and profile</li>
+                      <li>All connected business accounts</li>
+                      <li>All leads, messages, and automation rules</li>
+                      <li>Phone numbers and notification settings</li>
+                      <li>Active subscriptions will be cancelled</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-red-900 mb-1.5">
+                    Type your email <span className="font-bold">{user?.email}</span> to confirm
+                  </label>
+                  <input
+                    type="text"
+                    value={deleteConfirmEmail}
+                    onChange={(e) => setDeleteConfirmEmail(e.target.value)}
+                    placeholder={user?.email || ''}
+                    className="w-full px-4 py-2.5 border border-red-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-white"
+                    autoComplete="off"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={async () => {
+                      setDeletingAccount(true);
+                      try {
+                        await usersApi.deleteOwnAccount();
+                        logout();
+                        navigate('/');
+                      } catch (err: any) {
+                        notify.error('Error', err.message || 'Failed to delete account');
+                      } finally {
+                        setDeletingAccount(false);
+                      }
+                    }}
+                    disabled={deleteConfirmEmail !== user?.email || deletingAccount}
+                    className="px-6 py-2.5 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {deletingAccount ? (
+                      <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Deleting...</span>
+                    ) : (
+                      'Permanently Delete Account'
+                    )}
+                  </button>
+                  <button
+                    onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmEmail(''); }}
+                    className="px-6 py-2.5 bg-white text-slate-600 border border-slate-200 rounded-xl font-semibold hover:bg-slate-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Account Diagnostics Modal */}
       {selectedAccountForInfo && accountDiagnostics[selectedAccountForInfo] && (

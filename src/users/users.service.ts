@@ -1,14 +1,18 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
 import { SigcoreService, SigcoreSearchResult } from '../sigcore/sigcore.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { StripeService } from '../stripe/stripe.service';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     private prisma: PrismaService,
     private sigcoreService: SigcoreService,
     private notificationsService: NotificationsService,
+    private stripeService: StripeService,
   ) {}
 
   /**
@@ -231,5 +235,46 @@ export class UsersService {
       pool,
       openphone,
     };
+  }
+
+  /**
+   * Delete the current user's own account
+   */
+  async deleteOwnAccount(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { savedAccounts: { select: { id: true } } },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    // Cancel Stripe subscription if active
+    if (user.stripeSubscriptionId) {
+      try {
+        await this.stripeService.cancelSubscription(userId, true);
+      } catch (err: any) {
+        this.logger.warn(`[deleteOwnAccount] Stripe cancel failed: ${err.message}`);
+      }
+    }
+
+    // Clean up Sigcore tenants for each saved account
+    for (const account of user.savedAccounts) {
+      try {
+        await this.notificationsService.deleteSigcoreTenant(account.id);
+      } catch (err: any) {
+        this.logger.warn(`[deleteOwnAccount] Sigcore cleanup failed for ${account.id}: ${err.message}`);
+      }
+    }
+
+    // Unlink tenant phone numbers (nullify savedAccountId) before cascade
+    await this.prisma.tenantPhoneNumber.updateMany({
+      where: { userId },
+      data: { savedAccountId: null },
+    });
+
+    // Delete user — cascade handles all related records
+    await this.prisma.user.delete({ where: { id: userId } });
+
+    this.logger.log(`[deleteOwnAccount] User ${user.email} deleted their account`);
+    return { success: true };
   }
 }
