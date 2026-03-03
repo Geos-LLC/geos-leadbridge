@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { Phone, Loader2, X, ChevronDown, AlertCircle, PhoneCall, Building2, Key, Unplug, CheckCircle2, ExternalLink, Link2, Hash, ShieldCheck, ShieldAlert, MessageSquare } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { usersApi, thumbtackApi, notificationsApi } from '../services/api';
 import type { TenantPhoneNumber } from '../services/api';
 import type { SavedAccount, PhonePoolEntry, SigcorePhoneNumber, AvailablePhoneNumber } from '../types';
@@ -10,7 +9,6 @@ import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
 
 export function PhoneSettings() {
-  const navigate = useNavigate();
   const storedAccounts = useAppStore(state => state.savedAccounts);
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
   // Seed from Zustand store to avoid loading flash / health-status flicker
