@@ -8,28 +8,32 @@ import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
 
+// Module-level cache — survives navigation unmounts
+let _phoneCache: Record<string, any> | null = null;
+
 export function PhoneSettings() {
   const storedAccounts = useAppStore(state => state.savedAccounts);
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
+  const pc = _phoneCache; // cached phone settings data
   // Seed from Zustand store to avoid loading flash / health-status flicker
   const [accounts, setAccounts] = useState<SavedAccount[]>(storedAccounts);
   const [selectedAccountId, setSelectedAccountId] = useState<string>(storedAccounts[0]?.id || '');
-  const [loading, setLoading] = useState(storedAccounts.length === 0);
+  const [loading, setLoading] = useState(storedAccounts.length === 0 && !pc);
   const [error, setError] = useState<string | null>(null);
 
   // Pool phone state
-  const [poolPhones, setPoolPhones] = useState<PhonePoolEntry[]>([]);
-  const [loadingPoolPhone, setLoadingPoolPhone] = useState(true);
+  const [poolPhones, setPoolPhones] = useState<PhonePoolEntry[]>(pc?.poolPhones ?? []);
+  const [loadingPoolPhone, setLoadingPoolPhone] = useState(!pc);
 
   // Own provider connection state
   const [openPhoneApiKey, setOpenPhoneApiKey] = useState('');
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
-  const [sigcoreConnected, setSigcoreConnected] = useState(false);
-  const [ownPhoneNumbers, setOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>([]);
+  const [sigcoreConnected, setSigcoreConnected] = useState(pc?.sigcoreConnected ?? false);
+  const [ownPhoneNumbers, setOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>(pc?.ownPhoneNumbers ?? []);
   const [loadingConnectionStatus, setLoadingConnectionStatus] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
-  const [sigcoreProvisioned, setSigcoreProvisioned] = useState(false);
+  const [sigcoreProvisioned, setSigcoreProvisioned] = useState(pc?.sigcoreProvisioned ?? false);
   const [provisioning, setProvisioning] = useState(false);
 
   // Option 3: provisioned Twilio number
@@ -43,7 +47,7 @@ export function PhoneSettings() {
   const [searchError, setSearchError] = useState<string | null>(null);
 
   // Tenant purchased numbers
-  const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
+  const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>(pc?.tenantPhones ?? []);
   const [, setLoadingTenantPhones] = useState(false);
   const [cancellingPhoneId, setCancellingPhoneId] = useState<string | null>(null);
   const [phonePriceMonthly, setPhonePriceMonthly] = useState<number | null>(null);
@@ -69,9 +73,11 @@ export function PhoneSettings() {
 
   async function loadPoolPhone() {
     try {
-      setLoadingPoolPhone(true);
+      if (!_phoneCache) setLoadingPoolPhone(true);
       const result = await usersApi.getMyPoolPhone();
-      setPoolPhones(result.poolPhones || (result.poolPhone ? [result.poolPhone] : []));
+      const phones = result.poolPhones || (result.poolPhone ? [result.poolPhone] : []);
+      setPoolPhones(phones);
+      _phoneCache = { ..._phoneCache, poolPhones: phones };
     } catch (err) {
       console.error('Failed to load pool phone:', err);
     } finally {
@@ -108,12 +114,13 @@ export function PhoneSettings() {
       setSigcoreProvisioned(provisioned);
       setSigcoreFromPhone(settingsRes.settings?.sigcoreFromPhone || null);
       setSigcoreProvider(settingsRes.settings?.sigcoreProvider || null);
+      let phones: SigcorePhoneNumber[] = [];
       if (connected) {
         const { phoneNumbers } = await notificationsApi.getSigcorePhoneNumbers(accountId);
-        setOwnPhoneNumbers(phoneNumbers);
-      } else {
-        setOwnPhoneNumbers([]);
+        phones = phoneNumbers;
       }
+      setOwnPhoneNumbers(phones);
+      _phoneCache = { ..._phoneCache, sigcoreConnected: connected, sigcoreProvisioned: provisioned, ownPhoneNumbers: phones };
     } catch (err) {
       console.error('Failed to load connection status:', err);
     } finally {
@@ -198,7 +205,10 @@ export function PhoneSettings() {
     try {
       setLoadingTenantPhones(true);
       const result = await notificationsApi.listTenantPhones();
-      if (result.success) setTenantPhones(result.data);
+      if (result.success) {
+        setTenantPhones(result.data);
+        _phoneCache = { ..._phoneCache, tenantPhones: result.data };
+      }
     } catch {
       console.error('Failed to load tenant phones');
     } finally {

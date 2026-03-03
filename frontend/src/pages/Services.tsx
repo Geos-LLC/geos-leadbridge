@@ -117,6 +117,10 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
   );
 }
 
+// Module-level cache — survives navigation unmounts within SPA session
+// Keyed by accountId so switching accounts still fetches fresh data
+const _svcCache = new Map<string, Record<string, any>>();
+
 // -- Main Services Page --
 export function Services() {
   const navigate = useNavigate();
@@ -127,8 +131,10 @@ export function Services() {
 
   // Account state — seed from Zustand store so there's no loading flash
   const [accounts, setAccounts] = useState<SavedAccount[]>(storedAccounts);
-  const [selectedAccountId, setSelectedAccountId] = useState(storedAccounts[0]?.id || '');
-  const [loading, setLoading] = useState(storedAccounts.length === 0);
+  const initialAccountId = storedAccounts[0]?.id || '';
+  const [selectedAccountId, setSelectedAccountId] = useState(initialAccountId);
+  const sc = _svcCache.get(initialAccountId); // cached service data for this account
+  const [loading, setLoading] = useState(storedAccounts.length === 0 && !sc);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -137,20 +143,20 @@ export function Services() {
   const [confirmDeleteAlert, setConfirmDeleteAlert] = useState(false);
 
   // Auto Reply rules (dynamic array of all new_lead automation rules)
-  const [autoReplyRules, setAutoReplyRules] = useState<AutomationRule[]>([]);
+  const [autoReplyRules, setAutoReplyRules] = useState<AutomationRule[]>(sc?.autoReplyRules ?? []);
   const autoReplyEnabled = autoReplyRules.some(r => r.enabled);
   const firstReplyRule = autoReplyRules.find(r => r.delayMinutes === 0 || !r.delayMinutes) || null;
 
   // Other service rules
-  const [leadAlertRule, setLeadAlertRule] = useState<NotificationRule | null>(null);
+  const [leadAlertRule, setLeadAlertRule] = useState<NotificationRule | null>(sc?.leadAlertRule ?? null);
 
 
   // Supporting data
-  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
-  const [poolPhones, setPoolPhones] = useState<{ id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean; smsApproved?: boolean }[]>([]);
-  const [ctOwnPhoneNumbers, setCtOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>([]);
+  const [templates, setTemplates] = useState<MessageTemplate[]>(sc?.templates ?? []);
+  const [poolPhones, setPoolPhones] = useState<{ id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean; smsApproved?: boolean }[]>(sc?.poolPhones ?? []);
+  const [ctOwnPhoneNumbers, setCtOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>(sc?.ctOwnPhoneNumbers ?? []);
   // ctSigcoreConnected tracked via local var in loadServiceData (no longer needed in JSX)
-  const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
+  const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>(sc?.tenantPhones ?? []);
 
   // UI state
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
@@ -165,29 +171,29 @@ export function Services() {
   } | null>(null);
 
   // Instant Call Connect state
-  const [ccEnabled, setCcEnabled] = useState(false);
-  const [ccMode, setCcMode] = useState<CallConnectMode>('AGENT_FIRST');
-  const [ccAgentStrategy, setCcAgentStrategy] = useState<AgentStrategy>('owner');
-  const [ccAgentPhone, setCcAgentPhone] = useState('');
-  const [ccMaxAttempts, setCcMaxAttempts] = useState(2);
-  const [ccQuietEnabled, setCcQuietEnabled] = useState(false);
-  const [ccQuietTimezone, setCcQuietTimezone] = useState('America/New_York');
-  const [ccQuietStart, setCcQuietStart] = useState('22:00');
-  const [ccQuietEnd, setCcQuietEnd] = useState('08:00');
-  const [ccAgentAcceptDigits, setCcAgentAcceptDigits] = useState('1');
-  const [ccAgentWhisperMessage, setCcAgentWhisperMessage] = useState('');
-  const [ccLeadGreetingMessage, setCcLeadGreetingMessage] = useState('');
-  const [ccVoicemailEnabled, setCcVoicemailEnabled] = useState(false);
-  const [ccVoicemailMessage, setCcVoicemailMessage] = useState('');
-  const [ccVoicemailRecordingUrl, setCcVoicemailRecordingUrl] = useState('');
-  const [ccBotNumber, setCcBotNumber] = useState('');
+  const [ccEnabled, setCcEnabled] = useState(sc?.ccEnabled ?? false);
+  const [ccMode, setCcMode] = useState<CallConnectMode>(sc?.ccMode ?? 'AGENT_FIRST');
+  const [ccAgentStrategy, setCcAgentStrategy] = useState<AgentStrategy>(sc?.ccAgentStrategy ?? 'owner');
+  const [ccAgentPhone, setCcAgentPhone] = useState(sc?.ccAgentPhone ?? '');
+  const [ccMaxAttempts, setCcMaxAttempts] = useState(sc?.ccMaxAttempts ?? 2);
+  const [ccQuietEnabled, setCcQuietEnabled] = useState(sc?.ccQuietEnabled ?? false);
+  const [ccQuietTimezone, setCcQuietTimezone] = useState(sc?.ccQuietTimezone ?? 'America/New_York');
+  const [ccQuietStart, setCcQuietStart] = useState(sc?.ccQuietStart ?? '22:00');
+  const [ccQuietEnd, setCcQuietEnd] = useState(sc?.ccQuietEnd ?? '08:00');
+  const [ccAgentAcceptDigits, setCcAgentAcceptDigits] = useState(sc?.ccAgentAcceptDigits ?? '1');
+  const [ccAgentWhisperMessage, setCcAgentWhisperMessage] = useState(sc?.ccAgentWhisperMessage ?? '');
+  const [ccLeadGreetingMessage, setCcLeadGreetingMessage] = useState(sc?.ccLeadGreetingMessage ?? '');
+  const [ccVoicemailEnabled, setCcVoicemailEnabled] = useState(sc?.ccVoicemailEnabled ?? false);
+  const [ccVoicemailMessage, setCcVoicemailMessage] = useState(sc?.ccVoicemailMessage ?? '');
+  const [ccVoicemailRecordingUrl, setCcVoicemailRecordingUrl] = useState(sc?.ccVoicemailRecordingUrl ?? '');
+  const [ccBotNumber, setCcBotNumber] = useState(sc?.ccBotNumber ?? '');
   const [ccSaving, setCcSaving] = useState(false);
   const [ccTestPhone, setCcTestPhone] = useState(() => localStorage.getItem('cc_test_phone') || '');
   const [ccTesting, setCcTesting] = useState(false);
   // Track which saved template is currently loaded in each CC message field (for edit button)
-  const [ccWhisperTemplateId, setCcWhisperTemplateId] = useState<string | null>(null);
-  const [ccGreetingTemplateId, setCcGreetingTemplateId] = useState<string | null>(null);
-  const [ccVoicemailTemplateId, setCcVoicemailTemplateId] = useState<string | null>(null);
+  const [ccWhisperTemplateId, setCcWhisperTemplateId] = useState<string | null>(sc?.ccWhisperTemplateId ?? null);
+  const [ccGreetingTemplateId, setCcGreetingTemplateId] = useState<string | null>(sc?.ccGreetingTemplateId ?? null);
+  const [ccVoicemailTemplateId, setCcVoicemailTemplateId] = useState<string | null>(sc?.ccVoicemailTemplateId ?? null);
 
   // CC dirty tracking
   const [ccSavedSnapshot, setCcSavedSnapshot] = useState<{
@@ -199,31 +205,31 @@ export function Services() {
     voicemailMessage: string;
     voicemailRecordingUrl: string;
     callForwardingNumber: string;
-  } | null>(null);
+  } | null>(sc?.ccSavedSnapshot ?? null);
   const [ccValidationModalOpen, setCcValidationModalOpen] = useState(false);
   const [ccUnsavedModalOpen, setCcUnsavedModalOpen] = useState(false);
 
   // Lead Alerts form state (needed for first-time creation)
-  const [alertToPhone, setAlertToPhone] = useState('');
-  const [alertFromPhone, setAlertFromPhone] = useState('');
+  const [alertToPhone, setAlertToPhone] = useState(sc?.alertToPhone ?? '');
+  const [alertFromPhone, setAlertFromPhone] = useState(sc?.alertFromPhone ?? '');
 
   // Customer Texting state
-  const [ctEnabled, setCtEnabled] = useState(false);
+  const [ctEnabled, setCtEnabled] = useState(sc?.ctEnabled ?? false);
   const [ctAutoReplyTemplate, setCtAutoReplyTemplate] = useState(
-    "Hi {customerName}, this is {accountName}. We just received your request for {category}. When would be a good time to call you?"
+    sc?.ctAutoReplyTemplate ?? "Hi {customerName}, this is {accountName}. We just received your request for {category}. When would be a good time to call you?"
   );
   const [ctSaving, setCtSaving] = useState(false);
-  const [ctFromPhone, setCtFromPhone] = useState('');
-  const [ctSigcoreFromPhone, setCtSigcoreFromPhone] = useState<string | null>(null);
+  const [ctFromPhone, setCtFromPhone] = useState(sc?.ctFromPhone ?? '');
+  const [ctSigcoreFromPhone, setCtSigcoreFromPhone] = useState<string | null>(sc?.ctSigcoreFromPhone ?? null);
   const [ctTestPhone, setCtTestPhone] = useState(() => localStorage.getItem('ct_test_phone') || '');
   const [ctTestStatus, setCtTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
-  const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string; fromPhone: string; smsForwardingNumber: string } | null>(null);
-  const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>('');
-  const [ctSmsForwardingNumber, setCtSmsForwardingNumber] = useState('');
-  const [ccCallForwardingNumber, setCcCallForwardingNumber] = useState('');
+  const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string; fromPhone: string; smsForwardingNumber: string } | null>(sc?.ctSavedSnapshot ?? null);
+  const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>(sc?.ctSelectedTemplateId ?? '');
+  const [ctSmsForwardingNumber, setCtSmsForwardingNumber] = useState(sc?.ctSmsForwardingNumber ?? '');
+  const [ccCallForwardingNumber, setCcCallForwardingNumber] = useState(sc?.ccCallForwardingNumber ?? '');
 
   // Lead Alert saved snapshot for dirty tracking
-  const [alertSavedSnapshot, setAlertSavedSnapshot] = useState<{ toPhone: string; fromPhone: string } | null>(null);
+  const [alertSavedSnapshot, setAlertSavedSnapshot] = useState<{ toPhone: string; fromPhone: string } | null>(sc?.alertSavedSnapshot ?? null);
 
   // Derived: unsaved Lead Alert changes
   const alertDirty = alertSavedSnapshot !== null && (
@@ -281,7 +287,8 @@ export function Services() {
 
   async function loadServiceData(accountId: string) {
     try {
-      setLoading(true);
+      // Only show loading spinner on first load — cached data renders instantly
+      if (!_svcCache.has(accountId)) setLoading(true);
       setError(null);
 
       const [automationRes, notifRes, templatesRes, poolRes, ccRes, ctRes, notifSettingsRes] = await Promise.all([
@@ -355,7 +362,11 @@ export function Services() {
 
       // Load tenant purchased phone numbers
       notificationsApi.listTenantPhones().then(r => {
-        if (r.success) setTenantPhones(r.data.filter(tp => tp.status === 'ACTIVE'));
+        if (r.success) {
+          const active = r.data.filter(tp => tp.status === 'ACTIVE');
+          setTenantPhones(active);
+          const c = _svcCache.get(accountId); if (c) c.tenantPhones = active;
+        }
       }).catch(() => {});
 
       // Load own provider connection status for CT Option 2
@@ -365,7 +376,10 @@ export function Services() {
       setCtSmsForwardingNumber(notifSettingsRes?.settings?.smsForwardingNumber || '');
       setCcCallForwardingNumber(notifSettingsRes?.settings?.callForwardingNumber || '');
       if (connected) {
-        notificationsApi.getSigcorePhoneNumbers(accountId).then(r => setCtOwnPhoneNumbers(r.phoneNumbers)).catch(() => {});
+        notificationsApi.getSigcorePhoneNumbers(accountId).then(r => {
+          setCtOwnPhoneNumbers(r.phoneNumbers);
+          const c = _svcCache.get(accountId); if (c) c.ctOwnPhoneNumbers = r.phoneNumbers;
+        }).catch(() => {});
       } else {
         setCtOwnPhoneNumbers([]);
       }
@@ -464,6 +478,46 @@ export function Services() {
       if (toPhoneMissing || templateMissing || expandParam === 'lead-alerts') {
         setExpandedCard('lead-alerts');
       }
+
+      // Persist to module-level cache so returning to this page is instant
+      _svcCache.set(accountId, {
+        autoReplyRules: allAutoReplies, leadAlertRule: leadAlert, templates: allTemplates,
+        poolPhones: poolRes.phoneNumbers, tenantPhones: tenantPhones, ctOwnPhoneNumbers: ctOwnPhoneNumbers,
+        ccEnabled: ccs?.enabled ?? false, ccMode: (ccs?.mode || 'AGENT_FIRST') as CallConnectMode,
+        ccAgentStrategy: (ccs?.agentStrategy || 'owner') as AgentStrategy,
+        ccAgentPhone: ccs?.agentPhoneE164 || '', ccMaxAttempts: ccs?.maxAgentAttempts ?? 2,
+        ccQuietEnabled: ccs?.quietHoursEnabled ?? false,
+        ccQuietTimezone: ccs?.quietHoursTimezone || 'America/New_York',
+        ccQuietStart: ccs?.quietHoursStart || '22:00', ccQuietEnd: ccs?.quietHoursEnd || '08:00',
+        ccAgentAcceptDigits: ccs?.agentAcceptDigits || '0123456789*#',
+        ccAgentWhisperMessage: ccs?.agentWhisperMessage || '',
+        ccLeadGreetingMessage: ccs?.leadGreetingMessage || '',
+        ccVoicemailEnabled: ccs?.leadVoicemailEnabled ?? false,
+        ccVoicemailMessage: ccs?.leadVoicemailMessage || '',
+        ccVoicemailRecordingUrl: ccs?.leadVoicemailRecordingUrl || '',
+        ccBotNumber: ccs?.botNumberE164 || defaultBotNumber,
+        ccWhisperTemplateId: allTemplates.find(t => t.content === (ccs?.agentWhisperMessage || allTemplates.find(tt => tt.name === 'CC - Agent Whisper')?.content || ''))?.id || null,
+        ccGreetingTemplateId: allTemplates.find(t => t.content === (ccs?.leadGreetingMessage || allTemplates.find(tt => tt.name === 'CC - Lead Greeting')?.content || ''))?.id || null,
+        ccVoicemailTemplateId: allTemplates.find(t => t.content === (ccs?.leadVoicemailMessage || allTemplates.find(tt => tt.name === 'CC - Voicemail TTS')?.content || ''))?.id || null,
+        ctEnabled: ctRes?.enabled ?? false,
+        ctAutoReplyTemplate: ctRes?.autoReplyTemplate || allTemplates.find(t => t.name === 'CT - Auto Reply')?.content || '',
+        ctFromPhone: ctResolvedFromPhone, ctSigcoreFromPhone: notifSettingsRes?.settings?.sigcoreFromPhone || null,
+        ctSmsForwardingNumber: notifSettingsRes?.settings?.smsForwardingNumber || '',
+        ccCallForwardingNumber: notifSettingsRes?.settings?.callForwardingNumber || '',
+        ctSelectedTemplateId: allTemplates.find(t => t.content === ctContent)?.id || allTemplates.find(t => t.name === 'CT - Auto Reply')?.id || '',
+        alertToPhone: alertTo, alertFromPhone: alertFrom,
+        alertSavedSnapshot: leadAlert ? { toPhone: alertTo, fromPhone: alertFrom } : null,
+        ctSavedSnapshot: { autoReplyTemplate: ctContent, fromPhone: ctResolvedFromPhone, smsForwardingNumber: notifSettingsRes?.settings?.smsForwardingNumber || '' },
+        ccSavedSnapshot: {
+          mode: (ccs?.mode || 'AGENT_FIRST') as CallConnectMode,
+          agentPhone: ccs?.agentPhoneE164 || '', botNumber: ccs?.botNumberE164 || defaultBotNumber,
+          agentWhisperMessage: ccs?.agentWhisperMessage || allTemplates.find(t => t.name === 'CC - Agent Whisper')?.content || '',
+          leadGreetingMessage: ccs?.leadGreetingMessage || allTemplates.find(t => t.name === 'CC - Lead Greeting')?.content || '',
+          voicemailMessage: ccs?.leadVoicemailMessage || allTemplates.find(t => t.name === 'CC - Voicemail TTS')?.content || '',
+          voicemailRecordingUrl: ccs?.leadVoicemailRecordingUrl || '',
+          callForwardingNumber: notifSettingsRes?.settings?.callForwardingNumber || '',
+        },
+      });
 
     } catch (err: any) {
       setError(err.message || 'Failed to load services data');

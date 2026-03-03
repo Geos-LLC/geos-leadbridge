@@ -3,6 +3,7 @@ import { ArrowLeft, Bell, Loader2, X, ChevronDown, Send, Phone, MessageSquare, A
 import { useNavigate } from 'react-router-dom';
 import { notificationsApi, thumbtackApi, usersApi, type CreateNotificationRuleDto, type UpdateNotificationRuleDto } from '../services/api';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
+import { useAppStore } from '../store/appStore';
 import type { NotificationRule, SavedAccount } from '../types';
 
 // Available variables for SMS template
@@ -42,12 +43,16 @@ function formatToE164(phone: string): string {
   return cleaned;
 }
 
+// Module-level cache — survives navigation unmounts
+let _notifCache: { accounts: SavedAccount[]; rules: NotificationRule[]; phoneOptions: any } | null = null;
+
 export function NotificationSettings() {
   const navigate = useNavigate();
-  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
+  const storedAccounts = useAppStore(state => state.savedAccounts);
+  const [accounts, setAccounts] = useState<SavedAccount[]>(_notifCache?.accounts ?? storedAccounts);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
-  const [rules, setRules] = useState<NotificationRule[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [rules, setRules] = useState<NotificationRule[]>(_notifCache?.rules ?? []);
+  const [loading, setLoading] = useState(!_notifCache && storedAccounts.length === 0);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +63,7 @@ export function NotificationSettings() {
     dedicated: { id: string; phoneNumber: string; friendlyName: string | null; provider: string }[];
     pool: { id: string; phoneNumber: string; provider: string; friendlyName: string | null; smsApproved: boolean }[];
     openphone: { id: string; phoneNumber: string; friendlyName?: string; provider: string }[];
-  }>({ dedicated: [], pool: [], openphone: [] });
+  }>(_notifCache?.phoneOptions ?? { dedicated: [], pool: [], openphone: [] });
   const [loadingPhoneNumbers, setLoadingPhoneNumbers] = useState(false);
 
   // Rule editing state
@@ -101,7 +106,7 @@ export function NotificationSettings() {
 
   async function loadAccounts() {
     try {
-      setLoading(true);
+      if (!_notifCache) setLoading(true);
       const { accounts } = await thumbtackApi.getSavedAccounts();
       setAccounts(accounts);
       setSelectedAccountId('all');
@@ -115,13 +120,15 @@ export function NotificationSettings() {
 
   async function loadPoolPhones() {
     try {
-      setLoadingPhoneNumbers(true);
+      if (!_notifCache) setLoadingPhoneNumbers(true);
       const result = await usersApi.getAllPhoneOptions();
-      setPhoneOptions({
+      const opts = {
         dedicated: result.dedicated || [],
         pool: result.pool || [],
         openphone: result.openphone || [],
-      });
+      };
+      setPhoneOptions(opts);
+      if (_notifCache) _notifCache.phoneOptions = opts;
     } catch (err) {
       console.error('Failed to load phone options:', err);
       setPhoneOptions({ dedicated: [], pool: [], openphone: [] });
@@ -132,10 +139,12 @@ export function NotificationSettings() {
 
   async function loadAllRules() {
     try {
-      setLoading(true);
+      if (!_notifCache) setLoading(true);
       setError(null);
       const rulesRes = await notificationsApi.getAllRules();
       setRules(rulesRes.rules);
+      // Update module-level cache
+      _notifCache = { accounts, rules: rulesRes.rules, phoneOptions };
     } catch (err: any) {
       setError(err.message || 'Failed to load rules');
     } finally {

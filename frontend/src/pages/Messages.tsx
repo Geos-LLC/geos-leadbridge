@@ -165,7 +165,7 @@ export function Messages() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { leads, setLeads, selectedLead, setSelectedLead, configuredBusinessId, savedAccounts, setSavedAccounts } = useAppStore();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(leads.length === 0);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [resyncingMessages, setResyncingMessages] = useState(false);
@@ -496,7 +496,7 @@ export function Messages() {
   }, [selectedLead, savedAccounts]);
 
   const loadLeads = async () => {
-    setLoading(true);
+    if (leads.length === 0) setLoading(true);
     console.log('[Messages] Loading leads...');
     try {
       // Load all leads (no limit) to support date filtering across full history
