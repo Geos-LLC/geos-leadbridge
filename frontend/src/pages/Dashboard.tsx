@@ -330,7 +330,6 @@ export function Dashboard() {
             <h3 className={`text-2xl md:text-3xl font-bold text-slate-900 transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
               {loading ? '0' : stats.leadsToday}
             </h3>
-            <span className="text-emerald-500 text-xs md:text-sm font-bold">+12%</span>
           </div>
         </div>
 
@@ -343,7 +342,6 @@ export function Dashboard() {
             <h3 className={`text-2xl md:text-3xl font-bold text-slate-900 transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
               {loading ? '0' : stats.automatedReplies}
             </h3>
-            <span className="text-emerald-500 text-xs md:text-sm font-bold">100%</span>
           </div>
         </div>
 
@@ -356,7 +354,6 @@ export function Dashboard() {
             <h3 className={`text-2xl md:text-3xl font-bold text-slate-900 transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
               {loading ? '—' : stats.avgResponseTime}
             </h3>
-            <span className="text-emerald-500 text-xs md:text-sm font-bold">Fast</span>
           </div>
         </div>
 
@@ -522,43 +519,66 @@ export function Dashboard() {
             ) : (
               <div className="col-span-2 bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-8 text-center">
                 <p className="text-slate-600 font-medium mb-4">No accounts connected yet</p>
-                <Link to="/services" className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all">
+                <button
+                  onClick={() => setConnectionModalOpen(true)}
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all"
+                >
                   <Plus className="w-5 h-5" />
                   Connect Account
-                </Link>
+                </button>
               </div>
             )}
           </div>
           </div>
 
           {/* System Health */}
-          <div className="order-5 lg:order-none bg-slate-900 rounded-[2rem] p-6 md:p-8 text-white relative overflow-hidden">
-            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-8">
-              <div className="md:max-w-xs">
-                <h3 className="text-xl md:text-2xl font-bold mb-2">System Performance</h3>
-                <p className="text-slate-400 text-sm">Your automation bridge is running at optimal capacity. No downtime detected.</p>
+          {(() => {
+            const hasAccounts = savedAccounts.length > 0;
+            const healthyAccounts = savedAccounts.filter(a => {
+              const diag = accountDiagnostics[a.id];
+              return a.webhookId && diag?.healthy;
+            });
+            const allHealthy = hasAccounts && healthyAccounts.length === savedAccounts.length;
+            const autoReplyUp = allHealthy;
+            const smsUp = hasAccounts && healthyAccounts.length > 0;
+            const leadSyncUp = hasAccounts && healthyAccounts.length > 0;
+
+            return (
+              <div className="order-5 lg:order-none bg-slate-900 rounded-[2rem] p-6 md:p-8 text-white relative overflow-hidden">
+                <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-8">
+                  <div className="md:max-w-xs">
+                    <h3 className="text-xl md:text-2xl font-bold mb-2">System Performance</h3>
+                    <p className="text-slate-400 text-sm">
+                      {!hasAccounts
+                        ? 'Connect an account to activate your automation bridge.'
+                        : allHealthy
+                          ? 'Your automation bridge is running at optimal capacity.'
+                          : 'Some systems need attention. Check your account connections.'}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 md:gap-4 flex-1">
+                    <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${autoReplyUp ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-slate-500'}`}></div>
+                      <span className="text-xs md:text-sm font-medium">Auto-Reply: {autoReplyUp ? 'Active' : 'Inactive'}</span>
+                    </div>
+                    <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${smsUp ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-slate-500'}`}></div>
+                      <span className="text-xs md:text-sm font-medium">SMS Bridge: {smsUp ? 'Up' : 'Down'}</span>
+                    </div>
+                    <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${leadSyncUp ? 'bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.8)]' : 'bg-slate-500'}`}></div>
+                      <span className="text-xs md:text-sm font-medium">Lead Sync: {leadSyncUp ? 'Real-time' : 'Offline'}</span>
+                    </div>
+                    <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
+                      <div className="w-2 h-2 rounded-full bg-amber-400 shrink-0"></div>
+                      <span className="text-xs md:text-sm font-medium opacity-60 italic">Voice: Beta</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="absolute -right-20 -bottom-20 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl"></div>
               </div>
-              <div className="grid grid-cols-2 gap-3 md:gap-4 flex-1">
-                <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
-                  <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] shrink-0"></div>
-                  <span className="text-xs md:text-sm font-medium">Auto-Reply: Active</span>
-                </div>
-                <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
-                  <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] shrink-0"></div>
-                  <span className="text-xs md:text-sm font-medium">SMS Bridge: Up</span>
-                </div>
-                <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
-                  <div className="w-2 h-2 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.8)] shrink-0"></div>
-                  <span className="text-xs md:text-sm font-medium">Lead Sync: Real-time</span>
-                </div>
-                <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
-                  <div className="w-2 h-2 rounded-full bg-amber-400 shrink-0"></div>
-                  <span className="text-xs md:text-sm font-medium opacity-60 italic">Voice: Beta</span>
-                </div>
-              </div>
-            </div>
-            <div className="absolute -right-20 -bottom-20 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl"></div>
-          </div>
+            );
+          })()}
         </div>
 
         {/* Alerts & Quick Actions */}
@@ -687,13 +707,13 @@ export function Dashboard() {
               <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Sparkles className="w-8 h-8" />
               </div>
-              <h3 className="text-2xl font-bold mb-3">Automate Even Faster</h3>
+              <h3 className="text-2xl font-bold mb-3">AI Templates</h3>
               <p className="text-indigo-100 text-sm mb-6 leading-relaxed max-w-xs">
-                Our new AI-powered response templates are now live for all users.
+                AI-powered response templates are coming soon. Stay tuned!
               </p>
-              <Link to="/message-settings" className="px-8 py-3 bg-white text-indigo-600 rounded-xl font-bold text-sm shadow-lg hover:bg-indigo-50 transition-all">
-                Try AI Templates
-              </Link>
+              <span className="px-8 py-3 bg-white/20 text-white rounded-xl font-bold text-sm cursor-default">
+                Coming Soon
+              </span>
             </div>
             <div className="absolute -right-20 -bottom-20 w-64 h-64 bg-purple-600/20 rounded-full blur-3xl"></div>
           </div>

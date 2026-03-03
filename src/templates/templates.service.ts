@@ -32,11 +32,34 @@ export interface TemplateResponse {
 export class TemplatesService {
   constructor(private prisma: PrismaService) {}
 
+  private static readonly DEFAULT_TEMPLATES: { name: string; content: string; isDefault: boolean }[] = [
+    {
+      name: 'Auto Reply - New Lead',
+      content: 'Hi {firstName}, thanks for reaching out about {category}! I\'d love to help. Let me review your request and I\'ll get back to you shortly with availability and pricing. - {accountName}',
+      isDefault: true,
+    },
+    {
+      name: 'Auto Reply - Follow Up',
+      content: 'Hi {firstName}, just following up on your {category} request. Are you still looking for help? I have availability this week and would love to assist. Let me know!',
+      isDefault: false,
+    },
+    {
+      name: 'Alert - New Lead Notification',
+      content: 'New lead from Thumbtack! {customerName} is looking for {category} in {city}. Check your dashboard for details.',
+      isDefault: false,
+    },
+    {
+      name: 'Auto Reply - Welcome',
+      content: 'Welcome to {accountName}! Thanks for choosing us for your {category} needs. We\'ll be in touch soon to discuss your project. Feel free to reply with any questions!',
+      isDefault: false,
+    },
+  ];
+
   /**
-   * Get all templates for a user
+   * Get all templates for a user. Seeds defaults if user has none.
    */
   async getTemplates(userId: string): Promise<TemplateResponse[]> {
-    const templates = await this.prisma.messageTemplate.findMany({
+    let templates = await this.prisma.messageTemplate.findMany({
       where: { userId },
       orderBy: [
         { isDefault: 'desc' },
@@ -44,6 +67,27 @@ export class TemplatesService {
         { createdAt: 'desc' },
       ],
     });
+
+    // Seed default templates for new users
+    if (templates.length === 0) {
+      await this.prisma.messageTemplate.createMany({
+        data: TemplatesService.DEFAULT_TEMPLATES.map(t => ({
+          userId,
+          name: t.name,
+          content: t.content,
+          isDefault: t.isDefault,
+        })),
+      });
+
+      templates = await this.prisma.messageTemplate.findMany({
+        where: { userId },
+        orderBy: [
+          { isDefault: 'desc' },
+          { lastUsedAt: 'desc' },
+          { createdAt: 'desc' },
+        ],
+      });
+    }
 
     return templates.map(this.formatTemplate);
   }
