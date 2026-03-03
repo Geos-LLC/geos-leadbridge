@@ -105,26 +105,31 @@ export class UsersService {
    * Returns: user's assigned phones first, then all available pool phones
    */
   async getPoolPhonesForSms(userId: string) {
-    const [assignments, available] = await Promise.all([
-      this.prisma.phonePoolAssignment.findMany({
-        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
-        include: { phonePool: true },
-        orderBy: { assignedAt: 'desc' },
-      }),
+    // Pool numbers are shared across all tenants — show all non-released numbers.
+    // "assigned" flag indicates whether this user has an explicit assignment (informational only).
+    const [allPool, userAssignments] = await Promise.all([
       this.prisma.phonePool.findMany({
-        where: { status: 'AVAILABLE' },
+        where: { status: { not: 'RELEASED' } },
         orderBy: { provisionedAt: 'desc' },
+      }),
+      this.prisma.phonePoolAssignment.findMany({
+        where: { userId },
+        select: { phonePoolId: true },
       }),
     ]);
 
-    const assignedIds = new Set(assignments.map(a => a.phonePool.id));
+    const assignedIds = new Set(userAssignments.map(a => a.phonePoolId));
 
     return {
       success: true,
-      phoneNumbers: [
-        ...assignments.map(a => ({ id: a.phonePool.id, phoneNumber: a.phonePool.phoneNumber, provider: a.phonePool.provider, friendlyName: a.phonePool.friendlyName, assigned: true, smsApproved: a.phonePool.smsApproved })),
-        ...available.filter(p => !assignedIds.has(p.id)).map(p => ({ id: p.id, phoneNumber: p.phoneNumber, provider: p.provider, friendlyName: p.friendlyName, assigned: false, smsApproved: p.smsApproved })),
-      ],
+      phoneNumbers: allPool.map(p => ({
+        id: p.id,
+        phoneNumber: p.phoneNumber,
+        provider: p.provider,
+        friendlyName: p.friendlyName,
+        assigned: assignedIds.has(p.id),
+        smsApproved: p.smsApproved,
+      })),
     };
   }
 
@@ -176,19 +181,18 @@ export class UsersService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // 2. Pool phones assigned to user
-    const assignments = await this.prisma.phonePoolAssignment.findMany({
-      where: { userId, phonePool: { status: { not: 'RELEASED' } } },
-      include: { phonePool: true },
-      orderBy: { assignedAt: 'desc' },
+    // 2. Pool phones — shared across all tenants, show all non-released numbers
+    const poolPhones = await this.prisma.phonePool.findMany({
+      where: { status: { not: 'RELEASED' } },
+      orderBy: { provisionedAt: 'desc' },
     });
 
-    const pool = assignments.map(a => ({
-      id: a.phonePool.id,
-      phoneNumber: a.phonePool.phoneNumber,
-      provider: a.phonePool.provider,
-      friendlyName: a.phonePool.friendlyName,
-      smsApproved: a.phonePool.smsApproved,
+    const pool = poolPhones.map(p => ({
+      id: p.id,
+      phoneNumber: p.phoneNumber,
+      provider: p.provider,
+      friendlyName: p.friendlyName,
+      smsApproved: p.smsApproved,
     }));
 
     // 3. OpenPhone numbers from user's connected accounts

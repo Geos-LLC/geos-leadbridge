@@ -540,36 +540,52 @@ export function Dashboard() {
               const diag = accountDiagnostics[a.id];
               return a.webhookId && diag?.healthy;
             });
-            const allHealthy = hasAccounts && healthyAccounts.length === savedAccounts.length;
-            const autoReplyUp = allHealthy;
-            const smsUp = hasAccounts && healthyAccounts.length > 0;
-            const leadSyncUp = hasAccounts && healthyAccounts.length > 0;
+
+            // Account connected = at least one account with a working webhook
+            const accountConnected = healthyAccounts.length > 0;
+
+            // SMS alerts configured = healthy account whose notification issues are all "disabled"
+            // (rules exist but toggled off) or empty (fully configured and on)
+            const smsConfigured = accountConnected && healthyAccounts.some(a => {
+              const issues = accountDiagnostics[a.id]?.notificationIssues || [];
+              return issues.length === 0 || issues.every((i: string) => i.toLowerCase().includes('disabled'));
+            });
+
+            // Automation enabled = healthy account with zero notification issues (rules exist and are on)
+            const automationEnabled = accountConnected && healthyAccounts.some(a => {
+              const issues = accountDiagnostics[a.id]?.notificationIssues || [];
+              return issues.length === 0;
+            });
+
+            const subtitle = !hasAccounts
+              ? 'Connect a Thumbtack account to get started.'
+              : !accountConnected
+              ? 'Your account connection needs attention.'
+              : !smsConfigured
+              ? 'Account connected. Configure SMS alerts to enable automation.'
+              : !automationEnabled
+              ? 'SMS alerts configured but automation is currently off.'
+              : 'All systems connected and running.';
 
             return (
               <div className="order-5 lg:order-none bg-slate-900 rounded-[2rem] p-6 md:p-8 text-white relative overflow-hidden">
                 <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-8">
                   <div className="md:max-w-xs">
-                    <h3 className="text-xl md:text-2xl font-bold mb-2">System Performance</h3>
-                    <p className="text-slate-400 text-sm">
-                      {!hasAccounts
-                        ? 'Connect an account to activate your automation bridge.'
-                        : allHealthy
-                          ? 'Your automation bridge is running at optimal capacity.'
-                          : 'Some systems need attention. Check your account connections.'}
-                    </p>
+                    <h3 className="text-xl md:text-2xl font-bold mb-2">Account Status</h3>
+                    <p className="text-slate-400 text-sm">{subtitle}</p>
                   </div>
                   <div className="grid grid-cols-2 gap-3 md:gap-4 flex-1">
                     <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${autoReplyUp ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-slate-500'}`}></div>
-                      <span className="text-xs md:text-sm font-medium">Auto-Reply: {autoReplyUp ? 'Active' : 'Inactive'}</span>
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${accountConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-slate-500'}`}></div>
+                      <span className="text-xs md:text-sm font-medium">Thumbtack: {accountConnected ? 'Connected' : 'Not Connected'}</span>
                     </div>
                     <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${smsUp ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-slate-500'}`}></div>
-                      <span className="text-xs md:text-sm font-medium">SMS Bridge: {smsUp ? 'Up' : 'Down'}</span>
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${smsConfigured ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-slate-500'}`}></div>
+                      <span className="text-xs md:text-sm font-medium">SMS Alerts: {smsConfigured ? 'Configured' : 'Not Set Up'}</span>
                     </div>
                     <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${leadSyncUp ? 'bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.8)]' : 'bg-slate-500'}`}></div>
-                      <span className="text-xs md:text-sm font-medium">Lead Sync: {leadSyncUp ? 'Real-time' : 'Offline'}</span>
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${automationEnabled ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-slate-500'}`}></div>
+                      <span className="text-xs md:text-sm font-medium">Automation: {automationEnabled ? 'Enabled' : 'Off'}</span>
                     </div>
                     <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
                       <div className="w-2 h-2 rounded-full bg-amber-400 shrink-0"></div>
