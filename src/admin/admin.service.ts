@@ -481,8 +481,21 @@ export class AdminService {
           });
           notificationSettings = ns;
         }
+        // Check if this phone exists in the pool to determine its origin provider
+        let originProvider: string | null = null;
+        const poolEntry = await this.prisma.phonePool.findUnique({
+          where: { phoneNumber: phone.phoneNumber },
+          select: { provider: true },
+        });
+        originProvider = poolEntry?.provider || null;
+
         const { user, ...rest } = phone;
-        return { ...rest, user, savedAccount, notificationSettings };
+        return {
+          ...rest,
+          user,
+          savedAccount,
+          notificationSettings: notificationSettings || { sigcoreProvider: originProvider, sigcoreFromPhone: null, senderMode: null },
+        };
       }),
     );
 

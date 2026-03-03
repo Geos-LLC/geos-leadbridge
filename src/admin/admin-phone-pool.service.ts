@@ -612,10 +612,18 @@ export class AdminPhonePoolService {
       throw new BadRequestException('A tenant number with this phone already exists');
     }
 
+    // Auto-link to user's first savedAccount (provides business name + notification settings)
+    const savedAccount = await this.prisma.savedAccount.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+
     // Create tenant number
     const tenantPhone = await this.prisma.tenantPhoneNumber.create({
       data: {
         userId,
+        savedAccountId: savedAccount?.id || null,
         phoneNumber: poolPhone.phoneNumber,
         friendlyName: poolPhone.friendlyName,
         areaCode: poolPhone.areaCode,
