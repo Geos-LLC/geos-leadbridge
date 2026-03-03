@@ -733,7 +733,7 @@ export default function AdminTenantNumbers() {
                       {tenantPhones.map((phone) => (
                         <DraggableRow key={phone.id} id={phone.id} type="tenant">
                           <td className="px-5 py-3.5 font-mono text-sm font-bold text-slate-900">{formatPhone(phone.phoneNumber)}</td>
-                          <td className="px-5 py-3.5 text-sm text-slate-700 font-medium">{phone.savedAccount?.businessName || phone.user?.name || '—'}</td>
+                          <td className="px-5 py-3.5 text-sm text-slate-700 font-medium">{phone.user?.name || phone.savedAccount?.businessName || '—'}</td>
                           <td className="px-5 py-3.5 text-sm text-slate-500">{phone.user?.email || '—'}</td>
                           <td className="px-5 py-3.5">{providerBadge(phone.notificationSettings?.sigcoreProvider)}</td>
                           <td className="px-5 py-3.5">{tenantStatusBadge(phone.status)}</td>
@@ -771,7 +771,7 @@ export default function AdminTenantNumbers() {
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
                       {providerBadge(phone.notificationSettings?.sigcoreProvider)}
-                      {(phone.savedAccount?.businessName || phone.user?.name) && <span className="text-xs text-slate-600">{phone.savedAccount?.businessName || phone.user?.name}</span>}
+                      {(phone.user?.name || phone.savedAccount?.businessName) && <span className="text-xs text-slate-600">{phone.user?.name || phone.savedAccount?.businessName}</span>}
                     </div>
                     <p className="text-[11px] text-slate-400">{phone.user?.email} · {formatDate(phone.purchasedAt)}</p>
                   </div>
