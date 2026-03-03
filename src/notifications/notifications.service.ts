@@ -3,7 +3,7 @@
  * Manages SMS notification settings and sends notifications via Sigcore
  */
 
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 
@@ -245,6 +245,14 @@ export class NotificationsService {
 
     if (!account) {
       throw new NotFoundException('Saved account not found');
+    }
+
+    // Validate sigcoreFromPhone ownership — prevent setting another user's number
+    if (data.sigcoreFromPhone) {
+      const ownsPhone = await this.validatePhoneOwnership(userId, data.sigcoreFromPhone);
+      if (!ownsPhone) {
+        throw new BadRequestException('Phone number does not belong to this account');
+      }
     }
 
     const settings = await this.prisma.notificationSettings.upsert({
@@ -739,6 +747,14 @@ export class NotificationsService {
 
     const settings = existingSettings;
 
+    // Validate fromPhone ownership — prevent setting another user's number
+    if (data.fromPhone) {
+      const ownsPhone = await this.validatePhoneOwnership(userId, data.fromPhone);
+      if (!ownsPhone) {
+        throw new BadRequestException('Phone number does not belong to this account');
+      }
+    }
+
     const rule = await this.prisma.notificationRule.create({
       data: {
         notificationSettingsId: settings.id,
@@ -823,6 +839,14 @@ export class NotificationsService {
 
     this.logger.log(`[updateRule] Updating rule ${ruleId} with data: ${JSON.stringify(data)}`);
     this.logger.log(`[updateRule] Previous enabled value: ${existing.enabled}`);
+
+    // Validate fromPhone ownership — prevent setting another user's number
+    if (data.fromPhone) {
+      const ownsPhone = await this.validatePhoneOwnership(userId, data.fromPhone);
+      if (!ownsPhone) {
+        throw new BadRequestException('Phone number does not belong to this account');
+      }
+    }
 
     const rule = await this.prisma.notificationRule.update({
       where: { id: ruleId },
@@ -1151,6 +1175,38 @@ export class NotificationsService {
   }
 
   /**
+   * Validate that a phone number belongs to a specific user.
+   * Checks pool assignments, tenant (purchased) phones, and notification settings.
+   */
+  private async validatePhoneOwnership(userId: string, phoneNumber: string): Promise<boolean> {
+    // 1. Check pool phone assignments
+    const poolAssignment = await this.prisma.phonePoolAssignment.findFirst({
+      where: {
+        userId,
+        phonePool: { phoneNumber, status: { not: 'RELEASED' } },
+      },
+    });
+    if (poolAssignment) return true;
+
+    // 2. Check user-purchased tenant phones
+    const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
+      where: { userId, phoneNumber, status: 'ACTIVE' },
+    });
+    if (tenantPhone) return true;
+
+    // 3. Check if it's the user's sigcoreFromPhone in any of their notification settings
+    const settingsMatch = await this.prisma.notificationSettings.findFirst({
+      where: {
+        sigcoreFromPhone: phoneNumber,
+        savedAccount: { userId },
+      },
+    });
+    if (settingsMatch) return true;
+
+    return false;
+  }
+
+  /**
    * Send a notification using a specific rule (or legacy template)
    */
   private async sendNotificationWithRule(
@@ -1179,6 +1235,17 @@ export class NotificationsService {
         fromPhone = assignment.phonePool.phoneNumber;
         fromPhoneSource = 'pool';
         this.logger.log(`Using pool phone ${fromPhone} as fromPhone for rule`);
+      }
+    }
+
+    // Ownership guard: NEVER send SMS from a phone number that doesn't belong to this user
+    if (fromPhone) {
+      const ownsPhone = await this.validatePhoneOwnership(userId, fromPhone);
+      if (!ownsPhone) {
+        this.logger.warn(
+          `[sendNotificationWithRule] BLOCKED: user ${userId} does not own fromPhone ${fromPhone} (source: ${fromPhoneSource})`,
+        );
+        return;
       }
     }
 
