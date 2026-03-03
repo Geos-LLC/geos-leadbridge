@@ -867,10 +867,6 @@ export const usersApi = {
     const { data } = await api.patch('/v1/users/me', updates);
     return data;
   },
-  claimPoolAsDedicated: async (phonePoolId: string): Promise<{ success: boolean; tenantPhone: TenantPhoneNumber }> => {
-    const { data } = await api.post(`/v1/users/me/claim-dedicated/${phonePoolId}`);
-    return data;
-  },
   getAllPhoneOptions: async (): Promise<{
     success: boolean;
     dedicated: { id: string; phoneNumber: string; friendlyName: string | null; provider: string; type: 'dedicated' }[];

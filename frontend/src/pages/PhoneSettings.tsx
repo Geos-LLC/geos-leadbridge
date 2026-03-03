@@ -53,10 +53,6 @@ export function PhoneSettings() {
   const [phonePriceMonthly, setPhonePriceMonthly] = useState<number | null>(null);
   const [smsConsentAccepted, setSmsConsentAccepted] = useState(false);
 
-  // Claim from pool
-  const [claimingPoolId, setClaimingPoolId] = useState<string | null>(null);
-  // Available pool phones for claiming (AVAILABLE status only)
-  const availablePoolForClaim = poolPhones.filter(p => p.status === 'AVAILABLE');
 
   useEffect(() => {
     loadAccounts();
@@ -262,21 +258,6 @@ export function PhoneSettings() {
     }
   }
 
-  async function handleClaimFromPool(phonePoolId: string) {
-    if (!confirm('Claim this number as your dedicated number? It will be exclusively assigned to you.')) return;
-    setClaimingPoolId(phonePoolId);
-    setSearchError(null);
-    try {
-      const result = await usersApi.claimPoolAsDedicated(phonePoolId);
-      if (result.success) {
-        await Promise.all([loadTenantPhones(), loadPoolPhone()]);
-      }
-    } catch (err: any) {
-      setSearchError(err.response?.data?.message || err.message || 'Failed to claim number');
-    } finally {
-      setClaimingPoolId(null);
-    }
-  }
 
   if (loading && accounts.length === 0) {
     return (
@@ -629,41 +610,6 @@ export function PhoneSettings() {
               </div>
             )}
 
-            {/* Claim from Pool */}
-            {availablePoolForClaim.length > 0 && (
-              <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-4">
-                <div>
-                  <h4 className="font-semibold text-slate-900 mb-1">Claim from Pool</h4>
-                  <p className="text-slate-500 text-sm">
-                    Claim an available pool number as your exclusive dedicated number. No additional charges — managed by your administrator.
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {availablePoolForClaim.map(phone => (
-                    <div key={phone.id} className="bg-slate-50 rounded-2xl border border-slate-200 p-4 flex flex-col gap-3 hover:border-blue-200 transition-all">
-                      <div>
-                        <div className="font-bold text-slate-900 font-mono text-sm">{phone.phoneNumber}</div>
-                        <div className="text-xs text-slate-500 mt-0.5">
-                          {phone.areaCode ? `Area: ${phone.areaCode}` : 'Pool Number'}
-                        </div>
-                        {phone.friendlyName && (
-                          <div className="text-xs text-slate-400 mt-0.5">{phone.friendlyName}</div>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => handleClaimFromPool(phone.id)}
-                        disabled={claimingPoolId !== null}
-                        className="w-full px-4 py-2 bg-emerald-600 text-white rounded-xl font-semibold text-xs hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
-                      >
-                        {claimingPoolId === phone.id ? (
-                          <><Loader2 size={14} className="animate-spin" /> Claiming...</>
-                        ) : 'Claim as Dedicated'}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {/* SMS Consent */}
             <div className={`rounded-2xl border p-4 ${smsConsentAccepted ? 'bg-emerald-50/50 border-emerald-200' : 'bg-amber-50/50 border-amber-200'}`}>
