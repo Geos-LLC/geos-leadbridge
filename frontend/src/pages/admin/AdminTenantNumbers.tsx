@@ -446,10 +446,9 @@ export default function AdminTenantNumbers() {
   // ── Convert Operations ──
 
   const searchConvertUsers = useCallback(async (query: string) => {
-    if (!query.trim()) { setConvertUserResults([]); return; }
     try {
       setSearchingConvertUsers(true);
-      const result = await adminApi.getPhonePoolUsers(query);
+      const result = await adminApi.getPhonePoolUsers(query.trim() || '');
       setConvertUserResults(result.data);
     } catch { /* ignore */ } finally {
       setSearchingConvertUsers(false);
@@ -492,10 +491,9 @@ export default function AdminTenantNumbers() {
   // ── Reassign Operations ──
 
   const searchReassignUsers = useCallback(async (query: string) => {
-    if (!query.trim()) { setReassignUserResults([]); return; }
     try {
       setSearchingReassignUsers(true);
-      const result = await adminApi.getPhonePoolUsers(query);
+      const result = await adminApi.getPhonePoolUsers(query.trim() || '');
       setReassignUserResults(result.data);
     } catch { /* ignore */ } finally {
       setSearchingReassignUsers(false);

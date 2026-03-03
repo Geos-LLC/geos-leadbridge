@@ -619,18 +619,24 @@ export class AdminPhonePoolService {
       select: { id: true },
     });
 
-    // Create tenant number
-    const tenantPhone = await this.prisma.tenantPhoneNumber.create({
-      data: {
-        userId,
-        savedAccountId: savedAccount?.id || null,
-        phoneNumber: poolPhone.phoneNumber,
-        friendlyName: poolPhone.friendlyName,
-        areaCode: poolPhone.areaCode,
-        sigcoreAllocationId: poolPhone.sigcoreAllocationId,
-        status: 'ACTIVE',
-      },
-    });
+    // Create or re-activate tenant number (re-activate if a RELEASED record exists for this phone)
+    const tenantData = {
+      userId,
+      savedAccountId: savedAccount?.id || null,
+      phoneNumber: poolPhone.phoneNumber,
+      friendlyName: poolPhone.friendlyName,
+      areaCode: poolPhone.areaCode,
+      sigcoreAllocationId: poolPhone.sigcoreAllocationId,
+      status: 'ACTIVE' as const,
+      cancelledAt: null as Date | null,
+      releasedAt: null as Date | null,
+    };
+    const tenantPhone = existingTenant
+      ? await this.prisma.tenantPhoneNumber.update({
+          where: { id: existingTenant.id },
+          data: tenantData,
+        })
+      : await this.prisma.tenantPhoneNumber.create({ data: tenantData });
 
     // Remove pool assignments and mark as released
     await this.prisma.phonePoolAssignment.deleteMany({ where: { phonePoolId } });
