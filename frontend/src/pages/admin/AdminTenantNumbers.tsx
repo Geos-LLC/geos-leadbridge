@@ -609,22 +609,53 @@ export default function AdminTenantNumbers() {
             </div>
             <div className="flex items-center gap-3">
               {twilioHealth?.status === 'connected' && (
-                <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">
-                  {twilioHealth.phoneCount} number{twilioHealth.phoneCount !== 1 ? 's' : ''}
-                </span>
+                <>
+                  <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">
+                    {twilioHealth.phoneCount} number{twilioHealth.phoneCount !== 1 ? 's' : ''}
+                  </span>
+                  <button onClick={handleDisconnect} className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-semibold hover:bg-red-100 transition-all flex items-center gap-1.5">
+                    <Unlink size={12} /> Disconnect
+                  </button>
+                </>
               )}
               {(twilioHealth?.status === 'disconnected' || twilioHealth?.status === 'error') && (
                 <button onClick={() => setShowConnect(true)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-all flex items-center gap-1.5 shadow-sm">
-                  <Link size={12} /> Reconnect
+                  <Link size={12} /> Connect
                 </button>
               )}
               <button onClick={checkTwilioHealth} disabled={healthChecking} className="px-3 py-1.5 bg-white/80 border border-slate-200 text-slate-700 rounded-lg text-xs font-semibold hover:bg-white transition-all flex items-center gap-1.5 disabled:opacity-50">
                 {healthChecking ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                Check Now
+                Check
               </button>
             </div>
           </div>
         </div>
+
+        {/* Connect Provider Form (appears below health banner) */}
+        {showConnect && (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-8">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-slate-900">Connect Twilio</h3>
+              <button className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all" onClick={() => setShowConnect(false)}><X size={18} /></button>
+            </div>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-slate-700">Account SID</label>
+                <input type="text" placeholder="AC..." value={connectFields.accountSid} onChange={e => setConnectFields({ ...connectFields, accountSid: e.target.value })} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all" />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-slate-700">Auth Token</label>
+                <input type="password" placeholder="Enter your Twilio auth token" value={connectFields.authToken} onChange={e => setConnectFields({ ...connectFields, authToken: e.target.value })} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all" />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2 disabled:opacity-50" onClick={handleConnect} disabled={connecting || !connectFields.accountSid || !connectFields.authToken}>
+                  {connecting ? <><Loader2 size={16} className="animate-spin" /> Connecting...</> : <><Link size={16} /> Connect Twilio</>}
+                </button>
+                <button className="px-6 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all" onClick={() => setShowConnect(false)}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ═══════════════════════════════════════════════════════════════════ */}
         {/* SECTION 1: Tenant Dedicated Numbers                               */}
@@ -830,49 +861,15 @@ export default function AdminTenantNumbers() {
                   <option value="RELEASED">Released</option>
                 </select>
               </div>
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-2 border-t border-slate-100">
-                <div className="flex items-center gap-2 flex-1">
-                  <button className="flex-1 sm:flex-none px-4 py-2.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50" onClick={() => setShowConnect(true)} disabled={tenantKeyConfigured === false}>
-                    <Link size={16} /> Connect Provider
-                  </button>
-                  <button className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50" onClick={handleSync} disabled={syncing || tenantKeyConfigured === false}>
-                    {syncing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} Sync
-                  </button>
-                  <button className="px-3 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center justify-center" onClick={loadPoolData} title="Refresh">
-                    <RefreshCw size={16} />
-                  </button>
-                </div>
-                <button className="flex-1 sm:flex-none px-4 py-2.5 bg-red-50 text-red-600 border border-red-200 rounded-xl font-semibold hover:bg-red-100 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50" onClick={handleDisconnect} disabled={tenantKeyConfigured === false}>
-                  <Unlink size={14} /> Disconnect Twilio
+              <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                <button className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50" onClick={handleSync} disabled={syncing || tenantKeyConfigured === false}>
+                  {syncing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} Sync Numbers
+                </button>
+                <button className="px-3 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center justify-center" onClick={loadPoolData} title="Refresh">
+                  <RefreshCw size={16} />
                 </button>
               </div>
             </div>
-
-            {/* Connect Provider Form */}
-            {showConnect && (
-              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 md:p-8">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold text-slate-900">Connect Provider</h3>
-                  <button className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all" onClick={() => setShowConnect(false)}><X size={18} /></button>
-                </div>
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-slate-700">Account SID</label>
-                    <input type="text" placeholder="AC..." value={connectFields.accountSid} onChange={e => setConnectFields({ ...connectFields, accountSid: e.target.value })} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all" />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-slate-700">Auth Token</label>
-                    <input type="password" placeholder="Enter your Twilio auth token" value={connectFields.authToken} onChange={e => setConnectFields({ ...connectFields, authToken: e.target.value })} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all" />
-                  </div>
-                  <div className="flex gap-2 pt-2">
-                    <button className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2 disabled:opacity-50" onClick={handleConnect} disabled={connecting || !connectFields.accountSid || !connectFields.authToken}>
-                      {connecting ? <><Loader2 size={16} className="animate-spin" /> Connecting...</> : <><Link size={16} /> Connect Twilio</>}
-                    </button>
-                    <button className="px-6 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all" onClick={() => setShowConnect(false)}>Cancel</button>
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* Pool Table */}
             <div className="rounded-2xl md:rounded-3xl bg-white border border-slate-100 shadow-sm overflow-hidden">
