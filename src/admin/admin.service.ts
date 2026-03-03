@@ -494,11 +494,15 @@ export class AdminService {
         // Use origin provider as fallback when notificationSettings has no provider set
         const resolvedProvider = notificationSettings?.sigcoreProvider || originProvider || null;
 
-        const { user, ...rest } = phone;
+        const { user: usr, ...rest } = phone;
+
+        // Compute tenant display name: user account name first, then GBP business name
+        const tenantName = usr?.name || savedAccount?.businessName || null;
         return {
           ...rest,
-          user,
+          user: usr,
           savedAccount,
+          tenantName,
           notificationSettings: {
             sigcoreProvider: resolvedProvider,
             sigcoreFromPhone: notificationSettings?.sigcoreFromPhone || null,
