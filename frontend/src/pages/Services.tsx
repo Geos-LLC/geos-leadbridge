@@ -1622,8 +1622,8 @@ export function Services() {
                 )}
               </div>
 
-              {/* Test SMS */}
-              <div>
+              {/* Test SMS — disabled until a send-from phone is selected */}
+              <div className={!ctFromPhone ? 'opacity-40 pointer-events-none select-none' : ''}>
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send Test</label>
                 <div className="flex gap-2">
                   <input
