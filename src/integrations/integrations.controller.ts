@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards,
   Logger,
+  HttpCode,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -115,6 +116,20 @@ export class IntegrationsController {
     @Body() body: { thumbtackIds?: string[] },
   ) {
     return this.integrationsService.resetImported(user.id, body.thumbtackIds);
+  }
+
+  /**
+   * POST /api/integrations/thumbtack/leads/reimport
+   * Server-side bulk re-import of all collected leads — no extension needed.
+   * Pass savedAccountId in body to scope to a specific account.
+   */
+  @Post('leads/reimport')
+  @HttpCode(200)
+  async reimportLeads(
+    @CurrentUser() user: any,
+    @Body() body: { savedAccountId?: string },
+  ) {
+    return this.integrationsService.reimportLeads(user.id, body.savedAccountId);
   }
 
   /**

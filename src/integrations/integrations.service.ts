@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { PrismaService } from '../common/utils/prisma.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { LeadsService } from '../leads/leads.service';
 import { BudgetSnapshotDto } from './dto/budget-snapshot.dto';
 import { CollectLeadsDto } from './dto/collect-leads.dto';
 
@@ -12,6 +13,7 @@ export class IntegrationsService {
   constructor(
     private prisma: PrismaService,
     private analyticsService: AnalyticsService,
+    private leadsService: LeadsService,
   ) {}
 
   /**
@@ -259,6 +261,50 @@ export class IntegrationsService {
     this.logger.log(`Reset ${result.count} leads to pending for user ${userId}`);
 
     return { ok: true, resetCount: result.count };
+  }
+
+  /**
+   * Re-import all leads for a user/account from ThumbtackLeadId table.
+   * Runs the import server-side without requiring the Chrome extension.
+   * Resets imported=false first, then imports each ID, then marks as imported.
+   */
+  async reimportLeads(userId: string, savedAccountId?: string) {
+    const where: any = { userId };
+    if (savedAccountId) where.savedAccountId = savedAccountId;
+
+    const collected = await this.prisma.thumbtackLeadId.findMany({
+      where,
+      select: { thumbtackId: true },
+      orderBy: { capturedAt: 'desc' },
+    });
+
+    if (collected.length === 0) {
+      return { ok: true, total: 0, imported: 0, failed: 0, errors: [] };
+    }
+
+    const thumbtackIds = collected.map((l) => l.thumbtackId);
+    this.logger.log(`[reimportLeads] Re-importing ${thumbtackIds.length} leads for user ${userId}`);
+
+    const results = await this.leadsService.importThumbtackNegotiations(userId, thumbtackIds, savedAccountId);
+
+    // Mark successfully-imported ones (all that didn't fail) as imported
+    const failedIds = new Set(results.errors.map((e: string) => e.split(':')[0]));
+    const successIds = thumbtackIds.filter((id) => !failedIds.has(id));
+
+    if (successIds.length > 0) {
+      await this.prisma.thumbtackLeadId.updateMany({
+        where: { userId, thumbtackId: { in: successIds } },
+        data: { imported: true, importedAt: new Date(), needsRefetch: false },
+      });
+    }
+
+    return {
+      ok: true,
+      total: thumbtackIds.length,
+      imported: results.imported,
+      failed: results.failed,
+      errors: results.errors,
+    };
   }
 
   /**
