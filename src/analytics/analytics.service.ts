@@ -156,7 +156,7 @@ export class AnalyticsService {
     // leads.createdAt and tli.capturedAt are both the import/capture timestamp (same day for bulk imports).
     // leadPrice from rawJson is the cost Thumbtack charged the pro per lead (estimate.total is typically null).
     const sqlStr = `
-      WITH lead_dates AS (
+      WITH raw_leads AS (
         SELECT
           l.id,
           l."userId",
@@ -164,32 +164,37 @@ export class AnalyticsService {
           l."thumbtackStatus",
           l."rawJson",
           tli."thumbtackStatus" AS tli_status,
-          CASE
-            WHEN tli."leadDate" IS NOT NULL
-              AND tli."leadDate" ~ '^[A-Za-z]{3} +[0-9]{1,2}$'
-            THEN
-              CASE
-                WHEN TO_DATE(
-                  regexp_replace(tli."leadDate", ' +', ' ') || ' ' || EXTRACT(YEAR FROM NOW())::text,
-                  'Mon DD YYYY'
-                ) > CURRENT_DATE
-                THEN TO_DATE(
-                  regexp_replace(tli."leadDate", ' +', ' ') || ' ' || (EXTRACT(YEAR FROM NOW())::int - 1)::text,
-                  'Mon DD YYYY'
-                )::timestamptz
-                ELSE TO_DATE(
-                  regexp_replace(tli."leadDate", ' +', ' ') || ' ' || EXTRACT(YEAR FROM NOW())::text,
-                  'Mon DD YYYY'
-                )::timestamptz
-              END
-            ELSE COALESCE(tli."capturedAt", l."createdAt")
-          END AS lead_date
+          tli."capturedAt"      AS tli_captured_at,
+          l."createdAt"         AS l_created_at,
+          -- Extract just the "Mon DD" prefix; leadDate may have trailing text like "Feb 23 · $52"
+          CASE WHEN tli."leadDate" IS NOT NULL
+            THEN regexp_replace(
+              SUBSTRING(tli."leadDate" FROM '^[A-Za-z]{3}\\s+[0-9]{1,2}'),
+              '\\s+', ' '
+            )
+            ELSE NULL
+          END AS date_str
         FROM leads l
         LEFT JOIN thumbtack_lead_ids tli
           ON tli."thumbtackId" = l."externalRequestId"
          AND tli."userId"      = l."userId"
         WHERE l."userId" = $1
           AND ($2::text IS NULL OR l."businessId" = $2::text)
+      ),
+      lead_dates AS (
+        SELECT
+          id, "userId", "businessId", "thumbtackStatus", "rawJson", tli_status,
+          CASE
+            WHEN date_str IS NOT NULL AND date_str <> ''
+            THEN
+              CASE
+                WHEN TO_DATE(date_str || ' ' || EXTRACT(YEAR FROM NOW())::text, 'Mon DD YYYY') > CURRENT_DATE
+                THEN TO_DATE(date_str || ' ' || (EXTRACT(YEAR FROM NOW())::int - 1)::text, 'Mon DD YYYY')::timestamptz
+                ELSE TO_DATE(date_str || ' ' || EXTRACT(YEAR FROM NOW())::text, 'Mon DD YYYY')::timestamptz
+              END
+            ELSE COALESCE(tli_captured_at, l_created_at)
+          END AS lead_date
+        FROM raw_leads
       ),
       status_counts AS (
         SELECT
