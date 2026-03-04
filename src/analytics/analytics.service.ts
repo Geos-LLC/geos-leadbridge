@@ -152,12 +152,13 @@ export class AnalyticsService {
 
     const HIRED_STATUSES = new Set(['hired', 'job scheduled', 'job done']);
 
-    // Group by (bucket, job_status) so each status gets its own count per period.
-    // Budget stats are computed in a separate CTE per-bucket to avoid per-status skew.
+    // Use tli.capturedAt (when extension first saw the lead) as the canonical lead date.
+    // leads.createdAt is the import timestamp and can be today for bulk-imported old leads.
+    // Budget stats use the same date source for consistency.
     const sqlStr = `
       WITH status_counts AS (
         SELECT
-          DATE_TRUNC('${period}', l."createdAt" AT TIME ZONE 'UTC') AS bucket,
+          DATE_TRUNC('${period}', COALESCE(tli."capturedAt", l."createdAt") AT TIME ZONE 'UTC') AS bucket,
           COALESCE(NULLIF(TRIM(COALESCE(l."thumbtackStatus", tli."thumbtackStatus")), ''), 'No Status') AS job_status,
           COUNT(*) AS cnt
         FROM leads l
@@ -166,20 +167,23 @@ export class AnalyticsService {
          AND tli."userId"      = l."userId"
         WHERE l."userId" = $1
           AND ($2::text IS NULL OR l."businessId" = $2::text)
-          AND ($3::timestamptz IS NULL OR l."createdAt" >= $3::timestamptz)
-          AND ($4::timestamptz IS NULL OR l."createdAt" <= $4::timestamptz)
+          AND ($3::timestamptz IS NULL OR COALESCE(tli."capturedAt", l."createdAt") >= $3::timestamptz)
+          AND ($4::timestamptz IS NULL OR COALESCE(tli."capturedAt", l."createdAt") <= $4::timestamptz)
         GROUP BY bucket, job_status
       ),
       budget_stats AS (
         SELECT
-          DATE_TRUNC('${period}', "createdAt" AT TIME ZONE 'UTC') AS bucket,
-          AVG("budget") AS avg_budget,
-          SUM("budget") AS total_budget
-        FROM leads
-        WHERE "userId" = $1
-          AND ($2::text IS NULL OR "businessId" = $2::text)
-          AND ($3::timestamptz IS NULL OR "createdAt" >= $3::timestamptz)
-          AND ($4::timestamptz IS NULL OR "createdAt" <= $4::timestamptz)
+          DATE_TRUNC('${period}', COALESCE(tli."capturedAt", l."createdAt") AT TIME ZONE 'UTC') AS bucket,
+          AVG(l."budget") AS avg_budget,
+          SUM(l."budget") AS total_budget
+        FROM leads l
+        LEFT JOIN thumbtack_lead_ids tli
+          ON tli."thumbtackId" = l."externalRequestId"
+         AND tli."userId"      = l."userId"
+        WHERE l."userId" = $1
+          AND ($2::text IS NULL OR l."businessId" = $2::text)
+          AND ($3::timestamptz IS NULL OR COALESCE(tli."capturedAt", l."createdAt") >= $3::timestamptz)
+          AND ($4::timestamptz IS NULL OR COALESCE(tli."capturedAt", l."createdAt") <= $4::timestamptz)
         GROUP BY bucket
       )
       SELECT
@@ -207,6 +211,17 @@ export class AnalyticsService {
       dto.endDate   ? new Date(dto.endDate)   : null,
     );
 
+    // Normalize display labels for known status variants
+    const normalizeStatus = (s: string): string => {
+      const lower = s.toLowerCase();
+      if (lower === 'not scheduled yet') return 'Not hired';
+      if (lower === 'job scheduled')     return 'Job scheduled';
+      if (lower === 'job done')          return 'Job done';
+      if (lower === 'hired')             return 'Hired';
+      if (lower === 'not hired')         return 'Not hired';
+      return s;
+    };
+
     // Pivot rows into one point per bucket
     const bucketMap = new Map<string, TimeSeriesPoint>();
     for (const row of rows) {
@@ -225,7 +240,8 @@ export class AnalyticsService {
       }
       const entry = bucketMap.get(key)!;
       const cnt = Number(row.cnt);
-      entry.statuses[row.job_status] = cnt;
+      const status = normalizeStatus(row.job_status);
+      entry.statuses[status] = (entry.statuses[status] ?? 0) + cnt; // merge same-display statuses
       entry.total += cnt;
       if (HIRED_STATUSES.has(row.job_status.toLowerCase())) {
         entry.hiredCount += cnt;
