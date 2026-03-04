@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info, Eye, EyeOff, DollarSign, Clock, ArrowUpRight, List, Trash2, AlertTriangle } from 'lucide-react';
 import { authApi, billingApi, thumbtackApi, leadsApi, usersApi, integrationsApi } from '../services/api';
 import { notify } from '../store/notificationStore';
@@ -97,6 +97,15 @@ export default function SettingsPage() {
 
   // Extension detection
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
+  const prevExtensionRef = useRef<boolean | null>(null);
+
+  // Auto-expand Import Negotiations when user returns after installing the extension
+  useEffect(() => {
+    if (prevExtensionRef.current === false && extensionInstalled === true) {
+      setImportCollapsed(false);
+    }
+    prevExtensionRef.current = extensionInstalled;
+  }, [extensionInstalled]);
 
   useEffect(() => {
     // Always force-refresh diagnostics on mount so stale data doesn't persist
