@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info, Eye, EyeOff, DollarSign, Clock, ArrowUpRight, List, Trash2, AlertTriangle } from 'lucide-react';
-import { authApi, billingApi, thumbtackApi, leadsApi, usersApi, integrationsApi } from '../services/api';
+import { authApi, billingApi, thumbtackApi, leadsApi, usersApi, integrationsApi, platformsApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -342,19 +342,19 @@ export default function SettingsPage() {
     setImportError('');
     setImportResults([]);
 
-    // Validate token first
+    // Validate token — if invalid, redirect straight to Thumbtack OAuth (no modal)
     try {
       const validation = await thumbtackApi.validateToken(importAccountId);
       if (!validation.valid) {
-        setAccountToReconnect(accounts.find(a => a.id === importAccountId) || null);
-        setConnectionModalOpen(true);
         setImporting(false);
+        const { authUrl } = await platformsApi.getAuthUrl(true);
+        window.location.href = authUrl;
         return;
       }
     } catch {
-      setAccountToReconnect(accounts.find(a => a.id === importAccountId) || null);
-      setConnectionModalOpen(true);
       setImporting(false);
+      const { authUrl } = await platformsApi.getAuthUrl(true);
+      window.location.href = authUrl;
       return;
     }
 
