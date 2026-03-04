@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { sqltag as sql, empty, Sql } from '@prisma/client/runtime/library';
 import { PrismaService } from '../common/utils/prisma.service';
 import { AnalyticsQueryDto } from './dto/analytics-query.dto';
 import { TimeSeriesQueryDto } from './dto/analytics-timeseries-query.dto';
@@ -146,48 +145,40 @@ export class AnalyticsService {
     return { data, calculatedAt: record.calculatedAt };
   }
 
-  async getTimeSeries(userId: string, query: TimeSeriesQueryDto): Promise<TimeSeriesPoint[]> {
-    const period = query.period ?? 'month';
+  async getTimeSeries(userId: string, dto: TimeSeriesQueryDto): Promise<TimeSeriesPoint[]> {
+    // period is validated by DTO @IsIn — safe to embed as SQL literal
+    const period = dto.period ?? 'month';
 
-    const dateTruncMap: Record<string, Sql> = {
-      day:   sql`DATE_TRUNC('day',   "createdAt" AT TIME ZONE 'UTC')`,
-      week:  sql`DATE_TRUNC('week',  "createdAt" AT TIME ZONE 'UTC')`,
-      month: sql`DATE_TRUNC('month', "createdAt" AT TIME ZONE 'UTC')`,
-      year:  sql`DATE_TRUNC('year',  "createdAt" AT TIME ZONE 'UTC')`,
-    };
-    const dateTrunc = dateTruncMap[period];
-
-    const businessFilter = query.businessId
-      ? sql`AND "businessId" = ${query.businessId}`
-      : empty;
-    const startFilter = query.startDate
-      ? sql`AND "createdAt" >= ${new Date(query.startDate)}::timestamptz`
-      : empty;
-    const endFilter = query.endDate
-      ? sql`AND "createdAt" <= ${new Date(query.endDate)}::timestamptz`
-      : empty;
-
-    const rows = await this.prisma.$queryRaw<Array<{
-      bucket: Date;
-      lead_count: bigint;
-      hired_count: bigint;
-      avg_budget: string | null;
-      total_budget: string | null;
-    }>>`
+    // All user values are parameterized ($1–$4); only period (allow-listed) is interpolated
+    const sqlStr = `
       SELECT
-        ${dateTrunc} AS bucket,
+        DATE_TRUNC('${period}', "createdAt" AT TIME ZONE 'UTC') AS bucket,
         COUNT(*) AS lead_count,
         COUNT(CASE WHEN LOWER("thumbtackStatus") = 'hired' THEN 1 END) AS hired_count,
         AVG("budget") AS avg_budget,
         SUM("budget") AS total_budget
       FROM leads
-      WHERE "userId" = ${userId}
-      ${businessFilter}
-      ${startFilter}
-      ${endFilter}
+      WHERE "userId" = $1
+        AND ($2::text IS NULL OR "businessId" = $2::text)
+        AND ($3::timestamptz IS NULL OR "createdAt" >= $3::timestamptz)
+        AND ($4::timestamptz IS NULL OR "createdAt" <= $4::timestamptz)
       GROUP BY bucket
       ORDER BY bucket ASC
     `;
+
+    const rows = await this.prisma.$queryRawUnsafe<Array<{
+      bucket: Date;
+      lead_count: bigint;
+      hired_count: bigint;
+      avg_budget: string | null;
+      total_budget: string | null;
+    }>>(
+      sqlStr,
+      userId,
+      dto.businessId ?? null,
+      dto.startDate ? new Date(dto.startDate) : null,
+      dto.endDate   ? new Date(dto.endDate)   : null,
+    );
 
     return rows.map((r) => {
       const leadCount  = Number(r.lead_count);
