@@ -1254,6 +1254,15 @@ export const integrationsApi = {
     const { data } = await api.post('/integrations/thumbtack/leads/reimport', { savedAccountId });
     return data;
   },
+  reimportFailed: async (savedAccountId?: string): Promise<{ ok: boolean; missingCount: number; total: number; imported: number; failed: number; errors: string[] }> => {
+    const { data } = await api.post('/integrations/thumbtack/leads/reimport-failed', { savedAccountId });
+    return data;
+  },
+  getMissingCount: async (accountId?: string): Promise<{ ok: boolean; missingCount: number; total: number }> => {
+    const query = accountId ? `?accountId=${accountId}` : '';
+    const { data } = await api.get(`/integrations/thumbtack/leads/missing-count${query}`);
+    return data;
+  },
   getBudgetSnapshots: async (accountId?: string): Promise<{
     ok: boolean;
     snapshots: Array<{

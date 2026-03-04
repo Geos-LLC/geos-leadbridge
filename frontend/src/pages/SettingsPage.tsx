@@ -66,6 +66,7 @@ export default function SettingsPage() {
   const [importError, setImportError] = useState('');
   const [reimporting, setReimporting] = useState(false);
   const [reimportResult, setReimportResult] = useState<string | null>(null);
+  const [missingCount, setMissingCount] = useState<number | null>(null);
 
   // Extension-collected leads
   const [extensionPendingCount, setExtensionPendingCount] = useState(0);
@@ -147,6 +148,7 @@ export default function SettingsPage() {
       setExtensionPendingIds([]);
       setExtensionImportedCount(0);
       setExtensionTotalCount(0);
+      setMissingCount(null);
       setBudgetSnapshots([]);
       return;
     }
@@ -164,6 +166,9 @@ export default function SettingsPage() {
       setExtensionImportedCount(0);
       setExtensionTotalCount(0);
     });
+    integrationsApi.getMissingCount(importAccountId).then((res) => {
+      setMissingCount(res.missingCount);
+    }).catch(() => setMissingCount(null));
     integrationsApi.getBudgetSnapshots(importAccountId).then((res) => {
       setBudgetSnapshots(res.snapshots || []);
     }).catch(() => setBudgetSnapshots([]));
@@ -878,43 +883,36 @@ export default function SettingsPage() {
                       </div>
                     )}
 
-                    {/* Re-import already-imported leads */}
-                    {importAccountId && extensionImportedCount > 0 && extensionPendingCount === 0 && (
-                      <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                    {/* Re-import only failed/skipped leads */}
+                    {importAccountId && missingCount !== null && missingCount > 0 && (
+                      <div className="flex items-center justify-between p-3 bg-amber-50 border border-amber-200 rounded-xl">
                         <div>
-                          <p className="text-sm font-semibold text-slate-800">
-                            {extensionImportedCount} leads already imported
+                          <p className="text-sm font-semibold text-amber-800">
+                            {missingCount} lead{missingCount !== 1 ? 's' : ''} not imported yet
                           </p>
-                          <p className="text-xs text-slate-500">Re-run import to recover any that were skipped</p>
+                          <p className="text-xs text-amber-600">Collected but missing from your leads list</p>
                         </div>
                         <div className="flex flex-col items-end gap-1">
                           <button
                             onClick={async () => {
-                              if (!confirm(`Re-import all ${extensionImportedCount} collected leads for this account? This may take a while.`)) return;
+                              if (!confirm(`Import ${missingCount} missing lead(s)? This may take a while.`)) return;
                               setReimporting(true);
                               setReimportResult(null);
                               try {
-                                const res = await integrationsApi.reimportLeads(importAccountId);
+                                const res = await integrationsApi.reimportFailed(importAccountId);
                                 setReimportResult(`Done: ${res.imported} imported, ${res.failed} failed`);
-                                // Refresh counts
-                                integrationsApi.getCollectedLeads({ accountId: importAccountId }).then((r) => {
-                                  const all = r.leads || [];
-                                  setExtensionPendingIds(all.filter((l: any) => !l.imported).map((l: any) => l.thumbtackId));
-                                  setExtensionPendingCount(all.filter((l: any) => !l.imported).length);
-                                  setExtensionImportedCount(all.filter((l: any) => l.imported).length);
-                                  setExtensionTotalCount(all.length);
-                                }).catch(() => {});
+                                integrationsApi.getMissingCount(importAccountId).then((r) => setMissingCount(r.missingCount)).catch(() => {});
                               } catch {
-                                setReimportResult('Re-import failed');
+                                setReimportResult('Import failed');
                               } finally {
                                 setReimporting(false);
                               }
                             }}
                             disabled={reimporting || importing}
-                            className="px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                            className="px-3 py-1.5 bg-amber-600 text-white rounded-xl text-xs font-semibold hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
                           >
                             {reimporting ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                            Re-import All
+                            Import Missing
                           </button>
                           {reimportResult && (
                             <span className="text-xs text-slate-500">{reimportResult}</span>

@@ -264,9 +264,91 @@ export class IntegrationsService {
   }
 
   /**
-   * Re-import all leads for a user/account from ThumbtackLeadId table.
+   * Count collected leads that have no matching Lead record (without importing).
+   */
+  async countMissingLeads(userId: string, savedAccountId?: string) {
+    const where: any = { userId };
+    if (savedAccountId) where.savedAccountId = savedAccountId;
+
+    const collected = await this.prisma.thumbtackLeadId.findMany({
+      where,
+      select: { thumbtackId: true },
+    });
+
+    if (collected.length === 0) return { ok: true, missingCount: 0, total: 0 };
+
+    const allIds = collected.map((l) => l.thumbtackId);
+    const existing = await this.prisma.lead.findMany({
+      where: { platform: 'thumbtack', externalRequestId: { in: allIds } },
+      select: { externalRequestId: true },
+    });
+    const existingSet = new Set(existing.map((l) => l.externalRequestId));
+
+    return {
+      ok: true,
+      total: allIds.length,
+      missingCount: allIds.filter((id) => !existingSet.has(id)).length,
+    };
+  }
+
+  /**
+   * Re-import only the leads that are marked imported=true in ThumbtackLeadId
+   * but have NO matching Lead record — i.e. truly skipped/failed imports.
+   * Also returns the count of missing leads for UI display.
+   */
+  async reimportFailed(userId: string, savedAccountId?: string) {
+    const where: any = { userId };
+    if (savedAccountId) where.savedAccountId = savedAccountId;
+
+    const collected = await this.prisma.thumbtackLeadId.findMany({
+      where,
+      select: { thumbtackId: true },
+    });
+
+    if (collected.length === 0) {
+      return { ok: true, missingCount: 0, total: 0, imported: 0, failed: 0, errors: [] };
+    }
+
+    const allIds = collected.map((l) => l.thumbtackId);
+
+    // Find which thumbtackIds have no corresponding Lead record
+    const existingLeads = await this.prisma.lead.findMany({
+      where: { platform: 'thumbtack', externalRequestId: { in: allIds } },
+      select: { externalRequestId: true },
+    });
+    const existingSet = new Set(existingLeads.map((l) => l.externalRequestId));
+    const missingIds = allIds.filter((id) => !existingSet.has(id));
+
+    this.logger.log(`[reimportFailed] user=${userId}: ${allIds.length} collected, ${missingIds.length} missing Lead records`);
+
+    if (missingIds.length === 0) {
+      return { ok: true, missingCount: 0, total: 0, imported: 0, failed: 0, errors: [] };
+    }
+
+    const results = await this.leadsService.importThumbtackNegotiations(userId, missingIds, savedAccountId);
+
+    const failedSet = new Set(results.errors.map((e: string) => e.split(':')[0]));
+    const successIds = missingIds.filter((id) => !failedSet.has(id));
+    if (successIds.length > 0) {
+      await this.prisma.thumbtackLeadId.updateMany({
+        where: { userId, thumbtackId: { in: successIds } },
+        data: { imported: true, importedAt: new Date(), needsRefetch: false },
+      });
+    }
+
+    return {
+      ok: true,
+      missingCount: missingIds.length,
+      total: missingIds.length,
+      imported: results.imported,
+      failed: results.failed,
+      errors: results.errors,
+    };
+  }
+
+  /**
+   * Re-import ALL leads for a user/account from ThumbtackLeadId table.
    * Runs the import server-side without requiring the Chrome extension.
-   * Resets imported=false first, then imports each ID, then marks as imported.
    */
   async reimportLeads(userId: string, savedAccountId?: string) {
     const where: any = { userId };
