@@ -381,11 +381,9 @@ export function Analytics() {
           // Collect all unique statuses across all periods, sorted by total desc
           const STATUS_COLORS: Record<string, string> = {
             'Hired':         '#10b981',
-            'Job scheduled': '#3b82f6',
             'Job done':      '#059669',
             'Not hired':     '#f87171',
             'Not interested':'#fb923c',
-            'No Status':     '#cbd5e1',
           };
           const fallbackColors = ['#8b5cf6','#06b6d4','#f59e0b','#ec4899','#64748b'];
           const allStatuses = Array.from(

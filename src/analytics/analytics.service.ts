@@ -251,15 +251,16 @@ export class AnalyticsService {
       dto.endDate   ? new Date(dto.endDate)   : null,
     );
 
-    // Normalize display labels for known status variants
+    // Normalize display labels: merge similar statuses into canonical buckets
     const normalizeStatus = (s: string): string => {
       const lower = s.toLowerCase();
-      if (lower === 'not scheduled yet') return 'Not hired';
-      if (lower === 'job scheduled')     return 'Job scheduled';
-      if (lower === 'job done')          return 'Job done';
       if (lower === 'hired')             return 'Hired';
+      if (lower === 'job done')          return 'Job done';
+      if (lower === 'job scheduled')     return 'Job done';    // scheduled → job done
+      if (lower === 'not scheduled yet') return 'Not hired';
       if (lower === 'not hired')         return 'Not hired';
-      return s;
+      if (lower === 'no status')         return 'Not hired';   // no status → not hired
+      return 'Not hired'; // any other unknown status → not hired
     };
 
     // Pivot rows into one point per bucket
