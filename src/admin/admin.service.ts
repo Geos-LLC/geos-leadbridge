@@ -503,8 +503,10 @@ export class AdminService {
         });
         originProvider = poolEntry?.provider || null;
 
-        // Use origin provider as fallback when notificationSettings has no provider set
-        const resolvedProvider = notificationSettings?.sigcoreProvider || originProvider || null;
+        // Phone number's origin provider (from pool/Sigcore) takes precedence.
+        // notificationSettings.sigcoreProvider is the tenant's routing config, not where the number is hosted.
+        // All TenantPhoneNumbers provisioned via Sigcore are Twilio numbers.
+        const resolvedProvider = originProvider || (phone.sigcoreAllocationId ? 'twilio' : null) || null;
 
         const { user: usr, ...rest } = phone;
 
