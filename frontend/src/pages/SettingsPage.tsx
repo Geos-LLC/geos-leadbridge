@@ -67,6 +67,7 @@ export default function SettingsPage() {
   const [reimporting, setReimporting] = useState(false);
   const [reimportResult, setReimportResult] = useState<string | null>(null);
   const [missingCount, setMissingCount] = useState<number | null>(null);
+  const [needsScrapeCount, setNeedsScrapeCount] = useState<number | null>(null);
 
   // Extension-collected leads
   const [extensionPendingCount, setExtensionPendingCount] = useState(0);
@@ -169,6 +170,9 @@ export default function SettingsPage() {
     integrationsApi.getMissingCount(importAccountId).then((res) => {
       setMissingCount(res.missingCount);
     }).catch(() => setMissingCount(null));
+    integrationsApi.getNeedsScrape(importAccountId).then((res) => {
+      setNeedsScrapeCount(res.count);
+    }).catch(() => setNeedsScrapeCount(null));
     integrationsApi.getBudgetSnapshots(importAccountId).then((res) => {
       setBudgetSnapshots(res.snapshots || []);
     }).catch(() => setBudgetSnapshots([]));
@@ -918,6 +922,32 @@ export default function SettingsPage() {
                             <span className="text-xs text-slate-500">{reimportResult}</span>
                           )}
                         </div>
+                      </div>
+                    )}
+
+                    {/* Leads needing page scrape */}
+                    {importAccountId && needsScrapeCount !== null && needsScrapeCount > 0 && (
+                      <div className="flex items-center justify-between p-3 bg-orange-50 border border-orange-200 rounded-xl">
+                        <div>
+                          <p className="text-sm font-semibold text-orange-800">
+                            {needsScrapeCount} lead{needsScrapeCount !== 1 ? 's' : ''} missing details
+                          </p>
+                          <p className="text-xs text-orange-600">Re-run the extension to scrape missing data from Thumbtack pages</p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            document.dispatchEvent(new CustomEvent('leadbridge-scrape-missing', {
+                              detail: {
+                                accountId: importAccountId,
+                                apiUrl: import.meta.env.VITE_API_URL?.replace('/api', '') || '',
+                              },
+                            }));
+                          }}
+                          className="px-3 py-1.5 bg-orange-600 text-white rounded-xl text-xs font-semibold hover:bg-orange-700 inline-flex items-center gap-1.5"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          Re-run Extension
+                        </button>
                       </div>
                     )}
 

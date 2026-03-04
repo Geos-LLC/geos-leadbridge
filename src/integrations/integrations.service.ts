@@ -264,6 +264,25 @@ export class IntegrationsService {
   }
 
   /**
+   * Get IDs of leads that need page scraping (recovered from local sources, missing full details).
+   */
+  async getNeedsScrapeIds(userId: string, savedAccountId?: string) {
+    const where: any = { userId, needsRefetch: true };
+    if (savedAccountId) where.savedAccountId = savedAccountId;
+
+    const records = await this.prisma.thumbtackLeadId.findMany({
+      where,
+      select: { thumbtackId: true },
+    });
+
+    return {
+      ok: true,
+      count: records.length,
+      thumbtackIds: records.map((r) => r.thumbtackId),
+    };
+  }
+
+  /**
    * Count collected leads that have no matching Lead record (without importing).
    */
   async countMissingLeads(userId: string, savedAccountId?: string) {

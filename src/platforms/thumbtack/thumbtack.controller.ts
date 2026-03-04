@@ -538,6 +538,20 @@ export class ThumbtackController {
     };
   }
 
+  /**
+   * PATCH /api/v1/thumbtack/leads/:thumbtackId/patch-details
+   * Update a lead's details with data scraped from the Thumbtack page.
+   * Called by the extension after scraping an individual lead page.
+   */
+  @Patch('leads/:thumbtackId/patch-details')
+  async patchLeadDetails(
+    @CurrentUser() user: any,
+    @Param('thumbtackId') thumbtackId: string,
+    @Body() body: { budget?: number; city?: string; state?: string; postcode?: string; message?: string },
+  ) {
+    return this.leadsService.patchLeadDetails(user.id, thumbtackId, body);
+  }
+
   // ==========================================
   // Saved Accounts (for multi-account switching)
   // ==========================================

@@ -1263,6 +1263,11 @@ export const integrationsApi = {
     const { data } = await api.get(`/integrations/thumbtack/leads/missing-count${query}`);
     return data;
   },
+  getNeedsScrape: async (accountId?: string): Promise<{ ok: boolean; count: number; thumbtackIds: string[] }> => {
+    const query = accountId ? `?accountId=${accountId}` : '';
+    const { data } = await api.get(`/integrations/thumbtack/leads/needs-scrape${query}`);
+    return data;
+  },
   getBudgetSnapshots: async (accountId?: string): Promise<{
     ok: boolean;
     snapshots: Array<{

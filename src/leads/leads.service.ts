@@ -660,6 +660,11 @@ export class LeadsService {
           } as NormalizedLead;
 
           console.log(`[LeadsService] Recovered lead from local data: ${customerName} (${negotiationId})`);
+          // Mark as needing page scrape — full details unavailable from API
+          await this.prisma.thumbtackLeadId.updateMany({
+            where: { userId, thumbtackId: negotiationId },
+            data: { needsRefetch: true },
+          });
           // Fall through — upsertLead below will store this recovered lead
         } else {
           throw err; // No local data to recover from — let controller skip gracefully
@@ -847,6 +852,48 @@ export class LeadsService {
       // For other errors, don't throw - lead import succeeded, messages are optional
       return 0;
     }
+  }
+
+  /**
+   * Patch a lead's details with data scraped from the Thumbtack page.
+   * Used when the API was unavailable (service deleted) and the extension
+   * scraped the individual lead page to fill in missing fields.
+   */
+  async patchLeadDetails(
+    userId: string,
+    thumbtackId: string,
+    details: {
+      budget?: number;
+      city?: string;
+      state?: string;
+      postcode?: string;
+      message?: string;
+    },
+  ) {
+    const lead = await this.prisma.lead.findFirst({
+      where: { platform: 'thumbtack', externalRequestId: thumbtackId, userId },
+    });
+
+    if (!lead) throw new NotFoundException(`Lead not found for thumbtackId ${thumbtackId}`);
+
+    const updateData: any = {};
+    if (details.budget != null) updateData.budget = details.budget;
+    if (details.city) updateData.city = details.city;
+    if (details.state) updateData.state = details.state;
+    if (details.postcode) updateData.postcode = details.postcode;
+    if (details.message) updateData.message = details.message;
+
+    if (Object.keys(updateData).length > 0) {
+      await this.prisma.lead.update({ where: { id: lead.id }, data: updateData });
+    }
+
+    // Mark as no longer needing scrape
+    await this.prisma.thumbtackLeadId.updateMany({
+      where: { userId, thumbtackId },
+      data: { needsRefetch: false },
+    });
+
+    return { ok: true, leadId: lead.id };
   }
 
   /**

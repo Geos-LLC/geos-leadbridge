@@ -132,6 +132,18 @@ export class IntegrationsController {
   }
 
   /**
+   * GET /api/integrations/thumbtack/leads/needs-scrape
+   * Return IDs that need page scraping (recovered from local sources, missing full details).
+   */
+  @Get('leads/needs-scrape')
+  async getNeedsScrape(
+    @CurrentUser() user: any,
+    @Query('accountId') accountId?: string,
+  ) {
+    return this.integrationsService.getNeedsScrapeIds(user.id, accountId);
+  }
+
+  /**
    * GET /api/integrations/thumbtack/leads/missing-count
    * Count how many collected leads have no matching Lead record (without importing).
    */
