@@ -101,8 +101,11 @@ export default function SettingsPage() {
 
   // Auto-expand Import Negotiations when user returns after installing the extension
   useEffect(() => {
-    if (prevExtensionRef.current === false && extensionInstalled === true) {
-      setImportCollapsed(false);
+    if (extensionInstalled === true) {
+      if (localStorage.getItem('lb_expectingExtension') || prevExtensionRef.current === false) {
+        localStorage.removeItem('lb_expectingExtension');
+        setImportCollapsed(false);
+      }
     }
     prevExtensionRef.current = extensionInstalled;
   }, [extensionInstalled]);
@@ -807,6 +810,7 @@ export default function SettingsPage() {
                               href="https://chromewebstore.google.com/detail/leadbridge-sync-thumbtack/mkhkooldgglhnpkjfgmpkneongipfhnm"
                               target="_blank"
                               rel="noopener noreferrer"
+                              onClick={() => localStorage.setItem('lb_expectingExtension', '1')}
                               className="px-3 py-2 rounded-xl text-xs font-semibold bg-amber-600 text-white hover:bg-amber-700 whitespace-nowrap inline-flex items-center gap-1.5 shrink-0"
                             >
                               Install Extension
