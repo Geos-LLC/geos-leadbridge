@@ -64,6 +64,8 @@ export default function SettingsPage() {
   const [importTotal, setImportTotal] = useState(0);
   const [showImportResults, setShowImportResults] = useState(false);
   const [importError, setImportError] = useState('');
+  const [reimporting, setReimporting] = useState(false);
+  const [reimportResult, setReimportResult] = useState<string | null>(null);
 
   // Extension-collected leads
   const [extensionPendingCount, setExtensionPendingCount] = useState(0);
@@ -873,6 +875,51 @@ export default function SettingsPage() {
                           {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                           Import All
                         </button>
+                      </div>
+                    )}
+
+                    {/* Re-import already-imported leads */}
+                    {importAccountId && extensionImportedCount > 0 && extensionPendingCount === 0 && (
+                      <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">
+                            {extensionImportedCount} leads already imported
+                          </p>
+                          <p className="text-xs text-slate-500">Re-run import to recover any that were skipped</p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <button
+                            onClick={async () => {
+                              if (!confirm(`Re-import all ${extensionImportedCount} collected leads for this account? This may take a while.`)) return;
+                              setReimporting(true);
+                              setReimportResult(null);
+                              try {
+                                const res = await integrationsApi.reimportLeads(importAccountId);
+                                setReimportResult(`Done: ${res.imported} imported, ${res.failed} failed`);
+                                // Refresh counts
+                                integrationsApi.getCollectedLeads({ accountId: importAccountId }).then((r) => {
+                                  const all = r.leads || [];
+                                  setExtensionPendingIds(all.filter((l: any) => !l.imported).map((l: any) => l.thumbtackId));
+                                  setExtensionPendingCount(all.filter((l: any) => !l.imported).length);
+                                  setExtensionImportedCount(all.filter((l: any) => l.imported).length);
+                                  setExtensionTotalCount(all.length);
+                                }).catch(() => {});
+                              } catch {
+                                setReimportResult('Re-import failed');
+                              } finally {
+                                setReimporting(false);
+                              }
+                            }}
+                            disabled={reimporting || importing}
+                            className="px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                          >
+                            {reimporting ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                            Re-import All
+                          </button>
+                          {reimportResult && (
+                            <span className="text-xs text-slate-500">{reimportResult}</span>
+                          )}
+                        </div>
                       </div>
                     )}
 
