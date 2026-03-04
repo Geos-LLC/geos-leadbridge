@@ -149,19 +149,24 @@ export class AnalyticsService {
     // period is validated by DTO @IsIn — safe to embed as SQL literal
     const period = dto.period ?? 'month';
 
-    // All user values are parameterized ($1–$4); only period (allow-listed) is interpolated
+    // All user values are parameterized ($1–$4); only period (allow-listed) is interpolated.
+    // LEFT JOIN thumbtack_lead_ids to pick up thumbtackStatus (stored there, not on leads).
+    // @@unique([userId, thumbtackId]) guarantees at most one tli row per lead → no duplicates.
     const sqlStr = `
       SELECT
-        DATE_TRUNC('${period}', "createdAt" AT TIME ZONE 'UTC') AS bucket,
+        DATE_TRUNC('${period}', l."createdAt" AT TIME ZONE 'UTC') AS bucket,
         COUNT(*) AS lead_count,
-        COUNT(CASE WHEN LOWER("thumbtackStatus") = 'hired' THEN 1 END) AS hired_count,
-        AVG("budget") AS avg_budget,
-        SUM("budget") AS total_budget
-      FROM leads
-      WHERE "userId" = $1
-        AND ($2::text IS NULL OR "businessId" = $2::text)
-        AND ($3::timestamptz IS NULL OR "createdAt" >= $3::timestamptz)
-        AND ($4::timestamptz IS NULL OR "createdAt" <= $4::timestamptz)
+        COUNT(CASE WHEN LOWER(COALESCE(l."thumbtackStatus", tli."thumbtackStatus")) = 'hired' THEN 1 END) AS hired_count,
+        AVG(l."budget") AS avg_budget,
+        SUM(l."budget") AS total_budget
+      FROM leads l
+      LEFT JOIN thumbtack_lead_ids tli
+        ON tli."thumbtackId" = l."externalRequestId"
+       AND tli."userId"      = l."userId"
+      WHERE l."userId" = $1
+        AND ($2::text IS NULL OR l."businessId" = $2::text)
+        AND ($3::timestamptz IS NULL OR l."createdAt" >= $3::timestamptz)
+        AND ($4::timestamptz IS NULL OR l."createdAt" <= $4::timestamptz)
       GROUP BY bucket
       ORDER BY bucket ASC
     `;
