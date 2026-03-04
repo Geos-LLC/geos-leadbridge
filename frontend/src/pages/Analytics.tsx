@@ -411,7 +411,7 @@ export function Analytics() {
                   { label: 'Total Leads', value: tsData.reduce((s, r) => s + r.total, 0).toString() },
                   { label: 'Total Hired', value: tsData.reduce((s, r) => s + r.hiredCount, 0).toString() },
                   {
-                    label: 'Total Budget',
+                    label: 'Lead Spend',
                     value: (() => {
                       const sum = tsData.reduce((s, r) => s + (r.totalBudget ?? 0), 0);
                       return sum > 0 ? `$${sum.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '—';
@@ -463,10 +463,10 @@ export function Analytics() {
                 </ComposedChart>
               </ResponsiveContainer>
 
-              {/* Budget chart — only when data has budget values */}
+              {/* Lead spend chart — only when data has leadPrice values */}
               {tsData.some(r => r.avgBudget != null) && (
                 <div className="mt-8">
-                  <p className="text-sm font-semibold text-slate-700 mb-4">Average Budget per Period</p>
+                  <p className="text-sm font-semibold text-slate-700 mb-4">Avg Lead Cost per Period</p>
                   <ResponsiveContainer width="100%" height={200}>
                     <BarChart data={tsData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -474,9 +474,9 @@ export function Analytics() {
                       <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
                       <Tooltip
                         contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }}
-                        formatter={(v: any) => [`$${Number(v).toFixed(0)}`, 'Avg Budget']}
+                        formatter={(v: any) => [`$${Number(v).toFixed(2)}`, 'Avg Lead Cost']}
                       />
-                      <Bar dataKey="avgBudget" name="Avg Budget" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={48} />
+                      <Bar dataKey="avgBudget" name="Avg Lead Cost" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={48} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>

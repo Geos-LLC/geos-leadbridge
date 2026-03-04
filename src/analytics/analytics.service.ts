@@ -152,38 +152,73 @@ export class AnalyticsService {
 
     const HIRED_STATUSES = new Set(['hired', 'job scheduled', 'job done']);
 
-    // Use tli.capturedAt (when extension first saw the lead) as the canonical lead date.
-    // leads.createdAt is the import timestamp and can be today for bulk-imported old leads.
-    // Budget stats use the same date source for consistency.
+    // Use tli.leadDate ("Feb 23") with year inference as the canonical lead date.
+    // leads.createdAt and tli.capturedAt are both the import/capture timestamp (same day for bulk imports).
+    // leadPrice from rawJson is the cost Thumbtack charged the pro per lead (estimate.total is typically null).
     const sqlStr = `
-      WITH status_counts AS (
+      WITH lead_dates AS (
         SELECT
-          DATE_TRUNC('${period}', COALESCE(tli."capturedAt", l."createdAt") AT TIME ZONE 'UTC') AS bucket,
-          COALESCE(NULLIF(TRIM(COALESCE(l."thumbtackStatus", tli."thumbtackStatus")), ''), 'No Status') AS job_status,
-          COUNT(*) AS cnt
+          l.id,
+          l."userId",
+          l."businessId",
+          l."thumbtackStatus",
+          l."rawJson",
+          tli."thumbtackStatus" AS tli_status,
+          CASE
+            WHEN tli."leadDate" IS NOT NULL
+              AND tli."leadDate" ~ '^[A-Za-z]{3} +[0-9]{1,2}$'
+            THEN
+              CASE
+                WHEN TO_DATE(
+                  regexp_replace(tli."leadDate", ' +', ' ') || ' ' || EXTRACT(YEAR FROM NOW())::text,
+                  'Mon DD YYYY'
+                ) > CURRENT_DATE
+                THEN TO_DATE(
+                  regexp_replace(tli."leadDate", ' +', ' ') || ' ' || (EXTRACT(YEAR FROM NOW())::int - 1)::text,
+                  'Mon DD YYYY'
+                )::timestamptz
+                ELSE TO_DATE(
+                  regexp_replace(tli."leadDate", ' +', ' ') || ' ' || EXTRACT(YEAR FROM NOW())::text,
+                  'Mon DD YYYY'
+                )::timestamptz
+              END
+            ELSE COALESCE(tli."capturedAt", l."createdAt")
+          END AS lead_date
         FROM leads l
         LEFT JOIN thumbtack_lead_ids tli
           ON tli."thumbtackId" = l."externalRequestId"
          AND tli."userId"      = l."userId"
         WHERE l."userId" = $1
           AND ($2::text IS NULL OR l."businessId" = $2::text)
-          AND ($3::timestamptz IS NULL OR COALESCE(tli."capturedAt", l."createdAt") >= $3::timestamptz)
-          AND ($4::timestamptz IS NULL OR COALESCE(tli."capturedAt", l."createdAt") <= $4::timestamptz)
+      ),
+      status_counts AS (
+        SELECT
+          DATE_TRUNC('${period}', ld.lead_date AT TIME ZONE 'UTC') AS bucket,
+          COALESCE(NULLIF(TRIM(COALESCE(ld."thumbtackStatus", ld.tli_status)), ''), 'No Status') AS job_status,
+          COUNT(*) AS cnt
+        FROM lead_dates ld
+        WHERE ($3::timestamptz IS NULL OR ld.lead_date >= $3::timestamptz)
+          AND ($4::timestamptz IS NULL OR ld.lead_date <= $4::timestamptz)
         GROUP BY bucket, job_status
       ),
       budget_stats AS (
         SELECT
-          DATE_TRUNC('${period}', COALESCE(tli."capturedAt", l."createdAt") AT TIME ZONE 'UTC') AS bucket,
-          AVG(l."budget") AS avg_budget,
-          SUM(l."budget") AS total_budget
-        FROM leads l
-        LEFT JOIN thumbtack_lead_ids tli
-          ON tli."thumbtackId" = l."externalRequestId"
-         AND tli."userId"      = l."userId"
-        WHERE l."userId" = $1
-          AND ($2::text IS NULL OR l."businessId" = $2::text)
-          AND ($3::timestamptz IS NULL OR COALESCE(tli."capturedAt", l."createdAt") >= $3::timestamptz)
-          AND ($4::timestamptz IS NULL OR COALESCE(tli."capturedAt", l."createdAt") <= $4::timestamptz)
+          DATE_TRUNC('${period}', ld.lead_date AT TIME ZONE 'UTC') AS bucket,
+          AVG(
+            CASE WHEN ld."rawJson" IS NOT NULL AND ld."rawJson" != ''
+              THEN (ld."rawJson"::jsonb->>'leadPrice')::numeric
+              ELSE NULL
+            END
+          ) AS avg_budget,
+          SUM(
+            CASE WHEN ld."rawJson" IS NOT NULL AND ld."rawJson" != ''
+              THEN (ld."rawJson"::jsonb->>'leadPrice')::numeric
+              ELSE NULL
+            END
+          ) AS total_budget
+        FROM lead_dates ld
+        WHERE ($3::timestamptz IS NULL OR ld.lead_date >= $3::timestamptz)
+          AND ($4::timestamptz IS NULL OR ld.lead_date <= $4::timestamptz)
         GROUP BY bucket
       )
       SELECT
