@@ -105,6 +105,19 @@ export class IntegrationsController {
   }
 
   /**
+   * PATCH /api/integrations/thumbtack/leads/reset-imported
+   * Reset lead IDs back to pending so they can be re-imported.
+   * Pass thumbtackIds to reset specific ones, or omit to reset ALL imported leads for this user.
+   */
+  @Patch('leads/reset-imported')
+  async resetImported(
+    @CurrentUser() user: any,
+    @Body() body: { thumbtackIds?: string[] },
+  ) {
+    return this.integrationsService.resetImported(user.id, body.thumbtackIds);
+  }
+
+  /**
    * DELETE /api/integrations/thumbtack/leads
    * Delete collected lead IDs. Pass thumbtackIds in body, or omit to delete all.
    */

@@ -238,6 +238,30 @@ export class IntegrationsService {
   }
 
   /**
+   * Reset lead IDs back to pending (imported = false).
+   * Pass specific thumbtackIds, or omit to reset ALL imported leads for the user.
+   */
+  async resetImported(userId: string, thumbtackIds?: string[]) {
+    const where: any = { userId, imported: true };
+    if (thumbtackIds && thumbtackIds.length > 0) {
+      where.thumbtackId = { in: thumbtackIds };
+    }
+
+    const result = await this.prisma.thumbtackLeadId.updateMany({
+      where,
+      data: {
+        imported: false,
+        importedAt: null,
+        needsRefetch: false,
+      },
+    });
+
+    this.logger.log(`Reset ${result.count} leads to pending for user ${userId}`);
+
+    return { ok: true, resetCount: result.count };
+  }
+
+  /**
    * Query budget snapshots for a user.
    */
   async getSnapshots(userId: string, savedAccountId?: string) {
