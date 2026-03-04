@@ -2770,9 +2770,11 @@ export class NotificationsService {
       requestBody.fromNumber = params.fromPhone;
     }
 
-    // For OpenPhone: look up the Sigcore phone number ID.
-    // Sigcore routes OpenPhone messages by phone ID — using E.164 fromNumber alone causes 500.
-    // When phoneNumberId is resolved, remove fromNumber to avoid conflicts (Sigcore expects one or the other).
+    // For OpenPhone: also include the Sigcore phoneNumberId alongside fromNumber.
+    // Sigcore's tenant_phone_numbers table is keyed by both phoneNumber (E.164) and phoneNumberId.
+    // Sending both gives Sigcore the best chance to resolve the from-number to the OpenPhone provider.
+    // NOTE: the phone number must already be in Sigcore's tenant_phone_numbers for the tenant —
+    // if Sigcore returns "NOT FOUND", the user must reconnect OpenPhone to re-sync the numbers.
     const isOpenPhone = params.sigcoreProvider === 'openphone' || params.senderMode === 'openphone';
     if (isOpenPhone && params.fromPhone) {
       try {
@@ -2780,13 +2782,12 @@ export class NotificationsService {
         const match = opPhones.find(p => p.phoneNumber === params.fromPhone);
         if (match) {
           requestBody.phoneNumberId = match.id;
-          delete requestBody.fromNumber; // Sigcore uses phoneNumberId for routing, not fromNumber
-          this.logger.log(`[sendViaSigcore] OpenPhone: resolved phoneNumberId=${match.id} for ${params.fromPhone}, removed fromNumber`);
+          this.logger.log(`[sendViaSigcore] OpenPhone: resolved phoneNumberId=${match.id} for ${params.fromPhone}`);
         } else {
-          this.logger.warn(`[sendViaSigcore] OpenPhone: no ID found for ${params.fromPhone}, sending with fromNumber only`);
+          this.logger.warn(`[sendViaSigcore] OpenPhone: no ID found for ${params.fromPhone}`);
         }
       } catch (e: any) {
-        this.logger.warn(`[sendViaSigcore] OpenPhone ID lookup failed: ${e.message}, sending with fromNumber only`);
+        this.logger.warn(`[sendViaSigcore] OpenPhone ID lookup failed: ${e.message}`);
       }
     }
 
