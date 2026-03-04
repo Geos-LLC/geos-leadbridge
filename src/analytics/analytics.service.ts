@@ -15,11 +15,12 @@ import {
 export interface TimeSeriesPoint {
   period: string;
   label: string;
-  leadCount: number;
+  total: number;
+  statuses: { [status: string]: number };
   hiredCount: number;
+  conversionRate: number;
   avgBudget: number | null;
   totalBudget: number | null;
-  conversionRate: number;
 }
 
 @Injectable()
@@ -149,32 +150,53 @@ export class AnalyticsService {
     // period is validated by DTO @IsIn — safe to embed as SQL literal
     const period = dto.period ?? 'month';
 
-    // All user values are parameterized ($1–$4); only period (allow-listed) is interpolated.
-    // LEFT JOIN thumbtack_lead_ids to pick up thumbtackStatus (stored there, not on leads).
-    // @@unique([userId, thumbtackId]) guarantees at most one tli row per lead → no duplicates.
+    const HIRED_STATUSES = new Set(['hired', 'job scheduled', 'job done']);
+
+    // Group by (bucket, job_status) so each status gets its own count per period.
+    // Budget stats are computed in a separate CTE per-bucket to avoid per-status skew.
     const sqlStr = `
+      WITH status_counts AS (
+        SELECT
+          DATE_TRUNC('${period}', l."createdAt" AT TIME ZONE 'UTC') AS bucket,
+          COALESCE(NULLIF(TRIM(COALESCE(l."thumbtackStatus", tli."thumbtackStatus")), ''), 'No Status') AS job_status,
+          COUNT(*) AS cnt
+        FROM leads l
+        LEFT JOIN thumbtack_lead_ids tli
+          ON tli."thumbtackId" = l."externalRequestId"
+         AND tli."userId"      = l."userId"
+        WHERE l."userId" = $1
+          AND ($2::text IS NULL OR l."businessId" = $2::text)
+          AND ($3::timestamptz IS NULL OR l."createdAt" >= $3::timestamptz)
+          AND ($4::timestamptz IS NULL OR l."createdAt" <= $4::timestamptz)
+        GROUP BY bucket, job_status
+      ),
+      budget_stats AS (
+        SELECT
+          DATE_TRUNC('${period}', "createdAt" AT TIME ZONE 'UTC') AS bucket,
+          AVG("budget") AS avg_budget,
+          SUM("budget") AS total_budget
+        FROM leads
+        WHERE "userId" = $1
+          AND ($2::text IS NULL OR "businessId" = $2::text)
+          AND ($3::timestamptz IS NULL OR "createdAt" >= $3::timestamptz)
+          AND ($4::timestamptz IS NULL OR "createdAt" <= $4::timestamptz)
+        GROUP BY bucket
+      )
       SELECT
-        DATE_TRUNC('${period}', l."createdAt" AT TIME ZONE 'UTC') AS bucket,
-        COUNT(*) AS lead_count,
-        COUNT(CASE WHEN LOWER(COALESCE(l."thumbtackStatus", tli."thumbtackStatus")) IN ('hired', 'job scheduled', 'job done') THEN 1 END) AS hired_count,
-        AVG(l."budget") AS avg_budget,
-        SUM(l."budget") AS total_budget
-      FROM leads l
-      LEFT JOIN thumbtack_lead_ids tli
-        ON tli."thumbtackId" = l."externalRequestId"
-       AND tli."userId"      = l."userId"
-      WHERE l."userId" = $1
-        AND ($2::text IS NULL OR l."businessId" = $2::text)
-        AND ($3::timestamptz IS NULL OR l."createdAt" >= $3::timestamptz)
-        AND ($4::timestamptz IS NULL OR l."createdAt" <= $4::timestamptz)
-      GROUP BY bucket
-      ORDER BY bucket ASC
+        sc.bucket,
+        sc.job_status,
+        sc.cnt,
+        bs.avg_budget,
+        bs.total_budget
+      FROM status_counts sc
+      LEFT JOIN budget_stats bs ON bs.bucket = sc.bucket
+      ORDER BY sc.bucket ASC, sc.cnt DESC
     `;
 
     const rows = await this.prisma.$queryRawUnsafe<Array<{
       bucket: Date;
-      lead_count: bigint;
-      hired_count: bigint;
+      job_status: string;
+      cnt: bigint;
       avg_budget: string | null;
       total_budget: string | null;
     }>>(
@@ -185,19 +207,36 @@ export class AnalyticsService {
       dto.endDate   ? new Date(dto.endDate)   : null,
     );
 
-    return rows.map((r) => {
-      const leadCount  = Number(r.lead_count);
-      const hiredCount = Number(r.hired_count);
-      return {
-        period: r.bucket.toISOString(),
-        label: this.formatPeriodLabel(r.bucket, period as 'day' | 'week' | 'month' | 'year'),
-        leadCount,
-        hiredCount,
-        avgBudget: r.avg_budget != null ? parseFloat(r.avg_budget) : null,
-        totalBudget: r.total_budget != null ? parseFloat(r.total_budget) : null,
-        conversionRate: leadCount > 0 ? (hiredCount / leadCount) * 100 : 0,
-      };
-    });
+    // Pivot rows into one point per bucket
+    const bucketMap = new Map<string, TimeSeriesPoint>();
+    for (const row of rows) {
+      const key = row.bucket.toISOString();
+      if (!bucketMap.has(key)) {
+        bucketMap.set(key, {
+          period: key,
+          label: this.formatPeriodLabel(row.bucket, period as 'day' | 'week' | 'month' | 'year'),
+          total: 0,
+          statuses: {},
+          hiredCount: 0,
+          conversionRate: 0,
+          avgBudget: row.avg_budget != null ? parseFloat(row.avg_budget) : null,
+          totalBudget: row.total_budget != null ? parseFloat(row.total_budget) : null,
+        });
+      }
+      const entry = bucketMap.get(key)!;
+      const cnt = Number(row.cnt);
+      entry.statuses[row.job_status] = cnt;
+      entry.total += cnt;
+      if (HIRED_STATUSES.has(row.job_status.toLowerCase())) {
+        entry.hiredCount += cnt;
+      }
+    }
+
+    for (const entry of bucketMap.values()) {
+      entry.conversionRate = entry.total > 0 ? (entry.hiredCount / entry.total) * 100 : 0;
+    }
+
+    return Array.from(bucketMap.values());
   }
 
   private formatPeriodLabel(date: Date, period: 'day' | 'week' | 'month' | 'year'): string {

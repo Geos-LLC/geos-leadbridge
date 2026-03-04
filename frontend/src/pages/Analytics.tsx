@@ -377,84 +377,113 @@ export function Analytics() {
           </div>
         </div>
 
-        {tsLoading ? (
-          <div className="h-64 flex items-center justify-center">
-            <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
-          </div>
-        ) : tsData.length === 0 ? (
-          <div className="h-48 flex items-center justify-center text-slate-400 text-sm">No data for selected period</div>
-        ) : (
-          <>
-            {/* Summary strip */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-              {[
-                { label: 'Total Leads', value: tsData.reduce((s, r) => s + r.leadCount, 0).toString() },
-                { label: 'Total Hired', value: tsData.reduce((s, r) => s + r.hiredCount, 0).toString() },
-                {
-                  label: 'Total Budget',
-                  value: (() => {
-                    const sum = tsData.reduce((s, r) => s + (r.totalBudget ?? 0), 0);
-                    return sum > 0 ? `$${sum.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—';
-                  })(),
-                },
-                {
-                  label: 'Avg Hire Rate',
-                  value: (() => {
-                    const total = tsData.reduce((s, r) => s + r.leadCount, 0);
-                    const hired = tsData.reduce((s, r) => s + r.hiredCount, 0);
-                    return total > 0 ? `${((hired / total) * 100).toFixed(1)}%` : '—';
-                  })(),
-                },
-              ].map(({ label, value }) => (
-                <div key={label} className="bg-slate-50 rounded-2xl p-4">
-                  <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">{label}</p>
-                  <p className="text-xl font-bold text-slate-900 mt-1">{value}</p>
-                </div>
-              ))}
+        {(() => {
+          // Collect all unique statuses across all periods, sorted by total desc
+          const STATUS_COLORS: Record<string, string> = {
+            'Hired':         '#10b981',
+            'Job scheduled': '#3b82f6',
+            'Job done':      '#059669',
+            'Not hired':     '#f87171',
+            'Not interested':'#fb923c',
+            'No Status':     '#cbd5e1',
+          };
+          const fallbackColors = ['#8b5cf6','#06b6d4','#f59e0b','#ec4899','#64748b'];
+          const allStatuses = Array.from(
+            tsData.reduce((set, r) => { Object.keys(r.statuses).forEach(s => set.add(s)); return set; }, new Set<string>())
+          ).sort((a, b) => {
+            const totalA = tsData.reduce((s, r) => s + (r.statuses[a] ?? 0), 0);
+            const totalB = tsData.reduce((s, r) => s + (r.statuses[b] ?? 0), 0);
+            return totalB - totalA;
+          });
+          const getColor = (s: string, i: number) => STATUS_COLORS[s] ?? fallbackColors[i % fallbackColors.length];
+
+          return tsLoading ? (
+            <div className="h-64 flex items-center justify-center">
+              <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
             </div>
-
-            {/* Combo chart: bars = leads, line = hire rate % */}
-            <ResponsiveContainer width="100%" height={280}>
-              <ComposedChart data={tsData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
-                <YAxis yAxisId="left" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
-                <YAxis yAxisId="right" orientation="right" unit="%" domain={[0, 100]} tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
-                <Tooltip
-                  contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.07)' }}
-                  formatter={(value: any, name: string | undefined) => {
-                    if (name === 'Hire Rate') return [`${Number(value).toFixed(1)}%`, name ?? ''];
-                    if (name === 'Avg Budget') return value != null ? [`$${Number(value).toFixed(0)}`, name ?? ''] : ['—', name ?? ''];
-                    return [value, name ?? ''];
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar yAxisId="left" dataKey="leadCount" name="Leads" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={48} />
-                <Bar yAxisId="left" dataKey="hiredCount" name="Hired" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={48} />
-                <Line yAxisId="right" type="monotone" dataKey="conversionRate" name="Hire Rate" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
-
-            {/* Budget chart — only shown when data has budget values */}
-            {tsData.some(r => r.avgBudget != null) && (
-              <div className="mt-8">
-                <p className="text-sm font-semibold text-slate-700 mb-4">Average Budget per Period</p>
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={tsData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
-                    <Tooltip
-                      contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }}
-                      formatter={(v: any) => [`$${Number(v).toFixed(0)}`, 'Avg Budget']}
-                    />
-                    <Bar dataKey="avgBudget" name="Avg Budget" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={48} />
-                  </BarChart>
-                </ResponsiveContainer>
+          ) : tsData.length === 0 ? (
+            <div className="h-48 flex items-center justify-center text-slate-400 text-sm">No data for selected period</div>
+          ) : (
+            <>
+              {/* Summary strip */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                {[
+                  { label: 'Total Leads', value: tsData.reduce((s, r) => s + r.total, 0).toString() },
+                  { label: 'Total Hired', value: tsData.reduce((s, r) => s + r.hiredCount, 0).toString() },
+                  {
+                    label: 'Total Budget',
+                    value: (() => {
+                      const sum = tsData.reduce((s, r) => s + (r.totalBudget ?? 0), 0);
+                      return sum > 0 ? `$${sum.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '—';
+                    })(),
+                  },
+                  {
+                    label: 'Avg Hire Rate',
+                    value: (() => {
+                      const total = tsData.reduce((s, r) => s + r.total, 0);
+                      const hired = tsData.reduce((s, r) => s + r.hiredCount, 0);
+                      return total > 0 ? `${((hired / total) * 100).toFixed(1)}%` : '—';
+                    })(),
+                  },
+                ].map(({ label, value }) => (
+                  <div key={label} className="bg-slate-50 rounded-2xl p-4">
+                    <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">{label}</p>
+                    <p className="text-xl font-bold text-slate-900 mt-1">{value}</p>
+                  </div>
+                ))}
               </div>
-            )}
-          </>
-        )}
+
+              {/* Stacked bar chart by job status + hire rate line */}
+              <ResponsiveContainer width="100%" height={300}>
+                <ComposedChart data={tsData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                  <YAxis yAxisId="left" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                  <YAxis yAxisId="right" orientation="right" unit="%" domain={[0, 100]} tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.07)' }}
+                    formatter={(value: any, name: string | undefined) => {
+                      if (name === 'Hire Rate') return [`${Number(value).toFixed(1)}%`, name ?? ''];
+                      return [value, name ?? ''];
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  {allStatuses.map((status, i) => (
+                    <Bar
+                      key={status}
+                      yAxisId="left"
+                      dataKey={(d: TimeSeriesPoint) => d.statuses[status] ?? 0}
+                      name={status}
+                      stackId="status"
+                      fill={getColor(status, i)}
+                      maxBarSize={56}
+                    />
+                  ))}
+                  <Line yAxisId="right" type="monotone" dataKey="conversionRate" name="Hire Rate" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+
+              {/* Budget chart — only when data has budget values */}
+              {tsData.some(r => r.avgBudget != null) && (
+                <div className="mt-8">
+                  <p className="text-sm font-semibold text-slate-700 mb-4">Average Budget per Period</p>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={tsData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
+                      <Tooltip
+                        contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }}
+                        formatter={(v: any) => [`$${Number(v).toFixed(0)}`, 'Avg Budget']}
+                      />
+                      <Bar dataKey="avgBudget" name="Avg Budget" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={48} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {displayData ? (

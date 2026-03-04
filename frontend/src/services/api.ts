@@ -795,11 +795,12 @@ export interface AnalyticsData {
 export interface TimeSeriesPoint {
   period: string;
   label: string;
-  leadCount: number;
+  total: number;
+  statuses: { [status: string]: number };
   hiredCount: number;
+  conversionRate: number;
   avgBudget: number | null;
   totalBudget: number | null;
-  conversionRate: number;
 }
 
 // Analytics API
