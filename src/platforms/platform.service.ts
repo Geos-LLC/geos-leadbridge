@@ -862,32 +862,42 @@ export class PlatformService {
       return { valid: false, reason: 'No credentials stored for this account. Please reconnect.' };
     }
 
-    // Try making a simple API call to validate the token
+    const adapter = this.platformFactory.getAdapter(account.platform) as any;
+
+    // Helper: try API call with given credentials
+    const tryCall = async (creds: typeof credentials) => adapter.getBusinesses(creds);
+
+    // First attempt
     try {
-      const adapter = this.platformFactory.getAdapter(account.platform) as any;
-      // Use getBusinesses as a simple validation call - it will fail if token is expired
-      await adapter.getBusinesses(credentials);
+      await tryCall(credentials);
       return { valid: true };
-    } catch (error: any) {
-      const errMsg = error.message?.toLowerCase() || '';
-      const status = error.response?.status;
+    } catch (firstError: any) {
+      const status = firstError.response?.status;
+      const errMsg = firstError.message?.toLowerCase() || '';
+      const isAuthError = status === 401 || errMsg.includes('unauthorized') || errMsg.includes('token') || errMsg.includes('expired') || errMsg.includes('invalid') || errMsg.includes('not active');
 
-      console.log(`[PlatformService] Token validation failed - status: ${status}, message: ${errMsg}`);
-
-      if (status === 401 ||
-          errMsg.includes('unauthorized') ||
-          errMsg.includes('token') ||
-          errMsg.includes('expired') ||
-          errMsg.includes('invalid') ||
-          errMsg.includes('not active')) {
-        return {
-          valid: false,
-          reason: 'Login required to import. Please log in to Thumbtack to import old leads. (New leads still arrive automatically.)',
-        };
+      if (!isAuthError) {
+        return { valid: false, reason: firstError.message || 'Failed to validate token' };
       }
 
-      // Other errors - still treat as invalid for safety
-      return { valid: false, reason: error.message || 'Failed to validate token' };
+      // Auth error — try silent token refresh before giving up
+      console.log(`[PlatformService] Token invalid for account ${accountId}, attempting silent refresh...`);
+      if (credentials.refreshToken) {
+        try {
+          const refreshed = await adapter.refreshAccessToken(credentials.refreshToken);
+          await this.updateAccountCredentials(accountId, { ...credentials, ...refreshed });
+          await tryCall({ ...credentials, ...refreshed });
+          console.log(`[PlatformService] Silent token refresh succeeded for account ${accountId}`);
+          return { valid: true };
+        } catch (refreshError: any) {
+          console.log(`[PlatformService] Silent refresh failed: ${refreshError.message}`);
+        }
+      }
+
+      return {
+        valid: false,
+        reason: 'Login required to import. Please log in to Thumbtack to import old leads. (New leads still arrive automatically.)',
+      };
     }
   }
 
