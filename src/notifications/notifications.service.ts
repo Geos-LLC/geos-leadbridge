@@ -463,7 +463,7 @@ export class NotificationsService {
       return { success: false, error: 'No SMS settings configured. Set up SMS in Notification Settings.' };
     }
 
-    const apiKey = settings.sigcoreApiKey;
+    let apiKey = settings.sigcoreApiKey;
     if (!apiKey) {
       return { success: false, error: 'No Sigcore API key configured. Please provision your phone workspace first.' };
     }
@@ -476,6 +476,20 @@ export class NotificationsService {
         orderBy: { provisionedAt: 'desc' },
       });
       if (poolPhone) fromPhone = poolPhone.phoneNumber;
+    }
+
+    // If fromPhone is a shared pool number, use the platform key (not the tenant OpenPhone key).
+    // Pool phones are owned by the platform's Twilio account, not the tenant's provider.
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (fromPhone && platformKey) {
+      const isPoolPhone = await this.prisma.phonePool.findFirst({
+        where: { phoneNumber: fromPhone, status: { not: 'RELEASED' } },
+        select: { id: true },
+      });
+      if (isPoolPhone) {
+        this.logger.log(`[sendAdHocSms] fromPhone ${fromPhone} is a shared pool number — using platform key`);
+        apiKey = platformKey;
+      }
     }
 
     // 4. Create log entry
@@ -2196,6 +2210,25 @@ export class NotificationsService {
       } catch (err: any) {
         this.logger.warn(`[ensureSigcoreTenantProvisioned] Could not copy integrations: ${err.message}`);
       }
+
+      // After re-provisioning, Sigcore's copy-integrations copies the TenantIntegration record
+      // (provider credentials) but does NOT populate tenant_phone_numbers for the new tenant.
+      // Clear sigcoreProvider and sigcoreFromPhone so the UI shows "reconnect needed" — the user
+      // must reconnect OpenPhone via Notification Settings, which calls POST /integrations/openphone/connect
+      // and properly syncs tenant_phone_numbers on the new tenant.
+      await this.prisma.notificationSettings.update({
+        where: { savedAccountId },
+        data: {
+          sigcoreProvider: null,
+          sigcoreFromPhone: null,
+          sigcoreWebhookId: null,
+          inboundSmsWebhookId: null,
+        },
+      });
+      this.logger.log(
+        `[ensureSigcoreTenantProvisioned] Cleared sigcoreProvider/fromPhone for account ${savedAccountId} — ` +
+        `user must reconnect OpenPhone to sync tenant_phone_numbers on new tenant ${data.tenantId}`,
+      );
     }
 
     return { apiKey: data.apiKey, tenantId: data.tenantId };
@@ -2537,10 +2570,10 @@ export class NotificationsService {
    * Disconnect provider integration via Sigcore API
    */
   private async disconnectProviderViaSigcore(tenantApiKey: string, provider: string): Promise<void> {
-    const baseUrl = 'https://sigcore-production.up.railway.app';
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
     const endpoint = provider === 'openphone'
-      ? `${baseUrl}/api/integrations/openphone/disconnect`
-      : `${baseUrl}/api/integrations/twilio`;
+      ? `${sigcoreUrl}/integrations/openphone/disconnect`
+      : `${sigcoreUrl}/integrations/twilio`;
 
     this.logger.log(`[disconnectProvider] Calling ${endpoint} for provider ${provider}`);
 
