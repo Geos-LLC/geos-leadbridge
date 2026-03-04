@@ -137,8 +137,13 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
+    // Skip global toast for endpoints that handle their own error display
+    const url = error.config?.url || '';
+    const silentPatterns = [/\/negotiations\/[^/]+\/import$/];
+    const isSilent = silentPatterns.some(p => p.test(url));
+
     // Show toast notification for other errors
-    const errorDetails = getErrorDetails(error);
+    const errorDetails = !isSilent ? getErrorDetails(error) : null;
     if (errorDetails) {
       notify.error(errorDetails.title, errorDetails.message);
     }

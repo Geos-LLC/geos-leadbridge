@@ -342,14 +342,18 @@ export default function SettingsPage() {
     setImportError('');
     setImportResults([]);
 
-    // Validate token — if invalid, redirect straight to Thumbtack OAuth (no modal)
+    // Validate token — if invalid, silently reconnect; only fall back to OAuth if reconnect fails
     try {
       const validation = await thumbtackApi.validateToken(importAccountId);
       if (!validation.valid) {
-        setImporting(false);
-        const { authUrl } = await platformsApi.getAuthUrl(true);
-        window.location.href = authUrl;
-        return;
+        try {
+          await thumbtackApi.reconnect(importAccountId);
+        } catch {
+          setImporting(false);
+          const { authUrl } = await platformsApi.getAuthUrl(true);
+          window.location.href = authUrl;
+          return;
+        }
       }
     } catch {
       setImporting(false);
@@ -365,14 +369,34 @@ export default function SettingsPage() {
     const successIds: string[] = [];
 
     for (const id of extensionPendingIds) {
-      try {
-        const result = await leadsApi.importNegotiation(id, importAccountId);
-        results.push({ id, success: true, isNew: result.isNew });
-        successIds.push(id);
-      } catch (err: any) {
-        const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to import';
+      let attempts = 0;
+      let lastErr: any;
+      let imported = false;
+
+      while (attempts < 3 && !imported) {
+        try {
+          const result = await leadsApi.importNegotiation(id, importAccountId);
+          results.push({ id, success: true, isNew: result.isNew });
+          successIds.push(id);
+          imported = true;
+        } catch (err: any) {
+          lastErr = err;
+          // Only retry on network errors (no response from server), not on 4xx/5xx
+          const isNetworkError = !err.response;
+          attempts++;
+          if (isNetworkError && attempts < 3) {
+            await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
+          } else {
+            break;
+          }
+        }
+      }
+
+      if (!imported) {
+        const errorMsg = lastErr?.response?.data?.message || lastErr?.response?.data?.error || lastErr?.message || 'Failed to import';
         results.push({ id, success: false, error: errorMsg });
       }
+
       setImportResults([...results]);
     }
 
