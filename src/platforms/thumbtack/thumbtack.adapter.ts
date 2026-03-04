@@ -301,6 +301,10 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       // Log for debugging
       this.logger.error(`Auth check - status: ${status}, title: ${responseData?.title}, detail: ${detail}`);
 
+      if (status === 404 && detail.includes('service deleted')) {
+        throw new Error(`THUMBTACK_SERVICE_DELETED:${detail}`);
+      }
+
       if (status === 401 ||
           responseData?.title === 'Unauthorized' ||
           detail.includes('token') ||

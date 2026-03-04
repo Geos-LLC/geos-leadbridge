@@ -490,6 +490,16 @@ export class ThumbtackController {
       const errMsg = err.message?.toLowerCase() || '';
       console.log(`[ThumbtackController] Import error - message: "${err.message}"`);
 
+      if (err.message?.startsWith('THUMBTACK_SERVICE_DELETED')) {
+        console.log(`[ThumbtackController] Thumbtack service deleted — skipping gracefully`);
+        return {
+          success: false,
+          skipped: true,
+          reason: 'service_deleted',
+          message: 'Thumbtack service was deleted — negotiation skipped',
+        };
+      }
+
       if (errMsg.includes('login required') ||
           errMsg.includes('session expired') ||
           errMsg.includes('reconnect') ||
