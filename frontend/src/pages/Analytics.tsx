@@ -478,9 +478,9 @@ export function Analytics() {
                       <YAxis width={48} tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
                       <Tooltip
                         contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }}
-                        formatter={(v: any, name: string) => {
+                        formatter={(v: any, name: string | undefined) => {
                           if (name === 'Avg Lead Cost') return [`$${Number(v).toFixed(2)}`, name];
-                          return [v, name];
+                          return [v, name ?? ''];
                         }}
                       />
                       <Bar dataKey="avgBudget" name="Avg Lead Cost" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={48}>
