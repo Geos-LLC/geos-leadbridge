@@ -24,6 +24,7 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
+  LabelList,
   ResponsiveContainer,
 } from 'recharts';
 import { analyticsApi, thumbtackApi, type AnalyticsData, type TimeSeriesPoint } from '../services/api';
@@ -382,7 +383,7 @@ export function Analytics() {
           const STATUS_COLORS: Record<string, string> = {
             'Hired':         '#10b981',
             'Job done':      '#059669',
-            'Not hired':     '#f87171',
+            'Not hired':     '#94a3b8',
             'Not interested':'#fb923c',
           };
           const fallbackColors = ['#8b5cf6','#06b6d4','#f59e0b','#ec4899','#64748b'];
@@ -432,16 +433,17 @@ export function Analytics() {
               </div>
 
               {/* Stacked bar chart by job status + hire rate line */}
-              <ResponsiveContainer width="100%" height={300}>
-                <ComposedChart data={tsData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+              <ResponsiveContainer width="100%" height={320}>
+                <ComposedChart data={tsData} margin={{ top: 24, right: 20, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
-                  <YAxis yAxisId="left" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
-                  <YAxis yAxisId="right" orientation="right" unit="%" domain={[0, 100]} tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                  <YAxis yAxisId="left" width={48} tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                  <YAxis yAxisId="right" width={48} orientation="right" unit="%" domain={[0, 100]} tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
                   <Tooltip
                     contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.07)' }}
                     formatter={(value: any, name: string | undefined) => {
                       if (name === 'Hire Rate') return [`${Number(value).toFixed(1)}%`, name ?? ''];
+                      if (name === '_total') return null as any;
                       return [value, name ?? ''];
                     }}
                   />
@@ -457,6 +459,10 @@ export function Analytics() {
                       maxBarSize={56}
                     />
                   ))}
+                  {/* Invisible top-of-stack bar to render total count labels */}
+                  <Bar yAxisId="left" dataKey={() => 0} stackId="status" fill="transparent" legendType="none" maxBarSize={56} name="_total">
+                    <LabelList dataKey="total" position="top" style={{ fontSize: 11, fill: '#475569', fontWeight: 700 }} />
+                  </Bar>
                   <Line yAxisId="right" type="monotone" dataKey="conversionRate" name="Hire Rate" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
                 </ComposedChart>
               </ResponsiveContainer>
@@ -466,15 +472,31 @@ export function Analytics() {
                 <div className="mt-8">
                   <p className="text-sm font-semibold text-slate-700 mb-4">Avg Lead Cost per Period</p>
                   <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={tsData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                    <BarChart data={tsData} margin={{ top: 5, right: 68, left: 0, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                       <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
+                      <YAxis width={48} tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
                       <Tooltip
                         contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }}
-                        formatter={(v: any) => [`$${Number(v).toFixed(2)}`, 'Avg Lead Cost']}
+                        formatter={(v: any, name: string) => {
+                          if (name === 'Avg Lead Cost') return [`$${Number(v).toFixed(2)}`, name];
+                          return [v, name];
+                        }}
                       />
-                      <Bar dataKey="avgBudget" name="Avg Lead Cost" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={48} />
+                      <Bar dataKey="avgBudget" name="Avg Lead Cost" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={48}>
+                        <LabelList
+                          dataKey="totalBudget"
+                          content={(props: any) => {
+                            const { x, y, width, height, value } = props;
+                            if (!value || height < 18) return null;
+                            return (
+                              <text x={x + width / 2} y={y + height / 2 + 4} textAnchor="middle" fontSize={10} fill="white" fontWeight={700}>
+                                ${Number(value).toFixed(0)}
+                              </text>
+                            );
+                          }}
+                        />
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
