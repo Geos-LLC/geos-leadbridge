@@ -609,8 +609,65 @@ export class LeadsService {
           errMsg.includes('expired') || errMsg.includes('not active') || err.response?.status === 401) {
         throw err; // Re-throw the error from adapter which has a clear message
       }
-      // Re-throw other errors as-is
-      throw err;
+
+      // When Thumbtack service is deleted, try to recover lead data from local sources
+      if (err.message?.startsWith('THUMBTACK_SERVICE_DELETED')) {
+        console.log(`[LeadsService] Service deleted for ${negotiationId} — attempting recovery from local sources`);
+
+        // Source 1: ThumbtackLeadId — extension-scraped data includes customerName
+        const capturedData = await this.prisma.thumbtackLeadId.findFirst({
+          where: { userId, thumbtackId: negotiationId },
+        });
+
+        // Source 2: WebhookEvent — full payload if Thumbtack delivered this lead via webhook
+        const webhookEvent = await this.prisma.webhookEvent.findFirst({
+          where: { platform: 'thumbtack', eventType: 'NegotiationCreatedV4', payload: { contains: negotiationId } },
+          orderBy: { receivedAt: 'desc' },
+        });
+
+        if (capturedData?.customerName || webhookEvent) {
+          let customerName = capturedData?.customerName || 'Unknown';
+          let createdAt = capturedData?.capturedAt || new Date();
+          let message = '';
+          let raw: any = null;
+          let recoveredBusinessId = targetBusinessId;
+
+          if (webhookEvent) {
+            try {
+              const wPayload = JSON.parse(webhookEvent.payload);
+              const wData = wPayload.data || {};
+              const cust = wData.customer || {};
+              const req = wData.request || {};
+              customerName = `${cust.firstName || ''} ${cust.lastName || ''}`.trim() || customerName;
+              message = req.description || '';
+              recoveredBusinessId = wData.business?.businessID || recoveredBusinessId;
+              createdAt = wData.createdAt ? new Date(wData.createdAt) : createdAt;
+              raw = wData;
+            } catch { /* ignore parse errors */ }
+          }
+
+          lead = {
+            id: '',
+            platform: 'thumbtack',
+            businessId: recoveredBusinessId,
+            externalRequestId: negotiationId,
+            customerName,
+            message,
+            status: capturedData?.thumbtackStatus || 'Unknown',
+            createdAt,
+            updatedAt: new Date(),
+            raw,
+          } as NormalizedLead;
+
+          console.log(`[LeadsService] Recovered lead from local data: ${customerName} (${negotiationId})`);
+          // Fall through — upsertLead below will store this recovered lead
+        } else {
+          throw err; // No local data to recover from — let controller skip gracefully
+        }
+      } else {
+        // Re-throw other errors as-is
+        throw err;
+      }
     }
 
     // If we have a target businessId, verify the lead belongs to that business
