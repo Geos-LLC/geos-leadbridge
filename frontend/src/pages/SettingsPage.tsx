@@ -347,7 +347,7 @@ export default function SettingsPage() {
       const validation = await thumbtackApi.validateToken(importAccountId);
       if (!validation.valid) {
         try {
-          await thumbtackApi.reconnect(importAccountId);
+          await thumbtackApi.reconnectAccount(importAccountId);
         } catch {
           setImporting(false);
           const { authUrl } = await platformsApi.getAuthUrl(true);
