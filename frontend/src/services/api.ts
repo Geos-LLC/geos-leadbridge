@@ -792,6 +792,16 @@ export interface AnalyticsData {
   };
 }
 
+export interface TimeSeriesPoint {
+  period: string;
+  label: string;
+  leadCount: number;
+  hiredCount: number;
+  avgBudget: number | null;
+  totalBudget: number | null;
+  conversionRate: number;
+}
+
 // Analytics API
 export const analyticsApi = {
   getBasicAnalytics: async (params: {
@@ -829,6 +839,22 @@ export const analyticsApi = {
     if (params.businessId) queryParams.append('businessId', params.businessId);
 
     const { data } = await api.post(`/v1/analytics/refresh?${queryParams.toString()}`);
+    return data;
+  },
+
+  getTimeSeries: async (params: {
+    period?: 'day' | 'week' | 'month' | 'year';
+    businessId?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<{ success: boolean; data: TimeSeriesPoint[] }> => {
+    const queryParams = new URLSearchParams();
+    if (params.period) queryParams.append('period', params.period);
+    if (params.businessId) queryParams.append('businessId', params.businessId);
+    if (params.startDate) queryParams.append('startDate', params.startDate);
+    if (params.endDate) queryParams.append('endDate', params.endDate);
+
+    const { data } = await api.get(`/v1/analytics/timeseries?${queryParams.toString()}`);
     return data;
   },
 };

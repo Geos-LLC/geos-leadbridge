@@ -3,6 +3,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AnalyticsService } from './analytics.service';
 import { AnalyticsQueryDto } from './dto/analytics-query.dto';
+import { TimeSeriesQueryDto } from './dto/analytics-timeseries-query.dto';
 
 @Controller('v1/analytics')
 @UseGuards(JwtAuthGuard)
@@ -34,6 +35,15 @@ export class AnalyticsController {
   ) {
     const { data, calculatedAt } = await this.analyticsService.refreshAnalytics(user.id, query);
     return { success: true, data, calculatedAt };
+  }
+
+  @Get('timeseries')
+  async getTimeSeries(
+    @CurrentUser() user: any,
+    @Query() query: TimeSeriesQueryDto,
+  ) {
+    const data = await this.analyticsService.getTimeSeries(user.id, query);
+    return { success: true, data };
   }
 
   @Get('cache-info')

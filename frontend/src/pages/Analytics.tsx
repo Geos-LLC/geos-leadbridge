@@ -17,6 +17,8 @@ import {
   Cell,
   BarChart,
   Bar,
+  Line,
+  ComposedChart,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -24,7 +26,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { analyticsApi, thumbtackApi, type AnalyticsData } from '../services/api';
+import { analyticsApi, thumbtackApi, type AnalyticsData, type TimeSeriesPoint } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
@@ -39,6 +41,11 @@ export function Analytics() {
   const [refreshing, setRefreshing] = useState(false);
   const [analytics, setAnalytics] = useState<Partial<AnalyticsData> | null>(analyticsCache);
   const [calculatedAt, setCalculatedAt] = useState<string | null>(null);
+
+  // Time-series trends state
+  const [tsPeriod, setTsPeriod] = useState<'day' | 'week' | 'month' | 'year'>('month');
+  const [tsData, setTsData] = useState<TimeSeriesPoint[]>([]);
+  const [tsLoading, setTsLoading] = useState(false);
 
   // Filters from URL params
   const businessId = searchParams.get('businessId') || 'all';
@@ -68,6 +75,10 @@ export function Analytics() {
   useEffect(() => {
     loadAnalytics();
   }, [businessId, timeRange, customStart, customEnd]);
+
+  useEffect(() => {
+    loadTimeSeries();
+  }, [businessId, timeRange, customStart, customEnd, tsPeriod]);
 
   const loadSavedAccounts = async () => {
     try {
@@ -102,6 +113,19 @@ export function Analytics() {
       notify.error('Analytics', 'Failed to load analytics data. Please refresh.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadTimeSeries = async () => {
+    setTsLoading(true);
+    try {
+      const params = { ...buildQueryParams(), period: tsPeriod };
+      const { data } = await analyticsApi.getTimeSeries(params);
+      setTsData(data);
+    } catch (err) {
+      console.error('Failed to load time series:', err);
+    } finally {
+      setTsLoading(false);
     }
   };
 
@@ -324,6 +348,114 @@ export function Analytics() {
           />
         </div>
       )}
+
+      {/* ── Trends Over Time ── */}
+      <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-blue-600" />
+              Trends Over Time
+            </h3>
+            <p className="text-sm text-slate-500 mt-0.5">Lead volume, revenue, and hire rate by period</p>
+          </div>
+          {/* Period selector */}
+          <div className="flex rounded-xl border border-slate-200 overflow-hidden text-sm font-medium">
+            {(['day', 'week', 'month', 'year'] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setTsPeriod(p)}
+                className={`px-4 py-2 transition-colors capitalize ${
+                  tsPeriod === p
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {p === 'day' ? 'Daily' : p === 'week' ? 'Weekly' : p === 'month' ? 'Monthly' : 'Yearly'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {tsLoading ? (
+          <div className="h-64 flex items-center justify-center">
+            <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
+          </div>
+        ) : tsData.length === 0 ? (
+          <div className="h-48 flex items-center justify-center text-slate-400 text-sm">No data for selected period</div>
+        ) : (
+          <>
+            {/* Summary strip */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+              {[
+                { label: 'Total Leads', value: tsData.reduce((s, r) => s + r.leadCount, 0).toString() },
+                { label: 'Total Hired', value: tsData.reduce((s, r) => s + r.hiredCount, 0).toString() },
+                {
+                  label: 'Total Budget',
+                  value: (() => {
+                    const sum = tsData.reduce((s, r) => s + (r.totalBudget ?? 0), 0);
+                    return sum > 0 ? `$${sum.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—';
+                  })(),
+                },
+                {
+                  label: 'Avg Hire Rate',
+                  value: (() => {
+                    const total = tsData.reduce((s, r) => s + r.leadCount, 0);
+                    const hired = tsData.reduce((s, r) => s + r.hiredCount, 0);
+                    return total > 0 ? `${((hired / total) * 100).toFixed(1)}%` : '—';
+                  })(),
+                },
+              ].map(({ label, value }) => (
+                <div key={label} className="bg-slate-50 rounded-2xl p-4">
+                  <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">{label}</p>
+                  <p className="text-xl font-bold text-slate-900 mt-1">{value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Combo chart: bars = leads, line = hire rate % */}
+            <ResponsiveContainer width="100%" height={280}>
+              <ComposedChart data={tsData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                <YAxis yAxisId="left" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                <YAxis yAxisId="right" orientation="right" unit="%" domain={[0, 100]} tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                <Tooltip
+                  contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.07)' }}
+                  formatter={(value: any, name: string) => {
+                    if (name === 'Hire Rate') return [`${Number(value).toFixed(1)}%`, name];
+                    if (name === 'Avg Budget') return value != null ? [`$${Number(value).toFixed(0)}`, name] : ['—', name];
+                    return [value, name];
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar yAxisId="left" dataKey="leadCount" name="Leads" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={48} />
+                <Bar yAxisId="left" dataKey="hiredCount" name="Hired" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={48} />
+                <Line yAxisId="right" type="monotone" dataKey="conversionRate" name="Hire Rate" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+
+            {/* Budget chart — only shown when data has budget values */}
+            {tsData.some(r => r.avgBudget != null) && (
+              <div className="mt-8">
+                <p className="text-sm font-semibold text-slate-700 mb-4">Average Budget per Period</p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={tsData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
+                    <Tooltip
+                      contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }}
+                      formatter={(v: any) => [`$${Number(v).toFixed(0)}`, 'Avg Budget']}
+                    />
+                    <Bar dataKey="avgBudget" name="Avg Budget" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={48} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {displayData ? (
         <>

@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { sqltag as sql, empty, Sql } from '@prisma/client/runtime/library';
 import { PrismaService } from '../common/utils/prisma.service';
 import { AnalyticsQueryDto } from './dto/analytics-query.dto';
+import { TimeSeriesQueryDto } from './dto/analytics-timeseries-query.dto';
 import {
   AnalyticsResponseDto,
   CategoryDistribution,
@@ -10,6 +12,16 @@ import {
   CustomerEngagementMetric,
   ServiceDetailDistribution,
 } from './dto/analytics-response.dto';
+
+export interface TimeSeriesPoint {
+  period: string;
+  label: string;
+  leadCount: number;
+  hiredCount: number;
+  avgBudget: number | null;
+  totalBudget: number | null;
+  conversionRate: number;
+}
 
 @Injectable()
 export class AnalyticsService {
@@ -132,6 +144,77 @@ export class AnalyticsService {
       update: { data: data as any, calculatedAt: new Date() },
     });
     return { data, calculatedAt: record.calculatedAt };
+  }
+
+  async getTimeSeries(userId: string, query: TimeSeriesQueryDto): Promise<TimeSeriesPoint[]> {
+    const period = query.period ?? 'month';
+
+    const dateTruncMap: Record<string, Sql> = {
+      day:   sql`DATE_TRUNC('day',   "createdAt" AT TIME ZONE 'UTC')`,
+      week:  sql`DATE_TRUNC('week',  "createdAt" AT TIME ZONE 'UTC')`,
+      month: sql`DATE_TRUNC('month', "createdAt" AT TIME ZONE 'UTC')`,
+      year:  sql`DATE_TRUNC('year',  "createdAt" AT TIME ZONE 'UTC')`,
+    };
+    const dateTrunc = dateTruncMap[period];
+
+    const businessFilter = query.businessId
+      ? sql`AND "businessId" = ${query.businessId}`
+      : empty;
+    const startFilter = query.startDate
+      ? sql`AND "createdAt" >= ${new Date(query.startDate)}::timestamptz`
+      : empty;
+    const endFilter = query.endDate
+      ? sql`AND "createdAt" <= ${new Date(query.endDate)}::timestamptz`
+      : empty;
+
+    const rows = await this.prisma.$queryRaw<Array<{
+      bucket: Date;
+      lead_count: bigint;
+      hired_count: bigint;
+      avg_budget: string | null;
+      total_budget: string | null;
+    }>>`
+      SELECT
+        ${dateTrunc} AS bucket,
+        COUNT(*) AS lead_count,
+        COUNT(CASE WHEN LOWER("thumbtackStatus") = 'hired' THEN 1 END) AS hired_count,
+        AVG("budget") AS avg_budget,
+        SUM("budget") AS total_budget
+      FROM leads
+      WHERE "userId" = ${userId}
+      ${businessFilter}
+      ${startFilter}
+      ${endFilter}
+      GROUP BY bucket
+      ORDER BY bucket ASC
+    `;
+
+    return rows.map((r) => {
+      const leadCount  = Number(r.lead_count);
+      const hiredCount = Number(r.hired_count);
+      return {
+        period: r.bucket.toISOString(),
+        label: this.formatPeriodLabel(r.bucket, period as 'day' | 'week' | 'month' | 'year'),
+        leadCount,
+        hiredCount,
+        avgBudget: r.avg_budget != null ? parseFloat(r.avg_budget) : null,
+        totalBudget: r.total_budget != null ? parseFloat(r.total_budget) : null,
+        conversionRate: leadCount > 0 ? (hiredCount / leadCount) * 100 : 0,
+      };
+    });
+  }
+
+  private formatPeriodLabel(date: Date, period: 'day' | 'week' | 'month' | 'year'): string {
+    switch (period) {
+      case 'year':
+        return date.getUTCFullYear().toString();
+      case 'month':
+        return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+      case 'week':
+        return 'Wk ' + date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      case 'day':
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    }
   }
 
   async invalidateCache(userId: string) {
