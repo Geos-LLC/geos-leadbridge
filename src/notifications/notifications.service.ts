@@ -501,6 +501,7 @@ export class NotificationsService {
         fromPhone,
         apiKey,
         senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
+        sigcoreProvider: settings.sigcoreProvider,
         sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
         metadata: {
           tenantId: savedAccountId,
@@ -1049,6 +1050,7 @@ export class NotificationsService {
       fromPhone,
       apiKey: settings.sigcoreApiKey,
       senderMode: (settings.senderMode as 'shared' | 'dedicated' | 'openphone') || 'dedicated',
+      sigcoreProvider: settings.sigcoreProvider,
       sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
       metadata: { type: 'sms_forwarding', savedAccountId },
     });
@@ -1316,6 +1318,7 @@ export class NotificationsService {
         fromPhone: fromPhone,
         apiKey,
         senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
+        sigcoreProvider: settings.sigcoreProvider,
         sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
         metadata: {
           tenantId: savedAccountId,
@@ -1529,6 +1532,7 @@ export class NotificationsService {
         fromPhone: fromPhone,
         apiKey: effectiveApiKey,
         senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
+        sigcoreProvider: settings.sigcoreProvider,
         sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
         metadata: {
           tenantId: savedAccountId,
@@ -2730,6 +2734,7 @@ export class NotificationsService {
     fromPhone?: string | null;
     apiKey: string;
     senderMode: 'shared' | 'dedicated' | 'openphone';
+    sigcoreProvider?: string | null;
     sigcoreWorkspaceId?: string | null;
     metadata: Record<string, any>;
   }): Promise<{
@@ -2763,6 +2768,24 @@ export class NotificationsService {
     // If a specific phone number is selected, include it (must be valid E.164 phone number)
     if (params.fromPhone && params.fromPhone.length > 5 && params.fromPhone.match(/^\+?\d{10,}/)) {
       requestBody.fromNumber = params.fromPhone;
+    }
+
+    // For OpenPhone: look up the Sigcore phone number ID and include it.
+    // Sigcore routes OpenPhone messages by phone ID, not E.164 — sending only E.164 causes 500.
+    const isOpenPhone = params.sigcoreProvider === 'openphone' || params.senderMode === 'openphone';
+    if (isOpenPhone && params.fromPhone) {
+      try {
+        const opPhones = await this.fetchOpenPhoneNumbers(params.apiKey);
+        const match = opPhones.find(p => p.phoneNumber === params.fromPhone);
+        if (match) {
+          requestBody.phoneNumberId = match.id;
+          this.logger.log(`[sendViaSigcore] OpenPhone: resolved phoneNumberId=${match.id} for ${params.fromPhone}`);
+        } else {
+          this.logger.warn(`[sendViaSigcore] OpenPhone: no ID found for ${params.fromPhone}`);
+        }
+      } catch (e: any) {
+        this.logger.warn(`[sendViaSigcore] OpenPhone ID lookup failed: ${e.message}`);
+      }
     }
 
     const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
