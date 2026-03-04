@@ -739,7 +739,7 @@ export class AdminPhonePoolService {
     const settings = await this.prisma.notificationSettings.findMany({
       where: {
         sigcoreProvider: 'openphone',
-        sigcoreTenantId: { not: null },
+        sigcoreApiKey: { not: null },
       },
       include: {
         savedAccount: {
@@ -761,7 +761,7 @@ export class AdminPhonePoolService {
 
     const seenKeys = new Set<string>();
     for (const ns of settings) {
-      const apiKey = ns.sigcoreTenantId!;
+      const apiKey = ns.sigcoreApiKey!;
       if (seenKeys.has(apiKey)) continue;
       seenKeys.add(apiKey);
 

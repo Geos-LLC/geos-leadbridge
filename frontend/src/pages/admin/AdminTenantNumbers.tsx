@@ -1008,12 +1008,12 @@ export default function AdminTenantNumbers() {
         </DroppableZone>
 
         {/* ═══════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 3: OpenPhone Numbers (Informational)                       */}
+        {/* SECTION 3: Bring Your Own Numbers (Informational)                  */}
         {/* ═══════════════════════════════════════════════════════════════════ */}
 
         <div className="space-y-4">
           <h2 className="text-lg md:text-xl font-bold text-slate-900 flex items-center gap-2">
-            <Phone size={20} className="text-purple-600" /> OpenPhone Numbers
+            <Phone size={20} className="text-purple-600" /> Bring Your Own Numbers
             <span className="text-sm font-normal text-slate-500">({openPhoneNumbers.length})</span>
             <span className="px-2 py-0.5 bg-purple-50 text-purple-600 text-[10px] font-bold rounded uppercase tracking-wider">Informational</span>
           </h2>
