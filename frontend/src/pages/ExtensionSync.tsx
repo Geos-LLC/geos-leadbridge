@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   RefreshCw, Loader2, CheckCircle, Download, Package,
-  Clock, DollarSign, ArrowUpRight, Filter, Chrome, Building2, ChevronDown,
+  Clock, DollarSign, ArrowUpRight, Filter, Chrome, Building2, ChevronDown, RotateCcw,
 } from 'lucide-react';
 import { integrationsApi } from '../services/api';
 
@@ -73,6 +73,8 @@ export function ExtensionSync() {
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
   const [accounts, setAccounts] = useState<{ id: string; businessName: string }[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionResult, setActionResult] = useState<string | null>(null);
   // Detect if the Chrome extension is installed
   // The extension's leadbridgeAuth.js sets data-leadbridge-extension="true" on <html>
   useEffect(() => {
@@ -354,6 +356,59 @@ export function ExtensionSync() {
               ))}
             </div>
 
+            {/* Actions for imported leads */}
+            {(filter === 'imported' || filter === 'all') && importedLeads.length > 0 && (
+              <div className="flex items-center gap-2 ml-auto">
+                {actionResult && (
+                  <span className="text-xs text-slate-500 italic">{actionResult}</span>
+                )}
+                <button
+                  disabled={actionLoading}
+                  onClick={async () => {
+                    if (!confirm(`Reset ${filter === 'imported' ? filteredLeads.length : importedLeads.length} imported lead(s) back to pending so the extension can re-import them?`)) return;
+                    setActionLoading(true);
+                    setActionResult(null);
+                    try {
+                      const ids = (filter === 'imported' ? filteredLeads : importedLeads).map((l) => l.thumbtackId);
+                      const res = await integrationsApi.resetImported(ids);
+                      setActionResult(`Reset ${res.resetCount} to pending`);
+                      await loadData();
+                    } catch {
+                      setActionResult('Reset failed');
+                    } finally {
+                      setActionLoading(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 disabled:opacity-50 inline-flex items-center gap-1.5"
+                >
+                  {actionLoading ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                  Reset to Pending
+                </button>
+                <button
+                  disabled={actionLoading}
+                  onClick={async () => {
+                    const count = filter === 'imported' ? filteredLeads.length : importedLeads.length;
+                    if (!confirm(`Re-import ${count} lead(s) from the server? This may take a while.`)) return;
+                    setActionLoading(true);
+                    setActionResult(null);
+                    try {
+                      const accountId = selectedAccountId === 'all' ? undefined : selectedAccountId;
+                      const res = await integrationsApi.reimportLeads(accountId);
+                      setActionResult(`Done: ${res.imported} imported, ${res.failed} failed`);
+                      await loadData();
+                    } catch {
+                      setActionResult('Re-import failed');
+                    } finally {
+                      setActionLoading(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 disabled:opacity-50 inline-flex items-center gap-1.5"
+                >
+                  {actionLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                  Re-import All
+                </button>
+              </div>
+            )}
           </div>
 
           {filteredLeads.length === 0 ? (

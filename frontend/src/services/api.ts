@@ -1246,6 +1246,14 @@ export const integrationsApi = {
     const { data } = await api.patch('/integrations/thumbtack/leads/mark-imported', { thumbtackIds });
     return data;
   },
+  resetImported: async (thumbtackIds?: string[]): Promise<{ ok: boolean; resetCount: number }> => {
+    const { data } = await api.patch('/integrations/thumbtack/leads/reset-imported', { thumbtackIds });
+    return data;
+  },
+  reimportLeads: async (savedAccountId?: string): Promise<{ ok: boolean; total: number; imported: number; failed: number; errors: string[] }> => {
+    const { data } = await api.post('/integrations/thumbtack/leads/reimport', { savedAccountId });
+    return data;
+  },
   getBudgetSnapshots: async (accountId?: string): Promise<{
     ok: boolean;
     snapshots: Array<{
