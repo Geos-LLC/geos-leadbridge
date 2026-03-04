@@ -422,10 +422,10 @@ export function Analytics() {
                 <YAxis yAxisId="right" orientation="right" unit="%" domain={[0, 100]} tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
                 <Tooltip
                   contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.07)' }}
-                  formatter={(value: any, name: string) => {
-                    if (name === 'Hire Rate') return [`${Number(value).toFixed(1)}%`, name];
-                    if (name === 'Avg Budget') return value != null ? [`$${Number(value).toFixed(0)}`, name] : ['—', name];
-                    return [value, name];
+                  formatter={(value: any, name: string | undefined) => {
+                    if (name === 'Hire Rate') return [`${Number(value).toFixed(1)}%`, name ?? ''];
+                    if (name === 'Avg Budget') return value != null ? [`$${Number(value).toFixed(0)}`, name ?? ''] : ['—', name ?? ''];
+                    return [value, name ?? ''];
                   }}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
