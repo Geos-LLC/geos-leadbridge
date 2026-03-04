@@ -789,9 +789,19 @@ export default function SettingsPage() {
                             </div>
                           </>
                         ) : (
-                          <div className="text-xs text-slate-500">
-                            <span className="font-semibold text-slate-700">Extension not detected.</span>{' '}
-                            Install the <a href="https://chromewebstore.google.com/detail/leadbridge-sync-thumbtack/mkhkooldgglhnpkjfgmpkneongipfhnm" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">LeadBridge Sync</a> extension to collect IDs automatically.
+                          <div className="flex items-center justify-between gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                            <div>
+                              <p className="text-sm font-semibold text-amber-900">Extension not detected</p>
+                              <p className="text-xs text-amber-700 mt-0.5">Install the LeadBridge Sync extension to collect IDs automatically.</p>
+                            </div>
+                            <a
+                              href="https://chromewebstore.google.com/detail/leadbridge-sync-thumbtack/mkhkooldgglhnpkjfgmpkneongipfhnm"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-2 rounded-xl text-xs font-semibold bg-amber-600 text-white hover:bg-amber-700 whitespace-nowrap inline-flex items-center gap-1.5 shrink-0"
+                            >
+                              Install Extension
+                            </a>
                           </div>
                         )}
                       </div>
