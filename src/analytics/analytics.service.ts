@@ -156,7 +156,7 @@ export class AnalyticsService {
       SELECT
         DATE_TRUNC('${period}', l."createdAt" AT TIME ZONE 'UTC') AS bucket,
         COUNT(*) AS lead_count,
-        COUNT(CASE WHEN LOWER(COALESCE(l."thumbtackStatus", tli."thumbtackStatus")) = 'hired' THEN 1 END) AS hired_count,
+        COUNT(CASE WHEN LOWER(COALESCE(l."thumbtackStatus", tli."thumbtackStatus")) IN ('hired', 'job scheduled', 'job done') THEN 1 END) AS hired_count,
         AVG(l."budget") AS avg_budget,
         SUM(l."budget") AS total_budget
       FROM leads l
