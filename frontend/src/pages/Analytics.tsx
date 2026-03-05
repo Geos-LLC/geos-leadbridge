@@ -471,10 +471,12 @@ export function Analytics() {
                 </ComposedChart>
               </ResponsiveContainer>
 
-              {/* Lead spend chart — only when data has leadPrice values */}
-              {tsData.some(r => r.avgBudget != null) && (
-                <div className="mt-8">
+              {/* Lead spend chart */}
+              <div className="mt-8">
                   <p className="text-sm font-semibold text-slate-700 mb-4">Avg Lead Cost per Period</p>
+                  {!tsData.some(r => r.avgBudget != null) && (
+                    <p className="text-xs text-slate-400 mb-3">No lead price data available — lead prices are captured from Thumbtack webhooks.</p>
+                  )}
                   <ResponsiveContainer width="100%" height={200}>
                     <BarChart data={tsData} margin={{ top: 5, right: 68, left: 0, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -504,7 +506,6 @@ export function Analytics() {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-              )}
             </>
           );
         })()}
