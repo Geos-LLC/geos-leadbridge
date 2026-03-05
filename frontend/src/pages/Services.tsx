@@ -314,7 +314,7 @@ export function Services() {
       if (!_svcLoaded && !_svcCache.has(accountId)) setLoading(true);
       setError(null);
 
-      const [automationRes, notifRes, templatesRes, poolRes, ccRes, ctRes, notifSettingsRes] = await Promise.all([
+      const [automationRes, notifRes, templatesRes, poolRes, ccRes, ctRes, notifSettingsRes, tenantPhonesRes] = await Promise.all([
         automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] })),
         notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] })),
         templatesApi.getTemplates().catch(() => ({ templates: [] as MessageTemplate[] })),
@@ -322,15 +322,19 @@ export function Services() {
         callConnectApi.getSettings(accountId).catch(() => ({ settings: null })),
         notificationsApi.getCustomerTextingSettings(accountId).catch(() => null),
         notificationsApi.getSettings(accountId).catch(() => null),
+        notificationsApi.listTenantPhones().catch(() => ({ success: false as const, data: [] as TenantPhoneNumber[] })),
       ]);
 
       const ccs = ccRes.settings;
-      const defaultBotNumber = poolRes.phoneNumbers[0]?.phoneNumber || '';
+      const activeTenantPhones = tenantPhonesRes.success ? tenantPhonesRes.data.filter(tp => tp.status === 'ACTIVE') : [];
+      setTenantPhones(activeTenantPhones);
+      // Bot number defaults to first dedicated (tenant) phone — never pool
+      const defaultBotNumber = activeTenantPhones[0]?.phoneNumber || '';
       if (ccs) {
         setCcEnabled(ccs.enabled);
         setCcMode(ccs.mode);
         setCcAgentStrategy(ccs.agentStrategy);
-        setCcAgentPhone(ccs.agentPhoneE164 || '');
+        // ccAgentPhone set below after byoPhone is resolved
         setCcMaxAttempts(ccs.maxAgentAttempts);
         setCcQuietEnabled(ccs.quietHoursEnabled);
         setCcQuietTimezone(ccs.quietHoursTimezone || 'America/New_York');
@@ -347,7 +351,7 @@ export function Services() {
         setCcEnabled(false);
         setCcMode('AGENT_FIRST');
         setCcAgentStrategy('owner');
-        setCcAgentPhone('');
+        // ccAgentPhone set below after byoPhone is resolved
         setCcMaxAttempts(2);
         setCcQuietEnabled(false);
         setCcQuietTimezone('America/New_York');
@@ -383,14 +387,7 @@ export function Services() {
       setLeadAlertRule(leadAlert);
       setPoolPhones(poolRes.phoneNumbers);
 
-      // Load tenant purchased phone numbers
-      notificationsApi.listTenantPhones().then(r => {
-        if (r.success) {
-          const active = r.data.filter(tp => tp.status === 'ACTIVE');
-          setTenantPhones(active);
-          const c = _svcCache.get(accountId); if (c) c.tenantPhones = active;
-        }
-      }).catch(() => {});
+      // (tenant phones loaded in main Promise.all above)
 
       // Load own provider connection status for CT Option 2
       const connected = !!notifSettingsRes?.settings?.sigcoreConnected;
@@ -405,7 +402,12 @@ export function Services() {
       setCtSigcoreProvider(sigcoreProvider);
       setCtSigcoreFromPhone(byoPhone);
       setCtSmsForwardingNumber(effectiveForwarding);
-      setCcCallForwardingNumber(notifSettingsRes?.settings?.callForwardingNumber || '');
+      // Agent phone: use saved value, else default to BYO phone if available
+      const agentPhoneDefault = ccs?.agentPhoneE164 || byoPhone || '';
+      setCcAgentPhone(agentPhoneDefault);
+      // Forward calls to: use saved value, else default to same as agent phone
+      const savedCallFwd = notifSettingsRes?.settings?.callForwardingNumber || '';
+      setCcCallForwardingNumber(savedCallFwd || agentPhoneDefault);
       if (connected) {
         notificationsApi.getSigcorePhoneNumbers(accountId).then(r => {
           setCtOwnPhoneNumbers(r.phoneNumbers);
@@ -479,13 +481,13 @@ export function Services() {
       const snapshotVoicemail = ccs?.leadVoicemailMessage || voicemailTpl?.content || '';
       setCcSavedSnapshot({
         mode: (ccs?.mode || 'AGENT_FIRST') as CallConnectMode,
-        agentPhone: ccs?.agentPhoneE164 || '',
+        agentPhone: agentPhoneDefault,
         botNumber: ccs?.botNumberE164 || defaultBotNumber,
         agentWhisperMessage: snapshotWhisper,
         leadGreetingMessage: snapshotGreeting,
         voicemailMessage: snapshotVoicemail,
         voicemailRecordingUrl: ccs?.leadVoicemailRecordingUrl || '',
-        callForwardingNumber: notifSettingsRes?.settings?.callForwardingNumber || '',
+        callForwardingNumber: savedCallFwd || agentPhoneDefault,
       });
 
       // Pre-fill form states from existing rules
@@ -513,10 +515,10 @@ export function Services() {
       // Persist to module-level cache so returning to this page is instant
       _svcCache.set(accountId, {
         autoReplyRules: allAutoReplies, leadAlertRule: leadAlert, templates: allTemplates,
-        poolPhones: poolRes.phoneNumbers, tenantPhones: tenantPhones, ctOwnPhoneNumbers: ctOwnPhoneNumbers,
+        poolPhones: poolRes.phoneNumbers, tenantPhones: activeTenantPhones, ctOwnPhoneNumbers: ctOwnPhoneNumbers,
         ccEnabled: ccs?.enabled ?? false, ccMode: (ccs?.mode || 'AGENT_FIRST') as CallConnectMode,
         ccAgentStrategy: (ccs?.agentStrategy || 'owner') as AgentStrategy,
-        ccAgentPhone: ccs?.agentPhoneE164 || '', ccMaxAttempts: ccs?.maxAgentAttempts ?? 2,
+        ccAgentPhone: agentPhoneDefault, ccMaxAttempts: ccs?.maxAgentAttempts ?? 2,
         ccQuietEnabled: ccs?.quietHoursEnabled ?? false,
         ccQuietTimezone: ccs?.quietHoursTimezone || 'America/New_York',
         ccQuietStart: ccs?.quietHoursStart || '22:00', ccQuietEnd: ccs?.quietHoursEnd || '08:00',
@@ -535,19 +537,19 @@ export function Services() {
         ctFromPhone: ctResolvedFromPhone, ctSigcoreFromPhone: notifSettingsRes?.settings?.sigcoreFromPhone || null,
         ctSigcoreProvider: notifSettingsRes?.settings?.sigcoreProvider || null,
         ctSmsForwardingNumber: notifSettingsRes?.settings?.smsForwardingNumber || '',
-        ccCallForwardingNumber: notifSettingsRes?.settings?.callForwardingNumber || '',
+        ccCallForwardingNumber: savedCallFwd || agentPhoneDefault,
         ctSelectedTemplateId: allTemplates.find(t => t.content === ctContent)?.id || allTemplates.find(t => t.name === 'CT - Auto Reply')?.id || '',
         alertToPhone: alertTo, alertFromPhone: alertFrom,
         alertSavedSnapshot: leadAlert ? { toPhone: alertTo, fromPhone: alertFrom } : null,
         ctSavedSnapshot: { autoReplyTemplate: ctContent, fromPhone: ctResolvedFromPhone, smsForwardingNumber: notifSettingsRes?.settings?.smsForwardingNumber || '' },
         ccSavedSnapshot: {
           mode: (ccs?.mode || 'AGENT_FIRST') as CallConnectMode,
-          agentPhone: ccs?.agentPhoneE164 || '', botNumber: ccs?.botNumberE164 || defaultBotNumber,
+          agentPhone: agentPhoneDefault, botNumber: ccs?.botNumberE164 || defaultBotNumber,
           agentWhisperMessage: ccs?.agentWhisperMessage || allTemplates.find(t => t.name === 'CC - Agent Whisper')?.content || '',
           leadGreetingMessage: ccs?.leadGreetingMessage || allTemplates.find(t => t.name === 'CC - Lead Greeting')?.content || '',
           voicemailMessage: ccs?.leadVoicemailMessage || allTemplates.find(t => t.name === 'CC - Voicemail TTS')?.content || '',
           voicemailRecordingUrl: ccs?.leadVoicemailRecordingUrl || '',
-          callForwardingNumber: notifSettingsRes?.settings?.callForwardingNumber || '',
+          callForwardingNumber: savedCallFwd || agentPhoneDefault,
         },
       });
 
@@ -2048,6 +2050,11 @@ export function Services() {
                     <AlertCircle className="w-3 h-3 shrink-0" />
                     Must be E.164 format, e.g. +12125550100
                   </p>
+                ) : !ccAgentPhone && !ctSigcoreFromPhone ? (
+                  <p className="text-xs text-amber-500 mt-1.5 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    Required — enter your personal phone number
+                  </p>
                 ) : (
                   <p className="text-xs text-slate-400 mt-1.5">Phone Sigcore will ring when a new lead arrives</p>
                 )}
@@ -2062,27 +2069,17 @@ export function Services() {
                     onChange={e => setCcBotNumber(e.target.value)}
                     className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium appearance-none"
                   >
-                    <option value="">Select phone number</option>
-                    {ccBotNumber && !poolPhones.some(p => p.phoneNumber === ccBotNumber) && !tenantPhones.some(tp => tp.phoneNumber === ccBotNumber) && (
+                    <option value="">Select dedicated number</option>
+                    {ccBotNumber && !tenantPhones.some(tp => tp.phoneNumber === ccBotNumber) && (
                       <option value={ccBotNumber}>{ccBotNumber} (configured)</option>
                     )}
-                    {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).length > 0 && (
-                      <optgroup label="Dedicated Numbers">
-                        {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).map(tp => (
-                          <option key={tp.id} value={tp.phoneNumber}>
-                            {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {poolPhones.length > 0 && (
-                      <optgroup label="Pool Numbers">
-                        {poolPhones.map(p => (
-                          <option key={p.id} value={p.phoneNumber}>
-                            {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''}{p.smsApproved === false ? ' — NOT APPROVED' : ''}
-                          </option>
-                        ))}
-                      </optgroup>
+                    {tenantPhones.map(tp => (
+                      <option key={tp.id} value={tp.phoneNumber}>
+                        {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''}
+                      </option>
+                    ))}
+                    {tenantPhones.length === 0 && (
+                      <option value="" disabled>No dedicated numbers — purchase one in Phone Settings</option>
                     )}
                   </select>
                   <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
@@ -2118,7 +2115,7 @@ export function Services() {
                   Must be E.164 format, e.g. +12125550100
                 </p>
               ) : (
-                <p className="text-xs text-slate-400 mt-1.5">Customers calling your dedicated number will be connected to this phone (e.g. OpenPhone)</p>
+                <p className="text-xs text-slate-400 mt-1.5">Inbound calls to your dedicated number are forwarded here — defaults to Agent Phone</p>
               )}
             </div>
 
