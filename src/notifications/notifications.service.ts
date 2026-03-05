@@ -468,28 +468,20 @@ export class NotificationsService {
       return { success: false, error: 'No Sigcore API key configured. Please provision your phone workspace first.' };
     }
 
-    // Resolve fromPhone: settings phone or any pool phone (pool numbers are shared)
-    let fromPhone = settings.sigcoreFromPhone;
+    // Resolve fromPhone — must be a dedicated or BYO OpenPhone number (never pool)
+    const fromPhone = settings.sigcoreFromPhone;
     if (!fromPhone) {
-      const poolPhone = await this.prisma.phonePool.findFirst({
-        where: { status: { not: 'RELEASED' } },
-        orderBy: { provisionedAt: 'desc' },
-      });
-      if (poolPhone) fromPhone = poolPhone.phoneNumber;
+      return { success: false, error: 'No from-phone configured. Set up a dedicated or OpenPhone number in Notification Settings.' };
     }
 
-    // If fromPhone is a shared pool number, use the platform key (not the tenant OpenPhone key).
-    // Pool phones are owned by the platform's Twilio account, not the tenant's provider.
-    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
-    if (fromPhone && platformKey) {
-      const isPoolPhone = await this.prisma.phonePool.findFirst({
-        where: { phoneNumber: fromPhone, status: { not: 'RELEASED' } },
-        select: { id: true },
-      });
-      if (isPoolPhone) {
-        this.logger.log(`[sendAdHocSms] fromPhone ${fromPhone} is a shared pool number — using platform key`);
-        apiKey = platformKey;
-      }
+    // Guard: pool numbers cannot be used for customer SMS
+    const isPoolPhone = await this.prisma.phonePool.findFirst({
+      where: { phoneNumber: fromPhone, status: { not: 'RELEASED' } },
+      select: { id: true },
+    });
+    if (isPoolPhone) {
+      this.logger.warn(`[sendAdHocSms] Blocked: fromPhone ${fromPhone} is a shared pool number — cannot send customer SMS`);
+      return { success: false, error: 'Pool numbers cannot be used for customer SMS. Configure a dedicated or OpenPhone number in Notification Settings.' };
     }
 
     // 4. Create log entry
@@ -767,6 +759,16 @@ export class NotificationsService {
       if (!ownsPhone) {
         throw new BadRequestException('Phone number does not belong to this account');
       }
+      // Guard A4: pool numbers cannot be used for customer SMS rules
+      if (data.sendToCustomer) {
+        const isPoolPhone = await this.prisma.phonePool.findFirst({
+          where: { phoneNumber: data.fromPhone, status: { not: 'RELEASED' } },
+          select: { id: true },
+        });
+        if (isPoolPhone) {
+          throw new BadRequestException('Pool numbers cannot be used for customer SMS rules. Configure a dedicated or OpenPhone number.');
+        }
+      }
     }
 
     const rule = await this.prisma.notificationRule.create({
@@ -859,6 +861,17 @@ export class NotificationsService {
       const ownsPhone = await this.validatePhoneOwnership(userId, data.fromPhone);
       if (!ownsPhone) {
         throw new BadRequestException('Phone number does not belong to this account');
+      }
+      // Guard A4: pool numbers cannot be used for customer SMS rules
+      const sendToCustomer = data.sendToCustomer ?? existing.sendToCustomer;
+      if (sendToCustomer) {
+        const isPoolPhone = await this.prisma.phonePool.findFirst({
+          where: { phoneNumber: data.fromPhone, status: { not: 'RELEASED' } },
+          select: { id: true },
+        });
+        if (isPoolPhone) {
+          throw new BadRequestException('Pool numbers cannot be used for customer SMS rules. Configure a dedicated or OpenPhone number.');
+        }
       }
     }
 

@@ -659,6 +659,11 @@ export class AdminPhonePoolService {
       this.refreshWebhooksForAccount(savedAccount.id, poolPhone.phoneNumber).catch((err) =>
         this.logger.warn(`[convertPoolToTenant] refresh-webhooks failed for ${poolPhone.phoneNumber}: ${err.message}`),
       );
+      // Re-home the Sigcore allocation so tenant_phone_numbers.tenantId points to the real tenant.
+      // Fire-and-forget — don't fail the conversion if this step fails.
+      this.reallocateSigcorePhone(savedAccount.id, poolPhone.phoneNumber).catch((err) =>
+        this.logger.warn(`[convertPoolToTenant] Sigcore reallocation failed for ${poolPhone.phoneNumber}: ${err.message}`),
+      );
     }
 
     return tenantPhone;
@@ -700,6 +705,46 @@ export class AdminPhonePoolService {
     }
 
     this.logger.log(`[refreshWebhooks] Updated Twilio webhooks for ${phoneNumber} (tenant ${ns.sigcoreTenantId})`);
+  }
+
+  /**
+   * Re-home the Sigcore tenant_phone_numbers allocation so it points to the real tenant
+   * rather than the platform tenant. Called after pool→dedicated conversion.
+   */
+  private async reallocateSigcorePhone(savedAccountId: string, phoneNumber: string): Promise<void> {
+    const ns = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { sigcoreTenantId: true },
+    });
+    if (!ns?.sigcoreTenantId) {
+      this.logger.warn(`[reallocateSigcorePhone] No sigcoreTenantId for account ${savedAccountId} (${phoneNumber}) — skipping`);
+      return;
+    }
+
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (!platformKey) return;
+
+    const rawUrl =
+      this.configService.get<string>('SIGCORE_CALL_CONNECT_URL') ||
+      this.configService.get<string>('SIGCORE_API_URL') ||
+      'https://sigcore-production.up.railway.app/api';
+    const sigcoreBase = rawUrl.replace(/\/api\/?$/, '');
+
+    const resp = await fetch(
+      `${sigcoreBase}/api/tenants/phone-numbers/${encodeURIComponent(phoneNumber)}/reallocate`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey },
+        body: JSON.stringify({ tenantId: ns.sigcoreTenantId }),
+      },
+    );
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Sigcore reallocate failed (${resp.status}): ${text}`);
+    }
+
+    this.logger.log(`[reallocateSigcorePhone] ${phoneNumber} re-homed to tenant ${ns.sigcoreTenantId}`);
   }
 
   /**
