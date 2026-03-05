@@ -1069,8 +1069,24 @@ export class WebhooksService {
             });
             const normTo = toNumber?.replace(/\D/g, '').slice(-10);
             const normAcctFrom = acctSettings?.sigcoreFromPhone?.replace(/\D/g, '').slice(-10);
-            // Only forward if the account has no specific fromPhone (pool), or it matches toNumber
-            if (!normAcctFrom || !normTo || normAcctFrom === normTo) {
+
+            // Determine if this account is the legitimate recipient of the inbound SMS.
+            // Check 1: account has no dedicated fromPhone (pure pool routing) → always forward
+            // Check 2: toNumber matches the account's dedicated/BYO fromPhone
+            // Check 3: toNumber matches one of the account's pool phone assignments
+            let isOwner = !normAcctFrom || !normTo || normAcctFrom === normTo;
+            if (!isOwner && normTo) {
+              const poolAssignment = await this.prisma.phonePoolAssignment.findFirst({
+                where: { savedAccountId: accountId },
+                include: { phonePool: { select: { phoneNumber: true } } },
+              });
+              if (poolAssignment) {
+                const normPool = poolAssignment.phonePool.phoneNumber.replace(/\D/g, '').slice(-10);
+                if (normPool === normTo) isOwner = true;
+              }
+            }
+
+            if (isOwner) {
               await this.notificationsService.forwardInboundSms(accountId, fromNumber, fromNumber, body);
             } else {
               this.logger.log(
