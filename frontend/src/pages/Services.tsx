@@ -408,7 +408,10 @@ export function Services() {
       // Forward calls to: use saved value, else default to same as agent phone
       const savedCallFwd = notifSettingsRes?.settings?.callForwardingNumber || '';
       setCcCallForwardingNumber(savedCallFwd || agentPhoneDefault);
-      if (connected) {
+      // Load phone numbers if connected OR if provisioned (sigcoreProvider may have been cleared
+      // by re-provisioning but the tenant + API key still exist — numbers should still show).
+      const provisioned = !!notifSettingsRes?.settings?.sigcoreProvisioned;
+      if (connected || provisioned) {
         notificationsApi.getSigcorePhoneNumbers(accountId).then(r => {
           setCtOwnPhoneNumbers(r.phoneNumbers);
           const c = _svcCache.get(accountId); if (c) c.ctOwnPhoneNumbers = r.phoneNumbers;

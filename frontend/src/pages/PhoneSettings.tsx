@@ -112,8 +112,8 @@ export function PhoneSettings() {
       setSigcoreFromPhone(settingsRes.settings?.sigcoreFromPhone || null);
       setSigcoreProvider(settingsRes.settings?.sigcoreProvider || null);
       let phones: SigcorePhoneNumber[] = [];
-      if (connected) {
-        const { phoneNumbers } = await notificationsApi.getSigcorePhoneNumbers(accountId);
+      if (connected || provisioned) {
+        const { phoneNumbers } = await notificationsApi.getSigcorePhoneNumbers(accountId).catch(() => ({ phoneNumbers: [] as SigcorePhoneNumber[] }));
         phones = phoneNumbers;
       }
       setOwnPhoneNumbers(phones);
