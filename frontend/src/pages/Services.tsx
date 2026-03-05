@@ -402,8 +402,8 @@ export function Services() {
       setCtSigcoreProvider(sigcoreProvider);
       setCtSigcoreFromPhone(byoPhone);
       setCtSmsForwardingNumber(effectiveForwarding);
-      // Agent phone: use saved value only — never default to BYO number (different use case)
-      const agentPhoneDefault = ccs?.agentPhoneE164 || '';
+      // Agent phone: use saved value, else default to BYO number if available
+      const agentPhoneDefault = ccs?.agentPhoneE164 || byoPhone || '';
       setCcAgentPhone(agentPhoneDefault);
       // Forward calls to: use saved value, else default to same as agent phone
       const savedCallFwd = notifSettingsRes?.settings?.callForwardingNumber || '';
@@ -2041,7 +2041,7 @@ export function Services() {
                   }}
                   placeholder="+15551234567"
                   className={`w-full rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
-                    ccAgentPhone && !isValidPhoneE164(ccAgentPhone)
+                    (ccAgentPhone && !isValidPhoneE164(ccAgentPhone)) || (!ccAgentPhone && !ctSigcoreFromPhone)
                       ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
                       : ccAgentPhone && isValidPhoneE164(ccAgentPhone)
                         ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
@@ -2054,9 +2054,9 @@ export function Services() {
                     Must be E.164 format, e.g. +12125550100
                   </p>
                 ) : !ccAgentPhone && !ctSigcoreFromPhone ? (
-                  <p className="text-xs text-amber-500 mt-1.5 flex items-center gap-1">
+                  <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
                     <AlertCircle className="w-3 h-3 shrink-0" />
-                    Required — enter your personal phone number
+                    Required — connect a BYO number or enter your personal phone
                   </p>
                 ) : (
                   <p className="text-xs text-slate-400 mt-1.5">Phone Sigcore will ring when a new lead arrives</p>
