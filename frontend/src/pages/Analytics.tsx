@@ -411,7 +411,7 @@ export function Analytics() {
                   { label: 'Total Leads', value: tsData.reduce((s, r) => s + r.total, 0).toString() },
                   {
                     label: 'Total Hired & Scheduled',
-                    value: tsData.reduce((s, r) => s + r.hiredCount + (r.statuses['Scheduled'] ?? 0), 0).toString(),
+                    value: tsData.reduce((s, r) => s + r.hiredCount, 0).toString(),
                   },
                   {
                     label: 'Lead Spend',
@@ -424,7 +424,7 @@ export function Analytics() {
                     label: 'Avg Hire Rate',
                     value: (() => {
                       const total = tsData.reduce((s, r) => s + r.total, 0);
-                      const hired = tsData.reduce((s, r) => s + r.hiredCount + (r.statuses['Scheduled'] ?? 0), 0);
+                      const hired = tsData.reduce((s, r) => s + r.hiredCount, 0);
                       return total > 0 ? `${((hired / total) * 100).toFixed(1)}%` : '—';
                     })(),
                   },
@@ -467,7 +467,7 @@ export function Analytics() {
                   <Bar yAxisId="left" dataKey={() => 0} stackId="status" fill="transparent" legendType="none" maxBarSize={56} name="_total">
                     <LabelList dataKey="total" position="top" style={{ fontSize: 11, fill: '#475569', fontWeight: 700 }} />
                   </Bar>
-                  <Line yAxisId="right" type="monotone" dataKey={(d: TimeSeriesPoint) => d.total > 0 ? ((d.hiredCount + (d.statuses['Scheduled'] ?? 0)) / d.total) * 100 : 0} name="Hire Rate" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line yAxisId="right" type="monotone" dataKey={(d: TimeSeriesPoint) => d.total > 0 ? (d.hiredCount / d.total) * 100 : 0} name="Hire Rate" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
                 </ComposedChart>
               </ResponsiveContainer>
 

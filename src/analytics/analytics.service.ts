@@ -256,7 +256,7 @@ export class AnalyticsService {
       const lower = s.toLowerCase();
       if (lower === 'hired')             return 'Hired';
       if (lower === 'job done')          return 'Job done';
-      if (lower === 'job scheduled')     return 'Job done';    // scheduled → job done
+      if (lower === 'job scheduled')     return 'Scheduled';
       if (lower === 'not scheduled yet') return 'Not hired';
       if (lower === 'not hired')         return 'Not hired';
       if (lower === 'no status')         return 'Not hired';   // no status → not hired
