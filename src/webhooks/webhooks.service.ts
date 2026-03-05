@@ -1077,7 +1077,7 @@ export class WebhooksService {
             let isOwner = !normAcctFrom || !normTo || normAcctFrom === normTo;
             if (!isOwner && normTo) {
               const poolAssignment = await this.prisma.phonePoolAssignment.findFirst({
-                where: { savedAccountId: accountId },
+                where: { user: { savedAccounts: { some: { id: accountId } } } },
                 include: { phonePool: { select: { phoneNumber: true } } },
               });
               if (poolAssignment) {
