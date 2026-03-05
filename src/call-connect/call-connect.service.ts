@@ -267,6 +267,22 @@ export class CallConnectService {
       } catch (err: any) {
         this.logger.warn(`[ensureSigcoreProvisioned] Could not copy integrations: ${err.message}`);
       }
+
+      // Refresh Twilio webhook URLs for all phone numbers on the old tenant so inbound calls/SMS
+      // no longer 404. Uses SIGCORE_API_URL (production) — the Sigcore instance that actually owns
+      // the phone numbers and knows the correct workspace webhookId.
+      try {
+        await firstValueFrom(
+          this.httpService.post(
+            `${sigcoreUrl}/tenants/${oldTenantId}/phone-numbers/refresh-webhooks`,
+            {},
+            { headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey } },
+          ),
+        );
+        this.logger.log(`[ensureSigcoreProvisioned] Refreshed phone webhooks for old tenant ${oldTenantId}`);
+      } catch (err: any) {
+        this.logger.warn(`[ensureSigcoreProvisioned] Could not refresh phone webhooks: ${err.message}`);
+      }
     }
 
     return true; // Re-provisioned — caller should re-push settings

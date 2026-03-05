@@ -1049,6 +1049,17 @@ export class NotificationsService {
     });
     if (!settings?.smsForwardingNumber) return;
 
+    // If the forwarding destination is the same as the BYO from-phone, the message already
+    // arrived at that OpenPhone number — forwarding would loop from/to the same number.
+    const normForward = settings.smsForwardingNumber.replace(/\D/g, '').slice(-10);
+    const normFrom = settings.sigcoreFromPhone?.replace(/\D/g, '').slice(-10);
+    if (normFrom && normForward === normFrom) {
+      this.logger.log(
+        `[forwardInboundSms] Skipping forward for account ${savedAccountId}: smsForwardingNumber (${settings.smsForwardingNumber}) === sigcoreFromPhone (already delivered via OpenPhone)`,
+      );
+      return;
+    }
+
     const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
     // Prefer tenant Sigcore key; fall back to platform key so forwarding works
     // even for accounts that haven't completed full Sigcore provisioning.
