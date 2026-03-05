@@ -394,10 +394,12 @@ export class CallConnectService {
     const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
     if (!platformKey) return;
 
-    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    // Use the same Sigcore instance that handles inbound voice calls (SIGCORE_CALL_CONNECT_URL,
+    // falling back to SIGCORE_API_URL). this.sigcoreApiUrl already resolves this correctly.
+    // Note: this.sigcoreApiUrl has trailing /api stripped, so we re-add /api here.
     const forwardingNumber = ns.callForwardingNumber || null;
 
-    const resp = await fetch(`${sigcoreUrl}/tenants/${ns.sigcoreTenantId}`, {
+    const resp = await fetch(`${this.sigcoreApiUrl}/api/tenants/${ns.sigcoreTenantId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey },
       body: JSON.stringify({ metadata: { callForwardingNumber: forwardingNumber } }),
