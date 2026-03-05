@@ -295,14 +295,13 @@ export class CallConnectService {
     };
   }
 
-  /** Get Sigcore API key — account tenant key first (isolates per-account), env-level as fallback */
+  /** Get Sigcore API key — account tenant key only; env key is never used for tenant CC flows */
   private async getSigcoreApiKey(savedAccountId: string): Promise<string | null> {
     const ns = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
       select: { sigcoreApiKey: true },
     });
-    if (ns?.sigcoreApiKey) return ns.sigcoreApiKey;
-    return this.configService.get<string>('SIGCORE_API_KEY') || null;
+    return ns?.sigcoreApiKey || null;
   }
 
   /** Push call-connect settings to Sigcore and verify they were saved */
@@ -551,10 +550,9 @@ export class CallConnectService {
       where: { savedAccountId: params.savedAccountId },
       select: { sigcoreApiKey: true, sigcoreWorkspaceId: true, sigcoreTenantId: true },
     });
-    const sigcoreApiKey =
-      ns?.sigcoreApiKey || this.configService.get<string>('SIGCORE_API_KEY') || null;
+    const sigcoreApiKey = ns?.sigcoreApiKey || null;
     if (!sigcoreApiKey) {
-      this.logger.log('Skipping call-connect — no Sigcore API key configured');
+      this.logger.log(`[triggerForLead] Skipping call-connect for ${params.savedAccountId} — no tenant Sigcore API key configured`);
       return;
     }
 
@@ -801,18 +799,14 @@ export class CallConnectService {
       throw new BadRequestException('Saved account not found');
     }
 
-    const accountKey = ns?.sigcoreApiKey;
-    const envKey = this.configService.get<string>('SIGCORE_API_KEY');
-    const sigcoreApiKey = envKey || accountKey || null; // env var is authoritative
+    const sigcoreApiKey = ns?.sigcoreApiKey || null;
 
     this.logger.log(
-      `[triggerTestCall] accountKey=${accountKey ? `"${accountKey.slice(0, 6)}…" (len ${accountKey.length})` : 'empty/null'} | ` +
-      `envKey=${envKey ? `"${envKey.slice(0, 6)}…" (len ${envKey.length})` : 'not set'} | ` +
-      `using=${sigcoreApiKey ? `"${sigcoreApiKey.slice(0, 6)}…"` : 'NONE'}`
+      `[triggerTestCall] using=${sigcoreApiKey ? `"${sigcoreApiKey.slice(0, 6)}…" (len ${sigcoreApiKey.length})` : 'NONE'}`
     );
 
     if (!sigcoreApiKey) {
-      throw new BadRequestException('No Sigcore API key configured in Notification Settings');
+      throw new BadRequestException('No tenant Sigcore API key configured. Connect your Sigcore account in Notification Settings.');
     }
 
     const settings = await this.prisma.callConnectSettings.findUnique({
