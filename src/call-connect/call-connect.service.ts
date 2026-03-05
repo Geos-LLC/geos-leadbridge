@@ -269,12 +269,12 @@ export class CallConnectService {
       }
 
       // Refresh Twilio webhook URLs for all phone numbers on the old tenant so inbound calls/SMS
-      // no longer 404. Uses SIGCORE_API_URL (production) — the Sigcore instance that actually owns
-      // the phone numbers and knows the correct workspace webhookId.
+      // no longer 404. Must use this.sigcoreApiUrl (SIGCORE_CALL_CONNECT_URL || SIGCORE_API_URL)
+      // because the phone numbers are registered on whichever Sigcore instance handles CC calls.
       try {
         await firstValueFrom(
           this.httpService.post(
-            `${sigcoreUrl}/tenants/${oldTenantId}/phone-numbers/refresh-webhooks`,
+            `${this.sigcoreApiUrl}/api/tenants/${oldTenantId}/phone-numbers/refresh-webhooks`,
             {},
             { headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey } },
           ),
