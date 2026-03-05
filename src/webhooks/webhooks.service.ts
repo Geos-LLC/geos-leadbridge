@@ -1022,6 +1022,7 @@ export class WebhooksService {
     try {
       const data = payload?.data || payload;
       const fromNumber = data?.fromNumber || data?.from;
+      const toNumber = data?.toNumber || data?.to;
       const body = data?.body || data?.text || data?.content || '';
       const messageId = data?.id || data?.messageId;
 
@@ -1056,11 +1057,27 @@ export class WebhooksService {
 
       if (!lead) {
         this.logger.warn(`No lead found for inbound SMS from ${fromNumber}`);
-        // Still forward the message to the tenant's configured forwarding number —
-        // the account that received this inbound message is known from accountId.
+        // Forward to the tenant's configured forwarding number only if this account
+        // is the actual recipient of the inbound SMS. When multiple accounts share a
+        // Sigcore tenant, all of them receive the same webhook — skip accounts whose
+        // configured fromPhone doesn't match the inbound toNumber (ghost events).
         if (accountId) {
           try {
-            await this.notificationsService.forwardInboundSms(accountId, fromNumber, fromNumber, body);
+            const acctSettings = await this.prisma.notificationSettings.findUnique({
+              where: { savedAccountId: accountId },
+              select: { sigcoreFromPhone: true },
+            });
+            const normTo = toNumber?.replace(/\D/g, '').slice(-10);
+            const normAcctFrom = acctSettings?.sigcoreFromPhone?.replace(/\D/g, '').slice(-10);
+            // Only forward if the account has no specific fromPhone (pool), or it matches toNumber
+            if (!normAcctFrom || !normTo || normAcctFrom === normTo) {
+              await this.notificationsService.forwardInboundSms(accountId, fromNumber, fromNumber, body);
+            } else {
+              this.logger.log(
+                `[handleInboundSms] Skipping forward for account ${accountId}: ` +
+                `inbound toNumber=${toNumber} doesn't match account fromPhone=${acctSettings?.sigcoreFromPhone} (shared-tenant ghost event)`,
+              );
+            }
           } catch (err: any) {
             this.logger.warn(`SMS forwarding failed (no lead): ${err.message}`);
           }

@@ -1047,14 +1047,18 @@ export class NotificationsService {
     const settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
     });
-    if (!settings?.smsForwardingNumber || !settings.sigcoreApiKey) return;
+    if (!settings?.smsForwardingNumber) return;
 
-    const fromPhone = settings.sigcoreFromPhone;
-    if (!fromPhone) {
-      this.logger.warn(`[forwardInboundSms] No fromPhone configured for account ${savedAccountId}`);
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    // Prefer tenant Sigcore key; fall back to platform key so forwarding works
+    // even for accounts that haven't completed full Sigcore provisioning.
+    const apiKey = settings.sigcoreApiKey || platformKey;
+    if (!apiKey) {
+      this.logger.warn(`[forwardInboundSms] No API key available for account ${savedAccountId}`);
       return;
     }
 
+    const fromPhone = settings.sigcoreFromPhone ?? null;
     const forwardBody = `SMS from ${customerName} (${fromNumber}):\n${body}`;
     this.logger.log(`[forwardInboundSms] Forwarding to ${settings.smsForwardingNumber} for account ${savedAccountId}`);
 
@@ -1062,8 +1066,8 @@ export class NotificationsService {
       to: settings.smsForwardingNumber,
       body: forwardBody,
       fromPhone,
-      apiKey: settings.sigcoreApiKey,
-      senderMode: (settings.senderMode as 'shared' | 'dedicated' | 'openphone') || 'dedicated',
+      apiKey,
+      senderMode: (settings.senderMode as 'shared' | 'dedicated' | 'openphone') || 'shared',
       sigcoreProvider: settings.sigcoreProvider,
       sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
       metadata: { type: 'sms_forwarding', savedAccountId },
