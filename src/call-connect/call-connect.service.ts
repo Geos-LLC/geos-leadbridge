@@ -416,28 +416,41 @@ export class CallConnectService {
 
     // Also sync to the phone allocation directly so handleIncomingCall reads the correct
     // value regardless of which Sigcore tenant owns the phone (survives re-provisioning).
+    // The phone may be registered on staging (SIGCORE_CALL_CONNECT_URL) or production
+    // (SIGCORE_API_URL) — try both so whichever instance Twilio actually calls gets updated.
     const ccSettings = await this.prisma.callConnectSettings.findUnique({
       where: { savedAccountId },
       select: { botNumberE164: true },
     });
     if (ccSettings?.botNumberE164) {
-      const allocationResp = await fetch(
-        `${this.sigcoreApiUrl}/api/tenants/phone-numbers/${encodeURIComponent(ccSettings.botNumberE164)}/call-forwarding`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey },
-          body: JSON.stringify({ callForwardingNumber: forwardingNumber }),
-        },
-      );
-      if (allocationResp.ok) {
-        this.logger.log(
-          `[syncCallForwarding] Also synced callForwardingNumber=${forwardingNumber || 'none'} to allocation for ${ccSettings.botNumberE164}`,
+      const rawProdUrl =
+        this.configService.get<string>('SIGCORE_API_URL') ||
+        'https://sigcore-production.up.railway.app/api';
+      const prodBase = rawProdUrl.replace(/\/api\/?$/, '');
+
+      // Collect unique Sigcore base URLs to try (staging/CC + production)
+      const basesToTry = [this.sigcoreApiUrl];
+      if (prodBase !== this.sigcoreApiUrl) basesToTry.push(prodBase);
+
+      for (const base of basesToTry) {
+        const allocationResp = await fetch(
+          `${base}/api/tenants/phone-numbers/${encodeURIComponent(ccSettings.botNumberE164)}/call-forwarding`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey },
+            body: JSON.stringify({ callForwardingNumber: forwardingNumber }),
+          },
         );
-      } else {
-        const text = await allocationResp.text();
-        this.logger.warn(
-          `[syncCallForwarding] Allocation-level sync failed for ${ccSettings.botNumberE164} (${allocationResp.status}): ${text}`,
-        );
+        if (allocationResp.ok) {
+          this.logger.log(
+            `[syncCallForwarding] Synced callForwardingNumber=${forwardingNumber || 'none'} to allocation for ${ccSettings.botNumberE164} on ${base}`,
+          );
+        } else {
+          const text = await allocationResp.text();
+          this.logger.warn(
+            `[syncCallForwarding] Allocation sync failed for ${ccSettings.botNumberE164} on ${base} (${allocationResp.status}): ${text}`,
+          );
+        }
       }
     }
   }
