@@ -383,6 +383,7 @@ export function Analytics() {
           const STATUS_COLORS: Record<string, string> = {
             'Hired':         '#10b981',
             'Job done':      '#059669',
+            'Scheduled':     '#3b82f6',
             'Not hired':     '#94a3b8',
             'Not interested':'#fb923c',
           };
@@ -408,7 +409,10 @@ export function Analytics() {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
                 {[
                   { label: 'Total Leads', value: tsData.reduce((s, r) => s + r.total, 0).toString() },
-                  { label: 'Total Hired', value: tsData.reduce((s, r) => s + r.hiredCount, 0).toString() },
+                  {
+                    label: 'Total Hired & Scheduled',
+                    value: tsData.reduce((s, r) => s + r.hiredCount + (r.statuses['Scheduled'] ?? 0), 0).toString(),
+                  },
                   {
                     label: 'Lead Spend',
                     value: (() => {
@@ -420,7 +424,7 @@ export function Analytics() {
                     label: 'Avg Hire Rate',
                     value: (() => {
                       const total = tsData.reduce((s, r) => s + r.total, 0);
-                      const hired = tsData.reduce((s, r) => s + r.hiredCount, 0);
+                      const hired = tsData.reduce((s, r) => s + r.hiredCount + (r.statuses['Scheduled'] ?? 0), 0);
                       return total > 0 ? `${((hired / total) * 100).toFixed(1)}%` : '—';
                     })(),
                   },
@@ -463,7 +467,7 @@ export function Analytics() {
                   <Bar yAxisId="left" dataKey={() => 0} stackId="status" fill="transparent" legendType="none" maxBarSize={56} name="_total">
                     <LabelList dataKey="total" position="top" style={{ fontSize: 11, fill: '#475569', fontWeight: 700 }} />
                   </Bar>
-                  <Line yAxisId="right" type="monotone" dataKey="conversionRate" name="Hire Rate" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line yAxisId="right" type="monotone" dataKey={(d: TimeSeriesPoint) => d.total > 0 ? ((d.hiredCount + (d.statuses['Scheduled'] ?? 0)) / d.total) * 100 : 0} name="Hire Rate" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
                 </ComposedChart>
               </ResponsiveContainer>
 
