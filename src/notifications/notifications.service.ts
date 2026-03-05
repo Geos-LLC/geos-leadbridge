@@ -1627,9 +1627,13 @@ export class NotificationsService {
     message = message.replace(/\{accountName\}/gi, accountName || 'Your Business');
 
     // Replace basic variables — support both {{lead.x}} and {lead.x} single-brace syntax
-    message = message.replace(/\{\{lead\.name\}\}/gi, lead.customerName || 'Unknown');
-    message = message.replace(/\{lead\.name\}/gi, lead.customerName || 'Unknown');
-    message = message.replace(/\{customerName\}/gi, lead.customerName || 'Unknown');
+    const leadName = (lead.customerName || 'Unknown')
+      .split(' ')
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ');
+    message = message.replace(/\{\{lead\.name\}\}/gi, leadName);
+    message = message.replace(/\{lead\.name\}/gi, leadName);
+    message = message.replace(/\{customerName\}/gi, leadName);
     message = message.replace(/\{\{lead\.phone\}\}/gi, lead.customerPhone || 'Not provided');
     message = message.replace(/\{lead\.phone\}/gi, lead.customerPhone || 'Not provided');
     message = message.replace(/\{\{lead\.service\}\}/gi, lead.category || 'Not specified');
