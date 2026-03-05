@@ -246,6 +246,7 @@ export function Services() {
   const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string; fromPhone: string; smsForwardingNumber: string } | null>(sc?.ctSavedSnapshot ?? null);
   const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>(sc?.ctSelectedTemplateId ?? '');
   const [ctSmsForwardingNumber, setCtSmsForwardingNumber] = useState(sc?.ctSmsForwardingNumber ?? '');
+  const [ctSigcoreProvider, setCtSigcoreProvider] = useState<string | null>(sc?.ctSigcoreProvider ?? null);
   const [ctForwardingEditing, setCtForwardingEditing] = useState(false);
   const [ccCallForwardingNumber, setCcCallForwardingNumber] = useState(sc?.ccCallForwardingNumber ?? '');
 
@@ -394,10 +395,15 @@ export function Services() {
       // Load own provider connection status for CT Option 2
       const connected = !!notifSettingsRes?.settings?.sigcoreConnected;
       // connected state no longer needed in JSX — just used locally here
+      const sigcoreProvider = notifSettingsRes?.settings?.sigcoreProvider || null;
       const byoPhone = notifSettingsRes?.settings?.sigcoreFromPhone || null;
       const savedForwarding = notifSettingsRes?.settings?.smsForwardingNumber || '';
-      // Auto-default forwarding to BYO number if not explicitly set
-      const effectiveForwarding = savedForwarding || byoPhone || '';
+      // Auto-default forwarding to BYO phone ONLY for OpenPhone providers.
+      // For Twilio dedicated, sigcoreFromPhone IS the outbound number — forwarding to the same
+      // number would trigger the same-number guard in the backend and silently fail.
+      const isOpenPhone = sigcoreProvider === 'openphone';
+      const effectiveForwarding = savedForwarding || (isOpenPhone ? byoPhone : null) || '';
+      setCtSigcoreProvider(sigcoreProvider);
       setCtSigcoreFromPhone(byoPhone);
       setCtSmsForwardingNumber(effectiveForwarding);
       setCcCallForwardingNumber(notifSettingsRes?.settings?.callForwardingNumber || '');
@@ -528,6 +534,7 @@ export function Services() {
         ctEnabled: ctRes?.enabled ?? false,
         ctAutoReplyTemplate: ctRes?.autoReplyTemplate || allTemplates.find(t => t.name === 'CT - Auto Reply')?.content || '',
         ctFromPhone: ctResolvedFromPhone, ctSigcoreFromPhone: notifSettingsRes?.settings?.sigcoreFromPhone || null,
+        ctSigcoreProvider: notifSettingsRes?.settings?.sigcoreProvider || null,
         ctSmsForwardingNumber: notifSettingsRes?.settings?.smsForwardingNumber || '',
         ccCallForwardingNumber: notifSettingsRes?.settings?.callForwardingNumber || '',
         ctSelectedTemplateId: allTemplates.find(t => t.content === ctContent)?.id || allTemplates.find(t => t.name === 'CT - Auto Reply')?.id || '',
@@ -1756,11 +1763,8 @@ export function Services() {
               <div className="space-y-2">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">
                   Get replies to
-                  {!ctSigcoreFromPhone && !ctSmsForwardingNumber && (
-                    <span className="ml-1 text-red-400 normal-case font-normal tracking-normal">— required</span>
-                  )}
                 </label>
-                {ctSigcoreFromPhone && !ctForwardingEditing ? (
+                {ctSigcoreProvider === 'openphone' && ctSigcoreFromPhone && !ctForwardingEditing ? (
                   <div className="flex items-center gap-2">
                     <div className="flex-1 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
                       <span className="text-sm font-medium text-slate-900">{ctSmsForwardingNumber || ctSigcoreFromPhone}</span>
@@ -1794,10 +1798,10 @@ export function Services() {
                               : 'border border-slate-200 focus:ring-emerald-400'
                         }`}
                       />
-                      {ctSigcoreFromPhone && (
+                      {ctSigcoreProvider === 'openphone' && ctSigcoreFromPhone && (
                         <button
                           type="button"
-                          onClick={() => { setCtSmsForwardingNumber(ctSigcoreFromPhone); setCtForwardingEditing(false); }}
+                          onClick={() => { setCtSmsForwardingNumber(ctSavedSnapshot?.smsForwardingNumber || ctSigcoreFromPhone || ''); setCtForwardingEditing(false); }}
                           className="text-xs font-semibold text-slate-500 hover:text-slate-800 whitespace-nowrap px-3 py-2 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors"
                         >
                           Cancel
@@ -1809,11 +1813,8 @@ export function Services() {
                         <AlertCircle className="w-3 h-3 shrink-0" />
                         Must be E.164 format, e.g. +12125550100
                       </p>
-                    ) : !ctSigcoreFromPhone && !ctSmsForwardingNumber ? (
-                      <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3 shrink-0" />
-                        Enter the number where customer SMS replies should be sent
-                      </p>
+                    ) : !ctSmsForwardingNumber ? (
+                      <p className="text-xs text-slate-400 mt-1">Optional — enter a number to receive customer replies as SMS</p>
                     ) : (
                       <p className="text-xs text-slate-400 mt-1">Customer SMS replies will be forwarded here</p>
                     )}
