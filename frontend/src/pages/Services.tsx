@@ -402,8 +402,8 @@ export function Services() {
       setCtSigcoreProvider(sigcoreProvider);
       setCtSigcoreFromPhone(byoPhone);
       setCtSmsForwardingNumber(effectiveForwarding);
-      // Agent phone: use saved value, else default to BYO phone if available
-      const agentPhoneDefault = ccs?.agentPhoneE164 || byoPhone || '';
+      // Agent phone: use saved value only — never default to BYO number (different use case)
+      const agentPhoneDefault = ccs?.agentPhoneE164 || '';
       setCcAgentPhone(agentPhoneDefault);
       // Forward calls to: use saved value, else default to same as agent phone
       const savedCallFwd = notifSettingsRes?.settings?.callForwardingNumber || '';
