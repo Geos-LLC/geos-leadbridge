@@ -398,14 +398,9 @@ export function Services() {
       const sigcoreProvider = notifSettingsRes?.settings?.sigcoreProvider || null;
       const byoPhone = notifSettingsRes?.settings?.sigcoreFromPhone || null;
       const savedForwarding = notifSettingsRes?.settings?.smsForwardingNumber || '';
-      // Auto-default forwarding to BYO phone ONLY for OpenPhone providers.
-      // For Twilio dedicated, sigcoreFromPhone IS the outbound number — forwarding to the same
-      // number would trigger the same-number guard in the backend and silently fail.
-      const isOpenPhone = sigcoreProvider === 'openphone';
-      const effectiveForwarding = savedForwarding || (isOpenPhone ? byoPhone : null) || '';
       setCtSigcoreProvider(sigcoreProvider);
       setCtSigcoreFromPhone(byoPhone);
-      setCtSmsForwardingNumber(effectiveForwarding);
+      setCtSmsForwardingNumber(savedForwarding);
       setCcCallForwardingNumber(notifSettingsRes?.settings?.callForwardingNumber || '');
       if (connected) {
         notificationsApi.getSigcorePhoneNumbers(accountId).then(r => {
@@ -1760,67 +1755,53 @@ export function Services() {
               </div>
 
               {/* Get replies to */}
-              <div className="space-y-2">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">
-                  Get replies to
-                </label>
-                {ctSigcoreProvider === 'openphone' && ctSigcoreFromPhone && !ctForwardingEditing ? (
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
-                      <span className="text-sm font-medium text-slate-900">{ctSmsForwardingNumber || ctSigcoreFromPhone}</span>
-                      <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 rounded-full px-2 py-0.5 uppercase tracking-wide">OpenPhone</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setCtForwardingEditing(true)}
-                      className="text-xs font-semibold text-slate-500 hover:text-slate-800 whitespace-nowrap px-3 py-2.5 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors"
-                    >
-                      Change
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="tel"
-                        value={ctSmsForwardingNumber}
-                        onChange={e => setCtSmsForwardingNumber(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
-                        onBlur={e => {
-                          const formatted = formatPhoneE164(e.target.value);
-                          if (formatted !== e.target.value) setCtSmsForwardingNumber(formatted);
-                        }}
-                        placeholder="+15555550100"
-                        className={`flex-1 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
-                          ctSmsForwardingNumber && !isValidPhoneE164(ctSmsForwardingNumber)
-                            ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
-                            : ctSmsForwardingNumber && isValidPhoneE164(ctSmsForwardingNumber)
-                              ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
-                              : 'border border-slate-200 focus:ring-emerald-400'
-                        }`}
-                      />
-                      {ctSigcoreProvider === 'openphone' && ctSigcoreFromPhone && (
-                        <button
-                          type="button"
-                          onClick={() => { setCtSmsForwardingNumber(ctSavedSnapshot?.smsForwardingNumber || ctSigcoreFromPhone || ''); setCtForwardingEditing(false); }}
-                          className="text-xs font-semibold text-slate-500 hover:text-slate-800 whitespace-nowrap px-3 py-2 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      )}
-                    </div>
-                    {ctSmsForwardingNumber && !isValidPhoneE164(ctSmsForwardingNumber) ? (
-                      <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3 shrink-0" />
-                        Must be E.164 format, e.g. +12125550100
-                      </p>
-                    ) : !ctSmsForwardingNumber ? (
-                      <p className="text-xs text-slate-400 mt-1">Optional — enter a number to receive customer replies as SMS</p>
-                    ) : (
-                      <p className="text-xs text-slate-400 mt-1">Customer SMS replies will be forwarded here</p>
+              {ctSigcoreProvider === 'openphone' ? (
+                <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2.5">
+                  <svg className="w-4 h-4 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  <p className="text-xs text-blue-700">Customer replies go directly to your OpenPhone app — no forwarding needed.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">
+                    Get replies to
+                    {!ctSmsForwardingNumber && (
+                      <span className="ml-1 text-amber-500 normal-case font-normal tracking-normal">— required</span>
                     )}
-                  </>
-                )}
-              </div>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="tel"
+                      value={ctSmsForwardingNumber}
+                      onChange={e => setCtSmsForwardingNumber(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                      onBlur={e => {
+                        const formatted = formatPhoneE164(e.target.value);
+                        if (formatted !== e.target.value) setCtSmsForwardingNumber(formatted);
+                      }}
+                      placeholder="+15555550100"
+                      className={`flex-1 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                        ctSmsForwardingNumber && !isValidPhoneE164(ctSmsForwardingNumber)
+                          ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                          : ctSmsForwardingNumber && isValidPhoneE164(ctSmsForwardingNumber)
+                            ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                            : 'border border-slate-200 focus:ring-emerald-400'
+                      }`}
+                    />
+                  </div>
+                  {ctSmsForwardingNumber && !isValidPhoneE164(ctSmsForwardingNumber) ? (
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      Must be E.164 format, e.g. +12125550100
+                    </p>
+                  ) : !ctSmsForwardingNumber ? (
+                    <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      Customer replies go to your dedicated number — enter your personal phone to receive them
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-400 mt-1">Customer SMS replies will be forwarded here</p>
+                  )}
+                </div>
+              )}
 
               {/* Auto-reply message */}
               <div>
