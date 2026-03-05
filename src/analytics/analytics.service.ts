@@ -150,7 +150,7 @@ export class AnalyticsService {
     // period is validated by DTO @IsIn — safe to embed as SQL literal
     const period = dto.period ?? 'month';
 
-    const HIRED_STATUSES = new Set(['hired', 'job scheduled', 'job done']);
+    const HIRED_STATUSES = new Set(['hired', 'job scheduled', 'scheduled', 'job done']);
 
     // Use tli.leadDate ("Feb 23") with year inference as the canonical lead date.
     // leads.createdAt and tli.capturedAt are both the import/capture timestamp (same day for bulk imports).
@@ -256,7 +256,7 @@ export class AnalyticsService {
       const lower = s.toLowerCase();
       if (lower === 'hired')             return 'Hired';
       if (lower === 'job done')          return 'Job done';
-      if (lower === 'job scheduled')     return 'Scheduled';
+      if (lower === 'job scheduled' || lower === 'scheduled') return 'Scheduled';
       if (lower === 'not scheduled yet') return 'Not hired';
       if (lower === 'not hired')         return 'Not hired';
       if (lower === 'no status')         return 'Not hired';   // no status → not hired
