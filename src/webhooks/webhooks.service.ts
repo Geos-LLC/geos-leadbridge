@@ -1054,6 +1054,15 @@ export class WebhooksService {
 
       if (!lead) {
         this.logger.warn(`No lead found for inbound SMS from ${fromNumber}`);
+        // Still forward the message to the tenant's configured forwarding number —
+        // the account that received this inbound message is known from accountId.
+        if (accountId) {
+          try {
+            await this.notificationsService.forwardInboundSms(accountId, fromNumber, fromNumber, body);
+          } catch (err: any) {
+            this.logger.warn(`SMS forwarding failed (no lead): ${err.message}`);
+          }
+        }
         await this.prisma.webhookEvent.update({
           where: { id: event.id },
           data: { processed: true, processedAt: new Date(), processingError: 'No lead found for phone' },
