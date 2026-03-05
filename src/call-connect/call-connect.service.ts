@@ -138,6 +138,16 @@ export class CallConnectService {
       this.logger.warn(`Failed to push call-connect settings to Sigcore: ${err.message}`);
     }
 
+    // Sync callForwardingNumber to Sigcore tenant metadata AFTER ensureSigcoreProvisioned so we
+    // always have the correct (possibly freshly-created) sigcoreTenantId. This fixes the race
+    // condition where the frontend saves notifications settings and call-connect settings in
+    // parallel — if notifications ran first, sigcoreTenantId was null and the sync was skipped.
+    try {
+      await this.syncCallForwardingAfterProvision(savedAccountId);
+    } catch (err: any) {
+      this.logger.warn(`[saveSettings] Failed to sync callForwardingNumber after provision: ${err.message}`);
+    }
+
     // Ensure webhook subscription exists — always attempt so stale/missing IDs get fixed
     try {
       await this.ensureWebhookSubscription(savedAccountId, settings.id);
@@ -348,6 +358,43 @@ export class CallConnectService {
     } catch (verifyErr: any) {
       this.logger.warn(`[pushSettings] Could not verify settings via GET: ${verifyErr.message}`);
     }
+  }
+
+  /**
+   * Read callForwardingNumber from NotificationSettings and push it to Sigcore tenant metadata.
+   * Called after ensureSigcoreProvisioned so sigcoreTenantId is always fresh/correct.
+   */
+  private async syncCallForwardingAfterProvision(savedAccountId: string): Promise<void> {
+    const ns = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { sigcoreTenantId: true, callForwardingNumber: true },
+    });
+
+    if (!ns?.sigcoreTenantId) {
+      this.logger.warn(`[syncCallForwarding] No sigcoreTenantId for account ${savedAccountId} — skipping`);
+      return;
+    }
+
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (!platformKey) return;
+
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    const forwardingNumber = ns.callForwardingNumber || null;
+
+    const resp = await fetch(`${sigcoreUrl}/tenants/${ns.sigcoreTenantId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey },
+      body: JSON.stringify({ metadata: { callForwardingNumber: forwardingNumber } }),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Sigcore tenant update failed (${resp.status}): ${text}`);
+    }
+
+    this.logger.log(
+      `[syncCallForwarding] Synced callForwardingNumber=${forwardingNumber || 'none'} to tenant ${ns.sigcoreTenantId} for account ${savedAccountId}`,
+    );
   }
 
   /** Register per-business webhook subscription with Sigcore — re-activates paused subscriptions */
