@@ -50,6 +50,7 @@ export function PhoneSettings() {
   const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>(pc?.tenantPhones ?? []);
   const [, setLoadingTenantPhones] = useState(false);
   const [cancellingPhoneId, setCancellingPhoneId] = useState<string | null>(null);
+  const [claimingPoolId, setClaimingPoolId] = useState<string | null>(null);
   const [phonePriceMonthly, setPhonePriceMonthly] = useState<number | null>(null);
   const [smsConsentAccepted, setSmsConsentAccepted] = useState(false);
 
@@ -255,6 +256,19 @@ export function PhoneSettings() {
       setSearchError(err.message || 'Failed to cancel number');
     } finally {
       setCancellingPhoneId(null);
+    }
+  }
+
+  async function handleClaimPoolAsDedicated(poolId: string, phoneNumber: string) {
+    if (!confirm(`Claim ${phoneNumber} as your dedicated number? It will be removed from the shared pool and assigned exclusively to you.`)) return;
+    setClaimingPoolId(poolId);
+    try {
+      await usersApi.claimPoolAsDedicated(poolId);
+      await Promise.all([loadTenantPhones(), loadPoolPhone()]);
+    } catch (err: any) {
+      setSearchError(err.response?.data?.message || err.message || 'Failed to claim number');
+    } finally {
+      setClaimingPoolId(null);
     }
   }
 
@@ -610,6 +624,34 @@ export function PhoneSettings() {
               </div>
             )}
 
+
+            {/* Claim from Pool */}
+            {poolPhones.filter(p => p.status === 'AVAILABLE').length > 0 && (
+              <div className="space-y-3">
+                <div>
+                  <h4 className="font-semibold text-slate-900 text-sm">Claim from Pool</h4>
+                  <p className="text-xs text-slate-500 mt-0.5">Make one of your assigned pool numbers your exclusive dedicated number — no charge.</p>
+                </div>
+                {poolPhones.filter(p => p.status === 'AVAILABLE').map(phone => (
+                  <div key={phone.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-4">
+                    <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+                      <Phone className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-slate-900 font-mono text-sm">{phone.phoneNumber}</div>
+                      <div className="text-xs text-slate-400">{phone.friendlyName || 'Shared Pool'}{phone.areaCode ? ` · ${phone.areaCode}` : ''}</div>
+                    </div>
+                    <button
+                      onClick={() => handleClaimPoolAsDedicated(phone.id, phone.phoneNumber)}
+                      disabled={claimingPoolId === phone.id}
+                      className="px-3 py-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 whitespace-nowrap"
+                    >
+                      {claimingPoolId === phone.id ? <Loader2 size={12} className="animate-spin" /> : 'Claim as Dedicated'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* SMS Consent */}
             <div className={`rounded-2xl border p-4 ${smsConsentAccepted ? 'bg-emerald-50/50 border-emerald-200' : 'bg-amber-50/50 border-amber-200'}`}>

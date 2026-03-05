@@ -891,6 +891,10 @@ export const usersApi = {
     const { data } = await api.get('/v1/users/me/pool-phone');
     return data;
   },
+  claimPoolAsDedicated: async (phonePoolId: string): Promise<{ success: boolean; tenantPhone: TenantPhoneNumber }> => {
+    const { data } = await api.post(`/v1/users/me/claim-dedicated/${phonePoolId}`);
+    return data;
+  },
   getPoolPhonesForSms: async (): Promise<{ success: boolean; phoneNumbers: { id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }[] }> => {
     const { data } = await api.get('/v1/users/me/pool-phones-for-sms');
     return data;
