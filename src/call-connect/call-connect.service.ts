@@ -413,6 +413,33 @@ export class CallConnectService {
     this.logger.log(
       `[syncCallForwarding] Synced callForwardingNumber=${forwardingNumber || 'none'} to tenant ${ns.sigcoreTenantId} for account ${savedAccountId}`,
     );
+
+    // Also sync to the phone allocation directly so handleIncomingCall reads the correct
+    // value regardless of which Sigcore tenant owns the phone (survives re-provisioning).
+    const ccSettings = await this.prisma.callConnectSettings.findUnique({
+      where: { savedAccountId },
+      select: { botNumberE164: true },
+    });
+    if (ccSettings?.botNumberE164) {
+      const allocationResp = await fetch(
+        `${this.sigcoreApiUrl}/api/tenants/phone-numbers/${encodeURIComponent(ccSettings.botNumberE164)}/call-forwarding`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey },
+          body: JSON.stringify({ callForwardingNumber: forwardingNumber }),
+        },
+      );
+      if (allocationResp.ok) {
+        this.logger.log(
+          `[syncCallForwarding] Also synced callForwardingNumber=${forwardingNumber || 'none'} to allocation for ${ccSettings.botNumberE164}`,
+        );
+      } else {
+        const text = await allocationResp.text();
+        this.logger.warn(
+          `[syncCallForwarding] Allocation-level sync failed for ${ccSettings.botNumberE164} (${allocationResp.status}): ${text}`,
+        );
+      }
+    }
   }
 
   /** Register per-business webhook subscription with Sigcore — re-activates paused subscriptions */
