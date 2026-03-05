@@ -90,6 +90,13 @@ function mergeTimeline(
   for (const msg of platformMessages) {
     // SMS messages stored as Message records (platform: 'sms')
     if ((msg as any).platform === 'sms') {
+      const logId = (msg as any).notificationLogId as string | undefined;
+      // Cross-reference the NotificationLog to get the actual delivery status
+      // (Message records have no failure state; the log has the authoritative status)
+      const matchingLog = logId ? smsLogs.find(l => l.id === logId) : null;
+      const smsStatus: TimelineEvent['smsStatus'] = matchingLog
+        ? (matchingLog.status as TimelineEvent['smsStatus'])
+        : ((msg as any).deliveredAt ? 'delivered' : 'sent');
       events.push({
         id: `sms-msg-${msg.id}`,
         channel: 'sms',
@@ -97,9 +104,10 @@ function mergeTimeline(
         content: msg.content,
         timestamp: msg.sentAt,
         sender: msg.sender,
-        smsStatus: (msg as any).deliveredAt ? 'delivered' : 'sent',
+        smsStatus,
+        smsError: matchingLog?.error ?? undefined,
       });
-      if ((msg as any).notificationLogId) smsLogIdsFromMessages.add((msg as any).notificationLogId);
+      if (logId) smsLogIdsFromMessages.add(logId);
       continue;
     }
 

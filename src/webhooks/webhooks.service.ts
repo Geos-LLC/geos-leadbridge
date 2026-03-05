@@ -933,6 +933,8 @@ export class WebhooksService {
                   where: { id: linkedMessage.id },
                   data: {
                     ...(status === 'delivered' && { deliveredAt: new Date() }),
+                    // Clear deliveredAt if a failure event arrives (e.g. race: delivered then failed)
+                    ...(status === 'failed' && { deliveredAt: null }),
                   },
                 });
 
