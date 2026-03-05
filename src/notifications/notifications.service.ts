@@ -1270,6 +1270,21 @@ export class NotificationsService {
       return;
     }
 
+    // BYO (OpenPhone) alert guard: BYO numbers CAN send tenant alerts, but not to themselves.
+    // If fromPhone is the tenant's OpenPhone number and the alert destination is the same number,
+    // the message would loop back into OpenPhone — block it.
+    if (!rule?.sendToCustomer && settings.sigcoreProvider === 'openphone' && fromPhone && toPhone) {
+      const normFrom = fromPhone.replace(/\D/g, '').slice(-10);
+      const normTo = toPhone.replace(/\D/g, '').slice(-10);
+      if (normFrom.length >= 10 && normFrom === normTo) {
+        this.logger.warn(
+          `[sendNotificationWithRule] BLOCKED: BYO alert fromPhone (${fromPhone}) === toPhone (${toPhone}). ` +
+          `Set a different alert destination phone in Notification Settings.`,
+        );
+        return;
+      }
+    }
+
     // Render the message template
     const messageBody = this.renderTemplate(template, lead, context.accountName);
 
