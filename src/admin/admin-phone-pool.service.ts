@@ -653,20 +653,30 @@ export class AdminPhonePoolService {
 
     this.logger.log(`Converted pool phone ${poolPhone.phoneNumber} to tenant number for user ${user.email}`);
 
-    // Automatically refresh Twilio webhook URLs so inbound calls to this number work immediately.
-    // Fire-and-forget — don't fail the conversion if this step fails.
+    // Attempt Sigcore re-homing and webhook refresh. Don't fail the conversion on Sigcore errors,
+    // but surface any failures as warnings in the response so the admin is aware.
+    const sigcoreWarnings: string[] = [];
     if (savedAccount?.id) {
-      this.refreshWebhooksForAccount(savedAccount.id, poolPhone.phoneNumber).catch((err) =>
-        this.logger.warn(`[convertPoolToTenant] refresh-webhooks failed for ${poolPhone.phoneNumber}: ${err.message}`),
-      );
-      // Re-home the Sigcore allocation so tenant_phone_numbers.tenantId points to the real tenant.
-      // Fire-and-forget — don't fail the conversion if this step fails.
-      this.reallocateSigcorePhone(savedAccount.id, poolPhone.phoneNumber).catch((err) =>
-        this.logger.warn(`[convertPoolToTenant] Sigcore reallocation failed for ${poolPhone.phoneNumber}: ${err.message}`),
-      );
+      try {
+        await this.reallocateSigcorePhone(savedAccount.id, poolPhone.phoneNumber);
+      } catch (err: any) {
+        const msg = `Sigcore reallocation failed — manual webhook fix needed: ${err.message}`;
+        this.logger.warn(`[convertPoolToTenant] ${msg}`);
+        sigcoreWarnings.push(msg);
+      }
+
+      try {
+        await this.refreshWebhooksForAccount(savedAccount.id, poolPhone.phoneNumber);
+      } catch (err: any) {
+        const msg = `Sigcore webhook refresh failed — inbound calls may not route correctly: ${err.message}`;
+        this.logger.warn(`[convertPoolToTenant] ${msg}`);
+        sigcoreWarnings.push(msg);
+      }
+    } else {
+      sigcoreWarnings.push('No savedAccount linked — Sigcore webhook not updated. Assign an account and re-save CC settings to fix inbound call routing.');
     }
 
-    return tenantPhone;
+    return { ...tenantPhone, sigcoreWarnings: sigcoreWarnings.length ? sigcoreWarnings : undefined };
   }
 
   /**
@@ -748,6 +758,18 @@ export class AdminPhonePoolService {
   }
 
   /**
+   * Log a warning that a Sigcore tenant_phone_numbers record may be stale after pool conversion.
+   * Full implementation requires a platform tenant ID from Sigcore — use the Sigcore admin UI
+   * or API to manually reallocate the allocation back to the platform workspace if needed.
+   */
+  private async reallocateSigcoreToPlatform(phoneNumber: string): Promise<void> {
+    this.logger.warn(
+      `[convertTenantToPool] ${phoneNumber} moved to pool — Sigcore tenant_phone_numbers record may still point ` +
+      `to the old dedicated tenant. Reallocate manually in Sigcore if inbound SMS routing is affected.`,
+    );
+  }
+
+  /**
    * Convert a tenant-dedicated number back to the pool
    */
   async convertTenantToPool(adminId: string, tenantPhoneId: string) {
@@ -794,6 +816,13 @@ export class AdminPhonePoolService {
     });
 
     this.logger.log(`Converted tenant phone ${tenantPhone.phoneNumber} to pool`);
+
+    // Reallocate Sigcore record back to the platform tenant so inbound calls/SMS are no longer
+    // routed to the old dedicated tenant. Fire-and-forget — don't fail the conversion.
+    this.reallocateSigcoreToPlatform(tenantPhone.phoneNumber).catch((err) =>
+      this.logger.warn(`[convertTenantToPool] Sigcore platform reallocate failed for ${tenantPhone.phoneNumber}: ${err.message}`),
+    );
+
     return poolPhone;
   }
 
@@ -821,6 +850,25 @@ export class AdminPhonePoolService {
     });
 
     this.logger.log(`Reassigned tenant phone ${tenantPhone.phoneNumber} from user ${tenantPhone.userId} to ${newUser.email}`);
+
+    // Sync Sigcore: reallocate the tenant_phone_numbers record to the new user's Sigcore tenant
+    // and refresh Twilio webhook URLs so inbound calls route correctly.
+    const newSavedAccount = await this.prisma.savedAccount.findFirst({
+      where: { userId: newUserId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (newSavedAccount?.id) {
+      this.reallocateSigcorePhone(newSavedAccount.id, tenantPhone.phoneNumber).catch((err) =>
+        this.logger.warn(`[reassignTenantPhone] Sigcore reallocate failed for ${tenantPhone.phoneNumber}: ${err.message}`),
+      );
+      this.refreshWebhooksForAccount(newSavedAccount.id, tenantPhone.phoneNumber).catch((err) =>
+        this.logger.warn(`[reassignTenantPhone] Sigcore webhook refresh failed for ${tenantPhone.phoneNumber}: ${err.message}`),
+      );
+    } else {
+      this.logger.warn(`[reassignTenantPhone] New user ${newUserId} has no savedAccount — Sigcore not updated for ${tenantPhone.phoneNumber}`);
+    }
+
     return updated;
   }
 
