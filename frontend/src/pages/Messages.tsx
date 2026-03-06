@@ -29,6 +29,7 @@ import { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi,
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
+import NoAccountsOverlay from '../components/NoAccountsOverlay';
 import type { Lead, MessageTemplate, BulkMessagePreview, NotificationLog, TimelineEvent, TimelineChannel, CommunicationSummary } from '../types';
 
 interface LocalMessage {
@@ -61,6 +62,9 @@ function setLastSeenTimestamp(leadId: string, timestamp: string): void {
   localStorage.setItem(LAST_SEEN_KEY, JSON.stringify(timestamps));
 }
 
+// Module-level flag — once we've fetched leads at least once, don't show loading spinner on re-mount
+let _messagesLoaded = false;
+
 function hasNewUpdates(lead: Lead, lastSeenTimestamps: Record<string, string>): boolean {
   const lastSeen = lastSeenTimestamps[lead.id];
   // Use lastMessageAt if available, otherwise fall back to createdAt
@@ -86,6 +90,13 @@ function mergeTimeline(
   for (const msg of platformMessages) {
     // SMS messages stored as Message records (platform: 'sms')
     if ((msg as any).platform === 'sms') {
+      const logId = (msg as any).notificationLogId as string | undefined;
+      // Cross-reference the NotificationLog to get the actual delivery status
+      // (Message records have no failure state; the log has the authoritative status)
+      const matchingLog = logId ? smsLogs.find(l => l.id === logId) : null;
+      const smsStatus: TimelineEvent['smsStatus'] = matchingLog
+        ? (matchingLog.status as TimelineEvent['smsStatus'])
+        : ((msg as any).deliveredAt ? 'delivered' : 'sent');
       events.push({
         id: `sms-msg-${msg.id}`,
         channel: 'sms',
@@ -93,9 +104,10 @@ function mergeTimeline(
         content: msg.content,
         timestamp: msg.sentAt,
         sender: msg.sender,
-        smsStatus: (msg as any).deliveredAt ? 'delivered' : 'sent',
+        smsStatus,
+        smsError: matchingLog?.error ?? undefined,
       });
-      if ((msg as any).notificationLogId) smsLogIdsFromMessages.add((msg as any).notificationLogId);
+      if (logId) smsLogIdsFromMessages.add(logId);
       continue;
     }
 
@@ -164,7 +176,7 @@ export function Messages() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { leads, setLeads, selectedLead, setSelectedLead, configuredBusinessId, savedAccounts, setSavedAccounts } = useAppStore();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!_messagesLoaded && leads.length === 0);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [resyncingMessages, setResyncingMessages] = useState(false);
@@ -495,7 +507,7 @@ export function Messages() {
   }, [selectedLead, savedAccounts]);
 
   const loadLeads = async () => {
-    setLoading(true);
+    if (!_messagesLoaded && leads.length === 0) setLoading(true);
     console.log('[Messages] Loading leads...');
     try {
       // Load all leads (no limit) to support date filtering across full history
@@ -508,6 +520,7 @@ export function Messages() {
         return new Date(bTime).getTime() - new Date(aTime).getTime();
       });
       setLeads(sortedLeads);
+      _messagesLoaded = true;
       // Selection will be handled by the savedAccounts effect
     } catch (err) {
       console.error('[Messages] Failed to load leads:', err);
@@ -948,6 +961,7 @@ export function Messages() {
 
   return (
     <div className="flex h-[100dvh] lg:h-screen w-full max-w-[100vw] lg:max-w-none bg-slate-50 overflow-hidden">
+      {savedAccounts.length === 0 && useAuthStore.getState().user?.role !== 'ADMIN' && <NoAccountsOverlay />}
       {/* Leads Sidebar */}
       <aside className={`w-full md:w-80 bg-white border-r border-slate-100 flex flex-col ${mobilePanel !== 'list' ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-slate-100 flex items-center gap-3">

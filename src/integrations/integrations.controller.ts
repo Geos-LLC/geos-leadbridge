@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards,
   Logger,
+  HttpCode,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -105,15 +106,79 @@ export class IntegrationsController {
   }
 
   /**
+   * PATCH /api/integrations/thumbtack/leads/reset-imported
+   * Reset lead IDs back to pending so they can be re-imported.
+   * Pass thumbtackIds to reset specific ones, or omit to reset ALL imported leads for this user.
+   */
+  @Patch('leads/reset-imported')
+  async resetImported(
+    @CurrentUser() user: any,
+    @Body() body: { thumbtackIds?: string[] },
+  ) {
+    return this.integrationsService.resetImported(user.id, body.thumbtackIds);
+  }
+
+  /**
+   * POST /api/integrations/thumbtack/leads/reimport-failed
+   * Re-import only leads that are marked imported but have no Lead record.
+   */
+  @Post('leads/reimport-failed')
+  @HttpCode(200)
+  async reimportFailed(
+    @CurrentUser() user: any,
+    @Body() body: { savedAccountId?: string },
+  ) {
+    return this.integrationsService.reimportFailed(user.id, body.savedAccountId);
+  }
+
+  /**
+   * GET /api/integrations/thumbtack/leads/needs-scrape
+   * Return IDs that need page scraping (recovered from local sources, missing full details).
+   */
+  @Get('leads/needs-scrape')
+  async getNeedsScrape(
+    @CurrentUser() user: any,
+    @Query('accountId') accountId?: string,
+  ) {
+    return this.integrationsService.getNeedsScrapeIds(user.id, accountId);
+  }
+
+  /**
+   * GET /api/integrations/thumbtack/leads/missing-count
+   * Count how many collected leads have no matching Lead record (without importing).
+   */
+  @Get('leads/missing-count')
+  async getMissingCount(
+    @CurrentUser() user: any,
+    @Query('accountId') accountId?: string,
+  ) {
+    return this.integrationsService.countMissingLeads(user.id, accountId);
+  }
+
+  /**
+   * POST /api/integrations/thumbtack/leads/reimport
+   * Server-side bulk re-import of all collected leads — no extension needed.
+   * Pass savedAccountId in body to scope to a specific account.
+   */
+  @Post('leads/reimport')
+  @HttpCode(200)
+  async reimportLeads(
+    @CurrentUser() user: any,
+    @Body() body: { savedAccountId?: string },
+  ) {
+    return this.integrationsService.reimportLeads(user.id, body.savedAccountId);
+  }
+
+  /**
    * DELETE /api/integrations/thumbtack/leads
    * Delete collected lead IDs. Pass thumbtackIds in body, or omit to delete all.
    */
   @Delete('leads')
   async deleteLeadIds(
     @CurrentUser() user: any,
-    @Body() body: { thumbtackIds?: string[] },
+    @Body() body: { thumbtackIds?: string[]; savedAccountId?: string },
   ) {
-    return this.integrationsService.deleteLeadIds(user.id, body.thumbtackIds);
+    return this.integrationsService.deleteLeadIds(user.id, body.thumbtackIds, body.savedAccountId);
   }
 
   /**

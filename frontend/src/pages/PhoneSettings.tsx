@@ -1,36 +1,39 @@
 import { useState, useEffect } from 'react';
 import { Phone, Loader2, X, ChevronDown, AlertCircle, PhoneCall, Building2, Key, Unplug, CheckCircle2, ExternalLink, Link2, Hash, ShieldCheck, ShieldAlert, MessageSquare } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { usersApi, thumbtackApi, notificationsApi } from '../services/api';
 import type { TenantPhoneNumber } from '../services/api';
 import type { SavedAccount, PhonePoolEntry, SigcorePhoneNumber, AvailablePhoneNumber } from '../types';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
+import NoAccountsOverlay from '../components/NoAccountsOverlay';
+
+// Module-level cache — survives navigation unmounts
+let _phoneCache: Record<string, any> | null = null;
 
 export function PhoneSettings() {
-  const navigate = useNavigate();
   const storedAccounts = useAppStore(state => state.savedAccounts);
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
+  const pc = _phoneCache; // cached phone settings data
   // Seed from Zustand store to avoid loading flash / health-status flicker
   const [accounts, setAccounts] = useState<SavedAccount[]>(storedAccounts);
   const [selectedAccountId, setSelectedAccountId] = useState<string>(storedAccounts[0]?.id || '');
-  const [loading, setLoading] = useState(storedAccounts.length === 0);
+  const [loading, setLoading] = useState(storedAccounts.length === 0 && !pc);
   const [error, setError] = useState<string | null>(null);
 
   // Pool phone state
-  const [poolPhones, setPoolPhones] = useState<PhonePoolEntry[]>([]);
-  const [loadingPoolPhone, setLoadingPoolPhone] = useState(true);
+  const [poolPhones, setPoolPhones] = useState<PhonePoolEntry[]>(pc?.poolPhones ?? []);
+  const [loadingPoolPhone, setLoadingPoolPhone] = useState(!pc);
 
   // Own provider connection state
   const [openPhoneApiKey, setOpenPhoneApiKey] = useState('');
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
-  const [sigcoreConnected, setSigcoreConnected] = useState(false);
-  const [ownPhoneNumbers, setOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>([]);
+  const [sigcoreConnected, setSigcoreConnected] = useState(pc?.sigcoreConnected ?? false);
+  const [ownPhoneNumbers, setOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>(pc?.ownPhoneNumbers ?? []);
   const [loadingConnectionStatus, setLoadingConnectionStatus] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
-  const [sigcoreProvisioned, setSigcoreProvisioned] = useState(false);
+  const [sigcoreProvisioned, setSigcoreProvisioned] = useState(pc?.sigcoreProvisioned ?? false);
   const [provisioning, setProvisioning] = useState(false);
 
   // Option 3: provisioned Twilio number
@@ -44,11 +47,13 @@ export function PhoneSettings() {
   const [searchError, setSearchError] = useState<string | null>(null);
 
   // Tenant purchased numbers
-  const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
+  const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>(pc?.tenantPhones ?? []);
   const [, setLoadingTenantPhones] = useState(false);
   const [cancellingPhoneId, setCancellingPhoneId] = useState<string | null>(null);
+  const [claimingPoolId, setClaimingPoolId] = useState<string | null>(null);
   const [phonePriceMonthly, setPhonePriceMonthly] = useState<number | null>(null);
   const [smsConsentAccepted, setSmsConsentAccepted] = useState(false);
+
 
   useEffect(() => {
     loadAccounts();
@@ -65,9 +70,11 @@ export function PhoneSettings() {
 
   async function loadPoolPhone() {
     try {
-      setLoadingPoolPhone(true);
+      if (!_phoneCache) setLoadingPoolPhone(true);
       const result = await usersApi.getMyPoolPhone();
-      setPoolPhones(result.poolPhones || (result.poolPhone ? [result.poolPhone] : []));
+      const phones = result.poolPhones || (result.poolPhone ? [result.poolPhone] : []);
+      setPoolPhones(phones);
+      _phoneCache = { ..._phoneCache, poolPhones: phones };
     } catch (err) {
       console.error('Failed to load pool phone:', err);
     } finally {
@@ -104,12 +111,13 @@ export function PhoneSettings() {
       setSigcoreProvisioned(provisioned);
       setSigcoreFromPhone(settingsRes.settings?.sigcoreFromPhone || null);
       setSigcoreProvider(settingsRes.settings?.sigcoreProvider || null);
-      if (connected) {
-        const { phoneNumbers } = await notificationsApi.getSigcorePhoneNumbers(accountId);
-        setOwnPhoneNumbers(phoneNumbers);
-      } else {
-        setOwnPhoneNumbers([]);
+      let phones: SigcorePhoneNumber[] = [];
+      if (connected || provisioned) {
+        const { phoneNumbers } = await notificationsApi.getSigcorePhoneNumbers(accountId).catch(() => ({ phoneNumbers: [] as SigcorePhoneNumber[] }));
+        phones = phoneNumbers;
       }
+      setOwnPhoneNumbers(phones);
+      _phoneCache = { ..._phoneCache, sigcoreConnected: connected, sigcoreProvisioned: provisioned, ownPhoneNumbers: phones };
     } catch (err) {
       console.error('Failed to load connection status:', err);
     } finally {
@@ -194,7 +202,10 @@ export function PhoneSettings() {
     try {
       setLoadingTenantPhones(true);
       const result = await notificationsApi.listTenantPhones();
-      if (result.success) setTenantPhones(result.data);
+      if (result.success) {
+        setTenantPhones(result.data);
+        _phoneCache = { ..._phoneCache, tenantPhones: result.data };
+      }
     } catch {
       console.error('Failed to load tenant phones');
     } finally {
@@ -248,6 +259,20 @@ export function PhoneSettings() {
     }
   }
 
+  async function handleClaimPoolAsDedicated(poolId: string, phoneNumber: string) {
+    if (!confirm(`Claim ${phoneNumber} as your dedicated number? It will be removed from the shared pool and assigned exclusively to you.`)) return;
+    setClaimingPoolId(poolId);
+    try {
+      await usersApi.claimPoolAsDedicated(poolId);
+      await Promise.all([loadTenantPhones(), loadPoolPhone()]);
+    } catch (err: any) {
+      setSearchError(err.response?.data?.message || err.message || 'Failed to claim number');
+    } finally {
+      setClaimingPoolId(null);
+    }
+  }
+
+
   if (loading && accounts.length === 0) {
     return (
       <div className="p-6 lg:p-10">
@@ -263,35 +288,21 @@ export function PhoneSettings() {
     );
   }
 
-  if (accounts.length === 0) {
-    const isAdmin = useAuthStore.getState().user?.role === 'ADMIN';
+  if (accounts.length === 0 && useAuthStore.getState().user?.role === 'ADMIN') {
     return (
       <div className="p-6 lg:p-10">
         <div className="flex items-center gap-3 mb-6">
           <Phone className="w-6 h-6 text-blue-600" />
           <h1 className="text-2xl font-bold text-slate-900">Business Line</h1>
         </div>
-        {isAdmin ? (
-          <AdminNoAccountsState />
-        ) : (
-          <div className="max-w-md mx-auto bg-white rounded-3xl border border-slate-100 shadow-sm p-10 text-center mt-10">
-            <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-slate-900 mb-2">No Accounts Connected</h3>
-            <p className="text-slate-500 mb-6">You need to connect an account first.</p>
-            <button
-              className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all"
-              onClick={() => navigate('/dashboard')}
-            >
-              Go to Dashboard
-            </button>
-          </div>
-        )}
+        <AdminNoAccountsState />
       </div>
     );
   }
 
   return (
     <div className="p-6 lg:p-10 max-w-5xl mx-auto space-y-10">
+      {accounts.length === 0 && <NoAccountsOverlay />}
       {error && (
         <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-3 text-red-600 text-sm font-medium">
           <AlertCircle size={16} className="shrink-0" />
@@ -608,6 +619,35 @@ export function PhoneSettings() {
                         {cancellingPhoneId === tp.id ? <Loader2 size={12} className="animate-spin" /> : 'Cancel'}
                       </button>
                     )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+
+            {/* Claim from Pool */}
+            {poolPhones.filter(p => p.status === 'AVAILABLE').length > 0 && (
+              <div className="space-y-3">
+                <div>
+                  <h4 className="font-semibold text-slate-900 text-sm">Claim from Pool</h4>
+                  <p className="text-xs text-slate-500 mt-0.5">Make one of your assigned pool numbers your exclusive dedicated number — no charge.</p>
+                </div>
+                {poolPhones.filter(p => p.status === 'AVAILABLE').map(phone => (
+                  <div key={phone.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-4">
+                    <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+                      <Phone className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-slate-900 font-mono text-sm">{phone.phoneNumber}</div>
+                      <div className="text-xs text-slate-400">{phone.friendlyName || 'Shared Pool'}{phone.areaCode ? ` · ${phone.areaCode}` : ''}</div>
+                    </div>
+                    <button
+                      onClick={() => handleClaimPoolAsDedicated(phone.id, phone.phoneNumber)}
+                      disabled={claimingPoolId === phone.id}
+                      className="px-3 py-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 whitespace-nowrap"
+                    >
+                      {claimingPoolId === phone.id ? <Loader2 size={12} className="animate-spin" /> : 'Claim as Dedicated'}
+                    </button>
                   </div>
                 ))}
               </div>

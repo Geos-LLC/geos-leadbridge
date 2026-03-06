@@ -4,6 +4,7 @@ import Stripe from 'stripe';
 import { PrismaService } from '../common/utils/prisma.service';
 import { SigcoreService } from '../sigcore/sigcore.service';
 import { AdminService } from './admin.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PhonePoolStatus } from '../../generated/prisma';
 
 @Injectable()
@@ -15,6 +16,7 @@ export class AdminPhonePoolService {
     private sigcoreService: SigcoreService,
     private adminService: AdminService,
     private configService: ConfigService,
+    private notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -30,7 +32,9 @@ export class AdminPhonePoolService {
     const { status, areaCode, search, offset = 0, limit = 50 } = query;
 
     const where: any = {};
+    // When no status filter is specified, hide RELEASED numbers (they're defunct)
     if (status) where.status = status;
+    else where.status = { not: 'RELEASED' };
     if (areaCode) where.areaCode = areaCode;
     if (search) {
       where.OR = [
@@ -175,24 +179,22 @@ export class AdminPhonePoolService {
     const result = await this.sigcoreService.adminDisconnectProvider(provider);
 
     if (result.success) {
-      // Delete all assignments for phones from this provider
-      const phonesToRelease = await this.prisma.phonePool.findMany({
-        where: { provider, status: { not: 'RELEASED' } },
+      // Delete all assignments and pool records for this provider
+      const phonesToDelete = await this.prisma.phonePool.findMany({
+        where: { provider },
         select: { id: true },
       });
-      if (phonesToRelease.length > 0) {
+      if (phonesToDelete.length > 0) {
         await this.prisma.phonePoolAssignment.deleteMany({
-          where: { phonePoolId: { in: phonesToRelease.map(p => p.id) } },
+          where: { phonePoolId: { in: phonesToDelete.map(p => p.id) } },
+        });
+        await this.prisma.phonePool.deleteMany({
+          where: { id: { in: phonesToDelete.map(p => p.id) } },
         });
       }
-      // Mark pool phones from this provider as RELEASED
-      await this.prisma.phonePool.updateMany({
-        where: { provider, status: { not: 'RELEASED' } },
-        data: { status: 'RELEASED', releasedAt: new Date() },
-      });
 
-      await this.adminService.logAdminAction(adminId, 'DISCONNECT_PROVIDER', null, { provider });
-      this.logger.log(`Admin ${adminId} disconnected ${provider}`);
+      await this.adminService.logAdminAction(adminId, 'DISCONNECT_PROVIDER', null, { provider, deletedNumbers: phonesToDelete.length });
+      this.logger.log(`Admin ${adminId} disconnected ${provider}, deleted ${phonesToDelete.length} pool numbers`);
     }
 
     return result;
@@ -228,8 +230,11 @@ export class AdminPhonePoolService {
           }
 
           const friendlyName = num.friendlyName || num.friendly_name || num.name || num.label || null;
+          const capabilities = num.capabilities || {};
+          const smsCapable = !!capabilities.sms;
+          const voiceCapable = !!capabilities.voice;
 
-          // Upsert: create if new, skip if already exists (don't overwrite assignment)
+          // Upsert: create if new, update capabilities/friendlyName if exists
           const existing = await this.prisma.phonePool.findUnique({
             where: { phoneNumber },
           });
@@ -241,6 +246,8 @@ export class AdminPhonePoolService {
                 provider,
                 areaCode: this.extractAreaCode(phoneNumber),
                 friendlyName,
+                smsCapable,
+                voiceCapable,
                 status: 'AVAILABLE',
               },
             });
@@ -249,11 +256,16 @@ export class AdminPhonePoolService {
             // Re-activate released numbers
             await this.prisma.phonePool.update({
               where: { id: existing.id },
-              data: { status: 'AVAILABLE', friendlyName, releasedAt: null },
+              data: { status: 'AVAILABLE', friendlyName, smsCapable, voiceCapable, releasedAt: null },
             });
             providerResult.synced++;
+          } else {
+            // Update capabilities and friendlyName on existing active numbers
+            await this.prisma.phonePool.update({
+              where: { id: existing.id },
+              data: { friendlyName, smsCapable, voiceCapable },
+            });
           }
-          // If AVAILABLE or ASSIGNED, keep as-is (don't disturb assignments)
         }
       } catch (err: any) {
         const msg = err.message || 'Unknown error';
@@ -317,14 +329,14 @@ export class AdminPhonePoolService {
       });
     }
 
-    // Create assignment (phone stays AVAILABLE for other assignments)
+    // Create assignment and mark phone as ASSIGNED
     await this.prisma.phonePoolAssignment.create({
       data: { phonePoolId, userId },
     });
 
-    // Return the phone with all assignments
-    const updated = await this.prisma.phonePool.findUnique({
+    const updated = await this.prisma.phonePool.update({
       where: { id: phonePoolId },
+      data: { status: 'ASSIGNED' },
       include: {
         assignments: {
           include: { user: { select: { id: true, email: true, name: true } } },
@@ -373,9 +385,10 @@ export class AdminPhonePoolService {
       await this.prisma.phonePoolAssignment.createMany({ data: newAssignments });
     }
 
-    // Return the phone with all assignments
-    const updated = await this.prisma.phonePool.findUnique({
+    // Mark as ASSIGNED and return with all assignments
+    const updated = await this.prisma.phonePool.update({
       where: { id: phonePoolId },
+      data: { status: 'ASSIGNED' },
       include: {
         assignments: {
           include: { user: { select: { id: true, email: true, name: true } } },
@@ -413,13 +426,20 @@ export class AdminPhonePoolService {
       where: { id: assignment.id },
     });
 
+    // If no assignments remain, reset status to AVAILABLE
+    const remaining = await this.prisma.phonePoolAssignment.count({ where: { phonePoolId } });
+    const updated = await this.prisma.phonePool.update({
+      where: { id: phonePoolId },
+      data: { status: remaining === 0 ? 'AVAILABLE' : 'ASSIGNED' },
+    });
+
     await this.adminService.logAdminAction(adminId, 'UNASSIGN_POOL_PHONE', userId, {
       phoneNumber: phone.phoneNumber,
       phonePoolId,
     });
 
     this.logger.log(`Unassigned pool phone ${phone.phoneNumber} from user ${userId}`);
-    return phone;
+    return updated;
   }
 
   /**
@@ -571,6 +591,338 @@ export class AdminPhonePoolService {
       this.logger.error(`[setupDeliveryWebhook] Error: ${error.message}`);
       return { success: false, error: error.message };
     }
+  }
+
+  /**
+   * Convert a pool phone to a tenant-dedicated number
+   */
+  async convertPoolToTenant(adminId: string, phonePoolId: string, userId: string) {
+    const poolPhone = await this.prisma.phonePool.findUnique({ where: { id: phonePoolId } });
+    if (!poolPhone) throw new NotFoundException('Pool phone not found');
+    if (poolPhone.status === 'RELEASED') throw new BadRequestException('Phone has been released');
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    // Check no tenant number already exists with this phone
+    const existingTenant = await this.prisma.tenantPhoneNumber.findUnique({
+      where: { phoneNumber: poolPhone.phoneNumber },
+    });
+    if (existingTenant && existingTenant.status !== 'RELEASED') {
+      throw new BadRequestException('A tenant number with this phone already exists');
+    }
+
+    // Auto-link to user's first savedAccount (provides business name + notification settings)
+    const savedAccount = await this.prisma.savedAccount.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+
+    // Create or re-activate tenant number (re-activate if a RELEASED record exists for this phone)
+    const tenantData = {
+      userId,
+      savedAccountId: savedAccount?.id || null,
+      phoneNumber: poolPhone.phoneNumber,
+      friendlyName: poolPhone.friendlyName,
+      areaCode: poolPhone.areaCode,
+      sigcoreAllocationId: poolPhone.sigcoreAllocationId,
+      status: 'ACTIVE' as const,
+      cancelledAt: null as Date | null,
+      releasedAt: null as Date | null,
+    };
+    const tenantPhone = existingTenant
+      ? await this.prisma.tenantPhoneNumber.update({
+          where: { id: existingTenant.id },
+          data: tenantData,
+        })
+      : await this.prisma.tenantPhoneNumber.create({ data: tenantData });
+
+    // Remove pool assignments and mark as released
+    await this.prisma.phonePoolAssignment.deleteMany({ where: { phonePoolId } });
+    await this.prisma.phonePool.update({
+      where: { id: phonePoolId },
+      data: { status: 'RELEASED', releasedAt: new Date() },
+    });
+
+    await this.adminService.logAdminAction(adminId, 'CONVERT_POOL_TO_TENANT', userId, {
+      phoneNumber: poolPhone.phoneNumber,
+      phonePoolId,
+      tenantPhoneId: tenantPhone.id,
+    });
+
+    this.logger.log(`Converted pool phone ${poolPhone.phoneNumber} to tenant number for user ${user.email}`);
+
+    // Attempt Sigcore re-homing and webhook refresh. Don't fail the conversion on Sigcore errors,
+    // but surface any failures as warnings in the response so the admin is aware.
+    const sigcoreWarnings: string[] = [];
+    if (savedAccount?.id) {
+      try {
+        await this.reallocateSigcorePhone(savedAccount.id, poolPhone.phoneNumber);
+      } catch (err: any) {
+        const msg = `Sigcore reallocation failed — manual webhook fix needed: ${err.message}`;
+        this.logger.warn(`[convertPoolToTenant] ${msg}`);
+        sigcoreWarnings.push(msg);
+      }
+
+      try {
+        await this.refreshWebhooksForAccount(savedAccount.id, poolPhone.phoneNumber);
+      } catch (err: any) {
+        const msg = `Sigcore webhook refresh failed — inbound calls may not route correctly: ${err.message}`;
+        this.logger.warn(`[convertPoolToTenant] ${msg}`);
+        sigcoreWarnings.push(msg);
+      }
+    } else {
+      sigcoreWarnings.push('No savedAccount linked — Sigcore webhook not updated. Assign an account and re-save CC settings to fix inbound call routing.');
+    }
+
+    return { ...tenantPhone, sigcoreWarnings: sigcoreWarnings.length ? sigcoreWarnings : undefined };
+  }
+
+  /**
+   * Call Sigcore refresh-webhooks for the given account's Sigcore tenant so Twilio phone
+   * webhook URLs point to the current workspace.webhookId. Resolves 404s on inbound calls
+   * after a number is assigned or re-assigned to an account.
+   */
+  private async refreshWebhooksForAccount(savedAccountId: string, phoneNumber: string): Promise<void> {
+    const ns = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { sigcoreTenantId: true },
+    });
+    if (!ns?.sigcoreTenantId) {
+      this.logger.warn(`[refreshWebhooks] No sigcoreTenantId for account ${savedAccountId} (${phoneNumber}) — skipping`);
+      return;
+    }
+
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (!platformKey) return;
+
+    const rawUrl =
+      this.configService.get<string>('SIGCORE_CALL_CONNECT_URL') ||
+      this.configService.get<string>('SIGCORE_API_URL') ||
+      'https://sigcore-production.up.railway.app/api';
+    const sigcoreBase = rawUrl.replace(/\/api\/?$/, '');
+
+    const resp = await fetch(`${sigcoreBase}/api/tenants/${ns.sigcoreTenantId}/phone-numbers/refresh-webhooks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey },
+      body: '{}',
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Sigcore refresh-webhooks failed (${resp.status}): ${text}`);
+    }
+
+    this.logger.log(`[refreshWebhooks] Updated Twilio webhooks for ${phoneNumber} (tenant ${ns.sigcoreTenantId})`);
+  }
+
+  /**
+   * Re-home the Sigcore tenant_phone_numbers allocation so it points to the real tenant
+   * rather than the platform tenant. Called after pool→dedicated conversion.
+   */
+  private async reallocateSigcorePhone(savedAccountId: string, phoneNumber: string): Promise<void> {
+    const ns = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { sigcoreTenantId: true },
+    });
+    if (!ns?.sigcoreTenantId) {
+      this.logger.warn(`[reallocateSigcorePhone] No sigcoreTenantId for account ${savedAccountId} (${phoneNumber}) — skipping`);
+      return;
+    }
+
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (!platformKey) return;
+
+    const rawUrl =
+      this.configService.get<string>('SIGCORE_CALL_CONNECT_URL') ||
+      this.configService.get<string>('SIGCORE_API_URL') ||
+      'https://sigcore-production.up.railway.app/api';
+    const sigcoreBase = rawUrl.replace(/\/api\/?$/, '');
+
+    const resp = await fetch(
+      `${sigcoreBase}/api/tenants/phone-numbers/${encodeURIComponent(phoneNumber)}/reallocate`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey },
+        body: JSON.stringify({ tenantId: ns.sigcoreTenantId }),
+      },
+    );
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Sigcore reallocate failed (${resp.status}): ${text}`);
+    }
+
+    this.logger.log(`[reallocateSigcorePhone] ${phoneNumber} re-homed to tenant ${ns.sigcoreTenantId}`);
+  }
+
+  /**
+   * Log a warning that a Sigcore tenant_phone_numbers record may be stale after pool conversion.
+   * Full implementation requires a platform tenant ID from Sigcore — use the Sigcore admin UI
+   * or API to manually reallocate the allocation back to the platform workspace if needed.
+   */
+  private async reallocateSigcoreToPlatform(phoneNumber: string): Promise<void> {
+    this.logger.warn(
+      `[convertTenantToPool] ${phoneNumber} moved to pool — Sigcore tenant_phone_numbers record may still point ` +
+      `to the old dedicated tenant. Reallocate manually in Sigcore if inbound SMS routing is affected.`,
+    );
+  }
+
+  /**
+   * Convert a tenant-dedicated number back to the pool
+   */
+  async convertTenantToPool(adminId: string, tenantPhoneId: string) {
+    const tenantPhone = await this.prisma.tenantPhoneNumber.findUnique({ where: { id: tenantPhoneId } });
+    if (!tenantPhone) throw new NotFoundException('Tenant phone not found');
+    if (tenantPhone.status !== 'ACTIVE') throw new BadRequestException('Only active tenant numbers can be moved to pool');
+
+    // Check no pool entry already exists with this phone
+    const existingPool = await this.prisma.phonePool.findUnique({
+      where: { phoneNumber: tenantPhone.phoneNumber },
+    });
+
+    let poolPhone;
+    if (existingPool) {
+      // Re-activate existing released pool entry
+      poolPhone = await this.prisma.phonePool.update({
+        where: { id: existingPool.id },
+        data: { status: 'AVAILABLE', releasedAt: null, friendlyName: tenantPhone.friendlyName },
+      });
+    } else {
+      poolPhone = await this.prisma.phonePool.create({
+        data: {
+          phoneNumber: tenantPhone.phoneNumber,
+          provider: 'twilio',
+          areaCode: tenantPhone.areaCode,
+          friendlyName: tenantPhone.friendlyName,
+          sigcoreAllocationId: tenantPhone.sigcoreAllocationId,
+          status: 'AVAILABLE',
+          smsApproved: false,
+        },
+      });
+    }
+
+    // Mark tenant number as released
+    await this.prisma.tenantPhoneNumber.update({
+      where: { id: tenantPhoneId },
+      data: { status: 'RELEASED', cancelledAt: new Date(), releasedAt: new Date() },
+    });
+
+    await this.adminService.logAdminAction(adminId, 'CONVERT_TENANT_TO_POOL', tenantPhone.userId, {
+      phoneNumber: tenantPhone.phoneNumber,
+      tenantPhoneId,
+      poolPhoneId: poolPhone.id,
+    });
+
+    this.logger.log(`Converted tenant phone ${tenantPhone.phoneNumber} to pool`);
+
+    // Reallocate Sigcore record back to the platform tenant so inbound calls/SMS are no longer
+    // routed to the old dedicated tenant. Fire-and-forget — don't fail the conversion.
+    this.reallocateSigcoreToPlatform(tenantPhone.phoneNumber).catch((err) =>
+      this.logger.warn(`[convertTenantToPool] Sigcore platform reallocate failed for ${tenantPhone.phoneNumber}: ${err.message}`),
+    );
+
+    return poolPhone;
+  }
+
+  /**
+   * Reassign a dedicated tenant number to a different user
+   */
+  async reassignTenantPhone(adminId: string, tenantPhoneId: string, newUserId: string) {
+    const tenantPhone = await this.prisma.tenantPhoneNumber.findUnique({ where: { id: tenantPhoneId } });
+    if (!tenantPhone) throw new NotFoundException('Tenant phone not found');
+    if (tenantPhone.status !== 'ACTIVE') throw new BadRequestException('Only active tenant numbers can be reassigned');
+
+    const newUser = await this.prisma.user.findUnique({ where: { id: newUserId } });
+    if (!newUser) throw new NotFoundException('User not found');
+
+    const updated = await this.prisma.tenantPhoneNumber.update({
+      where: { id: tenantPhoneId },
+      data: { userId: newUserId },
+      include: { user: { select: { id: true, email: true, name: true } } },
+    });
+
+    await this.adminService.logAdminAction(adminId, 'REASSIGN_TENANT_PHONE', newUserId, {
+      phoneNumber: tenantPhone.phoneNumber,
+      tenantPhoneId,
+      previousUserId: tenantPhone.userId,
+    });
+
+    this.logger.log(`Reassigned tenant phone ${tenantPhone.phoneNumber} from user ${tenantPhone.userId} to ${newUser.email}`);
+
+    // Sync Sigcore: reallocate the tenant_phone_numbers record to the new user's Sigcore tenant
+    // and refresh Twilio webhook URLs so inbound calls route correctly.
+    const newSavedAccount = await this.prisma.savedAccount.findFirst({
+      where: { userId: newUserId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (newSavedAccount?.id) {
+      this.reallocateSigcorePhone(newSavedAccount.id, tenantPhone.phoneNumber).catch((err) =>
+        this.logger.warn(`[reassignTenantPhone] Sigcore reallocate failed for ${tenantPhone.phoneNumber}: ${err.message}`),
+      );
+      this.refreshWebhooksForAccount(newSavedAccount.id, tenantPhone.phoneNumber).catch((err) =>
+        this.logger.warn(`[reassignTenantPhone] Sigcore webhook refresh failed for ${tenantPhone.phoneNumber}: ${err.message}`),
+      );
+    } else {
+      this.logger.warn(`[reassignTenantPhone] New user ${newUserId} has no savedAccount — Sigcore not updated for ${tenantPhone.phoneNumber}`);
+    }
+
+    return updated;
+  }
+
+  /**
+   * Get all OpenPhone numbers across all tenants (informational)
+   */
+  async getAllOpenPhoneNumbers() {
+    const settings = await this.prisma.notificationSettings.findMany({
+      where: {
+        sigcoreProvider: 'openphone',
+        sigcoreApiKey: { not: null },
+      },
+      include: {
+        savedAccount: {
+          include: {
+            user: { select: { id: true, email: true, name: true } },
+          },
+        },
+      },
+    });
+
+    const results: {
+      phoneNumber: string;
+      friendlyName?: string;
+      provider: string;
+      userName: string | null;
+      userEmail: string;
+      accountName: string;
+    }[] = [];
+
+    const seenKeys = new Set<string>();
+    for (const ns of settings) {
+      const apiKey = ns.sigcoreApiKey!;
+      if (seenKeys.has(apiKey)) continue;
+      seenKeys.add(apiKey);
+
+      try {
+        const numbers = await this.notificationsService.fetchOpenPhoneNumbers(apiKey);
+        for (const num of numbers) {
+          results.push({
+            phoneNumber: num.phoneNumber,
+            friendlyName: num.friendlyName,
+            provider: 'openphone',
+            userName: ns.savedAccount?.user?.name || null,
+            userEmail: ns.savedAccount?.user?.email || 'Unknown',
+            accountName: ns.savedAccount?.businessName || 'Unknown',
+          });
+        }
+      } catch (err: any) {
+        this.logger.warn(`Failed to fetch OpenPhone numbers for tenant ${apiKey}: ${err.message}`);
+      }
+    }
+
+    return results;
   }
 
   /**

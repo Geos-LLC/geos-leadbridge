@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info, Eye, EyeOff, DollarSign, Clock, ArrowUpRight, List } from 'lucide-react';
-import { authApi, billingApi, thumbtackApi, leadsApi, usersApi, integrationsApi } from '../services/api';
+import { useState, useEffect, useRef } from 'react';
+import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info, Eye, EyeOff, DollarSign, Clock, ArrowUpRight, List, Trash2, AlertTriangle } from 'lucide-react';
+import { authApi, billingApi, thumbtackApi, leadsApi, usersApi, integrationsApi, platformsApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -20,16 +20,20 @@ const tierPrices: Record<string, number> = {
   ENTERPRISE: 129,
 };
 
+// Module-level cache — survives navigation unmounts
+let _settingsCache: { subscription: SubscriptionDetails | null; accounts: SavedAccount[] } | null = null;
+
 export default function SettingsPage() {
   const navigate = useNavigate();
   const user = useAuthStore(state => state.user);
   const setAuth = useAuthStore(state => state.setAuth);
+  const logout = useAuthStore(state => state.logout);
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
   const accountDiagnostics = useAppStore(state => state.accountDiagnostics);
   const loadDiagnostics = useAppStore(state => state.loadDiagnostics);
-  const [subscription, setSubscription] = useState<SubscriptionDetails | null>(null);
-  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [subscription, setSubscription] = useState<SubscriptionDetails | null>(_settingsCache?.subscription ?? null);
+  const [accounts, setAccounts] = useState<SavedAccount[]>(_settingsCache?.accounts ?? []);
+  const [loading, setLoading] = useState(!_settingsCache);
   const [portalLoading, setPortalLoading] = useState(false);
   const [selectedAccountForInfo, setSelectedAccountForInfo] = useState<string | null>(null);
   const [connectionModalOpen, setConnectionModalOpen] = useState(false);
@@ -54,13 +58,16 @@ export default function SettingsPage() {
   // Import negotiations state
   const [searchParams] = useSearchParams();
   const [importCollapsed, setImportCollapsed] = useState(() => searchParams.get('import') !== 'open');
-  const [importAccountId, setImportAccountId] = useState<string | null>(null);
-  const [importIds, setImportIds] = useState('');
+  const [importAccountId, setImportAccountId] = useState<string | null>(() => localStorage.getItem('lb_importAccountId'));
   const [importing, setImporting] = useState(false);
   const [importResults, setImportResults] = useState<{ id: string; success: boolean; isNew?: boolean; error?: string }[]>([]);
   const [importTotal, setImportTotal] = useState(0);
   const [showImportResults, setShowImportResults] = useState(false);
   const [importError, setImportError] = useState('');
+  const [reimporting, setReimporting] = useState(false);
+  const [reimportResult, setReimportResult] = useState<string | null>(null);
+  const [missingCount, setMissingCount] = useState<number | null>(null);
+  const [needsScrapeCount, setNeedsScrapeCount] = useState<number | null>(null);
 
   // Extension-collected leads
   const [extensionPendingCount, setExtensionPendingCount] = useState(0);
@@ -72,16 +79,36 @@ export default function SettingsPage() {
   const [showCollectedModal, setShowCollectedModal] = useState(false);
   const [collectedLeads, setCollectedLeads] = useState<any[]>([]);
   const [collectedLoading, setCollectedLoading] = useState(false);
+  const [collectedSelected, setCollectedSelected] = useState<Set<string>>(new Set());
+  const [collectedDeleting, setCollectedDeleting] = useState(false);
+  const [collectedDeleteConfirm, setCollectedDeleteConfirm] = useState<{
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
 
   // Budget snapshots
   const [budgetSnapshots, setBudgetSnapshots] = useState<Array<{ id: string; weeklyBudget: string; currency: string; capturedAt: string; effectiveFrom: string; effectiveTo: string | null; active: boolean; scopeCategory: string | null; scopeLocation: string | null }>>([]);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
 
-  // Manual paste toggle
-  const [showManualPaste, setShowManualPaste] = useState(false);
+  // Delete account
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   // Extension detection
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
+  const prevExtensionRef = useRef<boolean | null>(null);
+
+  // Auto-expand Import Negotiations when user returns after installing the extension
+  useEffect(() => {
+    if (extensionInstalled === true) {
+      if (localStorage.getItem('lb_expectingExtension') || prevExtensionRef.current === false) {
+        localStorage.removeItem('lb_expectingExtension');
+        setImportCollapsed(false);
+      }
+    }
+    prevExtensionRef.current = extensionInstalled;
+  }, [extensionInstalled]);
 
   useEffect(() => {
     // Always force-refresh diagnostics on mount so stale data doesn't persist
@@ -134,6 +161,7 @@ export default function SettingsPage() {
       setExtensionPendingIds([]);
       setExtensionImportedCount(0);
       setExtensionTotalCount(0);
+      setMissingCount(null);
       setBudgetSnapshots([]);
       return;
     }
@@ -151,6 +179,12 @@ export default function SettingsPage() {
       setExtensionImportedCount(0);
       setExtensionTotalCount(0);
     });
+    integrationsApi.getMissingCount(importAccountId).then((res) => {
+      setMissingCount(res.missingCount);
+    }).catch(() => setMissingCount(null));
+    integrationsApi.getNeedsScrape(importAccountId).then((res) => {
+      setNeedsScrapeCount(res.count);
+    }).catch(() => setNeedsScrapeCount(null));
     integrationsApi.getBudgetSnapshots(importAccountId).then((res) => {
       setBudgetSnapshots(res.snapshots || []);
     }).catch(() => setBudgetSnapshots([]));
@@ -158,7 +192,7 @@ export default function SettingsPage() {
 
   const loadData = async (forceDiagnostics = false) => {
     try {
-      setLoading(true);
+      if (!_settingsCache) setLoading(true);
       const [subResult, acctResult] = await Promise.all([
         billingApi.getSubscription().catch(() => null),
         thumbtackApi.getSavedAccounts().catch(() => ({ accounts: [] as SavedAccount[], count: 0 })),
@@ -166,6 +200,18 @@ export default function SettingsPage() {
       setSubscription(subResult);
       setAccounts(acctResult.accounts);
       setSavedAccounts(acctResult.accounts); // Update app store
+      _settingsCache = { subscription: subResult, accounts: acctResult.accounts };
+
+      // Auto-select the first account if none is selected (or if saved selection no longer exists)
+      if (acctResult.accounts.length > 0) {
+        const saved = localStorage.getItem('lb_importAccountId');
+        const stillExists = saved && acctResult.accounts.some((a: SavedAccount) => a.id === saved);
+        if (!stillExists) {
+          const firstId = acctResult.accounts[0].id;
+          setImportAccountId(firstId);
+          localStorage.setItem('lb_importAccountId', firstId);
+        }
+      }
 
       // Load diagnostics via shared store (skips if already loaded unless forced)
       if (acctResult.accounts.length > 0) {
@@ -189,6 +235,24 @@ export default function SettingsPage() {
     } finally {
       setCollectedLoading(false);
     }
+  };
+
+  const refreshExtensionCounts = () => {
+    if (!importAccountId) {
+      setExtensionPendingCount(0); setExtensionPendingIds([]); setExtensionImportedCount(0); setExtensionTotalCount(0);
+      return;
+    }
+    integrationsApi.getCollectedLeads({ accountId: importAccountId }).then((res) => {
+      const allLeads = res.leads || [];
+      const pending = allLeads.filter((l: any) => !l.imported);
+      const imported = allLeads.filter((l: any) => l.imported);
+      setExtensionPendingCount(pending.length);
+      setExtensionPendingIds(pending.map((l: any) => l.thumbtackId));
+      setExtensionImportedCount(imported.length);
+      setExtensionTotalCount(allLeads.length);
+    }).catch(() => {
+      setExtensionPendingCount(0); setExtensionPendingIds([]); setExtensionImportedCount(0); setExtensionTotalCount(0);
+    });
   };
 
   const handleReconnect = (account?: SavedAccount) => {
@@ -271,57 +335,6 @@ export default function SettingsPage() {
     }
   };
 
-  const handleImportNegotiations = async () => {
-    if (!importAccountId) { setImportError('Select an account first'); return; }
-    const ids = importIds.split(/[,\n\t\s]+/).map(id => id.trim()).filter(id => id.length > 0);
-    if (ids.length === 0) { setImportError('Enter at least one negotiation ID'); return; }
-
-    setImporting(true);
-    setImportError('');
-    setImportResults([]);
-
-    // Validate token first
-    try {
-      const validation = await thumbtackApi.validateToken(importAccountId);
-      if (!validation.valid) {
-        setImportError('Session expired. Please reconnect this account from the Overview page, then try again.');
-        setImporting(false);
-        return;
-      }
-    } catch {
-      setImportError('Session expired. Please reconnect this account from the Overview page, then try again.');
-      setImporting(false);
-      return;
-    }
-
-    setImportTotal(ids.length);
-    setShowImportResults(true);
-
-    const results: typeof importResults = [];
-    for (const id of ids) {
-      try {
-        const result = await leadsApi.importNegotiation(id, importAccountId);
-        results.push({ id, success: true, isNew: result.isNew });
-      } catch (err: any) {
-        const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to import';
-        results.push({ id, success: false, error: errorMsg });
-      }
-      setImportResults([...results]);
-    }
-
-    setImporting(false);
-    const newCount = results.filter(r => r.success && r.isNew).length;
-    const failCount = results.filter(r => !r.success).length;
-    if (newCount > 0 && failCount === 0) {
-      notify.success('Import Complete', `Successfully imported ${newCount} negotiation(s)`);
-      setImportIds('');
-    } else if (failCount > 0 && newCount > 0) {
-      notify.warning('Import Partial', `${newCount} imported, ${failCount} failed`);
-    } else if (failCount > 0) {
-      setImportError(`Failed to import all ${failCount} negotiation(s)`);
-    }
-  };
-
   const handleImportFromExtension = async () => {
     if (!importAccountId || extensionPendingIds.length === 0) return;
 
@@ -329,19 +342,23 @@ export default function SettingsPage() {
     setImportError('');
     setImportResults([]);
 
-    // Validate token first
+    // Validate token — if invalid, silently reconnect; only fall back to OAuth if reconnect fails
     try {
       const validation = await thumbtackApi.validateToken(importAccountId);
       if (!validation.valid) {
-        setAccountToReconnect(accounts.find(a => a.id === importAccountId) || null);
-        setConnectionModalOpen(true);
-        setImporting(false);
-        return;
+        try {
+          await thumbtackApi.reconnectAccount(importAccountId);
+        } catch {
+          setImporting(false);
+          const { authUrl } = await platformsApi.getAuthUrl(true);
+          window.location.href = authUrl;
+          return;
+        }
       }
     } catch {
-      setAccountToReconnect(accounts.find(a => a.id === importAccountId) || null);
-      setConnectionModalOpen(true);
       setImporting(false);
+      const { authUrl } = await platformsApi.getAuthUrl(true);
+      window.location.href = authUrl;
       return;
     }
 
@@ -352,14 +369,34 @@ export default function SettingsPage() {
     const successIds: string[] = [];
 
     for (const id of extensionPendingIds) {
-      try {
-        const result = await leadsApi.importNegotiation(id, importAccountId);
-        results.push({ id, success: true, isNew: result.isNew });
-        successIds.push(id);
-      } catch (err: any) {
-        const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message || 'Failed to import';
+      let attempts = 0;
+      let lastErr: any;
+      let imported = false;
+
+      while (attempts < 3 && !imported) {
+        try {
+          const result = await leadsApi.importNegotiation(id, importAccountId);
+          results.push({ id, success: true, isNew: result.isNew });
+          successIds.push(id);
+          imported = true;
+        } catch (err: any) {
+          lastErr = err;
+          // Only retry on network errors (no response from server), not on 4xx/5xx
+          const isNetworkError = !err.response;
+          attempts++;
+          if (isNetworkError && attempts < 3) {
+            await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
+          } else {
+            break;
+          }
+        }
+      }
+
+      if (!imported) {
+        const errorMsg = lastErr?.response?.data?.message || lastErr?.response?.data?.error || lastErr?.message || 'Failed to import';
         results.push({ id, success: false, error: errorMsg });
       }
+
       setImportResults([...results]);
     }
 
@@ -733,7 +770,12 @@ export default function SettingsPage() {
                       </label>
                       <select
                         value={importAccountId || ''}
-                        onChange={(e) => setImportAccountId(e.target.value || null)}
+                        onChange={(e) => {
+                          const val = e.target.value || null;
+                          setImportAccountId(val);
+                          if (val) localStorage.setItem('lb_importAccountId', val);
+                          else localStorage.removeItem('lb_importAccountId');
+                        }}
                         className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
                       >
                         <option value="">Choose account...</option>
@@ -783,9 +825,20 @@ export default function SettingsPage() {
                             </div>
                           </>
                         ) : (
-                          <div className="text-xs text-slate-500">
-                            <span className="font-semibold text-slate-700">Extension not detected.</span>{' '}
-                            Install the <a href="https://chromewebstore.google.com/detail/leadbridge-sync-thumbtack/mkhkooldgglhnpkjfgmpkneongipfhnm" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">LeadBridge Sync</a> extension to collect IDs automatically.
+                          <div className="flex items-center justify-between gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                            <div>
+                              <p className="text-sm font-semibold text-amber-900">Extension not detected</p>
+                              <p className="text-xs text-amber-700 mt-0.5">Install the LeadBridge Sync extension to collect IDs automatically.</p>
+                            </div>
+                            <a
+                              href="https://chromewebstore.google.com/detail/leadbridge-sync-thumbtack/mkhkooldgglhnpkjfgmpkneongipfhnm"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={() => localStorage.setItem('lb_expectingExtension', '1')}
+                              className="px-3 py-2 rounded-xl text-xs font-semibold bg-amber-600 text-white hover:bg-amber-700 whitespace-nowrap inline-flex items-center gap-1.5 shrink-0"
+                            >
+                              Install Extension
+                            </a>
                           </div>
                         )}
                       </div>
@@ -881,6 +934,70 @@ export default function SettingsPage() {
                       </div>
                     )}
 
+                    {/* Re-import only failed/skipped leads */}
+                    {importAccountId && missingCount !== null && missingCount > 0 && (
+                      <div className="flex items-center justify-between p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                        <div>
+                          <p className="text-sm font-semibold text-amber-800">
+                            {missingCount} lead{missingCount !== 1 ? 's' : ''} not imported yet
+                          </p>
+                          <p className="text-xs text-amber-600">Collected but missing from your leads list</p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <button
+                            onClick={async () => {
+                              if (!confirm(`Import ${missingCount} missing lead(s)? This may take a while.`)) return;
+                              setReimporting(true);
+                              setReimportResult(null);
+                              try {
+                                const res = await integrationsApi.reimportFailed(importAccountId);
+                                setReimportResult(`Done: ${res.imported} imported, ${res.failed} failed`);
+                                integrationsApi.getMissingCount(importAccountId).then((r) => setMissingCount(r.missingCount)).catch(() => {});
+                              } catch {
+                                setReimportResult('Import failed');
+                              } finally {
+                                setReimporting(false);
+                              }
+                            }}
+                            disabled={reimporting || importing}
+                            className="px-3 py-1.5 bg-amber-600 text-white rounded-xl text-xs font-semibold hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                          >
+                            {reimporting ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                            Import Missing
+                          </button>
+                          {reimportResult && (
+                            <span className="text-xs text-slate-500">{reimportResult}</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Leads needing page scrape */}
+                    {importAccountId && needsScrapeCount !== null && needsScrapeCount > 0 && (
+                      <div className="flex items-center justify-between p-3 bg-orange-50 border border-orange-200 rounded-xl">
+                        <div>
+                          <p className="text-sm font-semibold text-orange-800">
+                            {needsScrapeCount} lead{needsScrapeCount !== 1 ? 's' : ''} missing details
+                          </p>
+                          <p className="text-xs text-orange-600">Re-run the extension to scrape missing data from Thumbtack pages</p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            document.dispatchEvent(new CustomEvent('leadbridge-scrape-missing', {
+                              detail: {
+                                accountId: importAccountId,
+                                apiUrl: import.meta.env.VITE_API_URL?.replace('/api', '') || '',
+                              },
+                            }));
+                          }}
+                          className="px-3 py-1.5 bg-orange-600 text-white rounded-xl text-xs font-semibold hover:bg-orange-700 inline-flex items-center gap-1.5"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          Re-run Extension
+                        </button>
+                      </div>
+                    )}
+
                     {/* Import Progress */}
                     {importing && importTotal > 0 && (
                       <div className="space-y-2">
@@ -928,51 +1045,6 @@ export default function SettingsPage() {
                       </div>
                     )}
 
-                    {/* Manual Paste (collapsible) */}
-                    {importAccountId && (
-                      <div className="border-t border-blue-100 pt-2">
-                        <button
-                          onClick={() => setShowManualPaste(!showManualPaste)}
-                          className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-600 transition-colors"
-                        >
-                          {showManualPaste ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                          Paste IDs manually
-                        </button>
-                        {showManualPaste && (
-                          <div className="mt-2 space-y-2">
-                            <textarea
-                              placeholder="Paste negotiation IDs here (comma or newline separated)&#10;&#10;Example: abc123, def456, ghi789"
-                              value={importIds}
-                              onChange={(e) => setImportIds(e.target.value)}
-                              disabled={importing}
-                              rows={3}
-                              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300 disabled:bg-slate-50 disabled:text-slate-400"
-                            />
-                            <div className="flex gap-2">
-                              <button
-                                className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                onClick={handleImportNegotiations}
-                                disabled={importing || !importIds.trim() || !importAccountId}
-                              >
-                                {importing ? (
-                                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Importing...</>
-                                ) : (
-                                  <><Download className="w-3.5 h-3.5" /> Import</>
-                                )}
-                              </button>
-                              {importIds && !importing && (
-                                <button
-                                  className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-200 transition-colors"
-                                  onClick={() => { setImportIds(''); setImportResults([]); setShowImportResults(false); setImportError(''); }}
-                                >
-                                  <X className="w-3.5 h-3.5" /> Clear
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
                 )}
               </div>
@@ -1238,6 +1310,91 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {/* Danger Zone */}
+      {user?.role !== 'ADMIN' && (
+        <div className="bg-white rounded-3xl shadow-sm border border-red-100 overflow-hidden">
+          <div className="p-8">
+            <h2 className="text-xl font-bold text-red-600 mb-1">Danger Zone</h2>
+            <p className="text-sm text-slate-500 mb-6">
+              Permanently delete your account and all associated data. This action cannot be undone.
+            </p>
+
+            {!showDeleteConfirm ? (
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="px-6 py-3 bg-red-50 text-red-600 border border-red-200 rounded-xl font-semibold hover:bg-red-100 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <Trash2 size={16} />
+                  Delete Account
+                </span>
+              </button>
+            ) : (
+              <div className="p-6 bg-red-50 border border-red-200 rounded-2xl space-y-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-red-900">This will permanently delete:</p>
+                    <ul className="text-sm text-red-700 mt-1 list-disc list-inside space-y-0.5">
+                      <li>Your account and profile</li>
+                      <li>All connected business accounts</li>
+                      <li>All leads, messages, and automation rules</li>
+                      <li>Phone numbers and notification settings</li>
+                      <li>Active subscriptions will be cancelled</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-red-900 mb-1.5">
+                    Type your email <span className="font-bold">{user?.email}</span> to confirm
+                  </label>
+                  <input
+                    type="text"
+                    value={deleteConfirmEmail}
+                    onChange={(e) => setDeleteConfirmEmail(e.target.value)}
+                    placeholder={user?.email || ''}
+                    className="w-full px-4 py-2.5 border border-red-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-white"
+                    autoComplete="off"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={async () => {
+                      setDeletingAccount(true);
+                      try {
+                        await usersApi.deleteOwnAccount();
+                        logout();
+                        navigate('/');
+                      } catch (err: any) {
+                        notify.error('Error', err.message || 'Failed to delete account');
+                      } finally {
+                        setDeletingAccount(false);
+                      }
+                    }}
+                    disabled={deleteConfirmEmail !== user?.email || deletingAccount}
+                    className="px-6 py-2.5 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {deletingAccount ? (
+                      <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Deleting...</span>
+                    ) : (
+                      'Permanently Delete Account'
+                    )}
+                  </button>
+                  <button
+                    onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmEmail(''); }}
+                    className="px-6 py-2.5 bg-white text-slate-600 border border-slate-200 rounded-xl font-semibold hover:bg-slate-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Account Diagnostics Modal */}
       {selectedAccountForInfo && accountDiagnostics[selectedAccountForInfo] && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setSelectedAccountForInfo(null)}>
@@ -1371,8 +1528,8 @@ export default function SettingsPage() {
 
       {/* Collected Leads Modal */}
       {showCollectedModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowCollectedModal(false)}>
-          <div className="bg-white rounded-3xl p-6 max-w-3xl w-full shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowCollectedModal(false); setCollectedSelected(new Set()); }}>
+          <div className="relative bg-white rounded-3xl p-6 max-w-3xl w-full shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-xl font-bold text-slate-900">Collected Leads</h3>
@@ -1382,12 +1539,67 @@ export default function SettingsPage() {
                   </p>
                 )}
               </div>
-              <button
-                className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
-                onClick={() => setShowCollectedModal(false)}
-              >
-                <X size={18} />
-              </button>
+              <div className="flex items-center gap-2">
+                {collectedSelected.size > 0 && (
+                  <button
+                    disabled={collectedDeleting}
+                    onClick={() => {
+                      const count = collectedSelected.size;
+                      setCollectedDeleteConfirm({
+                        message: `Delete ${count} selected lead${count !== 1 ? 's' : ''}? This cannot be undone.`,
+                        onConfirm: async () => {
+                          setCollectedDeleteConfirm(null);
+                          setCollectedDeleting(true);
+                          try {
+                            await integrationsApi.deleteCollectedLeads(Array.from(collectedSelected));
+                            setCollectedLeads(prev => prev.filter(l => !collectedSelected.has(l.thumbtackId)));
+                            setCollectedSelected(new Set());
+                            refreshExtensionCounts();
+                            notify.success('Deleted', `Deleted ${count} leads`);
+                          } catch { notify.error('Error', 'Delete failed'); }
+                          setCollectedDeleting(false);
+                        },
+                      });
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 inline-flex items-center gap-1.5"
+                  >
+                    {collectedDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                    Delete ({collectedSelected.size})
+                  </button>
+                )}
+                {!collectedLoading && collectedLeads.length > 0 && (
+                  <button
+                    disabled={collectedDeleting}
+                    onClick={() => {
+                      const count = collectedLeads.length;
+                      setCollectedDeleteConfirm({
+                        message: `Delete all ${count} collected lead${count !== 1 ? 's' : ''}? This cannot be undone.`,
+                        onConfirm: async () => {
+                          setCollectedDeleteConfirm(null);
+                          setCollectedDeleting(true);
+                          try {
+                            const res = await integrationsApi.deleteCollectedLeads();
+                            setCollectedLeads([]);
+                            setCollectedSelected(new Set());
+                            refreshExtensionCounts();
+                            notify.success('Deleted', `Deleted ${res.deletedCount} leads`);
+                          } catch { notify.error('Error', 'Delete failed'); }
+                          setCollectedDeleting(false);
+                        },
+                      });
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold text-red-600 bg-white border border-red-200 hover:bg-red-50 disabled:opacity-50 inline-flex items-center gap-1.5"
+                  >
+                    <Trash2 size={13} /> Delete All
+                  </button>
+                )}
+                <button
+                  className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
+                  onClick={() => { setShowCollectedModal(false); setCollectedSelected(new Set()); }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
             <div className="overflow-y-auto flex-1">
@@ -1401,6 +1613,20 @@ export default function SettingsPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-slate-100">
+                      <th className="py-2.5 px-2 w-8">
+                        <input
+                          type="checkbox"
+                          checked={collectedSelected.size > 0 && collectedSelected.size === collectedLeads.length}
+                          onChange={() => {
+                            if (collectedSelected.size === collectedLeads.length) {
+                              setCollectedSelected(new Set());
+                            } else {
+                              setCollectedSelected(new Set(collectedLeads.map(l => l.thumbtackId)));
+                            }
+                          }}
+                          className="rounded border-slate-300"
+                        />
+                      </th>
                       <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Customer</th>
                       <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Thumbtack ID</th>
                       <th className="text-left py-2.5 px-3 text-xs font-bold text-slate-400 uppercase tracking-wide">Lead Date</th>
@@ -1411,6 +1637,21 @@ export default function SettingsPage() {
                   <tbody>
                     {collectedLeads.map((lead: any) => (
                       <tr key={lead.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                        <td className="py-2.5 px-2">
+                          <input
+                            type="checkbox"
+                            checked={collectedSelected.has(lead.thumbtackId)}
+                            onChange={() => {
+                              setCollectedSelected(prev => {
+                                const next = new Set(prev);
+                                if (next.has(lead.thumbtackId)) next.delete(lead.thumbtackId);
+                                else next.add(lead.thumbtackId);
+                                return next;
+                              });
+                            }}
+                            className="rounded border-slate-300"
+                          />
+                        </td>
                         <td className="py-2.5 px-3 text-sm font-medium text-slate-900">{lead.customerName || '-'}</td>
                         <td className="py-2.5 px-3">
                           <code className="text-xs font-mono text-slate-700 bg-slate-50 px-2 py-0.5 rounded">{lead.thumbtackId}</code>
@@ -1440,6 +1681,35 @@ export default function SettingsPage() {
                 </table>
               )}
             </div>
+
+            {/* Delete Confirm Dialog */}
+            {collectedDeleteConfirm && (
+              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm rounded-3xl flex items-center justify-center z-10">
+                <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full mx-4 p-5 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-red-100 rounded-full">
+                      <AlertTriangle className="w-5 h-5 text-red-600" />
+                    </div>
+                    <h4 className="text-base font-bold text-slate-900">Delete Leads</h4>
+                  </div>
+                  <p className="text-sm text-slate-600">{collectedDeleteConfirm.message}</p>
+                  <div className="flex justify-end gap-3">
+                    <button
+                      onClick={() => setCollectedDeleteConfirm(null)}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={collectedDeleteConfirm.onConfirm}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

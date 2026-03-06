@@ -137,8 +137,13 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
+    // Skip global toast for endpoints that handle their own error display
+    const url = error.config?.url || '';
+    const silentPatterns = [/\/negotiations\/[^/]+\/import$/];
+    const isSilent = silentPatterns.some(p => p.test(url));
+
     // Show toast notification for other errors
-    const errorDetails = getErrorDetails(error);
+    const errorDetails = !isSilent ? getErrorDetails(error) : null;
     if (errorDetails) {
       notify.error(errorDetails.title, errorDetails.message);
     }
@@ -497,6 +502,8 @@ export interface UpdateNotificationSettingsDto {
   quietHoursEnd?: string;
   quietHoursTimezone?: string;
   requirePhone?: boolean;
+  smsForwardingNumber?: string | null;
+  callForwardingNumber?: string | null;
 }
 
 // Notification Rule DTOs
@@ -785,6 +792,17 @@ export interface AnalyticsData {
   };
 }
 
+export interface TimeSeriesPoint {
+  period: string;
+  label: string;
+  total: number;
+  statuses: { [status: string]: number };
+  hiredCount: number;
+  conversionRate: number;
+  avgBudget: number | null;
+  totalBudget: number | null;
+}
+
 // Analytics API
 export const analyticsApi = {
   getBasicAnalytics: async (params: {
@@ -824,6 +842,22 @@ export const analyticsApi = {
     const { data } = await api.post(`/v1/analytics/refresh?${queryParams.toString()}`);
     return data;
   },
+
+  getTimeSeries: async (params: {
+    period?: 'day' | 'week' | 'month' | 'year';
+    businessId?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<{ success: boolean; data: TimeSeriesPoint[] }> => {
+    const queryParams = new URLSearchParams();
+    if (params.period) queryParams.append('period', params.period);
+    if (params.businessId) queryParams.append('businessId', params.businessId);
+    if (params.startDate) queryParams.append('startDate', params.startDate);
+    if (params.endDate) queryParams.append('endDate', params.endDate);
+
+    const { data } = await api.get(`/v1/analytics/timeseries?${queryParams.toString()}`);
+    return data;
+  },
 };
 
 // Billing API (Stripe)
@@ -857,12 +891,29 @@ export const usersApi = {
     const { data } = await api.get('/v1/users/me/pool-phone');
     return data;
   },
+  claimPoolAsDedicated: async (phonePoolId: string): Promise<{ success: boolean; tenantPhone: TenantPhoneNumber }> => {
+    const { data } = await api.post(`/v1/users/me/claim-dedicated/${phonePoolId}`);
+    return data;
+  },
   getPoolPhonesForSms: async (): Promise<{ success: boolean; phoneNumbers: { id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }[] }> => {
     const { data } = await api.get('/v1/users/me/pool-phones-for-sms');
     return data;
   },
   updateProfile: async (updates: { name?: string }): Promise<{ success: boolean; user: { id: string; name: string; email: string } }> => {
     const { data } = await api.patch('/v1/users/me', updates);
+    return data;
+  },
+  getAllPhoneOptions: async (): Promise<{
+    success: boolean;
+    dedicated: { id: string; phoneNumber: string; friendlyName: string | null; provider: string; type: 'dedicated' }[];
+    pool: { id: string; phoneNumber: string; provider: string; friendlyName: string | null; smsApproved: boolean }[];
+    openphone: { id: string; phoneNumber: string; friendlyName?: string; provider: string }[];
+  }> => {
+    const { data } = await api.get('/v1/users/me/phone-options');
+    return data;
+  },
+  deleteOwnAccount: async (): Promise<{ success: boolean }> => {
+    const { data } = await api.delete('/v1/users/me');
     return data;
   },
 };
@@ -1044,6 +1095,22 @@ export const adminApi = {
     const { data } = await api.get(`/v1/admin/tenant-numbers?${qp.toString()}`);
     return data.data;
   },
+  convertPoolToTenant: async (poolId: string, userId: string): Promise<any> => {
+    const { data } = await api.post(`/v1/admin/phone-pool/${poolId}/convert-to-tenant`, { userId });
+    return data.data;
+  },
+  convertTenantToPool: async (tenantPhoneId: string): Promise<any> => {
+    const { data } = await api.post(`/v1/admin/phone-pool/convert-tenant-to-pool/${tenantPhoneId}`);
+    return data.data;
+  },
+  reassignTenantPhone: async (tenantPhoneId: string, userId: string): Promise<any> => {
+    const { data } = await api.patch(`/v1/admin/phone-pool/tenant/${tenantPhoneId}/reassign`, { userId });
+    return data.data;
+  },
+  getOpenPhoneNumbers: async (): Promise<{ phoneNumber: string; friendlyName?: string; provider: string; userName: string | null; userEmail: string; accountName: string }[]> => {
+    const { data } = await api.get('/v1/admin/phone-pool/openphone-numbers');
+    return data.data;
+  },
 };
 
 // API Test / Webhook Simulation
@@ -1201,6 +1268,7 @@ export const integrationsApi = {
       lastActivityAt: string | null;
     }>;
     total: number;
+    accounts?: Array<{ id: string; businessName: string }>;
   }> => {
     const params = new URLSearchParams();
     if (filters?.pending) params.append('pending', 'true');
@@ -1212,6 +1280,28 @@ export const integrationsApi = {
   },
   markLeadsImported: async (thumbtackIds: string[]): Promise<{ ok: boolean; markedCount: number }> => {
     const { data } = await api.patch('/integrations/thumbtack/leads/mark-imported', { thumbtackIds });
+    return data;
+  },
+  resetImported: async (thumbtackIds?: string[]): Promise<{ ok: boolean; resetCount: number }> => {
+    const { data } = await api.patch('/integrations/thumbtack/leads/reset-imported', { thumbtackIds });
+    return data;
+  },
+  reimportLeads: async (savedAccountId?: string): Promise<{ ok: boolean; total: number; imported: number; failed: number; errors: string[] }> => {
+    const { data } = await api.post('/integrations/thumbtack/leads/reimport', { savedAccountId });
+    return data;
+  },
+  reimportFailed: async (savedAccountId?: string): Promise<{ ok: boolean; missingCount: number; total: number; imported: number; failed: number; errors: string[] }> => {
+    const { data } = await api.post('/integrations/thumbtack/leads/reimport-failed', { savedAccountId });
+    return data;
+  },
+  getMissingCount: async (accountId?: string): Promise<{ ok: boolean; missingCount: number; total: number }> => {
+    const query = accountId ? `?accountId=${accountId}` : '';
+    const { data } = await api.get(`/integrations/thumbtack/leads/missing-count${query}`);
+    return data;
+  },
+  getNeedsScrape: async (accountId?: string): Promise<{ ok: boolean; count: number; thumbtackIds: string[] }> => {
+    const query = accountId ? `?accountId=${accountId}` : '';
+    const { data } = await api.get(`/integrations/thumbtack/leads/needs-scrape${query}`);
     return data;
   },
   getBudgetSnapshots: async (accountId?: string): Promise<{
@@ -1236,8 +1326,13 @@ export const integrationsApi = {
     const { data } = await api.get(`/integrations/thumbtack/snapshots${query}`);
     return data;
   },
-  deleteCollectedLeads: async (thumbtackIds?: string[]): Promise<{ ok: boolean; deletedCount: number }> => {
-    const { data } = await api.delete('/integrations/thumbtack/leads', { data: thumbtackIds?.length ? { thumbtackIds } : {} });
+  deleteCollectedLeads: async (thumbtackIds?: string[], savedAccountId?: string): Promise<{ ok: boolean; deletedCount: number }> => {
+    const { data } = await api.delete('/integrations/thumbtack/leads', {
+      data: {
+        ...(thumbtackIds?.length ? { thumbtackIds } : {}),
+        ...(savedAccountId ? { savedAccountId } : {}),
+      },
+    });
     return data;
   },
   deleteBudgetSnapshots: async (): Promise<{ ok: boolean; deletedCount: number }> => {

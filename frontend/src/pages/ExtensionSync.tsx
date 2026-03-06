@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   RefreshCw, Loader2, CheckCircle, Download, Package,
-  Clock, DollarSign, ArrowUpRight, Filter, Chrome, Trash2, Building2, ChevronDown,
+  Clock, DollarSign, ArrowUpRight, Filter, Chrome, Building2, ChevronDown, RotateCcw,
 } from 'lucide-react';
-import { integrationsApi, thumbtackApi } from '../services/api';
-import type { SavedAccount } from '../types';
+import { integrationsApi } from '../services/api';
 
 type CollectedLead = {
   id: string;
@@ -70,12 +69,12 @@ export function ExtensionSync() {
   const [leads, setLeads] = useState<CollectedLead[]>([]);
   const [snapshots, setSnapshots] = useState<BudgetSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteResult, setDeleteResult] = useState<string | null>(null);
   const [filter, setFilter] = useState<LeadFilter>('all');
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
-  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
+  const [accounts, setAccounts] = useState<{ id: string; businessName: string }[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionResult, setActionResult] = useState<string | null>(null);
   // Detect if the Chrome extension is installed
   // The extension's leadbridgeAuth.js sets data-leadbridge-extension="true" on <html>
   useEffect(() => {
@@ -95,13 +94,6 @@ export function ExtensionSync() {
     return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibility); observer.disconnect(); };
   }, []);
 
-  // Load saved accounts
-  useEffect(() => {
-    thumbtackApi.getSavedAccounts().then((res) => {
-      setAccounts(res.accounts || []);
-    }).catch(() => {});
-  }, []);
-
   const prevTotalsRef = useRef({ leads: 0, snapshots: 0 });
 
   const accountFilter = selectedAccountId === 'all' ? undefined : selectedAccountId;
@@ -115,6 +107,10 @@ export function ExtensionSync() {
       ]);
       setLeads(leadsRes.leads);
       setSnapshots(snapshotsRes.snapshots);
+      // Update accounts list from the leads response (only on unfiltered load to get all accounts)
+      if (!accountFilter && leadsRes.accounts?.length) {
+        setAccounts(leadsRes.accounts);
+      }
       prevTotalsRef.current = { leads: leadsRes.total, snapshots: snapshotsRes.total };
     } catch (err) {
       if (!silent) console.error('Failed to load extension data:', err);
@@ -145,23 +141,6 @@ export function ExtensionSync() {
   const importedLeads = leads.filter((l) => l.imported);
   const refetchLeads = leads.filter((l) => l.needsRefetch);
 
-  const handleDelete = async (thumbtackIds?: string[]) => {
-    const count = thumbtackIds?.length || leads.length;
-    if (!confirm(`Delete ${count} collected lead${count !== 1 ? 's' : ''}? This cannot be undone.`)) return;
-    try {
-      setDeleting(true);
-      setDeleteResult(null);
-      const result = await integrationsApi.deleteCollectedLeads(thumbtackIds);
-      setDeleteResult(`Deleted ${result.deletedCount} leads`);
-      await loadData();
-    } catch (err: any) {
-      setDeleteResult(`Delete failed: ${err.message}`);
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const handleDeleteAll = () => handleDelete();
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleString(undefined, {
@@ -174,7 +153,7 @@ export function ExtensionSync() {
 
   const accountMap = new Map(accounts.map((a) => [a.id, a.businessName]));
   const getAccountName = (id: string | null) => (id ? accountMap.get(id) || null : null);
-  const showAccountColumn = selectedAccountId === 'all' && accounts.length > 1;
+  const showAccountColumn = selectedAccountId === 'all' && accounts.length > 0;
 
 
   return (
@@ -231,7 +210,7 @@ export function ExtensionSync() {
                 onClick={() => {
                   const acc = accounts.find((a) => a.id === selectedAccountId);
                   document.dispatchEvent(new CustomEvent('leadbridge-launch', {
-                    detail: { action: 'collect-leads', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: acc?.emailHint || null },
+                    detail: { action: 'collect-leads', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: null },
                   }));
                 }}
                 className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-2"
@@ -243,7 +222,7 @@ export function ExtensionSync() {
                 onClick={() => {
                   const acc = accounts.find((a) => a.id === selectedAccountId);
                   document.dispatchEvent(new CustomEvent('leadbridge-launch', {
-                    detail: { action: 'sync-budget', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: acc?.emailHint || null },
+                    detail: { action: 'sync-budget', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: null },
                   }));
                 }}
                 className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-2"
@@ -345,6 +324,21 @@ export function ExtensionSync() {
 
           {/* Filter + Actions */}
           <div className="flex flex-wrap items-center gap-3">
+            {accounts.length > 0 && (
+              <div className="relative">
+                <select
+                  value={selectedAccountId}
+                  onChange={(e) => setSelectedAccountId(e.target.value)}
+                  className="appearance-none bg-white border border-slate-200 rounded-xl px-3 py-1.5 pr-7 text-xs font-semibold text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer"
+                >
+                  <option value="all">All Accounts</option>
+                  {accounts.map((acc) => (
+                    <option key={acc.id} value={acc.id}>{acc.businessName}</option>
+                  ))}
+                </select>
+                <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Filter size={16} className="text-slate-400" />
               {(['all', 'pending', 'imported', 'refetch'] as LeadFilter[]).map((f) => (
@@ -362,25 +356,60 @@ export function ExtensionSync() {
               ))}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 ml-auto">
-              {leads.length > 0 && (
+            {/* Actions for imported leads */}
+            {(filter === 'imported' || filter === 'all') && importedLeads.length > 0 && (
+              <div className="flex items-center gap-2 ml-auto">
+                {actionResult && (
+                  <span className="text-xs text-slate-500 italic">{actionResult}</span>
+                )}
                 <button
-                  onClick={handleDeleteAll}
-                  disabled={deleting}
-                  className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-50 inline-flex items-center gap-2"
+                  disabled={actionLoading}
+                  onClick={async () => {
+                    if (!confirm(`Reset ${filter === 'imported' ? filteredLeads.length : importedLeads.length} imported lead(s) back to pending so the extension can re-import them?`)) return;
+                    setActionLoading(true);
+                    setActionResult(null);
+                    try {
+                      const ids = (filter === 'imported' ? filteredLeads : importedLeads).map((l) => l.thumbtackId);
+                      const res = await integrationsApi.resetImported(ids);
+                      setActionResult(`Reset ${res.resetCount} to pending`);
+                      await loadData();
+                    } catch {
+                      setActionResult('Reset failed');
+                    } finally {
+                      setActionLoading(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 disabled:opacity-50 inline-flex items-center gap-1.5"
                 >
-                  {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                  Delete All
+                  {actionLoading ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                  Reset to Pending
                 </button>
-              )}
-            </div>
+                <button
+                  disabled={actionLoading}
+                  onClick={async () => {
+                    const count = filter === 'imported' ? filteredLeads.length : importedLeads.length;
+                    if (!confirm(`Re-import ${count} lead(s) from the server? This may take a while.`)) return;
+                    setActionLoading(true);
+                    setActionResult(null);
+                    try {
+                      const accountId = selectedAccountId === 'all' ? undefined : selectedAccountId;
+                      const res = await integrationsApi.reimportLeads(accountId);
+                      setActionResult(`Done: ${res.imported} imported, ${res.failed} failed`);
+                      await loadData();
+                    } catch {
+                      setActionResult('Re-import failed');
+                    } finally {
+                      setActionLoading(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 disabled:opacity-50 inline-flex items-center gap-1.5"
+                >
+                  {actionLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                  Re-import All
+                </button>
+              </div>
+            )}
           </div>
-
-          {deleteResult && (
-            <div className={`p-3 rounded-xl text-sm font-medium ${deleteResult.startsWith('Delete failed') ? 'bg-red-50 text-red-700 border border-red-100' : 'bg-green-50 text-green-700 border border-green-100'}`}>
-              {deleteResult}
-            </div>
-          )}
 
           {filteredLeads.length === 0 ? (
             <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center">
@@ -469,25 +498,6 @@ export function ExtensionSync() {
             </div>
           ) : (
             <>
-              {/* Delete All (testing) */}
-              <div className="flex justify-end mb-3">
-                <button
-                  onClick={async () => {
-                    if (!window.confirm(`Delete all ${snapshots.length} budget snapshots? This cannot be undone.`)) return;
-                    try {
-                      await integrationsApi.deleteBudgetSnapshots();
-                      setSnapshots([]);
-                    } catch {
-                      // silent
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors"
-                >
-                  <Trash2 size={13} />
-                  Delete All ({snapshots.length})
-                </button>
-              </div>
-
               {/* Desktop Table */}
               <div className="hidden md:block bg-white rounded-2xl border border-slate-100 overflow-hidden">
                 <table className="w-full">

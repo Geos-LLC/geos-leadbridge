@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, Request, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Query, Request, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { UsersService } from './users.service';
 import { SigcoreSearchResult } from '../sigcore/sigcore.service';
@@ -54,5 +54,33 @@ export class UsersController {
   @Get('me/pool-phones-for-sms')
   async getPoolPhonesForSms(@Request() req: any) {
     return this.usersService.getPoolPhonesForSms(req.user.id);
+  }
+
+  /**
+   * Claim an available pool number as a dedicated number
+   * POST /v1/users/me/claim-dedicated/:phonePoolId
+   */
+  @Post('me/claim-dedicated/:phonePoolId')
+  async claimDedicated(@Request() req: any, @Param('phonePoolId') phonePoolId: string) {
+    return this.usersService.claimPoolAsDedicated(req.user.id, phonePoolId);
+  }
+
+  /**
+   * Get all phone options for the current user (dedicated + pool + OpenPhone)
+   * GET /v1/users/me/phone-options
+   */
+  @Get('me/phone-options')
+  async getPhoneOptions(@Request() req: any) {
+    return this.usersService.getAllPhoneOptions(req.user.id);
+  }
+
+  /**
+   * Delete the current user's own account
+   * DELETE /v1/users/me
+   */
+  @Delete('me')
+  async deleteOwnAccount(@Request() req: any) {
+    const result = await this.usersService.deleteOwnAccount(req.user.id);
+    return { success: true, data: result };
   }
 }

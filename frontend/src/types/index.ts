@@ -190,6 +190,8 @@ export interface NotificationSettings {
   quietHoursEnd: string | null;
   quietHoursTimezone: string | null;
   requirePhone: boolean;
+  smsForwardingNumber: string | null;
+  callForwardingNumber: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -305,6 +307,7 @@ export interface AdminUser {
   trialLeadsLimit: number;
   trialEndDate: string | null;
   leadsCount: number;
+  connectedAccounts: { id: string; businessName: string; platform: string }[];
   createdAt: string;
   updatedAt: string;
 }
@@ -326,6 +329,7 @@ export interface AdminStats {
   activeSubscriptions: number;
   monthlyRevenue: number;
   churnRate: number;
+  totalConnectedAccounts: number;
   usersByTier: {
     tier: 'STARTER' | 'PRO' | 'ENTERPRISE';
     count: number;
@@ -368,6 +372,8 @@ export interface PhonePoolEntry {
   sigcoreAllocationId: string | null;
   status: 'AVAILABLE' | 'ASSIGNED' | 'RESERVED' | 'RELEASED';
   smsApproved: boolean;
+  smsCapable: boolean;
+  voiceCapable: boolean;
   assignments?: PhonePoolAssignment[];
   provisionedAt: string;
   createdAt: string;

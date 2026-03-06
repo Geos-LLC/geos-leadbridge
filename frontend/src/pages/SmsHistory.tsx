@@ -43,9 +43,13 @@ function StatusBadge({ status, error }: { status: string; error?: string | null 
   );
 }
 
+// Module-level cache — survives navigation unmounts
+type SmsLogEntry = NotificationLog & { savedAccountId?: string; savedAccount?: { id: string; businessId: string; businessName: string } };
+let _smsLogsCache: SmsLogEntry[] | null = null;
+
 export function SmsHistory() {
-  const [logs, setLogs] = useState<(NotificationLog & { savedAccountId?: string; savedAccount?: { id: string; businessId: string; businessName: string } })[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [logs, setLogs] = useState<SmsLogEntry[]>(_smsLogsCache ?? []);
+  const [loading, setLoading] = useState(!_smsLogsCache);
   const [accountFilter, setAccountFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -56,9 +60,10 @@ export function SmsHistory() {
 
   const loadLogs = async () => {
     try {
-      setLoading(true);
+      if (!_smsLogsCache) setLoading(true);
       const data = await adminApi.getNotificationLogs(200);
       setLogs(data.logs);
+      _smsLogsCache = data.logs;
     } catch (err) {
       console.error('Failed to load SMS logs:', err);
     } finally {

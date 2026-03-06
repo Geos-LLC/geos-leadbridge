@@ -138,6 +138,16 @@ export class CallConnectService {
       this.logger.warn(`Failed to push call-connect settings to Sigcore: ${err.message}`);
     }
 
+    // Sync callForwardingNumber to Sigcore tenant metadata AFTER ensureSigcoreProvisioned so we
+    // always have the correct (possibly freshly-created) sigcoreTenantId. This fixes the race
+    // condition where the frontend saves notifications settings and call-connect settings in
+    // parallel — if notifications ran first, sigcoreTenantId was null and the sync was skipped.
+    try {
+      await this.syncCallForwardingAfterProvision(savedAccountId);
+    } catch (err: any) {
+      this.logger.warn(`[saveSettings] Failed to sync callForwardingNumber after provision: ${err.message}`);
+    }
+
     // Ensure webhook subscription exists — always attempt so stale/missing IDs get fixed
     try {
       await this.ensureWebhookSubscription(savedAccountId, settings.id);
@@ -257,6 +267,24 @@ export class CallConnectService {
       } catch (err: any) {
         this.logger.warn(`[ensureSigcoreProvisioned] Could not copy integrations: ${err.message}`);
       }
+
+      // Refresh Twilio webhook URLs for all phone numbers on the NEW tenant so inbound calls/SMS
+      // route to the correct workspace. Must use tenantId (new), not oldTenantId — phone numbers
+      // are already in tenant_phone_numbers under the new tenant after re-provisioning.
+      // Must use this.sigcoreApiUrl (SIGCORE_CALL_CONNECT_URL || SIGCORE_API_URL)
+      // because the phone numbers are registered on whichever Sigcore instance handles CC calls.
+      try {
+        await firstValueFrom(
+          this.httpService.post(
+            `${this.sigcoreApiUrl}/api/tenants/${tenantId}/phone-numbers/refresh-webhooks`,
+            {},
+            { headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey } },
+          ),
+        );
+        this.logger.log(`[ensureSigcoreProvisioned] Refreshed phone webhooks for new tenant ${tenantId}`);
+      } catch (err: any) {
+        this.logger.warn(`[ensureSigcoreProvisioned] Could not refresh phone webhooks: ${err.message}`);
+      }
     }
 
     return true; // Re-provisioned — caller should re-push settings
@@ -269,14 +297,13 @@ export class CallConnectService {
     };
   }
 
-  /** Get Sigcore API key — account tenant key first (isolates per-account), env-level as fallback */
+  /** Get Sigcore API key — account tenant key only; env key is never used for tenant CC flows */
   private async getSigcoreApiKey(savedAccountId: string): Promise<string | null> {
     const ns = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
       select: { sigcoreApiKey: true },
     });
-    if (ns?.sigcoreApiKey) return ns.sigcoreApiKey;
-    return this.configService.get<string>('SIGCORE_API_KEY') || null;
+    return ns?.sigcoreApiKey || null;
   }
 
   /** Push call-connect settings to Sigcore and verify they were saved */
@@ -348,6 +375,46 @@ export class CallConnectService {
     } catch (verifyErr: any) {
       this.logger.warn(`[pushSettings] Could not verify settings via GET: ${verifyErr.message}`);
     }
+  }
+
+  /**
+   * Read callForwardingNumber from NotificationSettings and push it to Sigcore tenant metadata.
+   * Called after ensureSigcoreProvisioned so sigcoreTenantId is always fresh/correct.
+   */
+  private async syncCallForwardingAfterProvision(savedAccountId: string): Promise<void> {
+    const ns = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { sigcoreTenantId: true, callForwardingNumber: true },
+    });
+
+    if (!ns?.sigcoreTenantId) {
+      this.logger.warn(`[syncCallForwarding] No sigcoreTenantId for account ${savedAccountId} — skipping`);
+      return;
+    }
+
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (!platformKey) return;
+
+    // Use the same Sigcore instance that handles inbound voice calls (SIGCORE_CALL_CONNECT_URL,
+    // falling back to SIGCORE_API_URL). this.sigcoreApiUrl already resolves this correctly.
+    // Note: this.sigcoreApiUrl has trailing /api stripped, so we re-add /api here.
+    const forwardingNumber = ns.callForwardingNumber || null;
+
+    const resp = await fetch(`${this.sigcoreApiUrl}/api/tenants/${ns.sigcoreTenantId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey },
+      body: JSON.stringify({ metadata: { callForwardingNumber: forwardingNumber } }),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Sigcore tenant update failed (${resp.status}): ${text}`);
+    }
+
+    this.logger.log(
+      `[syncCallForwarding] Synced callForwardingNumber=${forwardingNumber || 'none'} to tenant ${ns.sigcoreTenantId} for account ${savedAccountId}`,
+    );
+
   }
 
   /** Register per-business webhook subscription with Sigcore — re-activates paused subscriptions */
@@ -485,10 +552,9 @@ export class CallConnectService {
       where: { savedAccountId: params.savedAccountId },
       select: { sigcoreApiKey: true, sigcoreWorkspaceId: true, sigcoreTenantId: true },
     });
-    const sigcoreApiKey =
-      ns?.sigcoreApiKey || this.configService.get<string>('SIGCORE_API_KEY') || null;
+    const sigcoreApiKey = ns?.sigcoreApiKey || null;
     if (!sigcoreApiKey) {
-      this.logger.log('Skipping call-connect — no Sigcore API key configured');
+      this.logger.log(`[triggerForLead] Skipping call-connect for ${params.savedAccountId} — no tenant Sigcore API key configured`);
       return;
     }
 
@@ -735,18 +801,14 @@ export class CallConnectService {
       throw new BadRequestException('Saved account not found');
     }
 
-    const accountKey = ns?.sigcoreApiKey;
-    const envKey = this.configService.get<string>('SIGCORE_API_KEY');
-    const sigcoreApiKey = envKey || accountKey || null; // env var is authoritative
+    const sigcoreApiKey = ns?.sigcoreApiKey || null;
 
     this.logger.log(
-      `[triggerTestCall] accountKey=${accountKey ? `"${accountKey.slice(0, 6)}…" (len ${accountKey.length})` : 'empty/null'} | ` +
-      `envKey=${envKey ? `"${envKey.slice(0, 6)}…" (len ${envKey.length})` : 'not set'} | ` +
-      `using=${sigcoreApiKey ? `"${sigcoreApiKey.slice(0, 6)}…"` : 'NONE'}`
+      `[triggerTestCall] using=${sigcoreApiKey ? `"${sigcoreApiKey.slice(0, 6)}…" (len ${sigcoreApiKey.length})` : 'NONE'}`
     );
 
     if (!sigcoreApiKey) {
-      throw new BadRequestException('No Sigcore API key configured in Notification Settings');
+      throw new BadRequestException('No tenant Sigcore API key configured. Connect your Sigcore account in Notification Settings.');
     }
 
     const settings = await this.prisma.callConnectSettings.findUnique({

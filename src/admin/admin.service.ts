@@ -53,6 +53,9 @@ export class AdminService {
           trialEndDate: true,
           createdAt: true,
           updatedAt: true,
+          savedAccounts: {
+            select: { id: true, businessName: true, platform: true },
+          },
           _count: {
             select: { leads: true },
           },
@@ -65,9 +68,14 @@ export class AdminService {
     ]);
 
     // Flatten _count into leadsCount
-    const users = rawUsers.map(({ _count, ...user }) => ({
+    const users = rawUsers.map(({ _count, savedAccounts, ...user }) => ({
       ...user,
       leadsCount: _count.leads,
+      connectedAccounts: savedAccounts.map((a) => ({
+        id: a.id,
+        businessName: a.businessName,
+        platform: a.platform,
+      })),
     }));
 
     return {
@@ -240,11 +248,15 @@ export class AdminService {
       ? ((cancelledInLastMonth / activeSubscriptions) * 100).toFixed(2)
       : '0.00';
 
+    // Count total connected accounts (SavedAccounts)
+    const totalConnectedAccounts = await this.prisma.savedAccount.count();
+
     return {
       totalUsers,
       activeSubscriptions,
       monthlyRevenue,
       churnRate: parseFloat(churnRate),
+      totalConnectedAccounts,
       usersByTier: usersByTier.map((item: any) => ({
         tier: item.subscriptionTier,
         count: item._count,
@@ -441,7 +453,9 @@ export class AdminService {
     const statusFilter = query.status || undefined;
 
     const where: any = {};
+    // Hide RELEASED tenant numbers by default (they've been moved back to pool)
     if (statusFilter) where.status = statusFilter;
+    else where.status = { not: 'RELEASED' };
     if (search) {
       where.OR = [
         { phoneNumber: { contains: search } },
@@ -481,8 +495,34 @@ export class AdminService {
           });
           notificationSettings = ns;
         }
-        const { user, ...rest } = phone;
-        return { ...rest, user, savedAccount, notificationSettings };
+        // Check if this phone exists in the pool to determine its origin provider
+        let originProvider: string | null = null;
+        const poolEntry = await this.prisma.phonePool.findUnique({
+          where: { phoneNumber: phone.phoneNumber },
+          select: { provider: true },
+        });
+        originProvider = poolEntry?.provider || null;
+
+        // Phone number's origin provider (from pool/Sigcore) takes precedence.
+        // notificationSettings.sigcoreProvider is the tenant's routing config, not where the number is hosted.
+        // All TenantPhoneNumbers provisioned via Sigcore are Twilio numbers.
+        const resolvedProvider = originProvider || (phone.sigcoreAllocationId ? 'twilio' : null) || null;
+
+        const { user: usr, ...rest } = phone;
+
+        // Compute tenant display name: user account name first, then GBP business name
+        const tenantName = usr?.name || savedAccount?.businessName || null;
+        return {
+          ...rest,
+          user: usr,
+          savedAccount,
+          tenantName,
+          notificationSettings: {
+            sigcoreProvider: resolvedProvider,
+            sigcoreFromPhone: notificationSettings?.sigcoreFromPhone || null,
+            senderMode: notificationSettings?.senderMode || null,
+          },
+        };
       }),
     );
 

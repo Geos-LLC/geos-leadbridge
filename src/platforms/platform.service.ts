@@ -3,95 +3,73 @@
  * Manages platform connections and credentials
  */
 
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { PlatformFactory } from './platform.factory';
 import { PlatformCredentials } from '../common/interfaces/platform.interface';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class PlatformService {
   private readonly logger = new Logger(PlatformService.name);
   private readonly encryptionKey: string;
-  // In-memory state storage (use Redis in production)
-  private stateToUserMap: Map<string, { userId: string; expires: number }> = new Map();
 
   constructor(
     private prisma: PrismaService,
     private platformFactory: PlatformFactory,
     private configService: ConfigService,
+    @Inject(forwardRef(() => NotificationsService))
+    private notificationsService: NotificationsService,
   ) {
     this.encryptionKey = this.configService.get<string>('encryption.key') || 'default-32-char-encryption-key';
   }
 
   /**
    * Get OAuth authorization URL
+   * State is an encrypted token containing userId + expiry — survives server restarts.
    */
-  async getAuthUrl(userId: string, platformName: string, forceLogin = false): Promise<string> {
+  async getAuthUrl(userId: string, platformName: string, forceLogin = false, callbackUrl?: string): Promise<string> {
     const adapter = this.platformFactory.getAdapter(platformName);
-    const state = EncryptionUtil.generateSecureRandom(16);
 
-    // Store state -> userId mapping (expires in 10 minutes)
-    this.stateToUserMap.set(state, {
-      userId,
-      expires: Date.now() + 10 * 60 * 1000,
-    });
+    // Encode userId + expiry into the state param itself (no in-memory Map needed)
+    const statePayload = JSON.stringify({ userId, exp: Date.now() + 10 * 60 * 1000 });
+    const state = encodeURIComponent(EncryptionUtil.encrypt(statePayload, this.encryptionKey));
 
-    // Clean up expired states
-    this.cleanupExpiredStates();
-
-    return adapter.getAuthUrl(userId, state, forceLogin);
+    return adapter.getAuthUrl(userId, state, forceLogin, callbackUrl);
   }
 
   /**
    * Get userId from OAuth state parameter
-   * Supports both in-memory Map (local flows) and encrypted state (cross-server flows from staging)
+   * Decrypts the state token — works even after server restarts/redeploys.
    */
   async getUserIdFromState(state: string): Promise<string | null> {
-    // Try in-memory Map first (for locally-initiated flows)
-    const entry = this.stateToUserMap.get(state);
-    if (entry) {
-      if (Date.now() > entry.expires) {
-        this.stateToUserMap.delete(state);
-        return null;
-      }
-      this.stateToUserMap.delete(state);
-      return entry.userId;
-    }
-
-    // Fallback: try decrypting encrypted state (for cross-server flows, e.g. staging → production callback)
     try {
       const decoded = decodeURIComponent(state);
       const payload = JSON.parse(EncryptionUtil.decrypt(decoded, this.encryptionKey));
-      if (!payload.userId || !payload.exp) return null;
-      if (Date.now() > payload.exp) return null;
-      return payload.userId;
-    } catch {
-      return null;
-    }
-  }
 
-  /**
-   * Clean up expired OAuth states
-   */
-  private cleanupExpiredStates(): void {
-    const now = Date.now();
-    for (const [state, entry] of this.stateToUserMap.entries()) {
-      if (now > entry.expires) {
-        this.stateToUserMap.delete(state);
+      if (!payload.userId || !payload.exp) return null;
+      if (Date.now() > payload.exp) {
+        this.logger.warn('OAuth state expired');
+        return null;
       }
+
+      return payload.userId;
+    } catch (err) {
+      this.logger.error('Failed to decrypt OAuth state:', err.message);
+      return null;
     }
   }
 
   /**
    * Handle OAuth callback and store credentials
    */
-  async handleCallback(userId: string, platformName: string, code: string): Promise<void> {
+  async handleCallback(userId: string, platformName: string, code: string, callbackUrl?: string): Promise<void> {
     const adapter = this.platformFactory.getAdapter(platformName);
 
     // Exchange code for tokens
-    const credentials = await adapter.handleCallback(code, userId);
+    const credentials = await adapter.handleCallback(code, userId, callbackUrl);
 
     // Encrypt and store credentials
     await this.storeCredentials(userId, platformName, credentials);
@@ -211,16 +189,10 @@ export class PlatformService {
 
     await adapter.disconnect(userId);
 
-    await this.prisma.platform.update({
-      where: {
-        userId_platformName: {
-          userId,
-          platformName,
-        },
-      },
-      data: {
-        connected: false,
-      },
+    // Use updateMany to avoid P2025 when no Platform record exists (first-time users)
+    await this.prisma.platform.updateMany({
+      where: { userId, platformName },
+      data: { connected: false },
     });
   }
 
@@ -819,12 +791,26 @@ export class PlatformService {
       console.log(`[PlatformService] Deleted ${leads.length} leads for account ${account.businessName}`);
     }
 
-    // Delete the saved account
+    // Clean up Sigcore tenant before deleting locally (cascades phone numbers, integrations, API keys)
+    try {
+      await this.notificationsService.deleteSigcoreTenant(accountId);
+    } catch (err: any) {
+      this.logger.warn(`[removeSavedAccount] Sigcore tenant cleanup failed: ${err.message}`);
+    }
+
+    // Unlink any TenantPhoneNumbers that reference this saved account
+    // (no FK cascade since savedAccountId is a plain string)
+    await this.prisma.tenantPhoneNumber.updateMany({
+      where: { savedAccountId: accountId },
+      data: { savedAccountId: null },
+    });
+
+    // Delete the saved account (cascades to NotificationSettings, CallConnectSettings, etc.)
     await this.prisma.savedAccount.delete({
       where: { id: accountId },
     });
 
-    console.log(`[PlatformService] Removed account ${account.businessName}`);
+    this.logger.log(`[removeSavedAccount] Removed account ${account.businessName}`);
     return { deletedLeads: deletedLeadsCount };
   }
 
@@ -876,32 +862,42 @@ export class PlatformService {
       return { valid: false, reason: 'No credentials stored for this account. Please reconnect.' };
     }
 
-    // Try making a simple API call to validate the token
+    const adapter = this.platformFactory.getAdapter(account.platform) as any;
+
+    // Helper: try API call with given credentials
+    const tryCall = async (creds: typeof credentials) => adapter.getBusinesses(creds);
+
+    // First attempt
     try {
-      const adapter = this.platformFactory.getAdapter(account.platform) as any;
-      // Use getBusinesses as a simple validation call - it will fail if token is expired
-      await adapter.getBusinesses(credentials);
+      await tryCall(credentials);
       return { valid: true };
-    } catch (error: any) {
-      const errMsg = error.message?.toLowerCase() || '';
-      const status = error.response?.status;
+    } catch (firstError: any) {
+      const status = firstError.response?.status;
+      const errMsg = firstError.message?.toLowerCase() || '';
+      const isAuthError = status === 401 || errMsg.includes('unauthorized') || errMsg.includes('token') || errMsg.includes('expired') || errMsg.includes('invalid') || errMsg.includes('not active');
 
-      console.log(`[PlatformService] Token validation failed - status: ${status}, message: ${errMsg}`);
-
-      if (status === 401 ||
-          errMsg.includes('unauthorized') ||
-          errMsg.includes('token') ||
-          errMsg.includes('expired') ||
-          errMsg.includes('invalid') ||
-          errMsg.includes('not active')) {
-        return {
-          valid: false,
-          reason: 'Login required to import. Please log in to Thumbtack to import old leads. (New leads still arrive automatically.)',
-        };
+      if (!isAuthError) {
+        return { valid: false, reason: firstError.message || 'Failed to validate token' };
       }
 
-      // Other errors - still treat as invalid for safety
-      return { valid: false, reason: error.message || 'Failed to validate token' };
+      // Auth error — try silent token refresh before giving up
+      console.log(`[PlatformService] Token invalid for account ${accountId}, attempting silent refresh...`);
+      if (credentials.refreshToken) {
+        try {
+          const refreshed = await adapter.refreshAccessToken(credentials.refreshToken);
+          await this.updateAccountCredentials(accountId, { ...credentials, ...refreshed });
+          await tryCall({ ...credentials, ...refreshed });
+          console.log(`[PlatformService] Silent token refresh succeeded for account ${accountId}`);
+          return { valid: true };
+        } catch (refreshError: any) {
+          console.log(`[PlatformService] Silent refresh failed: ${refreshError.message}`);
+        }
+      }
+
+      return {
+        valid: false,
+        reason: 'Login required to import. Please log in to Thumbtack to import old leads. (New leads still arrive automatically.)',
+      };
     }
   }
 

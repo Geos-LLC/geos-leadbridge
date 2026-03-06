@@ -10,11 +10,13 @@ import { PlatformsModule } from '../platforms/platforms.module';
 import { AutomationModule } from '../automation/automation.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { CallConnectModule } from '../call-connect/call-connect.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
 
 @Module({
   imports: [
     ConfigModule,
     PlatformsModule,
+    AnalyticsModule,
     forwardRef(() => AutomationModule),
     forwardRef(() => NotificationsModule),
     forwardRef(() => CallConnectModule),

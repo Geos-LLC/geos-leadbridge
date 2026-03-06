@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Plus, Pencil, Trash2, Loader2, Save, X, Zap, Clock, Play, Pause, ChevronDown, FileText, Phone, Moon, Upload, Music, MessageSquare } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { automationApi, thumbtackApi, templatesApi, callConnectApi, notificationsApi } from '../services/api';
+import NoAccountsOverlay from '../components/NoAccountsOverlay';
 import type { AutomationRule, SavedAccount, MessageTemplate, CallConnectMode, AgentStrategy } from '../types';
 
 // Available variables for templates
@@ -24,12 +25,15 @@ const DELAY_OPTIONS = [
   { value: 120, label: '2 hours' },
 ];
 
+// Module-level cache — survives navigation unmounts
+let _autoCache: { rules: AutomationRule[]; accounts: SavedAccount[]; templates: MessageTemplate[] } | null = null;
+
 export function AutomationSettings() {
   const navigate = useNavigate();
-  const [rules, setRules] = useState<AutomationRule[]>([]);
-  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
-  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [rules, setRules] = useState<AutomationRule[]>(_autoCache?.rules ?? []);
+  const [accounts, setAccounts] = useState<SavedAccount[]>(_autoCache?.accounts ?? []);
+  const [templates, setTemplates] = useState<MessageTemplate[]>(_autoCache?.templates ?? []);
+  const [loading, setLoading] = useState(!_autoCache);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -96,7 +100,7 @@ export function AutomationSettings() {
 
   async function loadData() {
     try {
-      setLoading(true);
+      if (!_autoCache) setLoading(true);
       setError(null);
 
       const [rulesRes, accountsRes, templatesRes] = await Promise.all([
@@ -108,6 +112,7 @@ export function AutomationSettings() {
       setRules(rulesRes.rules);
       setAccounts(accountsRes.accounts);
       setTemplates(templatesRes.templates);
+      _autoCache = { rules: rulesRes.rules, accounts: accountsRes.accounts, templates: templatesRes.templates };
 
       // Pre-select first account if available
       if (accountsRes.accounts.length > 0 && !formAccountId) {
@@ -418,27 +423,6 @@ export function AutomationSettings() {
   }
 
   // Show message if no accounts or templates
-  if (accounts.length === 0) {
-    return (
-      <div className="automation-settings">
-        <div className="settings-header">
-          <button className="btn-icon" onClick={() => navigate(-1)}>
-            <ArrowLeft size={20} />
-          </button>
-          <h1>
-            <Zap size={24} />
-            Automations
-          </h1>
-        </div>
-        <div className="empty-state">
-          <p>You need to connect a Thumbtack account before creating automations.</p>
-          <button className="btn btn-primary" onClick={() => navigate('/')}>
-            Go to Dashboard
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   if (templates.length === 0 && !showTemplateModal) {
     return (
@@ -533,6 +517,7 @@ export function AutomationSettings() {
 
   return (
     <div className="automation-settings">
+      {accounts.length === 0 && <NoAccountsOverlay />}
       <div className="settings-header">
         <button className="btn-icon" onClick={() => navigate(-1)}>
           <ArrowLeft size={20} />

@@ -1,6 +1,6 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { billingApi } from '../services/api';
 
 // Routes that should be accessible even with expired trial
@@ -11,16 +11,15 @@ export function ProtectedRoute() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const [trialChecked, setTrialChecked] = useState(false);
   const [shouldBlockAccess, setShouldBlockAccess] = useState(false);
+  const hasEverChecked = useRef(false);
 
   useEffect(() => {
-    // Reset state on every route change so stale values don't persist
-    setTrialChecked(false);
-    setShouldBlockAccess(false);
-
     async function checkTrialStatus() {
       // Skip trial check for exempt routes — always allow access
       if (TRIAL_EXEMPT_ROUTES.includes(location.pathname)) {
+        setShouldBlockAccess(false);
         setTrialChecked(true);
+        hasEverChecked.current = true;
         return;
       }
 
@@ -33,14 +32,13 @@ export function ProtectedRoute() {
 
         const trialExpired = subscription.trial?.trialExpired;
 
-        if (trialExpired && !hasActiveSubscription) {
-          setShouldBlockAccess(true);
-        }
+        setShouldBlockAccess(!!(trialExpired && !hasActiveSubscription));
       } catch (error) {
         console.error('Failed to check trial status:', error);
-        // Don't block access on API errors — let user through
+        setShouldBlockAccess(false);
       } finally {
         setTrialChecked(true);
+        hasEverChecked.current = true;
       }
     }
 
@@ -53,8 +51,9 @@ export function ProtectedRoute() {
     return <Navigate to="/login" replace />;
   }
 
-  // Show loading state while checking trial
-  if (!trialChecked) {
+  // Only show blank on the very first check — subsequent route changes
+  // keep the current page mounted while re-checking in the background
+  if (!trialChecked && !hasEverChecked.current) {
     return null;
   }
 

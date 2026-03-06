@@ -17,17 +17,21 @@ import {
   Cell,
   BarChart,
   Bar,
+  Line,
+  ComposedChart,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   Legend,
+  LabelList,
   ResponsiveContainer,
 } from 'recharts';
-import { analyticsApi, thumbtackApi, type AnalyticsData } from '../services/api';
+import { analyticsApi, thumbtackApi, type AnalyticsData, type TimeSeriesPoint } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
+import NoAccountsOverlay from '../components/NoAccountsOverlay';
 import { notify } from '../store/notificationStore';
 
 export function Analytics() {
@@ -38,6 +42,11 @@ export function Analytics() {
   const [refreshing, setRefreshing] = useState(false);
   const [analytics, setAnalytics] = useState<Partial<AnalyticsData> | null>(analyticsCache);
   const [calculatedAt, setCalculatedAt] = useState<string | null>(null);
+
+  // Time-series trends state
+  const [tsPeriod, setTsPeriod] = useState<'day' | 'week' | 'month' | 'year'>('month');
+  const [tsData, setTsData] = useState<TimeSeriesPoint[]>([]);
+  const [tsLoading, setTsLoading] = useState(false);
 
   // Filters from URL params
   const businessId = searchParams.get('businessId') || 'all';
@@ -67,6 +76,10 @@ export function Analytics() {
   useEffect(() => {
     loadAnalytics();
   }, [businessId, timeRange, customStart, customEnd]);
+
+  useEffect(() => {
+    loadTimeSeries();
+  }, [businessId, timeRange, customStart, customEnd, tsPeriod]);
 
   const loadSavedAccounts = async () => {
     try {
@@ -101,6 +114,19 @@ export function Analytics() {
       notify.error('Analytics', 'Failed to load analytics data. Please refresh.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadTimeSeries = async () => {
+    setTsLoading(true);
+    try {
+      const params = { ...buildQueryParams(), period: tsPeriod };
+      const { data } = await analyticsApi.getTimeSeries(params);
+      setTsData(data);
+    } catch (err) {
+      console.error('Failed to load time series:', err);
+    } finally {
+      setTsLoading(false);
     }
   };
 
@@ -230,6 +256,7 @@ export function Analytics() {
 
   return (
     <div className="p-6 lg:p-10 max-w-7xl mx-auto space-y-10">
+      {savedAccounts.length === 0 && useAuthStore.getState().user?.role !== 'ADMIN' && <NoAccountsOverlay />}
       {/* Updating indicator */}
       {isUpdating && (
         <div className="fixed top-0 left-0 right-0 h-1 bg-blue-600 z-50 animate-pulse" />
@@ -322,6 +349,167 @@ export function Analytics() {
           />
         </div>
       )}
+
+      {/* ── Trends Over Time ── */}
+      <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-blue-600" />
+              Trends Over Time
+            </h3>
+            <p className="text-sm text-slate-500 mt-0.5">Lead volume, revenue, and hire rate by period</p>
+          </div>
+          {/* Period selector */}
+          <div className="flex rounded-xl border border-slate-200 overflow-hidden text-sm font-medium">
+            {(['day', 'week', 'month', 'year'] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setTsPeriod(p)}
+                className={`px-4 py-2 transition-colors capitalize ${
+                  tsPeriod === p
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {p === 'day' ? 'Daily' : p === 'week' ? 'Weekly' : p === 'month' ? 'Monthly' : 'Yearly'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {(() => {
+          // Collect all unique statuses across all periods, sorted by total desc
+          const STATUS_COLORS: Record<string, string> = {
+            'Hired':         '#10b981',
+            'Job done':      '#059669',
+            'Scheduled':     '#3b82f6',
+            'Not hired':     '#94a3b8',
+            'Not interested':'#fb923c',
+          };
+          const fallbackColors = ['#8b5cf6','#06b6d4','#f59e0b','#ec4899','#64748b'];
+          const allStatuses = Array.from(
+            tsData.reduce((set, r) => { Object.keys(r.statuses).forEach(s => set.add(s)); return set; }, new Set<string>())
+          ).sort((a, b) => {
+            const totalA = tsData.reduce((s, r) => s + (r.statuses[a] ?? 0), 0);
+            const totalB = tsData.reduce((s, r) => s + (r.statuses[b] ?? 0), 0);
+            return totalB - totalA;
+          });
+          const getColor = (s: string, i: number) => STATUS_COLORS[s] ?? fallbackColors[i % fallbackColors.length];
+
+          return tsLoading ? (
+            <div className="h-64 flex items-center justify-center">
+              <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
+            </div>
+          ) : tsData.length === 0 ? (
+            <div className="h-48 flex items-center justify-center text-slate-400 text-sm">No data for selected period</div>
+          ) : (
+            <>
+              {/* Summary strip */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                {[
+                  { label: 'Total Leads', value: tsData.reduce((s, r) => s + r.total, 0).toString() },
+                  {
+                    label: 'Total Hired & Scheduled',
+                    value: tsData.reduce((s, r) => s + r.hiredCount, 0).toString(),
+                  },
+                  {
+                    label: 'Lead Spend',
+                    value: (() => {
+                      const sum = tsData.reduce((s, r) => s + (r.totalBudget ?? 0), 0);
+                      return sum > 0 ? `$${sum.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '—';
+                    })(),
+                  },
+                  {
+                    label: 'Avg Hire Rate',
+                    value: (() => {
+                      const total = tsData.reduce((s, r) => s + r.total, 0);
+                      const hired = tsData.reduce((s, r) => s + r.hiredCount, 0);
+                      return total > 0 ? `${((hired / total) * 100).toFixed(1)}%` : '—';
+                    })(),
+                  },
+                ].map(({ label, value }) => (
+                  <div key={label} className="bg-slate-50 rounded-2xl p-4">
+                    <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">{label}</p>
+                    <p className="text-xl font-bold text-slate-900 mt-1">{value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Stacked bar chart by job status + hire rate line */}
+              <ResponsiveContainer width="100%" height={320}>
+                <ComposedChart data={tsData} margin={{ top: 24, right: 20, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                  <YAxis yAxisId="left" width={48} tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                  <YAxis yAxisId="right" width={48} orientation="right" unit="%" domain={[0, 100]} tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.07)' }}
+                    formatter={(value: any, name: string | undefined) => {
+                      if (name === 'Hire Rate') return [`${Number(value).toFixed(1)}%`, name ?? ''];
+                      if (name === '_total') return null as any;
+                      return [value, name ?? ''];
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  {allStatuses.map((status, i) => (
+                    <Bar
+                      key={status}
+                      yAxisId="left"
+                      dataKey={(d: TimeSeriesPoint) => d.statuses[status] ?? 0}
+                      name={status}
+                      stackId="status"
+                      fill={getColor(status, i)}
+                      maxBarSize={56}
+                    />
+                  ))}
+                  {/* Invisible top-of-stack bar to render total count labels */}
+                  <Bar yAxisId="left" dataKey={() => 0} stackId="status" fill="transparent" legendType="none" maxBarSize={56} name="_total">
+                    <LabelList dataKey="total" position="top" style={{ fontSize: 11, fill: '#475569', fontWeight: 700 }} />
+                  </Bar>
+                  <Line yAxisId="right" type="monotone" dataKey={(d: TimeSeriesPoint) => d.total > 0 ? (d.hiredCount / d.total) * 100 : 0} name="Hire Rate" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+
+              {/* Lead spend chart */}
+              <div className="mt-8">
+                  <p className="text-sm font-semibold text-slate-700 mb-4">Avg Lead Cost per Period</p>
+                  {!tsData.some(r => r.avgBudget != null) && (
+                    <p className="text-xs text-slate-400 mb-3">No lead price data available — lead prices are captured from Thumbtack webhooks.</p>
+                  )}
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={tsData} margin={{ top: 5, right: 68, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                      <YAxis width={48} tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
+                      <Tooltip
+                        contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }}
+                        formatter={(v: any, name: string | undefined) => {
+                          if (name === 'Avg Lead Cost') return [`$${Number(v).toFixed(2)}`, name];
+                          return [v, name ?? ''];
+                        }}
+                      />
+                      <Bar dataKey="avgBudget" name="Avg Lead Cost" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={48}>
+                        <LabelList
+                          dataKey="totalBudget"
+                          content={(props: any) => {
+                            const { x, y, width, height, value } = props;
+                            if (!value || height < 18) return null;
+                            return (
+                              <text x={x + width / 2} y={y + height / 2 + 4} textAnchor="middle" fontSize={10} fill="white" fontWeight={700}>
+                                ${Number(value).toFixed(0)}
+                              </text>
+                            );
+                          }}
+                        />
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+            </>
+          );
+        })()}
+      </div>
 
       {displayData ? (
         <>

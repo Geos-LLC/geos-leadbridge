@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LeadBridge Action Icons</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0f0f13;
+    color: #fff;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 40px 20px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 36px;
+    max-width: 900px;
+  }
+  .card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+  .icon-wrap {
+    width: 88px;
+    height: 88px;
+    border-radius: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .icon-wrap::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 22px;
+    padding: 1.5px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.03));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+  }
+  .icon-wrap svg {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Icon 1 - New Lead - warm amber/orange */
+  .icon-1 { background: linear-gradient(145deg, #2a1f0a, #1a1308); }
+  .icon-1 svg { color: #f59e0b; filter: drop-shadow(0 0 8px rgba(245,158,11,0.3)); }
+
+  /* Icon 2 - Detect - electric blue */
+  .icon-2 { background: linear-gradient(145deg, #0a1a2a, #081320); }
+  .icon-2 svg { color: #3b82f6; filter: drop-shadow(0 0 8px rgba(59,130,246,0.3)); }
+
+  /* Icon 3 - AI Reply - violet/purple */
+  .icon-3 { background: linear-gradient(145deg, #1a0a2a, #130820); }
+  .icon-3 svg { color: #a855f7; filter: drop-shadow(0 0 8px rgba(168,85,247,0.3)); }
+
+  /* Icon 4 - Follow-ups - teal/green */
+  .icon-4 { background: linear-gradient(145deg, #0a2a1f, #082018); }
+  .icon-4 svg { color: #10b981; filter: drop-shadow(0 0 8px rgba(16,185,129,0.3)); }
+
+  /* Icon 5 - You jump in - rose/pink */
+  .icon-5 { background: linear-gradient(145deg, #2a0a1a, #200815); }
+  .icon-5 svg { color: #f43f5e; filter: drop-shadow(0 0 8px rgba(244,63,94,0.3)); }
+
+  .step-num {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    opacity: 0.4;
+  }
+  .label {
+    font-size: 12px;
+    font-weight: 500;
+    text-align: center;
+    line-height: 1.45;
+    color: rgba(255,255,255,0.75);
+    max-width: 120px;
+  }
+</style>
+</head>
+<body>
+<div class="grid">
+
+  <!-- 1 · New Lead Comes In -->
+  <div class="card">
+    <div class="step-num">STEP 1</div>
+    <div class="icon-wrap icon-1">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+        <circle cx="9" cy="7" r="4"/>
+        <line x1="19" y1="8" x2="19" y2="14"/>
+        <line x1="22" y1="11" x2="16" y2="11"/>
+      </svg>
+    </div>
+    <div class="label">New lead comes in</div>
+  </div>
+
+  <!-- 2 · LeadBridge Detects It -->
+  <div class="card">
+    <div class="step-num">STEP 2</div>
+    <div class="icon-wrap icon-2">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+      </svg>
+    </div>
+    <div class="label">LeadBridge detects it instantly</div>
+  </div>
+
+  <!-- 3 · AI Sends First Reply -->
+  <div class="card">
+    <div class="step-num">STEP 3</div>
+    <div class="icon-wrap icon-3">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2a7 7 0 0 1 7 7c0 2.5-1.3 4.8-3.5 6l-.5.3V18H9v-2.7l-.5-.3C6.3 13.8 5 11.5 5 9a7 7 0 0 1 7-7z"/>
+        <line x1="9" y1="21" x2="15" y2="21"/>
+        <path d="M10 18v1a2 2 0 0 0 4 0v-1"/>
+        <path d="M9.5 9h1.5l1 2 1.5-4 1 2h1"/>
+      </svg>
+    </div>
+    <div class="label">AI sends optimized first reply</div>
+  </div>
+
+  <!-- 4 · Follow-ups Triggered -->
+  <div class="card">
+    <div class="step-num">STEP 4</div>
+    <div class="icon-wrap icon-4">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="17 1 21 5 17 9"/>
+        <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+        <polyline points="7 23 3 19 7 15"/>
+        <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+      </svg>
+    </div>
+    <div class="label">Follow-ups triggered automatically</div>
+  </div>
+
+  <!-- 5 · You Jump In -->
+  <div class="card">
+    <div class="step-num">STEP 5</div>
+    <div class="icon-wrap icon-5">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 21v-2a4 4 0 0 0-3-3.87"/>
+        <path d="M4 21v-2a4 4 0 0 1 3-3.87"/>
+        <circle cx="12" cy="7" r="4"/>
+        <path d="M8 21l2-4h4l2 4"/>
+      </svg>
+    </div>
+    <div class="label">You jump in when customer responds</div>
+  </div>
+
+</div>
+</body>
+</html>

@@ -3,7 +3,7 @@
  * Manages SMS notification settings and sends notifications via Sigcore
  */
 
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 
@@ -19,6 +19,8 @@ export interface UpdateNotificationSettingsDto {
   quietHoursEnd?: string;
   quietHoursTimezone?: string;
   requirePhone?: boolean;
+  smsForwardingNumber?: string | null;
+  callForwardingNumber?: string | null;
 }
 
 // Notification Rule DTOs
@@ -139,6 +141,8 @@ export interface NotificationSettingsResponse {
   quietHoursEnd: string | null;
   quietHoursTimezone: string | null;
   requirePhone: boolean;
+  smsForwardingNumber: string | null;
+  callForwardingNumber: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -243,6 +247,14 @@ export class NotificationsService {
       throw new NotFoundException('Saved account not found');
     }
 
+    // Validate sigcoreFromPhone ownership — prevent setting another user's number
+    if (data.sigcoreFromPhone) {
+      const ownsPhone = await this.validatePhoneOwnership(userId, data.sigcoreFromPhone);
+      if (!ownsPhone) {
+        throw new BadRequestException('Phone number does not belong to this account');
+      }
+    }
+
     const settings = await this.prisma.notificationSettings.upsert({
       where: { savedAccountId },
       create: {
@@ -258,6 +270,8 @@ export class NotificationsService {
         quietHoursEnd: data.quietHoursEnd,
         quietHoursTimezone: data.quietHoursTimezone ?? 'America/New_York',
         requirePhone: data.requirePhone ?? true,
+        smsForwardingNumber: data.smsForwardingNumber,
+        callForwardingNumber: data.callForwardingNumber,
       },
       update: {
         ...(data.enabled !== undefined && { enabled: data.enabled }),
@@ -271,8 +285,17 @@ export class NotificationsService {
         ...(data.quietHoursEnd !== undefined && { quietHoursEnd: data.quietHoursEnd }),
         ...(data.quietHoursTimezone !== undefined && { quietHoursTimezone: data.quietHoursTimezone }),
         ...(data.requirePhone !== undefined && { requirePhone: data.requirePhone }),
+        ...(data.smsForwardingNumber !== undefined && { smsForwardingNumber: data.smsForwardingNumber }),
+        ...(data.callForwardingNumber !== undefined && { callForwardingNumber: data.callForwardingNumber }),
       },
     });
+
+    // Sync call forwarding number to Sigcore tenant metadata
+    if (data.callForwardingNumber !== undefined && settings.sigcoreTenantId) {
+      this.syncCallForwardingToSigcore(settings.sigcoreTenantId, data.callForwardingNumber).catch(err => {
+        this.logger.warn(`[upsertSettings] Failed to sync callForwardingNumber to Sigcore: ${err.message}`);
+      });
+    }
 
     return this.formatSettings(settings);
   }
@@ -440,20 +463,25 @@ export class NotificationsService {
       return { success: false, error: 'No SMS settings configured. Set up SMS in Notification Settings.' };
     }
 
-    const apiKey = settings.sigcoreApiKey;
+    let apiKey = settings.sigcoreApiKey;
     if (!apiKey) {
       return { success: false, error: 'No Sigcore API key configured. Please provision your phone workspace first.' };
     }
 
-    // Resolve fromPhone: settings phone or pool phone
-    let fromPhone = settings.sigcoreFromPhone;
+    // Resolve fromPhone — must be a dedicated or BYO OpenPhone number (never pool)
+    const fromPhone = settings.sigcoreFromPhone;
     if (!fromPhone) {
-      const assignment = await this.prisma.phonePoolAssignment.findFirst({
-        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
-        include: { phonePool: true },
-        orderBy: { assignedAt: 'desc' },
-      });
-      if (assignment) fromPhone = assignment.phonePool.phoneNumber;
+      return { success: false, error: 'No from-phone configured. Set up a dedicated or OpenPhone number in Notification Settings.' };
+    }
+
+    // Guard: pool numbers cannot be used for customer SMS
+    const isPoolPhone = await this.prisma.phonePool.findFirst({
+      where: { phoneNumber: fromPhone, status: { not: 'RELEASED' } },
+      select: { id: true },
+    });
+    if (isPoolPhone) {
+      this.logger.warn(`[sendAdHocSms] Blocked: fromPhone ${fromPhone} is a shared pool number — cannot send customer SMS`);
+      return { success: false, error: 'Pool numbers cannot be used for customer SMS. Configure a dedicated or OpenPhone number in Notification Settings.' };
     }
 
     // 4. Create log entry
@@ -479,6 +507,7 @@ export class NotificationsService {
         fromPhone,
         apiKey,
         senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
+        sigcoreProvider: settings.sigcoreProvider,
         sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
         metadata: {
           tenantId: savedAccountId,
@@ -724,6 +753,24 @@ export class NotificationsService {
 
     const settings = existingSettings;
 
+    // Validate fromPhone ownership — prevent setting another user's number
+    if (data.fromPhone) {
+      const ownsPhone = await this.validatePhoneOwnership(userId, data.fromPhone);
+      if (!ownsPhone) {
+        throw new BadRequestException('Phone number does not belong to this account');
+      }
+      // Guard A4: pool numbers cannot be used for customer SMS rules
+      if (data.sendToCustomer) {
+        const isPoolPhone = await this.prisma.phonePool.findFirst({
+          where: { phoneNumber: data.fromPhone, status: { not: 'RELEASED' } },
+          select: { id: true },
+        });
+        if (isPoolPhone) {
+          throw new BadRequestException('Pool numbers cannot be used for customer SMS rules. Configure a dedicated or OpenPhone number.');
+        }
+      }
+    }
+
     const rule = await this.prisma.notificationRule.create({
       data: {
         notificationSettingsId: settings.id,
@@ -808,6 +855,25 @@ export class NotificationsService {
 
     this.logger.log(`[updateRule] Updating rule ${ruleId} with data: ${JSON.stringify(data)}`);
     this.logger.log(`[updateRule] Previous enabled value: ${existing.enabled}`);
+
+    // Validate fromPhone ownership — prevent setting another user's number
+    if (data.fromPhone) {
+      const ownsPhone = await this.validatePhoneOwnership(userId, data.fromPhone);
+      if (!ownsPhone) {
+        throw new BadRequestException('Phone number does not belong to this account');
+      }
+      // Guard A4: pool numbers cannot be used for customer SMS rules
+      const sendToCustomer = data.sendToCustomer ?? existing.sendToCustomer;
+      if (sendToCustomer) {
+        const isPoolPhone = await this.prisma.phonePool.findFirst({
+          where: { phoneNumber: data.fromPhone, status: { not: 'RELEASED' } },
+          select: { id: true },
+        });
+        if (isPoolPhone) {
+          throw new BadRequestException('Pool numbers cannot be used for customer SMS rules. Configure a dedicated or OpenPhone number.');
+        }
+      }
+    }
 
     const rule = await this.prisma.notificationRule.update({
       where: { id: ruleId },
@@ -982,6 +1048,87 @@ export class NotificationsService {
   }
 
   /**
+   * Forward an inbound SMS to the tenant's configured forwarding number (e.g. OpenPhone).
+   * No-ops if no forwarding number is configured.
+   */
+  async forwardInboundSms(
+    savedAccountId: string,
+    customerName: string,
+    fromNumber: string,
+    body: string,
+  ): Promise<void> {
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+    });
+    if (!settings?.smsForwardingNumber) return;
+
+    // If the forwarding destination is the same as the BYO from-phone, the message already
+    // arrived at that OpenPhone number — forwarding would loop from/to the same number.
+    const normForward = settings.smsForwardingNumber.replace(/\D/g, '').slice(-10);
+    const normFrom = settings.sigcoreFromPhone?.replace(/\D/g, '').slice(-10);
+    if (normFrom && normForward === normFrom) {
+      this.logger.log(
+        `[forwardInboundSms] Skipping forward for account ${savedAccountId}: smsForwardingNumber (${settings.smsForwardingNumber}) === sigcoreFromPhone (already delivered via OpenPhone)`,
+      );
+      return;
+    }
+
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    // Prefer tenant Sigcore key; fall back to platform key so forwarding works
+    // even for accounts that haven't completed full Sigcore provisioning.
+    const apiKey = settings.sigcoreApiKey || platformKey;
+    if (!apiKey) {
+      this.logger.warn(`[forwardInboundSms] No API key available for account ${savedAccountId}`);
+      return;
+    }
+
+    const fromPhone = settings.sigcoreFromPhone ?? null;
+    const forwardBody = `SMS from ${customerName} (${fromNumber}):\n${body}`;
+    this.logger.log(`[forwardInboundSms] Forwarding to ${settings.smsForwardingNumber} for account ${savedAccountId}`);
+
+    await this.sendViaSigcore({
+      to: settings.smsForwardingNumber,
+      body: forwardBody,
+      fromPhone,
+      apiKey,
+      senderMode: (settings.senderMode as 'shared' | 'dedicated' | 'openphone') || 'shared',
+      sigcoreProvider: settings.sigcoreProvider,
+      sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
+      metadata: { type: 'sms_forwarding', savedAccountId },
+    });
+  }
+
+  /**
+   * Sync callForwardingNumber to the Sigcore tenant's metadata so incoming calls
+   * can be forwarded without LeadBridge being in the loop.
+   */
+  private async syncCallForwardingToSigcore(
+    sigcoreTenantId: string,
+    callForwardingNumber: string | null,
+  ): Promise<void> {
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (!platformKey) return;
+
+    const resp = await fetch(`${sigcoreUrl}/tenants/${sigcoreTenantId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': platformKey,
+      },
+      body: JSON.stringify({
+        metadata: { callForwardingNumber: callForwardingNumber || null },
+      }),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Sigcore tenant update failed (${resp.status}): ${text}`);
+    }
+    this.logger.log(`[syncCallForwardingToSigcore] Synced callForwardingNumber=${callForwardingNumber || 'none'} to tenant ${sigcoreTenantId}`);
+  }
+
+  /**
    * Handle customer reply event - sends SMS for "customer_reply" rules
    * Fallback logic: If no account-specific settings exist, uses user-level default settings
    */
@@ -1071,6 +1218,35 @@ export class NotificationsService {
   }
 
   /**
+   * Validate that a phone number belongs to a specific user.
+   * Checks pool assignments, tenant (purchased) phones, and notification settings.
+   */
+  private async validatePhoneOwnership(userId: string, phoneNumber: string): Promise<boolean> {
+    // 1. Pool phones are shared across all tenants — any non-released pool number is valid for any user
+    const poolPhone = await this.prisma.phonePool.findFirst({
+      where: { phoneNumber, status: { not: 'RELEASED' } },
+    });
+    if (poolPhone) return true;
+
+    // 2. Check user-purchased tenant phones
+    const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
+      where: { userId, phoneNumber, status: 'ACTIVE' },
+    });
+    if (tenantPhone) return true;
+
+    // 3. Check if it's the user's sigcoreFromPhone in any of their notification settings
+    const settingsMatch = await this.prisma.notificationSettings.findFirst({
+      where: {
+        sigcoreFromPhone: phoneNumber,
+        savedAccount: { userId },
+      },
+    });
+    if (settingsMatch) return true;
+
+    return false;
+  }
+
+  /**
    * Send a notification using a specific rule (or legacy template)
    */
   private async sendNotificationWithRule(
@@ -1086,17 +1262,29 @@ export class NotificationsService {
       ? (lead?.customerPhone || null)
       : (rule?.toPhone || settings.destinationPhone);
     let fromPhone = rule?.fromPhone || settings.sigcoreFromPhone;
+    let fromPhoneSource = rule?.fromPhone ? 'rule' : settings.sigcoreFromPhone ? 'settings' : 'none';
 
-    // Fallback: use admin-assigned pool phone if no explicit fromPhone configured
+    // Fallback: use any pool phone if no explicit fromPhone configured (pool phones are shared)
     if (!fromPhone) {
-      const assignment = await this.prisma.phonePoolAssignment.findFirst({
-        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
-        include: { phonePool: true },
-        orderBy: { assignedAt: 'desc' },
+      const poolPhone = await this.prisma.phonePool.findFirst({
+        where: { status: { not: 'RELEASED' } },
+        orderBy: { provisionedAt: 'desc' },
       });
-      if (assignment) {
-        fromPhone = assignment.phonePool.phoneNumber;
+      if (poolPhone) {
+        fromPhone = poolPhone.phoneNumber;
+        fromPhoneSource = 'pool';
         this.logger.log(`Using pool phone ${fromPhone} as fromPhone for rule`);
+      }
+    }
+
+    // Ownership guard: NEVER send SMS from a phone number that doesn't belong to this user
+    if (fromPhone) {
+      const ownsPhone = await this.validatePhoneOwnership(userId, fromPhone);
+      if (!ownsPhone) {
+        this.logger.warn(
+          `[sendNotificationWithRule] BLOCKED: user ${userId} does not own fromPhone ${fromPhone} (source: ${fromPhoneSource})`,
+        );
+        return;
       }
     }
 
@@ -1110,10 +1298,31 @@ export class NotificationsService {
       return;
     }
 
+    // BYO (OpenPhone) alert guard: BYO numbers CAN send tenant alerts, but not to themselves.
+    // If fromPhone is the tenant's OpenPhone number and the alert destination is the same number,
+    // the message would loop back into OpenPhone — block it.
+    if (!rule?.sendToCustomer && settings.sigcoreProvider === 'openphone' && fromPhone && toPhone) {
+      const normFrom = fromPhone.replace(/\D/g, '').slice(-10);
+      const normTo = toPhone.replace(/\D/g, '').slice(-10);
+      if (normFrom.length >= 10 && normFrom === normTo) {
+        this.logger.warn(
+          `[sendNotificationWithRule] BLOCKED: BYO alert fromPhone (${fromPhone}) === toPhone (${toPhone}). ` +
+          `Set a different alert destination phone in Notification Settings.`,
+        );
+        return;
+      }
+    }
+
     // Render the message template
     const messageBody = this.renderTemplate(template, lead, context.accountName);
 
-    this.logger.log(`Sending notification for rule: ${ruleName} from ${fromPhone} to ${toPhone}`);
+    this.logger.log(
+      `[sendNotificationWithRule] rule=${ruleName} sendToCustomer=${!!rule?.sendToCustomer} ` +
+      `fromPhone=${fromPhone} (source=${fromPhoneSource}) toPhone=${toPhone} ` +
+      `senderMode=${settings.senderMode} sigcoreProvider=${settings.sigcoreProvider} ` +
+      `rule.fromPhone=${rule?.fromPhone || 'null'} settings.sigcoreFromPhone=${settings.sigcoreFromPhone || 'null'} ` +
+      `apiKeyType=${settings.sigcoreApiKey ? 'tenant' : 'MISSING'}`,
+    );
 
     // Create notification log entry
     const logEntry = await this.prisma.notificationLog.create({
@@ -1154,12 +1363,19 @@ export class NotificationsService {
         throw new Error('No Sigcore API key configured. Please provision your phone workspace first.');
       }
 
+      const keyType = apiKey === platformKey ? 'platform' : 'tenant';
+      this.logger.log(
+        `[sendNotificationWithRule] Sending via Sigcore: keyType=${keyType} fromPhone=${fromPhone} ` +
+        `keyPrefix=${apiKey.substring(0, 12)}...`,
+      );
+
       const result = await this.sendViaSigcore({
         to: toPhone,
         body: messageBody,
         fromPhone: fromPhone,
         apiKey,
         senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
+        sigcoreProvider: settings.sigcoreProvider,
         sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
         metadata: {
           tenantId: savedAccountId,
@@ -1373,6 +1589,7 @@ export class NotificationsService {
         fromPhone: fromPhone,
         apiKey: effectiveApiKey,
         senderMode: settings.senderMode as 'shared' | 'dedicated' | 'openphone',
+        sigcoreProvider: settings.sigcoreProvider,
         sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
         metadata: {
           tenantId: savedAccountId,
@@ -1434,9 +1651,13 @@ export class NotificationsService {
     message = message.replace(/\{accountName\}/gi, accountName || 'Your Business');
 
     // Replace basic variables — support both {{lead.x}} and {lead.x} single-brace syntax
-    message = message.replace(/\{\{lead\.name\}\}/gi, lead.customerName || 'Unknown');
-    message = message.replace(/\{lead\.name\}/gi, lead.customerName || 'Unknown');
-    message = message.replace(/\{customerName\}/gi, lead.customerName || 'Unknown');
+    const leadName = (lead.customerName || 'Unknown')
+      .split(' ')
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ');
+    message = message.replace(/\{\{lead\.name\}\}/gi, leadName);
+    message = message.replace(/\{lead\.name\}/gi, leadName);
+    message = message.replace(/\{customerName\}/gi, leadName);
     message = message.replace(/\{\{lead\.phone\}\}/gi, lead.customerPhone || 'Not provided');
     message = message.replace(/\{lead\.phone\}/gi, lead.customerPhone || 'Not provided');
     message = message.replace(/\{\{lead\.service\}\}/gi, lead.category || 'Not specified');
@@ -1932,6 +2153,9 @@ export class NotificationsService {
       where: { savedAccountId },
     });
 
+    // Remember the old tenantId before potential re-provisioning (needed for integration migration)
+    const oldTenantId = settings?.sigcoreTenantId || null;
+
     if (settings?.sigcoreTenantId && settings?.sigcoreApiKey) {
       // Check if this tenant ID is shared with another account (from old auto-copy logic).
       // Each account must have its OWN tenant to avoid Call Connect / SMS cross-contamination.
@@ -2008,6 +2232,52 @@ export class NotificationsService {
     });
 
     this.logger.log(`[ensureSigcoreTenantProvisioned] Provisioned tenant ${data.tenantId} for account ${savedAccountId}`);
+
+    // If re-provisioning from a shared tenant, copy integrations (OpenPhone, etc.) from the
+    // old tenant to the new one. Without this, the TenantIntegration in Sigcore still references
+    // the old tenantId, and messages would fall back to Twilio instead of OpenPhone.
+    if (oldTenantId && oldTenantId !== data.tenantId) {
+      try {
+        const copyResp = await fetch(`${sigcoreUrl}/tenants/${data.tenantId}/copy-integrations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': platformKey,
+          },
+          body: JSON.stringify({ fromTenantId: oldTenantId }),
+        });
+        if (copyResp.ok) {
+          const copyResult = await copyResp.json();
+          this.logger.log(
+            `[ensureSigcoreTenantProvisioned] Copied ${copyResult.data?.copied || 0} integrations from tenant ${oldTenantId} to ${data.tenantId}`,
+          );
+        } else {
+          this.logger.warn(`[ensureSigcoreTenantProvisioned] Failed to copy integrations: ${copyResp.status}`);
+        }
+      } catch (err: any) {
+        this.logger.warn(`[ensureSigcoreTenantProvisioned] Could not copy integrations: ${err.message}`);
+      }
+
+      // After re-provisioning, Sigcore's copy-integrations copies the TenantIntegration record
+      // (provider credentials) but does NOT populate tenant_phone_numbers for the new tenant.
+      // Clear sigcoreProvider and sigcoreFromPhone so the UI shows "reconnect needed" — the user
+      // must reconnect OpenPhone via Notification Settings, which calls POST /integrations/openphone/connect
+      // and properly syncs tenant_phone_numbers on the new tenant.
+      await this.prisma.notificationSettings.update({
+        where: { savedAccountId },
+        data: {
+          sigcoreProvider: null,
+          sigcoreFromPhone: null,
+          sigcoreWebhookId: null,
+          inboundSmsWebhookId: null,
+        },
+      });
+      this.logger.log(
+        `[ensureSigcoreTenantProvisioned] Cleared sigcoreProvider/fromPhone for account ${savedAccountId} — ` +
+        `user must reconnect OpenPhone to sync tenant_phone_numbers on new tenant ${data.tenantId}`,
+      );
+    }
+
     return { apiKey: data.apiKey, tenantId: data.tenantId };
   }
 
@@ -2215,7 +2485,7 @@ export class NotificationsService {
   /**
    * Fetch phone numbers from OpenPhone via Sigcore conversations endpoint
    */
-  private async fetchOpenPhoneNumbers(tenantApiKey: string): Promise<SigcorePhoneNumber[]> {
+  async fetchOpenPhoneNumbers(tenantApiKey: string): Promise<SigcorePhoneNumber[]> {
     const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
     // Use the dedicated phone-numbers endpoint so ALL configured numbers appear,
     // not just those with recent conversations (conversations?days=1 missed inactive numbers).
@@ -2308,13 +2578,49 @@ export class NotificationsService {
   }
 
   /**
+   * Delete the Sigcore tenant for a saved account.
+   * Called before account deletion to cascade-clean phone numbers, integrations, and API keys.
+   */
+  async deleteSigcoreTenant(savedAccountId: string): Promise<void> {
+    const settings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { sigcoreTenantId: true },
+    });
+
+    if (!settings?.sigcoreTenantId) return;
+
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (!platformKey) {
+      this.logger.warn('[deleteSigcoreTenant] No SIGCORE_API_KEY — skipping');
+      return;
+    }
+
+    const baseUrl = this.configService.get<string>('SIGCORE_API_URL') || 'https://sigcore-production.up.railway.app';
+    const url = `${baseUrl}/api/tenants/${settings.sigcoreTenantId}`;
+
+    try {
+      const resp = await fetch(url, {
+        method: 'DELETE',
+        headers: { 'x-api-key': platformKey },
+      });
+      if (resp.ok || resp.status === 404) {
+        this.logger.log(`[deleteSigcoreTenant] Deleted Sigcore tenant ${settings.sigcoreTenantId} for account ${savedAccountId}`);
+      } else {
+        this.logger.warn(`[deleteSigcoreTenant] Failed: ${resp.status} ${resp.statusText}`);
+      }
+    } catch (err: any) {
+      this.logger.warn(`[deleteSigcoreTenant] Error: ${err.message}`);
+    }
+  }
+
+  /**
    * Disconnect provider integration via Sigcore API
    */
   private async disconnectProviderViaSigcore(tenantApiKey: string, provider: string): Promise<void> {
-    const baseUrl = 'https://sigcore-production.up.railway.app';
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
     const endpoint = provider === 'openphone'
-      ? `${baseUrl}/api/integrations/openphone/disconnect`
-      : `${baseUrl}/api/integrations/twilio`;
+      ? `${sigcoreUrl}/integrations/openphone/disconnect`
+      : `${sigcoreUrl}/integrations/twilio`;
 
     this.logger.log(`[disconnectProvider] Calling ${endpoint} for provider ${provider}`);
 
@@ -2363,17 +2669,6 @@ export class NotificationsService {
       where: { savedAccountId },
     });
 
-    // Resolve fromPhone: explicit setting or first pool phone for this user
-    let fromPhone: string | null = settings?.sigcoreFromPhone || null;
-    if (!fromPhone) {
-      const assignment = await this.prisma.phonePoolAssignment.findFirst({
-        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
-        include: { phonePool: true },
-        orderBy: { assignedAt: 'desc' },
-      });
-      if (assignment) fromPhone = assignment.phonePool.phoneNumber;
-    }
-
     // Get customer texting auto-reply rule (sendToCustomer: true, delayMinutes: 0)
     const autoReplyRule = settings
       ? await this.prisma.notificationRule.findFirst({
@@ -2384,6 +2679,17 @@ export class NotificationsService {
           },
         })
       : null;
+
+    // Resolve fromPhone: prefer the rule's fromPhone (what actually fires at send time),
+    // then settings.sigcoreFromPhone, then first pool phone as last resort.
+    let fromPhone: string | null = autoReplyRule?.fromPhone || settings?.sigcoreFromPhone || null;
+    if (!fromPhone) {
+      const poolPhone = await this.prisma.phonePool.findFirst({
+        where: { status: { not: 'RELEASED' } },
+        orderBy: { provisionedAt: 'desc' },
+      });
+      if (poolPhone) fromPhone = poolPhone.phoneNumber;
+    }
 
     return {
       enabled: settings?.customerTextingEnabled ?? false,
@@ -2451,12 +2757,11 @@ export class NotificationsService {
     // dto.fromPhone takes priority because settings object was loaded before the update above.
     let fromPhone = dto.fromPhone || settings.sigcoreFromPhone;
     if (!fromPhone) {
-      const assignment = await this.prisma.phonePoolAssignment.findFirst({
-        where: { userId, phonePool: { status: { not: 'RELEASED' } } },
-        include: { phonePool: true },
-        orderBy: { assignedAt: 'desc' },
+      const poolPhone = await this.prisma.phonePool.findFirst({
+        where: { status: { not: 'RELEASED' } },
+        orderBy: { provisionedAt: 'desc' },
       });
-      if (assignment) fromPhone = assignment.phonePool.phoneNumber;
+      if (poolPhone) fromPhone = poolPhone.phoneNumber;
     }
 
     // Create auto-reply rule (immediate, no follow-ups)
@@ -2482,7 +2787,7 @@ export class NotificationsService {
           const webhookUrl = `${appBaseUrl}/api/webhooks/sigcore/inbound-sms?accountId=${savedAccountId}`;
           const result = await this.createSigcoreWebhook(apiKey, webhookUrl, {
             name: 'LeadBridge Inbound SMS',
-            events: ['message.received'],
+            events: ['sms.message.received', 'message.inbound'],
           });
           if (result.webhookId) {
             await this.prisma.notificationSettings.update({
@@ -2509,6 +2814,7 @@ export class NotificationsService {
     fromPhone?: string | null;
     apiKey: string;
     senderMode: 'shared' | 'dedicated' | 'openphone';
+    sigcoreProvider?: string | null;
     sigcoreWorkspaceId?: string | null;
     metadata: Record<string, any>;
   }): Promise<{
@@ -2542,6 +2848,27 @@ export class NotificationsService {
     // If a specific phone number is selected, include it (must be valid E.164 phone number)
     if (params.fromPhone && params.fromPhone.length > 5 && params.fromPhone.match(/^\+?\d{10,}/)) {
       requestBody.fromNumber = params.fromPhone;
+    }
+
+    // For OpenPhone: also include the Sigcore phoneNumberId alongside fromNumber.
+    // Sigcore's tenant_phone_numbers table is keyed by both phoneNumber (E.164) and phoneNumberId.
+    // Sending both gives Sigcore the best chance to resolve the from-number to the OpenPhone provider.
+    // NOTE: the phone number must already be in Sigcore's tenant_phone_numbers for the tenant —
+    // if Sigcore returns "NOT FOUND", the user must reconnect OpenPhone to re-sync the numbers.
+    const isOpenPhone = params.sigcoreProvider === 'openphone' || params.senderMode === 'openphone';
+    if (isOpenPhone && params.fromPhone) {
+      try {
+        const opPhones = await this.fetchOpenPhoneNumbers(params.apiKey);
+        const match = opPhones.find(p => p.phoneNumber === params.fromPhone);
+        if (match) {
+          requestBody.phoneNumberId = match.id;
+          this.logger.log(`[sendViaSigcore] OpenPhone: resolved phoneNumberId=${match.id} for ${params.fromPhone}`);
+        } else {
+          this.logger.warn(`[sendViaSigcore] OpenPhone: no ID found for ${params.fromPhone}`);
+        }
+      } catch (e: any) {
+        this.logger.warn(`[sendViaSigcore] OpenPhone ID lookup failed: ${e.message}`);
+      }
     }
 
     const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
@@ -2617,6 +2944,8 @@ export class NotificationsService {
       quietHoursEnd: settings.quietHoursEnd,
       quietHoursTimezone: settings.quietHoursTimezone,
       requirePhone: settings.requirePhone,
+      smsForwardingNumber: settings.smsForwardingNumber || null,
+      callForwardingNumber: settings.callForwardingNumber || null,
       createdAt: settings.createdAt.toISOString(),
       updatedAt: settings.updatedAt.toISOString(),
     };

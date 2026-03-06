@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
 import { AnalyticsQueryDto } from './dto/analytics-query.dto';
+import { TimeSeriesQueryDto } from './dto/analytics-timeseries-query.dto';
 import {
   AnalyticsResponseDto,
   CategoryDistribution,
@@ -10,6 +11,17 @@ import {
   CustomerEngagementMetric,
   ServiceDetailDistribution,
 } from './dto/analytics-response.dto';
+
+export interface TimeSeriesPoint {
+  period: string;
+  label: string;
+  total: number;
+  statuses: { [status: string]: number };
+  hiredCount: number;
+  conversionRate: number;
+  avgBudget: number | null;
+  totalBudget: number | null;
+}
 
 @Injectable()
 export class AnalyticsService {
@@ -132,6 +144,176 @@ export class AnalyticsService {
       update: { data: data as any, calculatedAt: new Date() },
     });
     return { data, calculatedAt: record.calculatedAt };
+  }
+
+  async getTimeSeries(userId: string, dto: TimeSeriesQueryDto): Promise<TimeSeriesPoint[]> {
+    // period is validated by DTO @IsIn — safe to embed as SQL literal
+    const period = dto.period ?? 'month';
+
+    const HIRED_STATUSES = new Set(['hired', 'job scheduled', 'scheduled', 'job done']);
+
+    // Use tli.leadDate ("Feb 23") with year inference as the canonical lead date.
+    // leads.createdAt and tli.capturedAt are both the import/capture timestamp (same day for bulk imports).
+    // leadPrice from rawJson is the cost Thumbtack charged the pro per lead (estimate.total is typically null).
+    const sqlStr = `
+      WITH raw_leads AS (
+        SELECT
+          l.id,
+          l."userId",
+          l."businessId",
+          l."thumbtackStatus",
+          l."rawJson",
+          tli."thumbtackStatus" AS tli_status,
+          tli."capturedAt"      AS tli_captured_at,
+          l."createdAt"         AS l_created_at,
+          -- Extract just the "Mon DD" prefix; leadDate may have trailing text like "Feb 23 · $52"
+          CASE WHEN tli."leadDate" IS NOT NULL
+            THEN regexp_replace(
+              SUBSTRING(tli."leadDate" FROM '^[A-Za-z]{3}\\s+[0-9]{1,2}'),
+              '\\s+', ' '
+            )
+            ELSE NULL
+          END AS date_str
+        FROM leads l
+        LEFT JOIN thumbtack_lead_ids tli
+          ON tli."thumbtackId" = l."externalRequestId"
+         AND tli."userId"      = l."userId"
+        WHERE l."userId" = $1
+          AND ($2::text IS NULL OR l."businessId" = $2::text)
+      ),
+      lead_dates AS (
+        SELECT
+          id, "userId", "businessId", "thumbtackStatus", "rawJson", tli_status,
+          CASE
+            WHEN date_str IS NOT NULL AND date_str <> ''
+            THEN
+              CASE
+                WHEN TO_DATE(date_str || ' ' || EXTRACT(YEAR FROM NOW())::text, 'Mon DD YYYY') > CURRENT_DATE
+                THEN TO_DATE(date_str || ' ' || (EXTRACT(YEAR FROM NOW())::int - 1)::text, 'Mon DD YYYY')::timestamptz
+                ELSE TO_DATE(date_str || ' ' || EXTRACT(YEAR FROM NOW())::text, 'Mon DD YYYY')::timestamptz
+              END
+            ELSE COALESCE(tli_captured_at, l_created_at)
+          END AS lead_date
+        FROM raw_leads
+      ),
+      status_counts AS (
+        SELECT
+          DATE_TRUNC('${period}', ld.lead_date AT TIME ZONE 'UTC') AS bucket,
+          COALESCE(NULLIF(TRIM(COALESCE(ld."thumbtackStatus", ld.tli_status)), ''), 'No Status') AS job_status,
+          COUNT(*) AS cnt
+        FROM lead_dates ld
+        WHERE ($3::timestamptz IS NULL OR ld.lead_date >= $3::timestamptz)
+          AND ($4::timestamptz IS NULL OR ld.lead_date <= $4::timestamptz)
+        GROUP BY bucket, job_status
+      ),
+      budget_stats AS (
+        SELECT
+          DATE_TRUNC('${period}', ld.lead_date AT TIME ZONE 'UTC') AS bucket,
+          AVG(
+            CASE WHEN ld."rawJson" IS NOT NULL AND ld."rawJson" != ''
+              THEN LTRIM(ld."rawJson"::jsonb->>'leadPrice', '$')::numeric
+              ELSE NULL
+            END
+          ) AS avg_budget,
+          SUM(
+            CASE WHEN ld."rawJson" IS NOT NULL AND ld."rawJson" != ''
+              THEN LTRIM(ld."rawJson"::jsonb->>'leadPrice', '$')::numeric
+              ELSE NULL
+            END
+          ) AS total_budget
+        FROM lead_dates ld
+        WHERE ($3::timestamptz IS NULL OR ld.lead_date >= $3::timestamptz)
+          AND ($4::timestamptz IS NULL OR ld.lead_date <= $4::timestamptz)
+        GROUP BY bucket
+      )
+      SELECT
+        sc.bucket,
+        sc.job_status,
+        sc.cnt,
+        bs.avg_budget,
+        bs.total_budget
+      FROM status_counts sc
+      LEFT JOIN budget_stats bs ON bs.bucket = sc.bucket
+      ORDER BY sc.bucket ASC, sc.cnt DESC
+    `;
+
+    const rows = await this.prisma.$queryRawUnsafe<Array<{
+      bucket: Date;
+      job_status: string;
+      cnt: bigint;
+      avg_budget: string | null;
+      total_budget: string | null;
+    }>>(
+      sqlStr,
+      userId,
+      dto.businessId ?? null,
+      dto.startDate ? new Date(dto.startDate) : null,
+      dto.endDate   ? new Date(dto.endDate)   : null,
+    );
+
+    // Normalize display labels: merge similar statuses into canonical buckets
+    const normalizeStatus = (s: string): string => {
+      const lower = s.toLowerCase();
+      if (lower === 'hired')             return 'Hired';
+      if (lower === 'job done')          return 'Job done';
+      if (lower === 'job scheduled' || lower === 'scheduled') return 'Scheduled';
+      if (lower === 'not scheduled yet') return 'Not hired';
+      if (lower === 'not hired')         return 'Not hired';
+      if (lower === 'no status')         return 'Not hired';   // no status → not hired
+      return 'Not hired'; // any other unknown status → not hired
+    };
+
+    // Pivot rows into one point per bucket
+    const bucketMap = new Map<string, TimeSeriesPoint>();
+    for (const row of rows) {
+      const key = row.bucket.toISOString();
+      if (!bucketMap.has(key)) {
+        bucketMap.set(key, {
+          period: key,
+          label: this.formatPeriodLabel(row.bucket, period as 'day' | 'week' | 'month' | 'year'),
+          total: 0,
+          statuses: {},
+          hiredCount: 0,
+          conversionRate: 0,
+          avgBudget: row.avg_budget != null ? parseFloat(row.avg_budget) : null,
+          totalBudget: row.total_budget != null ? parseFloat(row.total_budget) : null,
+        });
+      }
+      const entry = bucketMap.get(key)!;
+      const cnt = Number(row.cnt);
+      const status = normalizeStatus(row.job_status);
+      entry.statuses[status] = (entry.statuses[status] ?? 0) + cnt; // merge same-display statuses
+      entry.total += cnt;
+      if (HIRED_STATUSES.has(row.job_status.toLowerCase())) {
+        entry.hiredCount += cnt;
+      }
+    }
+
+    for (const entry of bucketMap.values()) {
+      entry.conversionRate = entry.total > 0 ? (entry.hiredCount / entry.total) * 100 : 0;
+    }
+
+    return Array.from(bucketMap.values());
+  }
+
+  private formatPeriodLabel(date: Date, period: 'day' | 'week' | 'month' | 'year'): string {
+    switch (period) {
+      case 'year':
+        return date.getUTCFullYear().toString();
+      case 'month':
+        return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+      case 'week':
+        return 'Wk ' + date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      case 'day':
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    }
+  }
+
+  async invalidateCache(userId: string) {
+    const result = await this.prisma.analyticsCache.deleteMany({ where: { userId } });
+    if (result.count > 0) {
+      this.logger.log(`[analytics] invalidated ${result.count} cache entries for user ${userId}`);
+    }
   }
 
   async getCacheInfo(userId: string, businessId?: string): Promise<{ calculatedAt: Date } | null> {

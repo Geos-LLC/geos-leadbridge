@@ -155,6 +155,30 @@ export class AdminPhonePoolController {
     return { success: result.success, data: result, error: result.error };
   }
 
+  /**
+   * Get all OpenPhone numbers across tenants (informational)
+   * MUST be before parameterized routes
+   */
+  @Get('openphone-numbers')
+  async getOpenPhoneNumbers() {
+    const numbers = await this.phonePoolService.getAllOpenPhoneNumbers();
+    return { success: true, data: numbers };
+  }
+
+  /**
+   * Reassign a dedicated tenant number to a different user
+   * MUST be before parameterized :phonePoolId routes
+   */
+  @Patch('tenant/:tenantPhoneId/reassign')
+  async reassignTenantPhone(
+    @Req() req: any,
+    @Param('tenantPhoneId') tenantPhoneId: string,
+    @Body() body: { userId: string },
+  ) {
+    const result = await this.phonePoolService.reassignTenantPhone(req.user.id, tenantPhoneId, body.userId);
+    return { success: true, data: result };
+  }
+
   @Patch(':phonePoolId/sms-approved')
   async updateSmsApproved(
     @Param('phonePoolId') phonePoolId: string,
@@ -200,5 +224,30 @@ export class AdminPhonePoolController {
   ) {
     await this.phonePoolService.removeFromPool(req.user.id, phonePoolId);
     return { success: true, message: 'Phone removed from pool' };
+  }
+
+  /**
+   * Convert a pool number to a tenant-dedicated number
+   */
+  @Post(':phonePoolId/convert-to-tenant')
+  async convertToTenant(
+    @Req() req: any,
+    @Param('phonePoolId') phonePoolId: string,
+    @Body() body: { userId: string },
+  ) {
+    const result = await this.phonePoolService.convertPoolToTenant(req.user.id, phonePoolId, body.userId);
+    return { success: true, data: result };
+  }
+
+  /**
+   * Convert a tenant-dedicated number back to the pool
+   */
+  @Post('convert-tenant-to-pool/:tenantPhoneId')
+  async convertTenantToPool(
+    @Req() req: any,
+    @Param('tenantPhoneId') tenantPhoneId: string,
+  ) {
+    const result = await this.phonePoolService.convertTenantToPool(req.user.id, tenantPhoneId);
+    return { success: true, data: result };
   }
 }

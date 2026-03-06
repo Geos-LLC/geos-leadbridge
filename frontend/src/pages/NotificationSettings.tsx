@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Bell, Loader2, X, ChevronDown, Send, Phone, MessageSquare, AlertCircle, CheckCircle, Plus, Edit2, Trash2, Zap, Save } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { notificationsApi, thumbtackApi, usersApi, type CreateNotificationRuleDto, type UpdateNotificationRuleDto } from '../services/api';
+import NoAccountsOverlay from '../components/NoAccountsOverlay';
+import { useAppStore } from '../store/appStore';
 import type { NotificationRule, SavedAccount } from '../types';
 
 // Available variables for SMS template
@@ -41,19 +43,27 @@ function formatToE164(phone: string): string {
   return cleaned;
 }
 
+// Module-level cache — survives navigation unmounts
+let _notifCache: { accounts: SavedAccount[]; rules: NotificationRule[]; phoneOptions: any } | null = null;
+
 export function NotificationSettings() {
   const navigate = useNavigate();
-  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
+  const storedAccounts = useAppStore(state => state.savedAccounts);
+  const [accounts, setAccounts] = useState<SavedAccount[]>(_notifCache?.accounts ?? storedAccounts);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
-  const [rules, setRules] = useState<NotificationRule[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [rules, setRules] = useState<NotificationRule[]>(_notifCache?.rules ?? []);
+  const [loading, setLoading] = useState(!_notifCache && storedAccounts.length === 0);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Pool phone numbers for the fromPhone dropdown
-  const [poolPhoneNumbers, setPoolPhoneNumbers] = useState<{ id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }[]>([]);
+  // Phone numbers for the fromPhone dropdown (unified: dedicated + pool + openphone)
+  const [phoneOptions, setPhoneOptions] = useState<{
+    dedicated: { id: string; phoneNumber: string; friendlyName: string | null; provider: string }[];
+    pool: { id: string; phoneNumber: string; provider: string; friendlyName: string | null; smsApproved: boolean }[];
+    openphone: { id: string; phoneNumber: string; friendlyName?: string; provider: string }[];
+  }>(_notifCache?.phoneOptions ?? { dedicated: [], pool: [], openphone: [] });
   const [loadingPhoneNumbers, setLoadingPhoneNumbers] = useState(false);
 
   // Rule editing state
@@ -96,7 +106,7 @@ export function NotificationSettings() {
 
   async function loadAccounts() {
     try {
-      setLoading(true);
+      if (!_notifCache) setLoading(true);
       const { accounts } = await thumbtackApi.getSavedAccounts();
       setAccounts(accounts);
       setSelectedAccountId('all');
@@ -110,12 +120,18 @@ export function NotificationSettings() {
 
   async function loadPoolPhones() {
     try {
-      setLoadingPhoneNumbers(true);
-      const result = await usersApi.getPoolPhonesForSms();
-      setPoolPhoneNumbers(result.phoneNumbers);
+      if (!_notifCache) setLoadingPhoneNumbers(true);
+      const result = await usersApi.getAllPhoneOptions();
+      const opts = {
+        dedicated: result.dedicated || [],
+        pool: result.pool || [],
+        openphone: result.openphone || [],
+      };
+      setPhoneOptions(opts);
+      if (_notifCache) _notifCache.phoneOptions = opts;
     } catch (err) {
-      console.error('Failed to load pool phone numbers:', err);
-      setPoolPhoneNumbers([]);
+      console.error('Failed to load phone options:', err);
+      setPhoneOptions({ dedicated: [], pool: [], openphone: [] });
     } finally {
       setLoadingPhoneNumbers(false);
     }
@@ -123,10 +139,12 @@ export function NotificationSettings() {
 
   async function loadAllRules() {
     try {
-      setLoading(true);
+      if (!_notifCache) setLoading(true);
       setError(null);
       const rulesRes = await notificationsApi.getAllRules();
       setRules(rulesRes.rules);
+      // Update module-level cache
+      _notifCache = { accounts, rules: rulesRes.rules, phoneOptions: _notifCache?.phoneOptions ?? phoneOptions };
     } catch (err: any) {
       setError(err.message || 'Failed to load rules');
     } finally {
@@ -177,7 +195,7 @@ export function NotificationSettings() {
       name: '',
       triggerType: 'new_lead',
       replyTriggerMode: 'first_only',
-      fromPhone: poolPhoneNumbers[0]?.phoneNumber || '',
+      fromPhone: (phoneOptions.dedicated[0]?.phoneNumber || phoneOptions.pool[0]?.phoneNumber || phoneOptions.openphone[0]?.phoneNumber || ''),
       toPhone: '',
       template: 'New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}',
       enabled: true,
@@ -358,8 +376,8 @@ export function NotificationSettings() {
     }
   }
 
-  // Pool phone numbers are global (not per-account)
-  const formPhoneNumbers = poolPhoneNumbers;
+  // All phone options combined for display check
+  const hasAnyPhones = phoneOptions.dedicated.length > 0 || phoneOptions.pool.length > 0 || phoneOptions.openphone.length > 0;
   const formPhoneNumbersLoading = loadingPhoneNumbers;
 
   if (loading && accounts.length === 0) {
@@ -382,30 +400,9 @@ export function NotificationSettings() {
     );
   }
 
-  if (accounts.length === 0) {
-    return (
-      <div className="notification-settings">
-        <div className="settings-header">
-          <button className="btn-icon" onClick={() => navigate(-1)}>
-            <ArrowLeft size={20} />
-          </button>
-          <h1>
-            <Bell size={24} />
-            SMS Alerts
-          </h1>
-        </div>
-        <div className="empty-state">
-          <p>You need to connect a Thumbtack account before setting up alerts.</p>
-          <button className="btn btn-primary" onClick={() => navigate('/')}>
-            Go to Dashboard
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="notification-settings">
+      {accounts.length === 0 && <NoAccountsOverlay />}
       <div className="settings-header">
         <button className="btn-icon" onClick={() => navigate(-1)}>
           <ArrowLeft size={20} />
@@ -493,7 +490,7 @@ export function NotificationSettings() {
                             value={ruleForm.accountId}
                             onChange={e => {
                               const newAccountId = e.target.value;
-                              setRuleForm(prev => ({ ...prev, accountId: newAccountId, fromPhone: poolPhoneNumbers[0]?.phoneNumber || '' }));
+                              setRuleForm(prev => ({ ...prev, accountId: newAccountId, fromPhone: (phoneOptions.dedicated[0]?.phoneNumber || phoneOptions.pool[0]?.phoneNumber || phoneOptions.openphone[0]?.phoneNumber || '') }));
                             }}
                             className={!ruleForm.accountId ? 'required' : ''}
                           >
@@ -538,18 +535,40 @@ export function NotificationSettings() {
                           <Loader2 size={14} className="spinner" />
                           Loading phone numbers...
                         </div>
-                      ) : formPhoneNumbers.length > 0 ? (
+                      ) : hasAnyPhones ? (
                         <div className="select-wrapper">
                           <select
                             value={ruleForm.fromPhone}
                             onChange={e => setRuleForm(prev => ({ ...prev, fromPhone: e.target.value }))}
                           >
                             <option value="">Select phone number...</option>
-                            {formPhoneNumbers.map((phone: { id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }) => (
-                              <option key={phone.id} value={phone.phoneNumber}>
-                                {phone.phoneNumber} (LeadBridge)
-                              </option>
-                            ))}
+                            {phoneOptions.dedicated.length > 0 && (
+                              <optgroup label="Dedicated Numbers">
+                                {phoneOptions.dedicated.map(phone => (
+                                  <option key={`ded-${phone.id}`} value={phone.phoneNumber}>
+                                    {phone.phoneNumber} (Dedicated)
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                            {phoneOptions.pool.length > 0 && (
+                              <optgroup label="Pool Numbers">
+                                {phoneOptions.pool.map(phone => (
+                                  <option key={`pool-${phone.id}`} value={phone.phoneNumber}>
+                                    {phone.phoneNumber} (Pool)
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                            {phoneOptions.openphone.length > 0 && (
+                              <optgroup label="OpenPhone Numbers">
+                                {phoneOptions.openphone.map(phone => (
+                                  <option key={`op-${phone.id}`} value={phone.phoneNumber}>
+                                    {phone.phoneNumber} (OpenPhone)
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
                           </select>
                           <ChevronDown size={16} />
                         </div>
@@ -557,7 +576,7 @@ export function NotificationSettings() {
                         <div>
                           <p className="form-hint warning">
                             <AlertCircle size={14} />
-                            No phone numbers available in the pool.
+                            No phone numbers available.
                           </p>
                           <button className="btn btn-secondary btn-sm" style={{ marginTop: '8px' }} onClick={() => navigate('/phone-settings')}>
                             <Phone size={14} />
@@ -804,18 +823,40 @@ export function NotificationSettings() {
                                   <Loader2 size={14} className="spinner" />
                                   Loading phone numbers...
                                 </div>
-                              ) : formPhoneNumbers.length > 0 ? (
+                              ) : hasAnyPhones ? (
                                 <div className="select-wrapper">
                                   <select
                                     value={ruleForm.fromPhone}
                                     onChange={e => setRuleForm(prev => ({ ...prev, fromPhone: e.target.value }))}
                                   >
                                     <option value="">Select phone number...</option>
-                                    {formPhoneNumbers.map((phone: { id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }) => (
-                                      <option key={phone.id} value={phone.phoneNumber}>
-                                        {phone.phoneNumber} (LeadBridge)
-                                      </option>
-                                    ))}
+                                    {phoneOptions.dedicated.length > 0 && (
+                                      <optgroup label="Dedicated Numbers">
+                                        {phoneOptions.dedicated.map(phone => (
+                                          <option key={`ded-${phone.id}`} value={phone.phoneNumber}>
+                                            {phone.phoneNumber} (Dedicated)
+                                          </option>
+                                        ))}
+                                      </optgroup>
+                                    )}
+                                    {phoneOptions.pool.length > 0 && (
+                                      <optgroup label="Pool Numbers">
+                                        {phoneOptions.pool.map(phone => (
+                                          <option key={`pool-${phone.id}`} value={phone.phoneNumber}>
+                                            {phone.phoneNumber} (Pool)
+                                          </option>
+                                        ))}
+                                      </optgroup>
+                                    )}
+                                    {phoneOptions.openphone.length > 0 && (
+                                      <optgroup label="OpenPhone Numbers">
+                                        {phoneOptions.openphone.map(phone => (
+                                          <option key={`op-${phone.id}`} value={phone.phoneNumber}>
+                                            {phone.phoneNumber} (OpenPhone)
+                                          </option>
+                                        ))}
+                                      </optgroup>
+                                    )}
                                   </select>
                                   <ChevronDown size={16} />
                                 </div>
@@ -823,7 +864,7 @@ export function NotificationSettings() {
                                 <div>
                                   <p className="form-hint warning">
                                     <AlertCircle size={14} />
-                                    No phone numbers available in the pool.
+                                    No phone numbers available.
                                   </p>
                                   <button className="btn btn-secondary btn-sm" style={{ marginTop: '8px' }} onClick={() => navigate('/phone-settings')}>
                                     <Phone size={14} />

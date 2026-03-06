@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Users, DollarSign, Activity, TrendingDown, Eye, Trash2, Plus, Minus, ChevronRight, AlertTriangle } from 'lucide-react';
+import { Users, DollarSign, Activity, TrendingDown, Eye, Trash2, Plus, Minus, ChevronRight, Loader2, Building2 } from 'lucide-react';
 import { adminApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
@@ -42,15 +42,21 @@ export default function AdminDashboard() {
   const [limit] = useState(50);
   const [offset, setOffset] = useState(0);
 
-  // Tenant error feed
-  const [tenantErrors, setTenantErrors] = useState<any[]>([]);
-  const [tenantErrorsTotal, setTenantErrorsTotal] = useState(0);
-  const [failedCount24h, setFailedCount24h] = useState(0);
-  const [errorsLoading, setErrorsLoading] = useState(true);
-  const [errorsLimit] = useState(10);
-  const [errorsOffset, setErrorsOffset] = useState(0);
-  const [errorStatusFilter, setErrorStatusFilter] = useState('failed');
-  const [expandedErrorId, setExpandedErrorId] = useState<string | null>(null);
+  // Phone pricing config
+  const [phonePriceMonthly, setPhonePriceMonthly] = useState<string>('');
+  const [phoneGracePeriodDays, setPhoneGracePeriodDays] = useState<string>('30');
+  const [phonePricingSaving, setPhonePricingSaving] = useState(false);
+  const [currentStripePriceId, setCurrentStripePriceId] = useState<string | null>(null);
+
+  // Test customer setup
+  const [testData, setTestData] = useState<Record<string, string>>({
+    customerName: 'Test Customer', firstName: 'Test', accountName: 'Test Business',
+    category: 'House Cleaning', city: 'Tampa', state: 'FL', location: 'Tampa, FL', zip: '33601',
+    message: 'Looking for reliable cleaning services', serviceDescription: 'Standard home cleaning',
+    addons: '', frequency: 'Weekly', bedrooms: '3', bathrooms: '2',
+    price: '$120', pets: 'None', estimate: '$120', dates: 'Flexible',
+  });
+  const [testConfigSaving, setTestConfigSaving] = useState(false);
 
   useEffect(() => {
     if (user?.role !== 'ADMIN') {
@@ -60,6 +66,8 @@ export default function AdminDashboard() {
     }
 
     loadData();
+    loadPhonePricing();
+    loadAdminConfig();
   }, [user, offset, tierFilter, search]);
 
   const loadData = async () => {
@@ -80,29 +88,62 @@ export default function AdminDashboard() {
     }
   };
 
-  const loadTenantErrors = async () => {
+
+  const loadPhonePricing = async () => {
     try {
-      setErrorsLoading(true);
-      const result = await adminApi.getTenantErrors({
-        status: errorStatusFilter,
-        limit: errorsLimit,
-        offset: errorsOffset,
-      });
-      setTenantErrors(result.logs);
-      setTenantErrorsTotal(result.total);
-      setFailedCount24h(result.failedCount24h);
+      const pricing = await adminApi.getPhonePricing();
+      if (pricing.priceMonthly != null) setPhonePriceMonthly(pricing.priceMonthly.toString());
+      setPhoneGracePeriodDays(pricing.gracePeriodDays.toString());
+      setCurrentStripePriceId(pricing.stripePriceId);
     } catch {
-      console.error('Failed to load tenant errors');
-    } finally {
-      setErrorsLoading(false);
+      // keep defaults
     }
   };
 
-  useEffect(() => {
-    if (user?.role === 'ADMIN') {
-      loadTenantErrors();
+  const handleSavePhonePricing = async () => {
+    const price = parseFloat(phonePriceMonthly);
+    const grace = parseInt(phoneGracePeriodDays, 10);
+    if (isNaN(price) || price <= 0) {
+      notify.error('Invalid', 'Price must be a positive number');
+      return;
     }
-  }, [errorsOffset, errorStatusFilter]);
+    if (isNaN(grace) || grace < 0) {
+      notify.error('Invalid', 'Grace period must be 0 or more days');
+      return;
+    }
+    try {
+      setPhonePricingSaving(true);
+      const result = await adminApi.updatePhonePricing(price, grace);
+      setCurrentStripePriceId(result.stripePriceId);
+      notify.success('Saved', `Phone pricing updated: $${result.priceMonthly}/mo, ${result.gracePeriodDays}d grace`);
+    } catch (err: any) {
+      notify.error('Error', err.response?.data?.message || 'Failed to save phone pricing');
+    } finally {
+      setPhonePricingSaving(false);
+    }
+  };
+
+  const loadAdminConfig = async () => {
+    try {
+      const cfg = await adminApi.getAdminConfig();
+      if (cfg?.testData) setTestData(prev => ({ ...prev, ...cfg.testData }));
+    } catch {
+      // keep defaults
+    }
+  };
+
+  const handleSaveTestConfig = async () => {
+    try {
+      setTestConfigSaving(true);
+      const updated = await adminApi.updateAdminConfig(testData);
+      if (updated?.testData) setTestData(prev => ({ ...prev, ...updated.testData }));
+      notify.success('Saved', 'Test customer settings updated');
+    } catch {
+      notify.error('Error', 'Failed to save test customer settings');
+    } finally {
+      setTestConfigSaving(false);
+    }
+  };
 
   const handleSearch = (value: string) => {
     setSearch(value);
@@ -210,140 +251,16 @@ export default function AdminDashboard() {
             <h3 className="text-2xl md:text-3xl font-bold text-slate-900 mt-1">{stats.churnRate}%</h3>
           </div>
 
-          <div className={`bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border shadow-sm hover:shadow-md transition-all ${failedCount24h > 0 ? 'border-red-200' : 'border-slate-100'}`}>
-            <div className={`w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4 ${failedCount24h > 0 ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-400'}`}>
-              <AlertTriangle className="w-5 h-5 md:w-6 md:h-6" />
+          <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div className="w-10 h-10 md:w-12 md:h-12 bg-cyan-50 text-cyan-600 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
+              <Building2 className="w-5 h-5 md:w-6 md:h-6" />
             </div>
-            <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Failed SMS (24h)</p>
-            <h3 className={`text-2xl md:text-3xl font-bold mt-1 ${failedCount24h > 0 ? 'text-red-600' : 'text-slate-900'}`}>{failedCount24h}</h3>
+            <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Connected Accounts</p>
+            <h3 className="text-2xl md:text-3xl font-bold text-slate-900 mt-1">{stats.totalConnectedAccounts}</h3>
           </div>
+
         </section>
       )}
-
-      {/* SMS Error Feed */}
-      <section className="bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm p-4 md:p-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-          <div>
-            <h2 className="text-xl md:text-2xl font-bold text-slate-900">SMS Error Feed</h2>
-            <p className="text-sm text-slate-500 mt-1">{tenantErrorsTotal} total {errorStatusFilter === 'all' ? 'entries' : errorStatusFilter}</p>
-          </div>
-          <select
-            value={errorStatusFilter}
-            onChange={(e) => { setErrorStatusFilter(e.target.value); setErrorsOffset(0); }}
-            className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
-          >
-            <option value="failed">Failed Only</option>
-            <option value="all">All Statuses</option>
-            <option value="pending">Pending</option>
-            <option value="sent">Sent</option>
-            <option value="delivered">Delivered</option>
-          </select>
-        </div>
-
-        {errorsLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <p className="text-slate-500">Loading...</p>
-          </div>
-        ) : tenantErrors.length === 0 ? (
-          <div className="text-center py-12">
-            <p className="text-slate-500">No {errorStatusFilter === 'all' ? 'notifications' : errorStatusFilter + ' notifications'} found</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {tenantErrors.map((log: any) => (
-              <div
-                key={log.id}
-                className="border border-slate-100 rounded-xl p-4 hover:bg-slate-50 transition-colors cursor-pointer"
-                onClick={() => setExpandedErrorId(expandedErrorId === log.id ? null : log.id)}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase shrink-0 ${
-                      log.status === 'failed' ? 'bg-red-100 text-red-700' :
-                      log.status === 'delivered' ? 'bg-green-100 text-green-700' :
-                      log.status === 'sent' ? 'bg-blue-100 text-blue-700' :
-                      'bg-yellow-100 text-yellow-700'
-                    }`}>
-                      {log.status}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-900 truncate">
-                        {log.savedAccount?.businessName || 'Unknown Account'}
-                      </p>
-                      <p className="text-xs text-slate-500 truncate">
-                        {log.savedAccount?.user?.email || 'Unknown user'} &middot; {log.ruleName || 'Manual SMS'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0 ml-4">
-                    <p className="text-xs text-slate-500">
-                      {new Date(log.createdAt).toLocaleDateString()}{' '}
-                      {new Date(log.createdAt).toLocaleTimeString()}
-                    </p>
-                    <p className="text-xs font-mono text-slate-400">{log.toPhone}</p>
-                  </div>
-                </div>
-                {expandedErrorId === log.id && (
-                  <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
-                    {log.error && (
-                      <div className="bg-red-50 border border-red-100 rounded-lg p-3">
-                        <p className="text-xs font-semibold text-red-700">Error</p>
-                        <p className="text-xs text-red-600 mt-1">{log.error}</p>
-                      </div>
-                    )}
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div>
-                        <span className="text-slate-500">From:</span>{' '}
-                        <span className="font-mono text-slate-700">{log.fromPhone || 'N/A'}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500">To:</span>{' '}
-                        <span className="font-mono text-slate-700">{log.toPhone}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500">Provider:</span>{' '}
-                        <span className="text-slate-700">{log.provider || 'N/A'}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500">Rule:</span>{' '}
-                        <span className="text-slate-700">{log.ruleName || 'N/A'}</span>
-                      </div>
-                    </div>
-                    {log.messageBody && (
-                      <div className="bg-slate-50 rounded-lg p-3">
-                        <p className="text-xs font-semibold text-slate-600">Message</p>
-                        <p className="text-xs text-slate-500 mt-1 whitespace-pre-wrap line-clamp-4">{log.messageBody}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {tenantErrorsTotal > errorsLimit && (
-          <div className="flex items-center justify-between mt-6 pt-6 border-t border-slate-100">
-            <button
-              onClick={() => setErrorsOffset(Math.max(0, errorsOffset - errorsLimit))}
-              disabled={errorsOffset === 0}
-              className="px-4 md:px-6 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-            >
-              Previous
-            </button>
-            <span className="text-xs md:text-sm text-slate-600">
-              {errorsOffset + 1}–{Math.min(errorsOffset + errorsLimit, tenantErrorsTotal)} of {tenantErrorsTotal}
-            </span>
-            <button
-              onClick={() => setErrorsOffset(errorsOffset + errorsLimit)}
-              disabled={errorsOffset + errorsLimit >= tenantErrorsTotal}
-              className="px-4 md:px-6 py-2 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-            >
-              Next
-            </button>
-          </div>
-        )}
-      </section>
 
       {/* Users Section */}
       <section className="bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm p-4 md:p-8">
@@ -387,6 +304,11 @@ export default function AdminDashboard() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-slate-900 truncate">{u.name || u.email.split('@')[0]}</p>
                   <p className="text-xs text-slate-500 truncate">{u.email}</p>
+                  {u.connectedAccounts.length > 0 && (
+                    <p className="text-xs text-blue-600 truncate mt-0.5">
+                      {u.connectedAccounts.map((a) => a.businessName).join(', ')}
+                    </p>
+                  )}
                 </div>
                 <span className={tier.className}>{tier.label}</span>
                 <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
@@ -402,6 +324,7 @@ export default function AdminDashboard() {
               <tr className="border-b border-slate-100">
                 <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Email</th>
                 <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Name</th>
+                <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Accounts</th>
                 <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Tier</th>
                 <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Leads</th>
                 <th className="text-left py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
@@ -417,6 +340,20 @@ export default function AdminDashboard() {
                   <tr key={u.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                     <td className="py-4 px-4 text-sm text-slate-900">{u.email}</td>
                     <td className="py-4 px-4 text-sm text-slate-700">{u.name || '—'}</td>
+                    <td className="py-4 px-4">
+                      {u.connectedAccounts.length > 0 ? (
+                        <div className="flex flex-col gap-1">
+                          {u.connectedAccounts.map((a) => (
+                            <div key={a.id} className="flex items-center gap-1.5">
+                              <Building2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                              <span className="text-xs text-slate-700 truncate max-w-[180px]" title={a.businessName}>{a.businessName}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                      )}
+                    </td>
                     <td className="py-4 px-4">
                       <span className={tier.className}>{tier.label}</span>
                     </td>
@@ -528,6 +465,182 @@ export default function AdminDashboard() {
           </div>
         )}
       </section>
+
+      {/* Phone Number Pricing */}
+      <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="p-4 md:p-6 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <DollarSign className="w-5 h-5 text-emerald-600" />
+            <h2 className="text-lg md:text-xl font-bold text-slate-900">Phone Number Pricing</h2>
+          </div>
+          <p className="text-sm text-slate-500 mt-1">Set the monthly price and grace period for tenant dedicated phone numbers.</p>
+        </div>
+        <div className="p-4 md:p-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-slate-700">Monthly Price ($)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={phonePriceMonthly}
+                onChange={e => setPhonePriceMonthly(e.target.value)}
+                placeholder="5.00"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-slate-700">Grace Period (days)</label>
+              <input
+                type="number"
+                min="0"
+                value={phoneGracePeriodDays}
+                onChange={e => setPhoneGracePeriodDays(e.target.value)}
+                placeholder="30"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              />
+              <p className="text-xs text-slate-400">Days to keep number after tenant cancels</p>
+            </div>
+            <div>
+              <button
+                onClick={handleSavePhonePricing}
+                disabled={phonePricingSaving}
+                className="w-full px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {phonePricingSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <DollarSign className="w-4 h-4" />}
+                Save Pricing
+              </button>
+            </div>
+          </div>
+          {currentStripePriceId && (
+            <div className="mt-3 text-xs text-slate-400">
+              Stripe Price ID: <code className="bg-slate-50 px-1.5 py-0.5 rounded">{currentStripePriceId}</code>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Test Customer Setup */}
+      <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="p-4 md:p-6 border-b border-slate-100">
+          <h2 className="text-lg md:text-xl font-bold text-slate-900">Test Customer Setup</h2>
+          <p className="text-sm text-slate-500 mt-1">Placeholder data injected into template variables when any tenant runs a test call.</p>
+        </div>
+        <div className="p-4 md:p-6 space-y-6">
+          {(() => {
+            const f = (key: string, label: string, vars: string[], placeholder: string) => (
+              <div className="space-y-1.5">
+                <div className="flex items-center flex-wrap gap-1.5">
+                  <label className="text-xs font-bold text-slate-700">{label}</label>
+                  {vars.map(v => (
+                    <span key={v} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg text-[11px] font-mono border border-blue-100">{v}</span>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  value={testData[key] ?? ''}
+                  onChange={e => setTestData(prev => ({ ...prev, [key]: e.target.value }))}
+                  placeholder={placeholder}
+                />
+              </div>
+            );
+            return (
+              <>
+                {/* Customer */}
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Customer</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {f('customerName', 'Full Name',   ['{customerName}', '{lead.name}'], 'Test Customer')}
+                    {f('firstName',    'First Name',  ['{firstName}'],                  'Test')}
+                    {f('accountName',  'Business Name', ['{accountName}'],              'Test Business')}
+                  </div>
+                </div>
+
+                {/* Location */}
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Location</p>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {f('location', 'City, State', ['{location}', '{lead.location}'], 'Tampa, FL')}
+                    {f('city',     'City',        ['{city}'],                        'Tampa')}
+                    {f('state',    'State',       ['{state}'],                       'FL')}
+                    {f('zip',      'ZIP',         ['{lead.zip}'],                    '33601')}
+                  </div>
+                </div>
+
+                {/* Service */}
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Service</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {f('category',           'Category',            ['{category}'],                    'House Cleaning')}
+                    {f('serviceDescription', 'Service Description', ['{lead.serviceDescription}'],     'Standard home cleaning')}
+                    {f('addons',             'Add-ons',             ['{lead.addons}'],                 '')}
+                    {f('frequency',          'Frequency',           ['{lead.frequency}'],              'Weekly')}
+                    {f('price',              'Price',               ['{lead.price}'],                  '$120')}
+                    {f('estimate',           'Estimate',            ['{lead.estimate}'],               '$120')}
+                    {f('dates',              'Dates',               ['{lead.dates}'],                  'Flexible')}
+                  </div>
+                </div>
+
+                {/* Property */}
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Property</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {f('bedrooms',  'Bedrooms',  ['{lead.bedrooms}'],  '3')}
+                    {f('bathrooms', 'Bathrooms', ['{lead.bathrooms}'], '2')}
+                    {f('pets',      'Pets',      ['{lead.pets}'],      'None')}
+                  </div>
+                </div>
+
+                {/* Message */}
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Message</p>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <label className="text-xs font-bold text-slate-700">Customer Message</label>
+                      <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg text-[11px] font-mono border border-blue-100">{'{lead.message}'}</span>
+                    </div>
+                    <textarea
+                      rows={2}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all resize-none"
+                      value={testData['message'] ?? ''}
+                      onChange={e => setTestData(prev => ({ ...prev, message: e.target.value }))}
+                      placeholder="Looking for reliable cleaning services"
+                    />
+                  </div>
+                </div>
+
+                {/* Auto-built / read-only variables */}
+                <div className="bg-slate-50 rounded-xl p-4">
+                  <p className="text-xs font-bold text-slate-600 mb-3">Auto-built variables (read-only)</p>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { name: '{summary}', value: `${testData['customerName'] || 'Test Customer'} — ${testData['category'] || 'House Cleaning'} — ${testData['location'] || 'Tampa, FL'}` },
+                      { name: '{phone}',   value: 'from test call input' },
+                      { name: '{digit}',   value: 'from agent accept digits' },
+                    ].map(v => (
+                      <div key={v.name} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs">
+                        <span className="font-mono text-blue-700 font-semibold">{v.name}</span>
+                        <span className="text-slate-300">→</span>
+                        <span className="text-slate-500 italic">{v.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+
+          <button
+            className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 shadow-sm shadow-blue-200 transition-all disabled:opacity-50 flex items-center gap-2"
+            onClick={handleSaveTestConfig}
+            disabled={testConfigSaving}
+          >
+            {testConfigSaving && <Loader2 size={14} className="animate-spin" />}
+            Save
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

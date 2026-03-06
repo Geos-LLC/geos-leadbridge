@@ -490,6 +490,16 @@ export class ThumbtackController {
       const errMsg = err.message?.toLowerCase() || '';
       console.log(`[ThumbtackController] Import error - message: "${err.message}"`);
 
+      if (err.message?.startsWith('THUMBTACK_SERVICE_DELETED')) {
+        console.log(`[ThumbtackController] Thumbtack service deleted — skipping gracefully`);
+        return {
+          success: false,
+          skipped: true,
+          reason: 'service_deleted',
+          message: 'Thumbtack service was deleted — negotiation skipped',
+        };
+      }
+
       if (errMsg.includes('login required') ||
           errMsg.includes('session expired') ||
           errMsg.includes('reconnect') ||
@@ -526,6 +536,20 @@ export class ThumbtackController {
       message: `Imported ${results.imported} of ${negotiationIds.length} negotiations`,
       ...results,
     };
+  }
+
+  /**
+   * PATCH /api/v1/thumbtack/leads/:thumbtackId/patch-details
+   * Update a lead's details with data scraped from the Thumbtack page.
+   * Called by the extension after scraping an individual lead page.
+   */
+  @Patch('leads/:thumbtackId/patch-details')
+  async patchLeadDetails(
+    @CurrentUser() user: any,
+    @Param('thumbtackId') thumbtackId: string,
+    @Body() body: { budget?: number; city?: string; state?: string; postcode?: string; message?: string },
+  ) {
+    return this.leadsService.patchLeadDetails(user.id, thumbtackId, body);
   }
 
   // ==========================================

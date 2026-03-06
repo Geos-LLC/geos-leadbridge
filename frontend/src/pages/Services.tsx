@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
   Bot, Pencil, Phone, Send, ChevronUp, Trash2, Save,
+  Key, Hash, ExternalLink, Link2,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -11,10 +12,11 @@ import {
 import type { TenantPhoneNumber } from '../services/api';
 import type {
   AutomationRule, NotificationRule, SavedAccount, MessageTemplate,
-  CallConnectMode, AgentStrategy, SigcorePhoneNumber,
+  CallConnectMode, AgentStrategy, SigcorePhoneNumber, AvailablePhoneNumber,
 } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
+import NoAccountsOverlay from '../components/NoAccountsOverlay';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 
@@ -39,11 +41,12 @@ interface ServiceCardProps {
   children?: React.ReactNode;
   iconBgColor?: string;
   iconTextColor?: string;
+  cardRef?: (el: HTMLDivElement | null) => void;
 }
 
-function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, expanded, onExpand, statusText, warningText, setupRequired, children, iconBgColor = 'bg-blue-50', iconTextColor = 'text-blue-600' }: ServiceCardProps) {
+function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, expanded, onExpand, statusText, warningText, setupRequired, children, iconBgColor = 'bg-blue-50', iconTextColor = 'text-blue-600', cardRef }: ServiceCardProps) {
   return (
-    <div className={`bg-white rounded-3xl border shadow-sm overflow-hidden transition-all ${comingSoon ? 'opacity-75 bg-slate-50/50 border-slate-100' : setupRequired ? 'border-orange-200 hover:border-orange-300' : 'border-slate-100 hover:border-blue-200'}`}>
+    <div ref={cardRef} className={`bg-white rounded-3xl border shadow-sm overflow-hidden transition-all ${comingSoon ? 'opacity-75 bg-slate-50/50 border-slate-100' : setupRequired ? 'border-orange-200 hover:border-orange-300' : 'border-slate-100 hover:border-blue-200'}`}>
       <div className="p-6 md:p-8">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
           <div className="flex gap-5">
@@ -116,6 +119,11 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
   );
 }
 
+// Module-level cache — survives navigation unmounts within SPA session
+// Keyed by accountId so switching accounts still fetches fresh data
+const _svcCache = new Map<string, Record<string, any>>();
+let _svcLoaded = false; // true once we've fetched at least once (even if no accounts)
+
 // -- Main Services Page --
 export function Services() {
   const navigate = useNavigate();
@@ -126,8 +134,10 @@ export function Services() {
 
   // Account state — seed from Zustand store so there's no loading flash
   const [accounts, setAccounts] = useState<SavedAccount[]>(storedAccounts);
-  const [selectedAccountId, setSelectedAccountId] = useState(storedAccounts[0]?.id || '');
-  const [loading, setLoading] = useState(storedAccounts.length === 0);
+  const initialAccountId = storedAccounts[0]?.id || '';
+  const [selectedAccountId, setSelectedAccountId] = useState(initialAccountId);
+  const sc = _svcCache.get(initialAccountId); // cached service data for this account
+  const [loading, setLoading] = useState(!_svcLoaded && storedAccounts.length === 0 && !sc);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -136,23 +146,40 @@ export function Services() {
   const [confirmDeleteAlert, setConfirmDeleteAlert] = useState(false);
 
   // Auto Reply rules (dynamic array of all new_lead automation rules)
-  const [autoReplyRules, setAutoReplyRules] = useState<AutomationRule[]>([]);
+  const [autoReplyRules, setAutoReplyRules] = useState<AutomationRule[]>(sc?.autoReplyRules ?? []);
   const autoReplyEnabled = autoReplyRules.some(r => r.enabled);
   const firstReplyRule = autoReplyRules.find(r => r.delayMinutes === 0 || !r.delayMinutes) || null;
 
   // Other service rules
-  const [leadAlertRule, setLeadAlertRule] = useState<NotificationRule | null>(null);
+  const [leadAlertRule, setLeadAlertRule] = useState<NotificationRule | null>(sc?.leadAlertRule ?? null);
 
 
   // Supporting data
-  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
-  const [poolPhones, setPoolPhones] = useState<{ id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean; smsApproved?: boolean }[]>([]);
-  const [ctOwnPhoneNumbers, setCtOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>([]);
+  const [templates, setTemplates] = useState<MessageTemplate[]>(sc?.templates ?? []);
+  const [poolPhones, setPoolPhones] = useState<{ id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean; smsApproved?: boolean }[]>(sc?.poolPhones ?? []);
+  const [ctOwnPhoneNumbers, setCtOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>(sc?.ctOwnPhoneNumbers ?? []);
   // ctSigcoreConnected tracked via local var in loadServiceData (no longer needed in JSX)
-  const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
+  const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>(sc?.tenantPhones ?? []);
 
   // UI state
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  const [showPhoneSetupModal, setShowPhoneSetupModal] = useState(false);
+  // OpenPhone setup modal
+  const [showOpenPhoneModal, setShowOpenPhoneModal] = useState(false);
+  const [opApiKey, setOpApiKey] = useState('');
+  const [opConnecting, setOpConnecting] = useState(false);
+  const [opConnectError, setOpConnectError] = useState<string | null>(null);
+  // Dedicated number setup modal
+  const [showDedicatedModal, setShowDedicatedModal] = useState(false);
+  const [dpAreaCode, setDpAreaCode] = useState('');
+  const [dpLocality, setDpLocality] = useState('');
+  const [dpSearchLoading, setDpSearchLoading] = useState(false);
+  const [dpAvailableNumbers, setDpAvailableNumbers] = useState<AvailablePhoneNumber[]>([]);
+  const [dpPurchasingNumber, setDpPurchasingNumber] = useState<string | null>(null);
+  const [dpSearchError, setDpSearchError] = useState<string | null>(null);
+  const [dpSmsConsent, setDpSmsConsent] = useState(false);
+  const [dpPhonePrice, setDpPhonePrice] = useState<number | null>(null);
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Template editor modal state
   const [templateEditor, setTemplateEditor] = useState<{
     mode: 'create' | 'service-edit';
@@ -164,29 +191,29 @@ export function Services() {
   } | null>(null);
 
   // Instant Call Connect state
-  const [ccEnabled, setCcEnabled] = useState(false);
-  const [ccMode, setCcMode] = useState<CallConnectMode>('AGENT_FIRST');
-  const [ccAgentStrategy, setCcAgentStrategy] = useState<AgentStrategy>('owner');
-  const [ccAgentPhone, setCcAgentPhone] = useState('');
-  const [ccMaxAttempts, setCcMaxAttempts] = useState(2);
-  const [ccQuietEnabled, setCcQuietEnabled] = useState(false);
-  const [ccQuietTimezone, setCcQuietTimezone] = useState('America/New_York');
-  const [ccQuietStart, setCcQuietStart] = useState('22:00');
-  const [ccQuietEnd, setCcQuietEnd] = useState('08:00');
-  const [ccAgentAcceptDigits, setCcAgentAcceptDigits] = useState('1');
-  const [ccAgentWhisperMessage, setCcAgentWhisperMessage] = useState('');
-  const [ccLeadGreetingMessage, setCcLeadGreetingMessage] = useState('');
-  const [ccVoicemailEnabled, setCcVoicemailEnabled] = useState(false);
-  const [ccVoicemailMessage, setCcVoicemailMessage] = useState('');
-  const [ccVoicemailRecordingUrl, setCcVoicemailRecordingUrl] = useState('');
-  const [ccBotNumber, setCcBotNumber] = useState('');
+  const [ccEnabled, setCcEnabled] = useState(sc?.ccEnabled ?? false);
+  const [ccMode, setCcMode] = useState<CallConnectMode>(sc?.ccMode ?? 'AGENT_FIRST');
+  const [ccAgentStrategy, setCcAgentStrategy] = useState<AgentStrategy>(sc?.ccAgentStrategy ?? 'owner');
+  const [ccAgentPhone, setCcAgentPhone] = useState(sc?.ccAgentPhone ?? '');
+  const [ccMaxAttempts, setCcMaxAttempts] = useState(sc?.ccMaxAttempts ?? 2);
+  const [ccQuietEnabled, setCcQuietEnabled] = useState(sc?.ccQuietEnabled ?? false);
+  const [ccQuietTimezone, setCcQuietTimezone] = useState(sc?.ccQuietTimezone ?? 'America/New_York');
+  const [ccQuietStart, setCcQuietStart] = useState(sc?.ccQuietStart ?? '22:00');
+  const [ccQuietEnd, setCcQuietEnd] = useState(sc?.ccQuietEnd ?? '08:00');
+  const [ccAgentAcceptDigits, setCcAgentAcceptDigits] = useState(sc?.ccAgentAcceptDigits ?? '1');
+  const [ccAgentWhisperMessage, setCcAgentWhisperMessage] = useState(sc?.ccAgentWhisperMessage ?? '');
+  const [ccLeadGreetingMessage, setCcLeadGreetingMessage] = useState(sc?.ccLeadGreetingMessage ?? '');
+  const [ccVoicemailEnabled, setCcVoicemailEnabled] = useState(sc?.ccVoicemailEnabled ?? false);
+  const [ccVoicemailMessage, setCcVoicemailMessage] = useState(sc?.ccVoicemailMessage ?? '');
+  const [ccVoicemailRecordingUrl, setCcVoicemailRecordingUrl] = useState(sc?.ccVoicemailRecordingUrl ?? '');
+  const [ccBotNumber, setCcBotNumber] = useState(sc?.ccBotNumber ?? '');
   const [ccSaving, setCcSaving] = useState(false);
   const [ccTestPhone, setCcTestPhone] = useState(() => localStorage.getItem('cc_test_phone') || '');
   const [ccTesting, setCcTesting] = useState(false);
   // Track which saved template is currently loaded in each CC message field (for edit button)
-  const [ccWhisperTemplateId, setCcWhisperTemplateId] = useState<string | null>(null);
-  const [ccGreetingTemplateId, setCcGreetingTemplateId] = useState<string | null>(null);
-  const [ccVoicemailTemplateId, setCcVoicemailTemplateId] = useState<string | null>(null);
+  const [ccWhisperTemplateId, setCcWhisperTemplateId] = useState<string | null>(sc?.ccWhisperTemplateId ?? null);
+  const [ccGreetingTemplateId, setCcGreetingTemplateId] = useState<string | null>(sc?.ccGreetingTemplateId ?? null);
+  const [ccVoicemailTemplateId, setCcVoicemailTemplateId] = useState<string | null>(sc?.ccVoicemailTemplateId ?? null);
 
   // CC dirty tracking
   const [ccSavedSnapshot, setCcSavedSnapshot] = useState<{
@@ -197,34 +224,46 @@ export function Services() {
     leadGreetingMessage: string;
     voicemailMessage: string;
     voicemailRecordingUrl: string;
-  } | null>(null);
+    callForwardingNumber: string;
+  } | null>(sc?.ccSavedSnapshot ?? null);
   const [ccValidationModalOpen, setCcValidationModalOpen] = useState(false);
   const [ccUnsavedModalOpen, setCcUnsavedModalOpen] = useState(false);
 
   // Lead Alerts form state (needed for first-time creation)
-  const [alertToPhone, setAlertToPhone] = useState('');
-  const [alertFromPhone, setAlertFromPhone] = useState('');
+  const [alertToPhone, setAlertToPhone] = useState(sc?.alertToPhone ?? '');
+  const [alertFromPhone, setAlertFromPhone] = useState(sc?.alertFromPhone ?? '');
 
   // Customer Texting state
-  const [ctEnabled, setCtEnabled] = useState(false);
+  const [ctEnabled, setCtEnabled] = useState(sc?.ctEnabled ?? false);
   const [ctAutoReplyTemplate, setCtAutoReplyTemplate] = useState(
-    "Hi {customerName}, this is {accountName}. We just received your request for {category}. When would be a good time to call you?"
+    sc?.ctAutoReplyTemplate ?? "Hi {customerName}, this is {accountName}. We just received your request for {category}. When would be a good time to call you?"
   );
   const [ctSaving, setCtSaving] = useState(false);
-  const [ctFromPhone, setCtFromPhone] = useState('');
-  const [ctSigcoreFromPhone, setCtSigcoreFromPhone] = useState<string | null>(null);
+  const [ctFromPhone, setCtFromPhone] = useState(sc?.ctFromPhone ?? '');
+  const [ctSigcoreFromPhone, setCtSigcoreFromPhone] = useState<string | null>(sc?.ctSigcoreFromPhone ?? null);
   const [ctTestPhone, setCtTestPhone] = useState(() => localStorage.getItem('ct_test_phone') || '');
   const [ctTestStatus, setCtTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
-  const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string; fromPhone: string } | null>(null);
-  const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>('');
+  const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string; fromPhone: string; smsForwardingNumber: string } | null>(sc?.ctSavedSnapshot ?? null);
+  const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>(sc?.ctSelectedTemplateId ?? '');
+  const [ctSmsForwardingNumber, setCtSmsForwardingNumber] = useState(sc?.ctSmsForwardingNumber ?? '');
+  const [ctSigcoreProvider, setCtSigcoreProvider] = useState<string | null>(sc?.ctSigcoreProvider ?? null);
+  const [ctForwardingEditing, setCtForwardingEditing] = useState(false);
+  const [ccCallForwardingNumber, setCcCallForwardingNumber] = useState(sc?.ccCallForwardingNumber ?? '');
 
-  // Derived: unsaved Lead Alert changes (only alertToPhone is pending — from-phone saves immediately)
-  const alertDirty = !!leadAlertRule && alertToPhone !== (leadAlertRule.toPhone || '');
+  // Lead Alert saved snapshot for dirty tracking
+  const [alertSavedSnapshot, setAlertSavedSnapshot] = useState<{ toPhone: string; fromPhone: string } | null>(sc?.alertSavedSnapshot ?? null);
+
+  // Derived: unsaved Lead Alert changes
+  const alertDirty = alertSavedSnapshot !== null && (
+    alertToPhone !== alertSavedSnapshot.toPhone ||
+    alertFromPhone !== alertSavedSnapshot.fromPhone
+  );
 
   // Derived: unsaved CT changes
   const ctDirty = ctSavedSnapshot !== null && (
     ctAutoReplyTemplate !== ctSavedSnapshot.autoReplyTemplate ||
-    ctFromPhone !== ctSavedSnapshot.fromPhone
+    ctFromPhone !== ctSavedSnapshot.fromPhone ||
+    ctSmsForwardingNumber !== ctSavedSnapshot.smsForwardingNumber
   );
 
   // Derived: unsaved CC changes
@@ -235,7 +274,8 @@ export function Services() {
     ccAgentWhisperMessage !== ccSavedSnapshot.agentWhisperMessage ||
     ccLeadGreetingMessage !== ccSavedSnapshot.leadGreetingMessage ||
     ccVoicemailMessage !== ccSavedSnapshot.voicemailMessage ||
-    ccVoicemailRecordingUrl !== ccSavedSnapshot.voicemailRecordingUrl
+    ccVoicemailRecordingUrl !== ccSavedSnapshot.voicemailRecordingUrl ||
+    ccCallForwardingNumber !== ccSavedSnapshot.callForwardingNumber
   );
 
   useEffect(() => {
@@ -264,15 +304,17 @@ export function Services() {
       }
     } finally {
       setLoading(false);
+      _svcLoaded = true;
     }
   }
 
   async function loadServiceData(accountId: string) {
     try {
-      setLoading(true);
+      // Only show loading spinner on first load — cached data renders instantly
+      if (!_svcLoaded && !_svcCache.has(accountId)) setLoading(true);
       setError(null);
 
-      const [automationRes, notifRes, templatesRes, poolRes, ccRes, ctRes, notifSettingsRes] = await Promise.all([
+      const [automationRes, notifRes, templatesRes, poolRes, ccRes, ctRes, notifSettingsRes, tenantPhonesRes] = await Promise.all([
         automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] })),
         notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] })),
         templatesApi.getTemplates().catch(() => ({ templates: [] as MessageTemplate[] })),
@@ -280,15 +322,19 @@ export function Services() {
         callConnectApi.getSettings(accountId).catch(() => ({ settings: null })),
         notificationsApi.getCustomerTextingSettings(accountId).catch(() => null),
         notificationsApi.getSettings(accountId).catch(() => null),
+        notificationsApi.listTenantPhones().catch(() => ({ success: false as const, data: [] as TenantPhoneNumber[] })),
       ]);
 
       const ccs = ccRes.settings;
-      const defaultBotNumber = poolRes.phoneNumbers[0]?.phoneNumber || '';
+      const activeTenantPhones = tenantPhonesRes.success ? tenantPhonesRes.data.filter(tp => tp.status === 'ACTIVE') : [];
+      setTenantPhones(activeTenantPhones);
+      // Bot number defaults to first dedicated (tenant) phone — never pool
+      const defaultBotNumber = activeTenantPhones[0]?.phoneNumber || '';
       if (ccs) {
         setCcEnabled(ccs.enabled);
         setCcMode(ccs.mode);
         setCcAgentStrategy(ccs.agentStrategy);
-        setCcAgentPhone(ccs.agentPhoneE164 || '');
+        // ccAgentPhone set below after byoPhone is resolved
         setCcMaxAttempts(ccs.maxAgentAttempts);
         setCcQuietEnabled(ccs.quietHoursEnabled);
         setCcQuietTimezone(ccs.quietHoursTimezone || 'America/New_York');
@@ -305,7 +351,7 @@ export function Services() {
         setCcEnabled(false);
         setCcMode('AGENT_FIRST');
         setCcAgentStrategy('owner');
-        setCcAgentPhone('');
+        // ccAgentPhone set below after byoPhone is resolved
         setCcMaxAttempts(2);
         setCcQuietEnabled(false);
         setCcQuietTimezone('America/New_York');
@@ -341,17 +387,35 @@ export function Services() {
       setLeadAlertRule(leadAlert);
       setPoolPhones(poolRes.phoneNumbers);
 
-      // Load tenant purchased phone numbers
-      notificationsApi.listTenantPhones().then(r => {
-        if (r.success) setTenantPhones(r.data.filter(tp => tp.status === 'ACTIVE'));
-      }).catch(() => {});
+      // (tenant phones loaded in main Promise.all above)
 
       // Load own provider connection status for CT Option 2
       const connected = !!notifSettingsRes?.settings?.sigcoreConnected;
       // connected state no longer needed in JSX — just used locally here
-      setCtSigcoreFromPhone(notifSettingsRes?.settings?.sigcoreFromPhone || null);
-      if (connected) {
-        notificationsApi.getSigcorePhoneNumbers(accountId).then(r => setCtOwnPhoneNumbers(r.phoneNumbers)).catch(() => {});
+      const sigcoreProvider = notifSettingsRes?.settings?.sigcoreProvider || null;
+      const byoPhone = notifSettingsRes?.settings?.sigcoreFromPhone || null;
+      const savedForwarding = notifSettingsRes?.settings?.smsForwardingNumber || '';
+      // For OpenPhone, default "Get replies to" to the BYO number if not explicitly set —
+      // most tenants want replies in their OpenPhone app. Twilio dedicated has no default
+      // since the dedicated number is not the tenant's personal phone.
+      const effectiveForwarding = savedForwarding || (sigcoreProvider === 'openphone' ? byoPhone : null) || '';
+      setCtSigcoreProvider(sigcoreProvider);
+      setCtSigcoreFromPhone(byoPhone);
+      setCtSmsForwardingNumber(effectiveForwarding);
+      // Agent phone: use saved value, else default to BYO number if available
+      const agentPhoneDefault = ccs?.agentPhoneE164 || byoPhone || '';
+      setCcAgentPhone(agentPhoneDefault);
+      // Forward calls to: use saved value, else default to same as agent phone
+      const savedCallFwd = notifSettingsRes?.settings?.callForwardingNumber || '';
+      setCcCallForwardingNumber(savedCallFwd || agentPhoneDefault);
+      // Load phone numbers if connected OR if provisioned (sigcoreProvider may have been cleared
+      // by re-provisioning but the tenant + API key still exist — numbers should still show).
+      const provisioned = !!notifSettingsRes?.settings?.sigcoreProvisioned;
+      if (connected || provisioned) {
+        notificationsApi.getSigcorePhoneNumbers(accountId).then(r => {
+          setCtOwnPhoneNumbers(r.phoneNumbers);
+          const c = _svcCache.get(accountId); if (c) c.ctOwnPhoneNumbers = r.phoneNumbers;
+        }).catch(() => {});
       } else {
         setCtOwnPhoneNumbers([]);
       }
@@ -412,7 +476,7 @@ export function Services() {
       }
       setCtSelectedTemplateId(allTemplates.find(t => t.content === ctContent)?.id || ctTpl?.id || '');
       // Initialize CT snapshot for dirty tracking (always, same as CC)
-      setCtSavedSnapshot({ autoReplyTemplate: ctContent, fromPhone: ctResolvedFromPhone });
+      setCtSavedSnapshot({ autoReplyTemplate: ctContent, fromPhone: ctResolvedFromPhone, smsForwardingNumber: notifSettingsRes?.settings?.smsForwardingNumber || '' });
 
       // Initialize CC snapshot for dirty tracking
       const snapshotWhisper = ccs?.agentWhisperMessage || whisperTpl?.content || '';
@@ -420,22 +484,28 @@ export function Services() {
       const snapshotVoicemail = ccs?.leadVoicemailMessage || voicemailTpl?.content || '';
       setCcSavedSnapshot({
         mode: (ccs?.mode || 'AGENT_FIRST') as CallConnectMode,
-        agentPhone: ccs?.agentPhoneE164 || '',
+        agentPhone: agentPhoneDefault,
         botNumber: ccs?.botNumberE164 || defaultBotNumber,
         agentWhisperMessage: snapshotWhisper,
         leadGreetingMessage: snapshotGreeting,
         voicemailMessage: snapshotVoicemail,
         voicemailRecordingUrl: ccs?.leadVoicemailRecordingUrl || '',
+        callForwardingNumber: savedCallFwd || agentPhoneDefault,
       });
 
       // Pre-fill form states from existing rules
+      const alertTo = leadAlert?.toPhone || '';
+      const alertFrom = leadAlert?.fromPhone || poolRes.phoneNumbers[0]?.phoneNumber || '';
       if (leadAlert) {
-        setAlertToPhone(leadAlert.toPhone || '');
-        setAlertFromPhone(leadAlert.fromPhone || '');
+        setAlertToPhone(alertTo);
+        setAlertFromPhone(alertFrom);
+      } else {
+        setAlertFromPhone(alertFrom);
       }
-      // Default from phone to first pool phone
-      const defaultFrom = poolRes.phoneNumbers[0]?.phoneNumber || '';
-      if (!leadAlert) setAlertFromPhone(defaultFrom);
+      // Initialize alert snapshot for dirty tracking
+      if (leadAlert) {
+        setAlertSavedSnapshot({ toPhone: alertTo, fromPhone: alertFrom });
+      }
 
       // Auto-expand Lead Alerts card if setup is incomplete OR directed here from Dashboard alert
       const toPhoneMissing = leadAlert && !leadAlert.toPhone;
@@ -445,10 +515,52 @@ export function Services() {
         setExpandedCard('lead-alerts');
       }
 
+      // Persist to module-level cache so returning to this page is instant
+      _svcCache.set(accountId, {
+        autoReplyRules: allAutoReplies, leadAlertRule: leadAlert, templates: allTemplates,
+        poolPhones: poolRes.phoneNumbers, tenantPhones: activeTenantPhones, ctOwnPhoneNumbers: ctOwnPhoneNumbers,
+        ccEnabled: ccs?.enabled ?? false, ccMode: (ccs?.mode || 'AGENT_FIRST') as CallConnectMode,
+        ccAgentStrategy: (ccs?.agentStrategy || 'owner') as AgentStrategy,
+        ccAgentPhone: agentPhoneDefault, ccMaxAttempts: ccs?.maxAgentAttempts ?? 2,
+        ccQuietEnabled: ccs?.quietHoursEnabled ?? false,
+        ccQuietTimezone: ccs?.quietHoursTimezone || 'America/New_York',
+        ccQuietStart: ccs?.quietHoursStart || '22:00', ccQuietEnd: ccs?.quietHoursEnd || '08:00',
+        ccAgentAcceptDigits: ccs?.agentAcceptDigits || '0123456789*#',
+        ccAgentWhisperMessage: ccs?.agentWhisperMessage || '',
+        ccLeadGreetingMessage: ccs?.leadGreetingMessage || '',
+        ccVoicemailEnabled: ccs?.leadVoicemailEnabled ?? false,
+        ccVoicemailMessage: ccs?.leadVoicemailMessage || '',
+        ccVoicemailRecordingUrl: ccs?.leadVoicemailRecordingUrl || '',
+        ccBotNumber: ccs?.botNumberE164 || defaultBotNumber,
+        ccWhisperTemplateId: allTemplates.find(t => t.content === (ccs?.agentWhisperMessage || allTemplates.find(tt => tt.name === 'CC - Agent Whisper')?.content || ''))?.id || null,
+        ccGreetingTemplateId: allTemplates.find(t => t.content === (ccs?.leadGreetingMessage || allTemplates.find(tt => tt.name === 'CC - Lead Greeting')?.content || ''))?.id || null,
+        ccVoicemailTemplateId: allTemplates.find(t => t.content === (ccs?.leadVoicemailMessage || allTemplates.find(tt => tt.name === 'CC - Voicemail TTS')?.content || ''))?.id || null,
+        ctEnabled: ctRes?.enabled ?? false,
+        ctAutoReplyTemplate: ctRes?.autoReplyTemplate || allTemplates.find(t => t.name === 'CT - Auto Reply')?.content || '',
+        ctFromPhone: ctResolvedFromPhone, ctSigcoreFromPhone: notifSettingsRes?.settings?.sigcoreFromPhone || null,
+        ctSigcoreProvider: notifSettingsRes?.settings?.sigcoreProvider || null,
+        ctSmsForwardingNumber: notifSettingsRes?.settings?.smsForwardingNumber || '',
+        ccCallForwardingNumber: savedCallFwd || agentPhoneDefault,
+        ctSelectedTemplateId: allTemplates.find(t => t.content === ctContent)?.id || allTemplates.find(t => t.name === 'CT - Auto Reply')?.id || '',
+        alertToPhone: alertTo, alertFromPhone: alertFrom,
+        alertSavedSnapshot: leadAlert ? { toPhone: alertTo, fromPhone: alertFrom } : null,
+        ctSavedSnapshot: { autoReplyTemplate: ctContent, fromPhone: ctResolvedFromPhone, smsForwardingNumber: notifSettingsRes?.settings?.smsForwardingNumber || '' },
+        ccSavedSnapshot: {
+          mode: (ccs?.mode || 'AGENT_FIRST') as CallConnectMode,
+          agentPhone: agentPhoneDefault, botNumber: ccs?.botNumberE164 || defaultBotNumber,
+          agentWhisperMessage: ccs?.agentWhisperMessage || allTemplates.find(t => t.name === 'CC - Agent Whisper')?.content || '',
+          leadGreetingMessage: ccs?.leadGreetingMessage || allTemplates.find(t => t.name === 'CC - Lead Greeting')?.content || '',
+          voicemailMessage: ccs?.leadVoicemailMessage || allTemplates.find(t => t.name === 'CC - Voicemail TTS')?.content || '',
+          voicemailRecordingUrl: ccs?.leadVoicemailRecordingUrl || '',
+          callForwardingNumber: savedCallFwd || agentPhoneDefault,
+        },
+      });
+
     } catch (err: any) {
       setError(err.message || 'Failed to load services data');
     } finally {
       setLoading(false);
+      _svcLoaded = true;
     }
   }
 
@@ -570,7 +682,9 @@ export function Services() {
           enabled: true,
         });
         setLeadAlertRule(rule);
+        const resolvedFrom = alertFromPhone || defaultFrom;
         if (!alertFromPhone && defaultFrom) setAlertFromPhone(defaultFrom);
+        setAlertSavedSnapshot({ toPhone: alertToPhone, fromPhone: resolvedFrom });
         setExpandedCard('lead-alerts');
         showSuccess('Lead Alerts enabled — configure your alert phone number');
       }
@@ -605,6 +719,11 @@ export function Services() {
     if (!selectedAccountId) return;
     setCcSaving(true);
     try {
+      // Save notification settings first so callForwardingNumber is in DB
+      // before callConnectApi.saveSettings triggers syncCallForwardingAfterProvision
+      await notificationsApi.updateSettings(selectedAccountId, {
+        callForwardingNumber: ccCallForwardingNumber || null,
+      });
       await callConnectApi.saveSettings(selectedAccountId, {
         enabled: ccEnabled,
         mode: ccMode,
@@ -632,6 +751,7 @@ export function Services() {
         leadGreetingMessage: ccLeadGreetingMessage,
         voicemailMessage: ccVoicemailMessage,
         voicemailRecordingUrl: ccVoicemailRecordingUrl,
+        callForwardingNumber: ccCallForwardingNumber,
       });
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Failed to save Call Connect settings');
@@ -662,13 +782,18 @@ export function Services() {
     if (!selectedAccountId) return;
     setCtSaving(true);
     try {
-      await notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
-        enabled: ctEnabled,
-        fromPhone: ctFromPhone || undefined,
-        autoReplyTemplate: ctAutoReplyTemplate,
-      });
+      await Promise.all([
+        notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
+          enabled: ctEnabled,
+          fromPhone: ctFromPhone || undefined,
+          autoReplyTemplate: ctAutoReplyTemplate,
+        }),
+        notificationsApi.updateSettings(selectedAccountId, {
+          smsForwardingNumber: ctSmsForwardingNumber || null,
+        }),
+      ]);
       showSuccess('Customer Texting settings saved');
-      setCtSavedSnapshot({ autoReplyTemplate: ctAutoReplyTemplate, fromPhone: ctFromPhone });
+      setCtSavedSnapshot({ autoReplyTemplate: ctAutoReplyTemplate, fromPhone: ctFromPhone, smsForwardingNumber: ctSmsForwardingNumber });
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Failed to save Customer Texting settings');
     } finally {
@@ -677,13 +802,16 @@ export function Services() {
   }
 
   function discardAlertChanges() {
-    setAlertToPhone(leadAlertRule?.toPhone || '');
+    if (!alertSavedSnapshot) return;
+    setAlertToPhone(alertSavedSnapshot.toPhone);
+    setAlertFromPhone(alertSavedSnapshot.fromPhone);
   }
 
   function discardCtChanges() {
     if (!ctSavedSnapshot) return;
     setCtAutoReplyTemplate(ctSavedSnapshot.autoReplyTemplate);
     setCtFromPhone(ctSavedSnapshot.fromPhone);
+    setCtSmsForwardingNumber(ctSavedSnapshot.smsForwardingNumber);
     setCtSelectedTemplateId(templates.find(t => t.content === ctSavedSnapshot.autoReplyTemplate)?.id || '');
   }
 
@@ -736,6 +864,7 @@ export function Services() {
     setCcLeadGreetingMessage(ccSavedSnapshot.leadGreetingMessage);
     setCcVoicemailMessage(ccSavedSnapshot.voicemailMessage);
     setCcVoicemailRecordingUrl(ccSavedSnapshot.voicemailRecordingUrl);
+    setCcCallForwardingNumber(ccSavedSnapshot.callForwardingNumber);
   }
 
   // --- Auto Reply Handlers ---
@@ -768,31 +897,25 @@ export function Services() {
     }
   }
 
-  async function saveAlertToPhone(toPhone: string) {
-    setAlertToPhone(toPhone);
-    if (!leadAlertRule) return;
-    setSaving(true);
-    try {
-      const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { toPhone });
-      setLeadAlertRule(rule);
-      showSuccess('Alert destination updated');
-    } catch (err: any) {
-      setError(err.message || 'Failed to update alert destination');
-    } finally {
-      setSaving(false);
-    }
+  // saveAlertToPhone removed — now handled by saveAlertSettings()
+
+  function setAlertFrom(fromPhone: string) {
+    setAlertFromPhone(fromPhone); // tracked in alertDirty — saved when user clicks Save Settings
   }
 
-  async function saveAlertFromPhone(fromPhone: string) {
-    setAlertFromPhone(fromPhone);
-    if (!leadAlertRule) return;
+  async function saveAlertSettings() {
+    if (!leadAlertRule || !selectedAccountId) return;
     setSaving(true);
     try {
-      const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { fromPhone });
+      const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, {
+        toPhone: alertToPhone,
+        fromPhone: alertFromPhone,
+      });
       setLeadAlertRule(rule);
-      showSuccess('Send from number updated');
+      setAlertSavedSnapshot({ toPhone: alertToPhone, fromPhone: alertFromPhone });
+      showSuccess('Lead Alert settings saved');
     } catch (err: any) {
-      setError(err.message || 'Failed to update from phone');
+      setError(err.response?.data?.message || err.message || 'Failed to save alert settings');
     } finally {
       setSaving(false);
     }
@@ -841,10 +964,80 @@ export function Services() {
 
   function saveCtFromPhone(fromPhone: string) {
     if (fromPhone === '__add_phone__') {
-      navigate('/phone-settings');
+      setShowPhoneSetupModal(true);
       return;
     }
     setCtFromPhone(fromPhone); // tracked in ctDirty — saved when user clicks Save Settings
+  }
+
+  function openDedicatedModal() {
+    setShowDedicatedModal(true);
+    setShowPhoneSetupModal(false);
+    notificationsApi.getPhonePricing().then(r => { if (r.success) setDpPhonePrice(r.data.priceMonthly); }).catch(() => {});
+  }
+
+  async function handleOpConnect() {
+    if (!selectedAccountId || !opApiKey.trim()) return;
+    setOpConnecting(true);
+    setOpConnectError(null);
+    try {
+      const result = await notificationsApi.connectSigcore(selectedAccountId, 'openphone', { apiKey: opApiKey.trim() });
+      if (result.success) {
+        const nums = await notificationsApi.getSigcorePhoneNumbers(selectedAccountId);
+        setCtOwnPhoneNumbers(nums.phoneNumbers);
+        setShowOpenPhoneModal(false);
+        setOpApiKey('');
+        showSuccess('OpenPhone connected successfully');
+      } else {
+        setOpConnectError((result as any).error || 'Failed to connect');
+      }
+    } catch (err: any) {
+      setOpConnectError(err.response?.data?.message || err.message || 'Failed to connect');
+    } finally {
+      setOpConnecting(false);
+    }
+  }
+
+  async function handleDpSearch() {
+    if (!selectedAccountId) return;
+    setDpSearchLoading(true);
+    setDpSearchError(null);
+    try {
+      const result = await notificationsApi.searchAvailableNumbers(selectedAccountId, 'US', dpAreaCode || undefined, dpLocality || undefined);
+      if (result.success) {
+        setDpAvailableNumbers(result.data);
+      } else {
+        setDpSearchError('Search failed — try a different area code or city');
+      }
+    } catch (err: any) {
+      setDpSearchError(err.response?.data?.message || err.message || 'Search failed');
+    } finally {
+      setDpSearchLoading(false);
+    }
+  }
+
+  async function handleDpPurchase(phoneNumber: string) {
+    if (!selectedAccountId || !dpSmsConsent) return;
+    setDpPurchasingNumber(phoneNumber);
+    setDpSearchError(null);
+    try {
+      const result = await notificationsApi.purchaseTenantPhone(selectedAccountId, phoneNumber);
+      if (result.success && result.tenantPhone) {
+        const refreshed = await notificationsApi.listTenantPhones();
+        if (refreshed.success) setTenantPhones(refreshed.data);
+        setShowDedicatedModal(false);
+        setDpAvailableNumbers([]);
+        setDpAreaCode('');
+        setDpLocality('');
+        showSuccess('Dedicated number provisioned successfully');
+      } else {
+        setDpSearchError((result as any).error || 'Purchase failed');
+      }
+    } catch (err: any) {
+      setDpSearchError(err.response?.data?.message || err.message || 'Purchase failed');
+    } finally {
+      setDpPurchasingNumber(null);
+    }
   }
 
   async function sendCtTest() {
@@ -955,7 +1148,17 @@ export function Services() {
   }
 
   function toggleExpand(card: string) {
-    setExpandedCard(expandedCard === card ? null : card);
+    const isExpanding = expandedCard !== card;
+    setExpandedCard(isExpanding ? card : null);
+    if (isExpanding) {
+      setTimeout(() => {
+        const el = cardRefs.current[card];
+        if (!el) return;
+        const HEADER_OFFSET = 80;
+        const top = el.getBoundingClientRect().top + window.scrollY - HEADER_OFFSET;
+        window.scrollTo({ top, behavior: 'smooth' });
+      }, 50);
+    }
   }
 
   // --- Render ---
@@ -975,35 +1178,21 @@ export function Services() {
     );
   }
 
-  if (accounts.length === 0) {
-    const isAdmin = useAuthStore.getState().user?.role === 'ADMIN';
+  if (accounts.length === 0 && useAuthStore.getState().user?.role === 'ADMIN') {
     return (
       <div className="p-6 lg:p-10">
         <div className="flex items-center gap-3 mb-6">
           <Briefcase className="w-6 h-6 text-blue-600" />
           <h1 className="text-2xl font-bold text-slate-900">Automation</h1>
         </div>
-        {isAdmin ? (
-          <AdminNoAccountsState />
-        ) : (
-          <div className="max-w-md mx-auto bg-white rounded-3xl border border-slate-100 shadow-sm p-10 text-center mt-10">
-            <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-slate-900 mb-2">No Accounts Connected</h3>
-            <p className="text-slate-500 mb-6">You need to connect an account first.</p>
-            <button
-              className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all"
-              onClick={() => navigate('/dashboard')}
-            >
-              Go to Dashboard
-            </button>
-          </div>
-        )}
+        <AdminNoAccountsState />
       </div>
     );
   }
 
   return (
     <div className="p-6 lg:p-10 max-w-5xl mx-auto space-y-8">
+      {accounts.length === 0 && <NoAccountsOverlay />}
       {/* Floating Notifications */}
       {error && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 max-w-md w-full mx-4 bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-3 text-red-600 text-sm font-medium shadow-lg animate-in slide-in-from-top-2">
@@ -1061,6 +1250,7 @@ export function Services() {
             expanded={expandedCard === 'auto-reply'}
             onExpand={() => toggleExpand('auto-reply')}
             statusText={autoReplyEnabled ? 'Active' : undefined}
+            cardRef={el => { cardRefs.current['auto-reply'] = el; }}
           >
             {/* AI Optimization Banner — Coming Soon */}
             <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-6 text-white flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
@@ -1150,9 +1340,10 @@ export function Services() {
             statusText={!leadAlertsIncomplete && leadAlertRule?.enabled ? `Destination: ${leadAlertRule.toPhone}` : undefined}
             iconBgColor="bg-amber-50"
             iconTextColor="text-amber-600"
+            cardRef={el => { cardRefs.current['lead-alerts'] = el; }}
           >
             {/* SMS Alert Configuration */}
-            <div className="space-y-6">
+            <div className={`space-y-6${!(leadAlertRule?.enabled) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
               <div className="grid grid-cols-2 gap-4">
                 {/* Send to */}
                 <div>
@@ -1198,7 +1389,7 @@ export function Services() {
                   <div className="relative">
                     <select
                       value={alertFromPhone}
-                      onChange={e => saveAlertFromPhone(e.target.value)}
+                      onChange={e => setAlertFrom(e.target.value)}
                       disabled={saving}
                       className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
                     >
@@ -1207,31 +1398,42 @@ export function Services() {
                       {alertFromPhone &&
                         !poolPhones.some(p => p.phoneNumber === alertFromPhone) &&
                         !ctOwnPhoneNumbers.some(p => p.phoneNumber === alertFromPhone) &&
+                        !tenantPhones.some(tp => tp.phoneNumber === alertFromPhone) &&
                         alertFromPhone !== ctSigcoreFromPhone && (
                           <option value={alertFromPhone}>{alertFromPhone} (configured)</option>
                       )}
-                      {poolPhones.map(p => (
-                        <option key={p.id} value={p.phoneNumber} disabled={p.smsApproved === false}>
-                          {p.phoneNumber} (LeadBridge shared){p.smsApproved === false ? ' — NOT A2P APPROVED' : ''}
-                        </option>
-                      ))}
-                      {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).map(tp => (
-                        <option key={tp.id} value={tp.phoneNumber}>
-                          {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''} (Dedicated)
-                        </option>
-                      ))}
-                      {ctOwnPhoneNumbers.filter(p => p.provider !== 'openphone' && !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => {
-                        const smsOk = p.smsEnabled !== false;
-                        return (
-                          <option key={p.id} value={p.phoneNumber} disabled={!smsOk}>
-                            {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider}){!smsOk ? ' — SMS NOT ENABLED' : ''}
-                          </option>
-                        );
-                      })}
-                      {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
-                        <option value={ctSigcoreFromPhone}>
-                          {ctSigcoreFromPhone} (Twilio · Dedicated)
-                        </option>
+                      {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).length > 0 && (
+                        <optgroup label="Dedicated Numbers">
+                          {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).map(tp => (
+                            <option key={tp.id} value={tp.phoneNumber}>
+                              {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''}
+                            </option>
+                          ))}
+                          {ctSigcoreFromPhone && !poolPhones.some(p => p.phoneNumber === ctSigcoreFromPhone) && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
+                            <option value={ctSigcoreFromPhone}>{ctSigcoreFromPhone} (Twilio)</option>
+                          )}
+                        </optgroup>
+                      )}
+                      {poolPhones.length > 0 && (
+                        <optgroup label="Pool Numbers">
+                          {poolPhones.map(p => (
+                            <option key={p.id} value={p.phoneNumber} disabled={p.smsApproved === false}>
+                              {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''}{p.smsApproved === false ? ' — NOT A2P APPROVED' : ''}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).length > 0 && (
+                        <optgroup label="OpenPhone Numbers">
+                          {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => {
+                            const smsOk = p.smsEnabled !== false;
+                            return (
+                              <option key={p.id} value={p.phoneNumber} disabled={!smsOk}>
+                                {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''}{!smsOk ? ' — SMS NOT ENABLED' : ''}
+                              </option>
+                            );
+                          })}
+                        </optgroup>
                       )}
                     </select>
                     <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
@@ -1339,33 +1541,49 @@ export function Services() {
                         </span>
                       )}
                     </div>
-                    {alertDirty && (
-                      <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
-                        <div className="flex items-center gap-2 text-amber-700">
-                          <AlertCircle className="w-4 h-4 shrink-0" />
-                          <span className="text-sm font-medium">You have unsaved changes</span>
-                        </div>
-                        <div className="flex gap-2 shrink-0">
-                          <button
-                            onClick={discardAlertChanges}
-                            className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-                          >
-                            Discard
-                          </button>
-                          <button
-                            onClick={() => saveAlertToPhone(alertToPhone)}
-                            disabled={saving || !alertToPhone}
-                            className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1"
-                          >
-                            {saving && <Loader2 className="w-3 h-3 animate-spin" />}
-                            Save Changes
-                          </button>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </>
               )}
+            </div>
+
+            {/* Save / unsaved changes */}
+            {leadAlertRule && (
+              <div className="pt-4 border-t border-slate-100">
+                {alertDirty ? (
+                  <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+                    <div className="flex items-center gap-2 text-amber-700">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span className="text-sm font-medium">You have unsaved changes</span>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        onClick={discardAlertChanges}
+                        className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                      >
+                        Discard
+                      </button>
+                      <button
+                        onClick={saveAlertSettings}
+                        disabled={saving || !alertToPhone}
+                        className="px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+                      >
+                        {saving && <Loader2 className="w-3 h-3 animate-spin" />}
+                        Save Settings
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={saveAlertSettings}
+                    disabled={saving}
+                    className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-amber-600 rounded-xl hover:bg-amber-700 transition-colors disabled:opacity-50"
+                  >
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    Save Settings
+                  </button>
+                )}
+              </div>
+            )}
 
               {/* Delete / Reset rule */}
               {leadAlertRule && (
@@ -1404,7 +1622,6 @@ export function Services() {
                   )}
                 </div>
               )}
-            </div>
           </ServiceCard>
             );
           })()}
@@ -1421,27 +1638,59 @@ export function Services() {
             statusText={ctEnabled ? 'Active — texting new leads automatically' : undefined}
             iconBgColor="bg-emerald-50"
             iconTextColor="text-emerald-600"
+            cardRef={el => { cardRefs.current['customer-texting'] = el; }}
           >
             <div className={`space-y-6${!ctEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
               {/* Phone number — only own/dedicated numbers (no shared pool — consent required) */}
               <div className="space-y-2">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Send from</label>
                 {(() => {
-                  const hasOwnNumbers = ctOwnPhoneNumbers.length > 0 || tenantPhones.length > 0 || !!ctSigcoreFromPhone;
+                  // Pool phones must not count as "own numbers" — consent compliance requires a dedicated/OpenPhone number
+                  const ctSigcoreIsPool = !!ctSigcoreFromPhone && poolPhones.some(p => p.phoneNumber === ctSigcoreFromPhone);
+                  const hasOwnNumbers = ctOwnPhoneNumbers.length > 0 || tenantPhones.length > 0 || (!!ctSigcoreFromPhone && !ctSigcoreIsPool);
                   if (!hasOwnNumbers) {
                     return (
-                      <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                        <p className="text-sm text-amber-800 font-medium mb-1">No dedicated number set up</p>
-                        <p className="text-xs text-amber-700 leading-relaxed">
-                          Customer texting requires your own phone number (not a shared pool number) for consent compliance. Set one up in Business Line settings:
+                      <div className="space-y-3">
+                        <p className="text-xs text-slate-500 leading-relaxed">
+                          Customer texting requires your own phone number for consent compliance. Choose an option to set one up:
                         </p>
-                        <div className="mt-3 flex flex-col gap-1.5">
-                          <button type="button" onClick={() => navigate('/phone-settings')} className="text-xs text-blue-600 hover:underline font-medium text-left">
-                            Connect your OpenPhone number (Option 2)
-                          </button>
-                          <button type="button" onClick={() => navigate('/phone-settings')} className="text-xs text-blue-600 hover:underline font-medium text-left">
-                            Buy a dedicated number (Option 3)
-                          </button>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="border border-slate-200 rounded-2xl p-4 hover:border-blue-200 transition-all">
+                            <div className="flex items-start gap-3">
+                              <div className="w-7 h-7 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5">
+                                <Phone className="w-3.5 h-3.5" />
+                              </div>
+                              <div className="flex-1">
+                                <p className="font-semibold text-slate-900 text-xs">Option 2 — Bring Your Own Phone</p>
+                                <p className="text-xs text-slate-500 mt-1 leading-relaxed">Connect your Quo, OpenPhone, or other provider. Your numbers stay in your account.</p>
+                                <button
+                                  type="button"
+                                  onClick={() => { setShowOpenPhoneModal(true); }}
+                                  className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+                                >
+                                  Connect your phone →
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="border border-slate-200 rounded-2xl p-4 hover:border-indigo-200 transition-all">
+                            <div className="flex items-start gap-3">
+                              <div className="w-7 h-7 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5">
+                                <Briefcase className="w-3.5 h-3.5" />
+                              </div>
+                              <div className="flex-1">
+                                <p className="font-semibold text-slate-900 text-xs">Option 3 — Dedicated Number</p>
+                                <p className="text-xs text-slate-500 mt-1 leading-relaxed">Get a Twilio number exclusively assigned to your account.</p>
+                                <button
+                                  type="button"
+                                  onClick={openDedicatedModal}
+                                  className="mt-2 text-xs font-semibold text-indigo-600 hover:text-indigo-700 hover:underline"
+                                >
+                                  Get a number →
+                                </button>
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     );
@@ -1460,33 +1709,33 @@ export function Services() {
                           {ctFromPhone &&
                             !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctFromPhone) &&
                             !tenantPhones.some(tp => tp.phoneNumber === ctFromPhone) &&
-                            !poolPhones.some(p => p.phoneNumber === ctFromPhone) &&
                             ctFromPhone !== ctSigcoreFromPhone && (
                               <option value={ctFromPhone}>{ctFromPhone} (configured)</option>
                           )}
-                          {tenantPhones.map(tp => (
-                            <option key={tp.id} value={tp.phoneNumber}>
-                              {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''} (Dedicated)
-                            </option>
-                          ))}
-                          {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => {
-                            const smsOk = p.smsEnabled !== false;
-                            return (
-                              <option key={p.id} value={p.phoneNumber} disabled={!smsOk}>
-                                {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''} ({p.provider === 'openphone' ? 'OpenPhone' : p.provider}){!smsOk ? ' — SMS NOT ENABLED' : ''}
-                              </option>
-                            );
-                          })}
-                          {ctSigcoreFromPhone && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
-                            <option value={ctSigcoreFromPhone}>
-                              {ctSigcoreFromPhone} (Twilio · Dedicated)
-                            </option>
+                          {(tenantPhones.length > 0 || (ctSigcoreFromPhone && !ctSigcoreIsPool && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone))) && (
+                            <optgroup label="Dedicated Numbers">
+                              {tenantPhones.map(tp => (
+                                <option key={tp.id} value={tp.phoneNumber}>
+                                  {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''}
+                                </option>
+                              ))}
+                              {ctSigcoreFromPhone && !ctSigcoreIsPool && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
+                                <option value={ctSigcoreFromPhone}>{ctSigcoreFromPhone} (Twilio)</option>
+                              )}
+                            </optgroup>
                           )}
-                          {poolPhones.map(p => (
-                            <option key={p.id} value={p.phoneNumber} disabled={p.smsApproved === false}>
-                              {p.phoneNumber} (Shared){p.smsApproved === false ? ' — SMS NOT APPROVED' : ' — SMS Approved'}
-                            </option>
-                          ))}
+                          {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).length > 0 && (
+                            <optgroup label="OpenPhone Numbers">
+                              {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => {
+                                const smsOk = p.smsEnabled !== false;
+                                return (
+                                  <option key={p.id} value={p.phoneNumber} disabled={!smsOk}>
+                                    {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''}{!smsOk ? ' — SMS NOT ENABLED' : ''}
+                                  </option>
+                                );
+                              })}
+                            </optgroup>
+                          )}
                           <option value="__add_phone__">+ Add phone number</option>
                         </select>
                         <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
@@ -1497,12 +1746,6 @@ export function Services() {
                         Customer texting requires a dedicated number for consent compliance. Connect your own or buy one in{' '}
                         <button type="button" onClick={() => navigate('/phone-settings')} className="text-blue-500 hover:underline font-medium">Phone Settings</button>.
                       </p>
-                      {ctFromPhone && poolPhones.find(p => p.phoneNumber === ctFromPhone && p.smsApproved === false) && (
-                        <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
-                          <AlertCircle className="w-3 h-3 shrink-0" />
-                          This number is not A2P 10DLC approved — SMS will fail to deliver
-                        </p>
-                      )}
                       {ctFromPhone && ctOwnPhoneNumbers.find(p => p.phoneNumber === ctFromPhone && p.smsEnabled === false) && (
                         <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
                           <AlertCircle className="w-3 h-3 shrink-0" />
@@ -1518,6 +1761,77 @@ export function Services() {
                     </>
                   );
                 })()}
+              </div>
+
+              {/* Get replies to */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">
+                  Get replies to
+                  {ctSigcoreProvider !== 'openphone' && !ctSmsForwardingNumber && (
+                    <span className="ml-1 text-amber-500 normal-case font-normal tracking-normal">— required</span>
+                  )}
+                </label>
+                {ctSmsForwardingNumber && !ctForwardingEditing ? (
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
+                      <span className="text-sm font-medium text-slate-900">{ctSmsForwardingNumber}</span>
+                      {ctSigcoreProvider === 'openphone' && ctSmsForwardingNumber === ctSigcoreFromPhone && (
+                        <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 rounded-full px-2 py-0.5 uppercase tracking-wide">OpenPhone</span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCtForwardingEditing(true)}
+                      className="text-xs font-semibold text-slate-500 hover:text-slate-800 whitespace-nowrap px-3 py-2.5 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors"
+                    >
+                      Change
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="tel"
+                        value={ctSmsForwardingNumber}
+                        onChange={e => setCtSmsForwardingNumber(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                        onBlur={e => {
+                          const formatted = formatPhoneE164(e.target.value);
+                          if (formatted !== e.target.value) setCtSmsForwardingNumber(formatted);
+                        }}
+                        placeholder="+15555550100"
+                        className={`flex-1 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                          ctSmsForwardingNumber && !isValidPhoneE164(ctSmsForwardingNumber)
+                            ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                            : ctSmsForwardingNumber && isValidPhoneE164(ctSmsForwardingNumber)
+                              ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                              : 'border border-slate-200 focus:ring-emerald-400'
+                        }`}
+                      />
+                      {ctForwardingEditing && (
+                        <button
+                          type="button"
+                          onClick={() => { setCtSmsForwardingNumber(ctSavedSnapshot?.smsForwardingNumber || ''); setCtForwardingEditing(false); }}
+                          className="text-xs font-semibold text-slate-500 hover:text-slate-800 whitespace-nowrap px-3 py-2 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                    {ctSmsForwardingNumber && !isValidPhoneE164(ctSmsForwardingNumber) ? (
+                      <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 shrink-0" />
+                        Must be E.164 format, e.g. +12125550100
+                      </p>
+                    ) : !ctSmsForwardingNumber && ctSigcoreProvider !== 'openphone' ? (
+                      <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 shrink-0" />
+                        Enter your personal phone — without this, customer replies won't reach you
+                      </p>
+                    ) : (
+                      <p className="text-xs text-slate-400 mt-1">Customer SMS replies will be forwarded here</p>
+                    )}
+                  </>
+                )}
               </div>
 
               {/* Auto-reply message */}
@@ -1568,8 +1882,8 @@ export function Services() {
                 )}
               </div>
 
-              {/* Test SMS */}
-              <div>
+              {/* Test SMS — disabled until a send-from phone is selected */}
+              <div className={!ctFromPhone ? 'opacity-40 pointer-events-none select-none' : ''}>
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send Test</label>
                 <div className="flex gap-2">
                   <input
@@ -1631,6 +1945,7 @@ export function Services() {
                 )}
               </div>
 
+
             </div>
 
             {/* Save / unsaved changes */}
@@ -1683,6 +1998,7 @@ export function Services() {
             statusText={ccEnabled ? 'Active — bridging calls for new leads' : undefined}
             iconBgColor="bg-violet-50"
             iconTextColor="text-violet-600"
+            cardRef={el => { cardRefs.current['call-connect'] = el; }}
           >
             <div className={`space-y-6${!ccEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
             {/* Unsaved changes banner */}
@@ -1725,7 +2041,7 @@ export function Services() {
                   }}
                   placeholder="+15551234567"
                   className={`w-full rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
-                    ccAgentPhone && !isValidPhoneE164(ccAgentPhone)
+                    (ccAgentPhone && !isValidPhoneE164(ccAgentPhone)) || (!ccAgentPhone && !ctSigcoreFromPhone)
                       ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
                       : ccAgentPhone && isValidPhoneE164(ccAgentPhone)
                         ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
@@ -1736,6 +2052,11 @@ export function Services() {
                   <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
                     <AlertCircle className="w-3 h-3 shrink-0" />
                     Must be E.164 format, e.g. +12125550100
+                  </p>
+                ) : !ccAgentPhone && !ctSigcoreFromPhone ? (
+                  <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    Required — connect a BYO number or enter your personal phone
                   </p>
                 ) : (
                   <p className="text-xs text-slate-400 mt-1.5">Phone Sigcore will ring when a new lead arrives</p>
@@ -1751,26 +2072,54 @@ export function Services() {
                     onChange={e => setCcBotNumber(e.target.value)}
                     className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium appearance-none"
                   >
-                    <option value="">Select phone number</option>
-                    {ccBotNumber && !poolPhones.some(p => p.phoneNumber === ccBotNumber) && !tenantPhones.some(tp => tp.phoneNumber === ccBotNumber) && (
+                    <option value="">Select dedicated number</option>
+                    {ccBotNumber && !tenantPhones.some(tp => tp.phoneNumber === ccBotNumber) && (
                       <option value={ccBotNumber}>{ccBotNumber} (configured)</option>
                     )}
-                    {poolPhones.map(p => (
-                      <option key={p.id} value={p.phoneNumber}>
-                        {p.phoneNumber} (LeadBridge){p.smsApproved === false ? ' — SMS NOT APPROVED' : ''}
-                      </option>
-                    ))}
-                    {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).map(tp => (
+                    {tenantPhones.map(tp => (
                       <option key={tp.id} value={tp.phoneNumber}>
-                        {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''} (Dedicated)
+                        {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''}
                       </option>
                     ))}
+                    {tenantPhones.length === 0 && (
+                      <option value="" disabled>No dedicated numbers — purchase one in Phone Settings</option>
+                    )}
                   </select>
                   <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
                     <ChevronDown className="w-4 h-4" />
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* Forward Inbound Calls To */}
+            <div>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Forward Inbound Calls To</label>
+              <input
+                type="tel"
+                value={ccCallForwardingNumber}
+                onChange={e => setCcCallForwardingNumber(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                onBlur={e => {
+                  const formatted = formatPhoneE164(e.target.value);
+                  if (formatted !== e.target.value) setCcCallForwardingNumber(formatted);
+                }}
+                placeholder="+15555550100"
+                className={`w-full rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                  ccCallForwardingNumber && !isValidPhoneE164(ccCallForwardingNumber)
+                    ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                    : ccCallForwardingNumber && isValidPhoneE164(ccCallForwardingNumber)
+                      ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                      : 'bg-white border border-slate-200 focus:ring-violet-300'
+                }`}
+              />
+              {ccCallForwardingNumber && !isValidPhoneE164(ccCallForwardingNumber) ? (
+                <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3 shrink-0" />
+                  Must be E.164 format, e.g. +12125550100
+                </p>
+              ) : (
+                <p className="text-xs text-slate-400 mt-1.5">Inbound calls to your dedicated number are forwarded here — defaults to Agent Phone</p>
+              )}
             </div>
 
             {/* Agent Whisper Message */}
@@ -2082,6 +2431,181 @@ export function Services() {
                 Save & Test
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Phone type selector — shown from "+ Add phone number" dropdown */}
+      {showPhoneSetupModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowPhoneSetupModal(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 relative" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setShowPhoneSetupModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Add a Phone Number</h3>
+            <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+              Choose how you want to add a send-from number for customer texting:
+            </p>
+            <div className="space-y-4">
+              <div className="border border-slate-200 rounded-2xl p-5 hover:border-blue-200 transition-all cursor-pointer" onClick={() => { setShowPhoneSetupModal(false); setShowOpenPhoneModal(true); }}>
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5"><Phone className="w-4 h-4" /></div>
+                  <div>
+                    <p className="font-semibold text-slate-900 text-sm">Option 2 — Bring Your Own Phone</p>
+                    <p className="text-xs text-slate-500 mt-1">Connect your Quo, OpenPhone, or other provider.</p>
+                  </div>
+                </div>
+              </div>
+              <div className="border border-slate-200 rounded-2xl p-5 hover:border-indigo-200 transition-all cursor-pointer" onClick={() => openDedicatedModal()}>
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5"><Briefcase className="w-4 h-4" /></div>
+                  <div>
+                    <p className="font-semibold text-slate-900 text-sm">Option 3 — Dedicated Number</p>
+                    <p className="text-xs text-slate-500 mt-1">Get a Twilio number exclusively assigned to your account.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p className="mt-5 text-xs text-slate-400 text-center">Shared pool numbers (Option 1) cannot be used for customer texting.</p>
+          </div>
+        </div>
+      )}
+
+      {/* OpenPhone Setup Modal */}
+      {showOpenPhoneModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowOpenPhoneModal(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 relative" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setShowOpenPhoneModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Bring Your Own Phone</h3>
+            <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+              Enter your Quo, OpenPhone, or compatible provider API key to use your own phone numbers for customer texting.{' '}
+              <a href="https://my.quo.com/settings/api" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline inline-flex items-center gap-1">
+                Get your Quo API key <ExternalLink size={11} />
+              </a>
+            </p>
+            {opConnectError && (
+              <div className="mb-4 bg-red-50 border border-red-100 rounded-xl p-3 flex items-center gap-2 text-red-600 text-sm">
+                <AlertCircle size={14} className="shrink-0" />
+                <span className="flex-1">{opConnectError}</span>
+                <button onClick={() => setOpConnectError(null)}><X size={14} /></button>
+              </div>
+            )}
+            <div className="flex gap-3">
+              <div className="relative flex-1">
+                <Key size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="password"
+                  value={opApiKey}
+                  onChange={e => setOpApiKey(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleOpConnect()}
+                  placeholder="OpenPhone API key"
+                  className="w-full pl-8 pr-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+                />
+              </div>
+              <button
+                onClick={handleOpConnect}
+                disabled={opConnecting || !opApiKey.trim()}
+                className="px-5 py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-200 transition-all"
+              >
+                {opConnecting ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+                {opConnecting ? 'Connecting...' : 'Connect'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dedicated Number Setup Modal */}
+      {showDedicatedModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowDedicatedModal(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-xl w-full p-8 relative" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setShowDedicatedModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Get a Dedicated Number</h3>
+            <p className="text-sm text-slate-500 mb-5 leading-relaxed">Search for an available number by area code or city, then purchase it for your account.</p>
+
+            {dpSearchError && (
+              <div className="mb-4 bg-red-50 border border-red-100 rounded-xl p-3 flex items-center gap-2 text-red-600 text-sm">
+                <AlertCircle size={14} className="shrink-0" />
+                <span className="flex-1">{dpSearchError}</span>
+                <button onClick={() => setDpSearchError(null)}><X size={14} /></button>
+              </div>
+            )}
+
+            {/* SMS Consent */}
+            <div className={`rounded-xl border p-3 mb-4 ${dpSmsConsent ? 'bg-emerald-50/50 border-emerald-200' : 'bg-amber-50/50 border-amber-200'}`}>
+              <label className="flex items-start gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={dpSmsConsent}
+                  onChange={e => setDpSmsConsent(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-xs text-slate-600 leading-relaxed">
+                  I agree to receive SMS notifications from Geos LLC regarding account alerts and new leads. Message frequency varies. Message and data rates may apply. Reply STOP to unsubscribe or HELP for assistance.
+                </span>
+              </label>
+              {!dpSmsConsent && (
+                <div className="mt-2 ml-7 flex items-center gap-1.5 text-amber-600 text-xs font-medium">
+                  <AlertCircle size={11} className="shrink-0" />
+                  You must accept the SMS consent to purchase a number.
+                </div>
+              )}
+            </div>
+
+            {/* Search inputs */}
+            <div className="flex flex-wrap gap-3 mb-4">
+              <input
+                type="text"
+                value={dpAreaCode}
+                onChange={e => setDpAreaCode(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                onKeyDown={e => e.key === 'Enter' && handleDpSearch()}
+                placeholder="Area code (e.g. 415)"
+                maxLength={3}
+                className="w-36 px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono tracking-widest"
+              />
+              <input
+                type="text"
+                value={dpLocality}
+                onChange={e => setDpLocality(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleDpSearch()}
+                placeholder="City (e.g. San Francisco)"
+                className="flex-1 min-w-40 px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <button
+                onClick={handleDpSearch}
+                disabled={dpSearchLoading}
+                className="px-5 py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-200 transition-all"
+              >
+                {dpSearchLoading ? <Loader2 size={14} className="animate-spin" /> : <Hash size={14} />}
+                {dpSearchLoading ? 'Searching...' : 'Search Numbers'}
+              </button>
+            </div>
+
+            {/* Available numbers grid */}
+            {dpAvailableNumbers.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
+                {dpAvailableNumbers.map(num => (
+                  <div key={num.phoneNumber} className="bg-slate-50 rounded-xl border border-slate-200 p-3 flex flex-col gap-2 hover:border-blue-200 transition-all">
+                    <div>
+                      <div className="font-bold text-slate-900 font-mono text-sm">{num.phoneNumber}</div>
+                      <div className="text-xs text-slate-500">{[num.locality, num.region].filter(Boolean).join(', ') || 'US'}</div>
+                      {dpPhonePrice != null && <div className="text-xs text-slate-400">${dpPhonePrice.toFixed(2)}/mo</div>}
+                    </div>
+                    <button
+                      onClick={() => handleDpPurchase(num.phoneNumber)}
+                      disabled={dpPurchasingNumber !== null || !dpSmsConsent}
+                      className="w-full px-3 py-2 bg-blue-600 text-white rounded-lg font-semibold text-xs hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
+                    >
+                      {dpPurchasingNumber === num.phoneNumber ? <><Loader2 size={12} className="animate-spin" /> Getting...</> : 'Get this number'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

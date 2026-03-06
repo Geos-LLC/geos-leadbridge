@@ -11,6 +11,7 @@ import { PlatformFactory } from '../platforms/platform.factory';
 import { AutomationService } from '../automation/automation.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CallConnectService } from '../call-connect/call-connect.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 @Injectable()
 export class WebhooksService {
@@ -32,6 +33,7 @@ export class WebhooksService {
     private notificationsService: NotificationsService,
     @Inject(forwardRef(() => CallConnectService))
     private callConnectService: CallConnectService,
+    private analyticsService: AnalyticsService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -364,6 +366,9 @@ export class WebhooksService {
 
     this.logger.log('Lead stored successfully', { negotiationId });
 
+    // Invalidate analytics cache so insights reflects the new lead immediately
+    await this.analyticsService.invalidateCache(userId);
+
     // Emit SSE event for real-time frontend updates
     this.eventEmitter.emit(`lead.created.${userId}`, lead);
 
@@ -626,6 +631,9 @@ export class WebhooksService {
     });
 
     this.logger.log('Lead ensured via upsert', { negotiationId, leadId: lead.id });
+
+    // Invalidate analytics cache (lead may have been created by this upsert)
+    await this.analyticsService.invalidateCache(userId);
 
     // Ensure conversation exists using upsert to handle race conditions
     const messageTimestampForConv = new Date(data.sentAt || data.createTimestamp || Date.now());
@@ -925,6 +933,8 @@ export class WebhooksService {
                   where: { id: linkedMessage.id },
                   data: {
                     ...(status === 'delivered' && { deliveredAt: new Date() }),
+                    // Clear deliveredAt if a failure event arrives (e.g. race: delivered then failed)
+                    ...(status === 'failed' && { deliveredAt: null }),
                   },
                 });
 
@@ -1012,6 +1022,7 @@ export class WebhooksService {
     try {
       const data = payload?.data || payload;
       const fromNumber = data?.fromNumber || data?.from;
+      const toNumber = data?.toNumber || data?.to;
       const body = data?.body || data?.text || data?.content || '';
       const messageId = data?.id || data?.messageId;
 
@@ -1046,6 +1057,47 @@ export class WebhooksService {
 
       if (!lead) {
         this.logger.warn(`No lead found for inbound SMS from ${fromNumber}`);
+        // Forward to the tenant's configured forwarding number only if this account
+        // is the actual recipient of the inbound SMS. When multiple accounts share a
+        // Sigcore tenant, all of them receive the same webhook — skip accounts whose
+        // configured fromPhone doesn't match the inbound toNumber (ghost events).
+        if (accountId) {
+          try {
+            const acctSettings = await this.prisma.notificationSettings.findUnique({
+              where: { savedAccountId: accountId },
+              select: { sigcoreFromPhone: true },
+            });
+            const normTo = toNumber?.replace(/\D/g, '').slice(-10);
+            const normAcctFrom = acctSettings?.sigcoreFromPhone?.replace(/\D/g, '').slice(-10);
+
+            // Determine if this account is the legitimate recipient of the inbound SMS.
+            // Check 1: account has no dedicated fromPhone (pure pool routing) → always forward
+            // Check 2: toNumber matches the account's dedicated/BYO fromPhone
+            // Check 3: toNumber matches one of the account's pool phone assignments
+            let isOwner = !normAcctFrom || !normTo || normAcctFrom === normTo;
+            if (!isOwner && normTo) {
+              const poolAssignment = await this.prisma.phonePoolAssignment.findFirst({
+                where: { user: { savedAccounts: { some: { id: accountId } } } },
+                include: { phonePool: { select: { phoneNumber: true } } },
+              });
+              if (poolAssignment) {
+                const normPool = poolAssignment.phonePool.phoneNumber.replace(/\D/g, '').slice(-10);
+                if (normPool === normTo) isOwner = true;
+              }
+            }
+
+            if (isOwner) {
+              await this.notificationsService.forwardInboundSms(accountId, fromNumber, fromNumber, body);
+            } else {
+              this.logger.log(
+                `[handleInboundSms] Skipping forward for account ${accountId}: ` +
+                `inbound toNumber=${toNumber} doesn't match account fromPhone=${acctSettings?.sigcoreFromPhone} (shared-tenant ghost event)`,
+              );
+            }
+          } catch (err: any) {
+            this.logger.warn(`SMS forwarding failed (no lead): ${err.message}`);
+          }
+        }
         await this.prisma.webhookEvent.update({
           where: { id: event.id },
           data: { processed: true, processedAt: new Date(), processingError: 'No lead found for phone' },
@@ -1127,6 +1179,18 @@ export class WebhooksService {
         }
       } catch (err: any) {
         this.logger.warn(`Failed to handle customer reply rules: ${err.message}`);
+      }
+
+      // Forward SMS to tenant's forwarding number if configured
+      try {
+        const fwdAccount = await this.prisma.savedAccount.findFirst({
+          where: { userId: lead.userId, businessId: lead.businessId || undefined },
+        });
+        if (fwdAccount) {
+          await this.notificationsService.forwardInboundSms(fwdAccount.id, lead.customerName, fromNumber, body);
+        }
+      } catch (err: any) {
+        this.logger.warn(`SMS forwarding failed: ${err.message}`);
       }
 
       // Emit SSE event for real-time UI update
