@@ -268,18 +268,20 @@ export class CallConnectService {
         this.logger.warn(`[ensureSigcoreProvisioned] Could not copy integrations: ${err.message}`);
       }
 
-      // Refresh Twilio webhook URLs for all phone numbers on the old tenant so inbound calls/SMS
-      // no longer 404. Must use this.sigcoreApiUrl (SIGCORE_CALL_CONNECT_URL || SIGCORE_API_URL)
+      // Refresh Twilio webhook URLs for all phone numbers on the NEW tenant so inbound calls/SMS
+      // route to the correct workspace. Must use tenantId (new), not oldTenantId — phone numbers
+      // are already in tenant_phone_numbers under the new tenant after re-provisioning.
+      // Must use this.sigcoreApiUrl (SIGCORE_CALL_CONNECT_URL || SIGCORE_API_URL)
       // because the phone numbers are registered on whichever Sigcore instance handles CC calls.
       try {
         await firstValueFrom(
           this.httpService.post(
-            `${this.sigcoreApiUrl}/api/tenants/${oldTenantId}/phone-numbers/refresh-webhooks`,
+            `${this.sigcoreApiUrl}/api/tenants/${tenantId}/phone-numbers/refresh-webhooks`,
             {},
             { headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey } },
           ),
         );
-        this.logger.log(`[ensureSigcoreProvisioned] Refreshed phone webhooks for old tenant ${oldTenantId}`);
+        this.logger.log(`[ensureSigcoreProvisioned] Refreshed phone webhooks for new tenant ${tenantId}`);
       } catch (err: any) {
         this.logger.warn(`[ensureSigcoreProvisioned] Could not refresh phone webhooks: ${err.message}`);
       }
