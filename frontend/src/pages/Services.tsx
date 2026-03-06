@@ -719,29 +719,29 @@ export function Services() {
     if (!selectedAccountId) return;
     setCcSaving(true);
     try {
-      await Promise.all([
-        callConnectApi.saveSettings(selectedAccountId, {
-          enabled: ccEnabled,
-          mode: ccMode,
-          agentStrategy: ccAgentStrategy,
-          agentPhoneE164: ccAgentPhone || undefined,
-          maxAgentAttempts: ccMaxAttempts,
-          quietHoursEnabled: ccQuietEnabled,
-          quietHoursTimezone: ccQuietEnabled ? ccQuietTimezone : undefined,
-          quietHoursStart: ccQuietEnabled ? ccQuietStart : undefined,
-          quietHoursEnd: ccQuietEnabled ? ccQuietEnd : undefined,
-          agentAcceptDigits: ccAgentAcceptDigits || '0123456789*#',
-          agentWhisperMessage: ccAgentWhisperMessage || undefined,
-          leadGreetingMessage: ccLeadGreetingMessage || undefined,
-          leadVoicemailEnabled: ccVoicemailEnabled,
-          leadVoicemailMessage: ccVoicemailEnabled ? ccVoicemailMessage : undefined,
-          leadVoicemailRecordingUrl: ccVoicemailEnabled ? ccVoicemailRecordingUrl : undefined,
-          botNumberE164: ccBotNumber || undefined,
-        }),
-        notificationsApi.updateSettings(selectedAccountId, {
-          callForwardingNumber: ccCallForwardingNumber || null,
-        }),
-      ]);
+      // Save notification settings first so callForwardingNumber is in DB
+      // before callConnectApi.saveSettings triggers syncCallForwardingAfterProvision
+      await notificationsApi.updateSettings(selectedAccountId, {
+        callForwardingNumber: ccCallForwardingNumber || null,
+      });
+      await callConnectApi.saveSettings(selectedAccountId, {
+        enabled: ccEnabled,
+        mode: ccMode,
+        agentStrategy: ccAgentStrategy,
+        agentPhoneE164: ccAgentPhone || undefined,
+        maxAgentAttempts: ccMaxAttempts,
+        quietHoursEnabled: ccQuietEnabled,
+        quietHoursTimezone: ccQuietEnabled ? ccQuietTimezone : undefined,
+        quietHoursStart: ccQuietEnabled ? ccQuietStart : undefined,
+        quietHoursEnd: ccQuietEnabled ? ccQuietEnd : undefined,
+        agentAcceptDigits: ccAgentAcceptDigits || '0123456789*#',
+        agentWhisperMessage: ccAgentWhisperMessage || undefined,
+        leadGreetingMessage: ccLeadGreetingMessage || undefined,
+        leadVoicemailEnabled: ccVoicemailEnabled,
+        leadVoicemailMessage: ccVoicemailEnabled ? ccVoicemailMessage : undefined,
+        leadVoicemailRecordingUrl: ccVoicemailEnabled ? ccVoicemailRecordingUrl : undefined,
+        botNumberE164: ccBotNumber || undefined,
+      });
       showSuccess('Instant Call Connect settings saved');
       setCcSavedSnapshot({
         mode: ccMode,
