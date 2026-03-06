@@ -144,7 +144,7 @@ export function NotificationSettings() {
       const rulesRes = await notificationsApi.getAllRules();
       setRules(rulesRes.rules);
       // Update module-level cache
-      _notifCache = { accounts, rules: rulesRes.rules, phoneOptions };
+      _notifCache = { accounts, rules: rulesRes.rules, phoneOptions: _notifCache?.phoneOptions ?? phoneOptions };
     } catch (err: any) {
       setError(err.message || 'Failed to load rules');
     } finally {
