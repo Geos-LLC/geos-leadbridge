@@ -806,7 +806,8 @@ export function Services() {
     );
     await Promise.all(promises);
     setAgentPhoneSaveStatus('saved');
-    setTimeout(() => setAgentPhoneSaveStatus('idle'), 2500);
+    showSuccess('Business phone saved');
+    setTimeout(() => setAgentPhoneSaveStatus('idle'), 3000);
     savingAgentPhoneRef.current = false;
   }
 
