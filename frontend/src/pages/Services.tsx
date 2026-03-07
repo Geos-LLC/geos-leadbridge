@@ -136,7 +136,7 @@ export function Services() {
   const initialAccountId = storedAccounts[0]?.id || '';
   const [selectedAccountId, setSelectedAccountId] = useState(initialAccountId);
   const sc = _svcCache.get(initialAccountId); // cached service data for this account
-  const [loading, setLoading] = useState(!_svcLoaded && storedAccounts.length === 0 && !sc);
+  const [loading, setLoading] = useState(!sc);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -1452,7 +1452,7 @@ export function Services() {
             onExpand={() => toggleExpand('notifications')}
             setupRequired={noPhone || leadAlertsIncomplete}
             warningText={noPhone ? 'LeadBridge number required' : leadAlertsIncomplete ? (toPhoneMissing ? 'Phone number required' : 'Template required') : undefined}
-            statusText={!noPhone && (autoReplyEnabled || leadAlertRule?.enabled) ? [autoReplyEnabled && 'Auto-reply', leadAlertRule?.enabled && 'Alerts'].filter(Boolean).join(' + ') + ' active' : undefined}
+            statusText={undefined}
             iconBgColor="bg-amber-50"
             iconTextColor="text-amber-600"
             cardRef={el => { cardRefs.current['notifications'] = el; }}
@@ -1693,7 +1693,7 @@ export function Services() {
             onExpand={() => toggleExpand('comms')}
             setupRequired={tenantPhones.length === 0 || (!ccAgentPhone && tenantPhones.length > 0)}
             warningText={tenantPhones.length === 0 ? 'LeadBridge number required' : (!ccAgentPhone && tenantPhones.length > 0) ? 'Agent phone required' : undefined}
-            statusText={tenantPhones.length > 0 && (ctEnabled || ccEnabled) ? [ctEnabled && 'Texting', ccEnabled && 'Calls'].filter(Boolean).join(' + ') + ' active' : undefined}
+            statusText={undefined}
             iconBgColor="bg-blue-50"
             iconTextColor="text-blue-600"
             cardRef={el => { cardRefs.current['comms'] = el; }}
