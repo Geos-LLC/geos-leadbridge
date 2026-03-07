@@ -382,6 +382,7 @@ export interface PhonePoolStats {
   available: number;
   assigned: number;
   reserved: number;
+  released: number;
   byAreaCode: { areaCode: string; count: number }[];
 }
 

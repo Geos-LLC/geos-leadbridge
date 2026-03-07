@@ -885,6 +885,12 @@ export default function AdminTenantNumbers() {
                   <p className="text-xs font-semibold text-slate-500 mb-1">Reserved</p>
                   <p className="text-2xl font-extrabold text-yellow-600">{poolStats.reserved}</p>
                 </div>
+                {(poolStats.released ?? 0) > 0 && (
+                  <div className="rounded-2xl bg-white border border-red-100 shadow-sm p-4">
+                    <p className="text-xs font-semibold text-red-500 mb-1">Released</p>
+                    <p className="text-2xl font-extrabold text-red-600">{poolStats.released}</p>
+                  </div>
+                )}
               </div>
             )}
 

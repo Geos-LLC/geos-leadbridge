@@ -32,9 +32,7 @@ export class AdminPhonePoolService {
     const { status, areaCode, search, offset = 0, limit = 50 } = query;
 
     const where: any = {};
-    // When no status filter is specified, hide RELEASED numbers (they're defunct)
     if (status) where.status = status;
-    else where.status = { not: 'RELEASED' };
     if (areaCode) where.areaCode = areaCode;
     if (search) {
       where.OR = [
@@ -67,10 +65,11 @@ export class AdminPhonePoolService {
    * Get pool statistics
    */
   async getPoolStats() {
-    const [total, available, reserved, assignmentCount] = await Promise.all([
+    const [total, available, reserved, released, assignmentCount] = await Promise.all([
       this.prisma.phonePool.count({ where: { status: { not: 'RELEASED' } } }),
       this.prisma.phonePool.count({ where: { status: 'AVAILABLE' } }),
       this.prisma.phonePool.count({ where: { status: 'RESERVED' } }),
+      this.prisma.phonePool.count({ where: { status: 'RELEASED' } }),
       // Count phones that have at least one assignment
       this.prisma.phonePool.count({ where: { status: { not: 'RELEASED' }, assignments: { some: {} } } }),
     ]);
@@ -87,6 +86,7 @@ export class AdminPhonePoolService {
       available,
       assigned: assignmentCount,
       reserved,
+      released,
       byAreaCode: byAreaCode.map((a) => ({
         areaCode: a.areaCode || 'unknown',
         count: a._count.id,
