@@ -21,6 +21,7 @@ export class WebhooksService {
   // Key: "eventType:negotiationId", Value: timestamp of first processing
   private processingCache: Map<string, number> = new Map();
   private readonly CACHE_TTL_MS = 30 * 1000; // 30 seconds TTL
+  private readonly _recentInboundSmsIds = new Set<string>();
 
   constructor(
     private prisma: PrismaService,
@@ -1029,6 +1030,17 @@ export class WebhooksService {
       if (!fromNumber || !body) {
         this.logger.warn('Inbound SMS missing fromNumber or body');
         return;
+      }
+
+      // Deduplicate: skip if we already saw this messageId (both webhooks arrive simultaneously)
+      if (messageId) {
+        if (this._recentInboundSmsIds.has(messageId)) {
+          this.logger.log(`[handleInboundSms] Skipping duplicate messageId=${messageId} for account ${accountId}`);
+          await this.prisma.webhookEvent.update({ where: { id: event.id }, data: { processed: true } });
+          return;
+        }
+        this._recentInboundSmsIds.add(messageId);
+        setTimeout(() => this._recentInboundSmsIds.delete(messageId), 60_000);
       }
 
       // Normalize phone for matching (last 10 digits)

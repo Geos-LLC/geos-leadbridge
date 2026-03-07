@@ -46,3 +46,4 @@ node_modules
 uploads/**
 !uploads/.gitkeep
 !uploads/voicemail/.gitkeep
+.vercel

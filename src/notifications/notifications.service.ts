@@ -2747,7 +2747,7 @@ export class NotificationsService {
         userId,
         savedAccountId,
         phoneNumber,
-        friendlyName: friendlyName || phoneNumber,
+        friendlyName: friendlyName || null,
         areaCode,
         sigcoreAllocationId: allocationId,
         stripeSubItemId,

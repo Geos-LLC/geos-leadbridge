@@ -1604,7 +1604,7 @@ export function Services() {
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Dedicated Number</label>
                 {tenantPhones.length > 0 ? (
                   <div className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700">
-                    {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
+                    {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName && tenantPhones[0].friendlyName !== tenantPhones[0].phoneNumber ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
                   </div>
                 ) : (
                   <div className="w-full rounded-xl p-3 text-sm font-medium bg-slate-50 border border-slate-200 text-slate-400">
