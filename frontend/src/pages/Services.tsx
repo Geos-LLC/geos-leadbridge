@@ -100,7 +100,7 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
               <input
                 type="checkbox"
                 checked={enabled}
-                onChange={(e) => onToggle(e.target.checked)}
+                onChange={(e) => { console.log(`[ServiceCard] "${title}" onChange: checked=${e.target.checked} enabled_prop=${enabled}`); onToggle(e.target.checked); }}
                 disabled={comingSoon}
                 className="sr-only peer"
               />
@@ -545,6 +545,7 @@ export function Services() {
   // --- Toggle Handlers ---
 
   async function toggleAutoReply(enabled: boolean) {
+    console.log(`[toggleAutoReply] called: enabled=${enabled} rules=${autoReplyRules.length}`);
     setError(null);
     // Optimistic: update UI immediately
     const prevRules = [...autoReplyRules];
@@ -584,6 +585,7 @@ export function Services() {
         setAutoReplyRules([rule]);
       }
     } catch (err: any) {
+      console.error('[toggleAutoReply] FAILED:', err.response?.data || err.message);
       // Rollback on error
       setAutoReplyRules(prevRules);
       setError(err.response?.data?.message || err.message || 'Failed to toggle Auto Reply');
@@ -593,7 +595,9 @@ export function Services() {
   }
 
   async function toggleLeadAlerts(enabled: boolean) {
+    console.log(`[toggleLeadAlerts] called: enabled=${enabled} tenantPhones=${tenantPhones.length} alertToPhone=${alertToPhone}`);
     if (enabled && tenantPhones.length === 0) {
+      console.log('[toggleLeadAlerts] ABORT: no tenant phones');
       setShowDedicatedModal(true);
       return;
     }
@@ -650,6 +654,7 @@ export function Services() {
       // Invalidate diagnostics cache so Dashboard/Settings show fresh data
       setAccountDiagnostics({});
     } catch (err: any) {
+      console.error('[toggleLeadAlerts] FAILED:', err.response?.data || err.message);
       // Rollback on error
       setLeadAlertRule(prevAlertRule);
       setError(err.response?.data?.message || err.message || 'Failed to toggle Lead Alerts');
@@ -660,8 +665,10 @@ export function Services() {
 
 
   async function toggleCallConnect(enabled: boolean) {
-    if (!selectedAccountId) return;
+    console.log(`[toggleCallConnect] called: enabled=${enabled} selectedAccountId=${selectedAccountId} tenantPhones=${tenantPhones.length}`);
+    if (!selectedAccountId) { console.log('[toggleCallConnect] ABORT: no selectedAccountId'); return; }
     if (enabled && tenantPhones.length === 0) {
+      console.log('[toggleCallConnect] ABORT: no tenant phones');
       setShowDedicatedModal(true);
       return;
     }
@@ -669,8 +676,10 @@ export function Services() {
     setCcSaving(true);
     try {
       const { settings } = await callConnectApi.saveSettings(selectedAccountId, { enabled });
+      console.log(`[toggleCallConnect] API OK: settings.enabled=${settings.enabled}`);
       setCcEnabled(settings.enabled);
     } catch (err: any) {
+      console.error(`[toggleCallConnect] API FAILED:`, err.response?.data || err.message);
       setCcEnabled(!enabled); // rollback
       setError(err.response?.data?.message || err.message || 'Failed to update Call Connect');
     } finally {
@@ -719,8 +728,10 @@ export function Services() {
   }
 
   async function toggleCustomerTexting(enabled: boolean) {
-    if (!selectedAccountId) return;
+    console.log(`[toggleCustomerTexting] called: enabled=${enabled} selectedAccountId=${selectedAccountId} tenantPhones=${tenantPhones.length}`);
+    if (!selectedAccountId) { console.log('[toggleCustomerTexting] ABORT: no selectedAccountId'); return; }
     if (enabled && tenantPhones.length === 0) {
+      console.log('[toggleCustomerTexting] ABORT: no tenant phones');
       setShowDedicatedModal(true);
       return;
     }
@@ -731,7 +742,9 @@ export function Services() {
         enabled,
         autoReplyTemplate: ctAutoReplyTemplate,
       });
+      console.log(`[toggleCustomerTexting] API OK`);
     } catch (err: any) {
+      console.error(`[toggleCustomerTexting] API FAILED:`, err.response?.data || err.message);
       setCtEnabled(!enabled); // rollback
       setError(err.response?.data?.message || err.message || 'Failed to toggle Customer Texting');
     } finally {
@@ -1198,6 +1211,8 @@ export function Services() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-6">
+          {/* eslint-disable-next-line @typescript-eslint/no-unused-expressions */}
+          <script dangerouslySetInnerHTML={{ __html: '' }} ref={() => console.log(`[Services RENDER] autoReplyEnabled=${autoReplyRules.some(r => r.enabled)} leadAlert=${leadAlertRule?.enabled} ctEnabled=${ctEnabled} ccEnabled=${ccEnabled} tenantPhones=${tenantPhones.length} selectedAccountId=${selectedAccountId}`)} />
 
           {/* 1. Lead Notifications (combined Auto-Reply + Lead Alerts) */}
           {(() => {
@@ -1212,23 +1227,25 @@ export function Services() {
             description="Auto-reply to leads and get SMS alerts for every new inquiry."
             enabled={autoReplyEnabled || (leadAlertRule?.enabled ?? false)}
             onToggle={(on) => {
-              if (on && noPhone) { setShowDedicatedModal(true); return; }
+              console.log(`[Notif] onToggle: on=${on} autoReplyEnabled=${autoReplyEnabled} leadAlertEnabled=${leadAlertRule?.enabled} noPhone=${noPhone} tenantPhones=${tenantPhones.length}`);
+              if (on && noPhone) { console.log('[Notif] BLOCKED: no phone'); setShowDedicatedModal(true); return; }
               // Optimistic: flip sub-switches immediately so the main toggle switches right away
               if (on) {
-                if (!autoReplyEnabled) setAutoReplyRules(prev => prev.length ? prev.map(r => ({ ...r, enabled: true })) : [{ id: '_pending', enabled: true } as any]);
-                if (!leadAlertRule?.enabled) setLeadAlertRule(leadAlertRule ? { ...leadAlertRule, enabled: true } : { id: '_pending', enabled: true } as any);
+                if (!autoReplyEnabled) { console.log('[Notif] Optimistic: autoReply ON'); setAutoReplyRules(prev => prev.length ? prev.map(r => ({ ...r, enabled: true })) : [{ id: '_pending', enabled: true } as any]); }
+                if (!leadAlertRule?.enabled) { console.log('[Notif] Optimistic: leadAlert ON'); setLeadAlertRule(leadAlertRule ? { ...leadAlertRule, enabled: true } : { id: '_pending', enabled: true } as any); }
               } else {
+                console.log('[Notif] Optimistic: all OFF');
                 setAutoReplyRules(prev => prev.map(r => ({ ...r, enabled: false })));
                 if (leadAlertRule) setLeadAlertRule({ ...leadAlertRule, enabled: false });
               }
               if (!expandedCard || expandedCard !== 'notifications') setExpandedCard('notifications');
               // Persist to backend
               if (on) {
-                if (!autoReplyEnabled) toggleAutoReply(true);
-                if (!leadAlertRule?.enabled) toggleLeadAlerts(true);
+                if (!autoReplyEnabled) { console.log('[Notif] Calling toggleAutoReply(true)...'); toggleAutoReply(true); }
+                if (!leadAlertRule?.enabled) { console.log('[Notif] Calling toggleLeadAlerts(true)...'); toggleLeadAlerts(true); }
               } else {
-                if (autoReplyEnabled) toggleAutoReply(false);
-                if (leadAlertRule?.enabled) toggleLeadAlerts(false);
+                if (autoReplyEnabled) { console.log('[Notif] Calling toggleAutoReply(false)...'); toggleAutoReply(false); }
+                if (leadAlertRule?.enabled) { console.log('[Notif] Calling toggleLeadAlerts(false)...'); toggleLeadAlerts(false); }
               }
             }}
             expanded={expandedCard === 'notifications'}
@@ -1530,22 +1547,30 @@ export function Services() {
             description="Text and call customers from your dedicated number."
             enabled={ctEnabled || ccEnabled}
             onToggle={(on) => {
-              if (on && tenantPhones.length === 0) { setShowDedicatedModal(true); return; }
+              console.log(`[Comms] onToggle: on=${on} ctEnabled=${ctEnabled} ccEnabled=${ccEnabled} tenantPhones=${tenantPhones.length} selectedAccountId=${selectedAccountId}`);
+              if (on && tenantPhones.length === 0) { console.log('[Comms] BLOCKED: no tenant phones'); setShowDedicatedModal(true); return; }
               // Optimistic: flip both sub-switches immediately so the main toggle switches right away
+              console.log(`[Comms] Setting ctEnabled=${on} ccEnabled=${on}`);
               setCtEnabled(on);
               setCcEnabled(on);
               if (!expandedCard || expandedCard !== 'comms') setExpandedCard('comms');
               // Persist to backend (fire & forget — each handles its own rollback)
               if (on !== ctEnabled && selectedAccountId) {
+                console.log('[Comms] Calling saveCustomerTextingSettings...');
                 notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
                   enabled: on,
                   autoReplyTemplate: ctAutoReplyTemplate,
-                }).catch(() => setCtEnabled(!on));
+                }).then(() => console.log('[Comms] CT save OK')).catch((err) => { console.error('[Comms] CT save FAILED:', err); setCtEnabled(!on); });
+              } else {
+                console.log(`[Comms] SKIPPED CT save: on!==ctEnabled=${on !== ctEnabled} selectedAccountId=${!!selectedAccountId}`);
               }
               if (on !== ccEnabled && selectedAccountId) {
+                console.log('[Comms] Calling callConnect.saveSettings...');
                 callConnectApi.saveSettings(selectedAccountId, { enabled: on })
-                  .then(({ settings }) => setCcEnabled(settings.enabled))
-                  .catch(() => setCcEnabled(!on));
+                  .then(({ settings }) => { console.log('[Comms] CC save OK, enabled=', settings.enabled); setCcEnabled(settings.enabled); })
+                  .catch((err) => { console.error('[Comms] CC save FAILED:', err); setCcEnabled(!on); });
+              } else {
+                console.log(`[Comms] SKIPPED CC save: on!==ccEnabled=${on !== ccEnabled} selectedAccountId=${!!selectedAccountId}`);
               }
             }}
             expanded={expandedCard === 'comms'}
