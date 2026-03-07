@@ -986,7 +986,9 @@ export class NotificationsService {
       });
       if (tenantPhone) fromPhone = tenantPhone.phoneNumber;
     }
-    const forwardBody = `SMS from ${customerName} (${fromNumber}):\n${body}`;
+    const forwardBody = customerName && customerName !== fromNumber
+      ? `SMS from ${customerName} (${fromNumber}):\n${body}`
+      : `SMS from ${fromNumber}:\n${body}`;
     this.logger.log(`[forwardInboundSms] Forwarding to ${settings.destinationPhone} for account ${savedAccountId}`);
 
     await this.sendViaSigcore({
