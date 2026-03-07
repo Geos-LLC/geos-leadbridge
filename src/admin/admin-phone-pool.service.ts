@@ -317,7 +317,7 @@ export class AdminPhonePoolService {
     });
 
     this.logger.log(`Synced ${totalSynced} phone number(s) to pool, marked ${released} as released`);
-    return results;
+    return { results, released };
   }
 
   /**

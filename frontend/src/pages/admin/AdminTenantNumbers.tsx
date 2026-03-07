@@ -297,9 +297,11 @@ export default function AdminTenantNumbers() {
       const result = await adminApi.syncPoolNumbers();
       if (result.success) {
         const totalSynced = result.data.results.reduce((sum: number, r: any) => sum + r.synced, 0);
+        const released = result.data.released || 0;
         const errors = result.data.results.flatMap((r: any) => r.errors);
         const details = result.data.results.map((r: any) => `${r.provider}: ${r.synced} synced${r.errors.length ? ` (${r.errors.join(', ')})` : ''}`).join(' | ');
-        if (totalSynced > 0) notify.success('Synced', `${totalSynced} number(s) synced. ${details}`);
+        const releasedMsg = released > 0 ? ` ${released} number(s) released from Twilio.` : '';
+        if (totalSynced > 0 || released > 0) notify.success('Synced', `${totalSynced} synced, ${released} released.${releasedMsg ? '' : ` ${details}`}`);
         else if (errors.length > 0) notify.error('Sync Issues', details);
         else notify.success('Up to date', `No new numbers. ${details}`);
       }
@@ -545,6 +547,7 @@ export default function AdminTenantNumbers() {
       case 'AVAILABLE': return <span className="px-2.5 py-1 bg-green-100 text-green-700 rounded-full text-[10px] font-bold uppercase">Available</span>;
       case 'ASSIGNED': return <span className="px-2.5 py-1 bg-blue-100 text-blue-700 rounded-full text-[10px] font-bold uppercase">Assigned</span>;
       case 'RESERVED': return <span className="px-2.5 py-1 bg-yellow-100 text-yellow-700 rounded-full text-[10px] font-bold uppercase">Reserved</span>;
+      case 'RELEASED': return <span className="px-2.5 py-1 bg-red-100 text-red-700 rounded-full text-[10px] font-bold uppercase">Released</span>;
       default: return <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-full text-[10px] font-bold uppercase">{status}</span>;
     }
   };
@@ -857,6 +860,7 @@ export default function AdminTenantNumbers() {
                   <option value="AVAILABLE">Available</option>
                   <option value="ASSIGNED">Assigned</option>
                   <option value="RESERVED">Reserved</option>
+                  <option value="RELEASED">Released</option>
                 </select>
               </div>
               <div className="flex items-center gap-2 pt-2 border-t border-slate-100">

@@ -142,8 +142,8 @@ export class AdminPhonePoolController {
    */
   @Post('sync')
   async syncNumbers(@Req() req: any) {
-    const results = await this.phonePoolService.syncProviderNumbers(req.user.id);
-    return { success: true, data: { results } };
+    const { results, released } = await this.phonePoolService.syncProviderNumbers(req.user.id);
+    return { success: true, data: { results, released } };
   }
 
   /**

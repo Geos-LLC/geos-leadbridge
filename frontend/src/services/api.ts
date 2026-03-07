@@ -967,7 +967,7 @@ export const adminApi = {
     const { data } = await api.post('/v1/admin/phone-pool/disconnect-provider', { provider });
     return data;
   },
-  syncPoolNumbers: async (): Promise<{ success: boolean; data: { results: { provider: string; synced: number; errors: string[] }[] } }> => {
+  syncPoolNumbers: async (): Promise<{ success: boolean; data: { results: { provider: string; synced: number; errors: string[] }[]; released: number } }> => {
     const { data } = await api.post('/v1/admin/phone-pool/sync');
     return data;
   },
