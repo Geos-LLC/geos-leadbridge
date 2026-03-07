@@ -236,7 +236,6 @@ export function Services() {
     sc?.ctAutoReplyTemplate ?? "Hi {customerName}, this is {accountName}. We just received your request for {category}. When would be a good time to call you?"
   );
   const [ctSaving, setCtSaving] = useState(false);
-  const [ctTestPhone, setCtTestPhone] = useState(() => localStorage.getItem('ct_test_phone') || '');
   const [ctTestStatus, setCtTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
   const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string } | null>(sc?.ctSavedSnapshot ?? null);
   const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>(sc?.ctSelectedTemplateId ?? '');
@@ -266,6 +265,7 @@ export function Services() {
     ccVoicemailRecordingUrl !== ccSavedSnapshot.voicemailRecordingUrl ||
     ccCallForwardingNumber !== ccSavedSnapshot.callForwardingNumber
   );
+  const commsDirty = ctDirty || ccDirty;
 
   useEffect(() => {
     loadAccounts();
@@ -763,6 +763,22 @@ export function Services() {
     setCtSelectedTemplateId(templates.find(t => t.content === ctSavedSnapshot.autoReplyTemplate)?.id || '');
   }
 
+  function discardCommsChanges() {
+    discardCtChanges();
+    discardCcChanges();
+  }
+
+  async function saveCommsSettings() {
+    if (!selectedAccountId) return;
+    const saving1 = ctDirty ? saveCtSettings() : Promise.resolve();
+    const saving2 = ccDirty ? saveCcSettings() : Promise.resolve();
+    await Promise.all([saving1, saving2]);
+    if (!ctDirty && !ccDirty) {
+      // Nothing was dirty — just save both anyway
+      await Promise.all([saveCtSettings(), saveCcSettings()]);
+    }
+  }
+
   async function doTestCall() {
     if (!selectedAccountId) return;
     setCcTesting(true);
@@ -974,11 +990,11 @@ export function Services() {
   }
 
   async function sendCtTest() {
-    if (!selectedAccountId || !ctTestPhone) return;
+    if (!selectedAccountId || !ccTestPhone) return;
     setCtTestStatus('sending');
     setError(null);
     try {
-      const result = await notificationsApi.sendTest(selectedAccountId, undefined, ctTestPhone, ctAutoReplyTemplate || undefined);
+      const result = await notificationsApi.sendTest(selectedAccountId, undefined, ccTestPhone, ctAutoReplyTemplate || undefined);
       if (result.success) {
         setCtTestStatus('delivered');
         setTimeout(() => setCtTestStatus('idle'), 4000);
@@ -1660,82 +1676,6 @@ export function Services() {
                     )}
                   </div>
 
-                  {/* Test SMS */}
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send Test</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="tel"
-                        value={ctTestPhone}
-                        onChange={e => {
-                          const v = e.target.value.replace(/[^\d+\s\-()]/g, '');
-                          setCtTestPhone(v);
-                          localStorage.setItem('ct_test_phone', v);
-                        }}
-                        onBlur={e => {
-                          const formatted = formatPhoneE164(e.target.value);
-                          if (formatted !== e.target.value) {
-                            setCtTestPhone(formatted);
-                            localStorage.setItem('ct_test_phone', formatted);
-                          }
-                        }}
-                        placeholder="+15555550100"
-                        className={`flex-1 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
-                          ctTestPhone && !isValidPhoneE164(ctTestPhone)
-                            ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
-                            : ctTestPhone && isValidPhoneE164(ctTestPhone)
-                              ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
-                              : 'border border-slate-200 focus:ring-emerald-400'
-                        }`}
-                      />
-                      <button
-                        onClick={sendCtTest}
-                        disabled={ctTestStatus === 'sending' || !ctTestPhone || !isValidPhoneE164(ctTestPhone) || tenantPhones.length === 0}
-                        className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed flex items-center gap-2 ${
-                          ctTestStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
-                          ctTestStatus === 'failed' ? 'bg-red-100 text-red-700' :
-                          ctTestStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
-                          'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
-                        }`}
-                      >
-                        {ctTestStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
-                         ctTestStatus === 'delivered' ? <CheckCircle size={14} /> :
-                         ctTestStatus === 'failed' ? <X size={14} /> :
-                         <Send size={14} />}
-                        {ctTestStatus === 'sending' ? 'Sending...' :
-                         ctTestStatus === 'delivered' ? 'Delivered' :
-                         ctTestStatus === 'failed' ? 'Failed' :
-                         'Send Test'}
-                      </button>
-                    </div>
-                    {ctTestPhone && !isValidPhoneE164(ctTestPhone) && (
-                      <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3 shrink-0" />
-                        Must be E.164 format, e.g. +12125550100
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* CT Save */}
-                <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/30">
-                  {ctDirty ? (
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-xs text-amber-600 font-medium flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3" /> Unsaved changes
-                      </span>
-                      <div className="flex gap-2">
-                        <button onClick={discardCtChanges} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Discard</button>
-                        <button onClick={saveCtSettings} disabled={ctSaving} className="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center gap-1">
-                          {ctSaving && <Loader2 className="w-3 h-3 animate-spin" />} Save
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button onClick={saveCtSettings} disabled={ctSaving} className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50">
-                      {ctSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} Save Texting
-                    </button>
-                  )}
                 </div>
               </div>
 
@@ -1911,62 +1851,87 @@ export function Services() {
                     </div>
                   </div>
 
-                  {/* Test Call */}
-                  <div className="pt-3 border-t border-slate-100">
-                    <div className="flex gap-3 flex-wrap items-center">
-                      <input
-                        type="tel"
-                        value={ccTestPhone}
-                        onChange={e => { const v = e.target.value.replace(/[^\d+\s\-()]/g, ''); setCcTestPhone(v); localStorage.setItem('cc_test_phone', v); }}
-                        onBlur={e => { const formatted = formatPhoneE164(e.target.value); if (formatted !== e.target.value) { setCcTestPhone(formatted); localStorage.setItem('cc_test_phone', formatted); } }}
-                        placeholder="+15559876543"
-                        className={`rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent min-w-[160px] transition-colors ${
-                          ccSamePhoneError ? 'border-2 border-amber-400 bg-amber-50/30 focus:ring-amber-200'
-                            : ccTestPhone && !isValidPhoneE164(ccTestPhone) ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
-                            : ccTestPhone && isValidPhoneE164(ccTestPhone) ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
-                            : 'bg-slate-50 border border-slate-200 focus:ring-violet-500'
-                        }`}
-                      />
-                      <button
-                        onClick={handleTestCall}
-                        disabled={ccTesting || !ccEnabled || !!ccSamePhoneError}
-                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all bg-slate-100 text-slate-700 hover:bg-slate-200 whitespace-nowrap ${
-                          ccTesting || !ccEnabled || ccSamePhoneError ? 'opacity-50 cursor-not-allowed'
-                            : (!ccAgentPhone || !isValidPhoneE164(ccAgentPhone) || !ccBotNumber || !ccTestPhone.trim() || !isValidPhoneE164(ccTestPhone)) ? 'opacity-60' : ''
-                        }`}
-                      >
-                        {ccTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
-                        {ccTesting ? 'Calling…' : 'Test Call'}
+                </div>
+              </div>
+
+              {/* ── Shared Test section ── */}
+              <div className="border border-slate-100 rounded-2xl p-5 space-y-3">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Test Phone</label>
+                <div className="flex gap-2 flex-wrap items-center">
+                  <input
+                    type="tel"
+                    value={ccTestPhone}
+                    onChange={e => { const v = e.target.value.replace(/[^\d+\s\-()]/g, ''); setCcTestPhone(v); localStorage.setItem('cc_test_phone', v); }}
+                    onBlur={e => { const formatted = formatPhoneE164(e.target.value); if (formatted !== e.target.value) { setCcTestPhone(formatted); localStorage.setItem('cc_test_phone', formatted); } }}
+                    placeholder="+15559876543"
+                    className={`flex-1 min-w-[160px] rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                      ccSamePhoneError ? 'border-2 border-amber-400 bg-amber-50/30 focus:ring-amber-200'
+                        : ccTestPhone && !isValidPhoneE164(ccTestPhone) ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                        : ccTestPhone && isValidPhoneE164(ccTestPhone) ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                        : 'bg-slate-50 border border-slate-200 focus:ring-blue-500'
+                    }`}
+                  />
+                  <button
+                    onClick={sendCtTest}
+                    disabled={ctTestStatus === 'sending' || !ctEnabled || !ccTestPhone || !isValidPhoneE164(ccTestPhone) || tenantPhones.length === 0}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                      ctTestStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                      ctTestStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                      ctTestStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                      'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
+                    }`}
+                    title={!ctEnabled ? 'Enable Customer Texting first' : ''}
+                  >
+                    {ctTestStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
+                     ctTestStatus === 'delivered' ? <CheckCircle size={14} /> :
+                     ctTestStatus === 'failed' ? <X size={14} /> :
+                     <Send size={14} />}
+                    {ctTestStatus === 'sending' ? 'Sending...' : ctTestStatus === 'delivered' ? 'Sent' : ctTestStatus === 'failed' ? 'Failed' : 'Test Text'}
+                  </button>
+                  <button
+                    onClick={handleTestCall}
+                    disabled={ccTesting || !ccEnabled || !!ccSamePhoneError || !ccTestPhone || !isValidPhoneE164(ccTestPhone)}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                      ccTesting ? 'bg-slate-100 text-slate-500' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
+                    }`}
+                    title={!ccEnabled ? 'Enable Instant Calls first' : ''}
+                  >
+                    {ccTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
+                    {ccTesting ? 'Calling…' : 'Test Call'}
+                  </button>
+                </div>
+                {ccTestPhone && !isValidPhoneE164(ccTestPhone) && (
+                  <p className="text-xs text-red-500 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" /> Must be E.164 format, e.g. +12125550100
+                  </p>
+                )}
+                {ccSamePhoneError && (
+                  <p className="text-xs text-amber-600 flex items-center gap-1">
+                    <AlertTriangle size={12} /> Test phone cannot be the same as the bot number or agent phone.
+                  </p>
+                )}
+              </div>
+
+              {/* ── Save / unsaved changes ── */}
+              <div className="pt-4 border-t border-slate-100">
+                {commsDirty ? (
+                  <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+                    <div className="flex items-center gap-2 text-amber-700">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span className="text-sm font-medium">You have unsaved changes</span>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button onClick={discardCommsChanges} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Discard</button>
+                      <button onClick={saveCommsSettings} disabled={ctSaving || ccSaving} className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1">
+                        {(ctSaving || ccSaving) && <Loader2 className="w-3 h-3 animate-spin" />} Save Settings
                       </button>
                     </div>
-                    {ccSamePhoneError && (
-                      <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
-                        <AlertTriangle size={12} /> Test phone cannot be the same as the bot number or agent phone.
-                      </p>
-                    )}
                   </div>
-                </div>
-
-                {/* ICC Save */}
-                <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/30">
-                  {ccDirty ? (
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-xs text-amber-600 font-medium flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3" /> Unsaved changes
-                      </span>
-                      <div className="flex gap-2">
-                        <button onClick={discardCcChanges} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Discard</button>
-                        <button onClick={saveCcSettings} disabled={ccSaving} className="px-3 py-1.5 text-xs font-semibold text-white bg-violet-600 rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50 flex items-center gap-1">
-                          {ccSaving && <Loader2 className="w-3 h-3 animate-spin" />} Save
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button onClick={saveCcSettings} disabled={ccSaving} className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-violet-600 rounded-lg hover:bg-violet-700 transition-colors disabled:opacity-50">
-                      {ccSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} Save Calls
-                    </button>
-                  )}
-                </div>
+                ) : (
+                  <button onClick={saveCommsSettings} disabled={ctSaving || ccSaving} className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50">
+                    {(ctSaving || ccSaving) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save Settings
+                  </button>
+                )}
               </div>
             </div>
           </ServiceCard>
