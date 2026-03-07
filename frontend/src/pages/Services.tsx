@@ -550,6 +550,8 @@ export function Services() {
     const prevRules = [...autoReplyRules];
     if (autoReplyRules.length > 0) {
       setAutoReplyRules(prev => prev.map(r => ({ ...r, enabled })));
+    } else if (enabled) {
+      setAutoReplyRules([{ id: '_pending', enabled: true } as any]);
     }
     setSaving(true);
     try {
@@ -580,7 +582,6 @@ export function Services() {
           enabled: true,
         });
         setAutoReplyRules([rule]);
-        showSuccess('Auto Reply enabled');
       }
     } catch (err: any) {
       // Rollback on error
@@ -601,6 +602,8 @@ export function Services() {
     const prevAlertRule = leadAlertRule ? { ...leadAlertRule } : null;
     if (leadAlertRule) {
       setLeadAlertRule({ ...leadAlertRule, enabled });
+    } else if (enabled) {
+      setLeadAlertRule({ id: '_pending', enabled: true, toPhone: alertToPhone } as any);
     }
     setSaving(true);
     try {
@@ -642,7 +645,7 @@ export function Services() {
         setLeadAlertRule(rule);
         setAlertSavedSnapshot({ toPhone: alertToPhone });
         setExpandedCard('notifications');
-        showSuccess(alertToPhone ? 'Lead Alerts enabled' : 'Lead Alerts enabled — configure your alert phone number');
+        showSuccess(alertToPhone ? 'Lead Notifications enabled' : 'Lead Notifications enabled — configure your alert phone number');
       }
       // Invalidate diagnostics cache so Dashboard/Settings show fresh data
       setAccountDiagnostics({});
@@ -1210,8 +1213,12 @@ export function Services() {
             enabled={autoReplyEnabled || (leadAlertRule?.enabled ?? false)}
             onToggle={(enabled) => {
               if (enabled && noPhone) { setShowDedicatedModal(true); return; }
-              if (enabled && !leadAlertRule?.enabled) {
-                toggleLeadAlerts(true);
+              if (enabled) {
+                if (!autoReplyEnabled) toggleAutoReply(true);
+                if (!leadAlertRule?.enabled) toggleLeadAlerts(true);
+              } else {
+                if (autoReplyEnabled) toggleAutoReply(false);
+                if (leadAlertRule?.enabled) toggleLeadAlerts(false);
               }
               toggleExpand('notifications');
             }}
