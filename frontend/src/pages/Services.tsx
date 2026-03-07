@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
-  Bot, Pencil, Phone, Send, ChevronUp, Trash2, Save,
+  Pencil, Phone, Send, ChevronUp, Trash2, Save,
   Key, Hash, ExternalLink, Link2, Sparkles,
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
@@ -775,6 +775,24 @@ export function Services() {
     setCcCallForwardingNumber(phone);
   }
 
+  async function saveAgentPhone() {
+    setEditingAgentPhone(false);
+    const phone = formatPhoneE164(ccAgentPhone);
+    if (phone !== ccAgentPhone) setAllAgentPhones(phone);
+    const finalPhone = phone || ccAgentPhone;
+    if (!selectedAccountId || !finalPhone) return;
+    // Save alert rule toPhone
+    if (leadAlertRule && leadAlertRule.id !== '_pending') {
+      notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { toPhone: finalPhone })
+        .then(({ rule }) => { setLeadAlertRule(rule); setAlertSavedSnapshot({ toPhone: finalPhone }); })
+        .catch(() => {});
+    }
+    // Save call connect agentPhone
+    callConnectApi.saveSettings(selectedAccountId, { agentPhoneE164: finalPhone })
+      .then(() => { setCcSavedSnapshot(prev => prev ? { ...prev, agentPhone: finalPhone } : prev); })
+      .catch(() => {});
+  }
+
   function discardAlertChanges() {
     if (!alertSavedSnapshot) return;
     setAlertToPhone(alertSavedSnapshot.toPhone);
@@ -1220,45 +1238,48 @@ export function Services() {
 
           {tenantPhones.length > 0 ? (
             <div className="space-y-4">
-              {/* LeadBridge number (read-only) */}
-              <div className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700">
-                {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName && tenantPhones[0].friendlyName !== tenantPhones[0].phoneNumber ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
-              </div>
-
-              {/* Send to (your phone) */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Your Phone</label>
-                {editingAgentPhone ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="tel"
-                      value={ccAgentPhone}
-                      onChange={e => setAllAgentPhones(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
-                      onBlur={e => { const f = formatPhoneE164(e.target.value); if (f !== e.target.value) setAllAgentPhones(f); }}
-                      onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingAgentPhone(false); }}
-                      autoFocus
-                      placeholder="+15551234567"
-                      className="flex-1 rounded-xl px-3 py-2.5 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                    />
-                    <button onClick={() => setEditingAgentPhone(false)} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
+              {/* LeadBridge number + Your phone — side by side */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">LeadBridge Number</label>
+                  <div className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700">
+                    {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName && tenantPhones[0].friendlyName !== tenantPhones[0].phoneNumber ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
                   </div>
-                ) : (
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 rounded-xl px-3 py-2.5 text-sm font-medium bg-slate-50 border border-slate-200 text-slate-800 font-mono">{ccAgentPhone || <span className="text-slate-400">Not set</span>}</div>
-                    <button
-                      onClick={() => setEditingAgentPhone(true)}
-                      className="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-                    >
-                      Change
-                    </button>
-                  </div>
-                )}
-                {ccAgentPhone && tenantPhones.length > 0 && ccAgentPhone === tenantPhones[0].phoneNumber && (
-                  <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 shrink-0" />
-                    This is your LeadBridge number — enter your personal phone instead
-                  </p>
-                )}
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Your Phone</label>
+                  {editingAgentPhone ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="tel"
+                        value={ccAgentPhone}
+                        onChange={e => setAllAgentPhones(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                        onBlur={() => saveAgentPhone()}
+                        onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') saveAgentPhone(); }}
+                        autoFocus
+                        placeholder="+15551234567"
+                        className="flex-1 rounded-xl px-3 py-2.5 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                      />
+                      <button onClick={() => saveAgentPhone()} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 rounded-xl px-3 py-2.5 text-sm font-medium bg-slate-50 border border-slate-200 text-slate-800 font-mono">{ccAgentPhone || <span className="text-slate-400">Not set</span>}</div>
+                      <button
+                        onClick={() => setEditingAgentPhone(true)}
+                        className="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                      >
+                        Change
+                      </button>
+                    </div>
+                  )}
+                  {ccAgentPhone && tenantPhones.length > 0 && ccAgentPhone === tenantPhones[0].phoneNumber && (
+                    <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      This is your LeadBridge number — enter your personal phone instead
+                    </p>
+                  )}
+                </div>
               </div>
 
               {/* Test phone */}
