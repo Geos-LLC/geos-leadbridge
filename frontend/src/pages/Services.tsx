@@ -1522,7 +1522,13 @@ export function Services() {
             enabled={ctEnabled || ccEnabled}
             onToggle={(enabled) => {
               if (enabled && tenantPhones.length === 0) { setShowDedicatedModal(true); return; }
-              // Don't toggle both — just expand to let user pick
+              if (enabled) {
+                if (!ctEnabled) toggleCustomerTexting(true);
+                if (!ccEnabled) toggleCallConnect(true);
+              } else {
+                if (ctEnabled) toggleCustomerTexting(false);
+                if (ccEnabled) toggleCallConnect(false);
+              }
               toggleExpand('comms');
             }}
             expanded={expandedCard === 'comms'}
