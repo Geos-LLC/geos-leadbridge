@@ -1063,35 +1063,28 @@ export class WebhooksService {
         // configured fromPhone doesn't match the inbound toNumber (ghost events).
         if (accountId) {
           try {
-            const acctSettings = await this.prisma.notificationSettings.findUnique({
-              where: { savedAccountId: accountId },
-              select: { sigcoreFromPhone: true },
+            // Check if toNumber matches the account's dedicated number (TenantPhoneNumber)
+            const acctUser = await this.prisma.savedAccount.findUnique({
+              where: { id: accountId },
+              select: { userId: true },
             });
-            const normTo = toNumber?.replace(/\D/g, '').slice(-10);
-            const normAcctFrom = acctSettings?.sigcoreFromPhone?.replace(/\D/g, '').slice(-10);
+            const dedicatedPhone = acctUser ? await this.prisma.tenantPhoneNumber.findFirst({
+              where: { userId: acctUser.userId, status: 'ACTIVE' },
+              select: { phoneNumber: true },
+            }) : null;
 
-            // Determine if this account is the legitimate recipient of the inbound SMS.
-            // Check 1: account has no dedicated fromPhone (pure pool routing) → always forward
-            // Check 2: toNumber matches the account's dedicated/BYO fromPhone
-            // Check 3: toNumber matches one of the account's pool phone assignments
-            let isOwner = !normAcctFrom || !normTo || normAcctFrom === normTo;
-            if (!isOwner && normTo) {
-              const poolAssignment = await this.prisma.phonePoolAssignment.findFirst({
-                where: { user: { savedAccounts: { some: { id: accountId } } } },
-                include: { phonePool: { select: { phoneNumber: true } } },
-              });
-              if (poolAssignment) {
-                const normPool = poolAssignment.phonePool.phoneNumber.replace(/\D/g, '').slice(-10);
-                if (normPool === normTo) isOwner = true;
-              }
-            }
+            const normTo = toNumber?.replace(/\D/g, '').slice(-10);
+            const normDedicated = dedicatedPhone?.phoneNumber?.replace(/\D/g, '').slice(-10);
+
+            // Forward if toNumber matches the account's dedicated number, or if no dedicated number is set
+            const isOwner = !normDedicated || !normTo || normDedicated === normTo;
 
             if (isOwner) {
               await this.notificationsService.forwardInboundSms(accountId, fromNumber, fromNumber, body);
             } else {
               this.logger.log(
                 `[handleInboundSms] Skipping forward for account ${accountId}: ` +
-                `inbound toNumber=${toNumber} doesn't match account fromPhone=${acctSettings?.sigcoreFromPhone} (shared-tenant ghost event)`,
+                `inbound toNumber=${toNumber} doesn't match dedicated number=${dedicatedPhone?.phoneNumber} (shared-tenant ghost event)`,
               );
             }
           } catch (err: any) {
