@@ -293,10 +293,8 @@ export function Services() {
       // If we have store data, silent fail; only show error if accounts list is empty
       if (accounts.length === 0) {
         setError(err.message || 'Failed to load accounts');
+        setLoading(false); // Only stop spinner if no accounts will trigger loadServiceData
       }
-    } finally {
-      setLoading(false);
-      _svcLoaded = true;
     }
   }
 
