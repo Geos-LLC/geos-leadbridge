@@ -149,6 +149,10 @@ export default function AdminTenantNumbers() {
   const [searchingReassignUsers, setSearchingReassignUsers] = useState(false);
   const [reassigning, setReassigning] = useState(false);
 
+  // ── Messaging Service SID ──
+  const [messagingServiceSid, setMessagingServiceSid] = useState('');
+  const [messagingServiceSaving, setMessagingServiceSaving] = useState(false);
+
   // ── OpenPhone numbers (informational) ──
   const [openPhoneNumbers, setOpenPhoneNumbers] = useState<{ phoneNumber: string; friendlyName?: string; provider: string; userName: string | null; userEmail: string; accountName: string }[]>([]);
   const [openPhoneLoading, setOpenPhoneLoading] = useState(false);
@@ -163,6 +167,7 @@ export default function AdminTenantNumbers() {
     loadTenantData();
     loadPoolData();
     loadPoolConfig();
+    loadMessagingServiceSid();
     checkTwilioHealth();
     loadOpenPhoneNumbers();
   }, [user]);
@@ -226,6 +231,29 @@ export default function AdminTenantNumbers() {
       setTenantKeyConfigured(config.configured);
     } catch {
       setTenantKeyConfigured(false);
+    }
+  };
+
+  const loadMessagingServiceSid = async () => {
+    try {
+      const pricing = await adminApi.getPhonePricing();
+      if (pricing.messagingServiceSid) setMessagingServiceSid(pricing.messagingServiceSid);
+    } catch { /* keep default */ }
+  };
+
+  const handleSaveMessagingService = async () => {
+    if (!messagingServiceSid.startsWith('MG')) {
+      notify.error('Invalid', 'Messaging Service SID must start with MG');
+      return;
+    }
+    try {
+      setMessagingServiceSaving(true);
+      const result = await adminApi.updateMessagingService(messagingServiceSid);
+      notify.success('Saved', result.synced ? 'Messaging Service SID saved and synced to Sigcore' : 'Saved locally but Sigcore sync failed — check logs');
+    } catch (err: any) {
+      notify.error('Error', err.response?.data?.message || 'Failed to save Messaging Service SID');
+    } finally {
+      setMessagingServiceSaving(false);
     }
   };
 
@@ -632,6 +660,28 @@ export default function AdminTenantNumbers() {
             </div>
           </div>
         </div>
+
+        {/* A2P Messaging Service SID — tight under Twilio connection */}
+        {twilioHealth?.status === 'connected' && (
+          <div className="flex items-center gap-3 px-4 py-3 bg-white rounded-2xl border border-slate-100 shadow-sm">
+            <label className="text-xs font-bold text-slate-600 whitespace-nowrap">Messaging Service SID</label>
+            <input
+              type="text"
+              value={messagingServiceSid}
+              onChange={e => setMessagingServiceSid(e.target.value)}
+              placeholder="MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              className="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none min-w-0"
+            />
+            <button
+              onClick={handleSaveMessagingService}
+              disabled={messagingServiceSaving || !messagingServiceSid}
+              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 whitespace-nowrap"
+            >
+              {messagingServiceSaving ? <Loader2 size={12} className="animate-spin" /> : <ShieldCheck size={12} />}
+              Save & Sync
+            </button>
+          </div>
+        )}
 
         {/* Connect Provider Form (appears below health banner) */}
         {showConnect && (
