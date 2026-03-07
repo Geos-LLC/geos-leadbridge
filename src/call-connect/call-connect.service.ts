@@ -75,7 +75,7 @@ export class CallConnectService {
     savedAccountId: string,
     dto: SaveCallConnectSettingsDto,
   ) {
-    const settings = await this.prisma.callConnectSettings.upsert({
+    let settings = await this.prisma.callConnectSettings.upsert({
       where: { savedAccountId },
       create: {
         savedAccountId,
@@ -125,6 +125,29 @@ export class CallConnectService {
       reProvisioned = await this.ensureSigcoreProvisioned(savedAccountId);
     } catch (err: any) {
       this.logger.warn(`[saveSettings] Auto-provision Sigcore workspace failed: ${err.message}`);
+    }
+
+    // Auto-resolve botNumberE164 from the tenant's dedicated phone if not already set
+    if (!settings.botNumberE164) {
+      const acctUser = await this.prisma.savedAccount.findUnique({
+        where: { id: savedAccountId },
+        select: { userId: true },
+      });
+      if (acctUser) {
+        const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
+          where: { userId: acctUser.userId, status: 'ACTIVE' },
+          orderBy: { purchasedAt: 'desc' },
+          select: { phoneNumber: true },
+        });
+        if (tenantPhone?.phoneNumber) {
+          await this.prisma.callConnectSettings.update({
+            where: { id: settings.id },
+            data: { botNumberE164: tenantPhone.phoneNumber },
+          });
+          settings = { ...settings, botNumberE164: tenantPhone.phoneNumber };
+          this.logger.log(`[saveSettings] Auto-resolved botNumberE164=${tenantPhone.phoneNumber} for account ${savedAccountId}`);
+        }
+      }
     }
 
     // Push settings to Sigcore (best effort).
