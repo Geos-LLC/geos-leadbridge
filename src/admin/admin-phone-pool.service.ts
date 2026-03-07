@@ -210,11 +210,13 @@ export class AdminPhonePoolService {
     // Only sync Twilio numbers into the shared pool.
     // OpenPhone numbers belong to tenants and route through OpenPhone's infrastructure,
     // so they should NOT be in the admin shared pool.
+    let fetchedTwilioNumbers: any[] | null = null;
     for (const provider of ['twilio'] as const) {
       const providerResult = { provider, synced: 0, errors: [] as string[] };
 
       try {
         const numbers = await this.sigcoreService.adminFetchTwilioNumbers();
+        fetchedTwilioNumbers = numbers;
 
         this.logger.log(`[syncProviderNumbers] Fetched ${numbers.length} numbers from ${provider}`);
         if (numbers.length > 0) {
@@ -276,14 +278,45 @@ export class AdminPhonePoolService {
       results.push(providerResult);
     }
 
+    // Mark pool numbers that no longer exist on Twilio as RELEASED
+    let released = 0;
+    try {
+      // Reuse the numbers already fetched during sync (avoid duplicate API call)
+      if (fetchedTwilioNumbers) {
+        const twilioPhoneSet = new Set(
+          fetchedTwilioNumbers.map((n: any) => n.phoneNumber || n.phone_number || n.number || n.e164 || n.phone).filter(Boolean),
+        );
+
+        const activePoolPhones = await this.prisma.phonePool.findMany({
+          where: { provider: 'twilio', status: { not: 'RELEASED' } },
+          select: { id: true, phoneNumber: true },
+        });
+
+        for (const pool of activePoolPhones) {
+          if (!twilioPhoneSet.has(pool.phoneNumber)) {
+            await this.prisma.phonePoolAssignment.deleteMany({ where: { phonePoolId: pool.id } });
+            await this.prisma.phonePool.update({
+              where: { id: pool.id },
+              data: { status: 'RELEASED', releasedAt: new Date() },
+            });
+            released++;
+            this.logger.log(`[syncProviderNumbers] Marked ${pool.phoneNumber} as RELEASED (no longer on Twilio)`);
+          }
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`[syncProviderNumbers] Failed to check for released numbers: ${err.message}`);
+    }
+
     const totalSynced = results.reduce((sum, r) => sum + r.synced, 0);
 
     await this.adminService.logAdminAction(adminId, 'SYNC_POOL_NUMBERS', null, {
       results,
       totalSynced,
+      released,
     });
 
-    this.logger.log(`Synced ${totalSynced} phone number(s) to pool`);
+    this.logger.log(`Synced ${totalSynced} phone number(s) to pool, marked ${released} as released`);
     return results;
   }
 
