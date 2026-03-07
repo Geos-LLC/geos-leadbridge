@@ -183,6 +183,13 @@ export class CallConnectService {
       this.logger.warn(`Failed to register Sigcore call-connect webhook: ${err.message}`);
     }
 
+    // Ensure inbound SMS webhook subscription exists (needed for SMS forwarding)
+    try {
+      await this.ensureInboundSmsWebhook(savedAccountId);
+    } catch (err: any) {
+      this.logger.warn(`[saveSettings] Failed to ensure inbound SMS webhook: ${err.message}`);
+    }
+
     return settings;
   }
 
@@ -528,6 +535,47 @@ export class CallConnectService {
 
     if (webhookId) {
       this.logger.log(`Registered Sigcore call-connect webhook: ${webhookId} for account ${savedAccountId}`);
+    }
+  }
+
+  /** Ensure inbound SMS webhook subscription exists for this account */
+  private async ensureInboundSmsWebhook(savedAccountId: string): Promise<void> {
+    const ns = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { id: true, sigcoreApiKey: true, inboundSmsWebhookId: true },
+    });
+    if (!ns?.sigcoreApiKey || ns.inboundSmsWebhookId) return; // already registered or no key
+
+    const appBaseUrl = this.configService.get<string>('APP_BASE_URL', 'https://www.leadbridge360.com');
+    const webhookUrl = `${appBaseUrl}/api/webhooks/sigcore/inbound-sms?accountId=${savedAccountId}`;
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+
+    const resp = await fetch(`${sigcoreUrl}/v1/webhook-subscriptions`, {
+      method: 'POST',
+      headers: { 'x-api-key': ns.sigcoreApiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'LeadBridge Inbound SMS',
+        webhookUrl,
+        events: ['sms.message.received', 'message.inbound'],
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      this.logger.warn(`[ensureInboundSmsWebhook] Failed (${resp.status}): ${text}`);
+      return;
+    }
+
+    const result = await resp.json();
+    const webhookId = result.data?.id || result.id || result.subscriptionId;
+
+    if (webhookId) {
+      await this.prisma.notificationSettings.update({
+        where: { id: ns.id },
+        data: { inboundSmsWebhookId: webhookId },
+      });
+      this.logger.log(`[ensureInboundSmsWebhook] Registered inbound SMS webhook: ${webhookId} for account ${savedAccountId}`);
     }
   }
 
