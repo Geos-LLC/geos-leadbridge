@@ -1008,12 +1008,16 @@ export const adminApi = {
     return data.data;
   },
   // Phone Pricing
-  getPhonePricing: async (): Promise<{ priceMonthly: number | null; gracePeriodDays: number; stripePriceId: string | null }> => {
+  getPhonePricing: async (): Promise<{ priceMonthly: number | null; gracePeriodDays: number; stripePriceId: string | null; messagingServiceSid: string | null }> => {
     const { data } = await api.get('/v1/admin/phone-pool/phone-pricing');
     return data.data;
   },
   updatePhonePricing: async (priceMonthly: number, gracePeriodDays: number): Promise<{ priceMonthly: number; gracePeriodDays: number; stripePriceId: string }> => {
     const { data } = await api.patch('/v1/admin/phone-pool/phone-pricing', { priceMonthly, gracePeriodDays });
+    return data.data;
+  },
+  updateMessagingService: async (messagingServiceSid: string): Promise<{ messagingServiceSid: string; synced: boolean }> => {
+    const { data } = await api.patch('/v1/admin/phone-pool/messaging-service', { messagingServiceSid });
     return data.data;
   },
   checkTwilioHealth: async (): Promise<{

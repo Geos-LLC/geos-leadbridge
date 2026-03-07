@@ -83,6 +83,15 @@ export class AdminPhonePoolController {
   }
 
   /**
+   * Update Messaging Service SID (A2P 10DLC) — saves locally and syncs to Sigcore
+   */
+  @Patch('messaging-service')
+  async updateMessagingService(@Body() body: { messagingServiceSid: string }) {
+    const result = await this.phonePoolService.updateMessagingServiceSid(body.messagingServiceSid);
+    return { success: true, data: result };
+  }
+
+  /**
    * List users for assignment dropdown
    * MUST be before parameterized routes to avoid NestJS matching 'users' as :phonePoolId
    */

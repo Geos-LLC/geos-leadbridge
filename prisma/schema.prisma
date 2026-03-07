@@ -770,6 +770,9 @@ model AdminConfig {
   phoneGracePeriodDays Int       @default(30)        @map("phone_grace_period_days")
   stripePriceId        String?                       @map("stripe_price_id")
 
+  // A2P 10DLC — Twilio Messaging Service SID (synced to Sigcore)
+  messagingServiceSid  String?                       @map("messaging_service_sid")
+
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 

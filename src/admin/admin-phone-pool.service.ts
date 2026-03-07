@@ -989,12 +989,14 @@ export class AdminPhonePoolService {
     priceMonthly: number | null;
     gracePeriodDays: number;
     stripePriceId: string | null;
+    messagingServiceSid: string | null;
   }> {
     const config = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
     return {
       priceMonthly: config?.phonePriceMonthly ? Number(config.phonePriceMonthly) : null,
       gracePeriodDays: config?.phoneGracePeriodDays ?? 30,
       stripePriceId: config?.stripePriceId ?? null,
+      messagingServiceSid: config?.messagingServiceSid ?? null,
     };
   }
 
@@ -1066,5 +1068,47 @@ export class AdminPhonePoolService {
     this.logger.log(`[updatePhonePricing] Price: $${priceMonthly}/mo, Grace: ${gracePeriodDays}d, Stripe Price: ${stripePriceId}`);
 
     return { priceMonthly, gracePeriodDays, stripePriceId };
+  }
+
+  /**
+   * Save Messaging Service SID locally and sync to Sigcore pricing config
+   */
+  async updateMessagingServiceSid(messagingServiceSid: string): Promise<{ messagingServiceSid: string; synced: boolean }> {
+    // Save locally
+    await this.prisma.adminConfig.upsert({
+      where: { id: 'global' },
+      create: { id: 'global', messagingServiceSid },
+      update: { messagingServiceSid },
+    });
+
+    // Sync to Sigcore
+    let synced = false;
+    const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+
+    if (platformKey) {
+      try {
+        const resp = await fetch(`${sigcoreUrl}/v1/tenants/phone-numbers/pricing`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': platformKey,
+          },
+          body: JSON.stringify({ messagingServiceSid }),
+        });
+        synced = resp.ok;
+        if (!synced) {
+          this.logger.warn(`[updateMessagingServiceSid] Sigcore sync failed: ${resp.status} ${await resp.text()}`);
+        } else {
+          this.logger.log(`[updateMessagingServiceSid] Synced to Sigcore: ${messagingServiceSid}`);
+        }
+      } catch (err) {
+        this.logger.error(`[updateMessagingServiceSid] Sigcore sync error: ${err.message}`);
+      }
+    } else {
+      this.logger.warn('[updateMessagingServiceSid] SIGCORE_API_KEY not configured, skipped sync');
+    }
+
+    return { messagingServiceSid, synced };
   }
 }

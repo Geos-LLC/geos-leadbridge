@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Users, DollarSign, Activity, TrendingDown, Eye, Trash2, Plus, Minus, ChevronRight, Loader2, Building2 } from 'lucide-react';
+import { Users, DollarSign, Activity, TrendingDown, Eye, Trash2, Plus, Minus, ChevronRight, Loader2, Building2, Save } from 'lucide-react';
 import { adminApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
@@ -47,6 +47,8 @@ export default function AdminDashboard() {
   const [phoneGracePeriodDays, setPhoneGracePeriodDays] = useState<string>('30');
   const [phonePricingSaving, setPhonePricingSaving] = useState(false);
   const [currentStripePriceId, setCurrentStripePriceId] = useState<string | null>(null);
+  const [messagingServiceSid, setMessagingServiceSid] = useState<string>('');
+  const [messagingServiceSaving, setMessagingServiceSaving] = useState(false);
 
   // Test customer setup
   const [testData, setTestData] = useState<Record<string, string>>({
@@ -95,6 +97,7 @@ export default function AdminDashboard() {
       if (pricing.priceMonthly != null) setPhonePriceMonthly(pricing.priceMonthly.toString());
       setPhoneGracePeriodDays(pricing.gracePeriodDays.toString());
       setCurrentStripePriceId(pricing.stripePriceId);
+      if (pricing.messagingServiceSid) setMessagingServiceSid(pricing.messagingServiceSid);
     } catch {
       // keep defaults
     }
@@ -120,6 +123,22 @@ export default function AdminDashboard() {
       notify.error('Error', err.response?.data?.message || 'Failed to save phone pricing');
     } finally {
       setPhonePricingSaving(false);
+    }
+  };
+
+  const handleSaveMessagingService = async () => {
+    if (!messagingServiceSid.startsWith('MG')) {
+      notify.error('Invalid', 'Messaging Service SID must start with MG');
+      return;
+    }
+    try {
+      setMessagingServiceSaving(true);
+      const result = await adminApi.updateMessagingService(messagingServiceSid);
+      notify.success('Saved', result.synced ? 'Messaging Service SID saved and synced to Sigcore' : 'Saved locally but Sigcore sync failed — check logs');
+    } catch (err: any) {
+      notify.error('Error', err.response?.data?.message || 'Failed to save Messaging Service SID');
+    } finally {
+      setMessagingServiceSaving(false);
     }
   };
 
@@ -517,6 +536,32 @@ export default function AdminDashboard() {
               Stripe Price ID: <code className="bg-slate-50 px-1.5 py-0.5 rounded">{currentStripePriceId}</code>
             </div>
           )}
+
+          {/* A2P Messaging Service */}
+          <div className="mt-6 pt-6 border-t border-slate-100">
+            <h3 className="text-sm font-bold text-slate-800 mb-1">A2P 10DLC Compliance</h3>
+            <p className="text-xs text-slate-400 mb-3">New numbers are auto-attached to this Twilio Messaging Service for A2P compliance.</p>
+            <div className="flex gap-3 items-end">
+              <div className="flex-1 space-y-1.5">
+                <label className="text-sm font-medium text-slate-700">Messaging Service SID</label>
+                <input
+                  type="text"
+                  value={messagingServiceSid}
+                  onChange={e => setMessagingServiceSid(e.target.value)}
+                  placeholder="MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                />
+              </div>
+              <button
+                onClick={handleSaveMessagingService}
+                disabled={messagingServiceSaving || !messagingServiceSid}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
+              >
+                {messagingServiceSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save & Sync
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
