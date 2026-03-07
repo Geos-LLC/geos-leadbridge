@@ -775,22 +775,39 @@ export function Services() {
     setCcCallForwardingNumber(phone);
   }
 
+  const [agentPhoneSaveStatus, setAgentPhoneSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const savingAgentPhoneRef = useRef(false);
+
   async function saveAgentPhone() {
     setEditingAgentPhone(false);
+    if (savingAgentPhoneRef.current) return;
+    savingAgentPhoneRef.current = true;
     const phone = formatPhoneE164(ccAgentPhone);
     if (phone !== ccAgentPhone) setAllAgentPhones(phone);
     const finalPhone = phone || ccAgentPhone;
-    if (!selectedAccountId || !finalPhone) return;
+    if (!selectedAccountId || !finalPhone) { savingAgentPhoneRef.current = false; return; }
+    setAgentPhoneSaveStatus('saving');
+    const promises: Promise<any>[] = [];
     // Save alert rule toPhone
     if (leadAlertRule && leadAlertRule.id !== '_pending') {
-      notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { toPhone: finalPhone })
-        .then(({ rule }) => { setLeadAlertRule(rule); setAlertSavedSnapshot({ toPhone: finalPhone }); })
-        .catch(() => {});
+      promises.push(
+        notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { toPhone: finalPhone })
+          .then(({ rule }) => { setLeadAlertRule(rule); setAlertSavedSnapshot({ toPhone: finalPhone }); })
+          .catch(() => {})
+      );
     }
-    // Save call connect agentPhone
-    callConnectApi.saveSettings(selectedAccountId, { agentPhoneE164: finalPhone })
-      .then(() => { setCcSavedSnapshot(prev => prev ? { ...prev, agentPhone: finalPhone } : prev); })
-      .catch(() => {});
+    // Save call connect agentPhone + update snapshot so ccDirty clears
+    promises.push(
+      callConnectApi.saveSettings(selectedAccountId, { agentPhoneE164: finalPhone })
+        .then(() => {
+          setCcSavedSnapshot(prev => prev ? { ...prev, agentPhone: finalPhone, callForwardingNumber: finalPhone } : prev);
+        })
+        .catch(() => {})
+    );
+    await Promise.all(promises);
+    setAgentPhoneSaveStatus('saved');
+    setTimeout(() => setAgentPhoneSaveStatus('idle'), 2500);
+    savingAgentPhoneRef.current = false;
   }
 
   function discardAlertChanges() {
@@ -1264,7 +1281,14 @@ export function Services() {
                     </div>
                   ) : (
                     <div className="flex items-center gap-3">
-                      <div className="flex-1 rounded-xl px-3 py-2.5 text-sm font-medium bg-slate-50 border border-slate-200 text-slate-800 font-mono">{ccAgentPhone || <span className="text-slate-400">Not set</span>}</div>
+                      <div className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-medium font-mono transition-colors ${
+                        agentPhoneSaveStatus === 'saved' ? 'bg-emerald-50 border-2 border-emerald-300 text-emerald-700' :
+                        agentPhoneSaveStatus === 'saving' ? 'bg-blue-50 border-2 border-blue-200 text-blue-700' :
+                        'bg-slate-50 border border-slate-200 text-slate-800'
+                      }`}>
+                        {agentPhoneSaveStatus === 'saved' && <CheckCircle className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />}
+                        {ccAgentPhone || <span className="text-slate-400">Not set</span>}
+                      </div>
                       <button
                         onClick={() => setEditingAgentPhone(true)}
                         className="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
