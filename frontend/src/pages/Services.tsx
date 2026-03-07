@@ -229,7 +229,6 @@ export function Services() {
 
   // Lead Alerts form state (needed for first-time creation)
   const [alertToPhone, setAlertToPhone] = useState(sc?.alertToPhone ?? '');
-  const [alertFromPhone] = useState(sc?.alertFromPhone ?? '');
 
   // Customer Texting state
   const [ctEnabled, setCtEnabled] = useState(sc?.ctEnabled ?? false);
@@ -237,7 +236,6 @@ export function Services() {
     sc?.ctAutoReplyTemplate ?? "Hi {customerName}, this is {accountName}. We just received your request for {category}. When would be a good time to call you?"
   );
   const [ctSaving, setCtSaving] = useState(false);
-  const [ctFromPhone] = useState(sc?.ctFromPhone ?? '');
   const [ctSigcoreFromPhone, setCtSigcoreFromPhone] = useState<string | null>(sc?.ctSigcoreFromPhone ?? null);
   const [ctTestPhone, setCtTestPhone] = useState(() => localStorage.getItem('ct_test_phone') || '');
   const [ctTestStatus, setCtTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
@@ -499,12 +497,12 @@ export function Services() {
         ccVoicemailTemplateId: allTemplates.find(t => t.content === (ccs?.leadVoicemailMessage || allTemplates.find(tt => tt.name === 'CC - Voicemail TTS')?.content || ''))?.id || null,
         ctEnabled: ctRes?.enabled ?? false,
         ctAutoReplyTemplate: ctRes?.autoReplyTemplate || allTemplates.find(t => t.name === 'CT - Auto Reply')?.content || '',
-        ctFromPhone: '', ctSigcoreFromPhone: notifSettingsRes?.settings?.sigcoreFromPhone || null,
+        ctSigcoreFromPhone: notifSettingsRes?.settings?.sigcoreFromPhone || null,
         ctSigcoreProvider: null,
         ctSmsForwardingNumber: '',
         ccCallForwardingNumber: agentPhoneDefault,
         ctSelectedTemplateId: allTemplates.find(t => t.content === ctContent)?.id || allTemplates.find(t => t.name === 'CT - Auto Reply')?.id || '',
-        alertToPhone: alertTo, alertFromPhone: '',
+        alertToPhone: alertTo,
         alertSavedSnapshot: leadAlert ? { toPhone: alertTo } : null,
         ctSavedSnapshot: { autoReplyTemplate: ctContent },
         ccSavedSnapshot: {
@@ -1392,14 +1390,14 @@ export function Services() {
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                       <button
                         onClick={sendTestAlert}
-                        disabled={testStatus === 'sending' || saving || !leadAlertRule.toPhone || !alertFromPhone || (alertFromPhone === alertToPhone)}
+                        disabled={testStatus === 'sending' || saving || !leadAlertRule.toPhone || tenantPhones.length === 0}
                         className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed flex items-center gap-2 ${
                           testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
                           testStatus === 'failed' ? 'bg-red-100 text-red-700' :
                           testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
                           'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
                         }`}
-                        title={!leadAlertRule.toPhone ? 'Set a destination phone first' : !alertFromPhone ? 'Set a send-from phone first' : 'Send a test SMS'}
+                        title={!leadAlertRule.toPhone ? 'Set a destination phone first' : tenantPhones.length === 0 ? 'No dedicated number assigned' : 'Send a test SMS'}
                       >
                         {testStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
                          testStatus === 'delivered' ? <CheckCircle size={14} /> :
@@ -1618,14 +1616,14 @@ export function Services() {
                   />
                   <button
                     onClick={sendCtTest}
-                    disabled={ctTestStatus === 'sending' || !ctTestPhone || !isValidPhoneE164(ctTestPhone) || !ctFromPhone || ctFromPhone === ctTestPhone}
+                    disabled={ctTestStatus === 'sending' || !ctTestPhone || !isValidPhoneE164(ctTestPhone) || tenantPhones.length === 0}
                     className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed flex items-center gap-2 ${
                       ctTestStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
                       ctTestStatus === 'failed' ? 'bg-red-100 text-red-700' :
                       ctTestStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
                       'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
                     }`}
-                    title={!ctFromPhone ? 'Set a send-from phone first' : !ctTestPhone ? 'Enter a test phone number' : 'Send a test SMS'}
+                    title={tenantPhones.length === 0 ? 'No dedicated number assigned' : !ctTestPhone ? 'Enter a test phone number' : 'Send a test SMS'}
                   >
                     {ctTestStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
                      ctTestStatus === 'delivered' ? <CheckCircle size={14} /> :
@@ -1643,7 +1641,7 @@ export function Services() {
                     Must be E.164 format, e.g. +12125550100
                   </p>
                 )}
-                {ctTestPhone && isValidPhoneE164(ctTestPhone) && ctFromPhone && ctFromPhone === ctTestPhone && (
+                {ctTestPhone && isValidPhoneE164(ctTestPhone) && tenantPhones.length > 0 && tenantPhones[0].phoneNumber === ctTestPhone && (
                   <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
                     <AlertCircle className="w-3 h-3 shrink-0" />
                     Test phone matches the send-from number
