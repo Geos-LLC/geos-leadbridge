@@ -410,12 +410,7 @@ export class NotificationsService {
         },
       });
       if (fallback) {
-        // Use fallback credentials but keep original fromPhone to avoid cross-account contamination
-        const originalFromPhone = settings?.sigcoreFromPhone || null;
         settings = fallback;
-        if (originalFromPhone) {
-          (settings as any).sigcoreFromPhone = originalFromPhone;
-        }
       }
     }
 
@@ -428,14 +423,14 @@ export class NotificationsService {
       return { success: false, error: 'No Sigcore API key configured. Please provision your phone workspace first.' };
     }
 
-    // Resolve fromPhone: prefer TenantPhoneNumber (dedicated), fall back to sigcoreFromPhone
+    // Resolve fromPhone from dedicated number only
     const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
       where: { userId, status: 'ACTIVE' },
       orderBy: { purchasedAt: 'desc' },
     });
-    let fromPhone = tenantPhone?.phoneNumber || settings.sigcoreFromPhone;
+    const fromPhone = tenantPhone?.phoneNumber ?? null;
     if (!fromPhone) {
-      return { success: false, error: 'No dedicated number assigned. Ask your admin to assign a number.' };
+      return { success: false, error: 'No dedicated number assigned. Get a dedicated number first.' };
     }
 
     // 4. Create log entry
@@ -963,7 +958,7 @@ export class NotificationsService {
       return;
     }
 
-    // Auto-resolve fromPhone: prefer TenantPhoneNumber (dedicated), fall back to sigcoreFromPhone
+    // Resolve fromPhone from dedicated number only
     let fromPhone: string | null = null;
     if (settings.savedAccount?.userId) {
       const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
@@ -972,7 +967,6 @@ export class NotificationsService {
       });
       if (tenantPhone) fromPhone = tenantPhone.phoneNumber;
     }
-    if (!fromPhone) fromPhone = settings.sigcoreFromPhone ?? null;
     const forwardBody = `SMS from ${customerName} (${fromNumber}):\n${body}`;
     this.logger.log(`[forwardInboundSms] Forwarding to ${settings.destinationPhone} for account ${savedAccountId}`);
 
@@ -1090,12 +1084,12 @@ export class NotificationsService {
       ? (lead?.customerPhone || null)
       : (rule?.toPhone || settings.destinationPhone);
 
-    // Auto-resolve fromPhone: prefer TenantPhoneNumber (dedicated), fall back to sigcoreFromPhone
+    // Resolve fromPhone from dedicated number only
     const tenantPhoneRec = await this.prisma.tenantPhoneNumber.findFirst({
       where: { userId, status: 'ACTIVE' },
       orderBy: { purchasedAt: 'desc' },
     });
-    let fromPhone = tenantPhoneRec?.phoneNumber || settings.sigcoreFromPhone;
+    const fromPhone = tenantPhoneRec?.phoneNumber ?? null;
 
     const template = rule?.messageTemplate?.content || rule?.template || settings.template;
     const ruleName = rule?.name || 'Legacy Alert';
@@ -1287,15 +1281,18 @@ export class NotificationsService {
 
     // Use override (CT test), then rule's phone numbers, then settings fallback
     const toPhone = toPhoneOverride || rule?.toPhone || settings.destinationPhone;
-    // Resolve fromPhone: prefer TenantPhoneNumber (dedicated), fall back to sigcoreFromPhone
+    // Resolve fromPhone from dedicated number only
     const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
       where: { userId, status: 'ACTIVE' },
       orderBy: { purchasedAt: 'desc' },
     });
-    let fromPhone = tenantPhone?.phoneNumber || settings.sigcoreFromPhone;
+    const fromPhone = tenantPhone?.phoneNumber ?? null;
 
     if (!toPhone) {
       return { success: false, error: 'No destination phone configured for this rule' };
+    }
+    if (!fromPhone) {
+      return { success: false, error: 'No dedicated number assigned. Get a dedicated number first.' };
     }
 
     // Load test customer data from admin config
