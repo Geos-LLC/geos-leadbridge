@@ -45,6 +45,7 @@ export interface Business {
   businessID: string;
   name: string;
   imageURL?: string;
+  ownedByOtherUser?: boolean;
 }
 
 export interface Message {

@@ -295,10 +295,25 @@ export class ThumbtackController {
     try {
       const businesses = await this.leadsService.getBusinesses(user.id, PlatformName.THUMBTACK);
 
+      // Flag businesses that are already owned by another user
+      const enriched = await Promise.all(
+        businesses.map(async (b: any) => {
+          const otherAccount = await this.platformService.getAccountByBusinessIdExcludingUser(
+            PlatformName.THUMBTACK,
+            b.businessID,
+            user.id,
+          );
+          return {
+            ...b,
+            ownedByOtherUser: !!otherAccount,
+          };
+        }),
+      );
+
       return {
         platform: PlatformName.THUMBTACK,
-        count: businesses.length,
-        businesses,
+        count: enriched.length,
+        businesses: enriched,
       };
     } catch (error) {
       // Token expired / refresh failed — tell frontend to re-auth instead of 500
@@ -327,6 +342,23 @@ export class ThumbtackController {
     @Body('imageUrl') imageUrl?: string,
     @Body('emailHint') emailHint?: string,
   ) {
+    // Block if another user already owns this business
+    const otherUserAccount = await this.platformService.getAccountByBusinessIdExcludingUser(
+      PlatformName.THUMBTACK,
+      businessId,
+      user.id,
+    );
+    if (otherUserAccount) {
+      const currentUser = await this.platformService.getUserById(user.id);
+      if (currentUser?.role !== 'ADMIN') {
+        throw new BadRequestException(
+          `This Thumbtack business is already connected to another LeadBridge account. ` +
+          `Each business can only be linked to one account. ` +
+          `If you own this business, please contact support or log in with the original account.`
+        );
+      }
+    }
+
     const result = await this.platformService.setupThumbtackWebhook(user.id, businessId);
 
     // Auto-save account for multi-account switching

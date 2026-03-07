@@ -125,9 +125,10 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
 
   if (!isOpen) return null;
 
-  // Figure out which businesses are already saved
+  // Figure out which businesses are already saved or owned by another user
   const savedBusinessIds = new Set(savedAccounts.map(a => a.businessId));
-  const newBusinesses = businesses.filter(b => !savedBusinessIds.has(b.businessID));
+  const newBusinesses = businesses.filter(b => !savedBusinessIds.has(b.businessID) && !b.ownedByOtherUser);
+  const ownedByOther = businesses.filter(b => b.ownedByOtherUser && !savedBusinessIds.has(b.businessID));
   const alreadyConnected = businesses.filter(b => savedBusinessIds.has(b.businessID));
 
   return (
@@ -237,6 +238,31 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
                   ))}
                 </div>
 
+                {/* Businesses owned by another LeadBridge user */}
+                {ownedByOther.length > 0 && (
+                  <div className="pt-2">
+                    <p className="text-xs text-red-500 font-medium uppercase tracking-wider mb-2">Connected to another account</p>
+                    {ownedByOther.map((business) => (
+                      <div key={business.businessID} className="p-3 bg-red-50/50 rounded-xl border border-red-200">
+                        <div className="flex items-center gap-3">
+                          {business.imageURL ? (
+                            <img src={business.imageURL} alt={business.name} className="w-10 h-10 rounded-lg opacity-50" />
+                          ) : (
+                            <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center text-red-400 font-bold">
+                              {business.name[0]}
+                            </div>
+                          )}
+                          <div className="flex-1">
+                            <h3 className="font-semibold text-slate-700 text-sm">{business.name}</h3>
+                            <p className="text-xs text-red-500 mt-0.5">This business is already linked to another LeadBridge account</p>
+                          </div>
+                          <AlertCircle size={14} className="text-red-400 shrink-0" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {/* Already connected businesses (greyed out) */}
                 {alreadyConnected.length > 0 && (
                   <div className="pt-2">
@@ -276,8 +302,42 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
                   </p>
                 </div>
               </>
-            ) : businesses.length > 0 && newBusinesses.length === 0 ? (
-              /* All businesses already connected */
+            ) : businesses.length > 0 && newBusinesses.length === 0 && ownedByOther.length > 0 ? (
+              /* All businesses are owned by another user */
+              <>
+                <div className="text-center py-6">
+                  <div className="w-16 h-16 bg-red-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                    <AlertCircle size={24} className="text-red-500" />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900 mb-2">Business already in use</h3>
+                  <p className="text-sm text-slate-600 mb-2 max-w-md mx-auto">
+                    This Thumbtack business is already connected to another LeadBridge account.
+                    Each business can only be linked to one account.
+                  </p>
+                  <p className="text-sm text-slate-500 max-w-md mx-auto">
+                    If you own this business, log in with the original account or contact support.
+                  </p>
+                </div>
+
+                {ownedByOther.map((business) => (
+                  <div key={business.businessID} className="p-3 bg-red-50/50 rounded-xl border border-red-200">
+                    <div className="flex items-center gap-3">
+                      {business.imageURL ? (
+                        <img src={business.imageURL} alt={business.name} className="w-10 h-10 rounded-lg opacity-50" />
+                      ) : (
+                        <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center text-red-400 font-bold">
+                          {business.name[0]}
+                        </div>
+                      )}
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-slate-700 text-sm">{business.name}</h3>
+                        <p className="text-xs text-red-500 mt-0.5">Linked to another LeadBridge account</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </>) : businesses.length > 0 && newBusinesses.length === 0 ? (
+              /* All businesses already connected by current user */
               <>
                 <div className="text-center py-6">
                   <div className="w-16 h-16 bg-emerald-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
