@@ -374,8 +374,8 @@ export function Services() {
 
       setLeadAlertRule(leadAlert);
 
-      // Agent phone: use saved value, else default to destination phone
-      const agentPhoneDefault = ccs?.agentPhoneE164 || notifSettingsRes?.settings?.destinationPhone || '';
+      // Agent phone: use saved value, else destination phone, else user's business phone
+      const agentPhoneDefault = ccs?.agentPhoneE164 || notifSettingsRes?.settings?.destinationPhone || useAuthStore.getState().user?.businessPhone || '';
       setCcAgentPhone(agentPhoneDefault);
       // Forward calls to: same as agent phone (destinationPhone)
       setCcCallForwardingNumber(agentPhoneDefault);

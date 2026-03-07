@@ -44,6 +44,11 @@ export default function SettingsPage() {
   const [nameValue, setNameValue] = useState('');
   const [savingName, setSavingName] = useState(false);
 
+  // Business phone editing
+  const [editingPhone, setEditingPhone] = useState(false);
+  const [phoneValue, setPhoneValue] = useState('');
+  const [savingPhone, setSavingPhone] = useState(false);
+
   // Change password state
   const [changingPassword, setChangingPassword] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -303,6 +308,30 @@ export default function SettingsPage() {
     }
   };
 
+  const handleSavePhone = async () => {
+    const trimmed = phoneValue.trim();
+    if (!trimmed || trimmed === (user?.businessPhone || '')) {
+      setEditingPhone(false);
+      return;
+    }
+    setSavingPhone(true);
+    try {
+      const result = await usersApi.updateProfile({ businessPhone: trimmed });
+      if (user) {
+        const token = localStorage.getItem('token');
+        if (token) {
+          setAuth({ ...user, businessPhone: result.user.businessPhone ?? null }, token);
+        }
+      }
+      notify.success('Updated', 'Business phone updated successfully');
+      setEditingPhone(false);
+    } catch (error: any) {
+      notify.error('Error', error.response?.data?.message || 'Failed to update phone');
+    } finally {
+      setSavingPhone(false);
+    }
+  };
+
   const handleChangePassword = async () => {
     setPasswordError('');
     if (!currentPassword || !newPassword || !confirmPassword) {
@@ -518,12 +547,37 @@ export default function SettingsPage() {
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Email Address</p>
             <p className="text-slate-900 font-semibold text-lg">{user?.email || 'Not set'}</p>
           </div>
-          {user?.phoneNumber && (
-            <div className="space-y-1">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Phone Number</p>
-              <p className="text-slate-900 font-semibold text-lg font-mono">{user.phoneNumber}</p>
-            </div>
-          )}
+          <div className="space-y-1">
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Business Phone</p>
+            {editingPhone ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="tel"
+                  value={phoneValue}
+                  onChange={(e) => setPhoneValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSavePhone();
+                    if (e.key === 'Escape') setEditingPhone(false);
+                  }}
+                  autoFocus
+                  placeholder="(555) 123-4567"
+                  className="flex-1 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                />
+                <button className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" onClick={handleSavePhone} disabled={savingPhone} title="Save">
+                  {savingPhone ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check size={16} />}
+                </button>
+                <button className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg transition-colors" onClick={() => setEditingPhone(false)} title="Cancel">
+                  <X size={16} />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 cursor-pointer group" onClick={() => { setPhoneValue(user?.businessPhone || ''); setEditingPhone(true); }}>
+                <p className="text-slate-900 font-semibold text-lg font-mono">{user?.businessPhone || 'Not set'}</p>
+                <Pencil size={14} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
+              </div>
+            )}
+            <p className="text-xs text-slate-400">Notifications and customer replies are forwarded to this number</p>
+          </div>
           <div className="space-y-1">
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Time Zone</p>
             <p className="text-slate-900 font-semibold text-lg">{timeZone}</p>

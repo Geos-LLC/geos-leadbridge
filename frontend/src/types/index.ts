@@ -8,6 +8,7 @@ export interface User {
   subscriptionPeriodEnd?: string;
   hasOwnNumber?: boolean;
   phoneNumber?: string | null;
+  businessPhone?: string | null;
   trialStartDate?: string;
   trialEndDate?: string;
   trialUsed?: boolean;

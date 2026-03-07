@@ -26,7 +26,7 @@ export class AuthService {
   /**
    * Register a new user
    */
-  async register(email: string, password: string, name?: string) {
+  async register(email: string, password: string, name?: string, businessPhone?: string) {
     // Check if user already exists
     const existingUser = await this.prisma.user.findUnique({
       where: { email },
@@ -44,12 +44,18 @@ export class AuthService {
     const trialEndDate = new Date(now);
     trialEndDate.setDate(trialEndDate.getDate() + 14);
 
+    // Normalize business phone to E.164 if provided
+    const normalizedBusinessPhone = businessPhone
+      ? this.normalizePhoneToE164(businessPhone)
+      : undefined;
+
     // Create user with trial
     const user = await this.prisma.user.create({
       data: {
         email,
         password: hashedPassword,
         name,
+        businessPhone: normalizedBusinessPhone || null,
         trialStartDate: now,
         trialEndDate: trialEndDate,
         trialUsed: false,
@@ -83,6 +89,7 @@ export class AuthService {
         subscriptionPeriodEnd: user.subscriptionPeriodEnd,
         hasOwnNumber: user.hasOwnNumber,
         phoneNumber: user.phoneNumber,
+        businessPhone: user.businessPhone,
         trialStartDate: user.trialStartDate,
         trialEndDate: user.trialEndDate,
         trialUsed: user.trialUsed,
@@ -125,6 +132,7 @@ export class AuthService {
         subscriptionPeriodEnd: user.subscriptionPeriodEnd,
         hasOwnNumber: user.hasOwnNumber,
         phoneNumber: user.phoneNumber,
+        businessPhone: user.businessPhone,
         trialStartDate: user.trialStartDate,
         trialEndDate: user.trialEndDate,
         trialUsed: user.trialUsed,
@@ -149,6 +157,7 @@ export class AuthService {
         subscriptionPeriodEnd: true,
         hasOwnNumber: true,
         phoneNumber: true,
+        businessPhone: true,
         createdAt: true,
         platforms: {
           select: {
@@ -194,6 +203,14 @@ export class AuthService {
       },
       stats: { collectedLeads },
     };
+  }
+
+  private normalizePhoneToE164(phone: string): string | null {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length === 10) return `+1${digits}`;
+    if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+    if (digits.length > 10) return `+${digits}`;
+    return null;
   }
 
   /**

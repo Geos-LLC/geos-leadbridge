@@ -19,8 +19,9 @@ export class AuthController {
     @Body('email') email: string,
     @Body('password') password: string,
     @Body('name') name?: string,
+    @Body('businessPhone') businessPhone?: string,
   ) {
-    return this.authService.register(email, password, name);
+    return this.authService.register(email, password, name, businessPhone);
   }
 
   @Public()

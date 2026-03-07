@@ -154,8 +154,8 @@ api.interceptors.response.use(
 
 // Auth
 export const authApi = {
-  register: async (email: string, password: string, name?: string): Promise<AuthResponse> => {
-    const { data } = await api.post('/auth/register', { email, password, name });
+  register: async (email: string, password: string, name?: string, businessPhone?: string): Promise<AuthResponse> => {
+    const { data } = await api.post('/auth/register', { email, password, name, businessPhone });
     console.log('[API] Register response:', data);
     return data;
   },
@@ -875,7 +875,7 @@ export const usersApi = {
     const { data } = await api.post(url);
     return data;
   },
-  updateProfile: async (updates: { name?: string }): Promise<{ success: boolean; user: { id: string; name: string; email: string } }> => {
+  updateProfile: async (updates: { name?: string; businessPhone?: string }): Promise<{ success: boolean; user: { id: string; name: string; email: string; businessPhone?: string | null } }> => {
     const { data } = await api.patch('/v1/users/me', updates);
     return data;
   },

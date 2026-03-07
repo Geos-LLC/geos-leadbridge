@@ -651,8 +651,17 @@ export class NotificationsService {
       });
 
       if (!existingSettings) {
+        // Default destinationPhone from user's businessPhone
+        const ownerUser = await this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { businessPhone: true },
+        });
         existingSettings = await this.prisma.notificationSettings.create({
-          data: { savedAccountId, enabled: true },
+          data: {
+            savedAccountId,
+            enabled: true,
+            destinationPhone: ownerUser?.businessPhone || null,
+          },
         });
       }
 
@@ -2394,12 +2403,17 @@ export class NotificationsService {
       where: { savedAccountId },
     });
     if (!settings) {
+      const ownerUser = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { businessPhone: true },
+      });
       settings = await this.prisma.notificationSettings.create({
         data: {
           savedAccountId,
           userId,
           enabled: true,
           customerTextingEnabled: dto.enabled,
+          destinationPhone: ownerUser?.businessPhone || null,
         },
       });
     } else {

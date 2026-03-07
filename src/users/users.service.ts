@@ -15,6 +15,48 @@ export class UsersService {
     private stripeService: StripeService,
   ) {}
 
+  async updateProfile(userId: string, updates: { name?: string; businessPhone?: string }) {
+    const data: Record<string, any> = {};
+    if (updates.name !== undefined) data.name = updates.name;
+    if (updates.businessPhone !== undefined) {
+      const digits = updates.businessPhone.replace(/\D/g, '');
+      if (digits.length === 10) data.businessPhone = `+1${digits}`;
+      else if (digits.length === 11 && digits.startsWith('1')) data.businessPhone = `+${digits}`;
+      else if (digits.length > 10) data.businessPhone = `+${digits}`;
+      else data.businessPhone = updates.businessPhone || null;
+    }
+
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      select: { id: true, name: true, email: true, businessPhone: true },
+      data,
+    });
+
+    // Sync businessPhone to all existing agent phone fields
+    if (data.businessPhone) {
+      await this.syncBusinessPhoneToAccounts(userId, data.businessPhone);
+    }
+
+    return { success: true, user };
+  }
+
+  private async syncBusinessPhoneToAccounts(userId: string, phone: string) {
+    const accounts = await this.prisma.savedAccount.findMany({
+      where: { userId },
+      select: { id: true },
+    });
+    for (const account of accounts) {
+      await this.prisma.notificationSettings.updateMany({
+        where: { savedAccountId: account.id },
+        data: { destinationPhone: phone },
+      });
+      await this.prisma.callConnectSettings.updateMany({
+        where: { savedAccountId: account.id },
+        data: { agentPhoneE164: phone },
+      });
+    }
+  }
+
   /**
    * Get user's phone number
    */

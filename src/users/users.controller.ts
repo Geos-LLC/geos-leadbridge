@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Param, Query, Request, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Request, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { UsersService } from './users.service';
 import { SigcoreSearchResult } from '../sigcore/sigcore.service';
@@ -72,6 +72,15 @@ export class UsersController {
   @Get('me/phone-options')
   async getPhoneOptions(@Request() req: any) {
     return this.usersService.getAllPhoneOptions(req.user.id);
+  }
+
+  /**
+   * Update current user's profile
+   * PATCH /v1/users/me
+   */
+  @Patch('me')
+  async updateProfile(@Request() req: any, @Body() body: { name?: string; businessPhone?: string }) {
+    return this.usersService.updateProfile(req.user.id, body);
   }
 
   /**
