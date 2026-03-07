@@ -663,23 +663,32 @@ export default function AdminTenantNumbers() {
 
         {/* A2P Messaging Service SID — tight under Twilio connection */}
         {twilioHealth?.status === 'connected' && (
-          <div className="flex items-center gap-3 px-4 py-3 bg-white rounded-2xl border border-slate-100 shadow-sm">
-            <label className="text-xs font-bold text-slate-600 whitespace-nowrap">Messaging Service SID</label>
-            <input
-              type="text"
-              value={messagingServiceSid}
-              onChange={e => setMessagingServiceSid(e.target.value)}
-              placeholder="MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-              className="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none min-w-0"
-            />
-            <button
-              onClick={handleSaveMessagingService}
-              disabled={messagingServiceSaving || !messagingServiceSid}
-              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 whitespace-nowrap"
-            >
-              {messagingServiceSaving ? <Loader2 size={12} className="animate-spin" /> : <ShieldCheck size={12} />}
-              Save & Sync
-            </button>
+          <div className="px-4 py-3 bg-white rounded-2xl border border-slate-100 shadow-sm space-y-2">
+            <div className="flex items-center gap-3">
+              <label className="text-xs font-bold text-slate-600 whitespace-nowrap">Messaging Service SID</label>
+              <input
+                type="text"
+                value={messagingServiceSid}
+                onChange={e => setMessagingServiceSid(e.target.value)}
+                placeholder="MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                className="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none min-w-0"
+              />
+              <button
+                onClick={handleSaveMessagingService}
+                disabled={messagingServiceSaving || !messagingServiceSid}
+                className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 whitespace-nowrap"
+              >
+                {messagingServiceSaving ? <Loader2 size={12} className="animate-spin" /> : <ShieldCheck size={12} />}
+                Save & Sync
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Required for A2P 10DLC compliance. Find it in{' '}
+              <a href="https://console.twilio.com/us1/develop/sms/services" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-600 underline">
+                Twilio Console → Messaging → Services
+              </a>
+              {' '}— copy the SID (starts with MG) of your registered Messaging Service.
+            </p>
           </div>
         )}
 
