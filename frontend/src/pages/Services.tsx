@@ -458,9 +458,7 @@ export function Services() {
 
       // Pre-fill form states from existing rules
       const alertTo = leadAlert?.toPhone || agentPhoneDefault;
-      if (leadAlert) {
-        setAlertToPhone(alertTo);
-      }
+      setAlertToPhone(alertTo);
       // Initialize alert snapshot for dirty tracking
       if (leadAlert) {
         setAlertSavedSnapshot({ toPhone: alertTo });
@@ -471,7 +469,7 @@ export function Services() {
       const templateMissing = leadAlert && !leadAlert.templateId && !leadAlert.messageTemplate;
       const expandParam = searchParams.get('expand');
       if (toPhoneMissing || templateMissing || expandParam === 'lead-alerts') {
-        setExpandedCard('lead-alerts');
+        setExpandedCard('notifications');
       }
 
       // Persist to module-level cache so returning to this page is instant
@@ -643,8 +641,8 @@ export function Services() {
         });
         setLeadAlertRule(rule);
         setAlertSavedSnapshot({ toPhone: alertToPhone });
-        setExpandedCard('lead-alerts');
-        showSuccess('Lead Alerts enabled — configure your alert phone number');
+        setExpandedCard('notifications');
+        showSuccess(alertToPhone ? 'Lead Alerts enabled' : 'Lead Alerts enabled — configure your alert phone number');
       }
       // Invalidate diagnostics cache so Dashboard/Settings show fresh data
       setAccountDiagnostics({});
@@ -1212,6 +1210,9 @@ export function Services() {
             enabled={autoReplyEnabled || (leadAlertRule?.enabled ?? false)}
             onToggle={(enabled) => {
               if (enabled && noPhone) { setShowDedicatedModal(true); return; }
+              if (enabled && !leadAlertRule?.enabled) {
+                toggleLeadAlerts(true);
+              }
               toggleExpand('notifications');
             }}
             expanded={expandedCard === 'notifications'}
