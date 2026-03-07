@@ -230,6 +230,9 @@ export function Services() {
   // Lead Alerts form state (needed for first-time creation)
   const [alertToPhone, setAlertToPhone] = useState(sc?.alertToPhone ?? '');
 
+  // Shared agent phone editing (bottom of both cards)
+  const [editingAgentPhone, setEditingAgentPhone] = useState(false);
+
   // Customer Texting state
   const [ctEnabled, setCtEnabled] = useState(sc?.ctEnabled ?? false);
   const [ctAutoReplyTemplate, setCtAutoReplyTemplate] = useState(
@@ -454,7 +457,7 @@ export function Services() {
       });
 
       // Pre-fill form states from existing rules
-      const alertTo = leadAlert?.toPhone || '';
+      const alertTo = leadAlert?.toPhone || agentPhoneDefault;
       if (leadAlert) {
         setAlertToPhone(alertTo);
       }
@@ -750,6 +753,12 @@ export function Services() {
     } finally {
       setCtSaving(false);
     }
+  }
+
+  function setAllAgentPhones(phone: string) {
+    setCcAgentPhone(phone);
+    setAlertToPhone(phone);
+    setCcCallForwardingNumber(phone);
   }
 
   function discardAlertChanges() {
@@ -1334,50 +1343,6 @@ export function Services() {
                   </label>
                 </div>
                 <div className={`px-5 py-4 space-y-4${!(leadAlertRule?.enabled) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-                  {/* Send to (agent phone) */}
-                  <div>
-                    <label className={`text-[11px] font-bold uppercase tracking-widest mb-2 block ${toPhoneMissing ? 'text-orange-500' : 'text-slate-400'}`}>
-                      Send to (your phone){toPhoneMissing && <span className="ml-1 text-orange-500">*</span>}
-                    </label>
-                    <input
-                      type="tel"
-                      value={alertToPhone}
-                      onChange={e => setAlertToPhone(e.target.value)}
-                      onBlur={e => {
-                        const formatted = formatPhoneE164(e.target.value);
-                        if (formatted !== e.target.value) setAlertToPhone(formatted);
-                      }}
-                      placeholder="+1234567890"
-                      className={`w-full rounded-xl p-3 text-sm focus:ring-2 focus:outline-none transition-colors ${
-                        toPhoneMissing
-                          ? 'border-2 border-orange-300 bg-orange-50/40 focus:ring-orange-200 focus:border-orange-400 placeholder:text-orange-300'
-                          : alertToPhone && !isValidPhoneE164(alertToPhone)
-                            ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200 focus:border-red-400'
-                            : alertToPhone && isValidPhoneE164(alertToPhone)
-                              ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200 focus:border-emerald-400'
-                              : 'bg-white border border-slate-200 focus:ring-blue-500 focus:border-blue-500'
-                      }`}
-                    />
-                    {toPhoneMissing && (
-                      <p className="mt-1.5 text-xs text-orange-600 font-medium flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3 shrink-0" />
-                        Enter your phone number to receive lead alert SMS messages
-                      </p>
-                    )}
-                    {!toPhoneMissing && alertToPhone && !isValidPhoneE164(alertToPhone) && (
-                      <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3 shrink-0" />
-                        Must be E.164 format, e.g. +12125550100
-                      </p>
-                    )}
-                    {alertToPhone && tenantPhones.length > 0 && alertToPhone === tenantPhones[0].phoneNumber && (
-                      <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3 shrink-0" />
-                        This is your dedicated number — enter your personal phone instead
-                      </p>
-                    )}
-                  </div>
-
                   {/* Template */}
                   {leadAlertRule && (
                     <>
@@ -1510,6 +1475,46 @@ export function Services() {
                 )}
               </div>
 
+              {/* ── Send to (your phone) wrap-up ── */}
+              <div className="border border-slate-100 rounded-2xl p-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Send to (your phone)</label>
+                    {editingAgentPhone ? (
+                      <div className="flex items-center gap-2 mt-2">
+                        <input
+                          type="tel"
+                          value={alertToPhone}
+                          onChange={e => setAllAgentPhones(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                          onBlur={e => { const f = formatPhoneE164(e.target.value); if (f !== e.target.value) setAllAgentPhones(f); }}
+                          onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingAgentPhone(false); }}
+                          autoFocus
+                          placeholder="+15551234567"
+                          className="flex-1 rounded-xl px-3 py-2 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                        />
+                        <button onClick={() => setEditingAgentPhone(false)} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
+                      </div>
+                    ) : (
+                      <p className="text-slate-900 font-semibold text-sm font-mono mt-1">{alertToPhone || 'Not set'}</p>
+                    )}
+                  </div>
+                  {!editingAgentPhone && (
+                    <button
+                      onClick={() => setEditingAgentPhone(true)}
+                      className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                    >
+                      Change
+                    </button>
+                  )}
+                </div>
+                {alertToPhone && tenantPhones.length > 0 && alertToPhone === tenantPhones[0].phoneNumber && (
+                  <p className="mt-2 text-xs text-red-600 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    This is your dedicated number — enter your personal phone instead
+                  </p>
+                )}
+              </div>
+
             </div>
           </ServiceCard>
             );
@@ -1552,58 +1557,19 @@ export function Services() {
 
             {/* Shared setup: Dedicated number + Agent phone */}
             <div className={`space-y-6${tenantPhones.length === 0 ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-              <div className="grid grid-cols-2 gap-4">
-                {/* Dedicated number (read-only) */}
-                <div>
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Dedicated Number</label>
-                  {tenantPhones.length > 0 ? (
-                    <div className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700">
-                      {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
-                    </div>
-                  ) : (
-                    <div className="w-full rounded-xl p-3 text-sm font-medium bg-slate-50 border border-slate-200 text-slate-400">
-                      Not assigned
-                    </div>
-                  )}
-                  <p className="text-xs text-slate-400 mt-1.5">Used for all outbound SMS and calls</p>
-                </div>
-
-                {/* Agent Phone */}
-                <div>
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Agent Phone</label>
-                  <input
-                    type="tel"
-                    value={ccAgentPhone}
-                    onChange={e => setCcAgentPhone(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
-                    onBlur={e => {
-                      const formatted = formatPhoneE164(e.target.value);
-                      if (formatted !== e.target.value) setCcAgentPhone(formatted);
-                    }}
-                    placeholder="+15551234567"
-                    className={`w-full rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
-                      ccAgentPhone && !isValidPhoneE164(ccAgentPhone)
-                        ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
-                        : ccAgentPhone && isValidPhoneE164(ccAgentPhone)
-                          ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
-                          : !ccAgentPhone
-                            ? 'border-2 border-orange-300 bg-orange-50/40 focus:ring-orange-200'
-                            : 'bg-white border border-slate-200 focus:ring-blue-300'
-                    }`}
-                  />
-                  {ccAgentPhone && !isValidPhoneE164(ccAgentPhone) ? (
-                    <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3 shrink-0" />
-                      Must be E.164 format, e.g. +12125550100
-                    </p>
-                  ) : !ccAgentPhone ? (
-                    <p className="text-xs text-orange-600 mt-1.5 flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3 shrink-0" />
-                      Your personal phone — receives forwarded texts and calls
-                    </p>
-                  ) : (
-                    <p className="text-xs text-slate-400 mt-1.5">Receives forwarded texts and calls from leads</p>
-                  )}
-                </div>
+              {/* Dedicated number (read-only) */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Dedicated Number</label>
+                {tenantPhones.length > 0 ? (
+                  <div className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700">
+                    {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
+                  </div>
+                ) : (
+                  <div className="w-full rounded-xl p-3 text-sm font-medium bg-slate-50 border border-slate-200 text-slate-400">
+                    Not assigned
+                  </div>
+                )}
+                <p className="text-xs text-slate-400 mt-1.5">Used for all outbound SMS and calls</p>
               </div>
 
               {/* ── Customer Texting sub-section ── */}
@@ -1908,6 +1874,46 @@ export function Services() {
                 {ccSamePhoneError && (
                   <p className="text-xs text-amber-600 flex items-center gap-1">
                     <AlertTriangle size={12} /> Test phone cannot be the same as the bot number or agent phone.
+                  </p>
+                )}
+              </div>
+
+              {/* ── Send to (your phone) wrap-up ── */}
+              <div className="border border-slate-100 rounded-2xl p-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Send to (your phone)</label>
+                    {editingAgentPhone ? (
+                      <div className="flex items-center gap-2 mt-2">
+                        <input
+                          type="tel"
+                          value={ccAgentPhone}
+                          onChange={e => setAllAgentPhones(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                          onBlur={e => { const f = formatPhoneE164(e.target.value); if (f !== e.target.value) setAllAgentPhones(f); }}
+                          onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingAgentPhone(false); }}
+                          autoFocus
+                          placeholder="+15551234567"
+                          className="flex-1 rounded-xl px-3 py-2 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                        />
+                        <button onClick={() => setEditingAgentPhone(false)} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
+                      </div>
+                    ) : (
+                      <p className="text-slate-900 font-semibold text-sm font-mono mt-1">{ccAgentPhone || 'Not set'}</p>
+                    )}
+                  </div>
+                  {!editingAgentPhone && (
+                    <button
+                      onClick={() => setEditingAgentPhone(true)}
+                      className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                    >
+                      Change
+                    </button>
+                  )}
+                </div>
+                {ccAgentPhone && tenantPhones.length > 0 && ccAgentPhone === tenantPhones[0].phoneNumber && (
+                  <p className="mt-2 text-xs text-red-600 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    This is your dedicated number — enter your personal phone instead
                   </p>
                 )}
               </div>
