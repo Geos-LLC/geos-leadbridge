@@ -843,6 +843,16 @@ export class PlatformService {
     });
   }
 
+  async getAccountByBusinessIdExcludingUser(platform: string, businessId: string, excludeUserId: string) {
+    return this.prisma.savedAccount.findFirst({
+      where: {
+        platform,
+        businessId,
+        userId: { not: excludeUserId },
+      },
+    });
+  }
+
   /**
    * Validate token for a saved account by making a simple API call
    * Returns { valid: true } if token works, or { valid: false, reason: string } if not

@@ -88,41 +88,43 @@ export class ThumbtackController {
           const currentUser = await this.platformService.getUserById(userId);
           const isAdmin = currentUser?.role === 'ADMIN';
 
-          // Check if this business already has an active webhook (from any user)
-          const existingAccount = await this.platformService.getAccountByBusinessId(
+          // Check if another user already owns this business
+          const otherUserAccount = await this.platformService.getAccountByBusinessIdExcludingUser(
+            PlatformName.THUMBTACK,
+            business.businessID,
+            userId,
+          );
+
+          if (otherUserAccount) {
+            if (!isAdmin) {
+              console.error(`Business ${business.name} (${business.businessID}) already connected to user ${otherUserAccount.userId}`);
+              throw new BadRequestException(
+                `This Thumbtack business "${business.name}" is already connected to another LeadBridge account. ` +
+                `Each business can only be linked to one account. ` +
+                `If you own this business, please contact support or log in with the original account.`
+              );
+            }
+            console.log(`Admin user bypassing ownership conflict for business ${business.name} (${business.businessID})`);
+          }
+
+          // Check if same user is reconnecting
+          const ownAccount = await this.platformService.getAccountByBusinessId(
             PlatformName.THUMBTACK,
             business.businessID,
           );
 
-          if (existingAccount && existingAccount.webhookId) {
-            // Check if this account belongs to a DIFFERENT user
-            if (existingAccount.userId !== userId) {
-              // Block non-admin users from connecting business that belongs to another user
-              if (!isAdmin) {
-                console.error(`Business ${business.name} (${business.businessID}) already connected to a different user`);
-                throw new BadRequestException(
-                  `Thumbtack business "${business.name}" is already connected to another account. ` +
-                  `Each Thumbtack business can only be connected to one LeadBridge account. ` +
-                  `Please use a different Thumbtack business or log in with the account that originally connected this business.`
-                );
-              }
-              // Admin users can proceed - they'll get a new webhook for testing
-              console.log(`Admin user bypassing webhook conflict for business ${business.name} (${business.businessID})`);
-            } else {
-              // Same user re-authenticating — update credentials and refresh the webhook
-              console.log(`Business ${business.name} (${business.businessID}) - same user reconnecting, refreshing webhook`);
-              if (credentials) {
-                await this.platformService.updateAccountCredentials(
-                  existingAccount.id,
-                  credentials,
-                );
-                console.log(`Updated credentials for existing account: ${business.name}`);
-              }
-              // Re-register the webhook so it is active with fresh credentials
-              await this.platformService.setupThumbtackWebhook(userId, business.businessID);
-              console.log(`Webhook refreshed for business: ${business.name} (${business.businessID})`);
-              continue;
+          if (ownAccount && ownAccount.userId === userId) {
+            console.log(`Business ${business.name} (${business.businessID}) - same user reconnecting, refreshing webhook`);
+            if (credentials) {
+              await this.platformService.updateAccountCredentials(
+                ownAccount.id,
+                credentials,
+              );
+              console.log(`Updated credentials for existing account: ${business.name}`);
             }
+            await this.platformService.setupThumbtackWebhook(userId, business.businessID);
+            console.log(`Webhook refreshed for business: ${business.name} (${business.businessID})`);
+            continue;
           }
 
           // First save the account WITH credentials (so setupThumbtackWebhook can update it with webhookId)
