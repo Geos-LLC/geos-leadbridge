@@ -596,6 +596,10 @@ export function Services() {
   }
 
   async function toggleLeadAlerts(enabled: boolean) {
+    if (enabled && tenantPhones.length === 0) {
+      setShowDedicatedModal(true);
+      return;
+    }
     setError(null);
     // Optimistic: update UI immediately
     const prevAlertRule = leadAlertRule ? { ...leadAlertRule } : null;
@@ -658,6 +662,10 @@ export function Services() {
 
   async function toggleCallConnect(enabled: boolean) {
     if (!selectedAccountId) return;
+    if (enabled && tenantPhones.length === 0) {
+      setShowDedicatedModal(true);
+      return;
+    }
     setCcEnabled(enabled); // optimistic
     setCcSaving(true);
     try {
@@ -713,6 +721,10 @@ export function Services() {
 
   async function toggleCustomerTexting(enabled: boolean) {
     if (!selectedAccountId) return;
+    if (enabled && tenantPhones.length === 0) {
+      setShowDedicatedModal(true);
+      return;
+    }
     setCtEnabled(enabled); // optimistic
     setCtSaving(true);
     try {
@@ -1244,12 +1256,15 @@ export function Services() {
 
           {/* 2. Lead Alerts */}
           {(() => {
+            const noPhone = tenantPhones.length === 0;
             const toPhoneMissing = !!leadAlertRule && !alertToPhone;
             const templateMissing = !!leadAlertRule && !leadAlertRule.templateId && !leadAlertRule.messageTemplate;
-            const leadAlertsIncomplete = toPhoneMissing || templateMissing;
+            const leadAlertsIncomplete = noPhone || toPhoneMissing || templateMissing;
             const directedHere = searchParams.get('expand') === 'lead-alerts';
             const isDisabledButExists = !!leadAlertRule && !leadAlertRule.enabled;
-            const warningText = leadAlertsIncomplete
+            const warningText = noPhone
+              ? 'Dedicated number required'
+              : leadAlertsIncomplete
               ? (toPhoneMissing ? 'Phone number required' : 'Template required')
               : (directedHere && isDisabledButExists) ? 'Toggle on to activate lead alerts' : undefined;
             return (
@@ -1268,8 +1283,23 @@ export function Services() {
             iconTextColor="text-amber-600"
             cardRef={el => { cardRefs.current['lead-alerts'] = el; }}
           >
+            {/* No dedicated number banner */}
+            {noPhone && (
+              <div className="flex flex-col items-center gap-3 py-6 px-4 bg-amber-50/50 rounded-2xl border border-amber-200">
+                <Phone className="w-8 h-8 text-amber-500" />
+                <p className="text-sm text-amber-700 font-medium text-center">You need a dedicated number to send lead alerts</p>
+                <button
+                  onClick={() => setShowDedicatedModal(true)}
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors flex items-center gap-2"
+                >
+                  <Phone className="w-4 h-4" />
+                  Get a Dedicated Number
+                </button>
+              </div>
+            )}
+
             {/* SMS Alert Configuration */}
-            <div className={`space-y-6${!(leadAlertRule?.enabled) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+            <div className={`space-y-6${(!(leadAlertRule?.enabled) || noPhone) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
               <div className="grid grid-cols-2 gap-4">
                 {/* Send to */}
                 <div>
@@ -1318,21 +1348,18 @@ export function Services() {
                 {/* Send from (dedicated number — auto-resolved) */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send from</label>
-                  <div className={`w-full rounded-xl p-3 text-sm font-medium ${
-                    tenantPhones.length > 0
-                      ? 'bg-emerald-50/30 border-2 border-emerald-200 text-emerald-700'
-                      : 'bg-slate-50 border border-slate-200 text-slate-400'
-                  }`}>
-                    {tenantPhones.length > 0
-                      ? `${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName ? ` — ${tenantPhones[0].friendlyName}` : ''}`
-                      : 'No dedicated number assigned'
-                    }
-                  </div>
-                  {tenantPhones.length === 0 && (
-                    <p className="mt-1.5 text-xs text-amber-600 font-medium flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3 shrink-0" />
-                      Contact admin to assign a dedicated number
-                    </p>
+                  {tenantPhones.length > 0 ? (
+                    <div className="w-full rounded-xl p-3 text-sm font-medium bg-emerald-50/30 border-2 border-emerald-200 text-emerald-700">
+                      {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowDedicatedModal(true)}
+                      className="w-full rounded-xl p-3 text-sm font-semibold bg-amber-50 border-2 border-amber-200 text-amber-700 hover:bg-amber-100 hover:border-amber-300 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Phone className="w-4 h-4" />
+                      Get a Dedicated Number
+                    </button>
                   )}
                 </div>
               </div>
@@ -1517,30 +1544,44 @@ export function Services() {
             onToggle={ctSaving ? () => {} : toggleCustomerTexting}
             expanded={expandedCard === 'customer-texting'}
             onExpand={() => toggleExpand('customer-texting')}
-            statusText={ctEnabled ? 'Active — texting new leads automatically' : undefined}
+            setupRequired={tenantPhones.length === 0}
+            warningText={tenantPhones.length === 0 ? 'Dedicated number required' : undefined}
+            statusText={ctEnabled && tenantPhones.length > 0 ? 'Active — texting new leads automatically' : undefined}
             iconBgColor="bg-emerald-50"
             iconTextColor="text-emerald-600"
             cardRef={el => { cardRefs.current['customer-texting'] = el; }}
           >
-            <div className={`space-y-6${!ctEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+            {/* No dedicated number banner */}
+            {tenantPhones.length === 0 && (
+              <div className="flex flex-col items-center gap-3 py-6 px-4 bg-amber-50/50 rounded-2xl border border-amber-200">
+                <Phone className="w-8 h-8 text-amber-500" />
+                <p className="text-sm text-amber-700 font-medium text-center">You need a dedicated number to text customers</p>
+                <button
+                  onClick={() => setShowDedicatedModal(true)}
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors flex items-center gap-2"
+                >
+                  <Phone className="w-4 h-4" />
+                  Get a Dedicated Number
+                </button>
+              </div>
+            )}
+
+            <div className={`space-y-6${(!ctEnabled || tenantPhones.length === 0) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
               {/* Phone number — dedicated number (auto-resolved) */}
               <div className="space-y-2">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Send from</label>
-                <div className={`w-full rounded-xl p-3 text-sm font-medium ${
-                  tenantPhones.length > 0
-                    ? 'bg-emerald-50/30 border-2 border-emerald-200 text-emerald-700'
-                    : 'bg-slate-50 border border-slate-200 text-slate-400'
-                }`}>
-                  {tenantPhones.length > 0
-                    ? `${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName ? ` — ${tenantPhones[0].friendlyName}` : ''}`
-                    : 'No dedicated number assigned'
-                  }
-                </div>
-                {tenantPhones.length === 0 && (
-                  <p className="mt-1.5 text-xs text-amber-600 font-medium flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 shrink-0" />
-                    Contact admin to assign a dedicated number
-                  </p>
+                {tenantPhones.length > 0 ? (
+                  <div className="w-full rounded-xl p-3 text-sm font-medium bg-emerald-50/30 border-2 border-emerald-200 text-emerald-700">
+                    {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowDedicatedModal(true)}
+                    className="w-full rounded-xl p-3 text-sm font-semibold bg-amber-50 border-2 border-amber-200 text-amber-700 hover:bg-amber-100 hover:border-amber-300 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Phone className="w-4 h-4" />
+                    Get a Dedicated Number
+                  </button>
                 )}
               </div>
 
@@ -1705,12 +1746,29 @@ export function Services() {
             onToggle={ccSaving ? () => {} : toggleCallConnect}
             expanded={expandedCard === 'call-connect'}
             onExpand={() => toggleExpand('call-connect')}
-            statusText={ccEnabled ? 'Active — bridging calls for new leads' : undefined}
+            setupRequired={tenantPhones.length === 0}
+            warningText={tenantPhones.length === 0 ? 'Dedicated number required' : undefined}
+            statusText={ccEnabled && tenantPhones.length > 0 ? 'Active — bridging calls for new leads' : undefined}
             iconBgColor="bg-violet-50"
             iconTextColor="text-violet-600"
             cardRef={el => { cardRefs.current['call-connect'] = el; }}
           >
-            <div className={`space-y-6${!ccEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+            {/* No dedicated number banner */}
+            {tenantPhones.length === 0 && (
+              <div className="flex flex-col items-center gap-3 py-6 px-4 bg-amber-50/50 rounded-2xl border border-amber-200">
+                <Phone className="w-8 h-8 text-amber-500" />
+                <p className="text-sm text-amber-700 font-medium text-center">You need a dedicated number for instant calls</p>
+                <button
+                  onClick={() => setShowDedicatedModal(true)}
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors flex items-center gap-2"
+                >
+                  <Phone className="w-4 h-4" />
+                  Get a Dedicated Number
+                </button>
+              </div>
+            )}
+
+            <div className={`space-y-6${(!ccEnabled || tenantPhones.length === 0) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
             {/* Unsaved changes banner */}
             {ccDirty && (
               <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
@@ -1776,21 +1834,18 @@ export function Services() {
               {/* Send from (dedicated number — auto-resolved) */}
               <div>
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send from</label>
-                <div className={`w-full rounded-xl p-3 text-sm font-medium ${
-                  tenantPhones.length > 0
-                    ? 'bg-violet-50/30 border-2 border-violet-200 text-violet-700'
-                    : 'bg-slate-50 border border-slate-200 text-slate-400'
-                }`}>
-                  {tenantPhones.length > 0
-                    ? `${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName ? ` — ${tenantPhones[0].friendlyName}` : ''}`
-                    : 'No dedicated number assigned'
-                  }
-                </div>
-                {tenantPhones.length === 0 && (
-                  <p className="mt-1.5 text-xs text-amber-600 font-medium flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 shrink-0" />
-                    Contact admin to assign a dedicated number
-                  </p>
+                {tenantPhones.length > 0 ? (
+                  <div className="w-full rounded-xl p-3 text-sm font-medium bg-violet-50/30 border-2 border-violet-200 text-violet-700">
+                    {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowDedicatedModal(true)}
+                    className="w-full rounded-xl p-3 text-sm font-semibold bg-amber-50 border-2 border-amber-200 text-amber-700 hover:bg-amber-100 hover:border-amber-300 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Phone className="w-4 h-4" />
+                    Get a Dedicated Number
+                  </button>
                 )}
               </div>
             </div>
