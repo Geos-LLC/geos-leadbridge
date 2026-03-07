@@ -1091,7 +1091,12 @@ export class WebhooksService {
             // Forward if toNumber matches the account's dedicated number, or if no dedicated number is set
             const isOwner = !normDedicated || !normTo || normDedicated === normTo;
 
+            this.logger.log(
+              `[handleInboundSms] No-lead forward check: isOwner=${isOwner}, normTo=${normTo}, normDedicated=${normDedicated}`,
+            );
+
             if (isOwner) {
+              this.logger.log(`[handleInboundSms] Forwarding no-lead inbound from ${fromNumber} for account ${accountId}`);
               await this.notificationsService.forwardInboundSms(accountId, fromNumber, fromNumber, body);
             } else {
               this.logger.log(

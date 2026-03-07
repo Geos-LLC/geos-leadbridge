@@ -779,32 +779,49 @@ export function Services() {
   const savingAgentPhoneRef = useRef(false);
 
   async function saveAgentPhone() {
+    console.log('[saveAgentPhone] called, editingAgentPhone will be set to false');
     setEditingAgentPhone(false);
-    if (savingAgentPhoneRef.current) return;
+    if (savingAgentPhoneRef.current) {
+      console.log('[saveAgentPhone] SKIPPED — already saving (ref guard)');
+      return;
+    }
     savingAgentPhoneRef.current = true;
     const phone = formatPhoneE164(ccAgentPhone);
     if (phone !== ccAgentPhone) setAllAgentPhones(phone);
     const finalPhone = phone || ccAgentPhone;
-    if (!selectedAccountId || !finalPhone) { savingAgentPhoneRef.current = false; return; }
+    console.log('[saveAgentPhone] finalPhone=', finalPhone, 'selectedAccountId=', selectedAccountId);
+    if (!selectedAccountId || !finalPhone) {
+      console.log('[saveAgentPhone] SKIPPED — missing accountId or phone');
+      savingAgentPhoneRef.current = false;
+      return;
+    }
     setAgentPhoneSaveStatus('saving');
+    console.log('[saveAgentPhone] status → saving');
     const promises: Promise<any>[] = [];
     // Save alert rule toPhone
     if (leadAlertRule && leadAlertRule.id !== '_pending') {
+      console.log('[saveAgentPhone] updating alert rule', leadAlertRule.id);
       promises.push(
         notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { toPhone: finalPhone })
-          .then(({ rule }) => { setLeadAlertRule(rule); setAlertSavedSnapshot({ toPhone: finalPhone }); })
-          .catch(() => {})
+          .then(({ rule }) => {
+            console.log('[saveAgentPhone] alert rule updated OK');
+            setLeadAlertRule(rule); setAlertSavedSnapshot({ toPhone: finalPhone });
+          })
+          .catch((err) => { console.error('[saveAgentPhone] alert rule update FAILED', err); })
       );
     }
     // Save call connect agentPhone + update snapshot so ccDirty clears
+    console.log('[saveAgentPhone] saving CC settings');
     promises.push(
       callConnectApi.saveSettings(selectedAccountId, { agentPhoneE164: finalPhone })
         .then(() => {
+          console.log('[saveAgentPhone] CC settings saved OK');
           setCcSavedSnapshot(prev => prev ? { ...prev, agentPhone: finalPhone, callForwardingNumber: finalPhone } : prev);
         })
-        .catch(() => {})
+        .catch((err) => { console.error('[saveAgentPhone] CC settings save FAILED', err); })
     );
     await Promise.all(promises);
+    console.log('[saveAgentPhone] all saves done, status → saved');
     setAgentPhoneSaveStatus('saved');
     showSuccess('Business phone saved');
     setTimeout(() => setAgentPhoneSaveStatus('idle'), 3000);
@@ -1256,9 +1273,8 @@ export function Services() {
 
           {tenantPhones.length > 0 ? (
             <div className="space-y-4">
-              {/* All three fields in a 3-column grid */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Bot Number */}
+              {/* Row 1: Bot Number + Business Phone */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🤖 Bot Number</label>
                   <p className="text-[11px] text-slate-400 mb-2">Customers receive texts and calls from this number.</p>
@@ -1266,8 +1282,6 @@ export function Services() {
                     {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName && tenantPhones[0].friendlyName !== tenantPhones[0].phoneNumber ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
                   </div>
                 </div>
-
-                {/* Business Phone */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">📱 Your Business Phone</label>
                   <p className="text-[11px] text-slate-400 mb-2">Lead notifications and alerts are sent to this number.</p>
@@ -1310,8 +1324,10 @@ export function Services() {
                     </p>
                   )}
                 </div>
+              </div>
 
-                {/* Test Number */}
+              {/* Row 2: Test Number (aligned under Bot) + Test Buttons (aligned under Business Phone) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🧪 Test Number</label>
                   <p className="text-[11px] text-slate-400 mb-2">Used to test messaging and automation safely.</p>
@@ -1339,10 +1355,8 @@ export function Services() {
                     </p>
                   )}
                 </div>
-              </div>
-
-              {/* Test buttons row */}
-              <div className="flex gap-2 flex-wrap">
+                <div className="flex items-end">
+                  <div className="flex gap-2 flex-wrap pb-[1px]">
                   <button
                     onClick={sendCtTest}
                     disabled={ctTestStatus === 'sending' || !ctEnabled || !ccTestPhone || !isValidPhoneE164(ccTestPhone) || tenantPhones.length === 0 || !!ccSamePhoneError || commsDirty}
@@ -1388,7 +1402,9 @@ export function Services() {
                      <Send size={14} />}
                     {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Sent!' : testStatus === 'failed' ? 'Failed' : 'Test Alert'}
                   </button>
+                  </div>
                 </div>
+              </div>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-3 py-6 px-4 bg-amber-50/50 rounded-2xl border border-amber-200">

@@ -959,7 +959,10 @@ export class NotificationsService {
       where: { savedAccountId },
       include: { savedAccount: { select: { userId: true } } },
     });
-    if (!settings?.destinationPhone) return;
+    if (!settings?.destinationPhone) {
+      this.logger.warn(`[forwardInboundSms] No destinationPhone set for account ${savedAccountId}, skipping forward`);
+      return;
+    }
 
     const apiKey = settings.sigcoreApiKey;
     if (!apiKey) {
