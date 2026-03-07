@@ -1032,15 +1032,17 @@ export class WebhooksService {
         return;
       }
 
-      // Deduplicate: skip if we already saw this messageId (both webhooks arrive simultaneously)
-      if (messageId) {
-        if (this._recentInboundSmsIds.has(messageId)) {
+      // Deduplicate: skip if we already saw this messageId FOR THIS ACCOUNT
+      // (shared tenants deliver the same webhook to multiple accounts)
+      if (messageId && accountId) {
+        const dedupKey = `${accountId}:${messageId}`;
+        if (this._recentInboundSmsIds.has(dedupKey)) {
           this.logger.log(`[handleInboundSms] Skipping duplicate messageId=${messageId} for account ${accountId}`);
           await this.prisma.webhookEvent.update({ where: { id: event.id }, data: { processed: true } });
           return;
         }
-        this._recentInboundSmsIds.add(messageId);
-        setTimeout(() => this._recentInboundSmsIds.delete(messageId), 60_000);
+        this._recentInboundSmsIds.add(dedupKey);
+        setTimeout(() => this._recentInboundSmsIds.delete(dedupKey), 60_000);
       }
 
       // Normalize phone for matching (last 10 digits)
