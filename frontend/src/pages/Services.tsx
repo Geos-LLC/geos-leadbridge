@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  automationApi, notificationsApi, thumbtackApi, templatesApi, usersApi, callConnectApi,
+  automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi,
 } from '../services/api';
 import type { TenantPhoneNumber } from '../services/api';
 import type {
@@ -243,7 +243,7 @@ export function Services() {
   const [ctSigcoreFromPhone, setCtSigcoreFromPhone] = useState<string | null>(sc?.ctSigcoreFromPhone ?? null);
   const [ctTestPhone, setCtTestPhone] = useState(() => localStorage.getItem('ct_test_phone') || '');
   const [ctTestStatus, setCtTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
-  const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string; fromPhone: string; smsForwardingNumber: string } | null>(sc?.ctSavedSnapshot ?? null);
+  const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string } | null>(sc?.ctSavedSnapshot ?? null);
   const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>(sc?.ctSelectedTemplateId ?? '');
   const [ctSmsForwardingNumber, setCtSmsForwardingNumber] = useState(sc?.ctSmsForwardingNumber ?? '');
   const [ctSigcoreProvider, setCtSigcoreProvider] = useState<string | null>(sc?.ctSigcoreProvider ?? null);
@@ -251,19 +251,16 @@ export function Services() {
   const [ccCallForwardingNumber, setCcCallForwardingNumber] = useState(sc?.ccCallForwardingNumber ?? '');
 
   // Lead Alert saved snapshot for dirty tracking
-  const [alertSavedSnapshot, setAlertSavedSnapshot] = useState<{ toPhone: string; fromPhone: string } | null>(sc?.alertSavedSnapshot ?? null);
+  const [alertSavedSnapshot, setAlertSavedSnapshot] = useState<{ toPhone: string } | null>(sc?.alertSavedSnapshot ?? null);
 
   // Derived: unsaved Lead Alert changes
   const alertDirty = alertSavedSnapshot !== null && (
-    alertToPhone !== alertSavedSnapshot.toPhone ||
-    alertFromPhone !== alertSavedSnapshot.fromPhone
+    alertToPhone !== alertSavedSnapshot.toPhone
   );
 
   // Derived: unsaved CT changes
   const ctDirty = ctSavedSnapshot !== null && (
-    ctAutoReplyTemplate !== ctSavedSnapshot.autoReplyTemplate ||
-    ctFromPhone !== ctSavedSnapshot.fromPhone ||
-    ctSmsForwardingNumber !== ctSavedSnapshot.smsForwardingNumber
+    ctAutoReplyTemplate !== ctSavedSnapshot.autoReplyTemplate
   );
 
   // Derived: unsaved CC changes
@@ -318,11 +315,11 @@ export function Services() {
         automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] })),
         notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] })),
         templatesApi.getTemplates().catch(() => ({ templates: [] as MessageTemplate[] })),
-        usersApi.getPoolPhonesForSms().catch(() => ({ phoneNumbers: [] })),
+        Promise.resolve({ phoneNumbers: [] }),
         callConnectApi.getSettings(accountId).catch(() => ({ settings: null })),
         notificationsApi.getCustomerTextingSettings(accountId).catch(() => null),
         notificationsApi.getSettings(accountId).catch(() => null),
-        notificationsApi.listTenantPhones().catch(() => ({ success: false as const, data: [] as TenantPhoneNumber[] })),
+        notificationsApi.listTenantPhones().catch((): { success: boolean; data: TenantPhoneNumber[] } => ({ success: false, data: [] })),
       ]);
 
       const ccs = ccRes.settings;
@@ -370,7 +367,6 @@ export function Services() {
       if (ctRes) {
         setCtEnabled(ctRes.enabled);
         setCtAutoReplyTemplate(ctRes.autoReplyTemplate);
-        setCtFromPhone(ctRes.fromPhone || poolRes.phoneNumbers[0]?.phoneNumber || '');
       }
 
       // Collect ALL new_lead automation rules
@@ -389,36 +385,18 @@ export function Services() {
 
       // (tenant phones loaded in main Promise.all above)
 
-      // Load own provider connection status for CT Option 2
-      const connected = !!notifSettingsRes?.settings?.sigcoreConnected;
-      // connected state no longer needed in JSX — just used locally here
-      const sigcoreProvider = notifSettingsRes?.settings?.sigcoreProvider || null;
+      // Dedicated number auto-resolved — no provider selection needed
       const byoPhone = notifSettingsRes?.settings?.sigcoreFromPhone || null;
-      const savedForwarding = notifSettingsRes?.settings?.smsForwardingNumber || '';
-      // For OpenPhone, default "Get replies to" to the BYO number if not explicitly set —
-      // most tenants want replies in their OpenPhone app. Twilio dedicated has no default
-      // since the dedicated number is not the tenant's personal phone.
-      const effectiveForwarding = savedForwarding || (sigcoreProvider === 'openphone' ? byoPhone : null) || '';
-      setCtSigcoreProvider(sigcoreProvider);
+      setCtSigcoreProvider(null);
       setCtSigcoreFromPhone(byoPhone);
-      setCtSmsForwardingNumber(effectiveForwarding);
-      // Agent phone: use saved value, else default to BYO number if available
-      const agentPhoneDefault = ccs?.agentPhoneE164 || byoPhone || '';
+      setCtSmsForwardingNumber('');
+      // Agent phone: use saved value, else default to destination phone
+      const agentPhoneDefault = ccs?.agentPhoneE164 || notifSettingsRes?.settings?.destinationPhone || '';
       setCcAgentPhone(agentPhoneDefault);
-      // Forward calls to: use saved value, else default to same as agent phone
-      const savedCallFwd = notifSettingsRes?.settings?.callForwardingNumber || '';
-      setCcCallForwardingNumber(savedCallFwd || agentPhoneDefault);
-      // Load phone numbers if connected OR if provisioned (sigcoreProvider may have been cleared
-      // by re-provisioning but the tenant + API key still exist — numbers should still show).
-      const provisioned = !!notifSettingsRes?.settings?.sigcoreProvisioned;
-      if (connected || provisioned) {
-        notificationsApi.getSigcorePhoneNumbers(accountId).then(r => {
-          setCtOwnPhoneNumbers(r.phoneNumbers);
-          const c = _svcCache.get(accountId); if (c) c.ctOwnPhoneNumbers = r.phoneNumbers;
-        }).catch(() => {});
-      } else {
-        setCtOwnPhoneNumbers([]);
-      }
+      // Forward calls to: same as agent phone (destinationPhone)
+      setCcCallForwardingNumber(agentPhoneDefault);
+      // No more phone number dropdowns — dedicated number is auto-resolved
+      setCtOwnPhoneNumbers([]);
 
       // Seed CC default templates for every user on first page visit
       const DEFAULT_CC_WHISPER = 'Hi {customerName}, you have a new lead for {category}. Press any key to connect with the customer.';
@@ -468,15 +446,13 @@ export function Services() {
 
       // Pre-select CT auto-reply template: match saved content, fall back to default by name
       const ctTpl = allTemplates.find(t => t.name === 'CT - Auto Reply');
-      const ctResolvedFromPhone = ctRes?.fromPhone || poolRes.phoneNumbers[0]?.phoneNumber || '';
       const ctContent = ctRes?.autoReplyTemplate || ctTpl?.content || '';
       if (!ctRes && ctTpl) {
         setCtAutoReplyTemplate(ctTpl.content);
-        setCtFromPhone(ctResolvedFromPhone);
       }
       setCtSelectedTemplateId(allTemplates.find(t => t.content === ctContent)?.id || ctTpl?.id || '');
-      // Initialize CT snapshot for dirty tracking (always, same as CC)
-      setCtSavedSnapshot({ autoReplyTemplate: ctContent, fromPhone: ctResolvedFromPhone, smsForwardingNumber: notifSettingsRes?.settings?.smsForwardingNumber || '' });
+      // Initialize CT snapshot for dirty tracking
+      setCtSavedSnapshot({ autoReplyTemplate: ctContent });
 
       // Initialize CC snapshot for dirty tracking
       const snapshotWhisper = ccs?.agentWhisperMessage || whisperTpl?.content || '';
@@ -490,21 +466,17 @@ export function Services() {
         leadGreetingMessage: snapshotGreeting,
         voicemailMessage: snapshotVoicemail,
         voicemailRecordingUrl: ccs?.leadVoicemailRecordingUrl || '',
-        callForwardingNumber: savedCallFwd || agentPhoneDefault,
+        callForwardingNumber: agentPhoneDefault,
       });
 
       // Pre-fill form states from existing rules
       const alertTo = leadAlert?.toPhone || '';
-      const alertFrom = leadAlert?.fromPhone || poolRes.phoneNumbers[0]?.phoneNumber || '';
       if (leadAlert) {
         setAlertToPhone(alertTo);
-        setAlertFromPhone(alertFrom);
-      } else {
-        setAlertFromPhone(alertFrom);
       }
       // Initialize alert snapshot for dirty tracking
       if (leadAlert) {
-        setAlertSavedSnapshot({ toPhone: alertTo, fromPhone: alertFrom });
+        setAlertSavedSnapshot({ toPhone: alertTo });
       }
 
       // Auto-expand Lead Alerts card if setup is incomplete OR directed here from Dashboard alert
@@ -537,14 +509,14 @@ export function Services() {
         ccVoicemailTemplateId: allTemplates.find(t => t.content === (ccs?.leadVoicemailMessage || allTemplates.find(tt => tt.name === 'CC - Voicemail TTS')?.content || ''))?.id || null,
         ctEnabled: ctRes?.enabled ?? false,
         ctAutoReplyTemplate: ctRes?.autoReplyTemplate || allTemplates.find(t => t.name === 'CT - Auto Reply')?.content || '',
-        ctFromPhone: ctResolvedFromPhone, ctSigcoreFromPhone: notifSettingsRes?.settings?.sigcoreFromPhone || null,
-        ctSigcoreProvider: notifSettingsRes?.settings?.sigcoreProvider || null,
-        ctSmsForwardingNumber: notifSettingsRes?.settings?.smsForwardingNumber || '',
-        ccCallForwardingNumber: savedCallFwd || agentPhoneDefault,
+        ctFromPhone: '', ctSigcoreFromPhone: notifSettingsRes?.settings?.sigcoreFromPhone || null,
+        ctSigcoreProvider: null,
+        ctSmsForwardingNumber: '',
+        ccCallForwardingNumber: agentPhoneDefault,
         ctSelectedTemplateId: allTemplates.find(t => t.content === ctContent)?.id || allTemplates.find(t => t.name === 'CT - Auto Reply')?.id || '',
-        alertToPhone: alertTo, alertFromPhone: alertFrom,
-        alertSavedSnapshot: leadAlert ? { toPhone: alertTo, fromPhone: alertFrom } : null,
-        ctSavedSnapshot: { autoReplyTemplate: ctContent, fromPhone: ctResolvedFromPhone, smsForwardingNumber: notifSettingsRes?.settings?.smsForwardingNumber || '' },
+        alertToPhone: alertTo, alertFromPhone: '',
+        alertSavedSnapshot: leadAlert ? { toPhone: alertTo } : null,
+        ctSavedSnapshot: { autoReplyTemplate: ctContent },
         ccSavedSnapshot: {
           mode: (ccs?.mode || 'AGENT_FIRST') as CallConnectMode,
           agentPhone: agentPhoneDefault, botNumber: ccs?.botNumberE164 || defaultBotNumber,
@@ -552,7 +524,7 @@ export function Services() {
           leadGreetingMessage: ccs?.leadGreetingMessage || allTemplates.find(t => t.name === 'CC - Lead Greeting')?.content || '',
           voicemailMessage: ccs?.leadVoicemailMessage || allTemplates.find(t => t.name === 'CC - Voicemail TTS')?.content || '',
           voicemailRecordingUrl: ccs?.leadVoicemailRecordingUrl || '',
-          callForwardingNumber: savedCallFwd || agentPhoneDefault,
+          callForwardingNumber: agentPhoneDefault,
         },
       });
 
@@ -670,11 +642,9 @@ export function Services() {
           setTemplates(prev => [template, ...prev]);
         }
 
-        const defaultFrom = poolPhones[0]?.phoneNumber || '';
         const { rule } = await notificationsApi.createRule(selectedAccountId, {
           name: 'Lead Alert - SMS',
           triggerType: 'new_lead',
-          fromPhone: alertFromPhone || defaultFrom,
           toPhone: alertToPhone,
           sendToCustomer: false,
           template: DEFAULT_ALERT_TEMPLATE,
@@ -682,9 +652,7 @@ export function Services() {
           enabled: true,
         });
         setLeadAlertRule(rule);
-        const resolvedFrom = alertFromPhone || defaultFrom;
-        if (!alertFromPhone && defaultFrom) setAlertFromPhone(defaultFrom);
-        setAlertSavedSnapshot({ toPhone: alertToPhone, fromPhone: resolvedFrom });
+        setAlertSavedSnapshot({ toPhone: alertToPhone });
         setExpandedCard('lead-alerts');
         showSuccess('Lead Alerts enabled — configure your alert phone number');
       }
@@ -719,11 +687,6 @@ export function Services() {
     if (!selectedAccountId) return;
     setCcSaving(true);
     try {
-      // Save notification settings first so callForwardingNumber is in DB
-      // before callConnectApi.saveSettings triggers syncCallForwardingAfterProvision
-      await notificationsApi.updateSettings(selectedAccountId, {
-        callForwardingNumber: ccCallForwardingNumber || null,
-      });
       await callConnectApi.saveSettings(selectedAccountId, {
         enabled: ccEnabled,
         mode: ccMode,
@@ -767,7 +730,6 @@ export function Services() {
     try {
       await notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
         enabled,
-        fromPhone: ctFromPhone || undefined,
         autoReplyTemplate: ctAutoReplyTemplate,
       });
     } catch (err: any) {
@@ -782,18 +744,12 @@ export function Services() {
     if (!selectedAccountId) return;
     setCtSaving(true);
     try {
-      await Promise.all([
-        notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
-          enabled: ctEnabled,
-          fromPhone: ctFromPhone || undefined,
-          autoReplyTemplate: ctAutoReplyTemplate,
-        }),
-        notificationsApi.updateSettings(selectedAccountId, {
-          smsForwardingNumber: ctSmsForwardingNumber || null,
-        }),
-      ]);
+      await notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
+        enabled: ctEnabled,
+        autoReplyTemplate: ctAutoReplyTemplate,
+      });
       showSuccess('Customer Texting settings saved');
-      setCtSavedSnapshot({ autoReplyTemplate: ctAutoReplyTemplate, fromPhone: ctFromPhone, smsForwardingNumber: ctSmsForwardingNumber });
+      setCtSavedSnapshot({ autoReplyTemplate: ctAutoReplyTemplate });
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Failed to save Customer Texting settings');
     } finally {
@@ -804,14 +760,11 @@ export function Services() {
   function discardAlertChanges() {
     if (!alertSavedSnapshot) return;
     setAlertToPhone(alertSavedSnapshot.toPhone);
-    setAlertFromPhone(alertSavedSnapshot.fromPhone);
   }
 
   function discardCtChanges() {
     if (!ctSavedSnapshot) return;
     setCtAutoReplyTemplate(ctSavedSnapshot.autoReplyTemplate);
-    setCtFromPhone(ctSavedSnapshot.fromPhone);
-    setCtSmsForwardingNumber(ctSavedSnapshot.smsForwardingNumber);
     setCtSelectedTemplateId(templates.find(t => t.content === ctSavedSnapshot.autoReplyTemplate)?.id || '');
   }
 
@@ -909,10 +862,9 @@ export function Services() {
     try {
       const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, {
         toPhone: alertToPhone,
-        fromPhone: alertFromPhone,
       });
       setLeadAlertRule(rule);
-      setAlertSavedSnapshot({ toPhone: alertToPhone, fromPhone: alertFromPhone });
+      setAlertSavedSnapshot({ toPhone: alertToPhone });
       showSuccess('Lead Alert settings saved');
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Failed to save alert settings');
@@ -983,8 +935,6 @@ export function Services() {
     try {
       const result = await notificationsApi.connectSigcore(selectedAccountId, 'openphone', { apiKey: opApiKey.trim() });
       if (result.success) {
-        const nums = await notificationsApi.getSigcorePhoneNumbers(selectedAccountId);
-        setCtOwnPhoneNumbers(nums.phoneNumbers);
         setShowOpenPhoneModal(false);
         setOpApiKey('');
         showSuccess('OpenPhone connected successfully');
@@ -1810,7 +1760,7 @@ export function Services() {
                       {ctForwardingEditing && (
                         <button
                           type="button"
-                          onClick={() => { setCtSmsForwardingNumber(ctSavedSnapshot?.smsForwardingNumber || ''); setCtForwardingEditing(false); }}
+                          onClick={() => { setCtSmsForwardingNumber(''); setCtForwardingEditing(false); }}
                           className="text-xs font-semibold text-slate-500 hover:text-slate-800 whitespace-nowrap px-3 py-2 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors"
                         >
                           Cancel

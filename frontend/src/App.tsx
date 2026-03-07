@@ -12,7 +12,6 @@ import { Messages } from './pages/Messages';
 import { MessageSettings } from './pages/MessageSettings';
 import { AutomationSettings } from './pages/AutomationSettings';
 import { NotificationSettings } from './pages/NotificationSettings';
-import { PhoneSettings } from './pages/PhoneSettings';
 import { Services } from './pages/Services';
 import { ApiTest } from './pages/ApiTest';
 import { Analytics } from './pages/Analytics';
@@ -75,7 +74,7 @@ function App() {
             <Route path="/message-settings" element={<MessageSettings />} />
             <Route path="/automation" element={<AutomationSettings />} />
             <Route path="/notifications" element={<NotificationSettings />} />
-            <Route path="/phone-settings" element={<PhoneSettings />} />
+            <Route path="/phone-settings" element={<Navigate to="/notifications" />} />
             <Route path="/sms-history" element={<SmsHistory />} />
             <Route path="/services" element={<Services />} />
             <Route path="/api-test" element={<ApiTest />} />

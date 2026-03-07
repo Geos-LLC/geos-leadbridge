@@ -178,20 +178,16 @@ export interface NotificationSettings {
   savedAccountId: string;
   enabled: boolean;
   destinationPhone: string | null;
-  senderMode: 'shared' | 'dedicated' | 'openphone';
   sigcoreApiKey: string | null; // Masked in response
   sigcoreFromPhone: string | null;
   sigcoreWorkspaceId: string | null;
   sigcoreConnected: boolean;
   sigcoreProvisioned: boolean;
-  sigcoreProvider: string | null;
   template: string;
   quietHoursStart: string | null;
   quietHoursEnd: string | null;
   quietHoursTimezone: string | null;
   requirePhone: boolean;
-  smsForwardingNumber: string | null;
-  callForwardingNumber: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -406,7 +406,6 @@ export class NotificationsController {
     @Param('savedAccountId') savedAccountId: string,
     @Body() body: {
       enabled: boolean;
-      fromPhone?: string;
       autoReplyTemplate: string;
       followUps: Array<{ enabled: boolean; delayMinutes: number; template: string }>;
       stopOnCustomerReply: boolean;
@@ -432,25 +431,6 @@ export class NotificationsController {
     return {
       success: true,
       valid: result.valid,
-    };
-  }
-
-  /**
-   * Get phone numbers from Sigcore for a saved account
-   */
-  @Get('sigcore/phone-numbers/:savedAccountId')
-  async getSigcorePhoneNumbers(
-    @CurrentUser() user: any,
-    @Param('savedAccountId') savedAccountId: string,
-  ) {
-    const phoneNumbers = await this.notificationsService.getSigcorePhoneNumbers(
-      user.id,
-      savedAccountId,
-    );
-
-    return {
-      success: true,
-      phoneNumbers,
     };
   }
 

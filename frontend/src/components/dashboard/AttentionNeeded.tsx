@@ -43,7 +43,7 @@ export default function AttentionNeeded({
       label: `SMS Failed`,
       description: 'Messages that could not be delivered today',
       severity: 'urgent',
-      onClick: () => navigate('/phone-settings'),
+      onClick: () => navigate('/notifications'),
       icon: <AlertCircle size={20} />,
     });
   }

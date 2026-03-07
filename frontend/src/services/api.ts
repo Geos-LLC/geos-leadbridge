@@ -493,17 +493,11 @@ export const automationApi = {
 export interface UpdateNotificationSettingsDto {
   enabled?: boolean;
   destinationPhone?: string;
-  senderMode?: 'shared' | 'dedicated' | 'openphone';
-  sigcoreApiKey?: string;
-  sigcoreFromPhone?: string;
-  sigcoreWorkspaceId?: string;
   template?: string;
   quietHoursStart?: string;
   quietHoursEnd?: string;
   quietHoursTimezone?: string;
   requirePhone?: boolean;
-  smsForwardingNumber?: string | null;
-  callForwardingNumber?: string | null;
 }
 
 // Notification Rule DTOs
@@ -511,7 +505,6 @@ export interface CreateNotificationRuleDto {
   name: string;
   triggerType: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply';
-  fromPhone: string;  // Sigcore phone to send FROM
   toPhone: string;    // Destination phone to send TO
   sendToCustomer?: boolean; // If true, send to lead's phone instead of toPhone
   template: string;
@@ -527,7 +520,6 @@ export interface UpdateNotificationRuleDto {
   name?: string;
   triggerType?: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply';
-  fromPhone?: string;
   toPhone?: string;
   sendToCustomer?: boolean;
   template?: string;
@@ -630,10 +622,6 @@ export const notificationsApi = {
     return data;
   },
   // Provider integration
-  getSigcorePhoneNumbers: async (savedAccountId: string): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[] }> => {
-    const { data } = await api.get(`/v1/notifications/sigcore/phone-numbers/${savedAccountId}`);
-    return data;
-  },
   saveApiKey: async (savedAccountId: string, apiKey: string): Promise<{ success: boolean; error?: string }> => {
     const { data } = await api.post(`/v1/notifications/sigcore/api-key/${savedAccountId}`, { apiKey });
     return data;
@@ -700,11 +688,11 @@ export const notificationsApi = {
     return data;
   },
   // Customer Texting
-  getCustomerTextingSettings: async (savedAccountId: string): Promise<{ success: boolean; enabled: boolean; fromPhone: string | null; autoReplyTemplate: string }> => {
+  getCustomerTextingSettings: async (savedAccountId: string): Promise<{ success: boolean; enabled: boolean; autoReplyTemplate: string }> => {
     const { data } = await api.get(`/v1/notifications/customer-texting/${savedAccountId}`);
     return data;
   },
-  saveCustomerTextingSettings: async (savedAccountId: string, settings: { enabled: boolean; fromPhone?: string; autoReplyTemplate: string }): Promise<{ success: boolean }> => {
+  saveCustomerTextingSettings: async (savedAccountId: string, settings: { enabled: boolean; autoReplyTemplate: string }): Promise<{ success: boolean }> => {
     const { data } = await api.put(`/v1/notifications/customer-texting/${savedAccountId}`, settings);
     return data;
   },
@@ -887,29 +875,8 @@ export const usersApi = {
     const { data } = await api.post(url);
     return data;
   },
-  getMyPoolPhone: async (): Promise<{ success: boolean; poolPhone: PhonePoolEntry | null; poolPhones: PhonePoolEntry[] }> => {
-    const { data } = await api.get('/v1/users/me/pool-phone');
-    return data;
-  },
-  claimPoolAsDedicated: async (phonePoolId: string): Promise<{ success: boolean; tenantPhone: TenantPhoneNumber }> => {
-    const { data } = await api.post(`/v1/users/me/claim-dedicated/${phonePoolId}`);
-    return data;
-  },
-  getPoolPhonesForSms: async (): Promise<{ success: boolean; phoneNumbers: { id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean }[] }> => {
-    const { data } = await api.get('/v1/users/me/pool-phones-for-sms');
-    return data;
-  },
   updateProfile: async (updates: { name?: string }): Promise<{ success: boolean; user: { id: string; name: string; email: string } }> => {
     const { data } = await api.patch('/v1/users/me', updates);
-    return data;
-  },
-  getAllPhoneOptions: async (): Promise<{
-    success: boolean;
-    dedicated: { id: string; phoneNumber: string; friendlyName: string | null; provider: string; type: 'dedicated' }[];
-    pool: { id: string; phoneNumber: string; provider: string; friendlyName: string | null; smsApproved: boolean }[];
-    openphone: { id: string; phoneNumber: string; friendlyName?: string; provider: string }[];
-  }> => {
-    const { data } = await api.get('/v1/users/me/phone-options');
     return data;
   },
   deleteOwnAccount: async (): Promise<{ success: boolean }> => {

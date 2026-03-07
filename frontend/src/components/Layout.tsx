@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Outlet, Link as RouterLink, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
-  MessageSquare, BarChart3, Settings, LogOut, Phone, Shield, FlaskConical,
+  MessageSquare, BarChart3, Settings, LogOut, Shield, FlaskConical,
   Menu, Bell, Zap, AlertTriangle, Workflow, LayoutGrid, Smartphone
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
@@ -48,7 +48,7 @@ export function Layout() {
     { icon: <Workflow size={20} />, label: 'Automation', path: '/services' },
     { icon: <Settings size={20} />, label: 'Templates', path: '/message-settings' },
     { icon: <MessageSquare size={20} />, label: 'Lead Activity', path: '/messages' },
-    { icon: <Phone size={20} />, label: 'Business Line', path: '/phone-settings' },
+    { icon: <Bell size={20} />, label: 'SMS Rules', path: '/notifications' },
     { icon: <BarChart3 size={20} />, label: 'Insights', path: '/analytics' },
   ];
 
