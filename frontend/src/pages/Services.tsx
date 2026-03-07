@@ -5,7 +5,7 @@ import {
   Bot, Pencil, Phone, Send, ChevronUp, Trash2, Save,
   Key, Hash, ExternalLink, Link2,
 } from 'lucide-react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import {
   automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi,
 } from '../services/api';
@@ -126,7 +126,6 @@ let _svcLoaded = false; // true once we've fetched at least once (even if no acc
 
 // -- Main Services Page --
 export function Services() {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const storedAccounts = useAppStore(state => state.savedAccounts);
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
@@ -156,8 +155,7 @@ export function Services() {
 
   // Supporting data
   const [templates, setTemplates] = useState<MessageTemplate[]>(sc?.templates ?? []);
-  const [poolPhones, setPoolPhones] = useState<{ id: string; phoneNumber: string; provider: string; friendlyName: string | null; assigned: boolean; smsApproved?: boolean }[]>(sc?.poolPhones ?? []);
-  const [ctOwnPhoneNumbers, setCtOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>(sc?.ctOwnPhoneNumbers ?? []);
+  const [, setCtOwnPhoneNumbers] = useState<SigcorePhoneNumber[]>(sc?.ctOwnPhoneNumbers ?? []);
   // ctSigcoreConnected tracked via local var in loadServiceData (no longer needed in JSX)
   const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>(sc?.tenantPhones ?? []);
 
@@ -231,7 +229,7 @@ export function Services() {
 
   // Lead Alerts form state (needed for first-time creation)
   const [alertToPhone, setAlertToPhone] = useState(sc?.alertToPhone ?? '');
-  const [alertFromPhone, setAlertFromPhone] = useState(sc?.alertFromPhone ?? '');
+  const [alertFromPhone] = useState(sc?.alertFromPhone ?? '');
 
   // Customer Texting state
   const [ctEnabled, setCtEnabled] = useState(sc?.ctEnabled ?? false);
@@ -239,15 +237,12 @@ export function Services() {
     sc?.ctAutoReplyTemplate ?? "Hi {customerName}, this is {accountName}. We just received your request for {category}. When would be a good time to call you?"
   );
   const [ctSaving, setCtSaving] = useState(false);
-  const [ctFromPhone, setCtFromPhone] = useState(sc?.ctFromPhone ?? '');
+  const [ctFromPhone] = useState(sc?.ctFromPhone ?? '');
   const [ctSigcoreFromPhone, setCtSigcoreFromPhone] = useState<string | null>(sc?.ctSigcoreFromPhone ?? null);
   const [ctTestPhone, setCtTestPhone] = useState(() => localStorage.getItem('ct_test_phone') || '');
   const [ctTestStatus, setCtTestStatus] = useState<'idle' | 'sending' | 'delivered' | 'failed'>('idle');
   const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string } | null>(sc?.ctSavedSnapshot ?? null);
   const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>(sc?.ctSelectedTemplateId ?? '');
-  const [ctSmsForwardingNumber, setCtSmsForwardingNumber] = useState(sc?.ctSmsForwardingNumber ?? '');
-  const [ctSigcoreProvider, setCtSigcoreProvider] = useState<string | null>(sc?.ctSigcoreProvider ?? null);
-  const [ctForwardingEditing, setCtForwardingEditing] = useState(false);
   const [ccCallForwardingNumber, setCcCallForwardingNumber] = useState(sc?.ccCallForwardingNumber ?? '');
 
   // Lead Alert saved snapshot for dirty tracking
@@ -381,15 +376,10 @@ export function Services() {
       ) || null;
 
       setLeadAlertRule(leadAlert);
-      setPoolPhones(poolRes.phoneNumbers);
-
-      // (tenant phones loaded in main Promise.all above)
 
       // Dedicated number auto-resolved — no provider selection needed
       const byoPhone = notifSettingsRes?.settings?.sigcoreFromPhone || null;
-      setCtSigcoreProvider(null);
       setCtSigcoreFromPhone(byoPhone);
-      setCtSmsForwardingNumber('');
       // Agent phone: use saved value, else default to destination phone
       const agentPhoneDefault = ccs?.agentPhoneE164 || notifSettingsRes?.settings?.destinationPhone || '';
       setCcAgentPhone(agentPhoneDefault);
@@ -490,7 +480,7 @@ export function Services() {
       // Persist to module-level cache so returning to this page is instant
       _svcCache.set(accountId, {
         autoReplyRules: allAutoReplies, leadAlertRule: leadAlert, templates: allTemplates,
-        poolPhones: poolRes.phoneNumbers, tenantPhones: activeTenantPhones, ctOwnPhoneNumbers: ctOwnPhoneNumbers,
+        poolPhones: poolRes.phoneNumbers, tenantPhones: activeTenantPhones, ctOwnPhoneNumbers: [],
         ccEnabled: ccs?.enabled ?? false, ccMode: (ccs?.mode || 'AGENT_FIRST') as CallConnectMode,
         ccAgentStrategy: (ccs?.agentStrategy || 'owner') as AgentStrategy,
         ccAgentPhone: agentPhoneDefault, ccMaxAttempts: ccs?.maxAgentAttempts ?? 2,
@@ -852,10 +842,6 @@ export function Services() {
 
   // saveAlertToPhone removed — now handled by saveAlertSettings()
 
-  function setAlertFrom(fromPhone: string) {
-    setAlertFromPhone(fromPhone); // tracked in alertDirty — saved when user clicks Save Settings
-  }
-
   async function saveAlertSettings() {
     if (!leadAlertRule || !selectedAccountId) return;
     setSaving(true);
@@ -913,14 +899,6 @@ export function Services() {
   }
 
   // --- Customer Texting Handlers ---
-
-  function saveCtFromPhone(fromPhone: string) {
-    if (fromPhone === '__add_phone__') {
-      setShowPhoneSetupModal(true);
-      return;
-    }
-    setCtFromPhone(fromPhone); // tracked in ctDirty — saved when user clicks Save Settings
-  }
 
   function openDedicatedModal() {
     setShowDedicatedModal(true);
@@ -1333,73 +1311,23 @@ export function Services() {
                   )}
                 </div>
 
-                {/* Send from */}
+                {/* Send from (dedicated number — auto-resolved) */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send from</label>
-                  <div className="relative">
-                    <select
-                      value={alertFromPhone}
-                      onChange={e => setAlertFrom(e.target.value)}
-                      disabled={saving}
-                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
-                    >
-                      <option value="">Select phone number</option>
-                      {/* Legacy: currently configured number not found in any list */}
-                      {alertFromPhone &&
-                        !poolPhones.some(p => p.phoneNumber === alertFromPhone) &&
-                        !ctOwnPhoneNumbers.some(p => p.phoneNumber === alertFromPhone) &&
-                        !tenantPhones.some(tp => tp.phoneNumber === alertFromPhone) &&
-                        alertFromPhone !== ctSigcoreFromPhone && (
-                          <option value={alertFromPhone}>{alertFromPhone} (configured)</option>
-                      )}
-                      {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).length > 0 && (
-                        <optgroup label="Dedicated Numbers">
-                          {tenantPhones.filter(tp => !poolPhones.some(pp => pp.phoneNumber === tp.phoneNumber)).map(tp => (
-                            <option key={tp.id} value={tp.phoneNumber}>
-                              {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''}
-                            </option>
-                          ))}
-                          {ctSigcoreFromPhone && !poolPhones.some(p => p.phoneNumber === ctSigcoreFromPhone) && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
-                            <option value={ctSigcoreFromPhone}>{ctSigcoreFromPhone} (Twilio)</option>
-                          )}
-                        </optgroup>
-                      )}
-                      {poolPhones.length > 0 && (
-                        <optgroup label="Pool Numbers">
-                          {poolPhones.map(p => (
-                            <option key={p.id} value={p.phoneNumber} disabled={p.smsApproved === false}>
-                              {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''}{p.smsApproved === false ? ' — NOT A2P APPROVED' : ''}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                      {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).length > 0 && (
-                        <optgroup label="OpenPhone Numbers">
-                          {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => {
-                            const smsOk = p.smsEnabled !== false;
-                            return (
-                              <option key={p.id} value={p.phoneNumber} disabled={!smsOk}>
-                                {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''}{!smsOk ? ' — SMS NOT ENABLED' : ''}
-                              </option>
-                            );
-                          })}
-                        </optgroup>
-                      )}
-                    </select>
-                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
-                      <ChevronDown className="w-4 h-4" />
-                    </div>
+                  <div className={`w-full rounded-xl p-3 text-sm font-medium ${
+                    tenantPhones.length > 0
+                      ? 'bg-emerald-50/30 border-2 border-emerald-200 text-emerald-700'
+                      : 'bg-slate-50 border border-slate-200 text-slate-400'
+                  }`}>
+                    {tenantPhones.length > 0
+                      ? `${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName ? ` — ${tenantPhones[0].friendlyName}` : ''}`
+                      : 'No dedicated number assigned'
+                    }
                   </div>
-                  {alertFromPhone && alertToPhone && alertFromPhone === alertToPhone && (
+                  {tenantPhones.length === 0 && (
                     <p className="mt-1.5 text-xs text-amber-600 font-medium flex items-center gap-1">
                       <AlertCircle className="w-3 h-3 shrink-0" />
-                      Send-from and send-to are the same number
-                    </p>
-                  )}
-                  {alertFromPhone && poolPhones.find(p => p.phoneNumber === alertFromPhone && p.smsApproved === false) && (
-                    <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3 shrink-0" />
-                      This number is not A2P 10DLC approved — SMS will fail to deliver
+                      Contact admin to assign a dedicated number
                     </p>
                   )}
                 </div>
@@ -1591,196 +1519,24 @@ export function Services() {
             cardRef={el => { cardRefs.current['customer-texting'] = el; }}
           >
             <div className={`space-y-6${!ctEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-              {/* Phone number — only own/dedicated numbers (no shared pool — consent required) */}
+              {/* Phone number — dedicated number (auto-resolved) */}
               <div className="space-y-2">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Send from</label>
-                {(() => {
-                  // Pool phones must not count as "own numbers" — consent compliance requires a dedicated/OpenPhone number
-                  const ctSigcoreIsPool = !!ctSigcoreFromPhone && poolPhones.some(p => p.phoneNumber === ctSigcoreFromPhone);
-                  const hasOwnNumbers = ctOwnPhoneNumbers.length > 0 || tenantPhones.length > 0 || (!!ctSigcoreFromPhone && !ctSigcoreIsPool);
-                  if (!hasOwnNumbers) {
-                    return (
-                      <div className="space-y-3">
-                        <p className="text-xs text-slate-500 leading-relaxed">
-                          Customer texting requires your own phone number for consent compliance. Choose an option to set one up:
-                        </p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="border border-slate-200 rounded-2xl p-4 hover:border-blue-200 transition-all">
-                            <div className="flex items-start gap-3">
-                              <div className="w-7 h-7 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5">
-                                <Phone className="w-3.5 h-3.5" />
-                              </div>
-                              <div className="flex-1">
-                                <p className="font-semibold text-slate-900 text-xs">Option 2 — Bring Your Own Phone</p>
-                                <p className="text-xs text-slate-500 mt-1 leading-relaxed">Connect your Quo, OpenPhone, or other provider. Your numbers stay in your account.</p>
-                                <button
-                                  type="button"
-                                  onClick={() => { setShowOpenPhoneModal(true); }}
-                                  className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
-                                >
-                                  Connect your phone →
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="border border-slate-200 rounded-2xl p-4 hover:border-indigo-200 transition-all">
-                            <div className="flex items-start gap-3">
-                              <div className="w-7 h-7 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5">
-                                <Briefcase className="w-3.5 h-3.5" />
-                              </div>
-                              <div className="flex-1">
-                                <p className="font-semibold text-slate-900 text-xs">Option 3 — Dedicated Number</p>
-                                <p className="text-xs text-slate-500 mt-1 leading-relaxed">Get a Twilio number exclusively assigned to your account.</p>
-                                <button
-                                  type="button"
-                                  onClick={openDedicatedModal}
-                                  className="mt-2 text-xs font-semibold text-indigo-600 hover:text-indigo-700 hover:underline"
-                                >
-                                  Get a number →
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
+                <div className={`w-full rounded-xl p-3 text-sm font-medium ${
+                  tenantPhones.length > 0
+                    ? 'bg-emerald-50/30 border-2 border-emerald-200 text-emerald-700'
+                    : 'bg-slate-50 border border-slate-200 text-slate-400'
+                }`}>
+                  {tenantPhones.length > 0
+                    ? `${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName ? ` — ${tenantPhones[0].friendlyName}` : ''}`
+                    : 'No dedicated number assigned'
                   }
-                  return (
-                    <>
-                      <div className="relative">
-                        <select
-                          value={ctFromPhone}
-                          onChange={e => saveCtFromPhone(e.target.value)}
-                          disabled={ctSaving}
-                          className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50 appearance-none"
-                        >
-                          <option value="">Select phone number</option>
-                          {/* Legacy: currently configured number not in any known list */}
-                          {ctFromPhone &&
-                            !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctFromPhone) &&
-                            !tenantPhones.some(tp => tp.phoneNumber === ctFromPhone) &&
-                            ctFromPhone !== ctSigcoreFromPhone && (
-                              <option value={ctFromPhone}>{ctFromPhone} (configured)</option>
-                          )}
-                          {(tenantPhones.length > 0 || (ctSigcoreFromPhone && !ctSigcoreIsPool && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone))) && (
-                            <optgroup label="Dedicated Numbers">
-                              {tenantPhones.map(tp => (
-                                <option key={tp.id} value={tp.phoneNumber}>
-                                  {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''}
-                                </option>
-                              ))}
-                              {ctSigcoreFromPhone && !ctSigcoreIsPool && !ctOwnPhoneNumbers.some(p => p.phoneNumber === ctSigcoreFromPhone) && !tenantPhones.some(tp => tp.phoneNumber === ctSigcoreFromPhone) && (
-                                <option value={ctSigcoreFromPhone}>{ctSigcoreFromPhone} (Twilio)</option>
-                              )}
-                            </optgroup>
-                          )}
-                          {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).length > 0 && (
-                            <optgroup label="OpenPhone Numbers">
-                              {ctOwnPhoneNumbers.filter(p => !tenantPhones.some(tp => tp.phoneNumber === p.phoneNumber)).map(p => {
-                                const smsOk = p.smsEnabled !== false;
-                                return (
-                                  <option key={p.id} value={p.phoneNumber} disabled={!smsOk}>
-                                    {p.phoneNumber}{p.friendlyName ? ` — ${p.friendlyName}` : ''}{!smsOk ? ' — SMS NOT ENABLED' : ''}
-                                  </option>
-                                );
-                              })}
-                            </optgroup>
-                          )}
-                          <option value="__add_phone__">+ Add phone number</option>
-                        </select>
-                        <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
-                          <ChevronDown className="w-4 h-4" />
-                        </div>
-                      </div>
-                      <p className="mt-1.5 text-xs text-slate-400">
-                        Customer texting requires a dedicated number for consent compliance. Connect your own or buy one in{' '}
-                        <button type="button" onClick={() => navigate('/phone-settings')} className="text-blue-500 hover:underline font-medium">Phone Settings</button>.
-                      </p>
-                      {ctFromPhone && ctOwnPhoneNumbers.find(p => p.phoneNumber === ctFromPhone && p.smsEnabled === false) && (
-                        <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
-                          <AlertCircle className="w-3 h-3 shrink-0" />
-                          SMS is not enabled on this number — messages will fail to deliver
-                        </p>
-                      )}
-                      {ctFromPhone && poolPhones.some(p => p.phoneNumber === ctFromPhone) && (
-                        <p className="mt-1.5 text-xs text-amber-600 font-medium flex items-center gap-1">
-                          <AlertCircle className="w-3 h-3 shrink-0" />
-                          This is a shared pool number — switch to a dedicated number for consent compliance
-                        </p>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-
-              {/* Get replies to */}
-              <div className="space-y-2">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">
-                  Get replies to
-                  {ctSigcoreProvider !== 'openphone' && !ctSmsForwardingNumber && (
-                    <span className="ml-1 text-amber-500 normal-case font-normal tracking-normal">— required</span>
-                  )}
-                </label>
-                {ctSmsForwardingNumber && !ctForwardingEditing ? (
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
-                      <span className="text-sm font-medium text-slate-900">{ctSmsForwardingNumber}</span>
-                      {ctSigcoreProvider === 'openphone' && ctSmsForwardingNumber === ctSigcoreFromPhone && (
-                        <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 rounded-full px-2 py-0.5 uppercase tracking-wide">OpenPhone</span>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setCtForwardingEditing(true)}
-                      className="text-xs font-semibold text-slate-500 hover:text-slate-800 whitespace-nowrap px-3 py-2.5 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors"
-                    >
-                      Change
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="tel"
-                        value={ctSmsForwardingNumber}
-                        onChange={e => setCtSmsForwardingNumber(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
-                        onBlur={e => {
-                          const formatted = formatPhoneE164(e.target.value);
-                          if (formatted !== e.target.value) setCtSmsForwardingNumber(formatted);
-                        }}
-                        placeholder="+15555550100"
-                        className={`flex-1 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
-                          ctSmsForwardingNumber && !isValidPhoneE164(ctSmsForwardingNumber)
-                            ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
-                            : ctSmsForwardingNumber && isValidPhoneE164(ctSmsForwardingNumber)
-                              ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
-                              : 'border border-slate-200 focus:ring-emerald-400'
-                        }`}
-                      />
-                      {ctForwardingEditing && (
-                        <button
-                          type="button"
-                          onClick={() => { setCtSmsForwardingNumber(''); setCtForwardingEditing(false); }}
-                          className="text-xs font-semibold text-slate-500 hover:text-slate-800 whitespace-nowrap px-3 py-2 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      )}
-                    </div>
-                    {ctSmsForwardingNumber && !isValidPhoneE164(ctSmsForwardingNumber) ? (
-                      <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3 shrink-0" />
-                        Must be E.164 format, e.g. +12125550100
-                      </p>
-                    ) : !ctSmsForwardingNumber && ctSigcoreProvider !== 'openphone' ? (
-                      <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3 shrink-0" />
-                        Enter your personal phone — without this, customer replies won't reach you
-                      </p>
-                    ) : (
-                      <p className="text-xs text-slate-400 mt-1">Customer SMS replies will be forwarded here</p>
-                    )}
-                  </>
+                </div>
+                {tenantPhones.length === 0 && (
+                  <p className="mt-1.5 text-xs text-amber-600 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    Contact admin to assign a dedicated number
+                  </p>
                 )}
               </div>
 
@@ -1832,8 +1588,8 @@ export function Services() {
                 )}
               </div>
 
-              {/* Test SMS — disabled until a send-from phone is selected */}
-              <div className={!ctFromPhone ? 'opacity-40 pointer-events-none select-none' : ''}>
+              {/* Test SMS — disabled until a dedicated number is assigned */}
+              <div className={tenantPhones.length === 0 ? 'opacity-40 pointer-events-none select-none' : ''}>
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send Test</label>
                 <div className="flex gap-2">
                   <input
@@ -2013,63 +1769,26 @@ export function Services() {
                 )}
               </div>
 
-              {/* Send from */}
+              {/* Send from (dedicated number — auto-resolved) */}
               <div>
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send from</label>
-                <div className="relative">
-                  <select
-                    value={ccBotNumber}
-                    onChange={e => setCcBotNumber(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium appearance-none"
-                  >
-                    <option value="">Select dedicated number</option>
-                    {ccBotNumber && !tenantPhones.some(tp => tp.phoneNumber === ccBotNumber) && (
-                      <option value={ccBotNumber}>{ccBotNumber} (configured)</option>
-                    )}
-                    {tenantPhones.map(tp => (
-                      <option key={tp.id} value={tp.phoneNumber}>
-                        {tp.phoneNumber}{tp.friendlyName ? ` — ${tp.friendlyName}` : ''}
-                      </option>
-                    ))}
-                    {tenantPhones.length === 0 && (
-                      <option value="" disabled>No dedicated numbers — purchase one in Phone Settings</option>
-                    )}
-                  </select>
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
-                    <ChevronDown className="w-4 h-4" />
-                  </div>
+                <div className={`w-full rounded-xl p-3 text-sm font-medium ${
+                  tenantPhones.length > 0
+                    ? 'bg-violet-50/30 border-2 border-violet-200 text-violet-700'
+                    : 'bg-slate-50 border border-slate-200 text-slate-400'
+                }`}>
+                  {tenantPhones.length > 0
+                    ? `${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName ? ` — ${tenantPhones[0].friendlyName}` : ''}`
+                    : 'No dedicated number assigned'
+                  }
                 </div>
+                {tenantPhones.length === 0 && (
+                  <p className="mt-1.5 text-xs text-amber-600 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    Contact admin to assign a dedicated number
+                  </p>
+                )}
               </div>
-            </div>
-
-            {/* Forward Inbound Calls To */}
-            <div>
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Forward Inbound Calls To</label>
-              <input
-                type="tel"
-                value={ccCallForwardingNumber}
-                onChange={e => setCcCallForwardingNumber(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
-                onBlur={e => {
-                  const formatted = formatPhoneE164(e.target.value);
-                  if (formatted !== e.target.value) setCcCallForwardingNumber(formatted);
-                }}
-                placeholder="+15555550100"
-                className={`w-full rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
-                  ccCallForwardingNumber && !isValidPhoneE164(ccCallForwardingNumber)
-                    ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
-                    : ccCallForwardingNumber && isValidPhoneE164(ccCallForwardingNumber)
-                      ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
-                      : 'bg-white border border-slate-200 focus:ring-violet-300'
-                }`}
-              />
-              {ccCallForwardingNumber && !isValidPhoneE164(ccCallForwardingNumber) ? (
-                <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3 shrink-0" />
-                  Must be E.164 format, e.g. +12125550100
-                </p>
-              ) : (
-                <p className="text-xs text-slate-400 mt-1.5">Inbound calls to your dedicated number are forwarded here — defaults to Agent Phone</p>
-              )}
             </div>
 
             {/* Agent Whisper Message */}
