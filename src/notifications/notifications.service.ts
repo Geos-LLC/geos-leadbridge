@@ -1113,6 +1113,14 @@ export class NotificationsService {
       this.logger.warn(`No destination phone for rule ${ruleName}`);
       return;
     }
+    if (fromPhone && toPhone) {
+      const nF = fromPhone.replace(/\D/g, '').slice(-10);
+      const nT = toPhone.replace(/\D/g, '').slice(-10);
+      if (nF.length >= 10 && nF === nT) {
+        this.logger.warn(`[sendNotificationWithRule] SKIPPED: from=${fromPhone} and to=${toPhone} are the same number (rule=${ruleName})`);
+        return;
+      }
+    }
 
     // Render the message template
     const messageBody = this.renderTemplate(template, lead, context.accountName);
@@ -1351,6 +1359,15 @@ export class NotificationsService {
         metadata: JSON.stringify({ test: true, ruleId: rule?.id }),
       },
     });
+
+    // Guard: prevent sending to same number as fromPhone
+    if (fromPhone && toPhone) {
+      const normFrom = fromPhone.replace(/\D/g, '').slice(-10);
+      const normTo = toPhone.replace(/\D/g, '').slice(-10);
+      if (normFrom.length >= 10 && normFrom === normTo) {
+        return { success: false, error: 'Destination phone is the same as your dedicated number. Please enter your personal phone number.' };
+      }
+    }
 
     try {
       const result = await this.sendViaSigcore({

@@ -1307,6 +1307,12 @@ export function Services() {
                       Must be E.164 format, e.g. +12125550100
                     </p>
                   )}
+                  {alertToPhone && tenantPhones.length > 0 && alertToPhone === tenantPhones[0].phoneNumber && (
+                    <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      This is your dedicated number — enter your personal phone instead
+                    </p>
+                  )}
                 </div>
 
                 {/* Send from (dedicated number — auto-resolved) */}
@@ -1390,14 +1396,14 @@ export function Services() {
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                       <button
                         onClick={sendTestAlert}
-                        disabled={testStatus === 'sending' || saving || !leadAlertRule.toPhone || tenantPhones.length === 0}
+                        disabled={testStatus === 'sending' || saving || !leadAlertRule.toPhone || tenantPhones.length === 0 || (tenantPhones.length > 0 && leadAlertRule.toPhone === tenantPhones[0].phoneNumber)}
                         className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed flex items-center gap-2 ${
                           testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
                           testStatus === 'failed' ? 'bg-red-100 text-red-700' :
                           testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
                           'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
                         }`}
-                        title={!leadAlertRule.toPhone ? 'Set a destination phone first' : tenantPhones.length === 0 ? 'No dedicated number assigned' : 'Send a test SMS'}
+                        title={!leadAlertRule.toPhone ? 'Set a destination phone first' : tenantPhones.length === 0 ? 'No dedicated number assigned' : (tenantPhones.length > 0 && leadAlertRule.toPhone === tenantPhones[0].phoneNumber) ? 'Destination matches your dedicated number' : 'Send a test SMS'}
                       >
                         {testStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
                          testStatus === 'delivered' ? <CheckCircle size={14} /> :
