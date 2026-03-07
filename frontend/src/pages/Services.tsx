@@ -1427,22 +1427,6 @@ export function Services() {
                   </label>
                 </div>
                 <div className={`px-5 py-4 space-y-4${!autoReplyEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-                  {/* AI Optimization Banner */}
-                  <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-5 text-white flex items-center justify-between gap-4 relative overflow-hidden">
-                    <div className="flex items-center gap-3 relative z-10">
-                      <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center">
-                        <Bot className="w-5 h-5 text-blue-400" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-bold text-sm">AI Optimization</h4>
-                          <span className="px-2 py-0.5 bg-blue-500 text-[10px] font-bold rounded uppercase">Coming Soon</span>
-                        </div>
-                        <p className="text-slate-400 text-xs mt-0.5">AI decides timing and message variations to maximize response.</p>
-                      </div>
-                    </div>
-                  </div>
-
                   {/* Template */}
                   {firstReplyRule && (
                     <div>
