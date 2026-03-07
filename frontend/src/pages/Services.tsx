@@ -1396,33 +1396,6 @@ export function Services() {
                         )}
                       </div>
 
-                      {/* Test + Stats */}
-                      <div className="pt-3 border-t border-slate-100">
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                          <button
-                            onClick={sendTestAlert}
-                            disabled={testStatus === 'sending' || saving || !leadAlertRule.toPhone || tenantPhones.length === 0 || (tenantPhones.length > 0 && leadAlertRule.toPhone === tenantPhones[0].phoneNumber)}
-                            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed flex items-center gap-2 ${
-                              testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
-                              testStatus === 'failed' ? 'bg-red-100 text-red-700' :
-                              testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
-                              'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
-                            }`}
-                          >
-                            {testStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
-                             testStatus === 'delivered' ? <CheckCircle size={14} /> :
-                             testStatus === 'failed' ? <X size={14} /> :
-                             <Send size={14} />}
-                            {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Delivered' : testStatus === 'failed' ? 'Failed' : 'Send Test'}
-                          </button>
-                          {leadAlertRule.triggerCount > 0 && (
-                            <span className="text-xs text-slate-500">
-                              Triggered {leadAlertRule.triggerCount} time{leadAlertRule.triggerCount !== 1 ? 's' : ''}
-                              {leadAlertRule.lastTriggeredAt && (<> — last {new Date(leadAlertRule.lastTriggeredAt).toLocaleDateString()}</>)}
-                            </span>
-                          )}
-                        </div>
-                      </div>
                     </>
                   )}
                 </div>
@@ -1495,7 +1468,26 @@ export function Services() {
                         <button onClick={() => setEditingAgentPhone(false)} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
                       </div>
                     ) : (
-                      <p className="text-slate-900 font-semibold text-sm font-mono mt-1">{alertToPhone || 'Not set'}</p>
+                      <div className="flex items-center gap-3 mt-1">
+                        <p className="text-slate-900 font-semibold text-sm font-mono">{alertToPhone || 'Not set'}</p>
+                        <button
+                          onClick={sendTestAlert}
+                          disabled={testStatus !== 'idle' || !(leadAlertRule?.enabled) || !alertToPhone || !isValidPhoneE164(alertToPhone) || alertDirty}
+                          title={!(leadAlertRule?.enabled) ? 'Enable Lead Alerts first' : alertDirty ? 'Save changes first' : !alertToPhone ? 'Set agent phone first' : ''}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:cursor-not-allowed ${
+                            testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                            testStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                            testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                            'bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50'
+                          }`}
+                        >
+                          {testStatus === 'sending' ? <Loader2 size={12} className="animate-spin" /> :
+                           testStatus === 'delivered' ? <CheckCircle size={12} /> :
+                           testStatus === 'failed' ? <X size={12} /> :
+                           <Send size={12} />}
+                          {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Sent!' : testStatus === 'failed' ? 'Failed' : 'Test'}
+                        </button>
+                      </div>
                     )}
                   </div>
                   {!editingAgentPhone && (
@@ -1570,6 +1562,64 @@ export function Services() {
                   </div>
                 )}
                 <p className="text-xs text-slate-400 mt-1.5">Used for all outbound SMS and calls</p>
+              </div>
+
+              {/* ── Test section ── */}
+              <div className="border border-slate-100 rounded-2xl p-5 space-y-3">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Test Phone</label>
+                <div className="flex gap-2 flex-wrap items-center">
+                  <input
+                    type="tel"
+                    value={ccTestPhone}
+                    onChange={e => { const v = e.target.value.replace(/[^\d+\s\-()]/g, ''); setCcTestPhone(v); localStorage.setItem('cc_test_phone', v); }}
+                    onBlur={e => { const formatted = formatPhoneE164(e.target.value); if (formatted !== e.target.value) { setCcTestPhone(formatted); localStorage.setItem('cc_test_phone', formatted); } }}
+                    placeholder="+15559876543"
+                    className={`flex-1 min-w-[160px] rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                      ccSamePhoneError ? 'border-2 border-amber-400 bg-amber-50/30 focus:ring-amber-200'
+                        : ccTestPhone && !isValidPhoneE164(ccTestPhone) ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                        : ccTestPhone && isValidPhoneE164(ccTestPhone) ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                        : 'bg-slate-50 border border-slate-200 focus:ring-blue-500'
+                    }`}
+                  />
+                  <button
+                    onClick={sendCtTest}
+                    disabled={ctTestStatus === 'sending' || !ctEnabled || !ccTestPhone || !isValidPhoneE164(ccTestPhone) || tenantPhones.length === 0 || !!ccSamePhoneError || commsDirty}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                      ctTestStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                      ctTestStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                      ctTestStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                      'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
+                    }`}
+                    title={!ctEnabled ? 'Enable Customer Texting first' : commsDirty ? 'Save changes first' : ''}
+                  >
+                    {ctTestStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
+                     ctTestStatus === 'delivered' ? <CheckCircle size={14} /> :
+                     ctTestStatus === 'failed' ? <X size={14} /> :
+                     <Send size={14} />}
+                    {ctTestStatus === 'sending' ? 'Sending...' : ctTestStatus === 'delivered' ? 'Sent' : ctTestStatus === 'failed' ? 'Failed' : 'Test Text'}
+                  </button>
+                  <button
+                    onClick={handleTestCall}
+                    disabled={ccTesting || !ccEnabled || !!ccSamePhoneError || !ccTestPhone || !isValidPhoneE164(ccTestPhone) || commsDirty}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                      ccTesting ? 'bg-slate-100 text-slate-500' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
+                    }`}
+                    title={!ccEnabled ? 'Enable Instant Calls first' : commsDirty ? 'Save changes first' : ''}
+                  >
+                    {ccTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
+                    {ccTesting ? 'Calling…' : 'Test Call'}
+                  </button>
+                </div>
+                {ccTestPhone && !isValidPhoneE164(ccTestPhone) && (
+                  <p className="text-xs text-red-500 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" /> Must be E.164 format, e.g. +12125550100
+                  </p>
+                )}
+                {ccSamePhoneError && (
+                  <p className="text-xs text-amber-600 flex items-center gap-1">
+                    <AlertTriangle size={12} /> Test phone cannot be the same as the bot number or agent phone.
+                  </p>
+                )}
               </div>
 
               {/* ── Customer Texting sub-section ── */}
@@ -1818,64 +1868,6 @@ export function Services() {
                   </div>
 
                 </div>
-              </div>
-
-              {/* ── Shared Test section ── */}
-              <div className="border border-slate-100 rounded-2xl p-5 space-y-3">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Test Phone</label>
-                <div className="flex gap-2 flex-wrap items-center">
-                  <input
-                    type="tel"
-                    value={ccTestPhone}
-                    onChange={e => { const v = e.target.value.replace(/[^\d+\s\-()]/g, ''); setCcTestPhone(v); localStorage.setItem('cc_test_phone', v); }}
-                    onBlur={e => { const formatted = formatPhoneE164(e.target.value); if (formatted !== e.target.value) { setCcTestPhone(formatted); localStorage.setItem('cc_test_phone', formatted); } }}
-                    placeholder="+15559876543"
-                    className={`flex-1 min-w-[160px] rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
-                      ccSamePhoneError ? 'border-2 border-amber-400 bg-amber-50/30 focus:ring-amber-200'
-                        : ccTestPhone && !isValidPhoneE164(ccTestPhone) ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
-                        : ccTestPhone && isValidPhoneE164(ccTestPhone) ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
-                        : 'bg-slate-50 border border-slate-200 focus:ring-blue-500'
-                    }`}
-                  />
-                  <button
-                    onClick={sendCtTest}
-                    disabled={ctTestStatus === 'sending' || !ctEnabled || !ccTestPhone || !isValidPhoneE164(ccTestPhone) || tenantPhones.length === 0}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
-                      ctTestStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
-                      ctTestStatus === 'failed' ? 'bg-red-100 text-red-700' :
-                      ctTestStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
-                      'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
-                    }`}
-                    title={!ctEnabled ? 'Enable Customer Texting first' : ''}
-                  >
-                    {ctTestStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
-                     ctTestStatus === 'delivered' ? <CheckCircle size={14} /> :
-                     ctTestStatus === 'failed' ? <X size={14} /> :
-                     <Send size={14} />}
-                    {ctTestStatus === 'sending' ? 'Sending...' : ctTestStatus === 'delivered' ? 'Sent' : ctTestStatus === 'failed' ? 'Failed' : 'Test Text'}
-                  </button>
-                  <button
-                    onClick={handleTestCall}
-                    disabled={ccTesting || !ccEnabled || !!ccSamePhoneError || !ccTestPhone || !isValidPhoneE164(ccTestPhone)}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
-                      ccTesting ? 'bg-slate-100 text-slate-500' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
-                    }`}
-                    title={!ccEnabled ? 'Enable Instant Calls first' : ''}
-                  >
-                    {ccTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
-                    {ccTesting ? 'Calling…' : 'Test Call'}
-                  </button>
-                </div>
-                {ccTestPhone && !isValidPhoneE164(ccTestPhone) && (
-                  <p className="text-xs text-red-500 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 shrink-0" /> Must be E.164 format, e.g. +12125550100
-                  </p>
-                )}
-                {ccSamePhoneError && (
-                  <p className="text-xs text-amber-600 flex items-center gap-1">
-                    <AlertTriangle size={12} /> Test phone cannot be the same as the bot number or agent phone.
-                  </p>
-                )}
               </div>
 
               {/* ── Send to (your phone) wrap-up ── */}
