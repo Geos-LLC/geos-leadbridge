@@ -214,6 +214,13 @@ export class NotificationsService {
       this.logger.log(`[getSettings] Auto-fixed enabled=false for account ${savedAccountId}`);
     }
 
+    // Auto-heal: register inbound SMS webhook if missing
+    if (!settings.inboundSmsWebhookId && settings.sigcoreApiKey) {
+      this.ensureInboundSmsWebhook(savedAccountId).catch(err =>
+        this.logger.warn(`[getSettings] Failed to auto-register inbound SMS webhook: ${err.message}`),
+      );
+    }
+
     return this.formatSettings(settings);
   }
 
@@ -2006,7 +2013,44 @@ export class NotificationsService {
       );
     }
 
+    // Register inbound SMS webhook on the new/existing tenant
+    try {
+      await this.ensureInboundSmsWebhook(savedAccountId, data.apiKey);
+    } catch (err: any) {
+      this.logger.warn(`[ensureSigcoreTenantProvisioned] Failed to register inbound SMS webhook: ${err.message}`);
+    }
+
     return { apiKey: data.apiKey, tenantId: data.tenantId };
+  }
+
+  /**
+   * Ensure inbound SMS webhook subscription exists for this account.
+   * Called during provisioning and settings saves.
+   */
+  private async ensureInboundSmsWebhook(savedAccountId: string, apiKeyOverride?: string): Promise<void> {
+    const ns = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId },
+      select: { id: true, sigcoreApiKey: true, inboundSmsWebhookId: true },
+    });
+    const apiKey = apiKeyOverride || ns?.sigcoreApiKey;
+    if (!apiKey || !ns) return;
+    if (ns.inboundSmsWebhookId) return; // already registered
+
+    const appBaseUrl = this.configService.get<string>('APP_BASE_URL', 'https://www.leadbridge360.com');
+    const webhookUrl = `${appBaseUrl}/api/webhooks/sigcore/inbound-sms?accountId=${savedAccountId}`;
+
+    const result = await this.createSigcoreWebhook(apiKey, webhookUrl, {
+      name: 'LeadBridge Inbound SMS',
+      events: ['sms.message.received', 'message.inbound'],
+    });
+
+    if (result.webhookId) {
+      await this.prisma.notificationSettings.update({
+        where: { id: ns.id },
+        data: { inboundSmsWebhookId: result.webhookId },
+      });
+      this.logger.log(`[ensureInboundSmsWebhook] Registered: ${result.webhookId} for account ${savedAccountId}`);
+    }
   }
 
   /**
@@ -2454,27 +2498,10 @@ export class NotificationsService {
     });
 
     // Register inbound SMS webhook with Sigcore (if not already registered)
-    if (!settings.inboundSmsWebhookId) {
-      try {
-        const apiKey = settings.sigcoreApiKey;
-        if (apiKey) {
-          const appBaseUrl = this.configService.get<string>('APP_BASE_URL', 'https://www.leadbridge360.com');
-          const webhookUrl = `${appBaseUrl}/api/webhooks/sigcore/inbound-sms?accountId=${savedAccountId}`;
-          const result = await this.createSigcoreWebhook(apiKey, webhookUrl, {
-            name: 'LeadBridge Inbound SMS',
-            events: ['sms.message.received', 'message.inbound'],
-          });
-          if (result.webhookId) {
-            await this.prisma.notificationSettings.update({
-              where: { id: settings.id },
-              data: { inboundSmsWebhookId: result.webhookId },
-            });
-            this.logger.log(`Registered inbound SMS webhook: ${result.webhookId}`);
-          }
-        }
-      } catch (err: any) {
-        this.logger.warn(`Failed to register inbound SMS webhook: ${err.message}`);
-      }
+    try {
+      await this.ensureInboundSmsWebhook(savedAccountId);
+    } catch (err: any) {
+      this.logger.warn(`Failed to register inbound SMS webhook: ${err.message}`);
     }
 
     return { success: true };
