@@ -779,52 +779,35 @@ export function Services() {
   const savingAgentPhoneRef = useRef(false);
 
   async function saveAgentPhone() {
-    console.log('[saveAgentPhone] called, editingAgentPhone will be set to false');
     setEditingAgentPhone(false);
-    if (savingAgentPhoneRef.current) {
-      console.log('[saveAgentPhone] SKIPPED — already saving (ref guard)');
-      return;
-    }
+    if (savingAgentPhoneRef.current) return;
     savingAgentPhoneRef.current = true;
     const phone = formatPhoneE164(ccAgentPhone);
     if (phone !== ccAgentPhone) setAllAgentPhones(phone);
     const finalPhone = phone || ccAgentPhone;
-    console.log('[saveAgentPhone] finalPhone=', finalPhone, 'selectedAccountId=', selectedAccountId);
-    if (!selectedAccountId || !finalPhone) {
-      console.log('[saveAgentPhone] SKIPPED — missing accountId or phone');
-      savingAgentPhoneRef.current = false;
-      return;
-    }
-    setAgentPhoneSaveStatus('saving');
-    console.log('[saveAgentPhone] status → saving');
-    const promises: Promise<any>[] = [];
-    // Save alert rule toPhone
-    if (leadAlertRule && leadAlertRule.id !== '_pending') {
-      console.log('[saveAgentPhone] updating alert rule', leadAlertRule.id);
-      promises.push(
-        notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { toPhone: finalPhone })
-          .then(({ rule }) => {
-            console.log('[saveAgentPhone] alert rule updated OK');
-            setLeadAlertRule(rule); setAlertSavedSnapshot({ toPhone: finalPhone });
-          })
-          .catch((err) => { console.error('[saveAgentPhone] alert rule update FAILED', err); })
-      );
-    }
-    // Save call connect agentPhone + update snapshot so ccDirty clears
-    console.log('[saveAgentPhone] saving CC settings');
-    promises.push(
-      callConnectApi.saveSettings(selectedAccountId, { agentPhoneE164: finalPhone })
-        .then(() => {
-          console.log('[saveAgentPhone] CC settings saved OK');
-          setCcSavedSnapshot(prev => prev ? { ...prev, agentPhone: finalPhone, callForwardingNumber: finalPhone } : prev);
-        })
-        .catch((err) => { console.error('[saveAgentPhone] CC settings save FAILED', err); })
-    );
-    await Promise.all(promises);
-    console.log('[saveAgentPhone] all saves done, status → saved');
+    if (!selectedAccountId || !finalPhone) { savingAgentPhoneRef.current = false; return; }
+
+    // Optimistic: show saved immediately
     setAgentPhoneSaveStatus('saved');
+    setCcSavedSnapshot(prev => prev ? { ...prev, agentPhone: finalPhone, callForwardingNumber: finalPhone } : prev);
+    setAlertSavedSnapshot({ toPhone: finalPhone });
     showSuccess('Business phone saved');
     setTimeout(() => setAgentPhoneSaveStatus('idle'), 3000);
+
+    // Fire-and-forget saves — warn only on failure
+    const promises: Promise<any>[] = [];
+    if (leadAlertRule && leadAlertRule.id !== '_pending') {
+      promises.push(
+        notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { toPhone: finalPhone })
+          .then(({ rule }) => { setLeadAlertRule(rule); })
+          .catch(() => { setError('Failed to save business phone to alert rule'); })
+      );
+    }
+    promises.push(
+      callConnectApi.saveSettings(selectedAccountId, { agentPhoneE164: finalPhone })
+        .catch(() => { setError('Failed to save business phone to call settings'); })
+    );
+    await Promise.all(promises);
     savingAgentPhoneRef.current = false;
   }
 
