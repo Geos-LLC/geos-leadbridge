@@ -1256,8 +1256,9 @@ export function Services() {
 
           {tenantPhones.length > 0 ? (
             <div className="space-y-4">
-              {/* Bot number + Business phone — side by side */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* All three fields in a 3-column grid */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Bot Number */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🤖 Bot Number</label>
                   <p className="text-[11px] text-slate-400 mb-2">Customers receive texts and calls from this number.</p>
@@ -1265,6 +1266,8 @@ export function Services() {
                     {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName && tenantPhones[0].friendlyName !== tenantPhones[0].phoneNumber ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
                   </div>
                 </div>
+
+                {/* Business Phone */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">📱 Your Business Phone</label>
                   <p className="text-[11px] text-slate-400 mb-2">Lead notifications and alerts are sent to this number.</p>
@@ -1283,7 +1286,7 @@ export function Services() {
                       <button onClick={() => saveAgentPhone()} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
                       <div className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-medium font-mono transition-colors ${
                         agentPhoneSaveStatus === 'saved' ? 'bg-emerald-50 border-2 border-emerald-300 text-emerald-700' :
                         agentPhoneSaveStatus === 'saving' ? 'bg-blue-50 border-2 border-blue-200 text-blue-700' :
@@ -1294,7 +1297,7 @@ export function Services() {
                       </div>
                       <button
                         onClick={() => setEditingAgentPhone(true)}
-                        className="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                        className="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors shrink-0"
                       >
                         Change
                       </button>
@@ -1307,26 +1310,39 @@ export function Services() {
                     </p>
                   )}
                 </div>
-              </div>
 
-              {/* Test number */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🧪 Test Number</label>
-                <p className="text-[11px] text-slate-400 mb-2">Used to test messaging and automation safely.</p>
-                <div className="flex gap-2 flex-wrap items-center">
+                {/* Test Number */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🧪 Test Number</label>
+                  <p className="text-[11px] text-slate-400 mb-2">Used to test messaging and automation safely.</p>
                   <input
                     type="tel"
                     value={ccTestPhone}
                     onChange={e => { const v = e.target.value.replace(/[^\d+\s\-()]/g, ''); setCcTestPhone(v); localStorage.setItem('cc_test_phone', v); }}
                     onBlur={e => { const formatted = formatPhoneE164(e.target.value); if (formatted !== e.target.value) { setCcTestPhone(formatted); localStorage.setItem('cc_test_phone', formatted); } }}
                     placeholder="+15559876543"
-                    className={`flex-1 min-w-[160px] rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                    className={`w-full rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
                       ccSamePhoneError ? 'border-2 border-amber-400 bg-amber-50/30 focus:ring-amber-200'
                         : ccTestPhone && !isValidPhoneE164(ccTestPhone) ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
                         : ccTestPhone && isValidPhoneE164(ccTestPhone) ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
                         : 'bg-slate-50 border border-slate-200 focus:ring-blue-500'
                     }`}
                   />
+                  {ccTestPhone && !isValidPhoneE164(ccTestPhone) && (
+                    <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" /> Must be E.164 format, e.g. +12125550100
+                    </p>
+                  )}
+                  {ccSamePhoneError && (
+                    <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
+                      <AlertTriangle size={12} /> Test phone cannot be the same as the bot number or business phone.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Test buttons row */}
+              <div className="flex gap-2 flex-wrap">
                   <button
                     onClick={sendCtTest}
                     disabled={ctTestStatus === 'sending' || !ctEnabled || !ccTestPhone || !isValidPhoneE164(ccTestPhone) || tenantPhones.length === 0 || !!ccSamePhoneError || commsDirty}
@@ -1373,17 +1389,6 @@ export function Services() {
                     {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Sent!' : testStatus === 'failed' ? 'Failed' : 'Test Alert'}
                   </button>
                 </div>
-                {ccTestPhone && !isValidPhoneE164(ccTestPhone) && (
-                  <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 shrink-0" /> Must be E.164 format, e.g. +12125550100
-                  </p>
-                )}
-                {ccSamePhoneError && (
-                  <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
-                    <AlertTriangle size={12} /> Test phone cannot be the same as the bot number or agent phone.
-                  </p>
-                )}
-              </div>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-3 py-6 px-4 bg-amber-50/50 rounded-2xl border border-amber-200">
