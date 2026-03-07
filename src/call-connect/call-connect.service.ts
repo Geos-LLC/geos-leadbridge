@@ -138,14 +138,11 @@ export class CallConnectService {
       this.logger.warn(`Failed to push call-connect settings to Sigcore: ${err.message}`);
     }
 
-    // Sync callForwardingNumber to Sigcore tenant metadata AFTER ensureSigcoreProvisioned so we
-    // always have the correct (possibly freshly-created) sigcoreTenantId. This fixes the race
-    // condition where the frontend saves notifications settings and call-connect settings in
-    // parallel — if notifications ran first, sigcoreTenantId was null and the sync was skipped.
+    // Sync destinationPhone as call forwarding to Sigcore tenant metadata
     try {
       await this.syncCallForwardingAfterProvision(savedAccountId);
     } catch (err: any) {
-      this.logger.warn(`[saveSettings] Failed to sync callForwardingNumber after provision: ${err.message}`);
+      this.logger.warn(`[saveSettings] Failed to sync call forwarding after provision: ${err.message}`);
     }
 
     // Ensure webhook subscription exists — always attempt so stale/missing IDs get fixed
@@ -378,13 +375,14 @@ export class CallConnectService {
   }
 
   /**
-   * Read callForwardingNumber from NotificationSettings and push it to Sigcore tenant metadata.
+   * Push destinationPhone as callForwardingNumber to Sigcore tenant metadata.
+   * All call forwarding goes to the agent's phone (destinationPhone).
    * Called after ensureSigcoreProvisioned so sigcoreTenantId is always fresh/correct.
    */
   private async syncCallForwardingAfterProvision(savedAccountId: string): Promise<void> {
     const ns = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
-      select: { sigcoreTenantId: true, callForwardingNumber: true },
+      select: { sigcoreTenantId: true, destinationPhone: true },
     });
 
     if (!ns?.sigcoreTenantId) {
@@ -395,10 +393,7 @@ export class CallConnectService {
     const platformKey = this.configService.get<string>('SIGCORE_API_KEY');
     if (!platformKey) return;
 
-    // Use the same Sigcore instance that handles inbound voice calls (SIGCORE_CALL_CONNECT_URL,
-    // falling back to SIGCORE_API_URL). this.sigcoreApiUrl already resolves this correctly.
-    // Note: this.sigcoreApiUrl has trailing /api stripped, so we re-add /api here.
-    const forwardingNumber = ns.callForwardingNumber || null;
+    const forwardingNumber = ns.destinationPhone || null;
 
     const resp = await fetch(`${this.sigcoreApiUrl}/api/tenants/${ns.sigcoreTenantId}`, {
       method: 'PUT',
@@ -412,9 +407,8 @@ export class CallConnectService {
     }
 
     this.logger.log(
-      `[syncCallForwarding] Synced callForwardingNumber=${forwardingNumber || 'none'} to tenant ${ns.sigcoreTenantId} for account ${savedAccountId}`,
+      `[syncCallForwarding] Synced callForwardingNumber=${forwardingNumber || 'none'} (from destinationPhone) to tenant ${ns.sigcoreTenantId} for account ${savedAccountId}`,
     );
-
   }
 
   /** Register per-business webhook subscription with Sigcore — re-activates paused subscriptions */
