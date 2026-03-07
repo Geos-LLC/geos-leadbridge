@@ -3,7 +3,7 @@ import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
   Bot, Pencil, Phone, Send, ChevronUp, Trash2, Save,
-  Key, Hash, ExternalLink, Link2,
+  Key, Hash, ExternalLink, Link2, Sparkles,
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -1001,7 +1001,7 @@ export function Services() {
         setDpAvailableNumbers([]);
         setDpAreaCode('');
         setDpLocality('');
-        showSuccess('Dedicated number provisioned successfully');
+        showSuccess('LeadBridge number provisioned successfully');
       } else {
         setDpSearchError((result as any).error || 'Purchase failed');
       }
@@ -1205,6 +1205,153 @@ export function Services() {
         </div>
       </div>
 
+      {/* Your LeadBridge Number — shared across all service cards */}
+      {!loading && (
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-9 h-9 bg-blue-50 rounded-2xl flex items-center justify-center">
+              <Phone className="w-5 h-5 text-blue-600" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Your LeadBridge Number</h2>
+              <p className="text-xs text-slate-400">Used for all outbound SMS and calls</p>
+            </div>
+          </div>
+
+          {tenantPhones.length > 0 ? (
+            <div className="space-y-4">
+              {/* LeadBridge number (read-only) */}
+              <div className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700">
+                {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName && tenantPhones[0].friendlyName !== tenantPhones[0].phoneNumber ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
+              </div>
+
+              {/* Send to (your phone) */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Your Phone</label>
+                {editingAgentPhone ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="tel"
+                      value={ccAgentPhone}
+                      onChange={e => setAllAgentPhones(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                      onBlur={e => { const f = formatPhoneE164(e.target.value); if (f !== e.target.value) setAllAgentPhones(f); }}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingAgentPhone(false); }}
+                      autoFocus
+                      placeholder="+15551234567"
+                      className="flex-1 rounded-xl px-3 py-2.5 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                    />
+                    <button onClick={() => setEditingAgentPhone(false)} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 rounded-xl px-3 py-2.5 text-sm font-medium bg-slate-50 border border-slate-200 text-slate-800 font-mono">{ccAgentPhone || <span className="text-slate-400">Not set</span>}</div>
+                    <button
+                      onClick={() => setEditingAgentPhone(true)}
+                      className="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                    >
+                      Change
+                    </button>
+                  </div>
+                )}
+                {ccAgentPhone && tenantPhones.length > 0 && ccAgentPhone === tenantPhones[0].phoneNumber && (
+                  <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    This is your LeadBridge number — enter your personal phone instead
+                  </p>
+                )}
+              </div>
+
+              {/* Test phone */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Test Phone</label>
+                <div className="flex gap-2 flex-wrap items-center">
+                  <input
+                    type="tel"
+                    value={ccTestPhone}
+                    onChange={e => { const v = e.target.value.replace(/[^\d+\s\-()]/g, ''); setCcTestPhone(v); localStorage.setItem('cc_test_phone', v); }}
+                    onBlur={e => { const formatted = formatPhoneE164(e.target.value); if (formatted !== e.target.value) { setCcTestPhone(formatted); localStorage.setItem('cc_test_phone', formatted); } }}
+                    placeholder="+15559876543"
+                    className={`flex-1 min-w-[160px] rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                      ccSamePhoneError ? 'border-2 border-amber-400 bg-amber-50/30 focus:ring-amber-200'
+                        : ccTestPhone && !isValidPhoneE164(ccTestPhone) ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                        : ccTestPhone && isValidPhoneE164(ccTestPhone) ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                        : 'bg-slate-50 border border-slate-200 focus:ring-blue-500'
+                    }`}
+                  />
+                  <button
+                    onClick={sendCtTest}
+                    disabled={ctTestStatus === 'sending' || !ctEnabled || !ccTestPhone || !isValidPhoneE164(ccTestPhone) || tenantPhones.length === 0 || !!ccSamePhoneError || commsDirty}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                      ctTestStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                      ctTestStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                      ctTestStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                      'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
+                    }`}
+                    title={!ctEnabled ? 'Enable Customer Texting first' : commsDirty ? 'Save changes first' : ''}
+                  >
+                    {ctTestStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
+                     ctTestStatus === 'delivered' ? <CheckCircle size={14} /> :
+                     ctTestStatus === 'failed' ? <X size={14} /> :
+                     <Send size={14} />}
+                    {ctTestStatus === 'sending' ? 'Sending...' : ctTestStatus === 'delivered' ? 'Sent' : ctTestStatus === 'failed' ? 'Failed' : 'Test Text'}
+                  </button>
+                  <button
+                    onClick={handleTestCall}
+                    disabled={ccTesting || !ccEnabled || !!ccSamePhoneError || !ccTestPhone || !isValidPhoneE164(ccTestPhone) || commsDirty}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                      ccTesting ? 'bg-slate-100 text-slate-500' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
+                    }`}
+                    title={!ccEnabled ? 'Enable Instant Calls first' : commsDirty ? 'Save changes first' : ''}
+                  >
+                    {ccTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
+                    {ccTesting ? 'Calling…' : 'Test Call'}
+                  </button>
+                  <button
+                    onClick={sendTestAlert}
+                    disabled={testStatus !== 'idle' || !(leadAlertRule?.enabled) || !alertToPhone || !isValidPhoneE164(alertToPhone) || alertDirty}
+                    title={!(leadAlertRule?.enabled) ? 'Enable Lead Alerts first' : alertDirty ? 'Save changes first' : !alertToPhone ? 'Set agent phone first' : ''}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                      testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                      testStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                      testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                      'bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50'
+                    }`}
+                  >
+                    {testStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
+                     testStatus === 'delivered' ? <CheckCircle size={14} /> :
+                     testStatus === 'failed' ? <X size={14} /> :
+                     <Send size={14} />}
+                    {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Sent!' : testStatus === 'failed' ? 'Failed' : 'Test Alert'}
+                  </button>
+                </div>
+                {ccTestPhone && !isValidPhoneE164(ccTestPhone) && (
+                  <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" /> Must be E.164 format, e.g. +12125550100
+                  </p>
+                )}
+                {ccSamePhoneError && (
+                  <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
+                    <AlertTriangle size={12} /> Test phone cannot be the same as the bot number or agent phone.
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-3 py-6 px-4 bg-amber-50/50 rounded-2xl border border-amber-200">
+              <Phone className="w-8 h-8 text-amber-500" />
+              <p className="text-sm text-amber-700 font-medium text-center">You need a LeadBridge number to use notifications and communications</p>
+              <button
+                onClick={() => setShowDedicatedModal(true)}
+                className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors flex items-center gap-2"
+              >
+                <Phone className="w-4 h-4" />
+                Get a Number
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <div className="flex justify-center py-10">
           <Loader2 size={24} className="animate-spin text-blue-600" />
@@ -1251,27 +1398,12 @@ export function Services() {
             expanded={expandedCard === 'notifications'}
             onExpand={() => toggleExpand('notifications')}
             setupRequired={noPhone || leadAlertsIncomplete}
-            warningText={noPhone ? 'Dedicated number required' : leadAlertsIncomplete ? (toPhoneMissing ? 'Phone number required' : 'Template required') : undefined}
+            warningText={noPhone ? 'LeadBridge number required' : leadAlertsIncomplete ? (toPhoneMissing ? 'Phone number required' : 'Template required') : undefined}
             statusText={!noPhone && (autoReplyEnabled || leadAlertRule?.enabled) ? [autoReplyEnabled && 'Auto-reply', leadAlertRule?.enabled && 'Alerts'].filter(Boolean).join(' + ') + ' active' : undefined}
             iconBgColor="bg-amber-50"
             iconTextColor="text-amber-600"
             cardRef={el => { cardRefs.current['notifications'] = el; }}
           >
-            {/* No dedicated number banner */}
-            {noPhone && (
-              <div className="flex flex-col items-center gap-3 py-6 px-4 bg-amber-50/50 rounded-2xl border border-amber-200">
-                <Phone className="w-8 h-8 text-amber-500" />
-                <p className="text-sm text-amber-700 font-medium text-center">You need a dedicated number for lead notifications</p>
-                <button
-                  onClick={() => setShowDedicatedModal(true)}
-                  className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors flex items-center gap-2"
-                >
-                  <Phone className="w-4 h-4" />
-                  Get a Dedicated Number
-                </button>
-              </div>
-            )}
-
             <div className={`space-y-6${noPhone ? ' opacity-40 pointer-events-none select-none' : ''}`}>
 
               {/* ── Auto Reply sub-section ── */}
@@ -1430,59 +1562,6 @@ export function Services() {
                         )}
                       </div>
 
-                      {/* Send to (your phone) */}
-                      <div>
-                        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send to (your phone)</label>
-                        {editingAgentPhone ? (
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="tel"
-                              value={alertToPhone}
-                              onChange={e => setAllAgentPhones(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
-                              onBlur={e => { const f = formatPhoneE164(e.target.value); if (f !== e.target.value) setAllAgentPhones(f); }}
-                              onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingAgentPhone(false); }}
-                              autoFocus
-                              placeholder="+15551234567"
-                              className="flex-1 rounded-xl px-3 py-2.5 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                            />
-                            <button onClick={() => setEditingAgentPhone(false)} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-3">
-                            <div className="flex-1 rounded-xl px-3 py-2.5 text-sm font-medium bg-slate-50 border border-slate-200 text-slate-800 font-mono">{alertToPhone || <span className="text-slate-400">Not set</span>}</div>
-                            <button
-                              onClick={() => setEditingAgentPhone(true)}
-                              className="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-                            >
-                              Change
-                            </button>
-                            <button
-                              onClick={sendTestAlert}
-                              disabled={testStatus !== 'idle' || !(leadAlertRule?.enabled) || !alertToPhone || !isValidPhoneE164(alertToPhone) || alertDirty}
-                              title={!(leadAlertRule?.enabled) ? 'Enable Lead Alerts first' : alertDirty ? 'Save changes first' : !alertToPhone ? 'Set agent phone first' : ''}
-                              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:cursor-not-allowed ${
-                                testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
-                                testStatus === 'failed' ? 'bg-red-100 text-red-700' :
-                                testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
-                                'bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50'
-                              }`}
-                            >
-                              {testStatus === 'sending' ? <Loader2 size={12} className="animate-spin" /> :
-                               testStatus === 'delivered' ? <CheckCircle size={12} /> :
-                               testStatus === 'failed' ? <X size={12} /> :
-                               <Send size={12} />}
-                              {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Sent!' : testStatus === 'failed' ? 'Failed' : 'Test'}
-                            </button>
-                          </div>
-                        )}
-                        {alertToPhone && tenantPhones.length > 0 && alertToPhone === tenantPhones[0].phoneNumber && (
-                          <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3 shrink-0" />
-                            This is your dedicated number — enter your personal phone instead
-                          </p>
-                        )}
-                      </div>
-
                     </>
                   )}
                 </div>
@@ -1544,7 +1623,7 @@ export function Services() {
           <ServiceCard
             icon={<Phone className="w-7 h-7" />}
             title="Customer Communications"
-            description="Text and call customers from your dedicated number."
+            description="Text and call customers from your LeadBridge number."
             enabled={ctEnabled || ccEnabled}
             onToggle={(on) => {
               console.log(`[Comms] onToggle: on=${on} ctEnabled=${ctEnabled} ccEnabled=${ccEnabled} tenantPhones=${tenantPhones.length} selectedAccountId=${selectedAccountId}`);
@@ -1576,137 +1655,13 @@ export function Services() {
             expanded={expandedCard === 'comms'}
             onExpand={() => toggleExpand('comms')}
             setupRequired={tenantPhones.length === 0 || (!ccAgentPhone && tenantPhones.length > 0)}
-            warningText={tenantPhones.length === 0 ? 'Dedicated number required' : (!ccAgentPhone && tenantPhones.length > 0) ? 'Agent phone required' : undefined}
+            warningText={tenantPhones.length === 0 ? 'LeadBridge number required' : (!ccAgentPhone && tenantPhones.length > 0) ? 'Agent phone required' : undefined}
             statusText={tenantPhones.length > 0 && (ctEnabled || ccEnabled) ? [ctEnabled && 'Texting', ccEnabled && 'Calls'].filter(Boolean).join(' + ') + ' active' : undefined}
             iconBgColor="bg-blue-50"
             iconTextColor="text-blue-600"
             cardRef={el => { cardRefs.current['comms'] = el; }}
           >
-            {/* No dedicated number banner */}
-            {tenantPhones.length === 0 && (
-              <div className="flex flex-col items-center gap-3 py-6 px-4 bg-amber-50/50 rounded-2xl border border-amber-200">
-                <Phone className="w-8 h-8 text-amber-500" />
-                <p className="text-sm text-amber-700 font-medium text-center">You need a dedicated number for customer communications</p>
-                <button
-                  onClick={() => setShowDedicatedModal(true)}
-                  className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors flex items-center gap-2"
-                >
-                  <Phone className="w-4 h-4" />
-                  Get a Dedicated Number
-                </button>
-              </div>
-            )}
-
-            {/* Shared setup: Dedicated number + Agent phone */}
             <div className={`space-y-6${tenantPhones.length === 0 ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-              {/* Dedicated number (read-only) */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Dedicated Number</label>
-                {tenantPhones.length > 0 ? (
-                  <div className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700">
-                    {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName && tenantPhones[0].friendlyName !== tenantPhones[0].phoneNumber ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
-                  </div>
-                ) : (
-                  <div className="w-full rounded-xl p-3 text-sm font-medium bg-slate-50 border border-slate-200 text-slate-400">
-                    Not assigned
-                  </div>
-                )}
-                <p className="text-xs text-slate-400 mt-1.5">Used for all outbound SMS and calls</p>
-              </div>
-
-              {/* Send to (your phone) */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send to (your phone)</label>
-                {editingAgentPhone ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="tel"
-                      value={ccAgentPhone}
-                      onChange={e => setAllAgentPhones(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
-                      onBlur={e => { const f = formatPhoneE164(e.target.value); if (f !== e.target.value) setAllAgentPhones(f); }}
-                      onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingAgentPhone(false); }}
-                      autoFocus
-                      placeholder="+15551234567"
-                      className="flex-1 rounded-xl px-3 py-2.5 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                    />
-                    <button onClick={() => setEditingAgentPhone(false)} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 rounded-xl px-3 py-2.5 text-sm font-medium bg-slate-50 border border-slate-200 text-slate-800 font-mono">{ccAgentPhone || <span className="text-slate-400">Not set</span>}</div>
-                    <button
-                      onClick={() => setEditingAgentPhone(true)}
-                      className="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-                    >
-                      Change
-                    </button>
-                  </div>
-                )}
-                {ccAgentPhone && tenantPhones.length > 0 && ccAgentPhone === tenantPhones[0].phoneNumber && (
-                  <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 shrink-0" />
-                    This is your dedicated number — enter your personal phone instead
-                  </p>
-                )}
-              </div>
-
-              {/* ── Test section ── */}
-              <div className="border border-slate-100 rounded-2xl p-5 space-y-3">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Test Phone</label>
-                <div className="flex gap-2 flex-wrap items-center">
-                  <input
-                    type="tel"
-                    value={ccTestPhone}
-                    onChange={e => { const v = e.target.value.replace(/[^\d+\s\-()]/g, ''); setCcTestPhone(v); localStorage.setItem('cc_test_phone', v); }}
-                    onBlur={e => { const formatted = formatPhoneE164(e.target.value); if (formatted !== e.target.value) { setCcTestPhone(formatted); localStorage.setItem('cc_test_phone', formatted); } }}
-                    placeholder="+15559876543"
-                    className={`flex-1 min-w-[160px] rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
-                      ccSamePhoneError ? 'border-2 border-amber-400 bg-amber-50/30 focus:ring-amber-200'
-                        : ccTestPhone && !isValidPhoneE164(ccTestPhone) ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
-                        : ccTestPhone && isValidPhoneE164(ccTestPhone) ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
-                        : 'bg-slate-50 border border-slate-200 focus:ring-blue-500'
-                    }`}
-                  />
-                  <button
-                    onClick={sendCtTest}
-                    disabled={ctTestStatus === 'sending' || !ctEnabled || !ccTestPhone || !isValidPhoneE164(ccTestPhone) || tenantPhones.length === 0 || !!ccSamePhoneError || commsDirty}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
-                      ctTestStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
-                      ctTestStatus === 'failed' ? 'bg-red-100 text-red-700' :
-                      ctTestStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
-                      'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
-                    }`}
-                    title={!ctEnabled ? 'Enable Customer Texting first' : commsDirty ? 'Save changes first' : ''}
-                  >
-                    {ctTestStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
-                     ctTestStatus === 'delivered' ? <CheckCircle size={14} /> :
-                     ctTestStatus === 'failed' ? <X size={14} /> :
-                     <Send size={14} />}
-                    {ctTestStatus === 'sending' ? 'Sending...' : ctTestStatus === 'delivered' ? 'Sent' : ctTestStatus === 'failed' ? 'Failed' : 'Test Text'}
-                  </button>
-                  <button
-                    onClick={handleTestCall}
-                    disabled={ccTesting || !ccEnabled || !!ccSamePhoneError || !ccTestPhone || !isValidPhoneE164(ccTestPhone) || commsDirty}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
-                      ccTesting ? 'bg-slate-100 text-slate-500' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
-                    }`}
-                    title={!ccEnabled ? 'Enable Instant Calls first' : commsDirty ? 'Save changes first' : ''}
-                  >
-                    {ccTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
-                    {ccTesting ? 'Calling…' : 'Test Call'}
-                  </button>
-                </div>
-                {ccTestPhone && !isValidPhoneE164(ccTestPhone) && (
-                  <p className="text-xs text-red-500 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 shrink-0" /> Must be E.164 format, e.g. +12125550100
-                  </p>
-                )}
-                {ccSamePhoneError && (
-                  <p className="text-xs text-amber-600 flex items-center gap-1">
-                    <AlertTriangle size={12} /> Test phone cannot be the same as the bot number or agent phone.
-                  </p>
-                )}
-              </div>
 
               {/* ── Customer Texting sub-section ── */}
               <div className="border border-slate-100 rounded-2xl overflow-hidden">
@@ -1980,6 +1935,25 @@ export function Services() {
             </div>
           </ServiceCard>
 
+          {/* 4. AI Optimization — Coming Soon */}
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden opacity-60 pointer-events-none select-none">
+            <div className="p-6 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-purple-50 rounded-2xl flex items-center justify-center">
+                  <Sparkles className="w-7 h-7 text-purple-600" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-slate-900">AI Optimization</h3>
+                    <span className="px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-purple-100 text-purple-600 rounded-full">Coming Soon</span>
+                  </div>
+                  <p className="text-sm text-slate-400 mt-0.5">AI decides timing and message variations to maximize response.</p>
+                </div>
+              </div>
+              <div className="relative w-11 h-6 bg-slate-200 rounded-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5" />
+            </div>
+          </div>
+
         </div>
       )}
 
@@ -2141,14 +2115,14 @@ export function Services() {
         </div>
       )}
 
-      {/* Dedicated Number Setup Modal */}
+      {/* LeadBridge Number Setup Modal */}
       {showDedicatedModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowDedicatedModal(false)}>
           <div className="bg-white rounded-3xl shadow-2xl max-w-xl w-full p-8 relative" onClick={e => e.stopPropagation()}>
             <button onClick={() => setShowDedicatedModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors">
               <X className="w-5 h-5" />
             </button>
-            <h3 className="text-xl font-bold text-slate-900 mb-2">Get a Dedicated Number</h3>
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Get a LeadBridge Number</h3>
             <p className="text-sm text-slate-500 mb-5 leading-relaxed">Search for an available number by area code or city, then purchase it for your account.</p>
 
             {dpSearchError && (
