@@ -151,6 +151,7 @@ export default function AdminTenantNumbers() {
 
   // ── Messaging Service SID ──
   const [messagingServiceSid, setMessagingServiceSid] = useState('');
+  const [messagingServiceSaved, setMessagingServiceSaved] = useState(''); // last saved value
   const [messagingServiceSaving, setMessagingServiceSaving] = useState(false);
 
   // ── OpenPhone numbers (informational) ──
@@ -237,7 +238,10 @@ export default function AdminTenantNumbers() {
   const loadMessagingServiceSid = async () => {
     try {
       const pricing = await adminApi.getPhonePricing();
-      if (pricing.messagingServiceSid) setMessagingServiceSid(pricing.messagingServiceSid);
+      if (pricing.messagingServiceSid) {
+        setMessagingServiceSid(pricing.messagingServiceSid);
+        setMessagingServiceSaved(pricing.messagingServiceSid);
+      }
     } catch { /* keep default */ }
   };
 
@@ -249,6 +253,7 @@ export default function AdminTenantNumbers() {
     try {
       setMessagingServiceSaving(true);
       const result = await adminApi.updateMessagingService(messagingServiceSid);
+      setMessagingServiceSaved(messagingServiceSid);
       notify.success('Saved', result.synced ? 'Messaging Service SID saved and synced to Sigcore' : 'Saved locally but Sigcore sync failed — check logs');
     } catch (err: any) {
       notify.error('Error', err.response?.data?.message || 'Failed to save Messaging Service SID');
@@ -665,7 +670,16 @@ export default function AdminTenantNumbers() {
         {twilioHealth?.status === 'connected' && (
           <div className="px-4 py-3 bg-white rounded-2xl border border-slate-100 shadow-sm space-y-2">
             <div className="flex items-center gap-3">
-              <label className="text-xs font-bold text-slate-600 whitespace-nowrap">Messaging Service SID</label>
+              <label className="text-xs font-bold text-slate-600 whitespace-nowrap flex items-center gap-2">
+                Messaging Service SID
+                {messagingServiceSaved ? (
+                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-[10px] font-bold uppercase flex items-center gap-1">
+                    <ShieldCheck size={10} /> Synced
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[10px] font-bold uppercase">Not configured</span>
+                )}
+              </label>
               <input
                 type="text"
                 value={messagingServiceSid}
