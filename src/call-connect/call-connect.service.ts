@@ -224,7 +224,7 @@ export class CallConnectService {
       this.httpService.post(
         `${sigcoreUrl}/tenants/provision`,
         { externalTenantId: savedAccountId, displayName: `Account ${savedAccountId}` },
-        { headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey } },
+        { headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey }, timeout: 15_000 },
       ),
     );
 
@@ -265,7 +265,7 @@ export class CallConnectService {
           this.httpService.post(
             `${sigcoreUrl}/tenants/${tenantId}/copy-integrations`,
             { fromTenantId: oldTenantId },
-            { headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey } },
+            { headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey }, timeout: 15_000 },
           ),
         );
         this.logger.log(`[ensureSigcoreProvisioned] Copied integrations from tenant ${oldTenantId} → ${tenantId}`);
@@ -283,7 +283,7 @@ export class CallConnectService {
           this.httpService.post(
             `${this.sigcoreApiUrl}/api/tenants/${tenantId}/phone-numbers/refresh-webhooks`,
             {},
-            { headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey } },
+            { headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey }, timeout: 15_000 },
           ),
         );
         this.logger.log(`[ensureSigcoreProvisioned] Refreshed phone webhooks for new tenant ${tenantId}`);
@@ -356,7 +356,7 @@ export class CallConnectService {
     );
 
     const pushResp = await firstValueFrom(
-      this.httpService.post(settingsUrl, payload, { headers }),
+      this.httpService.post(settingsUrl, payload, { headers, timeout: 15_000 }),
     );
 
     this.logger.log(
@@ -366,7 +366,7 @@ export class CallConnectService {
     // Verify with a GET — catch mismatches early
     try {
       const getResp = await firstValueFrom(
-        this.httpService.get(settingsUrl, { headers }),
+        this.httpService.get(settingsUrl, { headers, timeout: 15_000 }),
       );
       const saved = getResp.data;
       if (saved?.agentAcceptDigits !== payload.agentAcceptDigits) {
@@ -403,11 +403,15 @@ export class CallConnectService {
 
     const forwardingNumber = ns.destinationPhone || null;
 
+    const controller = new AbortController();
+    const fetchTimeout = setTimeout(() => controller.abort(), 15_000);
     const resp = await fetch(`${this.sigcoreApiUrl}/api/tenants/${ns.sigcoreTenantId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey },
       body: JSON.stringify({ metadata: { callForwardingNumber: forwardingNumber } }),
+      signal: controller.signal,
     });
+    clearTimeout(fetchTimeout);
 
     if (!resp.ok) {
       const text = await resp.text();
@@ -449,7 +453,7 @@ export class CallConnectService {
     if (settings?.sigcoreWebhookId) {
       try {
         const getResp = await firstValueFrom(
-          this.httpService.get(`${subscriptionsUrl}/${settings.sigcoreWebhookId}`, { headers }),
+          this.httpService.get(`${subscriptionsUrl}/${settings.sigcoreWebhookId}`, { headers, timeout: 15_000 }),
         );
         const sub = getResp.data?.data ?? getResp.data;
         if (sub?.status === 'paused') {
@@ -458,7 +462,7 @@ export class CallConnectService {
             this.httpService.patch(
               `${subscriptionsUrl}/${settings.sigcoreWebhookId}`,
               { status: 'active' },
-              { headers },
+              { headers, timeout: 15_000 },
             ),
           );
           this.logger.log(`Re-activated paused Sigcore webhook subscription ${settings.sigcoreWebhookId} for account ${savedAccountId}`);
@@ -485,7 +489,7 @@ export class CallConnectService {
       this.httpService.post(
         subscriptionsUrl,
         { name: 'LeadBridge Call Connect', webhookUrl, secret, events: CC_EVENTS },
-        { headers },
+        { headers, timeout: 15_000 },
       ),
     );
 
