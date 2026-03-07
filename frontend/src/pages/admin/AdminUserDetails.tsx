@@ -156,8 +156,8 @@ export default function AdminUserDetailsPage() {
   const handleViewAsUser = () => {
     if (!user) return;
     setSavedAccounts([]);
-    setDashboardStats(null);
-    setAnalyticsCache(null);
+    setDashboardStats(null as any);
+    setAnalyticsCache(null as any);
     startImpersonation({ id: user.id, name: user.name, email: user.email });
     navigate('/dashboard');
   };

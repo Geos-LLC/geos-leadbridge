@@ -13,8 +13,8 @@ export default function ImpersonationBanner() {
   const handleExit = () => {
     stopImpersonation();
     setSavedAccounts([]);
-    setDashboardStats(null);
-    setAnalyticsCache(null);
+    setDashboardStats(null as any);
+    setAnalyticsCache(null as any);
     window.location.reload();
   };
 
