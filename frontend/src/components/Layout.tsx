@@ -48,8 +48,7 @@ export function Layout() {
     { icon: <Workflow size={20} />, label: 'Automation', path: '/services' },
     { icon: <Settings size={20} />, label: 'Templates', path: '/message-settings' },
     { icon: <MessageSquare size={20} />, label: 'Lead Activity', path: '/messages' },
-    { icon: <Bell size={20} />, label: 'SMS Rules', path: '/notifications' },
-    { icon: <BarChart3 size={20} />, label: 'Insights', path: '/analytics' },
+{ icon: <BarChart3 size={20} />, label: 'Insights', path: '/analytics' },
   ];
 
   // Get current page name from route
