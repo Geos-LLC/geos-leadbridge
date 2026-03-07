@@ -100,7 +100,7 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
               <input
                 type="checkbox"
                 checked={enabled}
-                onChange={(e) => { console.log(`[ServiceCard] "${title}" onChange: checked=${e.target.checked} enabled_prop=${enabled}`); onToggle(e.target.checked); }}
+                onChange={(e) => onToggle(e.target.checked)}
                 disabled={comingSoon}
                 className="sr-only peer"
               />
@@ -543,7 +543,6 @@ export function Services() {
   // --- Toggle Handlers ---
 
   async function toggleAutoReply(enabled: boolean) {
-    console.log(`[toggleAutoReply] called: enabled=${enabled} rules=${autoReplyRules.length}`);
     setError(null);
     // Optimistic: update UI immediately
     const prevRules = [...autoReplyRules];
@@ -593,9 +592,7 @@ export function Services() {
   }
 
   async function toggleLeadAlerts(enabled: boolean) {
-    console.log(`[toggleLeadAlerts] called: enabled=${enabled} tenantPhones=${tenantPhones.length} alertToPhone=${alertToPhone}`);
     if (enabled && tenantPhones.length === 0) {
-      console.log('[toggleLeadAlerts] ABORT: no tenant phones');
       setShowDedicatedModal(true);
       return;
     }
@@ -652,7 +649,7 @@ export function Services() {
       // Invalidate diagnostics cache so Dashboard/Settings show fresh data
       setAccountDiagnostics({});
     } catch (err: any) {
-      console.error('[toggleLeadAlerts] FAILED:', err.response?.data || err.message);
+      console.error('Failed to toggle Lead Alerts:', err.response?.data || err.message);
       // Rollback on error
       setLeadAlertRule(prevAlertRule);
       setError(err.response?.data?.message || err.message || 'Failed to toggle Lead Alerts');
@@ -663,10 +660,8 @@ export function Services() {
 
 
   async function toggleCallConnect(enabled: boolean) {
-    console.log(`[toggleCallConnect] called: enabled=${enabled} selectedAccountId=${selectedAccountId} tenantPhones=${tenantPhones.length}`);
-    if (!selectedAccountId) { console.log('[toggleCallConnect] ABORT: no selectedAccountId'); return; }
+    if (!selectedAccountId) return;
     if (enabled && tenantPhones.length === 0) {
-      console.log('[toggleCallConnect] ABORT: no tenant phones');
       setShowDedicatedModal(true);
       return;
     }
@@ -674,10 +669,9 @@ export function Services() {
     setCcSaving(true);
     try {
       const { settings } = await callConnectApi.saveSettings(selectedAccountId, { enabled });
-      console.log(`[toggleCallConnect] API OK: settings.enabled=${settings.enabled}`);
       setCcEnabled(settings.enabled);
     } catch (err: any) {
-      console.error(`[toggleCallConnect] API FAILED:`, err.response?.data || err.message);
+      console.error('Failed to toggle Call Connect:', err.response?.data || err.message);
       setCcEnabled(!enabled); // rollback
       setError(err.response?.data?.message || err.message || 'Failed to update Call Connect');
     } finally {
@@ -726,10 +720,8 @@ export function Services() {
   }
 
   async function toggleCustomerTexting(enabled: boolean) {
-    console.log(`[toggleCustomerTexting] called: enabled=${enabled} selectedAccountId=${selectedAccountId} tenantPhones=${tenantPhones.length}`);
-    if (!selectedAccountId) { console.log('[toggleCustomerTexting] ABORT: no selectedAccountId'); return; }
+    if (!selectedAccountId) return;
     if (enabled && tenantPhones.length === 0) {
-      console.log('[toggleCustomerTexting] ABORT: no tenant phones');
       setShowDedicatedModal(true);
       return;
     }
@@ -740,9 +732,8 @@ export function Services() {
         enabled,
         autoReplyTemplate: ctAutoReplyTemplate,
       });
-      console.log(`[toggleCustomerTexting] API OK`);
     } catch (err: any) {
-      console.error(`[toggleCustomerTexting] API FAILED:`, err.response?.data || err.message);
+      console.error('Failed to toggle Customer Texting:', err.response?.data || err.message);
       setCtEnabled(!enabled); // rollback
       setError(err.response?.data?.message || err.message || 'Failed to toggle Customer Texting');
     } finally {
@@ -1339,6 +1330,23 @@ export function Services() {
                 <div className="flex items-end">
                   <div className="flex gap-2 flex-wrap pb-[1px]">
                   <button
+                    onClick={sendTestAlert}
+                    disabled={testStatus !== 'idle' || !(leadAlertRule?.enabled) || !alertToPhone || !isValidPhoneE164(alertToPhone) || alertDirty}
+                    title={!(leadAlertRule?.enabled) ? 'Enable Lead Alerts first' : alertDirty ? 'Save changes first' : !alertToPhone ? 'Set agent phone first' : ''}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                      testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                      testStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                      testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                      'bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50'
+                    }`}
+                  >
+                    {testStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
+                     testStatus === 'delivered' ? <CheckCircle size={14} /> :
+                     testStatus === 'failed' ? <X size={14} /> :
+                     <Send size={14} />}
+                    {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Sent!' : testStatus === 'failed' ? 'Failed' : 'Test Alert'}
+                  </button>
+                  <button
                     onClick={sendCtTest}
                     disabled={ctTestStatus === 'sending' || !ctEnabled || !ccTestPhone || !isValidPhoneE164(ccTestPhone) || tenantPhones.length === 0 || !!ccSamePhoneError || commsDirty}
                     className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
@@ -1366,23 +1374,6 @@ export function Services() {
                     {ccTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
                     {ccTesting ? 'Calling…' : 'Test Call'}
                   </button>
-                  <button
-                    onClick={sendTestAlert}
-                    disabled={testStatus !== 'idle' || !(leadAlertRule?.enabled) || !alertToPhone || !isValidPhoneE164(alertToPhone) || alertDirty}
-                    title={!(leadAlertRule?.enabled) ? 'Enable Lead Alerts first' : alertDirty ? 'Save changes first' : !alertToPhone ? 'Set agent phone first' : ''}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
-                      testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
-                      testStatus === 'failed' ? 'bg-red-100 text-red-700' :
-                      testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
-                      'bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50'
-                    }`}
-                  >
-                    {testStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
-                     testStatus === 'delivered' ? <CheckCircle size={14} /> :
-                     testStatus === 'failed' ? <X size={14} /> :
-                     <Send size={14} />}
-                    {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Sent!' : testStatus === 'failed' ? 'Failed' : 'Test Alert'}
-                  </button>
                   </div>
                 </div>
               </div>
@@ -1409,9 +1400,6 @@ export function Services() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-6">
-          {/* eslint-disable-next-line @typescript-eslint/no-unused-expressions */}
-          <script dangerouslySetInnerHTML={{ __html: '' }} ref={() => console.log(`[Services RENDER] autoReplyEnabled=${autoReplyRules.some(r => r.enabled)} leadAlert=${leadAlertRule?.enabled} ctEnabled=${ctEnabled} ccEnabled=${ccEnabled} tenantPhones=${tenantPhones.length} selectedAccountId=${selectedAccountId}`)} />
-
           {/* 1. Lead Notifications (combined Auto-Reply + Lead Alerts) */}
           {(() => {
             const noPhone = tenantPhones.length === 0;
@@ -1425,25 +1413,23 @@ export function Services() {
             description="Auto-reply to leads and get SMS alerts for every new inquiry."
             enabled={autoReplyEnabled || (leadAlertRule?.enabled ?? false)}
             onToggle={(on) => {
-              console.log(`[Notif] onToggle: on=${on} autoReplyEnabled=${autoReplyEnabled} leadAlertEnabled=${leadAlertRule?.enabled} noPhone=${noPhone} tenantPhones=${tenantPhones.length}`);
-              if (on && noPhone) { console.log('[Notif] BLOCKED: no phone'); setShowDedicatedModal(true); return; }
+              if (on && noPhone) { setShowDedicatedModal(true); return; }
               // Optimistic: flip sub-switches immediately so the main toggle switches right away
               if (on) {
-                if (!autoReplyEnabled) { console.log('[Notif] Optimistic: autoReply ON'); setAutoReplyRules(prev => prev.length ? prev.map(r => ({ ...r, enabled: true })) : [{ id: '_pending', enabled: true } as any]); }
-                if (!leadAlertRule?.enabled) { console.log('[Notif] Optimistic: leadAlert ON'); setLeadAlertRule(leadAlertRule ? { ...leadAlertRule, enabled: true } : { id: '_pending', enabled: true } as any); }
+                if (!autoReplyEnabled) setAutoReplyRules(prev => prev.length ? prev.map(r => ({ ...r, enabled: true })) : [{ id: '_pending', enabled: true } as any]);
+                if (!leadAlertRule?.enabled) setLeadAlertRule(leadAlertRule ? { ...leadAlertRule, enabled: true } : { id: '_pending', enabled: true } as any);
               } else {
-                console.log('[Notif] Optimistic: all OFF');
                 setAutoReplyRules(prev => prev.map(r => ({ ...r, enabled: false })));
                 if (leadAlertRule) setLeadAlertRule({ ...leadAlertRule, enabled: false });
               }
               if (!expandedCard || expandedCard !== 'notifications') setExpandedCard('notifications');
               // Persist to backend
               if (on) {
-                if (!autoReplyEnabled) { console.log('[Notif] Calling toggleAutoReply(true)...'); toggleAutoReply(true); }
-                if (!leadAlertRule?.enabled) { console.log('[Notif] Calling toggleLeadAlerts(true)...'); toggleLeadAlerts(true); }
+                if (!autoReplyEnabled) toggleAutoReply(true);
+                if (!leadAlertRule?.enabled) toggleLeadAlerts(true);
               } else {
-                if (autoReplyEnabled) { console.log('[Notif] Calling toggleAutoReply(false)...'); toggleAutoReply(false); }
-                if (leadAlertRule?.enabled) { console.log('[Notif] Calling toggleLeadAlerts(false)...'); toggleLeadAlerts(false); }
+                if (autoReplyEnabled) toggleAutoReply(false);
+                if (leadAlertRule?.enabled) toggleLeadAlerts(false);
               }
             }}
             expanded={expandedCard === 'notifications'}
@@ -1661,30 +1647,22 @@ export function Services() {
             description="Text and call customers from your LeadBridge number."
             enabled={ctEnabled || ccEnabled}
             onToggle={(on) => {
-              console.log(`[Comms] onToggle: on=${on} ctEnabled=${ctEnabled} ccEnabled=${ccEnabled} tenantPhones=${tenantPhones.length} selectedAccountId=${selectedAccountId}`);
-              if (on && tenantPhones.length === 0) { console.log('[Comms] BLOCKED: no tenant phones'); setShowDedicatedModal(true); return; }
-              // Optimistic: flip both sub-switches immediately so the main toggle switches right away
-              console.log(`[Comms] Setting ctEnabled=${on} ccEnabled=${on}`);
+              if (on && tenantPhones.length === 0) { setShowDedicatedModal(true); return; }
+              // Optimistic: flip both sub-switches immediately
               setCtEnabled(on);
               setCcEnabled(on);
               if (!expandedCard || expandedCard !== 'comms') setExpandedCard('comms');
               // Persist to backend (fire & forget — each handles its own rollback)
               if (on !== ctEnabled && selectedAccountId) {
-                console.log('[Comms] Calling saveCustomerTextingSettings...');
                 notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
                   enabled: on,
                   autoReplyTemplate: ctAutoReplyTemplate,
-                }).then(() => console.log('[Comms] CT save OK')).catch((err) => { console.error('[Comms] CT save FAILED:', err); setCtEnabled(!on); });
-              } else {
-                console.log(`[Comms] SKIPPED CT save: on!==ctEnabled=${on !== ctEnabled} selectedAccountId=${!!selectedAccountId}`);
+                }).catch((err) => { console.error('CT save failed:', err); setCtEnabled(!on); });
               }
               if (on !== ccEnabled && selectedAccountId) {
-                console.log('[Comms] Calling callConnect.saveSettings...');
                 callConnectApi.saveSettings(selectedAccountId, { enabled: on })
-                  .then(({ settings }) => { console.log('[Comms] CC save OK, enabled=', settings.enabled); setCcEnabled(settings.enabled); })
-                  .catch((err) => { console.error('[Comms] CC save FAILED:', err); setCcEnabled(!on); });
-              } else {
-                console.log(`[Comms] SKIPPED CC save: on!==ccEnabled=${on !== ccEnabled} selectedAccountId=${!!selectedAccountId}`);
+                  .then(({ settings }) => setCcEnabled(settings.enabled))
+                  .catch((err) => { console.error('CC save failed:', err); setCcEnabled(!on); });
               }
             }}
             expanded={expandedCard === 'comms'}
@@ -1970,7 +1948,26 @@ export function Services() {
             </div>
           </ServiceCard>
 
-          {/* 4. AI Optimization — Coming Soon */}
+          {/* 4. Yelp Automation — Coming Soon */}
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden opacity-60 pointer-events-none select-none">
+            <div className="p-6 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-red-50 rounded-2xl flex items-center justify-center">
+                  <MessageSquare className="w-7 h-7 text-red-600" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-slate-900">Yelp Automation</h3>
+                    <span className="px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-red-100 text-red-600 rounded-full">Coming Soon</span>
+                  </div>
+                  <p className="text-sm text-slate-400 mt-0.5">Schedule replies and follow-ups for Yelp conversations.</p>
+                </div>
+              </div>
+              <div className="relative w-11 h-6 bg-slate-200 rounded-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5" />
+            </div>
+          </div>
+
+          {/* 5. AI Optimization — Coming Soon */}
           <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden opacity-60 pointer-events-none select-none">
             <div className="p-6 flex items-center justify-between">
               <div className="flex items-center gap-4">
