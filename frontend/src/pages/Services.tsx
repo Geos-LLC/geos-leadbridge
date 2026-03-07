@@ -1255,16 +1255,18 @@ export function Services() {
 
           {tenantPhones.length > 0 ? (
             <div className="space-y-4">
-              {/* LeadBridge number + Your phone — side by side */}
+              {/* Bot number + Business phone — side by side */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">LeadBridge Number</label>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🤖 Bot Number</label>
+                  <p className="text-[11px] text-slate-400 mb-2">Customers receive texts and calls from this number.</p>
                   <div className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700">
                     {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName && tenantPhones[0].friendlyName !== tenantPhones[0].phoneNumber ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
                   </div>
                 </div>
                 <div>
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Your Phone</label>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">📱 Your Business Phone</label>
+                  <p className="text-[11px] text-slate-400 mb-2">Lead notifications and alerts are sent to this number.</p>
                   {editingAgentPhone ? (
                     <div className="flex items-center gap-2">
                       <input
@@ -1300,15 +1302,16 @@ export function Services() {
                   {ccAgentPhone && tenantPhones.length > 0 && ccAgentPhone === tenantPhones[0].phoneNumber && (
                     <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
                       <AlertCircle className="w-3 h-3 shrink-0" />
-                      This is your LeadBridge number — enter your personal phone instead
+                      This is your Bot Number — enter your business phone instead
                     </p>
                   )}
                 </div>
               </div>
 
-              {/* Test phone */}
+              {/* Test number */}
               <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Test Phone</label>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🧪 Test Number</label>
+                <p className="text-[11px] text-slate-400 mb-2">Used to test messaging and automation safely.</p>
                 <div className="flex gap-2 flex-wrap items-center">
                   <input
                     type="tel"
