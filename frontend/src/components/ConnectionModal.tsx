@@ -19,7 +19,9 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
   const [reconnectSuccess, setReconnectSuccess] = useState(false);
 
   useEffect(() => {
-    if (isOpen && !accountToReconnect) {
+    if (isOpen && !accountToReconnect && savedAccounts.length > 0) {
+      // Only fetch businesses when user already has connected accounts
+      // (adding another business). For fresh connections, go straight to OAuth.
       loadBusinesses();
     }
     if (!isOpen) {
