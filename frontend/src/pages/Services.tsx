@@ -1211,16 +1211,25 @@ export function Services() {
             title="Lead Notifications"
             description="Auto-reply to leads and get SMS alerts for every new inquiry."
             enabled={autoReplyEnabled || (leadAlertRule?.enabled ?? false)}
-            onToggle={(enabled) => {
-              if (enabled && noPhone) { setShowDedicatedModal(true); return; }
-              if (enabled) {
+            onToggle={(on) => {
+              if (on && noPhone) { setShowDedicatedModal(true); return; }
+              // Optimistic: flip sub-switches immediately so the main toggle switches right away
+              if (on) {
+                if (!autoReplyEnabled) setAutoReplyRules(prev => prev.length ? prev.map(r => ({ ...r, enabled: true })) : [{ id: '_pending', enabled: true } as any]);
+                if (!leadAlertRule?.enabled) setLeadAlertRule(leadAlertRule ? { ...leadAlertRule, enabled: true } : { id: '_pending', enabled: true } as any);
+              } else {
+                setAutoReplyRules(prev => prev.map(r => ({ ...r, enabled: false })));
+                if (leadAlertRule) setLeadAlertRule({ ...leadAlertRule, enabled: false });
+              }
+              if (!expandedCard || expandedCard !== 'notifications') setExpandedCard('notifications');
+              // Persist to backend
+              if (on) {
                 if (!autoReplyEnabled) toggleAutoReply(true);
                 if (!leadAlertRule?.enabled) toggleLeadAlerts(true);
               } else {
                 if (autoReplyEnabled) toggleAutoReply(false);
                 if (leadAlertRule?.enabled) toggleLeadAlerts(false);
               }
-              toggleExpand('notifications');
             }}
             expanded={expandedCard === 'notifications'}
             onExpand={() => toggleExpand('notifications')}
@@ -1520,16 +1529,24 @@ export function Services() {
             title="Customer Communications"
             description="Text and call customers from your dedicated number."
             enabled={ctEnabled || ccEnabled}
-            onToggle={(enabled) => {
-              if (enabled && tenantPhones.length === 0) { setShowDedicatedModal(true); return; }
-              if (enabled) {
-                if (!ctEnabled) toggleCustomerTexting(true);
-                if (!ccEnabled) toggleCallConnect(true);
-              } else {
-                if (ctEnabled) toggleCustomerTexting(false);
-                if (ccEnabled) toggleCallConnect(false);
+            onToggle={(on) => {
+              if (on && tenantPhones.length === 0) { setShowDedicatedModal(true); return; }
+              // Optimistic: flip both sub-switches immediately so the main toggle switches right away
+              setCtEnabled(on);
+              setCcEnabled(on);
+              if (!expandedCard || expandedCard !== 'comms') setExpandedCard('comms');
+              // Persist to backend (fire & forget — each handles its own rollback)
+              if (on !== ctEnabled && selectedAccountId) {
+                notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
+                  enabled: on,
+                  autoReplyTemplate: ctAutoReplyTemplate,
+                }).catch(() => setCtEnabled(!on));
               }
-              toggleExpand('comms');
+              if (on !== ccEnabled && selectedAccountId) {
+                callConnectApi.saveSettings(selectedAccountId, { enabled: on })
+                  .then(({ settings }) => setCcEnabled(settings.enabled))
+                  .catch(() => setCcEnabled(!on));
+              }
             }}
             expanded={expandedCard === 'comms'}
             onExpand={() => toggleExpand('comms')}
