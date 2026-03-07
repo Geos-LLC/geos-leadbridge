@@ -1396,6 +1396,59 @@ export function Services() {
                         )}
                       </div>
 
+                      {/* Send to (your phone) */}
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send to (your phone)</label>
+                        {editingAgentPhone ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="tel"
+                              value={alertToPhone}
+                              onChange={e => setAllAgentPhones(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                              onBlur={e => { const f = formatPhoneE164(e.target.value); if (f !== e.target.value) setAllAgentPhones(f); }}
+                              onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingAgentPhone(false); }}
+                              autoFocus
+                              placeholder="+15551234567"
+                              className="flex-1 rounded-xl px-3 py-2.5 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                            />
+                            <button onClick={() => setEditingAgentPhone(false)} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1 rounded-xl px-3 py-2.5 text-sm font-medium bg-slate-50 border border-slate-200 text-slate-800 font-mono">{alertToPhone || <span className="text-slate-400">Not set</span>}</div>
+                            <button
+                              onClick={() => setEditingAgentPhone(true)}
+                              className="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                            >
+                              Change
+                            </button>
+                            <button
+                              onClick={sendTestAlert}
+                              disabled={testStatus !== 'idle' || !(leadAlertRule?.enabled) || !alertToPhone || !isValidPhoneE164(alertToPhone) || alertDirty}
+                              title={!(leadAlertRule?.enabled) ? 'Enable Lead Alerts first' : alertDirty ? 'Save changes first' : !alertToPhone ? 'Set agent phone first' : ''}
+                              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:cursor-not-allowed ${
+                                testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                                testStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                                testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                                'bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50'
+                              }`}
+                            >
+                              {testStatus === 'sending' ? <Loader2 size={12} className="animate-spin" /> :
+                               testStatus === 'delivered' ? <CheckCircle size={12} /> :
+                               testStatus === 'failed' ? <X size={12} /> :
+                               <Send size={12} />}
+                              {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Sent!' : testStatus === 'failed' ? 'Failed' : 'Test'}
+                            </button>
+                          </div>
+                        )}
+                        {alertToPhone && tenantPhones.length > 0 && alertToPhone === tenantPhones[0].phoneNumber && (
+                          <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3 shrink-0" />
+                            This is your dedicated number — enter your personal phone instead
+                          </p>
+                        )}
+                      </div>
+
                     </>
                   )}
                 </div>
@@ -1445,65 +1498,6 @@ export function Services() {
                       </button>
                     )}
                   </div>
-                )}
-              </div>
-
-              {/* ── Send to (your phone) wrap-up ── */}
-              <div className="border border-slate-100 rounded-2xl p-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Send to (your phone)</label>
-                    {editingAgentPhone ? (
-                      <div className="flex items-center gap-2 mt-2">
-                        <input
-                          type="tel"
-                          value={alertToPhone}
-                          onChange={e => setAllAgentPhones(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
-                          onBlur={e => { const f = formatPhoneE164(e.target.value); if (f !== e.target.value) setAllAgentPhones(f); }}
-                          onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingAgentPhone(false); }}
-                          autoFocus
-                          placeholder="+15551234567"
-                          className="flex-1 rounded-xl px-3 py-2 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                        />
-                        <button onClick={() => setEditingAgentPhone(false)} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-3 mt-1">
-                        <p className="text-slate-900 font-semibold text-sm font-mono">{alertToPhone || 'Not set'}</p>
-                        <button
-                          onClick={sendTestAlert}
-                          disabled={testStatus !== 'idle' || !(leadAlertRule?.enabled) || !alertToPhone || !isValidPhoneE164(alertToPhone) || alertDirty}
-                          title={!(leadAlertRule?.enabled) ? 'Enable Lead Alerts first' : alertDirty ? 'Save changes first' : !alertToPhone ? 'Set agent phone first' : ''}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:cursor-not-allowed ${
-                            testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
-                            testStatus === 'failed' ? 'bg-red-100 text-red-700' :
-                            testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
-                            'bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50'
-                          }`}
-                        >
-                          {testStatus === 'sending' ? <Loader2 size={12} className="animate-spin" /> :
-                           testStatus === 'delivered' ? <CheckCircle size={12} /> :
-                           testStatus === 'failed' ? <X size={12} /> :
-                           <Send size={12} />}
-                          {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Sent!' : testStatus === 'failed' ? 'Failed' : 'Test'}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  {!editingAgentPhone && (
-                    <button
-                      onClick={() => setEditingAgentPhone(true)}
-                      className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-                    >
-                      Change
-                    </button>
-                  )}
-                </div>
-                {alertToPhone && tenantPhones.length > 0 && alertToPhone === tenantPhones[0].phoneNumber && (
-                  <p className="mt-2 text-xs text-red-600 font-medium flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 shrink-0" />
-                    This is your dedicated number — enter your personal phone instead
-                  </p>
                 )}
               </div>
 
@@ -1562,6 +1556,42 @@ export function Services() {
                   </div>
                 )}
                 <p className="text-xs text-slate-400 mt-1.5">Used for all outbound SMS and calls</p>
+              </div>
+
+              {/* Send to (your phone) */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send to (your phone)</label>
+                {editingAgentPhone ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="tel"
+                      value={ccAgentPhone}
+                      onChange={e => setAllAgentPhones(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                      onBlur={e => { const f = formatPhoneE164(e.target.value); if (f !== e.target.value) setAllAgentPhones(f); }}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingAgentPhone(false); }}
+                      autoFocus
+                      placeholder="+15551234567"
+                      className="flex-1 rounded-xl px-3 py-2.5 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                    />
+                    <button onClick={() => setEditingAgentPhone(false)} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 rounded-xl px-3 py-2.5 text-sm font-medium bg-slate-50 border border-slate-200 text-slate-800 font-mono">{ccAgentPhone || <span className="text-slate-400">Not set</span>}</div>
+                    <button
+                      onClick={() => setEditingAgentPhone(true)}
+                      className="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                    >
+                      Change
+                    </button>
+                  </div>
+                )}
+                {ccAgentPhone && tenantPhones.length > 0 && ccAgentPhone === tenantPhones[0].phoneNumber && (
+                  <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    This is your dedicated number — enter your personal phone instead
+                  </p>
+                )}
               </div>
 
               {/* ── Test section ── */}
@@ -1868,46 +1898,6 @@ export function Services() {
                   </div>
 
                 </div>
-              </div>
-
-              {/* ── Send to (your phone) wrap-up ── */}
-              <div className="border border-slate-100 rounded-2xl p-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Send to (your phone)</label>
-                    {editingAgentPhone ? (
-                      <div className="flex items-center gap-2 mt-2">
-                        <input
-                          type="tel"
-                          value={ccAgentPhone}
-                          onChange={e => setAllAgentPhones(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
-                          onBlur={e => { const f = formatPhoneE164(e.target.value); if (f !== e.target.value) setAllAgentPhones(f); }}
-                          onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingAgentPhone(false); }}
-                          autoFocus
-                          placeholder="+15551234567"
-                          className="flex-1 rounded-xl px-3 py-2 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                        />
-                        <button onClick={() => setEditingAgentPhone(false)} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
-                      </div>
-                    ) : (
-                      <p className="text-slate-900 font-semibold text-sm font-mono mt-1">{ccAgentPhone || 'Not set'}</p>
-                    )}
-                  </div>
-                  {!editingAgentPhone && (
-                    <button
-                      onClick={() => setEditingAgentPhone(true)}
-                      className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-                    >
-                      Change
-                    </button>
-                  )}
-                </div>
-                {ccAgentPhone && tenantPhones.length > 0 && ccAgentPhone === tenantPhones[0].phoneNumber && (
-                  <p className="mt-2 text-xs text-red-600 font-medium flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 shrink-0" />
-                    This is your dedicated number — enter your personal phone instead
-                  </p>
-                )}
               </div>
 
               {/* ── Save / unsaved changes ── */}
