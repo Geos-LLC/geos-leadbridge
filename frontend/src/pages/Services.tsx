@@ -1173,116 +1173,36 @@ export function Services() {
       ) : (
         <div className="grid grid-cols-1 gap-6">
 
-          {/* 1. Auto Reply */}
-          <ServiceCard
-            icon={<Zap className="w-7 h-7" />}
-            title="Auto Reply"
-            description="Automatically respond to new leads as they arrive."
-            enabled={autoReplyEnabled}
-            onToggle={toggleAutoReply}
-            expanded={expandedCard === 'auto-reply'}
-            onExpand={() => toggleExpand('auto-reply')}
-            statusText={autoReplyEnabled ? 'Active' : undefined}
-            cardRef={el => { cardRefs.current['auto-reply'] = el; }}
-          >
-            {/* AI Optimization Banner — Coming Soon */}
-            <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-6 text-white flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
-              <div className="flex items-center gap-4 relative z-10">
-                <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center">
-                  <Bot className="w-6 h-6 text-blue-400" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h4 className="font-bold">AI Optimization</h4>
-                    <span className="px-2 py-0.5 bg-blue-500 text-[10px] font-bold rounded uppercase tracking-wider">Coming Soon</span>
-                  </div>
-                  <p className="text-slate-400 text-sm mt-1">AI decides timing and message variations to maximize response.</p>
-                </div>
-              </div>
-              <div className="opacity-50 cursor-not-allowed grayscale">
-                <div className="w-12 h-6 bg-white/20 rounded-full"></div>
-              </div>
-            </div>
-
-            {/* First Message */}
-            {firstReplyRule && (
-              <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Template</label>
-                <select
-                  value={firstReplyRule.templateId || ''}
-                  onChange={e => {
-                    if (e.target.value === '__create_new__') {
-                      setTemplateEditor({ mode: 'create', ruleId: firstReplyRule.id, content: '', type: 'autoReply' });
-                    } else {
-                      changeRuleTemplate(firstReplyRule.id, e.target.value);
-                    }
-                  }}
-                  disabled={saving}
-                  className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
-                >
-                  <option value="">Select template...</option>
-                  {templates.map(t => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
-                  <option value="__create_new__">+ Create New Template</option>
-                </select>
-                {firstReplyRule.template?.content && (
-                  <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
-                    {firstReplyRule.template.content}
-                    <button
-                      onClick={() => setTemplateEditor({
-                        mode: 'service-edit',
-                        ruleId: firstReplyRule.id,
-                        templateId: firstReplyRule.template!.id,
-                        templateName: templates.find(t => t.id === firstReplyRule.templateId)?.name || 'template',
-                        content: firstReplyRule.template!.content,
-                        type: 'autoReply',
-                      })}
-                      className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-          </ServiceCard>
-
-          {/* 2. Lead Alerts */}
+          {/* 1. Lead Notifications (combined Auto-Reply + Lead Alerts) */}
           {(() => {
             const noPhone = tenantPhones.length === 0;
             const toPhoneMissing = !!leadAlertRule && !alertToPhone;
             const templateMissing = !!leadAlertRule && !leadAlertRule.templateId && !leadAlertRule.messageTemplate;
-            const leadAlertsIncomplete = noPhone || toPhoneMissing || templateMissing;
-            const directedHere = searchParams.get('expand') === 'lead-alerts';
-            const isDisabledButExists = !!leadAlertRule && !leadAlertRule.enabled;
-            const warningText = noPhone
-              ? 'Dedicated number required'
-              : leadAlertsIncomplete
-              ? (toPhoneMissing ? 'Phone number required' : 'Template required')
-              : (directedHere && isDisabledButExists) ? 'Toggle on to activate lead alerts' : undefined;
+            const leadAlertsIncomplete = toPhoneMissing || templateMissing;
             return (
           <ServiceCard
             icon={<Bell className="w-7 h-7" />}
-            title="Lead Alerts"
-            description="Get SMS notifications for every new inquiry."
-            enabled={leadAlertRule?.enabled ?? false}
-            onToggle={toggleLeadAlerts}
-            expanded={expandedCard === 'lead-alerts'}
-            onExpand={() => toggleExpand('lead-alerts')}
-            setupRequired={leadAlertsIncomplete || (directedHere && isDisabledButExists)}
-            warningText={warningText}
-            statusText={!leadAlertsIncomplete && leadAlertRule?.enabled ? `Destination: ${leadAlertRule.toPhone}` : undefined}
+            title="Lead Notifications"
+            description="Auto-reply to leads and get SMS alerts for every new inquiry."
+            enabled={autoReplyEnabled || (leadAlertRule?.enabled ?? false)}
+            onToggle={(enabled) => {
+              if (enabled && noPhone) { setShowDedicatedModal(true); return; }
+              toggleExpand('notifications');
+            }}
+            expanded={expandedCard === 'notifications'}
+            onExpand={() => toggleExpand('notifications')}
+            setupRequired={noPhone || leadAlertsIncomplete}
+            warningText={noPhone ? 'Dedicated number required' : leadAlertsIncomplete ? (toPhoneMissing ? 'Phone number required' : 'Template required') : undefined}
+            statusText={!noPhone && (autoReplyEnabled || leadAlertRule?.enabled) ? [autoReplyEnabled && 'Auto-reply', leadAlertRule?.enabled && 'Alerts'].filter(Boolean).join(' + ') + ' active' : undefined}
             iconBgColor="bg-amber-50"
             iconTextColor="text-amber-600"
-            cardRef={el => { cardRefs.current['lead-alerts'] = el; }}
+            cardRef={el => { cardRefs.current['notifications'] = el; }}
           >
             {/* No dedicated number banner */}
             {noPhone && (
               <div className="flex flex-col items-center gap-3 py-6 px-4 bg-amber-50/50 rounded-2xl border border-amber-200">
                 <Phone className="w-8 h-8 text-amber-500" />
-                <p className="text-sm text-amber-700 font-medium text-center">You need a dedicated number to send lead alerts</p>
+                <p className="text-sm text-amber-700 font-medium text-center">You need a dedicated number for lead notifications</p>
                 <button
                   onClick={() => setShowDedicatedModal(true)}
                   className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors flex items-center gap-2"
@@ -1293,239 +1213,288 @@ export function Services() {
               </div>
             )}
 
-            {/* SMS Alert Configuration */}
-            <div className={`space-y-6${(!(leadAlertRule?.enabled) || noPhone) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-              <div className="grid grid-cols-2 gap-4">
-                {/* Send to */}
-                <div>
-                  <label className={`text-[11px] font-bold uppercase tracking-widest mb-2 block ${toPhoneMissing ? 'text-orange-500' : 'text-slate-400'}`}>
-                    Send to (your phone){toPhoneMissing && <span className="ml-1 text-orange-500">*</span>}
-                  </label>
-                  <input
-                    type="tel"
-                    value={alertToPhone}
-                    onChange={e => setAlertToPhone(e.target.value)}
-                    onBlur={e => {
-                      const formatted = formatPhoneE164(e.target.value);
-                      if (formatted !== e.target.value) setAlertToPhone(formatted);
-                    }}
-                    placeholder="+1234567890"
-                    className={`w-full rounded-xl p-3 text-sm focus:ring-2 focus:outline-none transition-colors ${
-                      toPhoneMissing
-                        ? 'border-2 border-orange-300 bg-orange-50/40 focus:ring-orange-200 focus:border-orange-400 placeholder:text-orange-300'
-                        : alertToPhone && !isValidPhoneE164(alertToPhone)
-                          ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200 focus:border-red-400'
-                          : alertToPhone && isValidPhoneE164(alertToPhone)
-                            ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200 focus:border-emerald-400'
-                            : 'bg-white border border-slate-200 focus:ring-blue-500 focus:border-blue-500'
-                    }`}
-                  />
-                  {toPhoneMissing && (
-                    <p className="mt-1.5 text-xs text-orange-600 font-medium flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3 shrink-0" />
-                      Enter your phone number to receive lead alert SMS messages
-                    </p>
-                  )}
-                  {!toPhoneMissing && alertToPhone && !isValidPhoneE164(alertToPhone) && (
-                    <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3 shrink-0" />
-                      Must be E.164 format, e.g. +12125550100
-                    </p>
-                  )}
-                  {alertToPhone && tenantPhones.length > 0 && alertToPhone === tenantPhones[0].phoneNumber && (
-                    <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3 shrink-0" />
-                      This is your dedicated number — enter your personal phone instead
-                    </p>
-                  )}
-                </div>
+            <div className={`space-y-6${noPhone ? ' opacity-40 pointer-events-none select-none' : ''}`}>
 
-                {/* Send from (dedicated number — auto-resolved) */}
-                <div>
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Send from</label>
-                  {tenantPhones.length > 0 ? (
-                    <div className="w-full rounded-xl p-3 text-sm font-medium bg-emerald-50/30 border-2 border-emerald-200 text-emerald-700">
-                      {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
+              {/* ── Auto Reply sub-section ── */}
+              <div className="border border-slate-100 rounded-2xl overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50">
+                  <div className="flex items-center gap-3">
+                    <Zap className="w-5 h-5 text-blue-600" />
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-800">Auto Reply</h4>
+                      <p className="text-xs text-slate-400">Automatically respond to new leads as they arrive</p>
                     </div>
-                  ) : (
-                    <button
-                      onClick={() => setShowDedicatedModal(true)}
-                      className="w-full rounded-xl p-3 text-sm font-semibold bg-amber-50 border-2 border-amber-200 text-amber-700 hover:bg-amber-100 hover:border-amber-300 transition-colors flex items-center justify-center gap-2"
-                    >
-                      <Phone className="w-4 h-4" />
-                      Get a Dedicated Number
-                    </button>
-                  )}
+                  </div>
+                  <label className="inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={autoReplyEnabled}
+                      onChange={e => toggleAutoReply(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500" />
+                  </label>
                 </div>
-              </div>
-
-              {leadAlertRule && (
-                <>
-                  <div>
-                    <label className={`text-[11px] font-bold uppercase tracking-widest mb-2 block ${templateMissing ? 'text-orange-500' : 'text-slate-400'}`}>
-                      Template{templateMissing && <span className="ml-1 text-orange-500">*</span>}
-                    </label>
-                    <select
-                      value={leadAlertRule.templateId || leadAlertRule.messageTemplate?.id || ''}
-                      onChange={e => {
-                        if (e.target.value === '__create_new__') {
-                          setTemplateEditor({ mode: 'create', ruleId: leadAlertRule.id, content: '', type: 'alert' });
-                        } else {
-                          changeAlertRuleTemplate(leadAlertRule.id, e.target.value);
-                        }
-                      }}
-                      disabled={saving}
-                      className={`w-full rounded-xl p-3 text-sm font-medium disabled:opacity-50 transition-colors ${
-                        templateMissing
-                          ? 'border-2 border-orange-300 bg-orange-50/40 focus:ring-orange-200 focus:border-orange-400'
-                          : 'bg-white border border-slate-200'
-                      }`}
-                    >
-                      <option value="">Select template</option>
-                      {templates.map(t => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                      <option value="__create_new__">+ Create New Template</option>
-                    </select>
-                    {templateMissing && (
-                      <p className="mt-1.5 text-xs text-orange-600 font-medium flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3 shrink-0" />
-                        Select or create a template to define the SMS message content
-                      </p>
-                    )}
-                    {leadAlertRule.messageTemplate && (
-                      <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
-                        {leadAlertRule.messageTemplate.content}
-                        <button
-                          onClick={() => setTemplateEditor({
-                            mode: 'service-edit',
-                            ruleId: leadAlertRule.id,
-                            templateId: leadAlertRule.messageTemplate!.id,
-                            templateName: templates.find(t => t.id === (leadAlertRule.templateId || leadAlertRule.messageTemplate?.id))?.name || 'template',
-                            content: leadAlertRule.messageTemplate!.content,
-                            type: 'alert',
-                          })}
-                          className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
+                <div className={`px-5 py-4 space-y-4${!autoReplyEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+                  {/* AI Optimization Banner */}
+                  <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-5 text-white flex items-center justify-between gap-4 relative overflow-hidden">
+                    <div className="flex items-center gap-3 relative z-10">
+                      <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center">
+                        <Bot className="w-5 h-5 text-blue-400" />
                       </div>
-                    )}
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-sm">AI Optimization</h4>
+                          <span className="px-2 py-0.5 bg-blue-500 text-[10px] font-bold rounded uppercase">Coming Soon</span>
+                        </div>
+                        <p className="text-slate-400 text-xs mt-0.5">AI decides timing and message variations to maximize response.</p>
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Send Test + Trigger Stats + Save Button */}
-                  <div className="space-y-4 pt-4 border-t border-slate-100">
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                      <button
-                        onClick={sendTestAlert}
-                        disabled={testStatus === 'sending' || saving || !leadAlertRule.toPhone || tenantPhones.length === 0 || (tenantPhones.length > 0 && leadAlertRule.toPhone === tenantPhones[0].phoneNumber)}
-                        className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed flex items-center gap-2 ${
-                          testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
-                          testStatus === 'failed' ? 'bg-red-100 text-red-700' :
-                          testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
-                          'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
-                        }`}
-                        title={!leadAlertRule.toPhone ? 'Set a destination phone first' : tenantPhones.length === 0 ? 'No dedicated number assigned' : (tenantPhones.length > 0 && leadAlertRule.toPhone === tenantPhones[0].phoneNumber) ? 'Destination matches your dedicated number' : 'Send a test SMS'}
+                  {/* Template */}
+                  {firstReplyRule && (
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Template</label>
+                      <select
+                        value={firstReplyRule.templateId || ''}
+                        onChange={e => {
+                          if (e.target.value === '__create_new__') {
+                            setTemplateEditor({ mode: 'create', ruleId: firstReplyRule.id, content: '', type: 'autoReply' });
+                          } else {
+                            changeRuleTemplate(firstReplyRule.id, e.target.value);
+                          }
+                        }}
+                        disabled={saving}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
                       >
-                        {testStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
-                         testStatus === 'delivered' ? <CheckCircle size={14} /> :
-                         testStatus === 'failed' ? <X size={14} /> :
-                         <Send size={14} />}
-                        {testStatus === 'sending' ? 'Sending...' :
-                         testStatus === 'delivered' ? 'Delivered' :
-                         testStatus === 'failed' ? 'Failed' :
-                         'Send Test SMS'}
-                      </button>
-                      {leadAlertRule.triggerCount > 0 && (
-                        <span className="text-xs text-slate-500">
-                          Triggered {leadAlertRule.triggerCount} time{leadAlertRule.triggerCount !== 1 ? 's' : ''}
-                          {leadAlertRule.lastTriggeredAt && (
-                            <> — last {new Date(leadAlertRule.lastTriggeredAt).toLocaleDateString()}</>
-                          )}
-                        </span>
+                        <option value="">Select template...</option>
+                        {templates.map(t => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                        <option value="__create_new__">+ Create New Template</option>
+                      </select>
+                      {firstReplyRule.template?.content && (
+                        <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                          {firstReplyRule.template.content}
+                          <button
+                            onClick={() => setTemplateEditor({
+                              mode: 'service-edit',
+                              ruleId: firstReplyRule.id,
+                              templateId: firstReplyRule.template!.id,
+                              templateName: templates.find(t => t.id === firstReplyRule.templateId)?.name || 'template',
+                              content: firstReplyRule.template!.content,
+                              type: 'autoReply',
+                            })}
+                            className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        </div>
                       )}
                     </div>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Save / unsaved changes */}
-            {leadAlertRule && (
-              <div className="pt-4 border-t border-slate-100">
-                {alertDirty ? (
-                  <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
-                    <div className="flex items-center gap-2 text-amber-700">
-                      <AlertCircle className="w-4 h-4 shrink-0" />
-                      <span className="text-sm font-medium">You have unsaved changes</span>
-                    </div>
-                    <div className="flex gap-2 shrink-0">
-                      <button
-                        onClick={discardAlertChanges}
-                        className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-                      >
-                        Discard
-                      </button>
-                      <button
-                        onClick={saveAlertSettings}
-                        disabled={saving || !alertToPhone}
-                        className="px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-1"
-                      >
-                        {saving && <Loader2 className="w-3 h-3 animate-spin" />}
-                        Save Settings
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    onClick={saveAlertSettings}
-                    disabled={saving}
-                    className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-amber-600 rounded-xl hover:bg-amber-700 transition-colors disabled:opacity-50"
-                  >
-                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    Save Settings
-                  </button>
-                )}
-              </div>
-            )}
-
-              {/* Delete / Reset rule */}
-              {leadAlertRule && (
-                <div className="pt-4 border-t border-slate-100">
-                  {confirmDeleteAlert ? (
-                    <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                      <div className="flex-1">
-                        <p className="text-sm font-bold text-red-700">Delete this Lead Alert rule?</p>
-                        <p className="text-xs text-red-500 mt-0.5">This removes the rule and phone configuration. Toggle Lead Alerts back on to create a fresh setup with the new default template.</p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          onClick={() => setConfirmDeleteAlert(false)}
-                          className="px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-800 transition-colors"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={deleteLeadAlertRule}
-                          disabled={deletingAlert}
-                          className="px-4 py-2 bg-red-600 text-white rounded-xl text-sm font-semibold hover:bg-red-700 transition-all disabled:opacity-50 flex items-center gap-2"
-                        >
-                          {deletingAlert ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                          Delete Rule
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setConfirmDeleteAlert(true)}
-                      className="text-xs font-semibold text-slate-400 hover:text-red-500 transition-colors flex items-center gap-1.5"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Delete this rule and start over
-                    </button>
                   )}
                 </div>
-              )}
+              </div>
+
+              {/* ── Lead Alerts sub-section ── */}
+              <div className="border border-slate-100 rounded-2xl overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50">
+                  <div className="flex items-center gap-3">
+                    <MessageSquare className="w-5 h-5 text-amber-600" />
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-800">Lead Alerts</h4>
+                      <p className="text-xs text-slate-400">Get SMS notifications for every new inquiry</p>
+                    </div>
+                  </div>
+                  <label className="inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={leadAlertRule?.enabled ?? false}
+                      onChange={e => toggleLeadAlerts(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500" />
+                  </label>
+                </div>
+                <div className={`px-5 py-4 space-y-4${!(leadAlertRule?.enabled) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+                  {/* Send to (agent phone) */}
+                  <div>
+                    <label className={`text-[11px] font-bold uppercase tracking-widest mb-2 block ${toPhoneMissing ? 'text-orange-500' : 'text-slate-400'}`}>
+                      Send to (your phone){toPhoneMissing && <span className="ml-1 text-orange-500">*</span>}
+                    </label>
+                    <input
+                      type="tel"
+                      value={alertToPhone}
+                      onChange={e => setAlertToPhone(e.target.value)}
+                      onBlur={e => {
+                        const formatted = formatPhoneE164(e.target.value);
+                        if (formatted !== e.target.value) setAlertToPhone(formatted);
+                      }}
+                      placeholder="+1234567890"
+                      className={`w-full rounded-xl p-3 text-sm focus:ring-2 focus:outline-none transition-colors ${
+                        toPhoneMissing
+                          ? 'border-2 border-orange-300 bg-orange-50/40 focus:ring-orange-200 focus:border-orange-400 placeholder:text-orange-300'
+                          : alertToPhone && !isValidPhoneE164(alertToPhone)
+                            ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200 focus:border-red-400'
+                            : alertToPhone && isValidPhoneE164(alertToPhone)
+                              ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200 focus:border-emerald-400'
+                              : 'bg-white border border-slate-200 focus:ring-blue-500 focus:border-blue-500'
+                      }`}
+                    />
+                    {toPhoneMissing && (
+                      <p className="mt-1.5 text-xs text-orange-600 font-medium flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 shrink-0" />
+                        Enter your phone number to receive lead alert SMS messages
+                      </p>
+                    )}
+                    {!toPhoneMissing && alertToPhone && !isValidPhoneE164(alertToPhone) && (
+                      <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 shrink-0" />
+                        Must be E.164 format, e.g. +12125550100
+                      </p>
+                    )}
+                    {alertToPhone && tenantPhones.length > 0 && alertToPhone === tenantPhones[0].phoneNumber && (
+                      <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 shrink-0" />
+                        This is your dedicated number — enter your personal phone instead
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Template */}
+                  {leadAlertRule && (
+                    <>
+                      <div>
+                        <label className={`text-[11px] font-bold uppercase tracking-widest mb-2 block ${templateMissing ? 'text-orange-500' : 'text-slate-400'}`}>
+                          Template{templateMissing && <span className="ml-1 text-orange-500">*</span>}
+                        </label>
+                        <select
+                          value={leadAlertRule.templateId || leadAlertRule.messageTemplate?.id || ''}
+                          onChange={e => {
+                            if (e.target.value === '__create_new__') {
+                              setTemplateEditor({ mode: 'create', ruleId: leadAlertRule.id, content: '', type: 'alert' });
+                            } else {
+                              changeAlertRuleTemplate(leadAlertRule.id, e.target.value);
+                            }
+                          }}
+                          disabled={saving}
+                          className={`w-full rounded-xl p-3 text-sm font-medium disabled:opacity-50 transition-colors ${
+                            templateMissing ? 'border-2 border-orange-300 bg-orange-50/40 focus:ring-orange-200' : 'bg-white border border-slate-200'
+                          }`}
+                        >
+                          <option value="">Select template</option>
+                          {templates.map(t => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                          <option value="__create_new__">+ Create New Template</option>
+                        </select>
+                        {templateMissing && (
+                          <p className="mt-1.5 text-xs text-orange-600 font-medium flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3 shrink-0" />
+                            Select or create a template to define the SMS message content
+                          </p>
+                        )}
+                        {leadAlertRule.messageTemplate && (
+                          <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                            {leadAlertRule.messageTemplate.content}
+                            <button
+                              onClick={() => setTemplateEditor({
+                                mode: 'service-edit',
+                                ruleId: leadAlertRule.id,
+                                templateId: leadAlertRule.messageTemplate!.id,
+                                templateName: templates.find(t => t.id === (leadAlertRule.templateId || leadAlertRule.messageTemplate?.id))?.name || 'template',
+                                content: leadAlertRule.messageTemplate!.content,
+                                type: 'alert',
+                              })}
+                              className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Test + Stats */}
+                      <div className="pt-3 border-t border-slate-100">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                          <button
+                            onClick={sendTestAlert}
+                            disabled={testStatus === 'sending' || saving || !leadAlertRule.toPhone || tenantPhones.length === 0 || (tenantPhones.length > 0 && leadAlertRule.toPhone === tenantPhones[0].phoneNumber)}
+                            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:cursor-not-allowed flex items-center gap-2 ${
+                              testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                              testStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                              testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                              'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
+                            }`}
+                          >
+                            {testStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
+                             testStatus === 'delivered' ? <CheckCircle size={14} /> :
+                             testStatus === 'failed' ? <X size={14} /> :
+                             <Send size={14} />}
+                            {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Delivered' : testStatus === 'failed' ? 'Failed' : 'Send Test'}
+                          </button>
+                          {leadAlertRule.triggerCount > 0 && (
+                            <span className="text-xs text-slate-500">
+                              Triggered {leadAlertRule.triggerCount} time{leadAlertRule.triggerCount !== 1 ? 's' : ''}
+                              {leadAlertRule.lastTriggeredAt && (<> — last {new Date(leadAlertRule.lastTriggeredAt).toLocaleDateString()}</>)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Alert Save */}
+                {leadAlertRule && (
+                  <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/30">
+                    {alertDirty ? (
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-xs text-amber-600 font-medium flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3" /> Unsaved changes
+                        </span>
+                        <div className="flex gap-2">
+                          <button onClick={discardAlertChanges} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Discard</button>
+                          <button onClick={saveAlertSettings} disabled={saving || !alertToPhone} className="px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-1">
+                            {saving && <Loader2 className="w-3 h-3 animate-spin" />} Save
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button onClick={saveAlertSettings} disabled={saving} className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50">
+                        {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} Save Alerts
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Delete rule */}
+                {leadAlertRule && (
+                  <div className="px-5 py-3 border-t border-slate-100">
+                    {confirmDeleteAlert ? (
+                      <div className="bg-red-50 border border-red-100 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                        <div className="flex-1">
+                          <p className="text-xs font-bold text-red-700">Delete this rule?</p>
+                          <p className="text-[11px] text-red-500 mt-0.5">Toggle Lead Alerts back on to create a fresh setup.</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button onClick={() => setConfirmDeleteAlert(false)} className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-800 transition-colors">Cancel</button>
+                          <button onClick={deleteLeadAlertRule} disabled={deletingAlert} className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700 disabled:opacity-50 flex items-center gap-1">
+                            {deletingAlert ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />} Delete
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button onClick={() => setConfirmDeleteAlert(true)} className="text-xs font-semibold text-slate-400 hover:text-red-500 transition-colors flex items-center gap-1.5">
+                        <Trash2 className="w-3.5 h-3.5" /> Delete this rule and start over
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+            </div>
           </ServiceCard>
             );
           })()}
