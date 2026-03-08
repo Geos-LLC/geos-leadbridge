@@ -17,6 +17,7 @@ import type {
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
+import OnboardingTour, { ONBOARDING_STORAGE_KEY } from '../components/OnboardingTour';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 
@@ -243,6 +244,25 @@ export function Services() {
   const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string } | null>(sc?.ctSavedSnapshot ?? null);
   const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>(sc?.ctSelectedTemplateId ?? '');
   const [ccCallForwardingNumber, setCcCallForwardingNumber] = useState(sc?.ccCallForwardingNumber ?? '');
+
+  // Onboarding tour
+  const [tourActive, setTourActive] = useState(false);
+
+  // Listen for tour start event from Layout header button
+  useEffect(() => {
+    const handler = () => setTourActive(true);
+    window.addEventListener('lb:start-tour', handler);
+    return () => window.removeEventListener('lb:start-tour', handler);
+  }, []);
+
+  // Auto-start tour on first visit (once data is loaded and tenant phones exist)
+  useEffect(() => {
+    if (!loading && tenantPhones.length > 0 && !localStorage.getItem(ONBOARDING_STORAGE_KEY)) {
+      // Small delay so DOM is fully rendered
+      const t = setTimeout(() => setTourActive(true), 600);
+      return () => clearTimeout(t);
+    }
+  }, [loading, tenantPhones.length]);
 
   // Lead Alert saved snapshot for dirty tracking
   const [alertSavedSnapshot, setAlertSavedSnapshot] = useState<{ toPhone: string } | null>(sc?.alertSavedSnapshot ?? null);
@@ -1254,11 +1274,11 @@ export function Services() {
                 <div>
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🤖 Bot Number</label>
                   <p className="text-[11px] text-slate-400 mb-2">Customers receive texts and calls from this number.</p>
-                  <div className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700">
+                  <div data-tour="bot-number" className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700">
                     {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName && tenantPhones[0].friendlyName !== tenantPhones[0].phoneNumber ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
                   </div>
                 </div>
-                <div>
+                <div data-tour="business-phone">
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">📱 Your Business Phone</label>
                   <p className="text-[11px] text-slate-400 mb-2">Lead notifications and alerts are sent to this number.</p>
                   {editingAgentPhone ? (
@@ -1304,7 +1324,7 @@ export function Services() {
 
               {/* Row 2: Test Number (aligned under Bot) + Test Buttons (aligned under Business Phone) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
+                <div data-tour="test-number">
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🧪 Test Number</label>
                   <p className="text-[11px] text-slate-400 mb-2">Used to test messaging and automation safely.</p>
                   <input
@@ -1331,7 +1351,7 @@ export function Services() {
                     </p>
                   )}
                 </div>
-                <div className="flex items-end">
+                <div className="flex items-end" data-tour="test-buttons">
                   <div className="flex gap-2 flex-wrap pb-[1px]">
                   <button
                     onClick={sendTestAlert}
@@ -1443,7 +1463,7 @@ export function Services() {
             statusText={undefined}
             iconBgColor="bg-amber-50"
             iconTextColor="text-amber-600"
-            cardRef={el => { cardRefs.current['notifications'] = el; }}
+            cardRef={el => { cardRefs.current['notifications'] = el; if (el) el.setAttribute('data-tour', 'notifications-card'); }}
           >
             <div className={`space-y-6${noPhone ? ' opacity-40 pointer-events-none select-none' : ''}`}>
 
@@ -1676,7 +1696,7 @@ export function Services() {
             statusText={undefined}
             iconBgColor="bg-blue-50"
             iconTextColor="text-blue-600"
-            cardRef={el => { cardRefs.current['comms'] = el; }}
+            cardRef={el => { cardRefs.current['comms'] = el; if (el) el.setAttribute('data-tour', 'comms-card'); }}
           >
             <div className={`space-y-6${tenantPhones.length === 0 ? ' opacity-40 pointer-events-none select-none' : ''}`}>
 
@@ -2258,6 +2278,9 @@ export function Services() {
         onSave={templateEditor?.mode === 'create' ? handleEditorCreate : handleEditorUpdate}
         onSaveAsNew={handleEditorSaveAsNew}
       />
+
+      {/* Onboarding Tour */}
+      <OnboardingTour active={tourActive} onComplete={() => setTourActive(false)} />
     </div>
   );
 }

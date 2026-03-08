@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Outlet, Link as RouterLink, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   MessageSquare, BarChart3, Settings, LogOut, Shield, FlaskConical,
-  Menu, Bell, Zap, AlertTriangle, Workflow, LayoutGrid, Smartphone
+  Menu, HelpCircle, Zap, AlertTriangle, Workflow, LayoutGrid, Smartphone
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -191,8 +191,12 @@ export function Layout() {
               <h1 className="text-xl font-bold text-slate-900 lg:block hidden">{getPageName()}</h1>
             </div>
             <div className="flex items-center gap-3">
-              <button className="relative p-2 text-slate-400 hover:text-slate-600 transition-colors">
-                <Bell className="w-6 h-6" />
+              <button
+                onClick={() => window.dispatchEvent(new Event('lb:start-tour'))}
+                className="relative p-2 text-slate-400 hover:text-blue-600 transition-colors"
+                title="Quick tour"
+              >
+                <HelpCircle className="w-6 h-6" />
               </button>
             </div>
           </div>
