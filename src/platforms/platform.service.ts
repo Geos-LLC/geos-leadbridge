@@ -552,6 +552,23 @@ export class PlatformService {
       },
     });
 
+    // Link user's active TenantPhoneNumbers to this savedAccount if they point to a different account
+    // (handles account reconnection where user switches to a new Thumbtack business)
+    this.prisma.tenantPhoneNumber.updateMany({
+      where: {
+        userId,
+        status: 'ACTIVE',
+        savedAccountId: { not: savedAccount.id },
+      },
+      data: { savedAccountId: savedAccount.id },
+    }).then((result) => {
+      if (result.count > 0) {
+        this.logger.log(`[saveAccount] Re-linked ${result.count} tenant phone(s) to savedAccount ${savedAccount.id} (${businessName})`);
+      }
+    }).catch((err) => {
+      this.logger.warn(`[saveAccount] Failed to re-link tenant phones: ${err.message}`);
+    });
+
     // Auto-provision Sigcore workspace for this account (idempotent, non-blocking)
     this.autoProvisionSigcore(savedAccount.id, businessName).catch((err) => {
       this.logger.warn(`[saveAccount] Sigcore auto-provision failed for ${savedAccount.id}: ${err.message}`);

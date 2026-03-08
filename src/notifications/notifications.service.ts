@@ -2773,7 +2773,20 @@ export class NotificationsService {
     // 4. Extract area code from phone number
     const areaCode = phoneNumber.replace(/\D/g, '').slice(1, 4); // +1XXXYYYZZZZ → XXX
 
-    // 5. Create TenantPhoneNumber record
+    // 5. Release pool record if this number exists in the pool (prevent dual-existence)
+    const poolEntry = await this.prisma.phonePool.findUnique({
+      where: { phoneNumber },
+    });
+    if (poolEntry && poolEntry.status !== 'RELEASED') {
+      await this.prisma.phonePoolAssignment.deleteMany({ where: { phonePoolId: poolEntry.id } });
+      await this.prisma.phonePool.update({
+        where: { id: poolEntry.id },
+        data: { status: 'RELEASED', releasedAt: new Date() },
+      });
+      this.logger.log(`[purchaseTenantPhone] Released pool entry for ${phoneNumber} (was ${poolEntry.status})`);
+    }
+
+    // 6. Create TenantPhoneNumber record
     const tenantPhone = await this.prisma.tenantPhoneNumber.create({
       data: {
         userId,

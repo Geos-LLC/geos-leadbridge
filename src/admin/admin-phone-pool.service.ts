@@ -58,7 +58,32 @@ export class AdminPhonePoolService {
       this.prisma.phonePool.count({ where }),
     ]);
 
-    return { phones, total };
+    // Filter out pool numbers that also exist as active dedicated numbers (data inconsistency guard)
+    const activeDedicated = await this.prisma.tenantPhoneNumber.findMany({
+      where: {
+        phoneNumber: { in: phones.map((p) => p.phoneNumber) },
+        status: 'ACTIVE',
+      },
+      select: { phoneNumber: true },
+    });
+    const dedicatedSet = new Set(activeDedicated.map((d) => d.phoneNumber));
+
+    if (dedicatedSet.size > 0) {
+      // Auto-fix: release pool records that conflict with active dedicated numbers
+      for (const phone of phones) {
+        if (dedicatedSet.has(phone.phoneNumber) && phone.status !== 'RELEASED') {
+          this.logger.warn(`[listPoolPhones] Auto-releasing pool phone ${phone.phoneNumber} — already active as dedicated`);
+          await this.prisma.phonePoolAssignment.deleteMany({ where: { phonePoolId: phone.id } });
+          await this.prisma.phonePool.update({
+            where: { id: phone.id },
+            data: { status: 'RELEASED', releasedAt: new Date() },
+          });
+        }
+      }
+    }
+
+    const filtered = phones.filter((p) => !dedicatedSet.has(p.phoneNumber));
+    return { phones: filtered, total: total - dedicatedSet.size };
   }
 
   /**
