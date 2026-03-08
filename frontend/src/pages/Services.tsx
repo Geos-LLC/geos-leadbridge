@@ -3,11 +3,11 @@ import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
   Pencil, Phone, Send, ChevronUp, Trash2, Save,
-  Key, Hash, ExternalLink, Link2, Sparkles,
+  Key, Hash, ExternalLink, Link2, Sparkles, RefreshCw, Unlink,
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi,
+  automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi, conversationSyncApi,
 } from '../services/api';
 import type { TenantPhoneNumber } from '../services/api';
 import type {
@@ -243,6 +243,14 @@ export function Services() {
   const [ctSavedSnapshot, setCtSavedSnapshot] = useState<{ autoReplyTemplate: string } | null>(sc?.ctSavedSnapshot ?? null);
   const [ctSelectedTemplateId, setCtSelectedTemplateId] = useState<string>(sc?.ctSelectedTemplateId ?? '');
   const [ccCallForwardingNumber, setCcCallForwardingNumber] = useState(sc?.ccCallForwardingNumber ?? '');
+
+  // Conversation Sync state (isolated BYO phone)
+  const [csConnected, setCsConnected] = useState(false);
+  const [csConnecting, setCsConnecting] = useState(false);
+  const [csSyncing, setCsSyncing] = useState(false);
+  const [csApiKey, setCsApiKey] = useState('');
+  const [csError, setCsError] = useState<string | null>(null);
+  const [csPhoneNumbers, setCsPhoneNumbers] = useState<Array<{ id: string; phoneNumber: string; name?: string }>>([]);
 
   // Lead Alert saved snapshot for dirty tracking
   const [alertSavedSnapshot, setAlertSavedSnapshot] = useState<{ toPhone: string } | null>(sc?.alertSavedSnapshot ?? null);
@@ -508,6 +516,16 @@ export function Services() {
           voicemailRecordingUrl: ccs?.leadVoicemailRecordingUrl || '',
           callForwardingNumber: agentPhoneDefault,
         },
+      });
+
+      // Load Conversation Sync status (non-blocking)
+      conversationSyncApi.getStatus(accountId).then(csStatus => {
+        setCsConnected(csStatus.connected);
+        setCsPhoneNumbers(csStatus.connectedNumbers || []);
+        setCsError(csStatus.lastError);
+      }).catch(() => {
+        setCsConnected(false);
+        setCsPhoneNumbers([]);
       });
 
     } catch (err: any) {
@@ -1967,9 +1985,12 @@ export function Services() {
             </div>
           </div>
 
-          {/* 5. AI Optimization — Coming Soon */}
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden opacity-60 pointer-events-none select-none">
-            <div className="p-6 flex items-center justify-between">
+          {/* 5. AI Optimization — BYO Phone Connection + AI Suggestions */}
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+            <div
+              className="p-6 flex items-center justify-between cursor-pointer hover:bg-slate-50/50 transition-colors"
+              onClick={() => setExpandedCard(expandedCard === 'ai-optimization' ? null : 'ai-optimization')}
+            >
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-purple-50 rounded-2xl flex items-center justify-center">
                   <Sparkles className="w-7 h-7 text-purple-600" />
@@ -1977,13 +1998,153 @@ export function Services() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-lg font-bold text-slate-900">AI Optimization</h3>
-                    <span className="px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-purple-100 text-purple-600 rounded-full">Coming Soon</span>
+                    {csConnected && (
+                      <span className="px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-green-100 text-green-600 rounded-full">Connected</span>
+                    )}
                   </div>
-                  <p className="text-sm text-slate-400 mt-0.5">AI decides timing and message variations to maximize response.</p>
+                  <p className="text-sm text-slate-400 mt-0.5">
+                    Connect your business phone to enable AI-powered conversation insights.
+                  </p>
                 </div>
               </div>
-              <div className="relative w-11 h-6 bg-slate-200 rounded-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5" />
+              {expandedCard === 'ai-optimization' ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
             </div>
+
+            {expandedCard === 'ai-optimization' && (
+              <div className="px-6 pb-6 border-t border-slate-100 pt-4 space-y-5">
+                {/* Step 1: BYO Phone Connection */}
+                <div>
+                  <h4 className="text-xs font-semibold text-purple-600 uppercase tracking-wider mb-3">Step 1: Connect Business Phone</h4>
+
+                  {!csConnected ? (
+                    <div className="space-y-3">
+                      <p className="text-sm text-slate-600">
+                        Connect your OpenPhone account to sync lead conversations for AI analysis.
+                      </p>
+                      <div className="flex gap-3">
+                        <input
+                          type="password"
+                          placeholder="OpenPhone API Key"
+                          value={csApiKey}
+                          onChange={e => { setCsApiKey(e.target.value); setCsError(null); }}
+                          className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        />
+                        <button
+                          onClick={async () => {
+                            if (!csApiKey.trim() || !selectedAccountId) return;
+                            setCsConnecting(true);
+                            setCsError(null);
+                            try {
+                              const result = await conversationSyncApi.connect(selectedAccountId, csApiKey.trim());
+                              if (result.success) {
+                                setCsConnected(true);
+                                setCsPhoneNumbers(result.phoneNumbers || []);
+                                setCsApiKey('');
+                                setSuccessMessage('OpenPhone connected for AI Optimization');
+                                setTimeout(() => setSuccessMessage(null), 3000);
+                              } else {
+                                setCsError(result.error || 'Connection failed');
+                              }
+                            } catch (err: any) {
+                              setCsError(err.response?.data?.message || err.message || 'Connection failed');
+                            } finally {
+                              setCsConnecting(false);
+                            }
+                          }}
+                          disabled={csConnecting || !csApiKey.trim()}
+                          className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-purple-600 rounded-xl hover:bg-purple-700 transition-colors disabled:opacity-50"
+                        >
+                          {csConnecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+                          Connect
+                        </button>
+                      </div>
+                      {csError && (
+                        <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">
+                          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                          {csError}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {/* Connected Numbers */}
+                      {csPhoneNumbers.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {csPhoneNumbers.map((pn, i) => (
+                            <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 text-purple-700 text-sm rounded-lg">
+                              <Phone className="w-3.5 h-3.5" />
+                              {pn.phoneNumber}
+                              {pn.name && <span className="text-purple-400">({pn.name})</span>}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Actions */}
+                      <div className="flex gap-3">
+                        <button
+                          onClick={async () => {
+                            if (!selectedAccountId) return;
+                            setCsSyncing(true);
+                            try {
+                              const result = await conversationSyncApi.sync(selectedAccountId);
+                              if (result.success) {
+                                setSuccessMessage(`Synced ${result.synced} lead conversations`);
+                                setTimeout(() => setSuccessMessage(null), 3000);
+                              } else {
+                                setCsError(result.error || 'Sync failed');
+                              }
+                            } catch (err: any) {
+                              setCsError(err.response?.data?.message || err.message || 'Sync failed');
+                            } finally {
+                              setCsSyncing(false);
+                            }
+                          }}
+                          disabled={csSyncing}
+                          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-purple-700 bg-purple-50 rounded-xl hover:bg-purple-100 transition-colors disabled:opacity-50"
+                        >
+                          {csSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                          Sync Lead Conversations
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!selectedAccountId) return;
+                            try {
+                              await conversationSyncApi.disconnect(selectedAccountId);
+                              setCsConnected(false);
+                              setCsPhoneNumbers([]);
+                              setSuccessMessage('Phone disconnected');
+                              setTimeout(() => setSuccessMessage(null), 3000);
+                            } catch (err: any) {
+                              setCsError(err.response?.data?.message || err.message || 'Disconnect failed');
+                            }
+                          }}
+                          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 bg-red-50 rounded-xl hover:bg-red-100 transition-colors"
+                        >
+                          <Unlink className="w-4 h-4" />
+                          Disconnect
+                        </button>
+                      </div>
+
+                      {csError && (
+                        <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">
+                          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                          {csError}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Step 2: AI Suggestions (Coming Soon) */}
+                <div className="opacity-50 pointer-events-none">
+                  <h4 className="text-xs font-semibold text-purple-600 uppercase tracking-wider mb-2">Step 2: AI Suggestions</h4>
+                  <p className="text-sm text-slate-400">
+                    Once connected, AI will analyze your lead conversations and suggest optimal reply timing, message variations, and follow-up strategies.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
         </div>

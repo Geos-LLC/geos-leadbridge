@@ -123,6 +123,7 @@ model User {
   thumbtackLeadIds         ThumbtackLeadId[]
   callConnectSettings      CallConnectSettings[]
   tenantPhoneNumbers       TenantPhoneNumber[]
+  conversationSyncConnections ConversationSyncConnection[]
 
   @@map("users")
 }
@@ -189,6 +190,7 @@ model Lead {
   pendingMessages         PendingAutomatedMessage[]
   pendingNotificationMsgs PendingNotificationMessage[]
   callConnectSessions     LeadCallConnect[]
+  leadConversations       LeadConversation[]
 
   @@unique([platform, externalRequestId])
   @@index([userId])
@@ -829,4 +831,83 @@ model TenantPhoneNumber {
   @@index([savedAccountId])
   @@index([status])
   @@map("tenant_phone_numbers")
+}
+
+// ==========================================
+// Conversation Sync (Isolated BYO Phone Connection for AI)
+// ==========================================
+
+enum ConversationSyncStatus {
+  ACTIVE
+  DISCONNECTED
+  ERROR
+}
+
+model ConversationSyncConnection {
+  id                String                 @id @default(uuid())
+  userId            String
+  savedAccountId    String                 @unique
+  provider          String                 @default("openphone") // "openphone"
+  providerApiKey    String?                // OpenPhone API key (passed to Sigcore)
+  sigcoreApiKey     String?                // Sigcore tenant API key (reused from NotificationSettings)
+  webhookId         String?                // Sigcore webhook subscription ID for inbound events
+  status            ConversationSyncStatus @default(DISCONNECTED)
+  connectedNumbers  Json?                  // Array of connected phone numbers [{phoneNumber, name, id}]
+  lastError         String?
+  createdAt         DateTime               @default(now()) @map("created_at")
+  updatedAt         DateTime               @updatedAt @map("updated_at")
+
+  user              User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leadConversations LeadConversation[]
+
+  @@index([userId])
+  @@map("conversation_sync_connections")
+}
+
+// Lead-scoped conversation from BYO phone (matched by customerPhone)
+model LeadConversation {
+  id                String   @id @default(uuid())
+  connectionId      String
+  leadId            String
+  sigcoreConversationId String  // Sigcore conversation ID for fetching messages
+  phoneNumber       String      // Business phone number used
+  customerPhone     String      // Lead's phone number
+  customerName      String?     // Lead name (denormalized for display)
+  lastMessageAt     DateTime?   @map("last_message_at")
+  lastMessagePreview String?    @map("last_message_preview")
+  messageCount      Int         @default(0) @map("message_count")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  connection  ConversationSyncConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  lead        Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  messages    LeadSmsMessage[]
+
+  @@unique([connectionId, sigcoreConversationId])
+  @@unique([connectionId, leadId]) // One conversation per lead per connection
+  @@index([leadId])
+  @@index([customerPhone])
+  @@index([lastMessageAt])
+  @@map("lead_conversations")
+}
+
+// Individual SMS messages attached to a lead conversation (for activity timeline)
+model LeadSmsMessage {
+  id                  String   @id @default(uuid())
+  leadConversationId  String
+  externalId          String   // Sigcore message ID (for dedup)
+  direction           String   // "in" | "out"
+  body                String   @db.Text
+  fromNumber          String
+  toNumber            String
+  status              String   @default("delivered")
+  sentAt              DateTime @default(now()) @map("sent_at")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  leadConversation LeadConversation @relation(fields: [leadConversationId], references: [id], onDelete: Cascade)
+
+  @@unique([leadConversationId, externalId])
+  @@index([leadConversationId])
+  @@index([sentAt])
+  @@map("lead_sms_messages")
 }

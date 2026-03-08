@@ -1363,4 +1363,43 @@ export const callConnectApi = {
   },
 };
 
+// Conversation Sync API (Isolated BYO Phone for AI)
+export const conversationSyncApi = {
+  getStatus: async (savedAccountId: string): Promise<{
+    connected: boolean;
+    status: string;
+    provider: string | null;
+    connectedNumbers: Array<{ id: string; phoneNumber: string; name?: string }>;
+    lastError: string | null;
+  }> => {
+    const { data } = await api.get(`/v1/conversation-sync/status/${savedAccountId}`);
+    return data;
+  },
+
+  connect: async (
+    savedAccountId: string,
+    apiKey: string,
+  ): Promise<{ success: boolean; phoneNumbers?: Array<{ id: string; phoneNumber: string; name?: string }>; error?: string }> => {
+    const { data } = await api.post(`/v1/conversation-sync/connect/${savedAccountId}`, { apiKey });
+    return data;
+  },
+
+  disconnect: async (savedAccountId: string): Promise<{ success: boolean; error?: string }> => {
+    const { data } = await api.delete(`/v1/conversation-sync/disconnect/${savedAccountId}`);
+    return data;
+  },
+
+  sync: async (
+    savedAccountId: string,
+  ): Promise<{ success: boolean; synced: number; error?: string }> => {
+    const { data } = await api.post(`/v1/conversation-sync/sync/${savedAccountId}`);
+    return data;
+  },
+
+  getLeadActivity: async (leadId: string): Promise<{ data: any[] }> => {
+    const { data } = await api.get(`/v1/conversation-sync/lead/${leadId}/activity`);
+    return data;
+  },
+};
+
 export default api;
