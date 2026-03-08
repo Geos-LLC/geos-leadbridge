@@ -1294,10 +1294,10 @@ export function Services() {
             <div className="space-y-4">
               {/* Row 1: Bot Number + Business Phone */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
+                <div data-tour="bot-number">
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🤖 Bot Number</label>
                   <p className="text-[11px] text-slate-400 mb-2">Customers receive texts and calls from this number.</p>
-                  <div data-tour="bot-number" className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700">
+                  <div className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700">
                     {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName && tenantPhones[0].friendlyName !== tenantPhones[0].phoneNumber ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
                   </div>
                 </div>
