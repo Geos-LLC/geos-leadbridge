@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Outlet, Link as RouterLink, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   MessageSquare, BarChart3, Settings, LogOut, Shield, FlaskConical,
-  Menu, HelpCircle, Zap, AlertTriangle, Workflow, LayoutGrid, Smartphone
+  Menu, GraduationCap, Zap, AlertTriangle, Workflow, LayoutGrid, Smartphone
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -191,13 +191,6 @@ export function Layout() {
               <h1 className="text-xl font-bold text-slate-900 lg:block hidden">{getPageName()}</h1>
             </div>
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => window.dispatchEvent(new Event('lb:start-tour'))}
-                className="relative p-2 text-slate-400 hover:text-blue-600 transition-colors"
-                title="Quick tour"
-              >
-                <HelpCircle className="w-6 h-6" />
-              </button>
             </div>
           </div>
         </header>
@@ -225,6 +218,15 @@ export function Layout() {
 
         {/* Page Content */}
         <Outlet />
+
+        {/* Floating tour button */}
+        <button
+          onClick={() => window.dispatchEvent(new Event('lb:start-tour'))}
+          className="fixed bottom-6 right-6 z-30 w-12 h-12 bg-blue-600 text-white rounded-full shadow-lg shadow-blue-200 hover:bg-blue-700 hover:scale-105 transition-all flex items-center justify-center"
+          title="Quick tour"
+        >
+          <GraduationCap className="w-5 h-5" />
+        </button>
       </main>
     </div>
   );
