@@ -302,6 +302,10 @@ export function Services() {
       if (!selectedAccountId && accs.length > 0) {
         setSelectedAccountId(accs[0].id);
       }
+      // If no accounts, stop loading — loadServiceData won't fire
+      if (accs.length === 0) {
+        setLoading(false);
+      }
     } catch (err: any) {
       // If we have store data, silent fail; only show error if accounts list is empty
       if (accounts.length === 0) {
