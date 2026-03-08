@@ -1048,6 +1048,44 @@ export class WebhooksService {
       // Normalize phone for matching (last 10 digits)
       const normalizedFrom = fromNumber.replace(/\D/g, '').slice(-10);
 
+      // Detect agent replying to the bot number — send a helpful guidance SMS
+      if (accountId) {
+        const nsSettings = await this.prisma.notificationSettings.findUnique({
+          where: { savedAccountId: accountId },
+          select: { destinationPhone: true, sigcoreApiKey: true },
+        });
+        const normDestination = nsSettings?.destinationPhone?.replace(/\D/g, '').slice(-10);
+        if (normDestination && normDestination === normalizedFrom && nsSettings?.sigcoreApiKey) {
+          this.logger.log(
+            `[handleInboundSms] Agent phone ${fromNumber} texted the bot number — sending guidance reply`,
+          );
+          try {
+            const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app');
+            await fetch(`${sigcoreUrl}/api/v1/messages`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': nsSettings.sigcoreApiKey,
+              },
+              body: JSON.stringify({
+                to: fromNumber,
+                body: 'This is your LeadBridge number. To reply to a customer, text them directly from your phone or use the Lead Activity page on leadbridge360.com.',
+                fromNumber: toNumber,
+                metadata: { purpose: 'agent_guidance', savedAccountId: accountId },
+              }),
+              signal: AbortSignal.timeout(15_000),
+            });
+          } catch (err: any) {
+            this.logger.warn(`[handleInboundSms] Failed to send agent guidance SMS: ${err.message}`);
+          }
+          await this.prisma.webhookEvent.update({
+            where: { id: event.id },
+            data: { processed: true, processedAt: new Date(), processingError: 'Agent replied to bot number — guidance sent' },
+          });
+          return;
+        }
+      }
+
       // Find the most recent lead matching this phone, scoped by account
       let leadQuery: any = {
         customerPhone: { contains: normalizedFrom },
