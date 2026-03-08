@@ -110,10 +110,10 @@ export default function TrialBanner() {
     return null;
   }
 
-  // Trial expired - show urgent banner below the header
+  // Trial expired - show urgent banner overlaying the header
   if (trialStatus.trialExpired) {
     return (
-      <div className="sticky top-0 z-20 px-6 py-3 bg-red-600 border-b border-red-700 shadow-lg">
+      <div className="fixed top-0 left-0 lg:left-72 right-0 z-40 px-6 py-3 bg-red-600 border-b border-red-700 shadow-lg">
         <div className="flex items-center gap-4 max-w-7xl mx-auto">
           <div className="flex items-center justify-center w-8 h-8 bg-white/20 rounded-xl shrink-0">
             <AlertCircle className="w-4 h-4 text-white" />
@@ -151,8 +151,8 @@ export default function TrialBanner() {
 
   return (
     <div
-      className={`sticky top-0 z-20 px-6 py-3 ${bgColor} border-b ${borderColor} shadow-lg transition-all duration-300 ${
-        isVisible ? 'opacity-100 max-h-24' : 'opacity-0 max-h-0 py-0 overflow-hidden'
+      className={`fixed top-0 left-0 lg:left-72 right-0 z-40 px-6 py-3 ${bgColor} border-b ${borderColor} shadow-lg transition-all duration-300 ${
+        isVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
       }`}
     >
       <div className="flex items-center gap-4 max-w-7xl mx-auto">
