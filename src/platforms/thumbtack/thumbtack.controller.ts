@@ -730,9 +730,9 @@ export class ThumbtackController {
     if (!account.webhookId) connectionIssues.push('No webhook registered for this account');
 
     // Check notification health based on what actually matters for SMS delivery.
-    // Mirror the actual sending fallback chain:
-    //   fromPhone: rule.fromPhone → settings.sigcoreFromPhone → pool phone assignment
-    //   toPhone:   rule.toPhone   → settings.destinationPhone
+    // Mirror the actual sending fallback chain in sendNotificationWithRule:
+    //   fromPhone: dedicated TenantPhoneNumber (primary) → rule.fromPhone → settings.sigcoreFromPhone → pool phone
+    //   toPhone:   rule.toPhone → settings.destinationPhone
     const notificationIssues: string[] = [];
     const allNewLeadRules = (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead');
     const enabledNewLeadRules = allNewLeadRules.filter((r: any) => r.enabled);
@@ -742,20 +742,24 @@ export class ThumbtackController {
       notificationIssues.push('Lead alert rule exists but is disabled — toggle it on in Lead Alerts');
     } else {
       // Check if at least ONE enabled rule can successfully fire.
-      // Each rule fires independently — one working rule is enough for SMS delivery.
       const settingsFromPhone = notifSettings?.sigcoreFromPhone;
       const settingsDestPhone = notifSettings?.destinationPhone;
 
+      // Check for dedicated number (primary fromPhone source in sendNotificationWithRule)
+      const dedicatedPhone = await this.prisma.tenantPhoneNumber.findFirst({
+        where: { userId: account.userId, status: 'ACTIVE' },
+        select: { phoneNumber: true },
+      });
+
       const hasWorkingRule = enabledNewLeadRules.some((r: any) => {
         const hasTo = r.sendToCustomer || r.toPhone || settingsDestPhone;
-        const hasFrom = r.fromPhone || settingsFromPhone;
+        const hasFrom = dedicatedPhone?.phoneNumber || r.fromPhone || settingsFromPhone;
         return hasTo && hasFrom;
       });
 
       if (!hasWorkingRule) {
-        // No rule has both phones — check which piece is missing
         const anyHasTo = enabledNewLeadRules.some((r: any) => r.sendToCustomer || r.toPhone || settingsDestPhone);
-        const anyHasFrom = enabledNewLeadRules.some((r: any) => r.fromPhone || settingsFromPhone);
+        const anyHasFrom = dedicatedPhone?.phoneNumber || enabledNewLeadRules.some((r: any) => r.fromPhone || settingsFromPhone);
 
         if (!anyHasFrom) {
           // Last fallback: check for admin-assigned pool phone
@@ -765,10 +769,7 @@ export class ThumbtackController {
             orderBy: { assignedAt: 'desc' },
           });
           if (poolAssignment?.phonePool?.phoneNumber) {
-            // Pool phone covers fromPhone — recheck with that
-            if (anyHasTo) {
-              // At least one rule has toPhone + pool provides fromPhone → working
-            } else {
+            if (!anyHasTo) {
               notificationIssues.push('Lead alert rule is missing a destination phone number');
             }
           } else {
@@ -776,7 +777,6 @@ export class ThumbtackController {
             notificationIssues.push('Lead alert rule is missing a sender phone number');
           }
         } else {
-          // Has fromPhone but no toPhone on any rule
           notificationIssues.push('Lead alert rule is missing a destination phone number');
         }
       }

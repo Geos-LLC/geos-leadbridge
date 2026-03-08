@@ -90,19 +90,19 @@ export class AdminPhonePoolService {
    * Get pool statistics
    */
   async getPoolStats() {
-    const [total, available, reserved, released, assignmentCount] = await Promise.all([
-      this.prisma.phonePool.count({ where: { status: { not: 'RELEASED' } } }),
+    // Purge stale RELEASED records — they served their purpose, no need to show in stats
+    await this.prisma.phonePool.deleteMany({ where: { status: 'RELEASED' } });
+
+    const [total, available, reserved, assignmentCount] = await Promise.all([
+      this.prisma.phonePool.count(),
       this.prisma.phonePool.count({ where: { status: 'AVAILABLE' } }),
       this.prisma.phonePool.count({ where: { status: 'RESERVED' } }),
-      this.prisma.phonePool.count({ where: { status: 'RELEASED' } }),
-      // Count phones that have at least one assignment
-      this.prisma.phonePool.count({ where: { status: { not: 'RELEASED' }, assignments: { some: {} } } }),
+      this.prisma.phonePool.count({ where: { assignments: { some: {} } } }),
     ]);
 
     // Breakdown by area code
     const byAreaCode = await this.prisma.phonePool.groupBy({
       by: ['areaCode'],
-      where: { status: { not: 'RELEASED' } },
       _count: { id: true },
     });
 
@@ -111,7 +111,7 @@ export class AdminPhonePoolService {
       available,
       assigned: assignmentCount,
       reserved,
-      released,
+      released: 0,
       byAreaCode: byAreaCode.map((a) => ({
         areaCode: a.areaCode || 'unknown',
         count: a._count.id,
