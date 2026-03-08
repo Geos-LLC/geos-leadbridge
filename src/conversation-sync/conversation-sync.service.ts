@@ -212,26 +212,103 @@ export class ConversationSyncService {
   }
 
   // ==========================================
-  // Lead Conversation Sync
+  // Step 1: Sync OpenPhone → Sigcore
   // ==========================================
 
   /**
-   * Sync conversations for leads that have phone numbers.
-   * Queries Sigcore for conversations matching lead customerPhone,
-   * then stores matched conversations + messages locally for activity timeline.
+   * Trigger Sigcore to pull conversations from OpenPhone.
+   * Returns immediately — sync runs in background on Sigcore side.
    */
-  async syncLeadConversations(
-    userId: string,
+  async triggerOpenPhoneSync(
     savedAccountId: string,
-  ): Promise<{ synced: number; error?: string }> {
-    this.logger.log(`[syncLeadConversations] Starting for account ${savedAccountId}`);
+  ): Promise<{ success: boolean; error?: string }> {
+    this.logger.log(`[triggerOpenPhoneSync] Starting for account ${savedAccountId}`);
 
     const connection = await this.prisma.conversationSyncConnection.findUnique({
       where: { savedAccountId },
     });
 
     if (!connection?.sigcoreApiKey || connection.status !== 'ACTIVE') {
-      return { synced: 0, error: 'Not connected' };
+      return { success: false, error: 'Not connected' };
+    }
+
+    try {
+      const resp = await fetch(`${this.sigcoreApiUrl}/integrations/sync`, {
+        method: 'POST',
+        headers: { 'x-api-key': connection.sigcoreApiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ syncMessages: true }),
+        signal: AbortSignal.timeout(15_000),
+      });
+
+      if (!resp.ok) {
+        const errorText = await resp.text();
+        this.logger.error(`[triggerOpenPhoneSync] Failed: ${resp.status} — ${errorText}`);
+        return { success: false, error: `Sync trigger failed: ${resp.status}` };
+      }
+
+      this.logger.log(`[triggerOpenPhoneSync] Sigcore sync triggered (202)`);
+      return { success: true };
+    } catch (err: any) {
+      this.logger.error(`[triggerOpenPhoneSync] Error: ${err.message}`);
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Get sync progress from Sigcore.
+   */
+  async getSyncStatus(
+    savedAccountId: string,
+  ): Promise<{ status: string; progress?: number; total?: number; error?: string }> {
+    const connection = await this.prisma.conversationSyncConnection.findUnique({
+      where: { savedAccountId },
+    });
+
+    if (!connection?.sigcoreApiKey || connection.status !== 'ACTIVE') {
+      return { status: 'disconnected' };
+    }
+
+    try {
+      const resp = await fetch(`${this.sigcoreApiUrl}/integrations/sync/status`, {
+        headers: { 'x-api-key': connection.sigcoreApiKey },
+        signal: AbortSignal.timeout(10_000),
+      });
+
+      if (!resp.ok) {
+        return { status: 'unknown', error: `Status check failed: ${resp.status}` };
+      }
+
+      const data = await resp.json();
+      return {
+        status: data.status || data.state || 'unknown',
+        progress: data.progress ?? data.synced ?? undefined,
+        total: data.total ?? undefined,
+      };
+    } catch (err: any) {
+      return { status: 'error', error: err.message };
+    }
+  }
+
+  // ==========================================
+  // Step 2: Match Sigcore conversations → Leads
+  // ==========================================
+
+  /**
+   * Fetch conversations from Sigcore and match to leads by customerPhone.
+   * Only stores matched conversations + messages locally.
+   */
+  async matchLeadConversations(
+    userId: string,
+    savedAccountId: string,
+  ): Promise<{ synced: number; totalConversations: number; totalLeads: number; error?: string }> {
+    this.logger.log(`[matchLeadConversations] Starting for account ${savedAccountId}`);
+
+    const connection = await this.prisma.conversationSyncConnection.findUnique({
+      where: { savedAccountId },
+    });
+
+    if (!connection?.sigcoreApiKey || connection.status !== 'ACTIVE') {
+      return { synced: 0, totalConversations: 0, totalLeads: 0, error: 'Not connected' };
     }
 
     try {
@@ -240,7 +317,7 @@ export class ConversationSyncService {
         where: { id: savedAccountId },
         select: { userId: true },
       });
-      if (!account) return { synced: 0, error: 'Account not found' };
+      if (!account) return { synced: 0, totalConversations: 0, totalLeads: 0, error: 'Account not found' };
 
       const leads = await this.prisma.lead.findMany({
         where: {
@@ -251,7 +328,7 @@ export class ConversationSyncService {
       });
 
       if (leads.length === 0) {
-        return { synced: 0 };
+        return { synced: 0, totalConversations: 0, totalLeads: 0 };
       }
 
       // Build a phone → lead lookup (normalize phones)
@@ -273,7 +350,7 @@ export class ConversationSyncService {
       if (!resp.ok) {
         const errorText = await resp.text();
         this.logger.error(`[syncLeadConversations] Sigcore fetch failed: ${resp.status} — ${errorText}`);
-        return { synced: 0, error: `Fetch failed: ${resp.status}` };
+        return { synced: 0, totalConversations: 0, totalLeads: leads.length, error: `Fetch failed: ${resp.status}` };
       }
 
       const result = await resp.json();
@@ -324,11 +401,11 @@ export class ConversationSyncService {
         syncedCount++;
       }
 
-      this.logger.log(`[syncLeadConversations] Synced ${syncedCount} lead conversations`);
-      return { synced: syncedCount };
+      this.logger.log(`[matchLeadConversations] Synced ${syncedCount} of ${conversations.length} conversations for ${leads.length} leads`);
+      return { synced: syncedCount, totalConversations: conversations.length, totalLeads: leads.length };
     } catch (err: any) {
-      this.logger.error(`[syncLeadConversations] Error: ${err.message}`);
-      return { synced: 0, error: err.message };
+      this.logger.error(`[matchLeadConversations] Error: ${err.message}`);
+      return { synced: 0, totalConversations: 0, totalLeads: 0, error: err.message };
     }
   }
 

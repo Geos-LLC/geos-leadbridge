@@ -1389,10 +1389,24 @@ export const conversationSyncApi = {
     return data;
   },
 
-  sync: async (
+  syncOpenPhone: async (
     savedAccountId: string,
-  ): Promise<{ success: boolean; synced: number; error?: string }> => {
-    const { data } = await api.post(`/v1/conversation-sync/sync/${savedAccountId}`);
+  ): Promise<{ success: boolean; error?: string }> => {
+    const { data } = await api.post(`/v1/conversation-sync/sync-openphone/${savedAccountId}`);
+    return data;
+  },
+
+  getSyncStatus: async (
+    savedAccountId: string,
+  ): Promise<{ status: string; progress?: number; total?: number; error?: string }> => {
+    const { data } = await api.get(`/v1/conversation-sync/sync-status/${savedAccountId}`);
+    return data;
+  },
+
+  matchLeads: async (
+    savedAccountId: string,
+  ): Promise<{ success: boolean; synced: number; totalConversations: number; totalLeads: number; error?: string }> => {
+    const { data } = await api.post(`/v1/conversation-sync/match-leads/${savedAccountId}`);
     return data;
   },
 

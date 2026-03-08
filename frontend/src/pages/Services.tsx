@@ -247,10 +247,15 @@ export function Services() {
   // Conversation Sync state (isolated BYO phone)
   const [csConnected, setCsConnected] = useState(false);
   const [csConnecting, setCsConnecting] = useState(false);
-  const [csSyncing, setCsSyncing] = useState(false);
   const [csApiKey, setCsApiKey] = useState('');
   const [csError, setCsError] = useState<string | null>(null);
   const [csPhoneNumbers, setCsPhoneNumbers] = useState<Array<{ id: string; phoneNumber: string; name?: string }>>([]);
+  // Step 1: OpenPhone → Sigcore sync
+  const [csOpenPhoneSyncing, setCsOpenPhoneSyncing] = useState(false);
+  const [csSyncProgress, setCsSyncProgress] = useState<{ status: string; progress?: number; total?: number } | null>(null);
+  // Step 2: Match to leads
+  const [csMatchingLeads, setCsMatchingLeads] = useState(false);
+  const [csMatchResult, setCsMatchResult] = useState<{ synced: number; totalConversations: number; totalLeads: number } | null>(null);
 
   // Lead Alert saved snapshot for dirty tracking
   const [alertSavedSnapshot, setAlertSavedSnapshot] = useState<{ toPhone: string } | null>(sc?.alertSavedSnapshot ?? null);
@@ -2081,31 +2086,86 @@ export function Services() {
                       )}
 
                       {/* Actions */}
-                      <div className="flex gap-3">
+                      <div className="flex flex-wrap gap-3">
+                        {/* Step 1: Sync from OpenPhone */}
                         <button
                           onClick={async () => {
                             if (!selectedAccountId) return;
-                            setCsSyncing(true);
+                            setCsOpenPhoneSyncing(true);
+                            setCsError(null);
+                            setCsSyncProgress({ status: 'starting' });
                             try {
-                              const result = await conversationSyncApi.sync(selectedAccountId);
-                              if (result.success) {
-                                setSuccessMessage(`Synced ${result.synced} lead conversations`);
-                                setTimeout(() => setSuccessMessage(null), 3000);
-                              } else {
-                                setCsError(result.error || 'Sync failed');
+                              const result = await conversationSyncApi.syncOpenPhone(selectedAccountId);
+                              if (!result.success) {
+                                setCsError(result.error || 'Sync trigger failed');
+                                setCsOpenPhoneSyncing(false);
+                                setCsSyncProgress(null);
+                                return;
                               }
+                              // Poll for progress
+                              const pollInterval = setInterval(async () => {
+                                try {
+                                  const status = await conversationSyncApi.getSyncStatus(selectedAccountId);
+                                  setCsSyncProgress(status);
+                                  if (status.status === 'completed' || status.status === 'idle' || status.status === 'error') {
+                                    clearInterval(pollInterval);
+                                    setCsOpenPhoneSyncing(false);
+                                    if (status.status === 'error') {
+                                      setCsError(status.error || 'Sync failed');
+                                    } else {
+                                      setSuccessMessage('OpenPhone sync completed');
+                                      setTimeout(() => setSuccessMessage(null), 4000);
+                                    }
+                                  }
+                                } catch {
+                                  clearInterval(pollInterval);
+                                  setCsOpenPhoneSyncing(false);
+                                  setCsSyncProgress(null);
+                                }
+                              }, 3000);
                             } catch (err: any) {
                               setCsError(err.response?.data?.message || err.message || 'Sync failed');
-                            } finally {
-                              setCsSyncing(false);
+                              setCsOpenPhoneSyncing(false);
+                              setCsSyncProgress(null);
                             }
                           }}
-                          disabled={csSyncing}
+                          disabled={csOpenPhoneSyncing || csMatchingLeads}
                           className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-purple-700 bg-purple-50 rounded-xl hover:bg-purple-100 transition-colors disabled:opacity-50"
                         >
-                          {csSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                          Sync Lead Conversations
+                          {csOpenPhoneSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                          Sync from OpenPhone
                         </button>
+
+                        {/* Step 2: Match to Leads */}
+                        <button
+                          onClick={async () => {
+                            if (!selectedAccountId) return;
+                            setCsMatchingLeads(true);
+                            setCsError(null);
+                            setCsMatchResult(null);
+                            try {
+                              const result = await conversationSyncApi.matchLeads(selectedAccountId);
+                              if (result.success) {
+                                setCsMatchResult({ synced: result.synced, totalConversations: result.totalConversations, totalLeads: result.totalLeads });
+                                setSuccessMessage(`Matched ${result.synced} conversations to leads`);
+                                setTimeout(() => setSuccessMessage(null), 4000);
+                              } else {
+                                setCsError(result.error || 'Matching failed');
+                              }
+                            } catch (err: any) {
+                              setCsError(err.response?.data?.message || err.message || 'Matching failed');
+                            } finally {
+                              setCsMatchingLeads(false);
+                            }
+                          }}
+                          disabled={csOpenPhoneSyncing || csMatchingLeads}
+                          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-xl hover:bg-indigo-100 transition-colors disabled:opacity-50"
+                        >
+                          {csMatchingLeads ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                          Match to Leads
+                        </button>
+
+                        {/* Disconnect */}
                         <button
                           onClick={async () => {
                             if (!selectedAccountId) return;
@@ -2113,6 +2173,8 @@ export function Services() {
                               await conversationSyncApi.disconnect(selectedAccountId);
                               setCsConnected(false);
                               setCsPhoneNumbers([]);
+                              setCsSyncProgress(null);
+                              setCsMatchResult(null);
                               setSuccessMessage('Phone disconnected');
                               setTimeout(() => setSuccessMessage(null), 3000);
                             } catch (err: any) {
@@ -2126,6 +2188,37 @@ export function Services() {
                         </button>
                       </div>
 
+                      {/* Sync Progress */}
+                      {csOpenPhoneSyncing && csSyncProgress && (
+                        <div className="bg-purple-50 rounded-xl px-4 py-3 space-y-2">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="font-medium text-purple-700">
+                              {csSyncProgress.status === 'starting' ? 'Starting sync...' :
+                               csSyncProgress.status === 'syncing' || csSyncProgress.status === 'in_progress' ? 'Syncing conversations...' :
+                               csSyncProgress.status}
+                            </span>
+                            {csSyncProgress.progress != null && csSyncProgress.total != null && csSyncProgress.total > 0 && (
+                              <span className="text-purple-500">{csSyncProgress.progress} / {csSyncProgress.total}</span>
+                            )}
+                          </div>
+                          {csSyncProgress.progress != null && csSyncProgress.total != null && csSyncProgress.total > 0 && (
+                            <div className="w-full bg-purple-200 rounded-full h-2">
+                              <div
+                                className="bg-purple-600 h-2 rounded-full transition-all duration-500"
+                                style={{ width: `${Math.min(100, Math.round((csSyncProgress.progress / csSyncProgress.total) * 100))}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Match Result */}
+                      {csMatchResult && (
+                        <div className="bg-indigo-50 rounded-xl px-4 py-3 text-sm text-indigo-700">
+                          Matched <strong>{csMatchResult.synced}</strong> of {csMatchResult.totalConversations} conversations across {csMatchResult.totalLeads} leads
+                        </div>
+                      )}
+
                       {csError && (
                         <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">
                           <AlertCircle className="w-4 h-4 flex-shrink-0" />
@@ -2138,7 +2231,7 @@ export function Services() {
 
                 {/* Step 2: AI Suggestions (Coming Soon) */}
                 <div className="opacity-50 pointer-events-none">
-                  <h4 className="text-xs font-semibold text-purple-600 uppercase tracking-wider mb-2">Step 2: AI Suggestions</h4>
+                  <h4 className="text-xs font-semibold text-purple-600 uppercase tracking-wider mb-2">Step 3: AI Suggestions</h4>
                   <p className="text-sm text-slate-400">
                     Once connected, AI will analyze your lead conversations and suggest optimal reply timing, message variations, and follow-up strategies.
                   </p>

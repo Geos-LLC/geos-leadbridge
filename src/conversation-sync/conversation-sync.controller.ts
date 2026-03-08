@@ -110,20 +110,56 @@ export class ConversationSyncController {
   }
 
   /**
-   * Trigger lead conversation sync — matches Sigcore conversations to leads by phone.
+   * Step 1: Trigger OpenPhone → Sigcore sync (background, returns immediately).
    */
-  @Post('sync/:savedAccountId')
-  async sync(
+  @Post('sync-openphone/:savedAccountId')
+  async syncOpenPhone(
     @CurrentUser() user: any,
     @Param('savedAccountId') savedAccountId: string,
   ) {
     await this.verifyAccountOwnership(user.id, savedAccountId);
-    const result = await this.conversationSyncService.syncLeadConversations(
+    const result = await this.conversationSyncService.triggerOpenPhoneSync(savedAccountId);
+
+    if (!result.success) {
+      throw new HttpException(result.error || 'Sync trigger failed', HttpStatus.BAD_REQUEST);
+    }
+
+    return { success: true };
+  }
+
+  /**
+   * Get OpenPhone sync progress from Sigcore.
+   */
+  @Get('sync-status/:savedAccountId')
+  async getSyncStatus(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    await this.verifyAccountOwnership(user.id, savedAccountId);
+    return this.conversationSyncService.getSyncStatus(savedAccountId);
+  }
+
+  /**
+   * Step 2: Match Sigcore conversations to LeadBridge leads by phone number.
+   */
+  @Post('match-leads/:savedAccountId')
+  async matchLeads(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    await this.verifyAccountOwnership(user.id, savedAccountId);
+    const result = await this.conversationSyncService.matchLeadConversations(
       user.id,
       savedAccountId,
     );
 
-    return { success: !result.error, synced: result.synced, error: result.error };
+    return {
+      success: !result.error,
+      synced: result.synced,
+      totalConversations: result.totalConversations,
+      totalLeads: result.totalLeads,
+      error: result.error,
+    };
   }
 
   /**
