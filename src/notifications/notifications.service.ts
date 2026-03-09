@@ -941,11 +941,8 @@ export class NotificationsService {
 
     // If no rules exist, check for legacy settings (backward compatibility)
     if (rules.length === 0) {
-      // Only use legacy if destinationPhone is configured
-      if (!settings.destinationPhone) {
-        this.logger.log(`No new_lead rules and no legacy destination phone for account ${savedAccountId}`);
-        return;
-      }
+      // sendNotificationWithRule will resolve agent phone from User.businessPhone
+      // It handles the no-phone case gracefully, so just proceed
       this.logger.log(`No new_lead rules found, using legacy template`);
       await this.sendNotificationWithRule(settings, null, context);
       return;
@@ -976,25 +973,13 @@ export class NotificationsService {
       include: { savedAccount: { select: { userId: true } } },
     });
 
-    // Resolve destination: NotificationSettings.destinationPhone → fallback to CallConnectSettings.agentPhoneE164
-    let destPhone = settings?.destinationPhone || null;
-    if (!destPhone) {
-      const ccSettings = await this.prisma.callConnectSettings.findUnique({
-        where: { savedAccountId },
-        select: { agentPhoneE164: true },
-      });
-      destPhone = ccSettings?.agentPhoneE164 || null;
-      if (destPhone) {
-        this.logger.log(`[forwardInboundSms] destinationPhone empty, using CC agentPhone=${destPhone} for account ${savedAccountId}`);
-        // Back-fill so future lookups don't need fallback
-        await this.prisma.notificationSettings.updateMany({
-          where: { savedAccountId },
-          data: { destinationPhone: destPhone },
-        });
-      }
-    }
+    // Resolve agent phone from User.businessPhone (single source of truth)
+    const ownerUser = settings?.savedAccount?.userId
+      ? await this.prisma.user.findUnique({ where: { id: settings.savedAccount.userId }, select: { businessPhone: true } })
+      : null;
+    const destPhone = ownerUser?.businessPhone || settings?.destinationPhone || null;
     if (!destPhone || !settings) {
-      this.logger.warn(`[forwardInboundSms] No destinationPhone or agentPhone set for account ${savedAccountId}, skipping forward`);
+      this.logger.warn(`[forwardInboundSms] No businessPhone set for account ${savedAccountId}, skipping forward`);
       return;
     }
 
@@ -1127,10 +1112,17 @@ export class NotificationsService {
   ): Promise<void> {
     const { userId, savedAccountId, leadId, lead } = context;
 
+    // Resolve agent phone from User.businessPhone (single source of truth)
+    const ownerUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { businessPhone: true },
+    });
+    const agentPhone = ownerUser?.businessPhone || settings.destinationPhone;
+
     // Resolve phones: toPhone from rule or settings, fromPhone auto-resolved from dedicated number
     const toPhone = rule?.sendToCustomer
       ? (lead?.customerPhone || null)
-      : (rule?.toPhone || settings.destinationPhone);
+      : agentPhone;
 
     // Resolve fromPhone from dedicated number only
     const tenantPhoneRec = await this.prisma.tenantPhoneNumber.findFirst({
@@ -1327,8 +1319,15 @@ export class NotificationsService {
       }
     }
 
-    // Use override (CT test), then rule's phone numbers, then settings fallback
-    const toPhone = toPhoneOverride || rule?.toPhone || settings.destinationPhone;
+    // Resolve agent phone from User.businessPhone (single source of truth)
+    const ownerUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { businessPhone: true },
+    });
+    const agentPhone = ownerUser?.businessPhone || settings.destinationPhone;
+
+    // Use override (CT test), then agent phone as source of truth
+    const toPhone = toPhoneOverride || agentPhone;
     // Resolve fromPhone from dedicated number only
     const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
       where: { userId, status: 'ACTIVE' },
