@@ -270,6 +270,7 @@ export class NotificationsService {
         where: { id: userId },
         data: { businessPhone: data.destinationPhone },
       });
+      this.logger.log(`[upsertSettings] Synced destinationPhone ${data.destinationPhone} → User.businessPhone for user ${userId}`);
     }
 
     return this.formatSettings(settings);
