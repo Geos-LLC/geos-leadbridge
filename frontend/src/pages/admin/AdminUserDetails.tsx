@@ -35,6 +35,7 @@ export default function AdminUserDetailsPage() {
   const setSavedAccounts = useAppStore((state) => state.setSavedAccounts);
   const setDashboardStats = useAppStore((state) => state.setDashboardStats);
   const setAnalyticsCache = useAppStore((state) => state.setAnalyticsCache);
+  const setAccountDiagnostics = useAppStore((state) => state.setAccountDiagnostics);
   const [user, setUser] = useState<AdminUserDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
@@ -158,6 +159,7 @@ export default function AdminUserDetailsPage() {
     setSavedAccounts([]);
     setDashboardStats(null as any);
     setAnalyticsCache(null as any);
+    setAccountDiagnostics({});
     startImpersonation({ id: user.id, name: user.name, email: user.email });
     navigate('/dashboard');
   };
