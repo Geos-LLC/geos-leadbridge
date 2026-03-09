@@ -47,3 +47,12 @@ uploads/**
 !uploads/.gitkeep
 !uploads/voicemail/.gitkeep
 .vercel
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/*.tfplan
+terraform/tfplan
+terraform/terraform.tfvars
+terraform/.terraform.lock.hcl

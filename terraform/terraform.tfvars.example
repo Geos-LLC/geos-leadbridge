@@ -1,0 +1,48 @@
+# ============================================================
+# LeadBridge — Terraform Variables (EXAMPLE)
+# ============================================================
+# Copy this file to terraform.tfvars and fill in actual values.
+# NEVER commit terraform.tfvars to version control!
+# ============================================================
+
+# --- AWS ---
+aws_region  = "us-east-1"
+environment = "prod"
+
+# --- Database ---
+db_password = "CHANGE_ME_strong_password_here"
+db_username = "leadbridge"
+db_name     = "leadbridge"
+
+# --- Auth ---
+jwt_secret     = "CHANGE_ME_random_string"
+encryption_key = "CHANGE_ME_32_char_encryption_key"
+
+# --- Thumbtack ---
+thumbtack_client_id      = ""
+thumbtack_client_secret  = ""
+thumbtack_redirect_uri   = "https://YOUR_CLOUDFRONT_URL/api/v1/thumbtack/auth/callback"
+thumbtack_webhook_secret = ""
+
+# --- Yelp ---
+yelp_api_key       = ""
+yelp_client_id     = ""
+yelp_client_secret = ""
+yelp_webhook_secret = ""
+
+# --- Sigcore ---
+sigcore_api_url                     = "https://sigcore-production.up.railway.app"
+sigcore_api_key                     = ""
+sigcore_call_connect_webhook_secret = ""
+
+# --- Stripe ---
+stripe_secret_key       = ""
+stripe_webhook_secret   = ""
+stripe_price_starter    = ""
+stripe_price_pro        = ""
+stripe_price_enterprise = ""
+stripe_price_own_number = ""
+
+# --- Email ---
+emailjs_public_key  = ""
+emailjs_private_key = ""
