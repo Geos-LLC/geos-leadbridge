@@ -966,8 +966,26 @@ export class NotificationsService {
       where: { savedAccountId },
       include: { savedAccount: { select: { userId: true } } },
     });
-    if (!settings?.destinationPhone) {
-      this.logger.warn(`[forwardInboundSms] No destinationPhone set for account ${savedAccountId}, skipping forward`);
+
+    // Resolve destination: NotificationSettings.destinationPhone → fallback to CallConnectSettings.agentPhoneE164
+    let destPhone = settings?.destinationPhone || null;
+    if (!destPhone) {
+      const ccSettings = await this.prisma.callConnectSettings.findUnique({
+        where: { savedAccountId },
+        select: { agentPhoneE164: true },
+      });
+      destPhone = ccSettings?.agentPhoneE164 || null;
+      if (destPhone) {
+        this.logger.log(`[forwardInboundSms] destinationPhone empty, using CC agentPhone=${destPhone} for account ${savedAccountId}`);
+        // Back-fill so future lookups don't need fallback
+        await this.prisma.notificationSettings.updateMany({
+          where: { savedAccountId },
+          data: { destinationPhone: destPhone },
+        });
+      }
+    }
+    if (!destPhone || !settings) {
+      this.logger.warn(`[forwardInboundSms] No destinationPhone or agentPhone set for account ${savedAccountId}, skipping forward`);
       return;
     }
 
@@ -989,10 +1007,10 @@ export class NotificationsService {
     const forwardBody = customerName && customerName !== fromNumber
       ? `SMS from ${customerName} (${fromNumber}):\n${body}`
       : `SMS from ${fromNumber}:\n${body}`;
-    this.logger.log(`[forwardInboundSms] Forwarding to ${settings.destinationPhone} for account ${savedAccountId}`);
+    this.logger.log(`[forwardInboundSms] Forwarding to ${destPhone} for account ${savedAccountId}`);
 
     await this.sendViaSigcore({
-      to: settings.destinationPhone,
+      to: destPhone,
       body: forwardBody,
       fromPhone,
       apiKey,
