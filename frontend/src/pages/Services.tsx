@@ -305,8 +305,10 @@ export function Services() {
       const { accounts: accs } = await thumbtackApi.getSavedAccounts();
       setAccounts(accs);
       setSavedAccounts(accs); // Update global app store
-      // Only set selectedAccount from fetch if nothing was pre-selected from store
-      if (!selectedAccountId && accs.length > 0) {
+      // Reset selected account if it doesn't exist in the fetched list (e.g. after
+      // switching impersonated user — the store may still hold a stale account ID)
+      const currentStillValid = accs.some(a => a.id === selectedAccountId);
+      if ((!selectedAccountId || !currentStillValid) && accs.length > 0) {
         setSelectedAccountId(accs[0].id);
       }
       // If no accounts, stop loading — loadServiceData won't fire

@@ -7,6 +7,7 @@ export default function ImpersonationBanner() {
   const setSavedAccounts = useAppStore((s) => s.setSavedAccounts);
   const setDashboardStats = useAppStore((s) => s.setDashboardStats);
   const setAnalyticsCache = useAppStore((s) => s.setAnalyticsCache);
+  const setAccountDiagnostics = useAppStore((s) => s.setAccountDiagnostics);
 
   if (!impersonatingUser) return null;
 
@@ -15,6 +16,7 @@ export default function ImpersonationBanner() {
     setSavedAccounts([]);
     setDashboardStats(null as any);
     setAnalyticsCache(null as any);
+    setAccountDiagnostics({});
     window.location.reload();
   };
 
