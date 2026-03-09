@@ -352,7 +352,7 @@ export class CallConnectService {
     // Prefix messages with a brief TTS pause ("... ,") so Twilio doesn't clip
     // the first ~1 second of audio when the call leg connects.
     const pausePrefix = '... , ';
-    const whisperRaw = settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.';
+    const whisperRaw = settings.agentWhisperMessage || 'You have a new lead for {category}. Customer name: {customerName}. Press any key to connect with the customer.';
     const greetingRaw = settings.leadGreetingMessage || 'Please hold while we connect you with a specialist.';
     const vmRaw = settings.leadVoicemailMessage ?? null;
 
@@ -671,7 +671,7 @@ export class CallConnectService {
     // Build the complete whisper message on LeadBridge's side so Sigcore receives
     // the final text directly — no template substitution needed on Sigcore's end.
     // If settings has a custom template, apply vars here; otherwise use default.
-    const whisperTemplate = settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.';
+    const whisperTemplate = settings.agentWhisperMessage || 'You have a new lead for {category}. Customer name: {customerName}. Press any key to connect with the customer.';
 
     /** Apply all template variable substitutions to a string */
     const subst = (tpl: string) =>
@@ -980,7 +980,7 @@ export class CallConnectService {
         .replace(/\{lead\.dates\}/g,              td.dates);
 
     // Pre-build whisper + voicemail messages with all variables substituted.
-    const whisperTemplate = settings.agentWhisperMessage || 'New lead: {summary}. Press any key to connect.';
+    const whisperTemplate = settings.agentWhisperMessage || 'You have a new lead for {category}. Customer name: {customerName}. Press any key to connect with the customer.';
     const agentWhisperMessage = subst(whisperTemplate);
 
     const voicemailTemplate = settings.leadVoicemailMessage || '';

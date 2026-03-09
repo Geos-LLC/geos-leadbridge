@@ -91,12 +91,20 @@ export function MessageSettings() {
           content,
           isDefault,
         });
-        setTemplates(prev => { const next = prev.map(t => (t.id === template.id ? template : t)); _templatesCache = next; return next; });
+        // If isDefault changed, re-fetch all templates so other defaults get unset in UI
+        if (isDefault !== editingTemplate.isDefault) {
+          const { templates: fresh } = await templatesApi.getTemplates();
+          setTemplates(fresh);
+          _templatesCache = fresh;
+        } else {
+          setTemplates(prev => { const next = prev.map(t => (t.id === template.id ? template : t)); _templatesCache = next; return next; });
+        }
       }
 
       closeEditor();
     } catch (err: any) {
-      setError(err.message || 'Failed to save template');
+      console.error('[Templates] Save failed:', err);
+      setError(err.response?.data?.message || err.message || 'Failed to save template');
     } finally {
       setSaving(false);
     }
@@ -323,6 +331,7 @@ export function MessageSettings() {
         existingNames={templates.filter(t => t.id !== editingTemplate?.id).map(t => t.name)}
         showDefaultCheckbox={true}
         initialIsDefault={editingTemplate?.isDefault || false}
+        saveError={error}
         onSave={handleSave}
       />
 

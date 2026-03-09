@@ -47,6 +47,7 @@ interface TemplateEditorModalProps {
   existingNames?: string[];
   showDefaultCheckbox?: boolean;
   initialIsDefault?: boolean;
+  saveError?: string | null;
   onSave: (data: { name: string; content: string; isDefault?: boolean }) => void;
   onSaveAsNew?: (data: { name: string; content: string }) => void;
 }
@@ -54,7 +55,7 @@ interface TemplateEditorModalProps {
 export function TemplateEditorModal({
   isOpen, onClose, mode, initialName, initialContent,
   templateName, saving, variables, existingNames = [],
-  showDefaultCheckbox, initialIsDefault,
+  showDefaultCheckbox, initialIsDefault, saveError,
   onSave, onSaveAsNew,
 }: TemplateEditorModalProps) {
   const [name, setName] = useState(initialName);
@@ -222,6 +223,12 @@ export function TemplateEditorModal({
             </div>
           )}
         </div>
+
+        {saveError && (
+          <div className="mt-4 px-4 py-3 bg-red-50 border border-red-100 rounded-xl text-sm text-red-600 font-medium">
+            {saveError}
+          </div>
+        )}
 
         <div className="flex gap-3 mt-8 pt-6 border-t border-slate-100">
           <button
