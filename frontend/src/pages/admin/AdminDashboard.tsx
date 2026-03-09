@@ -357,7 +357,14 @@ export default function AdminDashboard() {
                 const free = isFreeTier(u);
                 return (
                   <tr key={u.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                    <td className="py-4 px-4 text-sm text-slate-900">{u.email}</td>
+                    <td className="py-4 px-4 text-sm text-slate-900">
+                      <div className="flex items-center gap-1.5">
+                        <Link to={`/admin/users/${u.id}`} className="hover:underline">{u.email}</Link>
+                        <Link to={`/admin/users/${u.id}`} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all" title="View Details">
+                          <Eye className="w-3.5 h-3.5" />
+                        </Link>
+                      </div>
+                    </td>
                     <td className="py-4 px-4 text-sm text-slate-700">{u.name || '—'}</td>
                     <td className="py-4 px-4">
                       {u.connectedAccounts.length > 0 ? (
@@ -433,13 +440,6 @@ export default function AdminDashboard() {
                             </button>
                           </>
                         )}
-                        <Link
-                          to={`/admin/users/${u.id}`}
-                          className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg transition-all"
-                          title="View Details"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </Link>
                         <button
                           onClick={() => handleDeleteUser(u.id, u.email)}
                           className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-all"
