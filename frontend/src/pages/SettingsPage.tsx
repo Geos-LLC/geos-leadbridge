@@ -25,9 +25,13 @@ let _settingsCache: { subscription: SubscriptionDetails | null; accounts: SavedA
 
 export default function SettingsPage() {
   const navigate = useNavigate();
-  const user = useAuthStore(state => state.user);
+  const authUser = useAuthStore(state => state.user);
+  const impersonatingUser = useAuthStore(state => state.impersonatingUser);
   const setAuth = useAuthStore(state => state.setAuth);
   const logout = useAuthStore(state => state.logout);
+  const [profileUser, setProfileUser] = useState<typeof authUser>(null);
+  // When impersonating, show the impersonated user's profile; otherwise show auth store user
+  const user = impersonatingUser ? profileUser : authUser;
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
   const accountDiagnostics = useAppStore(state => state.accountDiagnostics);
   const loadDiagnostics = useAppStore(state => state.loadDiagnostics);
@@ -198,10 +202,12 @@ export default function SettingsPage() {
   const loadData = async (forceDiagnostics = false) => {
     try {
       if (!_settingsCache) setLoading(true);
-      const [subResult, acctResult] = await Promise.all([
+      const [subResult, acctResult, profileResult] = await Promise.all([
         billingApi.getSubscription().catch(() => null),
         thumbtackApi.getSavedAccounts().catch(() => ({ accounts: [] as SavedAccount[], count: 0 })),
+        impersonatingUser ? authApi.getProfile().catch(() => null) : Promise.resolve(null),
       ]);
+      if (profileResult?.user) setProfileUser(profileResult.user);
       setSubscription(subResult);
       setAccounts(acctResult.accounts);
       setSavedAccounts(acctResult.accounts); // Update app store
@@ -294,9 +300,11 @@ export default function SettingsPage() {
     try {
       await usersApi.updateProfile({ name: nameValue.trim() });
       if (user) {
-        const token = localStorage.getItem('token');
-        if (token) {
-          setAuth({ ...user, name: nameValue.trim() }, token);
+        if (impersonatingUser) {
+          setProfileUser({ ...user, name: nameValue.trim() });
+        } else {
+          const token = localStorage.getItem('token');
+          if (token) setAuth({ ...user, name: nameValue.trim() }, token);
         }
       }
       notify.success('Updated', 'Name updated successfully');
@@ -318,9 +326,11 @@ export default function SettingsPage() {
     try {
       const result = await usersApi.updateProfile({ businessPhone: trimmed });
       if (user) {
-        const token = localStorage.getItem('token');
-        if (token) {
-          setAuth({ ...user, businessPhone: result.user.businessPhone ?? null }, token);
+        if (impersonatingUser) {
+          setProfileUser({ ...user, businessPhone: result.user.businessPhone ?? null });
+        } else {
+          const token = localStorage.getItem('token');
+          if (token) setAuth({ ...user, businessPhone: result.user.businessPhone ?? null }, token);
         }
       }
       notify.success('Updated', 'Business phone updated successfully');
