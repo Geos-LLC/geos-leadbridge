@@ -320,6 +320,7 @@ model SavedAccount {
   imageUrl        String?  // Business logo URL
   webhookId       String?  // Webhook subscription ID for this business
   credentialsJson String?  // Encrypted: access_token, refresh_token for THIS account
+  agentPhoneOverride String?  // Per-business agent phone; when null, inherits User.businessPhone
   lastUsedAt      DateTime @default(now())
   createdAt       DateTime @default(now())
 

@@ -747,7 +747,7 @@ export class PlatformService {
   /**
    * Update a saved account
    */
-  async updateSavedAccount(userId: string, accountId: string, updates: { emailHint?: string }): Promise<void> {
+  async updateSavedAccount(userId: string, accountId: string, updates: { emailHint?: string; agentPhoneOverride?: string | null }): Promise<void> {
     await this.prisma.savedAccount.updateMany({
       where: {
         id: accountId,
@@ -755,6 +755,7 @@ export class PlatformService {
       },
       data: {
         ...(updates.emailHint !== undefined && { emailHint: updates.emailHint }),
+        ...(updates.agentPhoneOverride !== undefined && { agentPhoneOverride: updates.agentPhoneOverride }),
       },
     });
   }

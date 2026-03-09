@@ -973,13 +973,12 @@ export class NotificationsService {
       include: { savedAccount: { select: { userId: true } } },
     });
 
-    // Resolve agent phone from User.businessPhone (single source of truth)
-    const ownerUser = settings?.savedAccount?.userId
-      ? await this.prisma.user.findUnique({ where: { id: settings.savedAccount.userId }, select: { businessPhone: true } })
-      : null;
-    const destPhone = ownerUser?.businessPhone || settings?.destinationPhone || null;
+    // Resolve agent phone: per-business override → user default → legacy fallback
+    const destPhone = settings?.savedAccount?.userId
+      ? (await this.resolveAgentPhone(settings.savedAccount.userId, savedAccountId) || settings?.destinationPhone || null)
+      : (settings?.destinationPhone || null);
     if (!destPhone || !settings) {
-      this.logger.warn(`[forwardInboundSms] No businessPhone set for account ${savedAccountId}, skipping forward`);
+      this.logger.warn(`[forwardInboundSms] No agent phone set for account ${savedAccountId}, skipping forward`);
       return;
     }
 
@@ -1112,12 +1111,8 @@ export class NotificationsService {
   ): Promise<void> {
     const { userId, savedAccountId, leadId, lead } = context;
 
-    // Resolve agent phone from User.businessPhone (single source of truth)
-    const ownerUser = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { businessPhone: true },
-    });
-    const agentPhone = ownerUser?.businessPhone || settings.destinationPhone;
+    // Resolve agent phone: per-business override → user default → legacy fallback
+    const agentPhone = await this.resolveAgentPhone(userId, savedAccountId) || settings.destinationPhone;
 
     // Resolve phones: toPhone from rule or settings, fromPhone auto-resolved from dedicated number
     const toPhone = rule?.sendToCustomer
@@ -1319,12 +1314,8 @@ export class NotificationsService {
       }
     }
 
-    // Resolve agent phone from User.businessPhone (single source of truth)
-    const ownerUser = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { businessPhone: true },
-    });
-    const agentPhone = ownerUser?.businessPhone || settings.destinationPhone;
+    // Resolve agent phone: per-business override → user default → legacy fallback
+    const agentPhone = await this.resolveAgentPhone(userId, savedAccountId) || settings.destinationPhone;
 
     // Use override (CT test), then agent phone as source of truth
     const toPhone = toPhoneOverride || agentPhone;
@@ -2533,6 +2524,24 @@ export class NotificationsService {
     }
 
     return { success: true };
+  }
+
+  /**
+   * Resolve agent phone: per-business override → user default → legacy fallback
+   */
+  private async resolveAgentPhone(userId: string, savedAccountId?: string | null): Promise<string | null> {
+    if (savedAccountId) {
+      const account = await this.prisma.savedAccount.findUnique({
+        where: { id: savedAccountId },
+        select: { agentPhoneOverride: true },
+      });
+      if (account?.agentPhoneOverride) return account.agentPhoneOverride;
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { businessPhone: true },
+    });
+    return user?.businessPhone || null;
   }
 
   /**

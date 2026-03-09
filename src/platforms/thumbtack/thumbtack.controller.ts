@@ -658,8 +658,9 @@ export class ThumbtackController {
     @CurrentUser() user: any,
     @Param('id') id: string,
     @Body('emailHint') emailHint?: string,
+    @Body('agentPhoneOverride') agentPhoneOverride?: string | null,
   ) {
-    await this.platformService.updateSavedAccount(user.id, id, { emailHint });
+    await this.platformService.updateSavedAccount(user.id, id, { emailHint, agentPhoneOverride });
 
     return {
       success: true,

@@ -80,6 +80,7 @@ export interface SavedAccount {
   emailHint?: string;
   imageUrl?: string;
   webhookId?: string | null; // Webhook subscription ID (null = disconnected)
+  agentPhoneOverride?: string | null; // Per-business agent phone; null = inherit User.businessPhone
   lastUsedAt: string;
   createdAt: string;
 }

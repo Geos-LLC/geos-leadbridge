@@ -419,9 +419,9 @@ export function Services() {
 
       setLeadAlertRule(leadAlert);
 
-      // Agent phone: use saved value, else destination phone (never fall back to auth-store
-      // user.businessPhone — that belongs to the logged-in admin, not the tenant being viewed)
-      const agentPhoneDefault = ccs?.agentPhoneE164 || notifSettingsRes?.settings?.destinationPhone || '';
+      // Agent phone: per-business override → CC saved value → destination phone
+      const currentAccount = accounts.find(a => a.id === accountId);
+      const agentPhoneDefault = currentAccount?.agentPhoneOverride || ccs?.agentPhoneE164 || notifSettingsRes?.settings?.destinationPhone || '';
       setCcAgentPhone(agentPhoneDefault);
       // Forward calls to: same as agent phone (destinationPhone)
       setCcCallForwardingNumber(agentPhoneDefault);
@@ -850,6 +850,11 @@ export function Services() {
     promises.push(
       callConnectApi.saveSettings(selectedAccountId, { agentPhoneE164: finalPhone })
         .catch(() => { setError('Failed to save business phone to call settings'); })
+    );
+    // Save per-business agent phone override
+    promises.push(
+      thumbtackApi.updateSavedAccount(selectedAccountId, { agentPhoneOverride: finalPhone })
+        .catch(() => { setError('Failed to save business phone override'); })
     );
     await Promise.all(promises);
     savingAgentPhoneRef.current = false;
