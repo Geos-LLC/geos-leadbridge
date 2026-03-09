@@ -264,6 +264,14 @@ export class NotificationsService {
       },
     });
 
+    // Sync destinationPhone → User.businessPhone so Settings profile stays in sync
+    if (data.destinationPhone) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { businessPhone: data.destinationPhone },
+      });
+    }
+
     return this.formatSettings(settings);
   }
 

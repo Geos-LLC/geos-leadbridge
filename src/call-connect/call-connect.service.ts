@@ -161,12 +161,18 @@ export class CallConnectService {
       this.logger.warn(`Failed to push call-connect settings to Sigcore: ${err.message}`);
     }
 
-    // Sync agentPhoneE164 → destinationPhone in NotificationSettings
+    // Sync agentPhoneE164 → destinationPhone + User.businessPhone
     if (dto.agentPhoneE164 !== undefined) {
       await this.prisma.notificationSettings.updateMany({
         where: { savedAccountId },
         data: { destinationPhone: dto.agentPhoneE164 || null },
       });
+      if (dto.agentPhoneE164) {
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: { businessPhone: dto.agentPhoneE164 },
+        });
+      }
     }
 
     // Sync destinationPhone as call forwarding to Sigcore tenant metadata
