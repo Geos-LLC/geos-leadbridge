@@ -207,7 +207,7 @@ export default function SettingsPage() {
         thumbtackApi.getSavedAccounts().catch(() => ({ accounts: [] as SavedAccount[], count: 0 })),
         impersonatingUser ? authApi.getProfile().catch(() => null) : Promise.resolve(null),
       ]);
-      if (profileResult?.user) setProfileUser(profileResult.user);
+      if (profileResult) setProfileUser(profileResult);
       setSubscription(subResult);
       setAccounts(acctResult.accounts);
       setSavedAccounts(acctResult.accounts); // Update app store

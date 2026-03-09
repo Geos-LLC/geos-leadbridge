@@ -1115,7 +1115,7 @@ export class WebhooksService {
         // configured fromPhone doesn't match the inbound toNumber (ghost events).
         if (accountId) {
           try {
-            // Check if toNumber matches the account's dedicated number (TenantPhoneNumber)
+            // Check if toNumber matches any phone the account owns (dedicated or BYO/OpenPhone)
             const acctUser = await this.prisma.savedAccount.findUnique({
               where: { id: accountId },
               select: { userId: true },
@@ -1124,15 +1124,23 @@ export class WebhooksService {
               where: { userId: acctUser.userId, status: 'ACTIVE' },
               select: { phoneNumber: true },
             }) : null;
+            const acctSettings = await this.prisma.notificationSettings.findUnique({
+              where: { savedAccountId: accountId },
+              select: { sigcoreFromPhone: true },
+            });
 
             const normTo = toNumber?.replace(/\D/g, '').slice(-10);
             const normDedicated = dedicatedPhone?.phoneNumber?.replace(/\D/g, '').slice(-10);
+            const normByo = acctSettings?.sigcoreFromPhone?.replace(/\D/g, '').slice(-10);
 
-            // Forward if toNumber matches the account's dedicated number, or if no dedicated number is set
-            const isOwner = !normDedicated || !normTo || normDedicated === normTo;
+            // Forward only if toNumber matches a phone this account owns
+            // Accounts with no phone at all should NOT process other accounts' inbound SMS
+            const isOwner = normTo
+              ? (normDedicated === normTo || normByo === normTo)
+              : false;
 
             this.logger.log(
-              `[handleInboundSms] No-lead forward check: isOwner=${isOwner}, normTo=${normTo}, normDedicated=${normDedicated}`,
+              `[handleInboundSms] No-lead forward check: isOwner=${isOwner}, normTo=${normTo}, normDedicated=${normDedicated}, normByo=${normByo}`,
             );
 
             if (isOwner) {
@@ -1141,7 +1149,7 @@ export class WebhooksService {
             } else {
               this.logger.log(
                 `[handleInboundSms] Skipping forward for account ${accountId}: ` +
-                `inbound toNumber=${toNumber} doesn't match dedicated number=${dedicatedPhone?.phoneNumber} (shared-tenant ghost event)`,
+                `inbound toNumber=${toNumber} doesn't match dedicated=${dedicatedPhone?.phoneNumber} or byo=${acctSettings?.sigcoreFromPhone}`,
               );
             }
           } catch (err: any) {
