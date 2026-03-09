@@ -7,19 +7,27 @@ import { SubscriptionTier, SubscriptionStatus } from '../../generated/prisma';
 @Injectable()
 export class StripeService {
   private readonly logger = new Logger(StripeService.name);
-  private stripe: Stripe;
+  private stripe: Stripe | null = null;
 
   constructor(
     private configService: ConfigService,
     private prisma: PrismaService,
   ) {
     const secretKey = this.configService.get<string>('STRIPE_SECRET_KEY');
-    if (!secretKey) {
-      throw new Error('STRIPE_SECRET_KEY is not configured');
+    if (secretKey) {
+      this.stripe = new Stripe(secretKey, {
+        apiVersion: '2026-01-28.clover',
+      });
+    } else {
+      this.logger.warn('STRIPE_SECRET_KEY is not configured — Stripe features disabled');
     }
-    this.stripe = new Stripe(secretKey, {
-      apiVersion: '2026-01-28.clover',
-    });
+  }
+
+  private requireStripe(): Stripe {
+    if (!this.stripe) {
+      throw new BadRequestException('Stripe is not configured');
+    }
+    return this.stripe;
   }
 
   async createCheckoutSession(
@@ -40,7 +48,7 @@ export class StripeService {
     let customerId = user.stripeCustomerId;
     if (!customerId) {
       this.logger.log(`[createCheckoutSession] Creating new Stripe customer`);
-      const customer = await this.stripe.customers.create({
+      const customer = await this.requireStripe().customers.create({
         email: user.email,
         metadata: { userId: user.id },
       });
@@ -75,7 +83,7 @@ export class StripeService {
 
     // Create checkout session
     this.logger.log(`[createCheckoutSession] Creating checkout session with ${lineItems.length} line items`);
-    const session = await this.stripe.checkout.sessions.create({
+    const session = await this.requireStripe().checkout.sessions.create({
       customer: customerId,
       payment_method_types: ['card'],
       line_items: lineItems,
@@ -99,7 +107,7 @@ export class StripeService {
       throw new BadRequestException('User has no Stripe customer');
     }
 
-    const session = await this.stripe.billingPortal.sessions.create({
+    const session = await this.requireStripe().billingPortal.sessions.create({
       customer: user.stripeCustomerId,
       return_url: `${this.configService.get<string>('FRONTEND_URL')}/billing`,
     });
@@ -121,7 +129,7 @@ export class StripeService {
 
     if (immediate) {
       // Cancel immediately
-      await this.stripe.subscriptions.cancel(user.stripeSubscriptionId);
+      await this.requireStripe().subscriptions.cancel(user.stripeSubscriptionId);
       this.logger.log(`[cancelSubscription] Subscription cancelled immediately`);
 
       // Clear subscription data immediately (webhook will also run, but this gives instant feedback)
@@ -138,7 +146,7 @@ export class StripeService {
       this.logger.log(`[cancelSubscription] User subscription data cleared`);
     } else {
       // Cancel at period end
-      await this.stripe.subscriptions.update(user.stripeSubscriptionId, {
+      await this.requireStripe().subscriptions.update(user.stripeSubscriptionId, {
         cancel_at_period_end: true,
       });
       this.logger.log(`[cancelSubscription] Subscription set to cancel at period end`);
@@ -157,7 +165,7 @@ export class StripeService {
     let event: Stripe.Event;
 
     try {
-      event = this.stripe.webhooks.constructEvent(
+      event = this.requireStripe().webhooks.constructEvent(
         rawBody,
         signature,
         webhookSecret,
@@ -375,7 +383,7 @@ export class StripeService {
     if (!user || !subscriptionId) return;
 
     // Update period end
-    const subscription = await this.stripe.subscriptions.retrieve(
+    const subscription = await this.requireStripe().subscriptions.retrieve(
       subscriptionId as string,
     );
 
