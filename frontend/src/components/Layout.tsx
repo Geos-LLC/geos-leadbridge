@@ -14,7 +14,7 @@ import ImpersonationBanner from './ImpersonationBanner';
 export function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuthStore();
+  const { user, logout, impersonatingUser } = useAuthStore();
   const savedAccounts = useAppStore(state => state.savedAccounts);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -114,7 +114,7 @@ export function Layout() {
               <span>Settings</span>
             </NavLink>
 
-            {user?.role === 'ADMIN' && (
+            {user?.role === 'ADMIN' && !impersonatingUser && (
               <>
                 <div className="pt-8 mb-4 px-2 text-[11px] font-bold text-slate-400 uppercase tracking-widest">Admin</div>
                 <NavLink
