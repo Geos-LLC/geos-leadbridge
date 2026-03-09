@@ -412,8 +412,9 @@ export function Services() {
 
       setLeadAlertRule(leadAlert);
 
-      // Agent phone: use saved value, else destination phone, else user's business phone
-      const agentPhoneDefault = ccs?.agentPhoneE164 || notifSettingsRes?.settings?.destinationPhone || useAuthStore.getState().user?.businessPhone || '';
+      // Agent phone: use saved value, else destination phone (never fall back to auth-store
+      // user.businessPhone — that belongs to the logged-in admin, not the tenant being viewed)
+      const agentPhoneDefault = ccs?.agentPhoneE164 || notifSettingsRes?.settings?.destinationPhone || '';
       setCcAgentPhone(agentPhoneDefault);
       // Forward calls to: same as agent phone (destinationPhone)
       setCcCallForwardingNumber(agentPhoneDefault);
