@@ -67,9 +67,13 @@ export class ImpersonationGuard implements CanActivate {
       hasOwnNumber: targetUser.hasOwnNumber,
     };
 
-    this.logger.log(
-      `Admin ${request.impersonator.email} impersonating ${targetUser.email} (${targetUser.id})`,
-    );
+    // Log only for mutating requests to reduce noise (page loads fire 10+ parallel GETs)
+    const method = request.method?.toUpperCase();
+    if (method && method !== 'GET') {
+      this.logger.log(
+        `Admin ${request.impersonator.email} impersonating ${targetUser.email} (${targetUser.id}) [${method} ${request.url}]`,
+      );
+    }
 
     return true;
   }

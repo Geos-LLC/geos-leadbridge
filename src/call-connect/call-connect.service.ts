@@ -172,6 +172,7 @@ export class CallConnectService {
           where: { id: userId },
           data: { businessPhone: dto.agentPhoneE164 },
         });
+        this.logger.log(`[saveSettings] Synced agentPhone ${dto.agentPhoneE164} → User.businessPhone for user ${userId}`);
       }
     }
 
