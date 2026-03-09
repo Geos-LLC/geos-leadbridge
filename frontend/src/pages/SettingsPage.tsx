@@ -48,10 +48,15 @@ export default function SettingsPage() {
   const [nameValue, setNameValue] = useState('');
   const [savingName, setSavingName] = useState(false);
 
-  // Business phone editing
+  // Business phone editing (default)
   const [editingPhone, setEditingPhone] = useState(false);
   const [phoneValue, setPhoneValue] = useState('');
   const [savingPhone, setSavingPhone] = useState(false);
+
+  // Per-business phone override editing
+  const [editingOverrideId, setEditingOverrideId] = useState<string | null>(null);
+  const [overrideValue, setOverrideValue] = useState('');
+  const [savingOverride, setSavingOverride] = useState(false);
 
   // Change password state
   const [changingPassword, setChangingPassword] = useState(false);
@@ -333,12 +338,29 @@ export default function SettingsPage() {
           if (token) setAuth({ ...user, businessPhone: result.user.businessPhone ?? null }, token);
         }
       }
-      notify.success('Updated', 'Business phone updated successfully');
+      notify.success('Updated', 'Default business phone updated');
       setEditingPhone(false);
     } catch (error: any) {
       notify.error('Error', error.response?.data?.message || 'Failed to update phone');
     } finally {
       setSavingPhone(false);
+    }
+  };
+
+  const handleSaveOverride = async (accountId: string) => {
+    const trimmed = overrideValue.trim();
+    setSavingOverride(true);
+    try {
+      // Empty string or same as default → clear override (use default)
+      const value = (!trimmed || trimmed === (user?.businessPhone || '')) ? null : trimmed;
+      await thumbtackApi.updateSavedAccount(accountId, { agentPhoneOverride: value });
+      setAccounts(prev => prev.map(a => a.id === accountId ? { ...a, agentPhoneOverride: value } : a));
+      notify.success('Updated', value ? 'Custom phone set for this business' : 'Reset to default phone');
+      setEditingOverrideId(null);
+    } catch (error: any) {
+      notify.error('Error', error.response?.data?.message || 'Failed to update phone');
+    } finally {
+      setSavingOverride(false);
     }
   };
 
@@ -557,36 +579,75 @@ export default function SettingsPage() {
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Email Address</p>
             <p className="text-slate-900 font-semibold text-lg">{user?.email || 'Not set'}</p>
           </div>
-          <div className="space-y-1">
+          <div className="space-y-3">
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Business Phone</p>
-            {editingPhone ? (
-              <div className="flex items-center gap-2">
-                <input
-                  type="tel"
-                  value={phoneValue}
-                  onChange={(e) => setPhoneValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleSavePhone();
-                    if (e.key === 'Escape') setEditingPhone(false);
-                  }}
-                  autoFocus
-                  placeholder="(555) 123-4567"
-                  className="flex-1 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                />
-                <button className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" onClick={handleSavePhone} disabled={savingPhone} title="Save">
-                  {savingPhone ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check size={16} />}
-                </button>
-                <button className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg transition-colors" onClick={() => setEditingPhone(false)} title="Cancel">
-                  <X size={16} />
-                </button>
+            {/* Default phone */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400 w-16 shrink-0">Default:</span>
+              {editingPhone ? (
+                <div className="flex items-center gap-2 flex-1">
+                  <input
+                    type="tel"
+                    value={phoneValue}
+                    onChange={(e) => setPhoneValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSavePhone();
+                      if (e.key === 'Escape') setEditingPhone(false);
+                    }}
+                    autoFocus
+                    placeholder="(555) 123-4567"
+                    className="flex-1 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                  />
+                  <button className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" onClick={handleSavePhone} disabled={savingPhone} title="Save">
+                    {savingPhone ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check size={16} />}
+                  </button>
+                  <button className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg transition-colors" onClick={() => setEditingPhone(false)} title="Cancel">
+                    <X size={16} />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 cursor-pointer group" onClick={() => { setPhoneValue(user?.businessPhone || ''); setEditingPhone(true); }}>
+                  <p className="text-slate-900 font-semibold font-mono">{user?.businessPhone || 'Not set'}</p>
+                  <Pencil size={14} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
+                </div>
+              )}
+            </div>
+            {/* Per-business overrides */}
+            {accounts.length > 1 && accounts.map(acct => (
+              <div key={acct.id} className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 w-16 shrink-0 truncate" title={acct.businessName}>{acct.businessName.split(' ')[0]}:</span>
+                {editingOverrideId === acct.id ? (
+                  <div className="flex items-center gap-2 flex-1">
+                    <input
+                      type="tel"
+                      value={overrideValue}
+                      onChange={(e) => setOverrideValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveOverride(acct.id);
+                        if (e.key === 'Escape') setEditingOverrideId(null);
+                      }}
+                      autoFocus
+                      placeholder={user?.businessPhone || '(555) 123-4567'}
+                      className="flex-1 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                    />
+                    <button className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" onClick={() => handleSaveOverride(acct.id)} disabled={savingOverride} title="Save">
+                      {savingOverride ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check size={16} />}
+                    </button>
+                    <button className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg transition-colors" onClick={() => setEditingOverrideId(null)} title="Cancel">
+                      <X size={16} />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 cursor-pointer group" onClick={() => { setOverrideValue(acct.agentPhoneOverride || ''); setEditingOverrideId(acct.id); }}>
+                    <p className={`font-mono text-sm ${acct.agentPhoneOverride ? 'text-slate-900 font-semibold' : 'text-slate-400'}`}>
+                      {acct.agentPhoneOverride || 'Using default'}
+                    </p>
+                    <Pencil size={12} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="flex items-center gap-2 cursor-pointer group" onClick={() => { setPhoneValue(user?.businessPhone || ''); setEditingPhone(true); }}>
-                <p className="text-slate-900 font-semibold text-lg font-mono">{user?.businessPhone || 'Not set'}</p>
-                <Pencil size={14} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
-              </div>
-            )}
-            <p className="text-xs text-slate-400">Notifications and customer replies are forwarded to this number</p>
+            ))}
+            <p className="text-xs text-slate-400">Notifications and customer replies are forwarded to {accounts.length > 1 ? 'these numbers' : 'this number'}</p>
           </div>
           <div className="space-y-1">
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Time Zone</p>
