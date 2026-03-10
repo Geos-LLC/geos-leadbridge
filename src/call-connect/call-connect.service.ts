@@ -703,10 +703,9 @@ export class CallConnectService {
     // Pre-build the voicemail message the same way so Sigcore receives the final text.
     // Sigcore will use this per-session value (overriding the workspace template) so the
     // message already has customerName, phone, etc. substituted correctly.
-    const voicemailTemplate = settings.leadVoicemailMessage || '';
-    const leadVoicemailMessage = voicemailTemplate
-      ? pausePrefix + subst(voicemailTemplate)
-      : undefined;
+    const DEFAULT_VOICEMAIL = 'Hi {customerName}, this is {accountName}. We tried to reach you about your {category} request. Please call us back and we\'ll be happy to help!';
+    const voicemailTemplate = settings.leadVoicemailMessage || DEFAULT_VOICEMAIL;
+    const leadVoicemailMessage = pausePrefix + subst(voicemailTemplate);
 
     try {
       const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
@@ -724,7 +723,7 @@ export class CallConnectService {
             leadPhoneE164: params.customerPhone,
             leadSummary: summary,
             agentWhisperMessage,
-            ...(leadVoicemailMessage && { leadVoicemailMessage }),
+            leadVoicemailMessage,
             agentHint: settings.agentPhoneE164 || undefined,
             source: 'leadbridge',
           },
@@ -990,8 +989,9 @@ export class CallConnectService {
     const whisperTemplate = settings.agentWhisperMessage || 'You have a new lead for {category}. Customer name: {customerName}. Press any key to connect with the customer.';
     const agentWhisperMessage = subst(whisperTemplate);
 
-    const voicemailTemplate = settings.leadVoicemailMessage || '';
-    const leadVoicemailMessage = voicemailTemplate ? subst(voicemailTemplate) : undefined;
+    const DEFAULT_VOICEMAIL = 'Hi {customerName}, this is {accountName}. We tried to reach you about your {category} request. Please call us back and we\'ll be happy to help!';
+    const voicemailTemplate = settings.leadVoicemailMessage || DEFAULT_VOICEMAIL;
+    const leadVoicemailMessage = subst(voicemailTemplate);
 
     const startPayload = {
       businessId: sigcoreBusinessId,
@@ -999,7 +999,7 @@ export class CallConnectService {
       leadPhoneE164: testPhone,
       leadSummary,
       agentWhisperMessage,
-      ...(leadVoicemailMessage && { leadVoicemailMessage }),
+      leadVoicemailMessage,
       agentHint: settings.agentPhoneE164 || undefined,
       source: 'leadbridge',
     };
