@@ -465,14 +465,7 @@ export function DemoAutomationView() {
 
         {autoReplyEnabled && (
           <div className="space-y-6 pt-6 border-t border-slate-100">
-            <div className="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-100 rounded-2xl p-5">
-              <div className="flex items-center gap-3 mb-2">
-                <Sparkles className="w-5 h-5 text-purple-600" />
-                <h4 className="font-bold text-slate-900">AI Optimization</h4>
-                <span className="ml-auto bg-purple-100 text-purple-700 text-xs font-bold px-2 py-1 rounded-full">COMING SOON</span>
-              </div>
-              <p className="text-sm text-slate-600">LeadBridge AI will analyze your leads and customize replies to increase response rates.</p>
-            </div>
+            {/* AI Optimization — disabled */}
 
             <div>
               <label className="block text-sm font-bold text-slate-900 mb-2">First Message Template</label>

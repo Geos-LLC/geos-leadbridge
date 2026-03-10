@@ -2027,8 +2027,8 @@ export function Services() {
             </div>
           </div>
 
-          {/* 5. AI Optimization — BYO Phone Connection + AI Suggestions */}
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+          {/* 5. AI Optimization — disabled */}
+          <div className="hidden bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
             <div
               className="p-6 flex items-center justify-between cursor-pointer hover:bg-slate-50/50 transition-colors"
               onClick={() => setExpandedCard(expandedCard === 'ai-optimization' ? null : 'ai-optimization')}
