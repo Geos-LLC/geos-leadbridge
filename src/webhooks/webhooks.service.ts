@@ -1026,6 +1026,8 @@ export class WebhooksService {
       const toNumber = data?.toNumber || data?.to;
       const body = data?.body || data?.text || data?.content || '';
       const messageId = data?.id || data?.messageId;
+      const conversationMetadata: Record<string, unknown> = data?.conversationMetadata || {};
+      const conversationPurpose = conversationMetadata?.purpose as string | undefined;
 
       if (!fromNumber || !body) {
         this.logger.warn('Inbound SMS missing fromNumber or body');
@@ -1143,9 +1145,12 @@ export class WebhooksService {
               `[handleInboundSms] No-lead forward check: isOwner=${isOwner}, normTo=${normTo}, normDedicated=${normDedicated}, normByo=${normByo}`,
             );
 
-            if (isOwner) {
+            const noFwdPurposes = new Set(['sms_forwarding', 'agent_notification', 'agent_guidance', 'icc_forward']);
+            if (isOwner && (!conversationPurpose || !noFwdPurposes.has(conversationPurpose))) {
               this.logger.log(`[handleInboundSms] Forwarding no-lead inbound from ${fromNumber} for account ${accountId}`);
               await this.notificationsService.forwardInboundSms(accountId, fromNumber, fromNumber, body);
+            } else if (isOwner) {
+              this.logger.log(`[handleInboundSms] Skipping no-lead forward for purpose=${conversationPurpose}`);
             } else {
               this.logger.log(
                 `[handleInboundSms] Skipping forward for account ${accountId}: ` +
@@ -1239,16 +1244,28 @@ export class WebhooksService {
         this.logger.warn(`Failed to handle customer reply rules: ${err.message}`);
       }
 
-      // Forward SMS to tenant's forwarding number if configured
-      try {
-        const fwdAccount = await this.prisma.savedAccount.findFirst({
-          where: { userId: lead.userId, businessId: lead.businessId || undefined },
-        });
-        if (fwdAccount) {
-          await this.notificationsService.forwardInboundSms(fwdAccount.id, lead.customerName, fromNumber, body);
+      // Forward SMS to tenant's forwarding number if configured.
+      // Skip forwarding for purposes that indicate this is NOT a customer-originating message:
+      // - 'sms_forwarding': we already forwarded to agent, this is the agent's reply back — don't re-forward
+      // - 'agent_notification': reply to a notification SMS — just store it, no forward needed
+      // - 'agent_guidance': system guidance message — no forward needed
+      // - 'icc_forward': reply to ICC-forwarded message — handled separately by ICC flow
+      const noForwardPurposes = new Set(['sms_forwarding', 'agent_notification', 'agent_guidance', 'icc_forward']);
+      if (conversationPurpose && noForwardPurposes.has(conversationPurpose)) {
+        this.logger.log(
+          `[handleInboundSms] Skipping forward for purpose=${conversationPurpose} (lead=${lead.id})`,
+        );
+      } else {
+        try {
+          const fwdAccount = await this.prisma.savedAccount.findFirst({
+            where: { userId: lead.userId, businessId: lead.businessId || undefined },
+          });
+          if (fwdAccount) {
+            await this.notificationsService.forwardInboundSms(fwdAccount.id, lead.customerName, fromNumber, body);
+          }
+        } catch (err: any) {
+          this.logger.warn(`SMS forwarding failed: ${err.message}`);
         }
-      } catch (err: any) {
-        this.logger.warn(`SMS forwarding failed: ${err.message}`);
       }
 
       // Emit SSE event for real-time UI update

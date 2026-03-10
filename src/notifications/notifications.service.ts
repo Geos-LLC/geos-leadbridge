@@ -1183,6 +1183,7 @@ export class NotificationsService {
         apiKey,
         sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
         metadata: {
+          purpose: 'agent_notification',
           tenantId: savedAccountId,
           leadId,
           ruleId,
@@ -2585,6 +2586,12 @@ export class NotificationsService {
     // If a specific phone number is selected, include it (must be valid E.164 phone number)
     if (params.fromPhone && params.fromPhone.length > 5 && params.fromPhone.match(/^\+?\d{10,}/)) {
       requestBody.fromNumber = params.fromPhone;
+    }
+
+    // Tag the message with purpose metadata so Sigcore stores it on the conversation.
+    // On inbound replies, Sigcore returns conversationMetadata.purpose so we can route correctly.
+    if (params.metadata && Object.keys(params.metadata).length > 0) {
+      requestBody.metadata = params.metadata;
     }
 
     const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
