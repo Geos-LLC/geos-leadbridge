@@ -429,7 +429,7 @@ export function Services() {
       setCtOwnPhoneNumbers([]);
 
       // Seed CC default templates for every user on first page visit
-      const DEFAULT_CC_WHISPER = 'Hi {customerName}, you have a new lead for {category}. Press any key to connect with the customer.';
+      const DEFAULT_CC_WHISPER = 'You have a new lead for {category}. Customer name: {customerName}. Press any key to connect with the customer.';
       const DEFAULT_CC_GREETING = 'Hi {customerName}! Thanks for your inquiry about {category}. We\'re connecting you with a specialist right now. Please hold for just a moment.';
       const DEFAULT_CC_VOICEMAIL = 'Hi {customerName}, this is {accountName}. We tried to reach you about your {category} request. Please call us back and we\'ll be happy to help!';
       const DEFAULT_CT_AUTO_REPLY = 'Hi {customerName}, this is {accountName}. We just received your request for {category}. When would be a good time to call you?';
