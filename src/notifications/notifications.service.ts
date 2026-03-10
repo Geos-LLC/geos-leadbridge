@@ -988,14 +988,14 @@ export class NotificationsService {
       return;
     }
 
-    // Resolve fromPhone from dedicated number only
+    // Resolve fromPhone: dedicated number first, then fall back to sigcoreFromPhone (BYO/OpenPhone)
     let fromPhone: string | null = null;
     if (settings.savedAccount?.userId) {
       const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
         where: { userId: settings.savedAccount.userId, savedAccountId, status: 'ACTIVE' },
         orderBy: { purchasedAt: 'desc' },
       });
-      if (tenantPhone) fromPhone = tenantPhone.phoneNumber;
+      fromPhone = tenantPhone?.phoneNumber ?? settings.sigcoreFromPhone ?? null;
     }
     const forwardBody = customerName && customerName !== fromNumber
       ? `SMS from ${customerName} (${fromNumber}):\n${body}`
@@ -1119,12 +1119,12 @@ export class NotificationsService {
       ? (lead?.customerPhone || null)
       : agentPhone;
 
-    // Resolve fromPhone from dedicated number only
+    // Resolve fromPhone: dedicated number first, then fall back to sigcoreFromPhone (BYO/OpenPhone)
     const tenantPhoneRec = await this.prisma.tenantPhoneNumber.findFirst({
       where: { userId, savedAccountId, status: 'ACTIVE' },
       orderBy: { purchasedAt: 'desc' },
     });
-    const fromPhone = tenantPhoneRec?.phoneNumber ?? null;
+    const fromPhone = tenantPhoneRec?.phoneNumber ?? settings.sigcoreFromPhone ?? null;
 
     const template = rule?.messageTemplate?.content || rule?.template || settings.template;
     const ruleName = rule?.name || 'Legacy Alert';
