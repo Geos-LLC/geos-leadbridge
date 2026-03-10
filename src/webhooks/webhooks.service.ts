@@ -1050,24 +1050,6 @@ export class WebhooksService {
       // Normalize phone for matching (last 10 digits)
       const normalizedFrom = fromNumber.replace(/\D/g, '').slice(-10);
 
-      // Loop guard: if the sender is one of our own dedicated bot numbers, this is a
-      // forwarded/automated message arriving at the agent's phone — not a real customer.
-      // Processing it would create an infinite forward loop. Drop it immediately.
-      const senderIsBotNumber = await this.prisma.tenantPhoneNumber.findFirst({
-        where: { phoneNumber: { endsWith: normalizedFrom }, status: 'ACTIVE' },
-        select: { id: true },
-      });
-      if (senderIsBotNumber) {
-        this.logger.log(
-          `[handleInboundSms] fromNumber=${fromNumber} is a TenantPhoneNumber — dropping to prevent forward loop`,
-        );
-        await this.prisma.webhookEvent.update({
-          where: { id: event.id },
-          data: { processed: true, processedAt: new Date(), processingError: 'Loop guard: sender is a bot/dedicated number' },
-        });
-        return;
-      }
-
       // Detect agent replying to the bot number — send a helpful guidance SMS
       if (accountId) {
         const nsSettings = await this.prisma.notificationSettings.findUnique({
