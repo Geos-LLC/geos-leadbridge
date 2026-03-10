@@ -1145,8 +1145,13 @@ export class WebhooksService {
               `[handleInboundSms] No-lead forward check: isOwner=${isOwner}, normTo=${normTo}, normDedicated=${normDedicated}, normByo=${normByo}`,
             );
 
+            // Don't forward if the customer texted the BYO/OpenPhone number directly —
+            // the agent already receives those natively; forwarding creates duplicates from the bot number.
+            const toIsByoNumber = normTo && normByo && normTo === normByo;
             const noFwdPurposes = new Set(['sms_forwarding', 'agent_notification', 'agent_guidance', 'icc_forward']);
-            if (isOwner && (!conversationPurpose || !noFwdPurposes.has(conversationPurpose))) {
+            if (isOwner && toIsByoNumber) {
+              this.logger.log(`[handleInboundSms] Skipping no-lead forward — customer texted BYO number directly for account ${accountId}`);
+            } else if (isOwner && (!conversationPurpose || !noFwdPurposes.has(conversationPurpose))) {
               this.logger.log(`[handleInboundSms] Forwarding no-lead inbound from ${fromNumber} for account ${accountId}`);
               await this.notificationsService.forwardInboundSms(accountId, fromNumber, fromNumber, body);
             } else if (isOwner) {
@@ -1245,11 +1250,11 @@ export class WebhooksService {
       }
 
       // Forward SMS to tenant's forwarding number if configured.
-      // Skip forwarding for purposes that indicate this is NOT a customer-originating message:
-      // - 'sms_forwarding': we already forwarded to agent, this is the agent's reply back — don't re-forward
-      // - 'agent_notification': reply to a notification SMS — just store it, no forward needed
-      // - 'agent_guidance': system guidance message — no forward needed
-      // - 'icc_forward': reply to ICC-forwarded message — handled separately by ICC flow
+      // Skip forwarding when:
+      // - Purpose indicates this is NOT a customer-originating message (sms_forwarding, agent_notification, etc.)
+      // - The customer texted the BYO/OpenPhone number directly — the agent already received it natively,
+      //   forwarding would send a duplicate "SMS from ..." message from the bot number.
+      //   Only forward when the customer texted a dedicated bot number (which the agent never monitors directly).
       const noForwardPurposes = new Set(['sms_forwarding', 'agent_notification', 'agent_guidance', 'icc_forward']);
       if (conversationPurpose && noForwardPurposes.has(conversationPurpose)) {
         this.logger.log(
@@ -1261,7 +1266,23 @@ export class WebhooksService {
             where: { userId: lead.userId, businessId: lead.businessId || undefined },
           });
           if (fwdAccount) {
-            await this.notificationsService.forwardInboundSms(fwdAccount.id, lead.customerName, fromNumber, body);
+            // Check if the customer texted the BYO/OpenPhone number directly.
+            // If so, the agent already received the message — skip forwarding to avoid duplicates.
+            const fwdSettings = await this.prisma.notificationSettings.findUnique({
+              where: { savedAccountId: fwdAccount.id },
+              select: { sigcoreFromPhone: true, sigcoreProvider: true },
+            });
+            const normToNumber = toNumber?.replace(/\D/g, '').slice(-10);
+            const normByoPhone = fwdSettings?.sigcoreFromPhone?.replace(/\D/g, '').slice(-10);
+            const toIsByoNumber = normToNumber && normByoPhone && normToNumber === normByoPhone;
+
+            if (toIsByoNumber) {
+              this.logger.log(
+                `[handleInboundSms] Skipping forward — customer texted BYO/OpenPhone number directly (lead=${lead.id})`,
+              );
+            } else {
+              await this.notificationsService.forwardInboundSms(fwdAccount.id, lead.customerName, fromNumber, body);
+            }
           }
         } catch (err: any) {
           this.logger.warn(`SMS forwarding failed: ${err.message}`);
