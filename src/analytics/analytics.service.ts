@@ -211,13 +211,13 @@ export class AnalyticsService {
           DATE_TRUNC('${period}', ld.lead_date AT TIME ZONE 'UTC') AS bucket,
           AVG(
             CASE WHEN ld."rawJson" IS NOT NULL AND ld."rawJson" != ''
-              THEN LTRIM(ld."rawJson"::jsonb->>'leadPrice', '$')::numeric
+              THEN NULLIF(LTRIM(ld."rawJson"::jsonb->>'leadPrice', '$'), '')::numeric
               ELSE NULL
             END
           ) AS avg_budget,
           SUM(
             CASE WHEN ld."rawJson" IS NOT NULL AND ld."rawJson" != ''
-              THEN LTRIM(ld."rawJson"::jsonb->>'leadPrice', '$')::numeric
+              THEN NULLIF(LTRIM(ld."rawJson"::jsonb->>'leadPrice', '$'), '')::numeric
               ELSE NULL
             END
           ) AS total_budget
