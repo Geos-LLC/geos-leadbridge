@@ -387,6 +387,14 @@ export class AdminPhonePoolService {
       });
     }
 
+    // Enforce 1-number-1-tenant: reject if phone is already assigned to another user
+    const otherAssignment = await this.prisma.phonePoolAssignment.findFirst({
+      where: { phonePoolId },
+    });
+    if (otherAssignment) {
+      throw new BadRequestException('This number is already assigned to another tenant. Each number can only belong to one tenant.');
+    }
+
     // Create assignment and mark phone as ASSIGNED
     await this.prisma.phonePoolAssignment.create({
       data: { phonePoolId, userId },
@@ -413,57 +421,11 @@ export class AdminPhonePoolService {
   }
 
   /**
-   * Assign a pool phone to ALL users at once
+   * @deprecated Numbers are now exclusive per tenant (1-number-1-tenant).
+   * Use assignToUser instead.
    */
-  async assignToAllUsers(adminId: string, phonePoolId: string) {
-    const phone = await this.prisma.phonePool.findUnique({ where: { id: phonePoolId } });
-    if (!phone) throw new NotFoundException('Pool phone not found');
-    if (phone.status === 'RELEASED') {
-      throw new BadRequestException('Phone has been released from pool');
-    }
-
-    // Get all users
-    const allUsers = await this.prisma.user.findMany({
-      select: { id: true, email: true },
-    });
-
-    // Get existing assignments for this phone
-    const existingAssignments = await this.prisma.phonePoolAssignment.findMany({
-      where: { phonePoolId },
-      select: { userId: true },
-    });
-    const assignedUserIds = new Set(existingAssignments.map(a => a.userId));
-
-    // Create assignments for users that don't already have one
-    const newAssignments = allUsers
-      .filter(u => !assignedUserIds.has(u.id))
-      .map(u => ({ phonePoolId, userId: u.id }));
-
-    if (newAssignments.length > 0) {
-      await this.prisma.phonePoolAssignment.createMany({ data: newAssignments });
-    }
-
-    // Mark as ASSIGNED and return with all assignments
-    const updated = await this.prisma.phonePool.update({
-      where: { id: phonePoolId },
-      data: { status: 'ASSIGNED' },
-      include: {
-        assignments: {
-          include: { user: { select: { id: true, email: true, name: true } } },
-          orderBy: { assignedAt: 'desc' },
-        },
-      },
-    });
-
-    await this.adminService.logAdminAction(adminId, 'ASSIGN_POOL_PHONE_ALL', null, {
-      phoneNumber: phone.phoneNumber,
-      phonePoolId,
-      newAssignments: newAssignments.length,
-      totalUsers: allUsers.length,
-    });
-
-    this.logger.log(`Assigned pool phone ${phone.phoneNumber} to all ${newAssignments.length} users`);
-    return updated;
+  async assignToAllUsers(_adminId: string, _phonePoolId: string) {
+    throw new BadRequestException('Assigning a number to all tenants is no longer supported. Each number can only belong to one tenant.');
   }
 
   /**
@@ -529,43 +491,43 @@ export class AdminPhonePoolService {
   }
 
   /**
-   * Auto-assign a phone from the pool to a user (round-robin with area code preference)
-   * Phone stays AVAILABLE since it can be shared across tenants.
+   * Auto-assign an unassigned phone from the pool to a user (1-number-1-tenant).
+   * Only picks phones with zero existing assignments.
    */
   async autoAssign(userId: string, preferredAreaCode?: string): Promise<any | null> {
-    // Find an available phone (prefer fewest assignments for round-robin)
+    // Find an unassigned phone (no existing assignments — enforces 1-number-1-tenant)
+    const unassignedWhere = {
+      status: 'AVAILABLE' as const,
+      assignments: { none: {} },
+    };
+
     let phone = null;
     if (preferredAreaCode) {
       phone = await this.prisma.phonePool.findFirst({
-        where: { status: 'AVAILABLE', areaCode: preferredAreaCode },
+        where: { ...unassignedWhere, areaCode: preferredAreaCode },
         orderBy: { provisionedAt: 'asc' },
       });
     }
 
     if (!phone) {
       phone = await this.prisma.phonePool.findFirst({
-        where: { status: 'AVAILABLE' },
+        where: unassignedWhere,
         orderBy: { provisionedAt: 'asc' },
       });
     }
 
     if (!phone) {
-      this.logger.log(`No available pool phones for user ${userId}`);
+      this.logger.log(`No unassigned pool phones for user ${userId}`);
       return null;
     }
 
-    // Idempotent: skip if already assigned to this user
-    const existing = await this.prisma.phonePoolAssignment.findUnique({
-      where: { phonePoolId_userId: { phonePoolId: phone.id, userId } },
-    });
-    if (existing) {
-      this.logger.log(`Pool phone ${phone.phoneNumber} already assigned to user ${userId} — skipping`);
-      return phone;
-    }
-
-    // Create assignment (phone stays AVAILABLE)
+    // Create assignment and mark as ASSIGNED
     await this.prisma.phonePoolAssignment.create({
       data: { phonePoolId: phone.id, userId },
+    });
+    await this.prisma.phonePool.update({
+      where: { id: phone.id },
+      data: { status: 'ASSIGNED' },
     });
 
     this.logger.log(`Auto-assigned pool phone ${phone.phoneNumber} to user ${userId}`);
