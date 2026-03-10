@@ -2,7 +2,7 @@ name: Deploy LeadBridge
 
 on:
   push:
-    branches: [main, staging]
+    branches: [staging]
   workflow_dispatch:
 
 env:
