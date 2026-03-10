@@ -243,3 +243,24 @@ variable "emailjs_private_key" {
   sensitive   = true
   default     = ""
 }
+
+# --- Loghub (Grafana log forwarding) ---
+
+variable "loghub_url" {
+  description = "Loghub ingest service URL"
+  type        = string
+  default     = "https://geosloghub-production.up.railway.app"
+}
+
+variable "loghub_source" {
+  description = "Loghub source identifier for this app"
+  type        = string
+  default     = "leadbridge"
+}
+
+variable "loghub_key" {
+  description = "Loghub API key for the leadbridge source"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
