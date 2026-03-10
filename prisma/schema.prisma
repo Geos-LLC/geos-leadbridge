@@ -302,6 +302,7 @@ model MessageTemplate {
   automationRules   AutomationRule[]
   notificationRules NotificationRule[]
 
+  @@unique([userId, name])
   @@index([userId])
   @@map("message_templates")
 }
