@@ -441,7 +441,7 @@ export class NotificationsService {
 
     // Resolve fromPhone from dedicated number only
     const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
-      where: { userId, status: 'ACTIVE' },
+      where: { userId, savedAccountId, status: 'ACTIVE' },
       orderBy: { purchasedAt: 'desc' },
     });
     const fromPhone = tenantPhone?.phoneNumber ?? null;
@@ -992,7 +992,7 @@ export class NotificationsService {
     let fromPhone: string | null = null;
     if (settings.savedAccount?.userId) {
       const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
-        where: { userId: settings.savedAccount.userId, status: 'ACTIVE' },
+        where: { userId: settings.savedAccount.userId, savedAccountId, status: 'ACTIVE' },
         orderBy: { purchasedAt: 'desc' },
       });
       if (tenantPhone) fromPhone = tenantPhone.phoneNumber;
@@ -1121,7 +1121,7 @@ export class NotificationsService {
 
     // Resolve fromPhone from dedicated number only
     const tenantPhoneRec = await this.prisma.tenantPhoneNumber.findFirst({
-      where: { userId, status: 'ACTIVE' },
+      where: { userId, savedAccountId, status: 'ACTIVE' },
       orderBy: { purchasedAt: 'desc' },
     });
     const fromPhone = tenantPhoneRec?.phoneNumber ?? null;
@@ -1322,7 +1322,7 @@ export class NotificationsService {
     const toPhone = toPhoneOverride || agentPhone;
     // Resolve fromPhone from dedicated number only
     const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
-      where: { userId, status: 'ACTIVE' },
+      where: { userId, savedAccountId, status: 'ACTIVE' },
       orderBy: { purchasedAt: 'desc' },
     });
     const fromPhone = tenantPhone?.phoneNumber ?? null;

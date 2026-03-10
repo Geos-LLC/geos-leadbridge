@@ -135,7 +135,7 @@ export class CallConnectService {
       });
       if (acctUser) {
         const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
-          where: { userId: acctUser.userId, status: 'ACTIVE' },
+          where: { userId: acctUser.userId, savedAccountId: savedAccountId, status: 'ACTIVE' },
           orderBy: { purchasedAt: 'desc' },
           select: { phoneNumber: true },
         });

@@ -1123,7 +1123,7 @@ export class WebhooksService {
               select: { userId: true },
             });
             const dedicatedPhone = acctUser ? await this.prisma.tenantPhoneNumber.findFirst({
-              where: { userId: acctUser.userId, status: 'ACTIVE' },
+              where: { userId: acctUser.userId, savedAccountId: accountId, status: 'ACTIVE' },
               select: { phoneNumber: true },
             }) : null;
             const acctSettings = await this.prisma.notificationSettings.findUnique({
