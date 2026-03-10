@@ -364,6 +364,8 @@ export class CallConnectService {
     const vmRaw = settings.leadVoicemailMessage ?? null;
 
     const payload = {
+      // savedAccountId is the per-account key that isolates settings within a shared Sigcore workspace
+      businessId: savedAccountId,
       enabled: settings.enabled,
       mode: settings.mode,
       botNumberE164: settings.botNumberE164,
@@ -389,7 +391,7 @@ export class CallConnectService {
     const headers = this.buildHeaders(apiKey);
 
     this.logger.log(
-      `[pushSettings] POST ${settingsUrl} | agentAcceptDigits=${payload.agentAcceptDigits} | mode=${payload.mode} | bot=${payload.botNumberE164} | agent=${payload.agentPhoneE164}`,
+      `[pushSettings] POST ${settingsUrl} | businessId=${savedAccountId} | agentAcceptDigits=${payload.agentAcceptDigits} | mode=${payload.mode} | bot=${payload.botNumberE164} | agent=${payload.agentPhoneE164}`,
     );
 
     const pushResp = await firstValueFrom(
@@ -400,10 +402,10 @@ export class CallConnectService {
       `[pushSettings] Sigcore responded ${pushResp.status} — agentAcceptDigits in response: ${pushResp.data?.agentAcceptDigits ?? 'N/A'}`,
     );
 
-    // Verify with a GET — catch mismatches early
+    // Verify with a GET (include businessId so we retrieve the per-account row)
     try {
       const getResp = await firstValueFrom(
-        this.httpService.get(settingsUrl, { headers, timeout: 15_000 }),
+        this.httpService.get(`${settingsUrl}?businessId=${encodeURIComponent(savedAccountId)}`, { headers, timeout: 15_000 }),
       );
       const saved = getResp.data;
       if (saved?.agentAcceptDigits !== payload.agentAcceptDigits) {
@@ -718,13 +720,16 @@ export class CallConnectService {
         this.httpService.post(
           url,
           {
-            businessId: sigcoreBusinessId,
+            // savedAccountId isolates this account's settings row in the shared Sigcore workspace
+            businessId: params.savedAccountId,
             leadId: params.leadId,
             leadPhoneE164: params.customerPhone,
             leadSummary: summary,
             agentWhisperMessage,
             leadVoicemailMessage,
             agentHint: settings.agentPhoneE164 || undefined,
+            // fromNumberHint tells Sigcore which per-account settings row to use
+            fromNumberHint: settings.botNumberE164 || undefined,
             source: 'leadbridge',
           },
           { headers: this.buildHeaders(sigcoreApiKey) },
@@ -994,13 +999,16 @@ export class CallConnectService {
     const leadVoicemailMessage = subst(voicemailTemplate);
 
     const startPayload = {
-      businessId: sigcoreBusinessId,
+      // savedAccountId isolates this account's settings row in the shared Sigcore workspace
+      businessId: savedAccountId,
       leadId: `test-${Date.now()}`,
       leadPhoneE164: testPhone,
       leadSummary,
       agentWhisperMessage,
       leadVoicemailMessage,
       agentHint: settings.agentPhoneE164 || undefined,
+      // fromNumberHint tells Sigcore which per-account settings row to use
+      fromNumberHint: settings.botNumberE164 || undefined,
       source: 'leadbridge',
     };
 
