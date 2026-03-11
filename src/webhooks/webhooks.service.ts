@@ -1117,15 +1117,29 @@ export class WebhooksService {
         // configured fromPhone doesn't match the inbound toNumber (ghost events).
         if (accountId) {
           try {
-            // Check if toNumber matches any phone the account owns (dedicated or BYO/OpenPhone)
+            // Check if toNumber matches any phone the user owns (dedicated, shared, or BYO)
+            // With shared bot numbers, one TenantPhoneNumber may serve multiple accounts.
             const acctUser = await this.prisma.savedAccount.findUnique({
               where: { id: accountId },
               select: { userId: true },
             });
-            const dedicatedPhone = acctUser ? await this.prisma.tenantPhoneNumber.findFirst({
+            // Check account-scoped → null-scoped → any user phone (same as resolveBotPhone)
+            let dedicatedPhone = acctUser ? await this.prisma.tenantPhoneNumber.findFirst({
               where: { userId: acctUser.userId, savedAccountId: accountId, status: 'ACTIVE' },
               select: { phoneNumber: true },
             }) : null;
+            if (!dedicatedPhone && acctUser) {
+              dedicatedPhone = await this.prisma.tenantPhoneNumber.findFirst({
+                where: { userId: acctUser.userId, savedAccountId: null, status: 'ACTIVE' },
+                select: { phoneNumber: true },
+              });
+            }
+            if (!dedicatedPhone && acctUser) {
+              dedicatedPhone = await this.prisma.tenantPhoneNumber.findFirst({
+                where: { userId: acctUser.userId, status: 'ACTIVE' },
+                select: { phoneNumber: true },
+              });
+            }
             const acctSettings = await this.prisma.notificationSettings.findUnique({
               where: { savedAccountId: accountId },
               select: { sigcoreFromPhone: true },
@@ -1135,8 +1149,7 @@ export class WebhooksService {
             const normDedicated = dedicatedPhone?.phoneNumber?.replace(/\D/g, '').slice(-10);
             const normByo = acctSettings?.sigcoreFromPhone?.replace(/\D/g, '').slice(-10);
 
-            // Forward only if toNumber matches a phone this account owns
-            // Accounts with no phone at all should NOT process other accounts' inbound SMS
+            // Forward only if toNumber matches a phone this account/user owns
             const isOwner = normTo
               ? (normDedicated === normTo || normByo === normTo)
               : false;
