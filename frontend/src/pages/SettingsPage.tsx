@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info, Eye, EyeOff, DollarSign, Clock, ArrowUpRight, List, Trash2, AlertTriangle } from 'lucide-react';
-import { authApi, billingApi, thumbtackApi, leadsApi, usersApi, integrationsApi, platformsApi } from '../services/api';
+import { authApi, billingApi, thumbtackApi, leadsApi, usersApi, integrationsApi, platformsApi, notificationsApi } from '../services/api';
+import type { TenantPhoneNumber } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -80,6 +81,9 @@ export default function SettingsPage() {
   const [importError, setImportError] = useState('');
   const [reimporting, setReimporting] = useState(false);
   const [reimportResult, setReimportResult] = useState<string | null>(null);
+
+  // Tenant phone numbers (bot numbers)
+  const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
   const [missingCount, setMissingCount] = useState<number | null>(null);
   const [needsScrapeCount, setNeedsScrapeCount] = useState<number | null>(null);
 
@@ -207,14 +211,16 @@ export default function SettingsPage() {
   const loadData = async (forceDiagnostics = false) => {
     try {
       if (!_settingsCache) setLoading(true);
-      const [subResult, acctResult, profileResult] = await Promise.all([
+      const [subResult, acctResult, profileResult, phonesResult] = await Promise.all([
         billingApi.getSubscription().catch(() => null),
         thumbtackApi.getSavedAccounts().catch(() => ({ accounts: [] as SavedAccount[], count: 0 })),
         impersonatingUser ? authApi.getProfile().catch(() => null) : Promise.resolve(null),
+        notificationsApi.listTenantPhones().catch(() => ({ success: false, data: [] as TenantPhoneNumber[] })),
       ]);
       if (profileResult) setProfileUser(profileResult);
       setSubscription(subResult);
       setAccounts(acctResult.accounts);
+      setTenantPhones((phonesResult.data || []).filter((p: TenantPhoneNumber) => p.status === 'ACTIVE'));
       setSavedAccounts(acctResult.accounts); // Update app store
       _settingsCache = { subscription: subResult, accounts: acctResult.accounts };
 
@@ -612,41 +618,6 @@ export default function SettingsPage() {
                 </div>
               )}
             </div>
-            {/* Per-business overrides */}
-            {accounts.length > 1 && accounts.map(acct => (
-              <div key={acct.id} className="flex items-center gap-2">
-                <span className="text-xs text-slate-400 w-16 shrink-0 truncate" title={acct.businessName}>{acct.businessName.split(' ')[0]}:</span>
-                {editingOverrideId === acct.id ? (
-                  <div className="flex items-center gap-2 flex-1">
-                    <input
-                      type="tel"
-                      value={overrideValue}
-                      onChange={(e) => setOverrideValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleSaveOverride(acct.id);
-                        if (e.key === 'Escape') setEditingOverrideId(null);
-                      }}
-                      autoFocus
-                      placeholder={user?.businessPhone || '(555) 123-4567'}
-                      className="flex-1 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                    />
-                    <button className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" onClick={() => handleSaveOverride(acct.id)} disabled={savingOverride} title="Save">
-                      {savingOverride ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check size={16} />}
-                    </button>
-                    <button className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg transition-colors" onClick={() => setEditingOverrideId(null)} title="Cancel">
-                      <X size={16} />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 cursor-pointer group" onClick={() => { setOverrideValue(acct.agentPhoneOverride || ''); setEditingOverrideId(acct.id); }}>
-                    <p className={`font-mono text-sm ${acct.agentPhoneOverride ? 'text-slate-900 font-semibold' : 'text-slate-400'}`}>
-                      {acct.agentPhoneOverride || 'Using default'}
-                    </p>
-                    <Pencil size={12} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
-                  </div>
-                )}
-              </div>
-            ))}
             <p className="text-xs text-slate-400">Notifications and customer replies are forwarded to {accounts.length > 1 ? 'these numbers' : 'this number'}</p>
           </div>
           <div className="space-y-1">
@@ -654,6 +625,75 @@ export default function SettingsPage() {
             <p className="text-slate-900 font-semibold text-lg">{timeZone}</p>
           </div>
           </div>
+
+          {/* Per-business phone details */}
+          {accounts.length > 0 && (
+            <div className="mt-6 pt-6 border-t border-slate-100">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Phone Numbers Per Business</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-slate-400 uppercase tracking-wider">
+                      <th className="pb-2 pr-4 font-semibold">Business Name</th>
+                      <th className="pb-2 pr-4 font-semibold">Agent Phone</th>
+                      <th className="pb-2 font-semibold">Bot Number</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {accounts.map(acct => {
+                      const botPhone = tenantPhones.find(p => p.savedAccountId === acct.id)
+                        || tenantPhones.find(p => !p.savedAccountId);
+                      const agentPhone = acct.agentPhoneOverride || user?.businessPhone || null;
+                      return (
+                        <tr key={acct.id}>
+                          <td className="py-2 pr-4 font-semibold text-slate-900">{acct.businessName}</td>
+                          <td className="py-2 pr-4">
+                            {editingOverrideId === acct.id ? (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="tel"
+                                  value={overrideValue}
+                                  onChange={(e) => setOverrideValue(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleSaveOverride(acct.id);
+                                    if (e.key === 'Escape') setEditingOverrideId(null);
+                                  }}
+                                  autoFocus
+                                  placeholder={user?.businessPhone || '(555) 123-4567'}
+                                  className="w-40 px-2 py-1 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                                />
+                                <button className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg" onClick={() => handleSaveOverride(acct.id)} disabled={savingOverride} title="Save">
+                                  {savingOverride ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check size={14} />}
+                                </button>
+                                <button className="p-1 text-slate-400 hover:bg-slate-50 rounded-lg" onClick={() => setEditingOverrideId(null)} title="Cancel">
+                                  <X size={14} />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5 cursor-pointer group" onClick={() => { setOverrideValue(acct.agentPhoneOverride || ''); setEditingOverrideId(acct.id); }}>
+                                <span className={`font-mono ${acct.agentPhoneOverride ? 'text-slate-900 font-semibold' : 'text-slate-400'}`}>
+                                  {agentPhone || 'Not set'}
+                                </span>
+                                {!acct.agentPhoneOverride && agentPhone && <span className="text-[10px] text-slate-300">(default)</span>}
+                                <Pencil size={12} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-2">
+                            {botPhone ? (
+                              <span className="font-mono text-slate-900 font-semibold">{botPhone.phoneNumber}</span>
+                            ) : (
+                              <span className="text-slate-400 text-xs">No bot number</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Change Password */}
           <div className="mt-8 pt-8 border-t border-slate-100">
