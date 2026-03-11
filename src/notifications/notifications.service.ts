@@ -1011,6 +1011,10 @@ export class NotificationsService {
       }
       fromPhone = tenantPhone?.phoneNumber ?? null;
     }
+    if (!fromPhone) {
+      this.logger.warn(`[forwardInboundSms] No dedicated number for account ${savedAccountId} — cannot forward SMS`);
+      return;
+    }
     const forwardBody = customerName && customerName !== fromNumber
       ? `SMS from ${customerName} (${fromNumber}):\n${body}`
       : `SMS from ${fromNumber}:\n${body}`;
@@ -1154,6 +1158,10 @@ export class NotificationsService {
     // Validate phone numbers
     if (!toPhone) {
       this.logger.warn(`No destination phone for rule ${ruleName}`);
+      return;
+    }
+    if (!fromPhone) {
+      this.logger.error(`[sendNotificationWithRule] No dedicated number for account ${savedAccountId} — cannot send rule ${ruleName}`);
       return;
     }
     if (fromPhone && toPhone) {
@@ -2059,6 +2067,34 @@ export class NotificationsService {
         `[ensureSigcoreTenantProvisioned] Cleared fromPhone/webhooks for account ${savedAccountId} — ` +
         `dedicated number will be auto-resolved from TenantPhoneNumber on new tenant ${data.tenantId}`,
       );
+
+      // Reallocate any existing TenantPhoneNumbers in Sigcore to the new tenant.
+      // Without this, the phone numbers are still assigned to the old Sigcore tenant
+      // and Sigcore can't send from them on the new tenant.
+      const phonesToReallocate = await this.prisma.tenantPhoneNumber.findMany({
+        where: { userId, status: 'ACTIVE', OR: [{ savedAccountId }, { savedAccountId: null }] },
+        select: { phoneNumber: true },
+      });
+      for (const ph of phonesToReallocate) {
+        try {
+          const sigcoreBase = sigcoreUrl.replace(/\/api\/?$/, '');
+          const reallocResp = await fetch(
+            `${sigcoreBase}/api/tenants/phone-numbers/${encodeURIComponent(ph.phoneNumber)}/reallocate`,
+            {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', 'x-api-key': platformKey },
+              body: JSON.stringify({ tenantId: data.tenantId }),
+            },
+          );
+          if (reallocResp.ok) {
+            this.logger.log(`[ensureSigcoreTenantProvisioned] Reallocated ${ph.phoneNumber} to tenant ${data.tenantId}`);
+          } else {
+            this.logger.warn(`[ensureSigcoreTenantProvisioned] Failed to reallocate ${ph.phoneNumber}: ${reallocResp.status}`);
+          }
+        } catch (err: any) {
+          this.logger.warn(`[ensureSigcoreTenantProvisioned] Could not reallocate ${ph.phoneNumber}: ${err.message}`);
+        }
+      }
     }
 
     // Register inbound SMS webhook on the new/existing tenant
