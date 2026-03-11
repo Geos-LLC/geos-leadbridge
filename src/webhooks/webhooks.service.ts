@@ -1117,62 +1117,29 @@ export class WebhooksService {
         // configured fromPhone doesn't match the inbound toNumber (ghost events).
         if (accountId) {
           try {
-            // Check if toNumber matches any phone the user owns (dedicated, shared, or BYO)
-            // With shared bot numbers, one TenantPhoneNumber may serve multiple accounts.
+            // Only forward when the customer texted a bot number (TenantPhoneNumber).
+            // Messages to BYO/OpenPhone or other numbers are NOT forwarded.
             const acctUser = await this.prisma.savedAccount.findUnique({
               where: { id: accountId },
               select: { userId: true },
             });
-            // Check account-scoped → null-scoped → any user phone (same as resolveBotPhone)
-            let dedicatedPhone = acctUser ? await this.prisma.tenantPhoneNumber.findFirst({
-              where: { userId: acctUser.userId, savedAccountId: accountId, status: 'ACTIVE' },
-              select: { phoneNumber: true },
-            }) : null;
-            if (!dedicatedPhone && acctUser) {
-              dedicatedPhone = await this.prisma.tenantPhoneNumber.findFirst({
-                where: { userId: acctUser.userId, savedAccountId: null, status: 'ACTIVE' },
-                select: { phoneNumber: true },
-              });
-            }
-            if (!dedicatedPhone && acctUser) {
-              dedicatedPhone = await this.prisma.tenantPhoneNumber.findFirst({
-                where: { userId: acctUser.userId, status: 'ACTIVE' },
-                select: { phoneNumber: true },
-              });
-            }
-            const acctSettings = await this.prisma.notificationSettings.findUnique({
-              where: { savedAccountId: accountId },
-              select: { sigcoreFromPhone: true },
-            });
-
             const normTo = toNumber?.replace(/\D/g, '').slice(-10);
-            const normDedicated = dedicatedPhone?.phoneNumber?.replace(/\D/g, '').slice(-10);
-            const normByo = acctSettings?.sigcoreFromPhone?.replace(/\D/g, '').slice(-10);
+            const botPhone = normTo && acctUser
+              ? await this.prisma.tenantPhoneNumber.findFirst({
+                  where: { userId: acctUser.userId, status: 'ACTIVE', phoneNumber: { endsWith: normTo } },
+                  select: { phoneNumber: true },
+                })
+              : null;
 
-            // Forward only if toNumber matches a phone this account/user owns
-            const isOwner = normTo
-              ? (normDedicated === normTo || normByo === normTo)
-              : false;
-
-            this.logger.log(
-              `[handleInboundSms] No-lead forward check: isOwner=${isOwner}, normTo=${normTo}, normDedicated=${normDedicated}, normByo=${normByo}`,
-            );
-
-            // Don't forward if the customer texted the BYO/OpenPhone number directly —
-            // the agent already receives those natively; forwarding creates duplicates from the bot number.
-            const toIsByoNumber = normTo && normByo && normTo === normByo;
             const noFwdPurposes = new Set(['sms_forwarding', 'agent_notification', 'agent_guidance', 'icc_forward']);
-            if (isOwner && toIsByoNumber) {
-              this.logger.log(`[handleInboundSms] Skipping no-lead forward — customer texted BYO number directly for account ${accountId}`);
-            } else if (isOwner && (!conversationPurpose || !noFwdPurposes.has(conversationPurpose))) {
-              this.logger.log(`[handleInboundSms] Forwarding no-lead inbound from ${fromNumber} for account ${accountId}`);
+            if (botPhone && (!conversationPurpose || !noFwdPurposes.has(conversationPurpose))) {
+              this.logger.log(`[handleInboundSms] Forwarding no-lead inbound from ${fromNumber} — toNumber ${toNumber} matches bot phone ${botPhone.phoneNumber} for account ${accountId}`);
               await this.notificationsService.forwardInboundSms(accountId, fromNumber, fromNumber, body);
-            } else if (isOwner) {
+            } else if (botPhone) {
               this.logger.log(`[handleInboundSms] Skipping no-lead forward for purpose=${conversationPurpose}`);
             } else {
               this.logger.log(
-                `[handleInboundSms] Skipping forward for account ${accountId}: ` +
-                `inbound toNumber=${toNumber} doesn't match dedicated=${dedicatedPhone?.phoneNumber} or byo=${acctSettings?.sigcoreFromPhone}`,
+                `[handleInboundSms] Skipping no-lead forward for account ${accountId}: toNumber=${toNumber} is not a bot number`,
               );
             }
           } catch (err: any) {
@@ -1262,12 +1229,12 @@ export class WebhooksService {
         this.logger.warn(`Failed to handle customer reply rules: ${err.message}`);
       }
 
-      // Forward SMS to tenant's forwarding number if configured.
+      // Forward SMS to agent only when the customer texted the bot number (dedicated number).
       // Skip forwarding when:
       // - Purpose indicates this is NOT a customer-originating message (sms_forwarding, agent_notification, etc.)
-      // - The customer texted the BYO/OpenPhone number directly — the agent already received it natively,
-      //   forwarding would send a duplicate "SMS from ..." message from the bot number.
-      //   Only forward when the customer texted a dedicated bot number (which the agent never monitors directly).
+      // - toNumber doesn't match a dedicated bot number for this account — LeadBridge only forwards
+      //   messages that arrive on numbers it controls (TenantPhoneNumber). Messages to BYO/OpenPhone
+      //   numbers or other numbers are NOT forwarded (the agent receives those natively).
       const noForwardPurposes = new Set(['sms_forwarding', 'agent_notification', 'agent_guidance', 'icc_forward']);
       if (conversationPurpose && noForwardPurposes.has(conversationPurpose)) {
         this.logger.log(
@@ -1279,22 +1246,25 @@ export class WebhooksService {
             where: { userId: lead.userId, businessId: lead.businessId || undefined },
           });
           if (fwdAccount) {
-            // Check if the customer texted the BYO/OpenPhone number directly.
-            // If so, the agent already received the message — skip forwarding to avoid duplicates.
-            const fwdSettings = await this.prisma.notificationSettings.findUnique({
-              where: { savedAccountId: fwdAccount.id },
-              select: { sigcoreFromPhone: true, sigcoreProvider: true },
-            });
+            // Only forward when the customer texted a bot number (TenantPhoneNumber) owned by this user.
+            // This prevents forwarding messages that arrived on BYO/OpenPhone or unrelated numbers.
             const normToNumber = toNumber?.replace(/\D/g, '').slice(-10);
-            const normByoPhone = fwdSettings?.sigcoreFromPhone?.replace(/\D/g, '').slice(-10);
-            const toIsByoNumber = normToNumber && normByoPhone && normToNumber === normByoPhone;
+            const botPhone = normToNumber
+              ? await this.prisma.tenantPhoneNumber.findFirst({
+                  where: { userId: lead.userId, status: 'ACTIVE', phoneNumber: { endsWith: normToNumber } },
+                  select: { phoneNumber: true },
+                })
+              : null;
 
-            if (toIsByoNumber) {
+            if (botPhone) {
               this.logger.log(
-                `[handleInboundSms] Skipping forward — customer texted BYO/OpenPhone number directly (lead=${lead.id})`,
+                `[handleInboundSms] toNumber ${toNumber} matches bot phone ${botPhone.phoneNumber} — forwarding to agent (lead=${lead.id})`,
               );
-            } else {
               await this.notificationsService.forwardInboundSms(fwdAccount.id, lead.customerName, fromNumber, body);
+            } else {
+              this.logger.log(
+                `[handleInboundSms] Skipping forward — toNumber ${toNumber} is not a bot number for user ${lead.userId} (lead=${lead.id})`,
+              );
             }
           }
         } catch (err: any) {
