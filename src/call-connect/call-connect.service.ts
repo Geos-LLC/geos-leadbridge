@@ -366,7 +366,7 @@ export class CallConnectService {
     // NOTE: Do NOT prefix messages with "... ," — Sigcore's TwiML already uses
     // <Pause length="2"/> inside the Gather verb and <Pause> before lead greetings.
     // The "..." prefix causes garbled TTS output that confuses agents.
-    const whisperRaw = settings.agentWhisperMessage || 'Press any key to connect. You have a new lead for {category}. Customer name: {customerName}.';
+    const whisperRaw = settings.agentWhisperMessage || 'New lead for {category}. Customer: {customerName}. Press any key to connect.';
     const greetingRaw = settings.leadGreetingMessage || 'Please hold while we connect you with a specialist.';
     const vmRaw = settings.leadVoicemailMessage ?? null;
 
@@ -689,7 +689,7 @@ export class CallConnectService {
     // If settings has a custom template, apply vars here; otherwise use default.
     // NOTE: Do NOT prefix with "... , " — Sigcore's TwiML already has a <Pause length="2"/>
     // inside the Gather, and the "..." causes garbled TTS that confuses agents.
-    const whisperTemplate = settings.agentWhisperMessage || 'Press any key to connect. You have a new lead for {category}. Customer name: {customerName}.';
+    const whisperTemplate = settings.agentWhisperMessage || 'New lead for {category}. Customer: {customerName}. Press any key to connect.';
 
     /** Apply all template variable substitutions to a string */
     const subst = (tpl: string) =>
@@ -998,7 +998,7 @@ export class CallConnectService {
         .replace(/\{lead\.dates\}/g,              td.dates);
 
     // Pre-build whisper + voicemail messages with all variables substituted.
-    const whisperTemplate = settings.agentWhisperMessage || 'Press any key to connect. You have a new lead for {category}. Customer name: {customerName}.';
+    const whisperTemplate = settings.agentWhisperMessage || 'New lead for {category}. Customer: {customerName}. Press any key to connect.';
     const agentWhisperMessage = subst(whisperTemplate);
 
     const DEFAULT_VOICEMAIL = 'Hi {customerName}, this is {accountName}. We tried to reach you about your {category} request. Please call us back and we\'ll be happy to help!';
