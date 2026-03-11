@@ -995,14 +995,21 @@ export class NotificationsService {
       return;
     }
 
-    // Resolve fromPhone: dedicated number first, then fall back to sigcoreFromPhone (BYO/OpenPhone)
+    // Resolve fromPhone from dedicated number only
+    // First try account-scoped number, then fall back to unassigned (null savedAccountId) number
     let fromPhone: string | null = null;
     if (settings.savedAccount?.userId) {
-      const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
+      let tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
         where: { userId: settings.savedAccount.userId, savedAccountId, status: 'ACTIVE' },
         orderBy: { purchasedAt: 'desc' },
       });
-      fromPhone = tenantPhone?.phoneNumber ?? settings.sigcoreFromPhone ?? null;
+      if (!tenantPhone) {
+        tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
+          where: { userId: settings.savedAccount.userId, savedAccountId: null, status: 'ACTIVE' },
+          orderBy: { purchasedAt: 'desc' },
+        });
+      }
+      fromPhone = tenantPhone?.phoneNumber ?? null;
     }
     const forwardBody = customerName && customerName !== fromNumber
       ? `SMS from ${customerName} (${fromNumber}):\n${body}`
@@ -1126,12 +1133,19 @@ export class NotificationsService {
       ? (lead?.customerPhone || null)
       : agentPhone;
 
-    // Resolve fromPhone: dedicated number first, then fall back to sigcoreFromPhone (BYO/OpenPhone)
-    const tenantPhoneRec = await this.prisma.tenantPhoneNumber.findFirst({
+    // Resolve fromPhone from dedicated number only
+    // First try account-scoped number, then fall back to unassigned (null savedAccountId) number
+    let tenantPhoneRec = await this.prisma.tenantPhoneNumber.findFirst({
       where: { userId, savedAccountId, status: 'ACTIVE' },
       orderBy: { purchasedAt: 'desc' },
     });
-    const fromPhone = tenantPhoneRec?.phoneNumber ?? settings.sigcoreFromPhone ?? null;
+    if (!tenantPhoneRec) {
+      tenantPhoneRec = await this.prisma.tenantPhoneNumber.findFirst({
+        where: { userId, savedAccountId: null, status: 'ACTIVE' },
+        orderBy: { purchasedAt: 'desc' },
+      });
+    }
+    const fromPhone = tenantPhoneRec?.phoneNumber ?? null;
 
     const template = rule?.messageTemplate?.content || rule?.template || settings.template;
     const ruleName = rule?.name || 'Legacy Alert';

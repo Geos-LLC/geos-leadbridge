@@ -158,6 +158,68 @@ describe('NotificationsService', () => {
   });
 
   // =========================================================================
+  // sendNotificationWithRule — phone number fallback logic
+  // =========================================================================
+  describe('sendNotificationWithRule – phone number fallback', () => {
+    const mockRule = {
+      id: RULE_ID,
+      name: 'Lead Alert - SMS',
+      sendToCustomer: false,
+      messageTemplate: { content: 'New lead: {{customerName}}' },
+    };
+    const mockLead = {
+      id: 'lead-1',
+      customerName: 'Test Customer',
+      customerPhone: '+15558887777',
+    };
+    const context = {
+      userId: USER_ID,
+      savedAccountId: ACCOUNT_ID,
+      leadId: 'lead-1',
+      accountName: 'Test Biz',
+      lead: mockLead,
+    };
+
+    it('Scenario A: uses account-scoped dedicated number when found', async () => {
+      prisma.tenantPhoneNumber.findFirst.mockResolvedValueOnce(mockPhoneRecord);
+
+      await (service as any).sendNotificationWithRule(mockSettings, mockRule, context);
+
+      expect((service as any).sendViaSigcore).toHaveBeenCalled();
+      const firstCallArgs = prisma.tenantPhoneNumber.findFirst.mock.calls[0][0];
+      expect(firstCallArgs.where).toMatchObject({ userId: USER_ID, savedAccountId: ACCOUNT_ID, status: 'ACTIVE' });
+    });
+
+    it('Scenario B: falls back to null-savedAccountId number when account-scoped returns null', async () => {
+      prisma.tenantPhoneNumber.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(mockPhoneRecord);
+
+      await (service as any).sendNotificationWithRule(mockSettings, mockRule, context);
+
+      expect((service as any).sendViaSigcore).toHaveBeenCalled();
+      expect(prisma.tenantPhoneNumber.findFirst).toHaveBeenCalledTimes(2);
+
+      const secondCallArgs = prisma.tenantPhoneNumber.findFirst.mock.calls[1][0];
+      expect(secondCallArgs.where).toMatchObject({ userId: USER_ID, savedAccountId: null, status: 'ACTIVE' });
+    });
+
+    it('Scenario C: sends with fromPhone=null when both lookups return null (Sigcore will assign)', async () => {
+      prisma.tenantPhoneNumber.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+
+      await (service as any).sendNotificationWithRule(mockSettings, mockRule, context);
+
+      // sendNotificationWithRule does NOT return early on null fromPhone — it still sends
+      // (Sigcore may assign a pool number). Verify fromPhone is null in the sendViaSigcore call.
+      expect((service as any).sendViaSigcore).toHaveBeenCalled();
+      const sigcoreCallArgs = (service as any).sendViaSigcore.mock.calls[0][0];
+      expect(sigcoreCallArgs.fromPhone).toBeNull();
+    });
+  });
+
+  // =========================================================================
   // sendAdHocSms — phone number fallback logic
   // =========================================================================
   describe('sendAdHocSms – phone number fallback', () => {
