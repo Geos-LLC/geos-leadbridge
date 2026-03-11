@@ -92,17 +92,6 @@ function SessionCard({ session, index, total }: { session: LeadCallConnect; inde
         <p className="text-xs text-red-600 mt-1">{session.failureReason}</p>
       )}
 
-      {session.recordingUrl && (
-        <a
-          href={session.recordingUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline mt-1"
-        >
-          <PhoneCall size={11} />
-          Listen to recording
-        </a>
-      )}
 
       {/* Timeline toggle */}
       {timeline.length > 0 && (

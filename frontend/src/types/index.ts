@@ -454,7 +454,6 @@ export interface CallConnectSettings {
   leadGreetingMessage: string | null;
   leadVoicemailEnabled: boolean;
   leadVoicemailMessage: string | null;
-  leadVoicemailRecordingUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -474,7 +473,6 @@ export interface LeadCallConnect {
   attempt: number;
   lastEventAt: string;
   failureReason: string | null;
-  recordingUrl: string | null;
   timeline: CallConnectTimelineEntry[];
   createdAt: string;
   updatedAt: string;

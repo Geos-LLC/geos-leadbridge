@@ -26,7 +26,6 @@ export interface SaveCallConnectSettingsDto {
   leadGreetingMessage?: string;
   leadVoicemailEnabled?: boolean;
   leadVoicemailMessage?: string;
-  leadVoicemailRecordingUrl?: string;
 }
 
 @Injectable()
@@ -95,7 +94,6 @@ export class CallConnectService {
         leadGreetingMessage: dto.leadGreetingMessage,
         leadVoicemailEnabled: dto.leadVoicemailEnabled ?? false,
         leadVoicemailMessage: dto.leadVoicemailMessage,
-        leadVoicemailRecordingUrl: dto.leadVoicemailRecordingUrl,
       },
       update: {
         ...(dto.enabled !== undefined && { enabled: dto.enabled }),
@@ -113,7 +111,6 @@ export class CallConnectService {
         ...(dto.leadGreetingMessage !== undefined && { leadGreetingMessage: dto.leadGreetingMessage }),
         ...(dto.leadVoicemailEnabled !== undefined && { leadVoicemailEnabled: dto.leadVoicemailEnabled }),
         ...(dto.leadVoicemailMessage !== undefined && { leadVoicemailMessage: dto.leadVoicemailMessage }),
-        ...(dto.leadVoicemailRecordingUrl !== undefined && { leadVoicemailRecordingUrl: dto.leadVoicemailRecordingUrl }),
       },
     });
 
@@ -384,7 +381,6 @@ export class CallConnectService {
       leadGreetingMessage: greetingRaw,
       leadVoicemailEnabled: true,
       leadVoicemailMessage: vmRaw || null,
-      leadVoicemailRecordingUrl: settings.leadVoicemailRecordingUrl ?? null,
       ...(settings.quietHoursEnabled && settings.quietHoursTimezone && settings.quietHoursStart && settings.quietHoursEnd && {
         quietHours: {
           timezone: settings.quietHoursTimezone,

@@ -12,31 +12,16 @@ import {
   Param,
   Query,
   UseGuards,
-  UseInterceptors,
-  UploadedFile,
   Request,
   HttpCode,
   HttpStatus,
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import * as path from 'path';
-import * as fs from 'fs';
-import * as crypto from 'crypto';
 
-// Ensure upload directory exists on module load
-const VOICEMAIL_DIR = path.join(process.cwd(), 'uploads', 'voicemail');
-if (!fs.existsSync(VOICEMAIL_DIR)) {
-  fs.mkdirSync(VOICEMAIL_DIR, { recursive: true });
-}
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CallConnectService, SaveCallConnectSettingsDto } from './call-connect.service';
 import { PrismaService } from '../common/utils/prisma.service';
-
-const ALLOWED_AUDIO_MIMES = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/wave', 'audio/x-wav'];
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 
 @UseGuards(JwtAuthGuard)
 @Controller('v1/call-connect')
@@ -145,51 +130,4 @@ export class CallConnectController {
     return { cancelled: true };
   }
 
-  /**
-   * POST /api/v1/call-connect/upload-voicemail
-   * Upload an MP3/WAV file for voicemail recording.
-   */
-  @Post('upload-voicemail')
-  @HttpCode(HttpStatus.OK)
-  @UseInterceptors(
-    FileInterceptor('file', {
-      storage: diskStorage({
-        destination: VOICEMAIL_DIR,
-        filename: (_req, file, cb) => {
-          const ext = path.extname(file.originalname) || '.mp3';
-          cb(null, `${crypto.randomUUID()}${ext}`);
-        },
-      }),
-      limits: { fileSize: MAX_FILE_SIZE },
-      fileFilter: (_req, file, cb) => {
-        if (ALLOWED_AUDIO_MIMES.includes(file.mimetype)) {
-          cb(null, true);
-        } else {
-          cb(new BadRequestException('Only MP3 and WAV files are allowed'), false);
-        }
-      },
-    }),
-  )
-  async uploadVoicemail(
-    @UploadedFile() file: Express.Multer.File,
-    @Body() body: { savedAccountId: string },
-    @Request() req: any,
-  ) {
-    if (!file) throw new BadRequestException('No audio file provided');
-
-    const account = await this.prisma.savedAccount.findFirst({
-      where: { id: body.savedAccountId, userId: req.user.id },
-    });
-    if (!account) throw new ForbiddenException('Account not found');
-
-    // Build public URL for the uploaded file
-    const recordingUrl = `/uploads/voicemail/${file.filename}`;
-
-    // Persist URL in settings
-    await this.callConnectService.saveSettings(req.user.id, body.savedAccountId, {
-      leadVoicemailRecordingUrl: recordingUrl,
-    });
-
-    return { recordingUrl };
-  }
 }

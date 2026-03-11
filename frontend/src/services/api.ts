@@ -1352,15 +1352,6 @@ export const callConnectApi = {
     const { data } = await api.post('/v1/call-connect/test', { savedAccountId, testPhone });
     return data;
   },
-  uploadVoicemail: async (savedAccountId: string, file: File): Promise<{ recordingUrl: string }> => {
-    const form = new FormData();
-    form.append('file', file);
-    form.append('savedAccountId', savedAccountId);
-    const { data } = await api.post('/v1/call-connect/upload-voicemail', form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return data;
-  },
 };
 
 // Conversation Sync API (Isolated BYO Phone for AI)

@@ -204,7 +204,6 @@ export function Services() {
   const [ccLeadGreetingMessage, setCcLeadGreetingMessage] = useState(sc?.ccLeadGreetingMessage ?? '');
   const [ccVoicemailEnabled, setCcVoicemailEnabled] = useState(sc?.ccVoicemailEnabled ?? false);
   const [ccVoicemailMessage, setCcVoicemailMessage] = useState(sc?.ccVoicemailMessage ?? '');
-  const [ccVoicemailRecordingUrl, setCcVoicemailRecordingUrl] = useState(sc?.ccVoicemailRecordingUrl ?? '');
   const [ccBotNumber, setCcBotNumber] = useState(sc?.ccBotNumber ?? '');
   const [ccSaving, setCcSaving] = useState(false);
   const [ccTestPhone, setCcTestPhone] = useState(() => {
@@ -225,7 +224,6 @@ export function Services() {
     agentWhisperMessage: string;
     leadGreetingMessage: string;
     voicemailMessage: string;
-    voicemailRecordingUrl: string;
     callForwardingNumber: string;
   } | null>(sc?.ccSavedSnapshot ?? null);
   const [ccValidationModalOpen, setCcValidationModalOpen] = useState(false);
@@ -301,7 +299,6 @@ export function Services() {
     ccAgentWhisperMessage !== ccSavedSnapshot.agentWhisperMessage ||
     ccLeadGreetingMessage !== ccSavedSnapshot.leadGreetingMessage ||
     ccVoicemailMessage !== ccSavedSnapshot.voicemailMessage ||
-    ccVoicemailRecordingUrl !== ccSavedSnapshot.voicemailRecordingUrl ||
     ccCallForwardingNumber !== ccSavedSnapshot.callForwardingNumber
   );
   const commsDirty = ctDirty || ccDirty;
@@ -377,7 +374,6 @@ export function Services() {
         setCcLeadGreetingMessage(ccs.leadGreetingMessage || '');
         setCcVoicemailEnabled(ccs.leadVoicemailEnabled);
         setCcVoicemailMessage(ccs.leadVoicemailMessage || '');
-        setCcVoicemailRecordingUrl(ccs.leadVoicemailRecordingUrl || '');
         setCcBotNumber(ccs.botNumberE164 || defaultBotNumber);
         setCcTestPhone(localStorage.getItem(`cc_test_phone_${accountId}`) || '');
       } else {
@@ -395,7 +391,6 @@ export function Services() {
         setCcLeadGreetingMessage('');
         setCcVoicemailEnabled(false);
         setCcVoicemailMessage('');
-        setCcVoicemailRecordingUrl('');
         setCcBotNumber(defaultBotNumber);
         setCcTestPhone(localStorage.getItem(`cc_test_phone_${accountId}`) || '');
       }
@@ -495,7 +490,6 @@ export function Services() {
         agentWhisperMessage: snapshotWhisper,
         leadGreetingMessage: snapshotGreeting,
         voicemailMessage: snapshotVoicemail,
-        voicemailRecordingUrl: ccs?.leadVoicemailRecordingUrl || '',
         callForwardingNumber: agentPhoneDefault,
       });
 
@@ -530,7 +524,6 @@ export function Services() {
         ccLeadGreetingMessage: ccs?.leadGreetingMessage || '',
         ccVoicemailEnabled: ccs?.leadVoicemailEnabled ?? false,
         ccVoicemailMessage: ccs?.leadVoicemailMessage || '',
-        ccVoicemailRecordingUrl: ccs?.leadVoicemailRecordingUrl || '',
         ccBotNumber: ccs?.botNumberE164 || defaultBotNumber,
         ccWhisperTemplateId: allTemplates.find(t => t.content === (ccs?.agentWhisperMessage || allTemplates.find(tt => tt.name === 'CC - Agent Whisper')?.content || ''))?.id || null,
         ccGreetingTemplateId: allTemplates.find(t => t.content === (ccs?.leadGreetingMessage || allTemplates.find(tt => tt.name === 'CC - Lead Greeting')?.content || ''))?.id || null,
@@ -550,7 +543,6 @@ export function Services() {
           agentWhisperMessage: ccs?.agentWhisperMessage || allTemplates.find(t => t.name === 'CC - Agent Whisper')?.content || '',
           leadGreetingMessage: ccs?.leadGreetingMessage || allTemplates.find(t => t.name === 'CC - Lead Greeting')?.content || '',
           voicemailMessage: ccs?.leadVoicemailMessage || allTemplates.find(t => t.name === 'CC - Voicemail TTS')?.content || '',
-          voicemailRecordingUrl: ccs?.leadVoicemailRecordingUrl || '',
           callForwardingNumber: agentPhoneDefault,
         },
       });
@@ -753,7 +745,6 @@ export function Services() {
         leadGreetingMessage: ccLeadGreetingMessage || undefined,
         leadVoicemailEnabled: ccVoicemailEnabled,
         leadVoicemailMessage: ccVoicemailEnabled ? ccVoicemailMessage : undefined,
-        leadVoicemailRecordingUrl: ccVoicemailEnabled ? ccVoicemailRecordingUrl : undefined,
         botNumberE164: ccBotNumber || undefined,
       });
       showSuccess('Instant Call Connect settings saved');
@@ -764,7 +755,6 @@ export function Services() {
         agentWhisperMessage: ccAgentWhisperMessage,
         leadGreetingMessage: ccLeadGreetingMessage,
         voicemailMessage: ccVoicemailMessage,
-        voicemailRecordingUrl: ccVoicemailRecordingUrl,
         callForwardingNumber: ccCallForwardingNumber,
       });
     } catch (err: any) {
@@ -935,7 +925,6 @@ export function Services() {
     setCcAgentWhisperMessage(ccSavedSnapshot.agentWhisperMessage);
     setCcLeadGreetingMessage(ccSavedSnapshot.leadGreetingMessage);
     setCcVoicemailMessage(ccSavedSnapshot.voicemailMessage);
-    setCcVoicemailRecordingUrl(ccSavedSnapshot.voicemailRecordingUrl);
     setCcCallForwardingNumber(ccSavedSnapshot.callForwardingNumber);
   }
 
@@ -1966,19 +1955,6 @@ export function Services() {
                         </button>
                       </div>
                     )}
-                    <div className="mt-5">
-                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Recording URL <span className="normal-case font-normal text-slate-400">(optional — overrides TTS above)</span></label>
-                      <div className="relative">
-                        <input type="url" value={ccVoicemailRecordingUrl} onChange={e => setCcVoicemailRecordingUrl(e.target.value)} placeholder="https://example.com/voicemail.mp3"
-                          className={`w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-transparent ${ccVoicemailRecordingUrl ? 'pr-10' : ''}`}
-                        />
-                        {ccVoicemailRecordingUrl && (
-                          <button type="button" onClick={() => setCcVoicemailRecordingUrl('')} title="Clear URL" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-500 transition-colors">
-                            <X className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
                   </div>
 
                 </div>
