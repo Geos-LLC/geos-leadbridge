@@ -356,10 +356,10 @@ export class CallConnectService {
       return;
     }
 
-    // Prefix messages with a brief TTS pause ("... ,") so Twilio doesn't clip
-    // the first ~1 second of audio when the call leg connects.
-    const pausePrefix = '... , ';
-    const whisperRaw = settings.agentWhisperMessage || 'You have a new lead for {category}. Customer name: {customerName}. Press any key to connect with the customer.';
+    // NOTE: Do NOT prefix messages with "... ," — Sigcore's TwiML already uses
+    // <Pause length="2"/> inside the Gather verb and <Pause> before lead greetings.
+    // The "..." prefix causes garbled TTS output that confuses agents.
+    const whisperRaw = settings.agentWhisperMessage || 'Press any key to connect. You have a new lead for {category}. Customer name: {customerName}.';
     const greetingRaw = settings.leadGreetingMessage || 'Please hold while we connect you with a specialist.';
     const vmRaw = settings.leadVoicemailMessage ?? null;
 
@@ -373,10 +373,10 @@ export class CallConnectService {
       ringTimeoutSeconds: 60,
       maxAgentAttempts: settings.maxAgentAttempts,
       agentAcceptDigits: (!settings.agentAcceptDigits || settings.agentAcceptDigits === '1') ? '0123456789*#' : settings.agentAcceptDigits,
-      agentWhisperMessage: pausePrefix + whisperRaw,
-      leadGreetingMessage: pausePrefix + greetingRaw,
+      agentWhisperMessage: whisperRaw,
+      leadGreetingMessage: greetingRaw,
       leadVoicemailEnabled: true,
-      leadVoicemailMessage: vmRaw ? pausePrefix + vmRaw : null,
+      leadVoicemailMessage: vmRaw || null,
       leadVoicemailRecordingUrl: settings.leadVoicemailRecordingUrl ?? null,
       ...(settings.quietHoursEnabled && settings.quietHoursTimezone && settings.quietHoursStart && settings.quietHoursEnd && {
         quietHours: {
@@ -680,7 +680,9 @@ export class CallConnectService {
     // Build the complete whisper message on LeadBridge's side so Sigcore receives
     // the final text directly — no template substitution needed on Sigcore's end.
     // If settings has a custom template, apply vars here; otherwise use default.
-    const whisperTemplate = settings.agentWhisperMessage || 'You have a new lead for {category}. Customer name: {customerName}. Press any key to connect with the customer.';
+    // NOTE: Do NOT prefix with "... , " — Sigcore's TwiML already has a <Pause length="2"/>
+    // inside the Gather, and the "..." causes garbled TTS that confuses agents.
+    const whisperTemplate = settings.agentWhisperMessage || 'Press any key to connect. You have a new lead for {category}. Customer name: {customerName}.';
 
     /** Apply all template variable substitutions to a string */
     const subst = (tpl: string) =>
@@ -698,16 +700,14 @@ export class CallConnectService {
         .replace(/\{lead\.message\}/g, '')
         .replace(/\{lead\.serviceDescription\}/g, params.category || '');
 
-    // Prefix with a brief TTS pause so Twilio doesn't clip the first ~1s of audio
-    const pausePrefix = '... , ';
-    const agentWhisperMessage = pausePrefix + subst(whisperTemplate);
+    const agentWhisperMessage = subst(whisperTemplate);
 
     // Pre-build the voicemail message the same way so Sigcore receives the final text.
     // Sigcore will use this per-session value (overriding the workspace template) so the
     // message already has customerName, phone, etc. substituted correctly.
     const DEFAULT_VOICEMAIL = 'Hi {customerName}, this is {accountName}. We tried to reach you about your {category} request. Please call us back and we\'ll be happy to help!';
     const voicemailTemplate = settings.leadVoicemailMessage || DEFAULT_VOICEMAIL;
-    const leadVoicemailMessage = pausePrefix + subst(voicemailTemplate);
+    const leadVoicemailMessage = subst(voicemailTemplate);
 
     try {
       const url = `${this.sigcoreApiUrl}/api/internal/call-connect/start`;
@@ -991,7 +991,7 @@ export class CallConnectService {
         .replace(/\{lead\.dates\}/g,              td.dates);
 
     // Pre-build whisper + voicemail messages with all variables substituted.
-    const whisperTemplate = settings.agentWhisperMessage || 'You have a new lead for {category}. Customer name: {customerName}. Press any key to connect with the customer.';
+    const whisperTemplate = settings.agentWhisperMessage || 'Press any key to connect. You have a new lead for {category}. Customer name: {customerName}.';
     const agentWhisperMessage = subst(whisperTemplate);
 
     const DEFAULT_VOICEMAIL = 'Hi {customerName}, this is {accountName}. We tried to reach you about your {category} request. Please call us back and we\'ll be happy to help!';
