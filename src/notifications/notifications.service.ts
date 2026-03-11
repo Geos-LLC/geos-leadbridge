@@ -440,10 +440,17 @@ export class NotificationsService {
     }
 
     // Resolve fromPhone from dedicated number only
-    const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
+    // First try account-scoped number, then fall back to unassigned (null savedAccountId) number
+    let tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
       where: { userId, savedAccountId, status: 'ACTIVE' },
       orderBy: { purchasedAt: 'desc' },
     });
+    if (!tenantPhone) {
+      tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
+        where: { userId, savedAccountId: null, status: 'ACTIVE' },
+        orderBy: { purchasedAt: 'desc' },
+      });
+    }
     const fromPhone = tenantPhone?.phoneNumber ?? null;
     if (!fromPhone) {
       return { success: false, error: 'No dedicated number assigned. Get a dedicated number first.' };
@@ -1321,10 +1328,17 @@ export class NotificationsService {
     // Use override (CT test), then agent phone as source of truth
     const toPhone = toPhoneOverride || agentPhone;
     // Resolve fromPhone from dedicated number only
-    const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
+    // First try account-scoped number, then fall back to unassigned (null savedAccountId) number
+    let tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
       where: { userId, savedAccountId, status: 'ACTIVE' },
       orderBy: { purchasedAt: 'desc' },
     });
+    if (!tenantPhone) {
+      tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
+        where: { userId, savedAccountId: null, status: 'ACTIVE' },
+        orderBy: { purchasedAt: 'desc' },
+      });
+    }
     const fromPhone = tenantPhone?.phoneNumber ?? null;
 
     if (!toPhone) {
