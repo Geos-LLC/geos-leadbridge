@@ -642,7 +642,8 @@ export default function SettingsPage() {
                   <tbody className="divide-y divide-slate-50">
                     {accounts.map(acct => {
                       const botPhone = tenantPhones.find(p => p.savedAccountId === acct.id)
-                        || tenantPhones.find(p => !p.savedAccountId);
+                        || tenantPhones.find(p => !p.savedAccountId)
+                        || tenantPhones[0];
                       const agentPhone = acct.agentPhoneOverride || user?.businessPhone || null;
                       return (
                         <tr key={acct.id}>
@@ -681,7 +682,10 @@ export default function SettingsPage() {
                           </td>
                           <td className="py-2">
                             {botPhone ? (
-                              <span className="font-mono text-slate-900 font-semibold">{botPhone.phoneNumber}</span>
+                              <span className="font-mono text-slate-900 font-semibold">
+                                {botPhone.phoneNumber}
+                                {botPhone.savedAccountId && botPhone.savedAccountId !== acct.id && <span className="text-[10px] text-slate-400 font-normal ml-1">(shared)</span>}
+                              </span>
                             ) : (
                               <span className="text-slate-400 text-xs">No bot number</span>
                             )}

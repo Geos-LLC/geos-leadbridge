@@ -76,7 +76,8 @@ const mockSettings = {
 const mockLogEntry = { id: 'log-1' };
 const mockAdminConfig = { id: 'global', testData: {} };
 const mockSigcoreResult = { status: 'sent', fromPhone: '+15551111111', provider: 'twilio', messageId: 'msg-1', conversationId: 'conv-1' };
-const mockPhoneRecord = { id: 'phone-1', phoneNumber: '+15551111111', status: 'ACTIVE' };
+const mockPhoneRecord = { id: 'phone-1', phoneNumber: '+15551111111', status: 'ACTIVE', savedAccountId: ACCOUNT_ID };
+const mockCrossAccountPhone = { id: 'phone-2', phoneNumber: '+15552222222', status: 'ACTIVE', savedAccountId: 'other-account' };
 
 // ---------------------------------------------------------------------------
 // Test suite
@@ -111,43 +112,80 @@ describe('NotificationsService', () => {
   });
 
   // =========================================================================
+  // resolveBotPhone — 3-step fallback chain
+  // =========================================================================
+  describe('resolveBotPhone – fallback chain', () => {
+    it('Step 1: returns account-scoped number when found', async () => {
+      prisma.tenantPhoneNumber.findFirst.mockResolvedValueOnce(mockPhoneRecord);
+
+      const result = await (service as any).resolveBotPhone(USER_ID, ACCOUNT_ID);
+
+      expect(result).toBe('+15551111111');
+      expect(prisma.tenantPhoneNumber.findFirst).toHaveBeenCalledTimes(1);
+      expect(prisma.tenantPhoneNumber.findFirst.mock.calls[0][0].where).toMatchObject({
+        userId: USER_ID, savedAccountId: ACCOUNT_ID, status: 'ACTIVE',
+      });
+    });
+
+    it('Step 2: falls back to null-savedAccountId number', async () => {
+      prisma.tenantPhoneNumber.findFirst
+        .mockResolvedValueOnce(null)   // account-scoped
+        .mockResolvedValueOnce({ ...mockPhoneRecord, savedAccountId: null }); // null-scoped
+
+      const result = await (service as any).resolveBotPhone(USER_ID, ACCOUNT_ID);
+
+      expect(result).toBe('+15551111111');
+      expect(prisma.tenantPhoneNumber.findFirst).toHaveBeenCalledTimes(2);
+      expect(prisma.tenantPhoneNumber.findFirst.mock.calls[1][0].where).toMatchObject({
+        userId: USER_ID, savedAccountId: null, status: 'ACTIVE',
+      });
+    });
+
+    it('Step 3: falls back to any active number for the user (cross-account)', async () => {
+      prisma.tenantPhoneNumber.findFirst
+        .mockResolvedValueOnce(null)   // account-scoped
+        .mockResolvedValueOnce(null)   // null-scoped
+        .mockResolvedValueOnce(mockCrossAccountPhone); // any-user
+
+      const result = await (service as any).resolveBotPhone(USER_ID, ACCOUNT_ID);
+
+      expect(result).toBe('+15552222222');
+      expect(prisma.tenantPhoneNumber.findFirst).toHaveBeenCalledTimes(3);
+      // Third call should query userId only (no savedAccountId filter)
+      expect(prisma.tenantPhoneNumber.findFirst.mock.calls[2][0].where).toMatchObject({
+        userId: USER_ID, status: 'ACTIVE',
+      });
+      expect(prisma.tenantPhoneNumber.findFirst.mock.calls[2][0].where).not.toHaveProperty('savedAccountId');
+    });
+
+    it('returns null when no numbers exist at all', async () => {
+      prisma.tenantPhoneNumber.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+
+      const result = await (service as any).resolveBotPhone(USER_ID, ACCOUNT_ID);
+
+      expect(result).toBeNull();
+      expect(prisma.tenantPhoneNumber.findFirst).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  // =========================================================================
   // sendTestNotification — phone number fallback logic
   // =========================================================================
   describe('sendTestNotification – phone number fallback', () => {
-    it('Scenario A: uses account-scoped dedicated number when found', async () => {
-      // First findFirst (savedAccountId = ACCOUNT_ID) returns a phone
-      prisma.tenantPhoneNumber.findFirst.mockResolvedValueOnce(mockPhoneRecord);
+    it('sends when resolveBotPhone returns a number', async () => {
+      jest.spyOn(service as any, 'resolveBotPhone').mockResolvedValue('+15551111111');
 
       const result = await service.sendTestNotification(USER_ID, ACCOUNT_ID, undefined, '+15559999999');
 
       expect(result.success).toBe(true);
       expect((service as any).sendViaSigcore).toHaveBeenCalled();
-
-      // First call should have been with the account-scoped query
-      const firstCallArgs = prisma.tenantPhoneNumber.findFirst.mock.calls[0][0];
-      expect(firstCallArgs.where).toMatchObject({ userId: USER_ID, savedAccountId: ACCOUNT_ID, status: 'ACTIVE' });
     });
 
-    it('Scenario B: falls back to null-savedAccountId number when account-scoped returns null', async () => {
-      // First findFirst (account-scoped) → null; second (null-scoped) → phone
-      prisma.tenantPhoneNumber.findFirst
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(mockPhoneRecord);
-
-      const result = await service.sendTestNotification(USER_ID, ACCOUNT_ID, undefined, '+15559999999');
-
-      expect(result.success).toBe(true);
-      expect((service as any).sendViaSigcore).toHaveBeenCalled();
-      expect(prisma.tenantPhoneNumber.findFirst).toHaveBeenCalledTimes(2);
-
-      const secondCallArgs = prisma.tenantPhoneNumber.findFirst.mock.calls[1][0];
-      expect(secondCallArgs.where).toMatchObject({ userId: USER_ID, savedAccountId: null, status: 'ACTIVE' });
-    });
-
-    it('Scenario C: returns error when both lookups return null', async () => {
-      prisma.tenantPhoneNumber.findFirst
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(null);
+    it('returns error when resolveBotPhone returns null', async () => {
+      jest.spyOn(service as any, 'resolveBotPhone').mockResolvedValue(null);
 
       const result = await service.sendTestNotification(USER_ID, ACCOUNT_ID, undefined, '+15559999999');
 
@@ -180,42 +218,20 @@ describe('NotificationsService', () => {
       lead: mockLead,
     };
 
-    it('Scenario A: uses account-scoped dedicated number when found', async () => {
-      prisma.tenantPhoneNumber.findFirst.mockResolvedValueOnce(mockPhoneRecord);
+    it('sends when resolveBotPhone returns a number', async () => {
+      jest.spyOn(service as any, 'resolveBotPhone').mockResolvedValue('+15551111111');
 
       await (service as any).sendNotificationWithRule(mockSettings, mockRule, context);
 
       expect((service as any).sendViaSigcore).toHaveBeenCalled();
-      const firstCallArgs = prisma.tenantPhoneNumber.findFirst.mock.calls[0][0];
-      expect(firstCallArgs.where).toMatchObject({ userId: USER_ID, savedAccountId: ACCOUNT_ID, status: 'ACTIVE' });
     });
 
-    it('Scenario B: falls back to null-savedAccountId number when account-scoped returns null', async () => {
-      prisma.tenantPhoneNumber.findFirst
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(mockPhoneRecord);
+    it('skips send when resolveBotPhone returns null (logs error)', async () => {
+      jest.spyOn(service as any, 'resolveBotPhone').mockResolvedValue(null);
 
       await (service as any).sendNotificationWithRule(mockSettings, mockRule, context);
 
-      expect((service as any).sendViaSigcore).toHaveBeenCalled();
-      expect(prisma.tenantPhoneNumber.findFirst).toHaveBeenCalledTimes(2);
-
-      const secondCallArgs = prisma.tenantPhoneNumber.findFirst.mock.calls[1][0];
-      expect(secondCallArgs.where).toMatchObject({ userId: USER_ID, savedAccountId: null, status: 'ACTIVE' });
-    });
-
-    it('Scenario C: sends with fromPhone=null when both lookups return null (Sigcore will assign)', async () => {
-      prisma.tenantPhoneNumber.findFirst
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(null);
-
-      await (service as any).sendNotificationWithRule(mockSettings, mockRule, context);
-
-      // sendNotificationWithRule does NOT return early on null fromPhone — it still sends
-      // (Sigcore may assign a pool number). Verify fromPhone is null in the sendViaSigcore call.
-      expect((service as any).sendViaSigcore).toHaveBeenCalled();
-      const sigcoreCallArgs = (service as any).sendViaSigcore.mock.calls[0][0];
-      expect(sigcoreCallArgs.fromPhone).toBeNull();
+      expect((service as any).sendViaSigcore).not.toHaveBeenCalled();
     });
   });
 
@@ -236,37 +252,17 @@ describe('NotificationsService', () => {
       prisma.lead.findFirst.mockResolvedValue(mockLead);
     });
 
-    it('Scenario A: uses account-scoped dedicated number when found', async () => {
-      prisma.tenantPhoneNumber.findFirst.mockResolvedValueOnce(mockPhoneRecord);
+    it('sends when resolveBotPhone returns a number', async () => {
+      jest.spyOn(service as any, 'resolveBotPhone').mockResolvedValue('+15551111111');
 
       const result = await service.sendAdHocSms(USER_ID, ACCOUNT_ID, LEAD_ID, MESSAGE);
 
       expect(result.success).toBe(true);
       expect((service as any).sendViaSigcore).toHaveBeenCalled();
-
-      const firstCallArgs = prisma.tenantPhoneNumber.findFirst.mock.calls[0][0];
-      expect(firstCallArgs.where).toMatchObject({ userId: USER_ID, savedAccountId: ACCOUNT_ID, status: 'ACTIVE' });
     });
 
-    it('Scenario B: falls back to null-savedAccountId number when account-scoped returns null', async () => {
-      prisma.tenantPhoneNumber.findFirst
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(mockPhoneRecord);
-
-      const result = await service.sendAdHocSms(USER_ID, ACCOUNT_ID, LEAD_ID, MESSAGE);
-
-      expect(result.success).toBe(true);
-      expect((service as any).sendViaSigcore).toHaveBeenCalled();
-      expect(prisma.tenantPhoneNumber.findFirst).toHaveBeenCalledTimes(2);
-
-      const secondCallArgs = prisma.tenantPhoneNumber.findFirst.mock.calls[1][0];
-      expect(secondCallArgs.where).toMatchObject({ userId: USER_ID, savedAccountId: null, status: 'ACTIVE' });
-    });
-
-    it('Scenario C: returns error when both lookups return null', async () => {
-      prisma.tenantPhoneNumber.findFirst
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(null);
+    it('returns error when resolveBotPhone returns null', async () => {
+      jest.spyOn(service as any, 'resolveBotPhone').mockResolvedValue(null);
 
       const result = await service.sendAdHocSms(USER_ID, ACCOUNT_ID, LEAD_ID, MESSAGE);
 

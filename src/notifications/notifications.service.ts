@@ -439,19 +439,7 @@ export class NotificationsService {
       return { success: false, error: 'No Sigcore API key configured. Please provision your phone workspace first.' };
     }
 
-    // Resolve fromPhone from dedicated number only
-    // First try account-scoped number, then fall back to unassigned (null savedAccountId) number
-    let tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
-      where: { userId, savedAccountId, status: 'ACTIVE' },
-      orderBy: { purchasedAt: 'desc' },
-    });
-    if (!tenantPhone) {
-      tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
-        where: { userId, savedAccountId: null, status: 'ACTIVE' },
-        orderBy: { purchasedAt: 'desc' },
-      });
-    }
-    const fromPhone = tenantPhone?.phoneNumber ?? null;
+    const fromPhone = await this.resolveBotPhone(userId, savedAccountId);
     if (!fromPhone) {
       return { success: false, error: 'No dedicated number assigned. Get a dedicated number first.' };
     }
@@ -995,22 +983,9 @@ export class NotificationsService {
       return;
     }
 
-    // Resolve fromPhone from dedicated number only
-    // First try account-scoped number, then fall back to unassigned (null savedAccountId) number
-    let fromPhone: string | null = null;
-    if (settings.savedAccount?.userId) {
-      let tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
-        where: { userId: settings.savedAccount.userId, savedAccountId, status: 'ACTIVE' },
-        orderBy: { purchasedAt: 'desc' },
-      });
-      if (!tenantPhone) {
-        tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
-          where: { userId: settings.savedAccount.userId, savedAccountId: null, status: 'ACTIVE' },
-          orderBy: { purchasedAt: 'desc' },
-        });
-      }
-      fromPhone = tenantPhone?.phoneNumber ?? null;
-    }
+    const fromPhone = settings.savedAccount?.userId
+      ? await this.resolveBotPhone(settings.savedAccount.userId, savedAccountId)
+      : null;
     if (!fromPhone) {
       this.logger.warn(`[forwardInboundSms] No dedicated number for account ${savedAccountId} — cannot forward SMS`);
       return;
@@ -1137,19 +1112,7 @@ export class NotificationsService {
       ? (lead?.customerPhone || null)
       : agentPhone;
 
-    // Resolve fromPhone from dedicated number only
-    // First try account-scoped number, then fall back to unassigned (null savedAccountId) number
-    let tenantPhoneRec = await this.prisma.tenantPhoneNumber.findFirst({
-      where: { userId, savedAccountId, status: 'ACTIVE' },
-      orderBy: { purchasedAt: 'desc' },
-    });
-    if (!tenantPhoneRec) {
-      tenantPhoneRec = await this.prisma.tenantPhoneNumber.findFirst({
-        where: { userId, savedAccountId: null, status: 'ACTIVE' },
-        orderBy: { purchasedAt: 'desc' },
-      });
-    }
-    const fromPhone = tenantPhoneRec?.phoneNumber ?? null;
+    const fromPhone = await this.resolveBotPhone(userId, savedAccountId);
 
     const template = rule?.messageTemplate?.content || rule?.template || settings.template;
     const ruleName = rule?.name || 'Legacy Alert';
@@ -1349,19 +1312,7 @@ export class NotificationsService {
 
     // Use override (CT test), then agent phone as source of truth
     const toPhone = toPhoneOverride || agentPhone;
-    // Resolve fromPhone from dedicated number only
-    // First try account-scoped number, then fall back to unassigned (null savedAccountId) number
-    let tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
-      where: { userId, savedAccountId, status: 'ACTIVE' },
-      orderBy: { purchasedAt: 'desc' },
-    });
-    if (!tenantPhone) {
-      tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
-        where: { userId, savedAccountId: null, status: 'ACTIVE' },
-        orderBy: { purchasedAt: 'desc' },
-      });
-    }
-    const fromPhone = tenantPhone?.phoneNumber ?? null;
+    const fromPhone = await this.resolveBotPhone(userId, savedAccountId);
 
     if (!toPhone) {
       return { success: false, error: 'No destination phone configured for this rule' };
@@ -2607,6 +2558,33 @@ export class NotificationsService {
       select: { businessPhone: true },
     });
     return user?.businessPhone || null;
+  }
+
+  /**
+   * Resolve the bot phone (dedicated TenantPhoneNumber) for sending SMS.
+   * Fallback chain: account-scoped → unassigned (null savedAccountId) → any active number for user.
+   */
+  private async resolveBotPhone(userId: string, savedAccountId?: string | null): Promise<string | null> {
+    // 1. Account-scoped number
+    if (savedAccountId) {
+      const scoped = await this.prisma.tenantPhoneNumber.findFirst({
+        where: { userId, savedAccountId, status: 'ACTIVE' },
+        orderBy: { purchasedAt: 'desc' },
+      });
+      if (scoped) return scoped.phoneNumber;
+    }
+    // 2. Unassigned (shared) number
+    const unassigned = await this.prisma.tenantPhoneNumber.findFirst({
+      where: { userId, savedAccountId: null, status: 'ACTIVE' },
+      orderBy: { purchasedAt: 'desc' },
+    });
+    if (unassigned) return unassigned.phoneNumber;
+    // 3. Any active number for this user (cross-account fallback)
+    const any = await this.prisma.tenantPhoneNumber.findFirst({
+      where: { userId, status: 'ACTIVE' },
+      orderBy: { purchasedAt: 'desc' },
+    });
+    return any?.phoneNumber ?? null;
   }
 
   /**
