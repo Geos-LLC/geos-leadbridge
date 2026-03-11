@@ -134,11 +134,18 @@ export class CallConnectService {
         select: { userId: true },
       });
       if (acctUser) {
-        const tenantPhone = await this.prisma.tenantPhoneNumber.findFirst({
-          where: { userId: acctUser.userId, savedAccountId: savedAccountId, status: 'ACTIVE' },
-          orderBy: { purchasedAt: 'desc' },
-          select: { phoneNumber: true },
-        });
+        // First try account-scoped TPN, then fall back to any TPN for the user
+        const tenantPhone =
+          (await this.prisma.tenantPhoneNumber.findFirst({
+            where: { userId: acctUser.userId, savedAccountId: savedAccountId, status: 'ACTIVE' },
+            orderBy: { purchasedAt: 'desc' },
+            select: { phoneNumber: true },
+          })) ??
+          (await this.prisma.tenantPhoneNumber.findFirst({
+            where: { userId: acctUser.userId, status: 'ACTIVE' },
+            orderBy: { purchasedAt: 'desc' },
+            select: { phoneNumber: true },
+          }));
         if (tenantPhone?.phoneNumber) {
           await this.prisma.callConnectSettings.update({
             where: { id: settings.id },
