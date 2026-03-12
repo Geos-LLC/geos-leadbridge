@@ -367,22 +367,11 @@ export class WebhooksService {
 
     this.logger.log('Lead stored successfully', { negotiationId });
 
-    // Invalidate analytics cache so insights reflects the new lead immediately
-    await this.analyticsService.invalidateCache(userId);
-
-    // Emit SSE event for real-time frontend updates
+    // Emit SSE event for real-time frontend updates (sync, instant)
     this.eventEmitter.emit(`lead.created.${userId}`, lead);
 
-    // Create conversation (messages will arrive via MessageCreatedV4 webhook)
-    await this.ensureConversationForLead(
-      userId,
-      platform,
-      negotiationId,
-      customerName,
-      lead.id,
-    );
-
     // Find saved account for this business (used by both automation and SMS notifications)
+    // NOTE: Run this before deferring non-critical work — notifications depend on it
     const savedAccounts = await this.prisma.savedAccount.findMany({
       where: {
         platform,
@@ -401,66 +390,80 @@ export class WebhooksService {
       this.logger.warn(`Multiple savedAccounts for business ${business.businessID}: ${savedAccounts.map(a => `${a.id}(user=${a.userId},settings=${!!a.notificationSettings})`).join(', ')}. Using ${savedAccount?.id}`);
     }
 
-    // Trigger automation rules for new leads
-    try {
-      await this.automationService.handleNewLead({
-        userId,
-        businessId: business.businessID,
-        negotiationId,
-        leadId: lead.id,
-        customerName,
-        accountName: savedAccount?.businessName || undefined,
-        category: request.category?.name,
-        city: location.city,
-        state: location.state,
-      });
-    } catch (err: any) {
-      this.logger.error('Automation trigger failed for new lead', err.message);
-    }
-
-    // Send SMS notification to company for new lead
-    try {
-      if (savedAccount) {
-        await this.notificationsService.sendLeadNotification({
+    // Fire automation, SMS notification, and call connect in parallel — all independent
+    const automationPromise = (async () => {
+      try {
+        await this.automationService.handleNewLead({
           userId,
-          savedAccountId: savedAccount.id,
+          businessId: business.businessID,
+          negotiationId,
           leadId: lead.id,
-          accountName: savedAccount.businessName,
-          lead: {
-            customerName,
-            customerPhone: customer.phone,
-            category: request.category?.name,
-            city: location.city,
-            state: location.state,
-            postcode: location.zipCode,
-            message: request.description || '',
-            rawJson: JSON.stringify(data),
-          },
+          customerName,
+          accountName: savedAccount?.businessName || undefined,
+          category: request.category?.name,
+          city: location.city,
+          state: location.state,
         });
-      } else {
-        this.logger.log('No saved account found for SMS notification', { businessId: business.businessID });
+      } catch (err: any) {
+        this.logger.error('Automation trigger failed for new lead', err.message);
       }
-    } catch (err: any) {
-      this.logger.error('SMS notification failed for new lead', err.message);
-    }
+    })();
 
-    // Trigger Instant Call Connect for new lead
-    try {
-      await this.callConnectService.triggerForLead({
-        userId,
-        savedAccountId: savedAccount?.id ?? null,
-        businessId: business.businessID ?? null,
-        leadId: lead.id,
-        customerPhone: customer.phone ?? null,
-        customerName,
-        accountName: savedAccount?.businessName ?? null,
-        category: request.category?.name ?? null,
-        location: [location.city, location.state].filter(Boolean).join(', ') || null,
-        leadSummary: `${customerName} — ${request.category?.name || 'Service'} — ${[location.city, location.state].filter(Boolean).join(', ')}`,
-      });
-    } catch (err: any) {
-      this.logger.error('Call-connect trigger failed for new lead', err.message);
-    }
+    const smsPromise = (async () => {
+      try {
+        if (savedAccount) {
+          await this.notificationsService.sendLeadNotification({
+            userId,
+            savedAccountId: savedAccount.id,
+            leadId: lead.id,
+            accountName: savedAccount.businessName,
+            lead: {
+              customerName,
+              customerPhone: customer.phone,
+              category: request.category?.name,
+              city: location.city,
+              state: location.state,
+              postcode: location.zipCode,
+              message: request.description || '',
+              rawJson: JSON.stringify(data),
+            },
+          });
+        } else {
+          this.logger.log('No saved account found for SMS notification', { businessId: business.businessID });
+        }
+      } catch (err: any) {
+        this.logger.error('SMS notification failed for new lead', err.message);
+      }
+    })();
+
+    const callPromise = (async () => {
+      try {
+        await this.callConnectService.triggerForLead({
+          userId,
+          savedAccountId: savedAccount?.id ?? null,
+          businessId: business.businessID ?? null,
+          leadId: lead.id,
+          customerPhone: customer.phone ?? null,
+          customerName,
+          accountName: savedAccount?.businessName ?? null,
+          category: request.category?.name ?? null,
+          location: [location.city, location.state].filter(Boolean).join(', ') || null,
+          leadSummary: `${customerName} — ${request.category?.name || 'Service'} — ${[location.city, location.state].filter(Boolean).join(', ')}`,
+        });
+      } catch (err: any) {
+        this.logger.error('Call-connect trigger failed for new lead', err.message);
+      }
+    })();
+
+    await Promise.all([automationPromise, smsPromise, callPromise]);
+
+    // Non-critical deferred work — runs after notifications/call are already firing
+    this.analyticsService.invalidateCache(userId).catch(err =>
+      this.logger.error('Analytics cache invalidation failed', err.message),
+    );
+    this.ensureConversationForLead(userId, platform, negotiationId, customerName, lead.id).catch(err =>
+      this.logger.error('Conversation creation failed for lead', err.message),
+    );
   }
 
   /**

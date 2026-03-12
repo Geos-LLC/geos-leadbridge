@@ -948,9 +948,9 @@ export class NotificationsService {
     const skippedCount = rules.length - immediateRules.length;
     this.logger.log(`Found ${rules.length} new_lead rules (${immediateRules.length} immediate, ${skippedCount} follow-ups skipped)`);
 
-    for (const rule of immediateRules) {
-      await this.sendNotificationWithRule(settings, rule, context);
-    }
+    await Promise.all(
+      immediateRules.map(rule => this.sendNotificationWithRule(settings, rule, context)),
+    );
   }
 
   /**
