@@ -1013,6 +1013,8 @@ export class CallConnectService {
       // fromNumberHint tells Sigcore which per-account settings row to use
       fromNumberHint: settings.botNumberE164 || undefined,
       source: 'leadbridge',
+      // Record the agent leg so we can listen to what the agent hears (whisper debugging)
+      recordAgentLeg: true,
     };
 
     this.logger.log(
