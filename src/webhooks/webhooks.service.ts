@@ -76,6 +76,7 @@ export class WebhooksService {
    * Handle incoming webhook from Thumbtack
    */
   async handleThumbtackWebhook(signature: string | undefined, payload: any): Promise<void> {
+    const _whStart = Date.now();
     const secret = this.configService.get<string>('thumbtack.webhookSecret') || '';
     const adapter = this.platformFactory.getAdapter('thumbtack');
 
@@ -85,7 +86,7 @@ export class WebhooksService {
     const messageId = payload?.data?.messageID;
     const eventType = payload?.event?.eventType || payload?.event_type || 'unknown';
 
-    this.logger.log('=== WEBHOOK RECEIVED ===');
+    this.logger.log(`=== WEBHOOK RECEIVED === (+${Date.now() - _whStart}ms)`);
     this.logger.log(`Event: ${eventType}, negotiation: ${negotiationId}, message: ${messageId}, business: ${businessId}`);
 
     // Verify signature if both signature and secret are present
@@ -114,6 +115,8 @@ export class WebhooksService {
         processed: false,
       },
     });
+
+    this.logger.log(`[timing] webhook DB write: +${Date.now() - _whStart}ms`);
 
     if (!isValid) {
       this.logger.warn('Invalid webhook signature', { eventId: event.id });
@@ -226,6 +229,7 @@ export class WebhooksService {
    * Stores the lead in the database
    */
   private async handleNegotiationCreated(platform: string, data: any): Promise<void> {
+    const _ncStart = Date.now();
     const negotiationId = data.negotiationID;
     const customer = data.customer || {};
     const request = data.request || {};
@@ -323,6 +327,7 @@ export class WebhooksService {
       this.logger.warn('No user found for business', { businessID: business.businessID });
       return;
     }
+    this.logger.log(`[timing] user lookup: +${Date.now() - _ncStart}ms`);
 
     const userId = platformConnection.userId;
     const customerName = `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown';
@@ -365,7 +370,7 @@ export class WebhooksService {
       },
     });
 
-    this.logger.log('Lead stored successfully', { negotiationId });
+    this.logger.log(`[timing] lead upsert: +${Date.now() - _ncStart}ms, negotiation: ${negotiationId}`);
 
     // Emit SSE event for real-time frontend updates (sync, instant)
     this.eventEmitter.emit(`lead.created.${userId}`, lead);
@@ -390,6 +395,7 @@ export class WebhooksService {
       this.logger.warn(`Multiple savedAccounts for business ${business.businessID}: ${savedAccounts.map(a => `${a.id}(user=${a.userId},settings=${!!a.notificationSettings})`).join(', ')}. Using ${savedAccount?.id}`);
     }
 
+    this.logger.log(`[timing] savedAccount lookup: +${Date.now() - _ncStart}ms`);
     // Fire automation, SMS notification, and call connect in parallel — all independent
     const automationPromise = (async () => {
       try {
@@ -412,6 +418,7 @@ export class WebhooksService {
     const smsPromise = (async () => {
       try {
         if (savedAccount) {
+          this.logger.log(`[timing] SMS notification starting: +${Date.now() - _ncStart}ms`);
           await this.notificationsService.sendLeadNotification({
             userId,
             savedAccountId: savedAccount.id,
@@ -432,12 +439,13 @@ export class WebhooksService {
           this.logger.log('No saved account found for SMS notification', { businessId: business.businessID });
         }
       } catch (err: any) {
-        this.logger.error('SMS notification failed for new lead', err.message);
+        this.logger.error(`SMS notification failed for new lead (+${Date.now() - _ncStart}ms)`, err.message);
       }
     })();
 
     const callPromise = (async () => {
       try {
+        this.logger.log(`[timing] call connect starting: +${Date.now() - _ncStart}ms`);
         await this.callConnectService.triggerForLead({
           userId,
           savedAccountId: savedAccount?.id ?? null,
@@ -451,11 +459,12 @@ export class WebhooksService {
           leadSummary: `${customerName} — ${request.category?.name || 'Service'} — ${[location.city, location.state].filter(Boolean).join(', ')}`,
         });
       } catch (err: any) {
-        this.logger.error('Call-connect trigger failed for new lead', err.message);
+        this.logger.error(`Call-connect trigger failed for new lead (+${Date.now() - _ncStart}ms)`, err.message);
       }
     })();
 
     await Promise.all([automationPromise, smsPromise, callPromise]);
+    this.logger.log(`[timing] all parallel tasks done: +${Date.now() - _ncStart}ms`);
 
     // Non-critical deferred work — runs after notifications/call are already firing
     this.analyticsService.invalidateCache(userId).catch(err =>
