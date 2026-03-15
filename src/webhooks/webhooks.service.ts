@@ -238,76 +238,49 @@ export class WebhooksService {
 
     this.logger.log(`NegotiationCreated: ${negotiationId}, business: ${business.businessID}`);
 
-    // Find user by businessID - first try exact match, then find any connected user for this platform
-    // This handles multiple businesses under one OAuth connection
-    let platformConnection = await this.prisma.platform.findFirst({
-      where: {
-        platformName: platform,
-        externalBusinessId: business.businessID,
-      },
-    });
+    // Parallel user lookup: fire all strategies concurrently, pick first match
+    // This replaces the sequential fallback chain (was 4 round-trips, now 1)
+    const [directMatch, existingLead, savedAccountMatch] = await Promise.all([
+      // Strategy 1: exact Platform match by businessId
+      this.prisma.platform.findFirst({
+        where: { platformName: platform, externalBusinessId: business.businessID },
+      }),
+      // Strategy 2: find user via existing lead for this business
+      this.prisma.lead.findFirst({
+        where: { platform, businessId: business.businessID },
+        select: { userId: true },
+      }),
+      // Strategy 3: find user via SavedAccount
+      this.prisma.savedAccount.findFirst({
+        where: { platform, businessId: business.businessID },
+        select: { userId: true },
+      }),
+    ]);
 
-    // If no exact match, find any connected platform for this user
-    // (Thumbtack OAuth grants access to all businesses for that user)
-    if (!platformConnection) {
-      // Check if there's a lead already for this business to find the user
-      const existingLead = await this.prisma.lead.findFirst({
-        where: {
-          platform,
-          businessId: business.businessID,
-        },
-      });
+    this.logger.log(`[timing] parallel user lookup: +${Date.now() - _ncStart}ms`);
 
-      if (existingLead) {
-        platformConnection = await this.prisma.platform.findFirst({
-          where: {
-            platformName: platform,
-            userId: existingLead.userId,
-            connected: true,
-          },
-        });
-      }
-    }
+    let platformConnection = directMatch;
 
-    // Fallback: check SavedAccount table for businessId -> userId mapping
-    // This handles multi-account scenarios where the businessId isn't the currently connected one
-    if (!platformConnection) {
-      const savedAccount = await this.prisma.savedAccount.findFirst({
-        where: {
-          platform,
-          businessId: business.businessID,
-        },
-      });
-
-      if (savedAccount) {
+    // If no direct match, resolve via lead or savedAccount userId
+    if (!platformConnection && (existingLead || savedAccountMatch)) {
+      const fallbackUserId = existingLead?.userId || savedAccountMatch?.userId;
+      if (savedAccountMatch && !existingLead) {
         this.logger.log('Found user via SavedAccount lookup for negotiation', {
-          userId: savedAccount.userId,
+          userId: fallbackUserId,
           businessID: business.businessID,
         });
-        platformConnection = await this.prisma.platform.findFirst({
-          where: {
-            platformName: platform,
-            userId: savedAccount.userId,
-            connected: true,
-          },
-        });
       }
+      platformConnection = await this.prisma.platform.findFirst({
+        where: { platformName: platform, userId: fallbackUserId, connected: true },
+      });
     }
 
-    // Last resort: try to find any connected Thumbtack platform
-    // This is a fallback - webhook came for a business we haven't seen before
+    // Last resort: find any connected Thumbtack platform
     if (!platformConnection) {
       this.logger.warn('No exact platform match, searching for any connected Thumbtack user', { businessID: business.businessID });
-
-      // Get all connected Thumbtack platforms
       const connectedPlatforms = await this.prisma.platform.findMany({
-        where: {
-          platformName: platform,
-          connected: true,
-        },
+        where: { platformName: platform, connected: true },
       });
-
-      // For now, if there's only one connected user, use that
       if (connectedPlatforms.length === 1) {
         platformConnection = connectedPlatforms[0];
         this.logger.log('Using single connected platform for webhook', {
@@ -327,7 +300,7 @@ export class WebhooksService {
       this.logger.warn('No user found for business', { businessID: business.businessID });
       return;
     }
-    this.logger.log(`[timing] user lookup: +${Date.now() - _ncStart}ms`);
+    this.logger.log(`[timing] user resolved: +${Date.now() - _ncStart}ms`);
 
     const userId = platformConnection.userId;
     const customerName = `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown';
@@ -335,55 +308,51 @@ export class WebhooksService {
     // Parse original createdAt from Thumbtack data
     const originalCreatedAt = data.createdAt ? new Date(data.createdAt) : new Date();
 
-    // Store the lead
-    // Note: Keep status as-is from Thumbtack API (Open, Picked, Canceled, Completed)
-    const lead = await this.prisma.lead.upsert({
-      where: {
-        platform_externalRequestId: {
-          platform,
-          externalRequestId: negotiationId,
+    // Run lead upsert + savedAccount lookup in parallel — they're independent
+    const [lead, savedAccounts] = await Promise.all([
+      this.prisma.lead.upsert({
+        where: {
+          platform_externalRequestId: {
+            platform,
+            externalRequestId: negotiationId,
+          },
         },
-      },
-      create: {
-        userId,
-        platform,
-        businessId: business.businessID,
-        externalRequestId: negotiationId,
-        customerName,
-        customerPhone: customer.phone,
-        message: request.description || '',
-        postcode: location.zipCode,
-        city: location.city,
-        state: location.state,
-        category: request.category?.name,
-        status: data.status || 'Open',
-        rawJson: JSON.stringify(data),
-        createdAt: originalCreatedAt,
-      },
-      update: {
-        customerName,
-        customerPhone: customer.phone,
-        message: request.description || '',
-        status: data.status || 'Open',
-        rawJson: JSON.stringify(data),
-        createdAt: originalCreatedAt,
-      },
-    });
+        create: {
+          userId,
+          platform,
+          businessId: business.businessID,
+          externalRequestId: negotiationId,
+          customerName,
+          customerPhone: customer.phone,
+          message: request.description || '',
+          postcode: location.zipCode,
+          city: location.city,
+          state: location.state,
+          category: request.category?.name,
+          status: data.status || 'Open',
+          rawJson: JSON.stringify(data),
+          createdAt: originalCreatedAt,
+        },
+        update: {
+          customerName,
+          customerPhone: customer.phone,
+          message: request.description || '',
+          status: data.status || 'Open',
+          rawJson: JSON.stringify(data),
+          createdAt: originalCreatedAt,
+        },
+      }),
+      this.prisma.savedAccount.findMany({
+        where: { platform, businessId: business.businessID },
+        include: { notificationSettings: { select: { id: true } } },
+      }),
+    ]);
 
-    this.logger.log(`[timing] lead upsert: +${Date.now() - _ncStart}ms, negotiation: ${negotiationId}`);
+    this.logger.log(`[timing] lead upsert + savedAccount: +${Date.now() - _ncStart}ms, negotiation: ${negotiationId}`);
 
     // Emit SSE event for real-time frontend updates (sync, instant)
     this.eventEmitter.emit(`lead.created.${userId}`, lead);
 
-    // Find saved account for this business (used by both automation and SMS notifications)
-    // NOTE: Run this before deferring non-critical work — notifications depend on it
-    const savedAccounts = await this.prisma.savedAccount.findMany({
-      where: {
-        platform,
-        businessId: business.businessID,
-      },
-      include: { notificationSettings: { select: { id: true } } },
-    });
     // Prefer: 1) account with settings matching userId, 2) account matching userId, 3) account with settings, 4) first
     // IMPORTANT: prioritize userId match over having settings to avoid cross-account contamination
     const savedAccount =
@@ -394,8 +363,6 @@ export class WebhooksService {
     if (savedAccounts.length > 1) {
       this.logger.warn(`Multiple savedAccounts for business ${business.businessID}: ${savedAccounts.map(a => `${a.id}(user=${a.userId},settings=${!!a.notificationSettings})`).join(', ')}. Using ${savedAccount?.id}`);
     }
-
-    this.logger.log(`[timing] savedAccount lookup: +${Date.now() - _ncStart}ms`);
     // Fire automation, SMS notification, and call connect in parallel — all independent
     const automationPromise = (async () => {
       try {
