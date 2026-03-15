@@ -865,9 +865,10 @@ export class NotificationsService {
    * Fallback logic: If no account-specific settings exist, uses user-level default settings
    */
   async sendLeadNotification(context: SendNotificationContext): Promise<void> {
+    const _notifStart = Date.now();
     const { userId, savedAccountId, leadId, lead } = context;
 
-    this.logger.log(`Checking notification rules for account ${savedAccountId}`);
+    this.logger.log(`[timing] sendLeadNotification start: +0ms`);
 
     // First try to get account-specific settings
     const notifRuleInclude = {
@@ -909,6 +910,8 @@ export class NotificationsService {
       return;
     }
 
+    this.logger.log(`[timing] sendLeadNotification settings loaded: +${Date.now() - _notifStart}ms`);
+
     if (!settings.enabled) {
       this.logger.log(`Notifications disabled for account ${savedAccountId}`);
       return;
@@ -945,12 +948,12 @@ export class NotificationsService {
 
     // Filter out follow-up rules (delayMinutes > 0) — only immediate rules should fire
     const immediateRules = rules.filter(r => !r.delayMinutes || r.delayMinutes <= 0);
-    const skippedCount = rules.length - immediateRules.length;
-    this.logger.log(`Found ${rules.length} new_lead rules (${immediateRules.length} immediate, ${skippedCount} follow-ups skipped)`);
+    this.logger.log(`[timing] sendLeadNotification firing ${immediateRules.length} rules: +${Date.now() - _notifStart}ms`);
 
     await Promise.all(
       immediateRules.map(rule => this.sendNotificationWithRule(settings, rule, context)),
     );
+    this.logger.log(`[timing] sendLeadNotification done: +${Date.now() - _notifStart}ms`);
   }
 
   /**
@@ -1102,17 +1105,21 @@ export class NotificationsService {
     rule: any | null,
     context: SendNotificationContext,
   ): Promise<void> {
+    const _ruleStart = Date.now();
     const { userId, savedAccountId, leadId, lead } = context;
 
-    // Resolve agent phone: per-business override → user default → legacy fallback
-    const agentPhone = await this.resolveAgentPhone(userId, savedAccountId) || settings.destinationPhone;
+    // Resolve agent phone + bot phone in parallel
+    const [agentPhoneRaw, fromPhone] = await Promise.all([
+      this.resolveAgentPhone(userId, savedAccountId),
+      this.resolveBotPhone(userId, savedAccountId),
+    ]);
+    const agentPhone = agentPhoneRaw || settings.destinationPhone;
+    this.logger.log(`[timing] sendNotificationWithRule phones resolved: +${Date.now() - _ruleStart}ms`);
 
     // Resolve phones: toPhone from rule or settings, fromPhone auto-resolved from dedicated number
     const toPhone = rule?.sendToCustomer
       ? (lead?.customerPhone || null)
       : agentPhone;
-
-    const fromPhone = await this.resolveBotPhone(userId, savedAccountId);
 
     const template = rule?.messageTemplate?.content || rule?.template || settings.template;
     const ruleName = rule?.name || 'Legacy Alert';
@@ -1144,6 +1151,7 @@ export class NotificationsService {
       `fromPhone=${fromPhone} toPhone=${toPhone}`,
     );
 
+    this.logger.log(`[timing] sendNotificationWithRule pre-send: +${Date.now() - _ruleStart}ms`);
     // Create notification log entry
     const logEntry = await this.prisma.notificationLog.create({
       data: {
@@ -1168,6 +1176,7 @@ export class NotificationsService {
         throw new Error('No Sigcore API key configured. Please provision your phone workspace first.');
       }
 
+      this.logger.log(`[timing] sendNotificationWithRule log created, calling Sigcore: +${Date.now() - _ruleStart}ms`);
       const result = await this.sendViaSigcore({
         to: toPhone,
         body: messageBody,
@@ -1183,29 +1192,36 @@ export class NotificationsService {
         },
       });
 
-      // Update log with result
-      await this.prisma.notificationLog.update({
-        where: { id: logEntry.id },
-        data: {
-          status: result.status,
-          fromPhone: result.fromPhone,
-          provider: result.provider,
-          sigcoreMessageId: result.messageId,
-          sigcoreConversationId: result.conversationId,
-          sentAt: new Date(),
-        },
-      });
+      this.logger.log(`[timing] sendNotificationWithRule Sigcore responded: +${Date.now() - _ruleStart}ms`);
+
+      // Update log + rule stats in parallel (non-critical)
+      const updatePromises: Promise<any>[] = [
+        this.prisma.notificationLog.update({
+          where: { id: logEntry.id },
+          data: {
+            status: result.status,
+            fromPhone: result.fromPhone,
+            provider: result.provider,
+            sigcoreMessageId: result.messageId,
+            sigcoreConversationId: result.conversationId,
+            sentAt: new Date(),
+          },
+        }),
+      ];
 
       // Update rule stats if applicable
       if (ruleId) {
-        await this.prisma.notificationRule.update({
+        updatePromises.push(this.prisma.notificationRule.update({
           where: { id: ruleId },
           data: {
             triggerCount: { increment: 1 },
             lastTriggeredAt: new Date(),
           },
-        });
+        }));
       }
+
+      await Promise.all(updatePromises);
+      this.logger.log(`[timing] sendNotificationWithRule done: +${Date.now() - _ruleStart}ms`);
 
       // Store customer-facing SMS as a Message record in the Conversation
       if (rule?.sendToCustomer && leadId) {
