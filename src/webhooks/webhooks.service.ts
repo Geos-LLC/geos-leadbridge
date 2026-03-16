@@ -353,15 +353,16 @@ export class WebhooksService {
     // Emit SSE event for real-time frontend updates (sync, instant)
     this.eventEmitter.emit(`lead.created.${userId}`, lead);
 
-    // Prefer: 1) account with settings matching userId, 2) account matching userId, 3) account with settings, 4) first
-    // IMPORTANT: prioritize userId match over having settings to avoid cross-account contamination
+    // STRICT: only use savedAccounts belonging to the resolved userId — never cross-account
+    const userAccounts = savedAccounts.filter((a: any) => a.userId === userId);
     const savedAccount =
-      savedAccounts.find((a: any) => a.notificationSettings && a.userId === userId) ||
-      savedAccounts.find((a: any) => a.userId === userId) ||
-      savedAccounts.find((a: any) => a.notificationSettings) ||
-      savedAccounts[0] || null;
-    if (savedAccounts.length > 1) {
-      this.logger.warn(`Multiple savedAccounts for business ${business.businessID}: ${savedAccounts.map(a => `${a.id}(user=${a.userId},settings=${!!a.notificationSettings})`).join(', ')}. Using ${savedAccount?.id}`);
+      userAccounts.find((a: any) => a.notificationSettings) ||
+      userAccounts[0] || null;
+    if (savedAccounts.length > userAccounts.length) {
+      this.logger.warn(`Cross-account savedAccounts filtered out for business ${business.businessID}: ${savedAccounts.length} total, ${userAccounts.length} for user ${userId}. Dropped: ${savedAccounts.filter(a => a.userId !== userId).map(a => `${a.id}(user=${a.userId})`).join(', ')}`);
+    }
+    if (userAccounts.length > 1) {
+      this.logger.warn(`Multiple savedAccounts for user ${userId}, business ${business.businessID}: ${userAccounts.map(a => `${a.id}(settings=${!!a.notificationSettings})`).join(', ')}. Using ${savedAccount?.id}`);
     }
     // Fire automation, SMS notification, and call connect in parallel — all independent
     const automationPromise = (async () => {
