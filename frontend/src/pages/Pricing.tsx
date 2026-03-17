@@ -94,7 +94,7 @@ export default function Pricing() {
           Choose Your <span className="gradient-text">Plan</span>
         </h2>
         <p className="text-slate-500 text-lg">
-          Select the perfect plan for your business. All plans include a 14-day money-back guarantee.
+          Select the perfect plan for your business.
         </p>
       </section>
 
@@ -200,10 +200,6 @@ export default function Pricing() {
           >
             Contact our team
           </a>
-          <span className="hidden sm:block text-slate-300">|</span>
-          <span className="text-slate-500 text-sm italic">
-            All plans include a 14-day money-back guarantee
-          </span>
         </div>
       </section>
     </div>
