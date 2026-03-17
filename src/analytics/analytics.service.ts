@@ -497,34 +497,47 @@ export class AnalyticsService {
   private async getConnectionTime(
     where: any,
   ): Promise<ConnectionTimeMetric> {
-    // Single query: fetch leads with their first pro message via nested select
+    // Only measure leads that were replied to via LeadBridge (have a notification log)
+    // First, get leadIds that have successful notification logs
+    const sentLogs = await this.prisma.notificationLog.findMany({
+      where: {
+        leadId: { not: null },
+        status: { in: ['sent', 'delivered', 'queued'] },
+      },
+      distinct: ['leadId'],
+      select: { leadId: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // Build map: leadId → earliest notification sent time
+    const leadFirstNotif = new Map<string, Date>();
+    for (const log of sentLogs) {
+      if (!log.leadId) continue;
+      if (!leadFirstNotif.has(log.leadId) || log.createdAt < leadFirstNotif.get(log.leadId)!) {
+        leadFirstNotif.set(log.leadId, log.createdAt);
+      }
+    }
+
+    if (leadFirstNotif.size === 0) {
+      return { averageMinutes: 0, median: 0, min: 0, max: 0, count: 0 };
+    }
+
+    // Fetch those leads with their createdAt
     const leads = await this.prisma.lead.findMany({
       where: {
         ...where,
-        threadId: { not: null },
+        id: { in: [...leadFirstNotif.keys()] },
       },
-      select: {
-        createdAt: true,
-        conversation: {
-          select: {
-            messages: {
-              where: { sender: 'pro' },
-              orderBy: { sentAt: 'asc' },
-              take: 1,
-              select: { sentAt: true },
-            },
-          },
-        },
-      },
+      select: { id: true, createdAt: true },
     });
 
     const connectionTimes: number[] = [];
 
     for (const lead of leads) {
-      const firstProMessage = lead.conversation?.messages?.[0];
-      if (!firstProMessage) continue;
-      const diffMs = firstProMessage.sentAt.getTime() - lead.createdAt.getTime();
-      if (diffMs < 0) continue; // Skip leads where pro message predates lead (stale data from re-sync)
+      const notifTime = leadFirstNotif.get(lead.id);
+      if (!notifTime) continue;
+      const diffMs = notifTime.getTime() - lead.createdAt.getTime();
+      if (diffMs < 0) continue;
       connectionTimes.push(diffMs / (1000 * 60));
     }
 
@@ -730,27 +743,42 @@ export class AnalyticsService {
   ): Promise<CustomerEngagementMetric> {
     const totalLeads = await this.prisma.lead.count({ where });
 
-    const leadsWithThreads = await this.prisma.lead.findMany({
+    // Only count leads that were contacted via LeadBridge (have notification logs)
+    const sentLogLeadIds = await this.prisma.notificationLog.findMany({
       where: {
-        ...where,
-        threadId: { not: null },
+        leadId: { not: null },
+        status: { in: ['sent', 'delivered', 'queued'] },
       },
-      select: {
-        conversation: {
-          select: { id: true },
-        },
-      },
+      distinct: ['leadId'],
+      select: { leadId: true },
     });
+    const contactedLeadIds = sentLogLeadIds.map(l => l.leadId).filter(Boolean) as string[];
 
-    const conversationIds = leadsWithThreads
+    const leadsContactedViaApp = contactedLeadIds.length > 0
+      ? await this.prisma.lead.findMany({
+          where: {
+            ...where,
+            id: { in: contactedLeadIds },
+            threadId: { not: null },
+          },
+          select: {
+            conversation: {
+              select: { id: true },
+            },
+          },
+        })
+      : [];
+
+    const contactedCount = contactedLeadIds.length; // Total leads contacted, even those without threads
+    const conversationIds = leadsContactedViaApp
       .filter((l) => l.conversation)
       .map((l) => l.conversation!.id);
 
     if (conversationIds.length === 0) {
-      return { engagedCount: 0, totalCount: totalLeads, engagementRate: 0 };
+      return { engagedCount: 0, totalCount: contactedCount || totalLeads, engagementRate: 0 };
     }
 
-    // Find conversations with at least one customer message
+    // Find conversations where the customer replied back
     const engagedConversations = await this.prisma.message.groupBy({
       by: ['conversationId'],
       where: {
@@ -763,8 +791,8 @@ export class AnalyticsService {
 
     return {
       engagedCount,
-      totalCount: totalLeads,
-      engagementRate: totalLeads > 0 ? (engagedCount / totalLeads) * 100 : 0,
+      totalCount: contactedCount,
+      engagementRate: contactedCount > 0 ? (engagedCount / contactedCount) * 100 : 0,
     };
   }
 
