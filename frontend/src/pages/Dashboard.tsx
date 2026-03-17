@@ -8,7 +8,7 @@ import {
 import { useAppStore } from '../store/appStore';
 import type { DashboardStats } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
-import { thumbtackApi, analyticsApi } from '../services/api';
+import { thumbtackApi, analyticsApi, notificationsApi } from '../services/api';
 import ConnectionModal from '../components/ConnectionModal';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import type { SavedAccount } from '../types';
@@ -122,8 +122,8 @@ export function Dashboard() {
       const sevenDaysAgo = new Date(now);
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-      // Load analytics data in parallel
-      const [todayData, weekData, allTimeData] = await Promise.all([
+      // Load analytics data + real notification counts in parallel
+      const [todayData, weekData, allTimeData, allRules] = await Promise.all([
         // Today's leads
         analyticsApi.getBasicAnalytics({
           startDate: todayStart.toISOString(),
@@ -145,6 +145,9 @@ export function Dashboard() {
             messagesPerLead: { average: 0 },
           },
         })),
+
+        // Real notification rule trigger counts
+        notificationsApi.getAllRules().catch(() => ({ success: false, count: 0, rules: [] as any[] })),
       ]);
 
       // Format average response time
@@ -162,21 +165,23 @@ export function Dashboard() {
         return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
       };
 
-      // Calculate estimated message counts (rough approximation)
-      const totalLeads = allTimeData.data.totalLeads || 0;
-      const avgMessagesPerLead = allTimeData.data.messagesPerLead?.average || 0;
-      const estimatedTotalMessages = Math.round(totalLeads * avgMessagesPerLead);
-      const estimatedProMessages = Math.round(estimatedTotalMessages / 2); // Rough estimate
+      // Real counts from notification rules triggerCount
+      const rules = allRules.rules || [];
+      const autoReplyRules = rules.filter((r: any) => r.sendToCustomer === true);
+      const alertRules = rules.filter((r: any) => !r.sendToCustomer);
+      const totalAutoReplies = autoReplyRules.reduce((sum: number, r: any) => sum + (r.triggerCount || 0), 0);
+      const totalAlertsSent = alertRules.reduce((sum: number, r: any) => sum + (r.triggerCount || 0), 0);
+      const totalMessagesSent = totalAutoReplies + totalAlertsSent;
 
       const freshStats = {
         leadsToday: todayData.data.totalLeads || 0,
-        automatedReplies: Math.round(estimatedProMessages * 0.7),
+        automatedReplies: totalAutoReplies,
         avgResponseTime: formatDuration(allTimeData.data.connectionTime?.averageMinutes || 0),
         conversionRate: Math.round(allTimeData.data.customerEngagement?.engagementRate || 0),
         weeklyLeads: weekData.data.totalLeads || 0,
         engagement: Math.round(weekData.data.customerEngagement?.engagementRate || 0),
-        lifetimeReplies: estimatedProMessages,
-        messagesSent: estimatedTotalMessages,
+        lifetimeReplies: totalAutoReplies,
+        messagesSent: totalMessagesSent,
       };
 
       setStats(freshStats);
