@@ -609,26 +609,38 @@ export function Services() {
         );
         setAutoReplyRules(updated.map(u => u.rule));
       } else if (enabled) {
-        // First time: create default template + first message rule only
-        let templateId = templates.find(t => t.name.includes('Auto Reply'))?.id;
-        if (!templateId) {
-          const { template } = await templatesApi.createTemplate(
-            'Auto Reply - Welcome',
-            'Hi {firstName}, thanks for reaching out about {category}! I\'d love to help. Let me review your request and get back to you shortly.',
-          );
-          templateId = template.id;
-          setTemplates(prev => [template, ...prev]);
+        // First time: create rule in AI or template mode based on current selection
+        if (autoReplyUseAi) {
+          const { rule } = await automationApi.createRule({
+            savedAccountId: selectedAccountId,
+            name: 'Auto Reply - Immediate',
+            triggerType: 'new_lead',
+            useAi: true,
+            aiSystemPrompt: autoReplyAiPrompt || undefined,
+            delayMinutes: 0,
+            enabled: true,
+          });
+          setAutoReplyRules([rule]);
+        } else {
+          let templateId = templates.find(t => t.name.includes('Auto Reply'))?.id;
+          if (!templateId) {
+            const { template } = await templatesApi.createTemplate(
+              'Auto Reply - Welcome',
+              'Hi {firstName}, thanks for reaching out about {category}! I\'d love to help. Let me review your request and get back to you shortly.',
+            );
+            templateId = template.id;
+            setTemplates(prev => [template, ...prev]);
+          }
+          const { rule } = await automationApi.createRule({
+            savedAccountId: selectedAccountId,
+            name: 'Auto Reply - Immediate',
+            triggerType: 'new_lead',
+            templateId,
+            delayMinutes: 0,
+            enabled: true,
+          });
+          setAutoReplyRules([rule]);
         }
-
-        const { rule } = await automationApi.createRule({
-          savedAccountId: selectedAccountId,
-          name: 'Auto Reply - Immediate',
-          triggerType: 'new_lead',
-          templateId,
-          delayMinutes: 0,
-          enabled: true,
-        });
-        setAutoReplyRules([rule]);
       }
     } catch (err: any) {
       console.error('[toggleAutoReply] FAILED:', err.response?.data || err.message);
@@ -1532,40 +1544,41 @@ export function Services() {
                     <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500" />
                   </label>
                 </div>
-                <div className={`px-5 py-4 space-y-4${!autoReplyEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+                <div className="px-5 py-4 space-y-4">
+                  {/* Reply Type toggle — always visible */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Reply Type</label>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => { setAutoReplyUseAi(false); if (firstReplyRule) changeRuleAiMode(firstReplyRule.id, false); }}
+                        disabled={saving}
+                        className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all disabled:opacity-50"
+                        style={{
+                          background: !autoReplyUseAi ? '#1d4ed8' : '#f1f5f9',
+                          color: !autoReplyUseAi ? '#fff' : '#64748b',
+                          borderColor: !autoReplyUseAi ? '#1d4ed8' : '#e2e8f0',
+                        }}
+                      >
+                        📝 Template
+                      </button>
+                      <button
+                        onClick={() => { setAutoReplyUseAi(true); if (firstReplyRule) changeRuleAiMode(firstReplyRule.id, true, autoReplyAiPrompt); }}
+                        disabled={saving}
+                        className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all disabled:opacity-50"
+                        style={{
+                          background: autoReplyUseAi ? '#1d4ed8' : '#f1f5f9',
+                          color: autoReplyUseAi ? '#fff' : '#64748b',
+                          borderColor: autoReplyUseAi ? '#1d4ed8' : '#e2e8f0',
+                        }}
+                      >
+                        ✨ AI Reply
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className={!autoReplyEnabled ? 'opacity-40 pointer-events-none select-none' : ''}>
                   {firstReplyRule && (
                     <div className="space-y-4">
-                      {/* Reply Type toggle */}
-                      <div>
-                        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Reply Type</label>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => { setAutoReplyUseAi(false); changeRuleAiMode(firstReplyRule.id, false); }}
-                            disabled={saving}
-                            className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all disabled:opacity-50"
-                            style={{
-                              background: !autoReplyUseAi ? '#1d4ed8' : '#f1f5f9',
-                              color: !autoReplyUseAi ? '#fff' : '#64748b',
-                              borderColor: !autoReplyUseAi ? '#1d4ed8' : '#e2e8f0',
-                            }}
-                          >
-                            📝 Template
-                          </button>
-                          <button
-                            onClick={() => { setAutoReplyUseAi(true); changeRuleAiMode(firstReplyRule.id, true, autoReplyAiPrompt); }}
-                            disabled={saving}
-                            className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all disabled:opacity-50"
-                            style={{
-                              background: autoReplyUseAi ? '#1d4ed8' : '#f1f5f9',
-                              color: autoReplyUseAi ? '#fff' : '#64748b',
-                              borderColor: autoReplyUseAi ? '#1d4ed8' : '#e2e8f0',
-                            }}
-                          >
-                            ✨ AI Reply
-                          </button>
-                        </div>
-                      </div>
-
                       {!autoReplyUseAi ? (
                         /* Template selector */
                         <div>
@@ -1624,6 +1637,7 @@ export function Services() {
                       )}
                     </div>
                   )}
+                  </div>
                 </div>
               </div>
 
