@@ -116,6 +116,15 @@ export class StripeService {
       return { portalUrl: session.url };
     } catch (err: any) {
       this.logger.error(`[createBillingPortalSession] Stripe error: ${err.message}`);
+      // Stale customer ID (e.g. test-mode customer used with live keys) — clear it and send to pricing
+      if (err.code === 'resource_missing' || err.message?.includes('No such customer')) {
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: { stripeCustomerId: null },
+        });
+        const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+        return { portalUrl: `${frontendUrl}/pricing` };
+      }
       throw new BadRequestException(err.message || 'Failed to create billing portal session');
     }
   }
