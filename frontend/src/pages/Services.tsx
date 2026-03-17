@@ -149,6 +149,8 @@ export function Services() {
   const [autoReplyRules, setAutoReplyRules] = useState<AutomationRule[]>(sc?.autoReplyRules ?? []);
   const autoReplyEnabled = autoReplyRules.some(r => r.enabled);
   const firstReplyRule = autoReplyRules.find(r => r.delayMinutes === 0 || !r.delayMinutes) || null;
+  const [autoReplyUseAi, setAutoReplyUseAi] = useState<boolean>(firstReplyRule?.useAi ?? false);
+  const [autoReplyAiPrompt, setAutoReplyAiPrompt] = useState<string>(firstReplyRule?.aiSystemPrompt ?? '');
 
   // Other service rules
   const [leadAlertRule, setLeadAlertRule] = useState<NotificationRule | null>(sc?.leadAlertRule ?? null);
@@ -943,6 +945,24 @@ export function Services() {
     }
   }
 
+  async function changeRuleAiMode(ruleId: string, useAi: boolean, aiSystemPrompt?: string) {
+    setSaving(true);
+    try {
+      const { rule } = await automationApi.updateRule(ruleId, {
+        useAi,
+        aiSystemPrompt: useAi ? (aiSystemPrompt ?? '') : undefined,
+        templateId: useAi ? undefined : (firstReplyRule?.templateId ?? undefined),
+      });
+      setAutoReplyRules(prev => prev.map(r => r.id === ruleId ? rule : r));
+      setAutoReplyUseAi(useAi);
+      showSuccess(useAi ? 'AI Reply enabled' : 'Template mode enabled');
+    } catch (err: any) {
+      setError(err.message || 'Failed to update reply mode');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   // --- Lead Alert Handlers ---
 
   async function changeAlertRuleTemplate(ruleId: string, templateId: string) {
@@ -1513,44 +1533,93 @@ export function Services() {
                   </label>
                 </div>
                 <div className={`px-5 py-4 space-y-4${!autoReplyEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-                  {/* Template */}
                   {firstReplyRule && (
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Template</label>
-                      <select
-                        value={firstReplyRule.templateId || ''}
-                        onChange={e => {
-                          if (e.target.value === '__create_new__') {
-                            setTemplateEditor({ mode: 'create', ruleId: firstReplyRule.id, content: '', type: 'autoReply' });
-                          } else {
-                            changeRuleTemplate(firstReplyRule.id, e.target.value);
-                          }
-                        }}
-                        disabled={saving}
-                        className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
-                      >
-                        <option value="">Select template...</option>
-                        {templates.map(t => (
-                          <option key={t.id} value={t.id}>{t.name}</option>
-                        ))}
-                        <option value="__create_new__">+ Create New Template</option>
-                      </select>
-                      {firstReplyRule.template?.content && (
-                        <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
-                          {firstReplyRule.template.content}
+                    <div className="space-y-4">
+                      {/* Reply Type toggle */}
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Reply Type</label>
+                        <div className="flex gap-2">
                           <button
-                            onClick={() => setTemplateEditor({
-                              mode: 'service-edit',
-                              ruleId: firstReplyRule.id,
-                              templateId: firstReplyRule.template!.id,
-                              templateName: templates.find(t => t.id === firstReplyRule.templateId)?.name || 'template',
-                              content: firstReplyRule.template!.content,
-                              type: 'autoReply',
-                            })}
-                            className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
+                            onClick={() => { setAutoReplyUseAi(false); changeRuleAiMode(firstReplyRule.id, false); }}
+                            disabled={saving}
+                            className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all disabled:opacity-50"
+                            style={{
+                              background: !autoReplyUseAi ? '#1d4ed8' : '#f1f5f9',
+                              color: !autoReplyUseAi ? '#fff' : '#64748b',
+                              borderColor: !autoReplyUseAi ? '#1d4ed8' : '#e2e8f0',
+                            }}
                           >
-                            <Pencil className="w-4 h-4" />
+                            📝 Template
                           </button>
+                          <button
+                            onClick={() => { setAutoReplyUseAi(true); changeRuleAiMode(firstReplyRule.id, true, autoReplyAiPrompt); }}
+                            disabled={saving}
+                            className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all disabled:opacity-50"
+                            style={{
+                              background: autoReplyUseAi ? '#1d4ed8' : '#f1f5f9',
+                              color: autoReplyUseAi ? '#fff' : '#64748b',
+                              borderColor: autoReplyUseAi ? '#1d4ed8' : '#e2e8f0',
+                            }}
+                          >
+                            ✨ AI Reply
+                          </button>
+                        </div>
+                      </div>
+
+                      {!autoReplyUseAi ? (
+                        /* Template selector */
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Template</label>
+                          <select
+                            value={firstReplyRule.templateId || ''}
+                            onChange={e => {
+                              if (e.target.value === '__create_new__') {
+                                setTemplateEditor({ mode: 'create', ruleId: firstReplyRule.id, content: '', type: 'autoReply' });
+                              } else {
+                                changeRuleTemplate(firstReplyRule.id, e.target.value);
+                              }
+                            }}
+                            disabled={saving}
+                            className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium disabled:opacity-50"
+                          >
+                            <option value="">Select template...</option>
+                            {templates.map(t => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                            <option value="__create_new__">+ Create New Template</option>
+                          </select>
+                          {firstReplyRule.template?.content && (
+                            <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                              {firstReplyRule.template.content}
+                              <button
+                                onClick={() => setTemplateEditor({
+                                  mode: 'service-edit',
+                                  ruleId: firstReplyRule.id,
+                                  templateId: firstReplyRule.template!.id,
+                                  templateName: templates.find(t => t.id === firstReplyRule.templateId)?.name || 'template',
+                                  content: firstReplyRule.template!.content,
+                                  type: 'autoReply',
+                                })}
+                                className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        /* AI mode: optional custom instructions */
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Custom AI Instructions <span className="font-normal normal-case">(optional)</span></label>
+                          <textarea
+                            value={autoReplyAiPrompt}
+                            onChange={e => setAutoReplyAiPrompt(e.target.value)}
+                            onBlur={() => firstReplyRule && changeRuleAiMode(firstReplyRule.id, true, autoReplyAiPrompt)}
+                            placeholder="e.g. Keep responses under 3 sentences. Always mention we offer free estimates. Be friendly and professional."
+                            rows={3}
+                            className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          />
+                          <p className="text-xs text-slate-400 mt-1">Leave blank to use the default AI instructions.</p>
                         </div>
                       )}
                     </div>
