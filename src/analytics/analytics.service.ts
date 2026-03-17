@@ -524,6 +524,7 @@ export class AnalyticsService {
       const firstProMessage = lead.conversation?.messages?.[0];
       if (!firstProMessage) continue;
       const diffMs = firstProMessage.sentAt.getTime() - lead.createdAt.getTime();
+      if (diffMs < 0) continue; // Skip leads where pro message predates lead (stale data from re-sync)
       connectionTimes.push(diffMs / (1000 * 60));
     }
 
@@ -587,9 +588,8 @@ export class AnalyticsService {
         if (messages[i].sender === 'customer') {
           for (let j = i + 1; j < messages.length; j++) {
             if (messages[j].sender === 'pro') {
-              responseTimes.push(
-                (messages[j].sentAt.getTime() - messages[i].sentAt.getTime()) / 60000,
-              );
+              const diffMin = (messages[j].sentAt.getTime() - messages[i].sentAt.getTime()) / 60000;
+              if (diffMin >= 0) responseTimes.push(diffMin);
               break;
             }
           }
