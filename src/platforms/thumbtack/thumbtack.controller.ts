@@ -750,8 +750,12 @@ export class ThumbtackController {
       const settingsDestPhone = notifSettings?.destinationPhone;
 
       // Check for dedicated number (primary fromPhone source in sendNotificationWithRule)
+      // Look for phone linked to this account first, then any active phone for the user
       const dedicatedPhone = await this.prisma.tenantPhoneNumber.findFirst({
-        where: { userId: account.userId, savedAccountId: account.id, status: 'ACTIVE' },
+        where: { userId: account.userId, status: 'ACTIVE', OR: [{ savedAccountId: account.id }, { savedAccountId: null }] },
+        select: { phoneNumber: true },
+      }) || await this.prisma.tenantPhoneNumber.findFirst({
+        where: { userId: account.userId, status: 'ACTIVE' },
         select: { phoneNumber: true },
       });
 
