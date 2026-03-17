@@ -395,7 +395,7 @@ export function Dashboard() {
                 return savedAccounts.map((account) => {
                   const diag = accountDiagnostics[account.id];
                   const isCheckingDiag = !diag;
-                  const hasConnectionIssues = !isCheckingDiag && (!account.webhookId || (diag && !diag.healthy));
+                  const hasConnectionIssues = !isCheckingDiag && (diag && !diag.healthy);
                   const notifIssues = diag?.notificationIssues || [];
                   // "disabled" = rule exists but toggled off; everything else = real config problem
                   const isJustDisabled = !isCheckingDiag && !hasConnectionIssues && notifIssues.length > 0 && notifIssues.every((i: string) => i.toLowerCase().includes('disabled'));

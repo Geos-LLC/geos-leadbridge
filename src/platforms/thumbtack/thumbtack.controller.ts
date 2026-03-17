@@ -728,7 +728,10 @@ export class ThumbtackController {
 
     const connectionIssues: string[] = [];
     if (!platformConnection) connectionIssues.push('No active Thumbtack connection found for this user');
-    if (!account.webhookId) connectionIssues.push('No webhook registered for this account');
+    // Missing webhookId on savedAccount is only a hard issue if there's also no platform connection.
+    // For multi-business accounts, the webhook is registered per-business at the Thumbtack API level
+    // and may not be stored on every savedAccount row — but webhooks still arrive correctly.
+    if (!account.webhookId && !platformConnection) connectionIssues.push('No webhook registered for this account');
 
     // Check notification health based on what actually matters for SMS delivery.
     // Mirror the actual sending fallback chain in sendNotificationWithRule:
