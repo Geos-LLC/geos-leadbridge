@@ -408,6 +408,11 @@ export function Services() {
         (r: AutomationRule) => r.triggerType === 'new_lead'
       );
       setAutoReplyRules(allAutoReplies);
+      const loadedFirstRule = allAutoReplies.find((r: AutomationRule) => r.delayMinutes === 0 || !r.delayMinutes) || null;
+      if (loadedFirstRule) {
+        setAutoReplyUseAi(loadedFirstRule.useAi ?? false);
+        setAutoReplyAiPrompt(loadedFirstRule.aiSystemPrompt ?? '');
+      }
 
       // Find lead alert rules (non-customer-facing)
       const leadAlert = notifRes.rules.find(
