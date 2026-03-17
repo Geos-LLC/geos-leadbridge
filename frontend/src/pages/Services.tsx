@@ -1484,6 +1484,17 @@ export function Services() {
           {/* 1. Lead Notifications (combined Auto-Reply + Lead Alerts) */}
           {(() => {
             const noPhone = tenantPhones.length === 0;
+            console.log('[Services Debug]', {
+              selectedAccountId,
+              expandedCard,
+              noPhone,
+              tenantPhonesCount: tenantPhones.length,
+              autoReplyEnabled,
+              autoReplyRulesCount: autoReplyRules.length,
+              firstReplyRule: firstReplyRule ? { id: firstReplyRule.id, useAi: firstReplyRule.useAi } : null,
+              autoReplyUseAi,
+              loading,
+            });
             const toPhoneMissing = !!leadAlertRule && !alertToPhone;
             const templateMissing = !!leadAlertRule && !leadAlertRule.templateId && !leadAlertRule.messageTemplate;
             const leadAlertsIncomplete = toPhoneMissing || templateMissing;
