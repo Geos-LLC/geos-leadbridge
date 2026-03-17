@@ -247,55 +247,60 @@ export function Landing() {
 
       {/* Pricing */}
       <section id="pricing" className="py-24 bg-white">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-16">
+        <div className="max-w-5xl mx-auto px-6">
+          <div className="text-center mb-6">
             <span className="text-blue-600 font-bold tracking-widest uppercase text-sm">💰 PRICING</span>
-            <h2 className="text-4xl font-extrabold text-slate-900 mt-4">Transparent Growth Plans</h2>
+            <h2 className="text-4xl font-extrabold text-slate-900 mt-4">Simple, Honest Pricing</h2>
+            <p className="text-slate-500 mt-3 text-lg">All plans include a 14-day money-back guarantee.</p>
           </div>
-          <div className="grid lg:grid-cols-3 gap-8">
-            <div className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all">
-              <h3 className="text-xl font-bold mb-2">Starter</h3>
-              <div className="flex items-baseline gap-1 mb-6">
-                <span className="text-4xl font-extrabold">$79</span>
-                <span className="text-slate-500">/month</span>
+          <div className="flex justify-center mb-12">
+            <div className="bg-amber-50 border border-amber-200 px-6 py-3 rounded-2xl text-center">
+              <span className="text-amber-800 font-bold text-sm">🎉 Early Access Pricing</span>
+              <span className="text-amber-600 text-sm ml-2">— Lock in lower rates before we launch publicly</span>
+            </div>
+          </div>
+          <div className="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
+            {/* Starter */}
+            <div className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all flex flex-col">
+              <h3 className="text-xl font-bold mb-1">Starter</h3>
+              <p className="text-slate-500 text-sm mb-5">Never miss a lead</p>
+              <div className="flex items-baseline gap-2 mb-1">
+                <span className="text-slate-400 line-through text-lg font-medium">$29</span>
+                <span className="text-4xl font-extrabold text-slate-900">$19</span>
+                <span className="text-slate-400 font-medium">/month</span>
               </div>
-              <ul className="space-y-4 mb-10">
-                <li className="flex items-center gap-3 text-slate-600"><Check className="w-5 h-5 text-blue-500" /> Instant first reply</li>
-                <li className="flex items-center gap-3 text-slate-600"><Check className="w-5 h-5 text-blue-500" /> 1 follow-up sequence</li>
-                <li className="flex items-center gap-3 text-slate-600 font-bold"><Check className="w-5 h-5 text-blue-500" /> Up to 50 leads</li>
+              <p className="text-xs text-amber-600 font-semibold mb-6">Early Access Price</p>
+              <ul className="space-y-3 mb-8 flex-1">
+                <li className="flex items-center gap-3 text-slate-600 text-sm"><div className="rounded-full p-1 bg-emerald-100 text-emerald-600 shrink-0"><Check className="w-3 h-3" /></div> Instant lead notifications (SMS alerts)</li>
+                <li className="flex items-center gap-3 text-slate-600 text-sm"><div className="rounded-full p-1 bg-emerald-100 text-emerald-600 shrink-0"><Check className="w-3 h-3" /></div> Basic auto-reply (first message only)</li>
+                <li className="flex items-center gap-3 text-slate-600 text-sm"><div className="rounded-full p-1 bg-emerald-100 text-emerald-600 shrink-0"><Check className="w-3 h-3" /></div> 1 phone number included</li>
+                <li className="flex items-center gap-3 text-slate-600 text-sm"><div className="rounded-full p-1 bg-emerald-100 text-emerald-600 shrink-0"><Check className="w-3 h-3" /></div> Manual follow-up & calls</li>
               </ul>
-              <Link to="/register" className="block w-full py-4 text-center bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800">Start Free Trial</Link>
+              <p className="text-xs text-slate-400 italic mb-4">Perfect for solo operators getting started</p>
+              <Link to="/register" className="block w-full py-4 text-center bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all">Start Free Trial</Link>
             </div>
 
-            <div className="bg-white p-10 rounded-[2.5rem] border-4 border-blue-600 shadow-xl relative scale-105 z-10">
-              <div className="absolute -top-5 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest">Most Popular</div>
-              <h3 className="text-xl font-bold mb-2 text-blue-600">Pro</h3>
-              <div className="flex items-baseline gap-1 mb-6">
-                <span className="text-4xl font-extrabold">$149</span>
-                <span className="text-slate-500">/month</span>
+            {/* Pro */}
+            <div className="bg-white p-10 rounded-[2.5rem] border-2 border-blue-600 shadow-2xl shadow-blue-100 scale-[1.02] relative flex flex-col">
+              <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest px-4 py-1.5 rounded-full">Most Popular</div>
+              <h3 className="text-xl font-bold mb-1">Pro</h3>
+              <p className="text-slate-500 text-sm mb-5">Automatically handle every lead</p>
+              <div className="flex items-baseline gap-2 mb-1">
+                <span className="text-slate-400 line-through text-lg font-medium">$99</span>
+                <span className="text-4xl font-extrabold text-slate-900">$49</span>
+                <span className="text-slate-400 font-medium">/month</span>
               </div>
-              <ul className="space-y-4 mb-10">
-                <li className="flex items-center gap-3 text-slate-700 font-medium"><Check className="w-5 h-5 text-blue-500" /> AI first reply</li>
-                <li className="flex items-center gap-3 text-slate-700 font-medium"><Check className="w-5 h-5 text-blue-500" /> Multi-step follow-ups</li>
-                <li className="flex items-center gap-3 text-slate-700 font-medium"><Check className="w-5 h-5 text-blue-500" /> Performance tracking</li>
-                <li className="flex items-center gap-3 text-slate-700 font-bold"><Check className="w-5 h-5 text-blue-500" /> Up to 150 leads</li>
+              <p className="text-xs text-amber-600 font-semibold mb-6">Early Access Price</p>
+              <ul className="space-y-3 mb-8 flex-1">
+                <li className="flex items-center gap-3 text-slate-700 text-sm font-medium"><div className="rounded-full p-1 bg-blue-600 text-white shrink-0"><Check className="w-3 h-3" /></div> Full auto-replies (ongoing conversations)</li>
+                <li className="flex items-center gap-3 text-slate-700 text-sm font-medium"><div className="rounded-full p-1 bg-blue-600 text-white shrink-0"><Check className="w-3 h-3" /></div> 2-way messaging (SMS + calls)</li>
+                <li className="flex items-center gap-3 text-slate-700 text-sm font-medium"><div className="rounded-full p-1 bg-blue-600 text-white shrink-0"><Check className="w-3 h-3" /></div> Call connect (instant call to new leads)</li>
+                <li className="flex items-center gap-3 text-slate-700 text-sm font-medium"><div className="rounded-full p-1 bg-blue-600 text-white shrink-0"><Check className="w-3 h-3" /></div> Automatic follow-ups <span className="text-slate-400 font-normal">(coming soon)</span></li>
+                <li className="flex items-center gap-3 text-slate-700 text-sm font-medium"><div className="rounded-full p-1 bg-blue-600 text-white shrink-0"><Check className="w-3 h-3" /></div> Handles up to 500 leads/month</li>
+                <li className="flex items-center gap-3 text-slate-700 text-sm font-medium"><div className="rounded-full p-1 bg-blue-600 text-white shrink-0"><Check className="w-3 h-3" /></div> Everything in Starter, included</li>
               </ul>
-              <Link to="/register" className="block w-full py-4 text-center bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-200">Start Free Trial</Link>
-            </div>
-
-            <div className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all">
-              <h3 className="text-xl font-bold mb-2">Elite</h3>
-              <div className="flex items-baseline gap-1 mb-6">
-                <span className="text-4xl font-extrabold">$249</span>
-                <span className="text-slate-500">/month</span>
-              </div>
-              <ul className="space-y-4 mb-10">
-                <li className="flex items-center gap-3 text-slate-600"><Check className="w-5 h-5 text-blue-500" /> AI optimization</li>
-                <li className="flex items-center gap-3 text-slate-600"><Check className="w-5 h-5 text-blue-500" /> Custom message logic</li>
-                <li className="flex items-center gap-3 text-slate-600"><Check className="w-5 h-5 text-blue-500" /> Dedicated phone number</li>
-                <li className="flex items-center gap-3 text-slate-600 font-bold"><Check className="w-5 h-5 text-blue-500" /> Unlimited leads</li>
-              </ul>
-              <Link to="/register" className="block w-full py-4 text-center bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800">Contact Sales</Link>
+              <p className="text-xs text-slate-400 italic mb-4">Best for growing businesses that want more bookings with less effort</p>
+              <Link to="/register" className="block w-full py-4 text-center bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200">Get Started</Link>
             </div>
           </div>
         </div>
@@ -327,7 +332,7 @@ export function Landing() {
             </div>
             <span className="text-lg font-bold">LeadBridge</span>
           </div>
-          <p className="text-slate-400 text-sm">© 2024 LeadBridge AI. Built for the Home Service Industry.</p>
+          <p className="text-slate-400 text-sm">© 2025 LeadBridge AI. Built for the Home Service Industry.</p>
           <div className="flex items-center gap-6 text-slate-400">
             <Link to="/demo" className="text-sm hover:text-blue-600 transition-colors">Demo</Link>
             <a href="#" className="hover:text-blue-600 transition-colors"><Twitter className="w-5 h-5" /></a>

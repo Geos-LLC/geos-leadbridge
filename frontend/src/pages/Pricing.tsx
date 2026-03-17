@@ -9,8 +9,8 @@ const tiers = [
   {
     name: 'Starter',
     id: 'STARTER' as const,
-    price: 29,
-    originalPrice: 19,
+    price: 19,
+    originalPrice: 29,
     tagline: 'Never miss a lead',
     description: 'Get notified instantly and send a quick first response to every new inquiry.',
     features: [
@@ -24,8 +24,8 @@ const tiers = [
   {
     name: 'Pro',
     id: 'PRO' as const,
-    price: 99,
-    originalPrice: 49,
+    price: 49,
+    originalPrice: 99,
     tagline: 'Automatically handle every lead',
     description: 'Let the system respond, follow up, and connect you with customers — automatically.',
     features: [
