@@ -104,15 +104,20 @@ export class StripeService {
   async createBillingPortalSession(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.stripeCustomerId) {
-      throw new BadRequestException('User has no Stripe customer');
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+      return { portalUrl: `${frontendUrl}/pricing` };
     }
 
-    const session = await this.requireStripe().billingPortal.sessions.create({
-      customer: user.stripeCustomerId,
-      return_url: `${this.configService.get<string>('FRONTEND_URL')}/billing`,
-    });
-
-    return { portalUrl: session.url };
+    try {
+      const session = await this.requireStripe().billingPortal.sessions.create({
+        customer: user.stripeCustomerId,
+        return_url: `${this.configService.get<string>('FRONTEND_URL')}/billing`,
+      });
+      return { portalUrl: session.url };
+    } catch (err: any) {
+      this.logger.error(`[createBillingPortalSession] Stripe error: ${err.message}`);
+      throw new BadRequestException(err.message || 'Failed to create billing portal session');
+    }
   }
 
   async cancelSubscription(userId: string, immediate: boolean = true) {
