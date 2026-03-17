@@ -16,12 +16,17 @@ export interface AiReplyContext {
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
-  private readonly client: OpenAI;
+  private _client: OpenAI | null = null;
 
-  constructor(private readonly configService: ConfigService) {
-    this.client = new OpenAI({
-      apiKey: this.configService.get<string>('OPENAI_API_KEY'),
-    });
+  constructor(private readonly configService: ConfigService) {}
+
+  private get client(): OpenAI {
+    if (!this._client) {
+      const apiKey = this.configService.get<string>('OPENAI_API_KEY');
+      if (!apiKey) throw new Error('OPENAI_API_KEY is not configured');
+      this._client = new OpenAI({ apiKey });
+    }
+    return this._client;
   }
 
   async generateReply(ctx: AiReplyContext): Promise<string> {
