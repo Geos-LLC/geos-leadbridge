@@ -963,17 +963,22 @@ export function Services() {
   }
 
   async function changeRuleAiMode(ruleId: string, useAi: boolean, aiSystemPrompt?: string) {
+    console.log('[changeRuleAiMode] start', { ruleId, useAi, aiSystemPrompt });
     setSaving(true);
     try {
-      const { rule } = await automationApi.updateRule(ruleId, {
+      const payload = {
         useAi,
         aiSystemPrompt: useAi ? (aiSystemPrompt ?? '') : undefined,
         templateId: useAi ? undefined : (firstReplyRule?.templateId ?? undefined),
-      });
+      };
+      console.log('[changeRuleAiMode] calling updateRule', payload);
+      const { rule } = await automationApi.updateRule(ruleId, payload);
+      console.log('[changeRuleAiMode] updated rule', rule);
       setAutoReplyRules(prev => prev.map(r => r.id === ruleId ? rule : r));
       setAutoReplyUseAi(useAi);
       showSuccess(useAi ? 'AI Reply enabled' : 'Template mode enabled');
     } catch (err: any) {
+      console.error('[changeRuleAiMode] error', err.response?.data || err.message);
       setError(err.message || 'Failed to update reply mode');
     } finally {
       setSaving(false);
@@ -1566,7 +1571,7 @@ export function Services() {
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Reply Type</label>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => { setAutoReplyUseAi(false); if (firstReplyRule) changeRuleAiMode(firstReplyRule.id, false); }}
+                        onClick={() => { console.log('[AI Switch] → Template clicked', { firstReplyRule, autoReplyUseAi, saving }); setAutoReplyUseAi(false); if (firstReplyRule) changeRuleAiMode(firstReplyRule.id, false); else console.warn('[AI Switch] no firstReplyRule — skipping changeRuleAiMode'); }}
                         disabled={saving}
                         className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all disabled:opacity-50"
                         style={{
@@ -1578,7 +1583,7 @@ export function Services() {
                         📝 Template
                       </button>
                       <button
-                        onClick={() => { setAutoReplyUseAi(true); if (firstReplyRule) changeRuleAiMode(firstReplyRule.id, true, autoReplyAiPrompt); }}
+                        onClick={() => { console.log('[AI Switch] → AI clicked', { firstReplyRule, autoReplyUseAi, autoReplyAiPrompt, saving }); setAutoReplyUseAi(true); if (firstReplyRule) changeRuleAiMode(firstReplyRule.id, true, autoReplyAiPrompt); else console.warn('[AI Switch] no firstReplyRule — skipping changeRuleAiMode'); }}
                         disabled={saving}
                         className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all disabled:opacity-50"
                         style={{
