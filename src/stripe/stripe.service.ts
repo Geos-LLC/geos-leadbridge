@@ -44,8 +44,18 @@ export class StripeService {
     }
     this.logger.log(`[createCheckoutSession] User found: ${user.email}`);
 
-    // Get or create Stripe customer
+    // Get or create Stripe customer (validates existing ID is in the correct mode)
     let customerId = user.stripeCustomerId;
+    if (customerId) {
+      try {
+        await this.requireStripe().customers.retrieve(customerId);
+        this.logger.log(`[createCheckoutSession] Using existing customer: ${customerId}`);
+      } catch (err: any) {
+        this.logger.warn(`[createCheckoutSession] Stale customer ID ${customerId}: ${err.message} — creating new`);
+        customerId = null;
+        await this.prisma.user.update({ where: { id: userId }, data: { stripeCustomerId: null } });
+      }
+    }
     if (!customerId) {
       this.logger.log(`[createCheckoutSession] Creating new Stripe customer`);
       const customer = await this.requireStripe().customers.create({
@@ -54,13 +64,10 @@ export class StripeService {
       });
       customerId = customer.id;
       this.logger.log(`[createCheckoutSession] Created customer: ${customerId}`);
-
       await this.prisma.user.update({
         where: { id: userId },
         data: { stripeCustomerId: customerId },
       });
-    } else {
-      this.logger.log(`[createCheckoutSession] Using existing customer: ${customerId}`);
     }
 
     // Build line items
