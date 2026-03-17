@@ -1,0 +1,1 @@
+it is just git log check main and staging remote - 

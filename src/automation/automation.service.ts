@@ -8,15 +8,18 @@ import { PrismaService } from '../common/utils/prisma.service';
 import { TemplatesService } from '../templates/templates.service';
 import { LeadsService } from '../leads/leads.service';
 import { ConfigService } from '@nestjs/config';
+import { AiService } from '../ai/ai.service';
 
 export interface CreateAutomationRuleDto {
   savedAccountId: string;
   name: string;
   triggerType: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply';
-  templateId: string;
+  templateId?: string;
   delayMinutes?: number;
   enabled?: boolean;
+  useAi?: boolean;
+  aiSystemPrompt?: string;
 }
 
 export interface UpdateAutomationRuleDto {
@@ -26,6 +29,8 @@ export interface UpdateAutomationRuleDto {
   templateId?: string;
   delayMinutes?: number;
   enabled?: boolean;
+  useAi?: boolean;
+  aiSystemPrompt?: string;
 }
 
 export interface AutomationTriggerContext {
@@ -34,10 +39,12 @@ export interface AutomationTriggerContext {
   negotiationId: string;
   leadId: string;
   customerName: string;
+  customerMessage?: string;
   accountName?: string;
   category?: string;
   city?: string;
   state?: string;
+  budget?: number;
 }
 
 export interface CustomerReplyContext extends AutomationTriggerContext {
@@ -56,6 +63,7 @@ export class AutomationService implements OnModuleInit {
     @Inject(forwardRef(() => LeadsService))
     private leadsService: LeadsService,
     private configService: ConfigService,
+    private aiService: AiService,
   ) {}
 
   /**
@@ -145,13 +153,17 @@ export class AutomationService implements OnModuleInit {
       throw new NotFoundException('Saved account not found');
     }
 
-    // Verify template belongs to user
-    const template = await this.prisma.messageTemplate.findFirst({
-      where: { id: data.templateId, userId },
-    });
-
-    if (!template) {
-      throw new NotFoundException('Template not found');
+    // Verify template belongs to user (only required when not using AI)
+    if (!data.useAi) {
+      if (!data.templateId) {
+        throw new NotFoundException('Template is required when not using AI');
+      }
+      const template = await this.prisma.messageTemplate.findFirst({
+        where: { id: data.templateId, userId },
+      });
+      if (!template) {
+        throw new NotFoundException('Template not found');
+      }
     }
 
     const rule = await this.prisma.automationRule.create({
@@ -161,9 +173,11 @@ export class AutomationService implements OnModuleInit {
         name: data.name,
         triggerType: data.triggerType,
         replyTriggerMode: data.replyTriggerMode,
-        templateId: data.templateId,
+        templateId: data.useAi ? null : data.templateId,
         delayMinutes: data.delayMinutes ?? 0,
         enabled: data.enabled ?? true,
+        useAi: data.useAi ?? false,
+        aiSystemPrompt: data.aiSystemPrompt ?? null,
       },
       include: {
         savedAccount: {
@@ -208,9 +222,11 @@ export class AutomationService implements OnModuleInit {
         ...(data.name !== undefined && { name: data.name }),
         ...(data.triggerType !== undefined && { triggerType: data.triggerType }),
         ...(data.replyTriggerMode !== undefined && { replyTriggerMode: data.replyTriggerMode }),
-        ...(data.templateId !== undefined && { templateId: data.templateId }),
+        ...(data.templateId !== undefined && { templateId: data.useAi ? null : data.templateId }),
         ...(data.delayMinutes !== undefined && { delayMinutes: data.delayMinutes }),
         ...(data.enabled !== undefined && { enabled: data.enabled }),
+        ...(data.useAi !== undefined && { useAi: data.useAi }),
+        ...(data.aiSystemPrompt !== undefined && { aiSystemPrompt: data.aiSystemPrompt }),
       },
       include: {
         savedAccount: {
@@ -485,22 +501,23 @@ export class AutomationService implements OnModuleInit {
     const delayMs = rule.delayMinutes * 60 * 1000;
     if (delayMs === 0) {
       // Execute immediately
-      await this.executePendingMessage(pending.id, rule.template, context);
+      await this.executePendingMessage(pending.id, rule, context);
     } else {
       // Schedule for later
-      this.scheduleTimer(pending.id, delayMs, rule.template, context);
+      this.scheduleTimer(pending.id, delayMs, rule, context);
     }
   }
 
   /**
    * Execute a pending automated message (send it)
+   * Supports both static templates and AI-generated replies.
    */
   private async executePendingMessage(
     pendingId: string,
-    template: { id: string; content: string },
+    rule: { id: string; useAi: boolean; aiSystemPrompt?: string | null; template?: { id: string; content: string } | null },
     context: AutomationTriggerContext,
   ): Promise<void> {
-    this.logger.log(`Executing pending message: ${pendingId}`);
+    this.logger.log(`Executing pending message: ${pendingId} (useAi=${rule.useAi})`);
 
     try {
       // Verify lead still has a thread
@@ -516,29 +533,48 @@ export class AutomationService implements OnModuleInit {
         throw new Error('No conversation thread for lead');
       }
 
-      // Personalize the message
-      const personalizedMessage = this.templatesService.personalizeMessage(template.content, {
-        customerName: context.customerName,
-        accountName: context.accountName,
-        category: context.category,
-        city: context.city,
-        state: context.state,
-      });
+      let messageToSend: string;
+
+      if (rule.useAi) {
+        // Generate reply via OpenAI
+        messageToSend = await this.aiService.generateReply({
+          customerName: context.customerName,
+          customerMessage: context.customerMessage || lead.message || '',
+          category: context.category,
+          city: context.city,
+          state: context.state,
+          budget: context.budget,
+          accountName: context.accountName,
+          systemPrompt: rule.aiSystemPrompt ?? undefined,
+        });
+        this.logger.log(`[AI] Generated reply for pending message ${pendingId}`);
+      } else {
+        // Use static template
+        if (!rule.template) {
+          throw new Error('No template configured for this automation rule');
+        }
+        messageToSend = this.templatesService.personalizeMessage(rule.template.content, {
+          customerName: context.customerName,
+          accountName: context.accountName,
+          category: context.category,
+          city: context.city,
+          state: context.state,
+        });
+      }
 
       // Send the message
-      await this.leadsService.sendMessage(context.userId, context.leadId, personalizedMessage);
+      await this.leadsService.sendMessage(context.userId, context.leadId, messageToSend);
 
       // Mark as sent
       await this.prisma.pendingAutomatedMessage.update({
         where: { id: pendingId },
-        data: {
-          status: 'sent',
-          sentAt: new Date(),
-        },
+        data: { status: 'sent', sentAt: new Date() },
       });
 
-      // Record template usage
-      await this.templatesService.recordUsage(context.userId, template.id);
+      // Record template usage if applicable
+      if (!rule.useAi && rule.template) {
+        await this.templatesService.recordUsage(context.userId, rule.template.id);
+      }
 
       this.logger.log(`Successfully sent automated message: ${pendingId}`);
     } catch (error: any) {
@@ -546,10 +582,7 @@ export class AutomationService implements OnModuleInit {
 
       await this.prisma.pendingAutomatedMessage.update({
         where: { id: pendingId },
-        data: {
-          status: 'failed',
-          failureReason: error.message,
-        },
+        data: { status: 'failed', failureReason: error.message },
       });
     }
   }
@@ -560,12 +593,12 @@ export class AutomationService implements OnModuleInit {
   private scheduleTimer(
     pendingId: string,
     delayMs: number,
-    template: { id: string; content: string },
+    rule: { id: string; useAi: boolean; aiSystemPrompt?: string | null; template?: { id: string; content: string } | null },
     context: AutomationTriggerContext,
   ): void {
     const timer = setTimeout(async () => {
       this.pendingTimers.delete(pendingId);
-      await this.executePendingMessage(pendingId, template, context);
+      await this.executePendingMessage(pendingId, rule, context);
     }, delayMs);
 
     this.pendingTimers.set(pendingId, timer);
@@ -624,6 +657,7 @@ export class AutomationService implements OnModuleInit {
         negotiationId: pending.negotiationId,
         leadId: pending.leadId,
         customerName: pending.lead.customerName,
+        customerMessage: pending.lead.message || undefined,
         accountName: savedAccount?.businessName || undefined,
         category: pending.lead.category || undefined,
         city: pending.lead.city || undefined,
@@ -633,10 +667,10 @@ export class AutomationService implements OnModuleInit {
       if (delayMs === 0) {
         // Should have already been sent - execute now
         this.logger.log(`Executing overdue message: ${pending.id}`);
-        await this.executePendingMessage(pending.id, pending.automationRule.template, context);
+        await this.executePendingMessage(pending.id, pending.automationRule, context);
       } else {
         // Reschedule for remaining time
-        this.scheduleTimer(pending.id, delayMs, pending.automationRule.template, context);
+        this.scheduleTimer(pending.id, delayMs, pending.automationRule, context);
       }
     }
   }
@@ -654,6 +688,8 @@ export class AutomationService implements OnModuleInit {
       templateId: rule.templateId,
       delayMinutes: rule.delayMinutes,
       enabled: rule.enabled,
+      useAi: rule.useAi,
+      aiSystemPrompt: rule.aiSystemPrompt || null,
       triggerCount: rule.triggerCount,
       lastTriggeredAt: rule.lastTriggeredAt?.toISOString() || null,
       createdAt: rule.createdAt.toISOString(),

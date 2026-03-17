@@ -373,6 +373,7 @@ export class WebhooksService {
           negotiationId,
           leadId: lead.id,
           customerName,
+          customerMessage: request.description || undefined,
           accountName: savedAccount?.businessName || undefined,
           category: request.category?.name,
           city: location.city,

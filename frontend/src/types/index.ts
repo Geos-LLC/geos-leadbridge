@@ -145,9 +145,11 @@ export interface AutomationRule {
   name: string;
   triggerType: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply';
-  templateId: string;
+  templateId: string | null;
   delayMinutes: number;
   enabled: boolean;
+  useAi: boolean;
+  aiSystemPrompt: string | null;
   triggerCount: number;
   lastTriggeredAt: string | null;
   createdAt: string;

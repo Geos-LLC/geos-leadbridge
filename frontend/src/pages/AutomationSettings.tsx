@@ -52,6 +52,8 @@ export function AutomationSettings() {
   const [formTemplateId, setFormTemplateId] = useState('');
   const [formDelayMinutes, setFormDelayMinutes] = useState(0);
   const [formEnabled, setFormEnabled] = useState(true);
+  const [formUseAi, setFormUseAi] = useState(false);
+  const [formAiSystemPrompt, setFormAiSystemPrompt] = useState('');
 
   // Delete confirmation
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -218,6 +220,8 @@ export function AutomationSettings() {
     setFormTemplateId(templates[0]?.id || '');
     setFormDelayMinutes(0);
     setFormEnabled(true);
+    setFormUseAi(false);
+    setFormAiSystemPrompt('');
   }
 
   function startEdit(rule: AutomationRule) {
@@ -227,9 +231,11 @@ export function AutomationSettings() {
     setFormAccountId(rule.savedAccountId);
     setFormTriggerType(rule.triggerType);
     setFormReplyMode(rule.replyTriggerMode || 'first_only');
-    setFormTemplateId(rule.templateId);
+    setFormTemplateId(rule.templateId || '');
     setFormDelayMinutes(rule.delayMinutes);
     setFormEnabled(rule.enabled);
+    setFormUseAi(rule.useAi ?? false);
+    setFormAiSystemPrompt(rule.aiSystemPrompt || '');
   }
 
   function cancelEdit() {
@@ -238,8 +244,12 @@ export function AutomationSettings() {
   }
 
   async function handleSave() {
-    if (!formName.trim() || !formAccountId || !formTemplateId) {
+    if (!formName.trim() || !formAccountId) {
       setError('Please fill in all required fields');
+      return;
+    }
+    if (!formUseAi && !formTemplateId) {
+      setError('Please select a template or enable AI replies');
       return;
     }
 
@@ -253,9 +263,11 @@ export function AutomationSettings() {
           name: formName.trim(),
           triggerType: formTriggerType,
           replyTriggerMode: formTriggerType === 'customer_reply' ? formReplyMode : undefined,
-          templateId: formTemplateId,
+          templateId: formUseAi ? undefined : formTemplateId,
           delayMinutes: formDelayMinutes,
           enabled: formEnabled,
+          useAi: formUseAi,
+          aiSystemPrompt: formUseAi ? formAiSystemPrompt : undefined,
         });
         setRules(prev => [rule, ...prev]);
       } else if (editingRule) {
@@ -263,9 +275,11 @@ export function AutomationSettings() {
           name: formName.trim(),
           triggerType: formTriggerType,
           replyTriggerMode: formTriggerType === 'customer_reply' ? formReplyMode : undefined,
-          templateId: formTemplateId,
+          templateId: formUseAi ? undefined : formTemplateId,
           delayMinutes: formDelayMinutes,
           enabled: formEnabled,
+          useAi: formUseAi,
+          aiSystemPrompt: formUseAi ? formAiSystemPrompt : undefined,
         });
         setRules(prev => prev.map(r => (r.id === rule.id ? rule : r)));
       }
@@ -620,36 +634,88 @@ export function AutomationSettings() {
                 </div>
               )}
 
+              {/* AI Toggle */}
               <div className="form-group">
-                <label>Template *</label>
-                <div className="template-select-row">
-                  <div className="select-wrapper">
-                    <select
-                      value={formTemplateId}
-                      onChange={e => handleTemplateChange(e.target.value)}
-                    >
-                      {templates.map(t => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                      <option value="__new__">+ Create New Template</option>
-                    </select>
-                    <ChevronDown size={16} />
-                  </div>
+                <label>Reply Type</label>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                   <button
                     type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={openTemplateModal}
-                    title="Create new template"
+                    onClick={() => setFormUseAi(false)}
+                    style={{
+                      flex: 1, padding: '8px', borderRadius: '10px', fontWeight: 600, fontSize: '13px', cursor: 'pointer',
+                      background: !formUseAi ? '#1d4ed8' : '#f1f5f9',
+                      color: !formUseAi ? '#fff' : '#64748b',
+                      border: !formUseAi ? '2px solid #1d4ed8' : '2px solid #e2e8f0',
+                    }}
                   >
-                    <Plus size={14} />
+                    📝 Static Template
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormUseAi(true)}
+                    style={{
+                      flex: 1, padding: '8px', borderRadius: '10px', fontWeight: 600, fontSize: '13px', cursor: 'pointer',
+                      background: formUseAi ? '#1d4ed8' : '#f1f5f9',
+                      color: formUseAi ? '#fff' : '#64748b',
+                      border: formUseAi ? '2px solid #1d4ed8' : '2px solid #e2e8f0',
+                    }}
+                  >
+                    ✨ AI Reply
                   </button>
                 </div>
-                {formTemplateId && (
-                  <div className="template-preview-small">
-                    {templates.find(t => t.id === formTemplateId)?.content.substring(0, 100)}...
-                  </div>
+
+                {!formUseAi ? (
+                  <>
+                    <label style={{ fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '4px', display: 'block' }}>Template *</label>
+                    <div className="template-select-row">
+                      <div className="select-wrapper">
+                        <select
+                          value={formTemplateId}
+                          onChange={e => handleTemplateChange(e.target.value)}
+                        >
+                          {templates.map(t => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
+                            </option>
+                          ))}
+                          <option value="__new__">+ Create New Template</option>
+                        </select>
+                        <ChevronDown size={16} />
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={openTemplateModal}
+                        title="Create new template"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                    {formTemplateId && (
+                      <div className="template-preview-small">
+                        {templates.find(t => t.id === formTemplateId)?.content.substring(0, 100)}...
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '10px 12px', marginBottom: '10px', fontSize: '12px', color: '#1e40af' }}>
+                      ✨ AI will read the customer's message and generate a personalized reply automatically.
+                    </div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '4px', display: 'block' }}>
+                      AI Instructions <span style={{ fontWeight: 400, color: '#94a3b8' }}>(optional)</span>
+                    </label>
+                    <textarea
+                      rows={4}
+                      placeholder="e.g. You are a friendly assistant for a cleaning business. Always ask for their availability and confirm the address. Keep responses under 3 sentences."
+                      value={formAiSystemPrompt}
+                      onChange={e => setFormAiSystemPrompt(e.target.value)}
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '10px', border: '1.5px solid #e2e8f0', fontSize: '13px', resize: 'vertical', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }}
+                    />
+                    <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
+                      Leave blank to use the default prompt. The AI always knows the customer's name, message, service, and location.
+                    </p>
+                  </>
                 )}
               </div>
 
@@ -691,7 +757,7 @@ export function AutomationSettings() {
                 <button
                   className="btn btn-primary"
                   onClick={handleSave}
-                  disabled={saving || !formName.trim() || !formTemplateId}
+                  disabled={saving || !formName.trim() || (!formUseAi && !formTemplateId)}
                 >
                   {saving ? <Loader2 size={16} className="spinner" /> : <Save size={16} />}
                   Create Rule
@@ -896,7 +962,7 @@ export function AutomationSettings() {
                         <button
                           className="btn btn-primary"
                           onClick={handleSave}
-                          disabled={saving || !formName.trim() || !formTemplateId}
+                          disabled={saving || !formName.trim() || (!formUseAi && !formTemplateId)}
                         >
                           {saving ? <Loader2 size={16} className="spinner" /> : <Save size={16} />}
                           Save Changes

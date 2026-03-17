@@ -372,9 +372,11 @@ model AutomationRule {
   name             String    // User-friendly rule name
   triggerType      String    // "new_lead" | "customer_reply"
   replyTriggerMode String?   // For customer_reply: "first_only" | "every_reply"
-  templateId       String    // Reference to MessageTemplate
+  templateId       String?   // Reference to MessageTemplate (null when useAi=true)
   delayMinutes     Int       @default(0) // Delay before sending (0 = immediate)
   enabled          Boolean   @default(true)
+  useAi            Boolean   @default(false) // Use AI to generate reply instead of template
+  aiSystemPrompt   String?   // Custom instructions for AI (tone, what to ask, etc.)
   triggerCount     Int       @default(0)
   lastTriggeredAt  DateTime?
   createdAt        DateTime  @default(now())
@@ -383,7 +385,7 @@ model AutomationRule {
   // Relationships
   savedAccount    SavedAccount              @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
   user            User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  template        MessageTemplate           @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  template        MessageTemplate?          @relation(fields: [templateId], references: [id], onDelete: SetNull)
   pendingMessages PendingAutomatedMessage[]
 
   @@index([savedAccountId])

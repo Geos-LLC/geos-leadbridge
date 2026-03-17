@@ -9,12 +9,14 @@ import { AutomationService } from './automation.service';
 import { TemplatesModule } from '../templates/templates.module';
 import { LeadsModule } from '../leads/leads.module';
 import { PlatformsModule } from '../platforms/platforms.module';
+import { AiModule } from '../ai/ai.module';
 
 @Module({
   imports: [
     TemplatesModule,
     forwardRef(() => LeadsModule),
     forwardRef(() => PlatformsModule),
+    AiModule,
   ],
   controllers: [AutomationController],
   providers: [AutomationService],

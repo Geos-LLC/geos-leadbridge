@@ -440,9 +440,11 @@ export interface CreateAutomationRuleDto {
   name: string;
   triggerType: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply';
-  templateId: string;
+  templateId?: string;
   delayMinutes?: number;
   enabled?: boolean;
+  useAi?: boolean;
+  aiSystemPrompt?: string;
 }
 
 export interface UpdateAutomationRuleDto {
@@ -452,6 +454,8 @@ export interface UpdateAutomationRuleDto {
   templateId?: string;
   delayMinutes?: number;
   enabled?: boolean;
+  useAi?: boolean;
+  aiSystemPrompt?: string;
 }
 
 export const automationApi = {
