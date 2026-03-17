@@ -149,6 +149,7 @@ export function Dashboard() {
 
       // Format average response time
       const formatDuration = (minutes: number): string => {
+        if (!minutes || minutes <= 0) return '—';
         if (minutes < 1) {
           const seconds = Math.round(minutes * 60);
           return `${seconds}s`;
