@@ -15,6 +15,7 @@ import {
   HttpStatus,
   RawBodyRequest,
   Req,
+  BadRequestException,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { WebhooksService } from './webhooks.service';
@@ -46,13 +47,34 @@ export class WebhooksController {
   }
 
   /**
-   * Yelp webhook endpoint (for future implementation)
+   * Yelp webhook verification endpoint (GET)
+   * Yelp sends GET ?verification=xxx and expects {"verification": "xxx"} in response
+   */
+  @Public()
+  @Get('yelp')
+  @HttpCode(HttpStatus.OK)
+  async verifyYelpWebhook(@Query('verification') verification: string) {
+    if (!verification) throw new BadRequestException('Missing verification token');
+    return { verification };
+  }
+
+  /**
+   * Yelp webhook event endpoint (POST)
+   * Receives NEW_EVENT, CONSUMER_PHONE_NUMBER_OPT_IN_EVENT, etc.
    */
   @Public()
   @Post('yelp')
   @HttpCode(HttpStatus.OK)
-  async handleYelpWebhook(@Headers('x-yelp-signature') _signature: string, @Body() _payload: any) {
-    // Future implementation
+  async handleYelpWebhook(
+    @Headers('x-yelp-signature') signature: string,
+    @Body() payload: any,
+    @Req() req: RawBodyRequest<Request>,
+  ) {
+    await this.webhooksService.handleYelpWebhook(
+      signature,
+      payload,
+      req.rawBody?.toString() || JSON.stringify(payload),
+    );
     return { received: true };
   }
 

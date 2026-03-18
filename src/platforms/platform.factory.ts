@@ -6,10 +6,14 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { IPlatformAdapter, PlatformName } from '../common/interfaces/platform.interface';
 import { ThumbtackAdapter } from './thumbtack/thumbtack.adapter';
+import { YelpAdapter } from './yelp/yelp.adapter';
 
 @Injectable()
 export class PlatformFactory {
-  constructor(private thumbtackAdapter: ThumbtackAdapter) {}
+  constructor(
+    private thumbtackAdapter: ThumbtackAdapter,
+    private yelpAdapter: YelpAdapter,
+  ) {}
 
   /**
    * Get the appropriate platform adapter
@@ -18,11 +22,8 @@ export class PlatformFactory {
     switch (platformName.toLowerCase()) {
       case PlatformName.THUMBTACK:
         return this.thumbtackAdapter;
-
-      // Add more platforms here as they're implemented
-      // case PlatformName.YELP:
-      //   return this.yelpAdapter;
-
+      case PlatformName.YELP:
+        return this.yelpAdapter;
       default:
         throw new BadRequestException(`Unsupported platform: ${platformName}`);
     }
@@ -32,6 +33,6 @@ export class PlatformFactory {
    * Get all supported platform names
    */
   getSupportedPlatforms(): string[] {
-    return [PlatformName.THUMBTACK];
+    return [PlatformName.THUMBTACK, PlatformName.YELP];
   }
 }

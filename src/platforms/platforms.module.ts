@@ -6,6 +6,8 @@ import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThumbtackAdapter } from './thumbtack/thumbtack.adapter';
 import { ThumbtackController } from './thumbtack/thumbtack.controller';
+import { YelpAdapter } from './yelp/yelp.adapter';
+import { YelpController } from './yelp/yelp.controller';
 import { PlatformsController } from './platforms.controller';
 import { PlatformFactory } from './platform.factory';
 import { PlatformService } from './platform.service';
@@ -14,8 +16,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [ConfigModule, forwardRef(() => LeadsModule), forwardRef(() => NotificationsModule)],
-  controllers: [ThumbtackController, PlatformsController],
-  providers: [ThumbtackAdapter, PlatformFactory, PlatformService],
-  exports: [PlatformFactory, PlatformService],
+  controllers: [ThumbtackController, YelpController, PlatformsController],
+  providers: [ThumbtackAdapter, YelpAdapter, PlatformFactory, PlatformService],
+  exports: [PlatformFactory, PlatformService, YelpAdapter],
 })
 export class PlatformsModule {}

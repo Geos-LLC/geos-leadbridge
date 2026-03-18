@@ -1283,6 +1283,241 @@ export class WebhooksService {
     }
   }
 
+  // ==========================================
+  // Yelp Webhook Handling
+  // ==========================================
+
+  /**
+   * Handle incoming webhook from Yelp
+   * Yelp sends POST for: NEW_EVENT, CONSUMER_PHONE_NUMBER_OPT_IN_EVENT, etc.
+   */
+  async handleYelpWebhook(signature: string | undefined, payload: any, rawBody: string): Promise<void> {
+    const secret = this.configService.get<string>('yelp.webhookSecret') || '';
+    const adapter = this.platformFactory.getAdapter('yelp');
+
+    // Determine event type — may be at top level or inside data.updates array
+    const updates = payload?.data?.updates || (payload?.data?.event_type ? [payload.data] : []);
+    const eventType = payload?.data?.event_type || updates[0]?.event_type || 'unknown';
+    const businessId = payload?.data?.id;
+
+    this.logger.log(`Yelp webhook received: eventType=${eventType} business=${businessId}`);
+
+    // Verify signature if both are present
+    let isValid = true;
+    if (signature && secret) {
+      isValid = adapter.verifyWebhookSignature(signature, rawBody, secret);
+    }
+
+    const event = await this.prisma.webhookEvent.create({
+      data: {
+        platform: 'yelp',
+        eventType,
+        payload: JSON.stringify(payload),
+        signature,
+        verified: isValid,
+        processed: false,
+      },
+    });
+
+    if (!isValid) {
+      this.logger.warn('Invalid Yelp webhook signature');
+      await this.prisma.webhookEvent.update({
+        where: { id: event.id },
+        data: { processed: true, processingError: 'Invalid signature', processedAt: new Date() },
+      });
+      return;
+    }
+
+    try {
+      // Handle each update in the payload (Yelp may batch updates)
+      if (updates.length > 0) {
+        for (const update of updates) {
+          await this.processYelpUpdate(update.event_type || eventType, businessId, update, payload);
+        }
+      } else {
+        await this.processYelpUpdate(eventType, businessId, payload?.data, payload);
+      }
+
+      await this.prisma.webhookEvent.update({
+        where: { id: event.id },
+        data: { processed: true, processedAt: new Date() },
+      });
+    } catch (error: any) {
+      this.logger.error(`Error processing Yelp webhook: ${error.message}`);
+      await this.prisma.webhookEvent.update({
+        where: { id: event.id },
+        data: { processed: true, processingError: error.message, processedAt: new Date() },
+      });
+    }
+  }
+
+  private async processYelpUpdate(eventType: string, businessId: string, data: any, _fullPayload: any): Promise<void> {
+    switch (eventType) {
+      case 'NEW_EVENT':
+        await this.handleYelpNewEvent(businessId, data);
+        break;
+      case 'CONSUMER_PHONE_NUMBER_OPT_IN_EVENT':
+        this.logger.log(`Yelp consumer phone opt-in: business=${businessId} lead=${data?.lead_id}`);
+        break;
+      case 'CONSUMER_PHONE_NUMBER_OPT_OUT_EVENT':
+        this.logger.log(`Yelp consumer phone opt-out: business=${businessId} lead=${data?.lead_id}`);
+        break;
+      default:
+        this.logger.warn(`Unhandled Yelp event type: ${eventType}`);
+    }
+  }
+
+  private async handleYelpNewEvent(businessId: string, data: any): Promise<void> {
+    const leadId = data?.lead_id;
+    const eventId = data?.event_id;
+
+    if (!leadId || !businessId) {
+      this.logger.warn(`Yelp NEW_EVENT missing lead_id or business_id — data: ${JSON.stringify(data)}`);
+      return;
+    }
+
+    // Deduplicate by event_id
+    if (eventId && this.isDuplicateWebhook('yelp.NEW_EVENT', eventId)) {
+      return;
+    }
+
+    // Find saved account for this business
+    const savedAccount = await this.prisma.savedAccount.findFirst({
+      where: { platform: 'yelp', businessId },
+    });
+
+    if (!savedAccount) {
+      this.logger.warn(`No saved Yelp account for business ${businessId} — add it via POST /v1/yelp/businesses`);
+      return;
+    }
+
+    const userId = savedAccount.userId;
+
+    // Fetch full lead details from Yelp API
+    const apiKey = this.configService.get<string>('yelp.apiKey') || '';
+    const { YelpAdapter } = await import('../platforms/yelp/yelp.adapter');
+    const yelpAdapter = this.platformFactory.getAdapter('yelp') as InstanceType<typeof YelpAdapter>;
+    let leadData: any;
+    try {
+      leadData = await yelpAdapter.getLead({ accessToken: apiKey }, leadId);
+    } catch (err: any) {
+      this.logger.error(`Failed to fetch Yelp lead ${leadId}: ${err.message}`);
+      // Still upsert a minimal lead so we don't lose it
+      leadData = {
+        platform: 'yelp',
+        externalRequestId: leadId,
+        businessId,
+        customerName: 'Unknown',
+        message: '',
+        status: 'new',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        raw: data,
+      };
+    }
+
+    // Check if this is an existing lead (customer reply) vs new lead
+    const existingLead = await this.prisma.lead.findUnique({
+      where: { platform_externalRequestId: { platform: 'yelp', externalRequestId: leadId } },
+    });
+
+    const lead = await this.prisma.lead.upsert({
+      where: { platform_externalRequestId: { platform: 'yelp', externalRequestId: leadId } },
+      create: {
+        userId,
+        platform: 'yelp',
+        businessId,
+        externalRequestId: leadId,
+        threadId: leadId, // lead_id is the thread on Yelp
+        customerName: leadData.customerName,
+        customerPhone: leadData.customerPhone,
+        customerEmail: leadData.customerEmail,
+        message: leadData.message,
+        city: leadData.city,
+        state: leadData.state,
+        postcode: leadData.postcode,
+        category: leadData.category,
+        status: leadData.status || 'new',
+        rawJson: JSON.stringify(leadData.raw || data),
+      },
+      update: {
+        customerName: leadData.customerName,
+        message: leadData.message || undefined,
+        status: leadData.status || undefined,
+        rawJson: JSON.stringify(leadData.raw || data),
+      },
+    });
+
+    // Emit SSE for real-time frontend update
+    this.eventEmitter.emit(`lead.created.${userId}`, lead);
+
+    if (existingLead) {
+      // Customer replied — store message and trigger reply automation
+      this.logger.log(`Yelp customer reply on lead ${leadId}`);
+      try {
+        await this.automationService.handleCustomerReply({
+          userId,
+          businessId,
+          negotiationId: leadId,
+          leadId: lead.id,
+          customerName: leadData.customerName,
+          customerMessage: leadData.message || undefined,
+          accountName: savedAccount.businessName,
+          isFirstCustomerReply: false,
+          isSecondCustomerMessage: false,
+        });
+      } catch (err: any) {
+        this.logger.error(`Yelp reply automation failed: ${err.message}`);
+      }
+      return;
+    }
+
+    // New lead — trigger new_lead automation + SMS notification
+    this.logger.log(`Yelp new lead: ${leadId} customer=${leadData.customerName} business=${savedAccount.businessName}`);
+
+    const automationPromise = (async () => {
+      try {
+        await this.automationService.handleNewLead({
+          userId,
+          businessId,
+          negotiationId: leadId,
+          leadId: lead.id,
+          customerName: leadData.customerName,
+          customerMessage: leadData.message || undefined,
+          accountName: savedAccount.businessName,
+          category: leadData.category,
+          city: leadData.city,
+          state: leadData.state,
+        });
+      } catch (err: any) {
+        this.logger.error(`Yelp automation trigger failed: ${err.message}`);
+      }
+    })();
+
+    const smsPromise = (async () => {
+      try {
+        await this.notificationsService.sendLeadNotification({
+          userId,
+          savedAccountId: savedAccount.id,
+          leadId: lead.id,
+          accountName: savedAccount.businessName,
+          lead: {
+            customerName: leadData.customerName,
+            customerPhone: leadData.customerPhone,
+            category: leadData.category,
+            city: leadData.city,
+            state: leadData.state,
+            message: leadData.message,
+          },
+        });
+      } catch (err: any) {
+        this.logger.error(`Yelp SMS notification failed: ${err.message}`);
+      }
+    })();
+
+    await Promise.all([automationPromise, smsPromise]);
+  }
+
   /**
    * Get webhook events (for debugging/monitoring)
    */
