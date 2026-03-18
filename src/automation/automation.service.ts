@@ -595,7 +595,7 @@ export class AutomationService implements OnModuleInit {
 
       this.logger.log(`Successfully sent automated message: ${pendingId}`);
     } catch (error: any) {
-      this.logger.error(`Failed to send automated message: ${pendingId}`, error.message);
+      this.logger.error(`Failed to send automated message: ${pendingId} — ${error.message}`);
 
       await this.prisma.pendingAutomatedMessage.update({
         where: { id: pendingId },
