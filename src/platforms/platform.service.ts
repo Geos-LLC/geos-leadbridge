@@ -10,6 +10,7 @@ import { EncryptionUtil } from '../common/utils/encryption.util';
 import { PlatformFactory } from './platform.factory';
 import { PlatformCredentials } from '../common/interfaces/platform.interface';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MonitoringService } from '../monitoring/monitoring.service';
 
 @Injectable()
 export class PlatformService {
@@ -22,6 +23,7 @@ export class PlatformService {
     private configService: ConfigService,
     @Inject(forwardRef(() => NotificationsService))
     private notificationsService: NotificationsService,
+    private monitoring: MonitoringService,
   ) {
     this.encryptionKey = this.configService.get<string>('encryption.key') || 'default-32-char-encryption-key';
   }
@@ -168,6 +170,13 @@ export class PlatformService {
         } catch {
           // ignore re-read errors
         }
+
+        this.monitoring.captureError({
+          category: 'token_refresh',
+          message: `${platformName} token refresh failed — ${error.message}`,
+          userId,
+          context: { platformName },
+        });
 
         throw error;
       }
@@ -761,6 +770,15 @@ export class PlatformService {
             } catch {
               // ignore re-read errors
             }
+
+            const savedAcct = await this.prisma.savedAccount.findFirst({ where: { userId, platform, businessId }, select: { businessName: true } }).catch(() => null);
+            this.monitoring.captureError({
+              category: 'token_refresh',
+              message: `${platform} token refresh failed for business ${businessId} — ${refreshError.message}`,
+              userId,
+              accountName: savedAcct?.businessName,
+              context: { platform, businessId },
+            });
 
             throw new Error(`Thumbtack token expired and could not be refreshed — please reconnect your Thumbtack account (${refreshError.message})`);
           }

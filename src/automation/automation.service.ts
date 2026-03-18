@@ -9,6 +9,7 @@ import { TemplatesService } from '../templates/templates.service';
 import { LeadsService } from '../leads/leads.service';
 import { ConfigService } from '@nestjs/config';
 import { AiService } from '../ai/ai.service';
+import { MonitoringService } from '../monitoring/monitoring.service';
 
 export interface CreateAutomationRuleDto {
   savedAccountId: string;
@@ -64,6 +65,7 @@ export class AutomationService implements OnModuleInit {
     private leadsService: LeadsService,
     private configService: ConfigService,
     private aiService: AiService,
+    private monitoring: MonitoringService,
   ) {}
 
   /**
@@ -600,6 +602,15 @@ export class AutomationService implements OnModuleInit {
       await this.prisma.pendingAutomatedMessage.update({
         where: { id: pendingId },
         data: { status: 'failed', failureReason: error.message },
+      });
+
+      // Capture to monitoring for dashboard + email alert
+      this.monitoring.captureError({
+        category: 'automation',
+        message: error.message || 'Failed to send automated message',
+        userId: context.userId,
+        accountName: context.accountName,
+        context: { pendingId, leadId: context.leadId, negotiationId: context.negotiationId },
       });
     }
   }

@@ -24,6 +24,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
 import { CallConnectModule } from './call-connect/call-connect.module';
 import { ConversationSyncModule } from './conversation-sync/conversation-sync.module';
 import { HealthModule } from './health/health.module';
+import { MonitoringModule } from './monitoring/monitoring.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { ImpersonationGuard, ImpersonationInterceptor } from './common/guards/impersonation.guard';
 import { PrismaModule } from './common/utils/prisma.module';
@@ -53,6 +54,7 @@ import { PrismaModule } from './common/utils/prisma.module';
     CallConnectModule,
     ConversationSyncModule,
     HealthModule,
+    MonitoringModule,
   ],
   providers: [
     {

@@ -915,3 +915,23 @@ model LeadSmsMessage {
   @@index([sentAt])
   @@map("lead_sms_messages")
 }
+
+// System-wide error log for monitoring and alerting
+model SystemErrorLog {
+  id          String    @id @default(cuid())
+  category    String    // 'automation' | 'token_refresh' | 'webhook' | 'notification' | 'yelp' | 'other'
+  severity    String    @default("error") // 'error' | 'warning'
+  message     String    @db.Text
+  context     String?   @db.Text // JSON: accountName, leadId, negotiationId, etc.
+  userId      String?
+  accountId   String?   // SavedAccount id
+  accountName String?   // Denormalized for quick display
+  resolved    Boolean   @default(false)
+  emailedAt   DateTime? // Last time an alert email was sent for this error
+  createdAt   DateTime  @default(now())
+
+  @@index([category, createdAt])
+  @@index([resolved, createdAt])
+  @@index([userId, createdAt])
+  @@map("system_error_logs")
+}
