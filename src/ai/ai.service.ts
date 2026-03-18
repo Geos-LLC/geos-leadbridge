@@ -16,7 +16,8 @@ export interface AiReplyContext {
   budget?: number;
   accountName?: string;
   systemPrompt?: string;
-  conversationHistory?: ConversationMessage[]; // prior messages for context
+  conversationHistory?: ConversationMessage[];
+  leadDetails?: Record<string, string>; // structured metadata: bedrooms, bathrooms, pets, frequency, etc.
 }
 
 @Injectable()
@@ -49,21 +50,24 @@ Ask one clarifying question if needed. Never mention AI or automation.`;
 
     this.logger.log(`[AI] Generating reply for customer "${ctx.customerName}" — category: ${ctx.category || 'unknown'}`);
 
-    // Build message thread: system → context intro → conversation history → final ask
+    // Build the message thread:
+    // system (instructions + lead context) → history turns → final customer message
     const openAiMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
+      { role: 'system', content: systemPrompt + '\n\n' + userPrompt },
     ];
 
-    // Inject conversation history as alternating user/assistant turns before the final message
+    // Inject conversation history as alternating user/assistant turns
     if (ctx.conversationHistory && ctx.conversationHistory.length > 0) {
-      // Insert history before the final user message
-      const historyMessages = ctx.conversationHistory.map(m => ({
-        role: m.role === 'customer' ? 'user' as const : 'assistant' as const,
-        content: m.content,
-      }));
-      openAiMessages.splice(1, 0, ...historyMessages);
+      for (const m of ctx.conversationHistory) {
+        openAiMessages.push({
+          role: m.role === 'customer' ? 'user' : 'assistant',
+          content: m.content,
+        });
+      }
     }
+
+    // Final customer message to reply to
+    openAiMessages.push({ role: 'user', content: ctx.customerMessage });
 
     const completion = await this.client.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -82,16 +86,24 @@ Ask one clarifying question if needed. Never mention AI or automation.`;
   }
 
   private buildUserPrompt(ctx: AiReplyContext): string {
-    const parts: string[] = [];
+    const parts: string[] = ['--- Lead Context ---'];
 
     if (ctx.accountName) parts.push(`Business: ${ctx.accountName}`);
-    if (ctx.category) parts.push(`Service: ${ctx.category}`);
+    if (ctx.category) parts.push(`Service requested: ${ctx.category}`);
     if (ctx.city || ctx.state) parts.push(`Location: ${[ctx.city, ctx.state].filter(Boolean).join(', ')}`);
     if (ctx.budget) parts.push(`Customer budget: $${ctx.budget}`);
-
     parts.push(`Customer name: ${ctx.customerName}`);
-    parts.push(`Customer message: "${ctx.customerMessage}"`);
-    parts.push(`\nWrite a reply to this customer inquiry:`);
+
+    // Include structured lead details (bedrooms, bathrooms, pets, frequency, etc.)
+    if (ctx.leadDetails && Object.keys(ctx.leadDetails).length > 0) {
+      parts.push('Job details:');
+      for (const [question, answer] of Object.entries(ctx.leadDetails)) {
+        parts.push(`  - ${question}: ${answer}`);
+      }
+    }
+
+    parts.push('--- End Context ---');
+    parts.push('Use the context above when crafting your reply. Do not repeat all details back — just use them naturally.');
 
     return parts.join('\n');
   }

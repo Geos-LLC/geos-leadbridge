@@ -38,6 +38,9 @@ export class AiController {
       select: { businessName: true },
     });
 
+    // Extract structured details from rawJson (bedrooms, bathrooms, pets, frequency, etc.)
+    const details = this.extractLeadDetails(lead.rawJson);
+
     const reply = await this.aiService.generateReply({
       customerName: lead.customerName,
       customerMessage: customerMessage || lead.message || '',
@@ -48,8 +51,31 @@ export class AiController {
       accountName: account?.businessName ?? undefined,
       systemPrompt: aiRule?.aiSystemPrompt ?? undefined,
       conversationHistory: conversationHistory ?? [],
+      leadDetails: details,
     });
 
     return { reply };
+  }
+
+  private extractLeadDetails(rawJson: string): Record<string, string> {
+    try {
+      const raw = JSON.parse(rawJson);
+      const details: any[] = raw.request?.details || raw.details || [];
+      const result: Record<string, string> = {};
+
+      for (const item of details) {
+        if (item.question && item.answer) {
+          result[String(item.question)] = String(item.answer);
+        }
+      }
+
+      // Also pull top-level fields if present
+      if (raw.request?.description) result['Description'] = raw.request.description;
+      if (raw.description) result['Description'] = raw.description;
+
+      return result;
+    } catch {
+      return {};
+    }
   }
 }
