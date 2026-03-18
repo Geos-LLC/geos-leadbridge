@@ -160,13 +160,12 @@ export class ThumbtackAdapter implements IPlatformAdapter {
         scope,
       };
     } catch (error) {
-      this.logger.error('Token refresh error:', error.response?.status, error.response?.data || error.message);
-      this.logger.error('Full refresh error:', JSON.stringify({
-        status: error.response?.status,
-        data: error.response?.data,
-        message: error.message,
-      }));
-      throw new Error(`Failed to refresh access token: ${error.response?.data?.error_description || error.message}`);
+      const status = error.response?.status;
+      const data = error.response?.data;
+      const msg = error.message;
+      this.logger.error(`Token refresh failed — status=${status} data=${JSON.stringify(data)} msg=${msg}`);
+      const reason = data?.error_description || data?.error || msg || 'unknown';
+      throw new Error(`Failed to refresh Thumbtack token: ${reason} (status=${status})`);
     }
   }
 
@@ -461,8 +460,14 @@ export class ThumbtackAdapter implements IPlatformAdapter {
 
       return this.normalizeMessage(response.data, negotiationId);
     } catch (error) {
-      this.logger.error('Error sending message:', error.response?.data || error.message);
-      throw new Error('Failed to send message to Thumbtack');
+      const status = error.response?.status;
+      const data = error.response?.data;
+      const msg = error.message;
+      this.logger.error(`Error sending message — status=${status} data=${JSON.stringify(data)} msg=${msg}`);
+      if (status === 401) {
+        throw new Error('Thumbtack token expired — please reconnect your Thumbtack account');
+      }
+      throw new Error(`Failed to send message to Thumbtack: ${msg}`);
     }
   }
 

@@ -724,8 +724,7 @@ export class PlatformService {
             };
           } catch (refreshError: any) {
             console.error(`[PlatformService] Failed to refresh account token for business ${businessId}:`, refreshError.message);
-            // Return existing credentials and let the API call fail with proper error
-            return credentials;
+            throw new Error(`Thumbtack token expired and could not be refreshed — please reconnect your Thumbtack account (${refreshError.message})`);
           }
         }
       }
