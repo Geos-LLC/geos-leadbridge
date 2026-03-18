@@ -15,7 +15,6 @@ import {
   HttpStatus,
   RawBodyRequest,
   Req,
-  BadRequestException,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { WebhooksService } from './webhooks.service';
@@ -54,7 +53,7 @@ export class WebhooksController {
   @Get('yelp')
   @HttpCode(HttpStatus.OK)
   async verifyYelpWebhook(@Query('verification') verification: string) {
-    if (!verification) throw new BadRequestException('Missing verification token');
+    if (!verification) return { status: 'ok', platform: 'yelp' };
     return { verification };
   }
 
