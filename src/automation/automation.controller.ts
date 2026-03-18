@@ -16,11 +16,17 @@ import {
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AutomationService, CreateAutomationRuleDto, UpdateAutomationRuleDto } from './automation.service';
+import { AiService } from '../ai/ai.service';
+import { PrismaService } from '../common/utils/prisma.service';
 
 @Controller('v1/automation')
 @UseGuards(JwtAuthGuard)
 export class AutomationController {
-  constructor(private automationService: AutomationService) {}
+  constructor(
+    private automationService: AutomationService,
+    private aiService: AiService,
+    private prisma: PrismaService,
+  ) {}
 
   /**
    * Get all automation rules for the current user
@@ -112,6 +118,35 @@ export class AutomationController {
   ) {
     const pending = await this.automationService.getPendingMessages(user.id, ruleId);
     return { pending };
+  }
+
+  /**
+   * Preview AI reply for a specific lead (no message sent)
+   */
+  @Post('rules/:ruleId/preview-ai')
+  async previewAiReply(
+    @CurrentUser() user: any,
+    @Param('ruleId') ruleId: string,
+    @Body('leadId') leadId: string,
+  ) {
+    const rule = await this.automationService.getRule(user.id, ruleId);
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, userId: user.id },
+    });
+    if (!lead) throw new Error('Lead not found');
+
+    const reply = await this.aiService.generateReply({
+      customerName: lead.customerName,
+      customerMessage: lead.message || '',
+      category: lead.category ?? undefined,
+      city: lead.city ?? undefined,
+      state: lead.state ?? undefined,
+      budget: lead.budget ? Number(lead.budget) : undefined,
+      accountName: rule.savedAccount?.businessName ?? undefined,
+      systemPrompt: rule.aiSystemPrompt ?? undefined,
+    });
+
+    return { reply, leadId, ruleId };
   }
 
   /**

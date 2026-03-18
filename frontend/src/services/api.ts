@@ -491,6 +491,10 @@ export const automationApi = {
     const { data } = await api.post(`/v1/automation/pending/${pendingId}/cancel`);
     return data;
   },
+  previewAiReply: async (ruleId: string, leadId: string): Promise<{ reply: string }> => {
+    const { data } = await api.post(`/v1/automation/rules/${ruleId}/preview-ai`, { leadId });
+    return data;
+  },
 };
 
 // Update notification settings DTO

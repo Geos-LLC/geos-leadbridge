@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi, conversationSyncApi,
+  automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi, conversationSyncApi, leadsApi,
 } from '../services/api';
 import type { TenantPhoneNumber } from '../services/api';
 import type {
@@ -165,6 +165,7 @@ export function Services() {
   // UI state
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [showPhoneSetupModal, setShowPhoneSetupModal] = useState(false);
+  const [aiPreview, setAiPreview] = useState<{ loading: boolean; reply: string | null; leads: { id: string; customerName: string; message: string }[]; selectedLeadId: string } | null>(null);
   // OpenPhone setup modal
   const [showOpenPhoneModal, setShowOpenPhoneModal] = useState(false);
   const [opApiKey, setOpApiKey] = useState('');
@@ -1649,6 +1650,16 @@ export function Services() {
                             className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-200"
                           />
                           <p className="text-xs text-slate-400 mt-1">Leave blank to use the default AI instructions.</p>
+                          {/* Test AI Reply button */}
+                          <button
+                            onClick={async () => {
+                              const { leads } = await leadsApi.getLeads(20);
+                              setAiPreview({ loading: false, reply: null, leads: leads.slice(0, 20).map(l => ({ id: l.id, customerName: l.customerName, message: l.message })), selectedLeadId: leads[0]?.id ?? '' });
+                            }}
+                            className="mt-3 w-full py-2 px-4 rounded-xl text-sm font-semibold bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 transition-colors"
+                          >
+                            ✨ Test AI Reply on a Lead
+                          </button>
                         </div>
                       )}
                     </div>
@@ -2427,6 +2438,52 @@ export function Services() {
                 Save & Test
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Reply Preview Modal */}
+      {aiPreview && firstReplyRule && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setAiPreview(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-8 relative" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setAiPreview(null)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+            <h3 className="text-lg font-bold text-slate-800 mb-1">Test AI Reply</h3>
+            <p className="text-sm text-slate-400 mb-5">Pick a lead and generate a preview — nothing is sent.</p>
+            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Select Lead</label>
+            {aiPreview.leads.length === 0 ? (
+              <p className="text-sm text-slate-500 mb-4">No leads found for this account.</p>
+            ) : (
+              <select
+                value={aiPreview.selectedLeadId}
+                onChange={e => setAiPreview(p => p ? { ...p, selectedLeadId: e.target.value, reply: null } : p)}
+                className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium mb-4"
+              >
+                {aiPreview.leads.map(l => (
+                  <option key={l.id} value={l.id}>{l.customerName} — {l.message.slice(0, 60)}{l.message.length > 60 ? '…' : ''}</option>
+                ))}
+              </select>
+            )}
+            <button
+              disabled={!aiPreview.selectedLeadId || aiPreview.loading}
+              onClick={async () => {
+                setAiPreview(p => p ? { ...p, loading: true, reply: null } : p);
+                try {
+                  const { reply } = await automationApi.previewAiReply(firstReplyRule.id, aiPreview.selectedLeadId);
+                  setAiPreview(p => p ? { ...p, loading: false, reply } : p);
+                } catch (err: any) {
+                  setAiPreview(p => p ? { ...p, loading: false, reply: `Error: ${err.response?.data?.message || err.message}` } : p);
+                }
+              }}
+              className="w-full py-2.5 px-4 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors mb-4"
+            >
+              {aiPreview.loading ? 'Generating…' : '✨ Generate Preview'}
+            </button>
+            {aiPreview.reply && (
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">AI Reply Preview</p>
+                <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{aiPreview.reply}</p>
+              </div>
+            )}
           </div>
         </div>
       )}
