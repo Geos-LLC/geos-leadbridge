@@ -24,8 +24,9 @@ import {
   ChevronRight,
   Smartphone,
   MessageCircle,
+  Sparkles,
 } from 'lucide-react';
-import { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, type MessageAttachment } from '../services/api';
+import { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, type MessageAttachment } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
@@ -179,6 +180,7 @@ export function Messages() {
   const [loading, setLoading] = useState(!_messagesLoaded && leads.length === 0);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [generatingAi, setGeneratingAi] = useState(false);
   const [resyncingMessages, setResyncingMessages] = useState(false);
   const [resyncError, setResyncError] = useState<string | null>(null);
   const [messageText, setMessageText] = useState('');
@@ -1447,6 +1449,27 @@ export function Messages() {
                       </div>
                     )}
                   </div>
+                  <button
+                    type="button"
+                    title="Generate AI reply"
+                    disabled={generatingAi || !selectedLead}
+                    onClick={async () => {
+                      if (!selectedLead) return;
+                      setGeneratingAi(true);
+                      try {
+                        const { reply } = await aiApi.previewForLead(selectedLead.id);
+                        setMessageText(reply);
+                      } catch {
+                        alert('Failed to generate AI reply. Make sure OPENAI_API_KEY is configured.');
+                      } finally {
+                        setGeneratingAi(false);
+                      }
+                    }}
+                    className="px-3 py-2 sm:py-3 rounded-xl border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 transition-colors disabled:opacity-50 shrink-0 flex items-center gap-1.5 text-sm font-semibold"
+                  >
+                    {generatingAi ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
+                    <span className="hidden sm:inline">{generatingAi ? 'Writing…' : 'AI Reply'}</span>
+                  </button>
                   <form className="flex-1 flex gap-1.5 sm:gap-2 min-w-0" onSubmit={handleSendMessage}>
                     <input
                       type="text"

@@ -458,6 +458,13 @@ export interface UpdateAutomationRuleDto {
   aiSystemPrompt?: string;
 }
 
+export const aiApi = {
+  previewForLead: async (leadId: string): Promise<{ reply: string }> => {
+    const { data } = await api.post('/v1/ai/preview-for-lead', { leadId });
+    return data;
+  },
+};
+
 export const automationApi = {
   getRules: async (): Promise<{ rules: AutomationRule[] }> => {
     const { data } = await api.get('/v1/automation/rules');
