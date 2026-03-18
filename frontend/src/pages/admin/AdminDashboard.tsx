@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Users, DollarSign, Activity, TrendingDown, Eye, Trash2, Plus, Minus, ChevronRight, Loader2, Building2, Save } from 'lucide-react';
-import { adminApi } from '../../services/api';
+import { Users, DollarSign, Activity, TrendingDown, Eye, Trash2, Plus, Minus, ChevronRight, Loader2, Building2, Save, AlertTriangle, CheckCircle, RefreshCw } from 'lucide-react';
+import { adminApi, monitoringApi } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
 import type { AdminUser, AdminStats } from '../../types';
@@ -60,6 +60,14 @@ export default function AdminDashboard() {
   });
   const [testConfigSaving, setTestConfigSaving] = useState(false);
 
+  // Error monitoring
+  const [errors, setErrors] = useState<Awaited<ReturnType<typeof monitoringApi.getErrors>>>([]);
+  const [errorSummary, setErrorSummary] = useState<Awaited<ReturnType<typeof monitoringApi.getSummary>> | null>(null);
+  const [errorFilter, setErrorFilter] = useState<string>('');
+  const [showResolvedErrors, setShowResolvedErrors] = useState(false);
+  const [errorsLoading, setErrorsLoading] = useState(false);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
+
   useEffect(() => {
     if (user?.role !== 'ADMIN') {
       notify.error('Access Denied', 'You must be an admin to access this page');
@@ -70,6 +78,7 @@ export default function AdminDashboard() {
     loadData();
     loadPhonePricing();
     loadAdminConfig();
+    loadErrors();
   }, [user, offset, tierFilter, search]);
 
   const loadData = async () => {
@@ -142,6 +151,22 @@ export default function AdminDashboard() {
     }
   };
 
+  const loadErrors = async () => {
+    try {
+      setErrorsLoading(true);
+      const [errs, summary] = await Promise.all([
+        monitoringApi.getErrors({ limit: 50, onlyUnresolved: !showResolvedErrors, category: errorFilter || undefined }),
+        monitoringApi.getSummary(),
+      ]);
+      setErrors(errs);
+      setErrorSummary(summary);
+    } catch {
+      // non-critical
+    } finally {
+      setErrorsLoading(false);
+    }
+  };
+
   const loadAdminConfig = async () => {
     try {
       const cfg = await adminApi.getAdminConfig();
@@ -161,6 +186,29 @@ export default function AdminDashboard() {
       notify.error('Error', 'Failed to save test customer settings');
     } finally {
       setTestConfigSaving(false);
+    }
+  };
+
+  const handleResolveError = async (id: string) => {
+    try {
+      setResolvingId(id);
+      await monitoringApi.resolveError(id);
+      setErrors(prev => prev.filter(e => e.id !== id));
+      setErrorSummary(prev => prev ? { ...prev, totalUnresolved: Math.max(0, prev.totalUnresolved - 1) } : prev);
+    } catch {
+      notify.error('Error', 'Failed to resolve error');
+    } finally {
+      setResolvingId(null);
+    }
+  };
+
+  const handleResolveAll = async (category: string) => {
+    try {
+      const result = await monitoringApi.resolveAll(category);
+      notify.success('Resolved', `Resolved ${result.resolved} errors in "${category}"`);
+      loadErrors();
+    } catch {
+      notify.error('Error', 'Failed to resolve all errors');
     }
   };
 
@@ -684,6 +732,124 @@ export default function AdminDashboard() {
             {testConfigSaving && <Loader2 size={14} className="animate-spin" />}
             Save
           </button>
+        </div>
+      </div>
+
+      {/* System Alerts */}
+      <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="p-4 md:p-6 border-b border-slate-100">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-500" />
+              <h2 className="text-lg md:text-xl font-bold text-slate-900">System Alerts</h2>
+              {errorSummary && errorSummary.totalUnresolved > 0 && (
+                <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-bold">{errorSummary.totalUnresolved} unresolved</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Category filter */}
+              <select
+                value={errorFilter}
+                onChange={e => { setErrorFilter(e.target.value); setTimeout(loadErrors, 0); }}
+                className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">All categories</option>
+                {['automation', 'token_refresh', 'webhook', 'notification', 'yelp', 'other'].map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={showResolvedErrors}
+                  onChange={e => { setShowResolvedErrors(e.target.checked); setTimeout(loadErrors, 0); }}
+                  className="rounded"
+                />
+                Show resolved
+              </label>
+              <button
+                onClick={loadErrors}
+                className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
+                title="Refresh"
+              >
+                <RefreshCw className={`w-4 h-4 ${errorsLoading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          </div>
+          {/* Summary badges */}
+          {errorSummary && Object.keys(errorSummary.byCategory).length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-3">
+              {Object.entries(errorSummary.byCategory).map(([cat, count]) => (
+                <button
+                  key={cat}
+                  onClick={() => handleResolveAll(cat)}
+                  title={`Resolve all ${cat} errors`}
+                  className="px-2.5 py-1 bg-red-50 text-red-700 border border-red-100 rounded-lg text-xs font-semibold hover:bg-red-100 transition-all"
+                >
+                  {cat}: {count} — resolve all
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="divide-y divide-slate-50">
+          {errorsLoading && errors.length === 0 && (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+            </div>
+          )}
+          {!errorsLoading && errors.length === 0 && (
+            <div className="flex items-center gap-2 justify-center py-10 text-slate-400">
+              <CheckCircle className="w-5 h-5 text-emerald-500" />
+              <span className="text-sm">No unresolved errors</span>
+            </div>
+          )}
+          {errors.map(err => {
+            const categoryColors: Record<string, string> = {
+              automation: 'bg-purple-100 text-purple-700',
+              token_refresh: 'bg-amber-100 text-amber-700',
+              webhook: 'bg-blue-100 text-blue-700',
+              notification: 'bg-cyan-100 text-cyan-700',
+              yelp: 'bg-pink-100 text-pink-700',
+              other: 'bg-slate-100 text-slate-700',
+            };
+            const colorClass = categoryColors[err.category] || categoryColors.other;
+            let contextObj: Record<string, any> | null = null;
+            try { if (err.context) contextObj = JSON.parse(err.context); } catch { }
+            return (
+              <div key={err.id} className={`p-4 md:p-5 flex items-start gap-4 ${err.resolved ? 'opacity-50' : ''}`}>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${colorClass}`}>{err.category}</span>
+                    {err.severity === 'critical' && <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">critical</span>}
+                    {err.accountName && <span className="text-xs text-slate-500 font-medium">{err.accountName}</span>}
+                    <span className="text-xs text-slate-400 ml-auto">{new Date(err.createdAt).toLocaleString()}</span>
+                  </div>
+                  <p className="text-sm text-slate-800 font-medium break-words">{err.message}</p>
+                  {contextObj && (
+                    <div className="mt-1.5 flex flex-wrap gap-2">
+                      {Object.entries(contextObj).map(([k, v]) => (
+                        <span key={k} className="text-xs text-slate-500 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-lg">
+                          <span className="font-medium text-slate-600">{k}:</span> {String(v)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {!err.resolved && (
+                  <button
+                    onClick={() => handleResolveError(err.id)}
+                    disabled={resolvingId === err.id}
+                    className="shrink-0 p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all disabled:opacity-50"
+                    title="Mark resolved"
+                  >
+                    {resolvingId === err.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

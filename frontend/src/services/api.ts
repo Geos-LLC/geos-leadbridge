@@ -1103,6 +1103,39 @@ export const adminApi = {
   },
 };
 
+// Monitoring / Error Log
+export const monitoringApi = {
+  getErrors: async (params?: { limit?: number; onlyUnresolved?: boolean; category?: string }) => {
+    const { data } = await api.get('/v1/monitoring/errors', { params });
+    return data.errors as {
+      id: string;
+      category: string;
+      severity: string;
+      message: string;
+      context: string | null;
+      userId: string | null;
+      accountName: string | null;
+      resolved: boolean;
+      createdAt: string;
+    }[];
+  },
+  getSummary: async () => {
+    const { data } = await api.get('/v1/monitoring/errors/summary');
+    return data as {
+      totalUnresolved: number;
+      byCategory: Record<string, number>;
+      last24h: number;
+    };
+  },
+  resolveError: async (id: string) => {
+    await api.patch(`/v1/monitoring/errors/${id}/resolve`);
+  },
+  resolveAll: async (category: string) => {
+    const { data } = await api.patch(`/v1/monitoring/errors/resolve-all/${category}`);
+    return data as { success: boolean; resolved: number };
+  },
+};
+
 // API Test / Webhook Simulation
 export interface SimulateWebhookRequest {
   targetUserId: string;
