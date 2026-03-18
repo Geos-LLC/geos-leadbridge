@@ -152,7 +152,23 @@ export class PlatformService {
         console.log(`[PlatformService] Token refreshed successfully, new expiry: ${newCredentials.expiresAt}`);
         return newCredentials;
       } catch (error) {
-        console.error(`[PlatformService] Token refresh failed:`, error.message);
+        console.error(`[PlatformService] Token refresh failed: ${error.message}`);
+
+        // Race condition guard: re-read from DB — another concurrent worker may have already refreshed.
+        try {
+          const latest = await this.prisma.platform.findUnique({ where: { userId_platformName: { userId, platformName } } });
+          if (latest?.credentialsJson) {
+            const latestCreds = EncryptionUtil.decryptObject<PlatformCredentials>(latest.credentialsJson, this.encryptionKey);
+            const latestExpiry = latestCreds.expiresAt ? new Date(latestCreds.expiresAt) : null;
+            if (latestExpiry && latestExpiry.getTime() > Date.now()) {
+              console.log(`[PlatformService] Re-read fresh platform token after race — expires ${latestExpiry.toISOString()}`);
+              return latestCreds;
+            }
+          }
+        } catch {
+          // ignore re-read errors
+        }
+
         throw error;
       }
     }
@@ -723,7 +739,29 @@ export class PlatformService {
               email: credentials.email,
             };
           } catch (refreshError: any) {
-            console.error(`[PlatformService] Failed to refresh account token for business ${businessId}:`, refreshError.message);
+            console.error(`[PlatformService] Failed to refresh account token for business ${businessId}: ${refreshError.message}`);
+
+            // Race condition guard: another concurrent worker may have already refreshed the token.
+            // Re-read the latest credentials from DB before giving up.
+            try {
+              const latestAccount = await this.prisma.savedAccount.findFirst({
+                where: { userId, platform, businessId },
+              });
+              if (latestAccount?.credentialsJson) {
+                const latestCreds = EncryptionUtil.decryptObject<{ accessToken: string; refreshToken?: string; email?: string; expiresAt?: string }>(
+                  latestAccount.credentialsJson,
+                  this.encryptionKey,
+                );
+                const latestExpiry = latestCreds.expiresAt ? new Date(latestCreds.expiresAt) : null;
+                if (latestExpiry && latestExpiry.getTime() > Date.now()) {
+                  console.log(`[PlatformService] Re-read fresh token after race — expires ${latestExpiry.toISOString()}`);
+                  return { accessToken: latestCreds.accessToken, refreshToken: latestCreds.refreshToken, email: latestCreds.email };
+                }
+              }
+            } catch {
+              // ignore re-read errors
+            }
+
             throw new Error(`Thumbtack token expired and could not be refreshed — please reconnect your Thumbtack account (${refreshError.message})`);
           }
         }
