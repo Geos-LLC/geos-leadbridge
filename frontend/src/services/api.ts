@@ -459,8 +459,12 @@ export interface UpdateAutomationRuleDto {
 }
 
 export const aiApi = {
-  previewForLead: async (leadId: string): Promise<{ reply: string }> => {
-    const { data } = await api.post('/v1/ai/preview-for-lead', { leadId });
+  previewForLead: async (
+    leadId: string,
+    customerMessage: string,
+    conversationHistory: { role: 'customer' | 'pro'; content: string }[],
+  ): Promise<{ reply: string }> => {
+    const { data } = await api.post('/v1/ai/preview-for-lead', { leadId, customerMessage, conversationHistory });
     return data;
   },
 };

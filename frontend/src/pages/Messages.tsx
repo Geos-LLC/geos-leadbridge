@@ -180,7 +180,7 @@ export function Messages() {
   const [loading, setLoading] = useState(!_messagesLoaded && leads.length === 0);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
-  const [generatingAi, setGeneratingAi] = useState(false);
+  const [aiPreview, setAiPreview] = useState<Record<string, { loading: boolean; reply: string | null }>>({});
   const [resyncingMessages, setResyncingMessages] = useState(false);
   const [resyncError, setResyncError] = useState<string | null>(null);
   const [messageText, setMessageText] = useState('');
@@ -1395,6 +1395,48 @@ export function Messages() {
                         </div>
                       )}
                     </div>
+
+                    {/* AI Reply preview — inbound messages only */}
+                    {event.direction === 'inbound' && event.content && (
+                      <div className="mt-1">
+                        {!aiPreview[event.id] ? (
+                          <button
+                            onClick={() => {
+                              const idx = timelineEvents.indexOf(event);
+                              const history = timelineEvents.slice(0, idx)
+                                .filter(e => e.content && (e.direction === 'inbound' || e.direction === 'outbound'))
+                                .map(e => ({ role: (e.direction === 'inbound' ? 'customer' : 'pro') as 'customer' | 'pro', content: e.content! }));
+                              setAiPreview(prev => ({ ...prev, [event.id]: { loading: true, reply: null } }));
+                              aiApi.previewForLead(selectedLead!.id, event.content!, history)
+                                .then(({ reply }) => setAiPreview(prev => ({ ...prev, [event.id]: { loading: false, reply } })))
+                                .catch(() => setAiPreview(prev => ({ ...prev, [event.id]: { loading: false, reply: 'Failed to generate reply.' } })));
+                            }}
+                            className="flex items-center gap-1 text-[10px] text-violet-500 hover:text-violet-700 transition-colors"
+                          >
+                            <Sparkles size={10} />
+                            <span>See AI reply</span>
+                          </button>
+                        ) : (
+                          <div className="bg-violet-50 border border-violet-100 rounded-xl px-3 py-2 max-w-sm">
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <span className="text-[10px] font-bold text-violet-500 uppercase tracking-widest flex items-center gap-1">
+                                <Sparkles size={9} /> AI would reply
+                              </span>
+                              <button onClick={() => setAiPreview(prev => { const n = { ...prev }; delete n[event.id]; return n; })} className="text-violet-300 hover:text-violet-500">
+                                <X size={11} />
+                              </button>
+                            </div>
+                            {aiPreview[event.id].loading ? (
+                              <div className="flex items-center gap-1.5 text-violet-400 text-xs">
+                                <Loader2 size={11} className="animate-spin" /> Generating…
+                              </div>
+                            ) : (
+                              <p className="text-xs text-slate-700 leading-relaxed">{aiPreview[event.id].reply}</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   );
                 })
@@ -1449,27 +1491,6 @@ export function Messages() {
                       </div>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    title="Generate AI reply"
-                    disabled={generatingAi || !selectedLead}
-                    onClick={async () => {
-                      if (!selectedLead) return;
-                      setGeneratingAi(true);
-                      try {
-                        const { reply } = await aiApi.previewForLead(selectedLead.id);
-                        setMessageText(reply);
-                      } catch {
-                        alert('Failed to generate AI reply. Make sure OPENAI_API_KEY is configured.');
-                      } finally {
-                        setGeneratingAi(false);
-                      }
-                    }}
-                    className="px-3 py-2 sm:py-3 rounded-xl border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 transition-colors disabled:opacity-50 shrink-0 flex items-center gap-1.5 text-sm font-semibold"
-                  >
-                    {generatingAi ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
-                    <span className="hidden sm:inline">{generatingAi ? 'Writing…' : 'AI Reply'}</span>
-                  </button>
                   <form className="flex-1 flex gap-1.5 sm:gap-2 min-w-0" onSubmit={handleSendMessage}>
                     <input
                       type="text"

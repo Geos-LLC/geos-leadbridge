@@ -2,6 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 
+export interface ConversationMessage {
+  role: 'customer' | 'pro';
+  content: string;
+}
+
 export interface AiReplyContext {
   customerName: string;
   customerMessage: string;
@@ -11,6 +16,7 @@ export interface AiReplyContext {
   budget?: number;
   accountName?: string;
   systemPrompt?: string;
+  conversationHistory?: ConversationMessage[]; // prior messages for context
 }
 
 @Injectable()
@@ -43,12 +49,25 @@ Ask one clarifying question if needed. Never mention AI or automation.`;
 
     this.logger.log(`[AI] Generating reply for customer "${ctx.customerName}" — category: ${ctx.category || 'unknown'}`);
 
+    // Build message thread: system → context intro → conversation history → final ask
+    const openAiMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ];
+
+    // Inject conversation history as alternating user/assistant turns before the final message
+    if (ctx.conversationHistory && ctx.conversationHistory.length > 0) {
+      // Insert history before the final user message
+      const historyMessages = ctx.conversationHistory.map(m => ({
+        role: m.role === 'customer' ? 'user' as const : 'assistant' as const,
+        content: m.content,
+      }));
+      openAiMessages.splice(1, 0, ...historyMessages);
+    }
+
     const completion = await this.client.chat.completions.create({
       model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
+      messages: openAiMessages,
       max_tokens: 200,
       temperature: 0.7,
     });
