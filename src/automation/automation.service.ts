@@ -536,6 +536,21 @@ export class AutomationService implements OnModuleInit {
       let messageToSend: string;
 
       if (rule.useAi) {
+        // Fetch conversation history for context (via lead's threadId)
+        const existingMessages = lead.threadId ? await this.prisma.message.findMany({
+          where: { conversationId: lead.threadId },
+          orderBy: { createdAt: 'asc' },
+        }) : [];
+        const conversationHistory = existingMessages
+          .filter(m => m.content?.trim())
+          .map(m => ({
+            role: (m.sender === 'customer' ? 'customer' : 'pro') as 'customer' | 'pro',
+            content: m.content!,
+          }));
+
+        // Extract structured lead details from rawJson
+        const leadDetails = this.extractLeadDetails(lead.rawJson);
+
         // Generate reply via OpenAI
         messageToSend = await this.aiService.generateReply({
           customerName: context.customerName,
@@ -546,8 +561,10 @@ export class AutomationService implements OnModuleInit {
           budget: context.budget,
           accountName: context.accountName,
           systemPrompt: rule.aiSystemPrompt ?? undefined,
+          conversationHistory,
+          leadDetails,
         });
-        this.logger.log(`[AI] Generated reply for pending message ${pendingId}`);
+        this.logger.log(`[AI] Generated reply for pending message ${pendingId} (history: ${conversationHistory.length} msgs)`);
       } else {
         // Use static template
         if (!rule.template) {
@@ -678,6 +695,24 @@ export class AutomationService implements OnModuleInit {
   /**
    * Format rule for API response
    */
+  private extractLeadDetails(rawJson: string): Record<string, string> {
+    try {
+      const raw = JSON.parse(rawJson);
+      const details: any[] = raw.request?.details || raw.details || [];
+      const result: Record<string, string> = {};
+      for (const item of details) {
+        if (item.question && item.answer) {
+          result[String(item.question)] = String(item.answer);
+        }
+      }
+      if (raw.request?.description) result['Description'] = raw.request.description;
+      if (raw.description) result['Description'] = raw.description;
+      return result;
+    } catch {
+      return {};
+    }
+  }
+
   private formatRule(rule: any): any {
     return {
       id: rule.id,
