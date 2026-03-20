@@ -364,6 +364,9 @@ export class WebhooksService {
     if (userAccounts.length > 1) {
       this.logger.warn(`Multiple savedAccounts for user ${userId}, business ${business.businessID}: ${userAccounts.map(a => `${a.id}(settings=${!!a.notificationSettings})`).join(', ')}. Using ${savedAccount?.id}`);
     }
+    // Ensure conversation exists BEFORE automation fires — automation needs threadId to send platform messages
+    await this.ensureConversationForLead(userId, platform, negotiationId, customerName, lead.id);
+
     // Fire automation, SMS notification, and call connect in parallel — all independent
     const automationPromise = (async () => {
       try {
@@ -438,9 +441,6 @@ export class WebhooksService {
     // Non-critical deferred work — runs after notifications/call are already firing
     this.analyticsService.invalidateCache(userId).catch(err =>
       this.logger.error('Analytics cache invalidation failed', err.message),
-    );
-    this.ensureConversationForLead(userId, platform, negotiationId, customerName, lead.id).catch(err =>
-      this.logger.error('Conversation creation failed for lead', err.message),
     );
   }
 

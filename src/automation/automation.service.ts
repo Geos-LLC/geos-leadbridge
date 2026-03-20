@@ -532,7 +532,30 @@ export class AutomationService implements OnModuleInit {
       }
 
       if (!lead.threadId) {
-        throw new Error('No conversation thread for lead');
+        // Conversation may not exist yet (race with webhook handler) — create it now
+        this.logger.warn(`Lead ${context.leadId} has no threadId — creating conversation for negotiation ${context.negotiationId}`);
+        const conversation = await this.prisma.conversation.upsert({
+          where: {
+            platform_externalThreadId: {
+              platform: lead.platform,
+              externalThreadId: lead.externalRequestId,
+            },
+          },
+          create: {
+            userId: context.userId,
+            platform: lead.platform,
+            externalThreadId: lead.externalRequestId,
+            customerName: context.customerName,
+            lastMessageAt: new Date(),
+            status: 'active',
+          },
+          update: {},
+        });
+        await this.prisma.lead.update({
+          where: { id: lead.id },
+          data: { threadId: conversation.id },
+        });
+        lead.threadId = conversation.id;
       }
 
       let messageToSend: string;
