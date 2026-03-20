@@ -16,6 +16,9 @@ import { MonitoringService } from '../monitoring/monitoring.service';
 export class PlatformService {
   private readonly logger = new Logger(PlatformService.name);
   private readonly encryptionKey: string;
+  // Per-business token refresh lock: only one refresh at a time per business.
+  // Concurrent callers wait for the same promise instead of racing.
+  private readonly refreshLocks = new Map<string, Promise<{ accessToken: string; refreshToken?: string; expiresAt?: Date }>>();
 
   constructor(
     private prisma: PrismaService,
@@ -146,8 +149,22 @@ export class PlatformService {
 
     if (expiresAt && now.getTime() > (expiresAt.getTime() - bufferMs)) {
       console.log(`[PlatformService] Token expired or expiring soon for ${platformName}`);
-      console.log(`[PlatformService] Token expires: ${expiresAt.toISOString()}, Now: ${now.toISOString()}`);
-      console.log(`[PlatformService] Refreshing token...`);
+
+      // First, check if serializedAccountRefresh already updated the Platform table
+      // (this happens when getAccountCredentialsByBusinessId refreshed first and synced)
+      try {
+        const latest = await this.prisma.platform.findUnique({ where: { userId_platformName: { userId, platformName } } });
+        if (latest?.credentialsJson) {
+          const latestCreds = EncryptionUtil.decryptObject<PlatformCredentials>(latest.credentialsJson, this.encryptionKey);
+          const latestExpiry = latestCreds.expiresAt ? new Date(latestCreds.expiresAt) : null;
+          if (latestExpiry && latestExpiry.getTime() > (Date.now() + 60000)) {
+            console.log(`[PlatformService] Platform token already fresh (synced from account refresh) — expires ${latestExpiry.toISOString()}`);
+            return latestCreds;
+          }
+        }
+      } catch {
+        // continue to refresh
+      }
 
       try {
         const newCredentials = await this.refreshToken(userId, platformName, credentials);
@@ -155,21 +172,6 @@ export class PlatformService {
         return newCredentials;
       } catch (error) {
         console.error(`[PlatformService] Token refresh failed: ${error.message}`);
-
-        // Race condition guard: re-read from DB — another concurrent worker may have already refreshed.
-        try {
-          const latest = await this.prisma.platform.findUnique({ where: { userId_platformName: { userId, platformName } } });
-          if (latest?.credentialsJson) {
-            const latestCreds = EncryptionUtil.decryptObject<PlatformCredentials>(latest.credentialsJson, this.encryptionKey);
-            const latestExpiry = latestCreds.expiresAt ? new Date(latestCreds.expiresAt) : null;
-            if (latestExpiry && latestExpiry.getTime() > Date.now()) {
-              console.log(`[PlatformService] Re-read fresh platform token after race — expires ${latestExpiry.toISOString()}`);
-              return latestCreds;
-            }
-          }
-        } catch {
-          // ignore re-read errors
-        }
 
         this.monitoring.captureError({
           category: 'token_refresh',
@@ -204,6 +206,66 @@ export class PlatformService {
     await this.storeCredentials(userId, platformName, newCredentials);
 
     return newCredentials;
+  }
+
+  /**
+   * Serialized token refresh for a saved account (per-business lock).
+   * Prevents concurrent refresh calls from consuming the same rotating refresh token.
+   * All concurrent callers for the same business share a single refresh promise.
+   */
+  private async serializedAccountRefresh(
+    lockKey: string,
+    accountId: string,
+    platform: string,
+    refreshToken: string,
+    email?: string,
+  ): Promise<{ accessToken: string; refreshToken?: string; expiresAt?: Date }> {
+    // If a refresh is already in flight for this business, piggyback on it
+    const existing = this.refreshLocks.get(lockKey);
+    if (existing) {
+      console.log(`[PlatformService] Waiting for in-flight refresh: ${lockKey}`);
+      return existing;
+    }
+
+    const refreshPromise = (async () => {
+      try {
+        const adapter = this.platformFactory.getAdapter(platform);
+        const newCredentials = await adapter.refreshAccessToken(refreshToken);
+
+        // Store the new credentials (with new refresh token) immediately
+        await this.updateAccountCredentials(accountId, {
+          accessToken: newCredentials.accessToken,
+          refreshToken: newCredentials.refreshToken || refreshToken,
+          email,
+          expiresAt: newCredentials.expiresAt,
+        });
+
+        // Also sync to Platform table so platform-level fallback stays fresh
+        try {
+          const account = await this.prisma.savedAccount.findUnique({
+            where: { id: accountId },
+            select: { userId: true },
+          });
+          if (account) {
+            await this.storeCredentials(account.userId, platform, newCredentials);
+          }
+        } catch {
+          // Non-critical: platform table sync failure doesn't block the main flow
+        }
+
+        return {
+          accessToken: newCredentials.accessToken,
+          refreshToken: newCredentials.refreshToken || refreshToken,
+          expiresAt: newCredentials.expiresAt,
+        };
+      } finally {
+        // Release lock regardless of success/failure
+        this.refreshLocks.delete(lockKey);
+      }
+    })();
+
+    this.refreshLocks.set(lockKey, refreshPromise);
+    return refreshPromise;
   }
 
   /**
@@ -774,49 +836,25 @@ export class PlatformService {
 
         if (now.getTime() > (expiresAt.getTime() - bufferMs)) {
           console.log(`[PlatformService] Account token expired for business ${businessId}, refreshing...`);
-          console.log(`[PlatformService] Token expires: ${expiresAt.toISOString()}, Now: ${now.toISOString()}`);
 
+          const lockKey = `${platform}:${businessId}`;
           try {
-            const adapter = this.platformFactory.getAdapter(platform);
-            const newCredentials = await adapter.refreshAccessToken(credentials.refreshToken);
-
-            // Update stored credentials with new token
-            await this.updateAccountCredentials(account.id, {
-              accessToken: newCredentials.accessToken,
-              refreshToken: newCredentials.refreshToken || credentials.refreshToken,
-              email: credentials.email,
-              expiresAt: newCredentials.expiresAt,
-            });
+            const refreshed = await this.serializedAccountRefresh(
+              lockKey,
+              account.id,
+              platform,
+              credentials.refreshToken,
+              credentials.email,
+            );
 
             console.log(`[PlatformService] Account token refreshed successfully for business ${businessId}`);
             return {
-              accessToken: newCredentials.accessToken,
-              refreshToken: newCredentials.refreshToken || credentials.refreshToken,
+              accessToken: refreshed.accessToken,
+              refreshToken: refreshed.refreshToken,
               email: credentials.email,
             };
           } catch (refreshError: any) {
             console.error(`[PlatformService] Failed to refresh account token for business ${businessId}: ${refreshError.message}`);
-
-            // Race condition guard: another concurrent worker may have already refreshed the token.
-            // Re-read the latest credentials from DB before giving up.
-            try {
-              const latestAccount = await this.prisma.savedAccount.findFirst({
-                where: { userId, platform, businessId },
-              });
-              if (latestAccount?.credentialsJson) {
-                const latestCreds = EncryptionUtil.decryptObject<{ accessToken: string; refreshToken?: string; email?: string; expiresAt?: string }>(
-                  latestAccount.credentialsJson,
-                  this.encryptionKey,
-                );
-                const latestExpiry = latestCreds.expiresAt ? new Date(latestCreds.expiresAt) : null;
-                if (latestExpiry && latestExpiry.getTime() > Date.now()) {
-                  console.log(`[PlatformService] Re-read fresh token after race — expires ${latestExpiry.toISOString()}`);
-                  return { accessToken: latestCreds.accessToken, refreshToken: latestCreds.refreshToken, email: latestCreds.email };
-                }
-              }
-            } catch {
-              // ignore re-read errors
-            }
 
             const savedAcct = await this.prisma.savedAccount.findFirst({ where: { userId, platform, businessId }, select: { businessName: true } }).catch(() => null);
             this.monitoring.captureError({
