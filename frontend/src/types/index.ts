@@ -308,7 +308,7 @@ export interface AdminUser {
   trialLeadsLimit: number;
   trialEndDate: string | null;
   leadsCount: number;
-  connectedAccounts: { id: string; businessName: string; platform: string }[];
+  connectedAccounts: { id: string; businessName: string; businessId: string; platform: string }[];
   createdAt: string;
   updatedAt: string;
 }

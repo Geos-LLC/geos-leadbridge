@@ -420,7 +420,8 @@ export default function AdminDashboard() {
                           {u.connectedAccounts.map((a) => (
                             <div key={a.id} className="flex items-center gap-1.5">
                               <Building2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                              <span className="text-xs text-slate-700 truncate max-w-[180px]" title={a.businessName}>{a.businessName}</span>
+                              <span className="text-xs text-slate-700 truncate max-w-[180px]" title={`${a.businessName} (${a.businessId})`}>{a.businessName}</span>
+                              <span className="text-[10px] text-slate-400 font-mono">{a.businessId}</span>
                             </div>
                           ))}
                         </div>

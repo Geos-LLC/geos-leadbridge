@@ -54,7 +54,7 @@ export class AdminService {
           createdAt: true,
           updatedAt: true,
           savedAccounts: {
-            select: { id: true, businessName: true, platform: true },
+            select: { id: true, businessName: true, businessId: true, platform: true },
           },
           _count: {
             select: { leads: true },
@@ -74,6 +74,7 @@ export class AdminService {
       connectedAccounts: savedAccounts.map((a) => ({
         id: a.id,
         businessName: a.businessName,
+        businessId: a.businessId,
         platform: a.platform,
       })),
     }));
