@@ -318,10 +318,57 @@ export class PlatformService {
       },
     });
 
+    // Auto-register agent phone as Thumbtack associate phone (allows calling without access code)
+    try {
+      await this.registerAgentPhoneWithThumbtack(userId, businessId, credentials, adapter);
+    } catch (err: any) {
+      console.warn(`[PlatformService] Associate phone registration failed (non-blocking): ${err.message}`);
+    }
+
     return {
       webhookId: result.webhookId,
       businessId,
     };
+  }
+
+  /**
+   * Register the agent's business phone as a Thumbtack associate phone number.
+   * This allows the agent to call customers through Thumbtack's proxy number
+   * without needing an access code.
+   */
+  async registerAgentPhoneWithThumbtack(
+    userId: string,
+    businessId: string,
+    credentials?: { accessToken: string } | null,
+    adapter?: any,
+  ): Promise<void> {
+    // Resolve the agent's phone: account override > user default
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { userId, platform: 'thumbtack', businessId },
+      select: { agentPhoneOverride: true },
+    });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { businessPhone: true },
+    });
+
+    const agentPhone = account?.agentPhoneOverride || user?.businessPhone;
+    if (!agentPhone) {
+      console.log(`[PlatformService] No agent phone set for user ${userId}, skipping Thumbtack associate phone registration`);
+      return;
+    }
+
+    if (!adapter) {
+      adapter = this.platformFactory.getAdapter('thumbtack') as any;
+    }
+    if (!credentials) {
+      const creds = await this.getAccountCredentialsByBusinessId(userId, 'thumbtack', businessId);
+      if (!creds) return;
+      credentials = creds;
+    }
+
+    console.log(`[PlatformService] Registering agent phone ${agentPhone} as Thumbtack associate for business ${businessId}`);
+    await adapter.registerAssociatePhone(credentials, businessId, agentPhone, 'LeadBridge Agent');
   }
 
   /**
@@ -818,6 +865,19 @@ export class PlatformService {
         ...(updates.agentPhoneOverride !== undefined && { agentPhoneOverride: updates.agentPhoneOverride }),
       },
     });
+
+    // If phone changed on a Thumbtack account, register as associate phone (non-blocking)
+    if (updates.agentPhoneOverride) {
+      const account = await this.prisma.savedAccount.findFirst({
+        where: { id: accountId, userId, platform: 'thumbtack' },
+        select: { businessId: true },
+      });
+      if (account?.businessId) {
+        this.registerAgentPhoneWithThumbtack(userId, account.businessId, null, null).catch(err =>
+          console.warn(`[PlatformService] Associate phone update failed (non-blocking): ${err.message}`),
+        );
+      }
+    }
   }
 
   /**

@@ -65,7 +65,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       redirect_uri: callbackUrl || this.redirectUri,
       response_type: 'code',
       // Include openid email profile scopes to get ID token with user info
-      scope: 'openid email profile supply::businesses.list supply::messages.read supply::messages.write supply::negotiations.read supply::users.read supply::webhooks.read supply::webhooks.write offline_access',
+      scope: 'openid email profile supply::businesses.list supply::messages.read supply::messages.write supply::negotiations.read supply::users.read supply::webhooks.read supply::webhooks.write supply::businesses/associate-phone-numbers.read supply::businesses/associate-phone-numbers.write offline_access',
       state,
       audience: 'urn:partner-api',
     });
@@ -623,6 +623,93 @@ export class ThumbtackAdapter implements IPlatformAdapter {
         processed: false,
         error: error.message,
       };
+    }
+  }
+
+  // ==========================================
+  // Associate Phone Numbers
+  // ==========================================
+
+  /**
+   * Register a phone number as an associate phone for a Thumbtack business.
+   * This allows the phone owner to call customers through Thumbtack's proxy
+   * number without needing an access code.
+   */
+  async registerAssociatePhone(
+    credentials: PlatformCredentials,
+    businessId: string,
+    phoneNumber: string,
+    label?: string,
+  ): Promise<{ phoneNumberId: string }> {
+    try {
+      this.logger.log(`Registering associate phone ${phoneNumber} for business ${businessId}`);
+      const response = await this.httpClient.post(
+        `/businesses/${businessId}/associate-phone-numbers`,
+        {
+          phoneNumber,
+          label: label || 'LeadBridge Agent',
+        },
+        {
+          headers: { Authorization: `Bearer ${credentials.accessToken}` },
+        },
+      );
+
+      const id = response.data.phoneNumberID || response.data.id;
+      this.logger.log(`Associate phone registered: ${id}`);
+      return { phoneNumberId: id };
+    } catch (error) {
+      const status = error.response?.status;
+      const data = error.response?.data;
+      // 409 = already registered — not an error
+      if (status === 409) {
+        this.logger.log(`Associate phone ${phoneNumber} already registered for business ${businessId}`);
+        return { phoneNumberId: 'already-registered' };
+      }
+      this.logger.error(`Error registering associate phone — status=${status} data=${JSON.stringify(data)}`);
+      throw new Error(`Failed to register associate phone: ${data?.detail || error.message}`);
+    }
+  }
+
+  /**
+   * List all associate phone numbers for a business
+   */
+  async listAssociatePhones(
+    credentials: PlatformCredentials,
+    businessId: string,
+  ): Promise<any[]> {
+    try {
+      const response = await this.httpClient.get(
+        `/businesses/${businessId}/associate-phone-numbers`,
+        {
+          headers: { Authorization: `Bearer ${credentials.accessToken}` },
+        },
+      );
+      return response.data.data || response.data || [];
+    } catch (error) {
+      this.logger.error(`Error listing associate phones: ${error.response?.status} ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Remove an associate phone number from a business
+   */
+  async removeAssociatePhone(
+    credentials: PlatformCredentials,
+    businessId: string,
+    phoneNumberId: string,
+  ): Promise<void> {
+    try {
+      await this.httpClient.delete(
+        `/businesses/${businessId}/associate-phone-numbers/${phoneNumberId}`,
+        {
+          headers: { Authorization: `Bearer ${credentials.accessToken}` },
+        },
+      );
+      this.logger.log(`Removed associate phone ${phoneNumberId} from business ${businessId}`);
+    } catch (error) {
+      this.logger.error(`Error removing associate phone: ${error.response?.status} ${error.message}`);
+      throw new Error(`Failed to remove associate phone: ${error.message}`);
     }
   }
 

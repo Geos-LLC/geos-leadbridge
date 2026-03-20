@@ -669,6 +669,24 @@ export class ThumbtackController {
   }
 
   /**
+   * Register the agent's phone as a Thumbtack associate phone for a business.
+   * Allows the agent to call customers via Thumbtack proxy without an access code.
+   */
+  @Post('saved-accounts/:id/register-phone')
+  async registerAssociatePhone(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    const accounts = await this.platformService.getSavedAccounts(user.id, 'thumbtack');
+    const account = accounts.find(a => a.id === id);
+    if (!account) {
+      throw new BadRequestException('Thumbtack account not found');
+    }
+    await this.platformService.registerAgentPhoneWithThumbtack(user.id, account.businessId);
+    return { success: true, message: 'Phone registered with Thumbtack' };
+  }
+
+  /**
    * Get account health/diagnostics for the current user's own account.
    * Returns notification issues and connection status without requiring admin access.
    */
