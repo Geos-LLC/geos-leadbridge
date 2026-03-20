@@ -65,7 +65,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       redirect_uri: callbackUrl || this.redirectUri,
       response_type: 'code',
       // Include openid email profile scopes to get ID token with user info
-      scope: 'openid email profile supply::businesses.list supply::messages.read supply::messages.write supply::negotiations.read supply::users.read supply::webhooks.read supply::webhooks.write supply::businesses/associate-phone-numbers.read supply::businesses/associate-phone-numbers.write offline_access',
+      scope: 'openid email profile supply::businesses.list supply::messages.read supply::messages.write supply::negotiations.read supply::users.read supply::webhooks.read supply::webhooks.write offline_access',
       state,
       audience: 'urn:partner-api',
     });
