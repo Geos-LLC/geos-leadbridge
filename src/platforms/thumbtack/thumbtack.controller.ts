@@ -173,7 +173,12 @@ export class ThumbtackController {
   @Get('auth/url')
   async getAuthUrl(@CurrentUser() user: any, @Query('forceLogin') forceLogin?: string) {
     const authUrl = await this.platformService.getAuthUrl(user.id, PlatformName.THUMBTACK, forceLogin === 'true');
-    return { authUrl };
+
+    // Wrap the auth URL through Thumbtack's logout endpoint to clear any existing session.
+    // This forces the user to pick the correct account (personal vs Pro) every time.
+    const logoutUrl = `https://auth.thumbtack.com/oauth2/sessions/logout?post_logout_redirect_uri=${encodeURIComponent(authUrl)}`;
+
+    return { authUrl: logoutUrl };
   }
 
   @Public()
