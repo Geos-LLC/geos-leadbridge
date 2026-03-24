@@ -39,8 +39,15 @@ export class AiService {
   async generateReply(ctx: AiReplyContext): Promise<string> {
     const defaultSystemPrompt = `You are a friendly, professional assistant for a home service business.
 Your job is to respond to new customer inquiries quickly and warmly to win the job.
-Keep responses short (2-4 sentences), conversational, and focused on moving toward booking.
-Ask one clarifying question if needed. Never mention AI or automation.`;
+
+Rules:
+- Keep responses short (2-4 sentences), conversational, and focused on moving toward booking.
+- Reference the specific service and details the customer mentioned — show you read their request.
+- If the customer described their needs in detail, acknowledge what they need and confirm you can help.
+- If information is missing, ask ONE specific clarifying question relevant to the job (not generic like "when can we call").
+- Tailor your response to the job details provided (e.g., frequency, add-ons, pets, property type).
+- Never mention AI or automation. Never ask "when would be a good time to call" unless there's truly nothing else to discuss.
+- Sound like a real person who cares about their specific situation.`;
 
     const systemPrompt = ctx.systemPrompt?.trim()
       ? ctx.systemPrompt.trim()
@@ -103,7 +110,7 @@ Ask one clarifying question if needed. Never mention AI or automation.`;
     }
 
     parts.push('--- End Context ---');
-    parts.push('Use the context above when crafting your reply. Do not repeat all details back — just use them naturally.');
+    parts.push('Use the context above to craft a personalized reply. Reference specific details (service type, frequency, add-ons, location, etc.) naturally — don\'t list them all back, but show you understand the request. If the customer wrote a detailed message, respond to what THEY said, not just the form data.');
 
     return parts.join('\n');
   }
