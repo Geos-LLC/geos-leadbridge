@@ -97,7 +97,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       });
 
       const { access_token, refresh_token, expires_in, scope, id_token } = response.data;
-      this.logger.log('Token response received, id_token present:', !!id_token);
+      this.logger.log(`Token response received, id_token present: ${!!id_token}`);
 
       // Extract email from ID token (JWT) if present
       let email: string | undefined;
@@ -107,11 +107,11 @@ export class ThumbtackAdapter implements IPlatformAdapter {
           const parts = id_token.split('.');
           if (parts.length === 3) {
             const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-            this.logger.log('ID token payload:', JSON.stringify(payload));
+            this.logger.log(`ID token payload: ${JSON.stringify(payload)}`);
             email = payload.email;
           }
         } catch (err) {
-          this.logger.warn('Failed to decode id_token:', err.message);
+          this.logger.warn(`Failed to decode id_token: ${err.message}`);
         }
       }
 
@@ -123,7 +123,7 @@ export class ThumbtackAdapter implements IPlatformAdapter {
         email, // Include email from ID token
       };
     } catch (error) {
-      this.logger.error('OAuth callback error:', error.response?.data || error.message);
+      this.logger.error(`OAuth callback error: ${JSON.stringify(error.response?.data) || error.message}`);
       throw new Error('Failed to exchange authorization code for tokens');
     }
   }
@@ -232,14 +232,14 @@ export class ThumbtackAdapter implements IPlatformAdapter {
   async getBusinesses(credentials: PlatformCredentials): Promise<any[]> {
     try {
       this.logger.log('Fetching businesses from Thumbtack API');
-      this.logger.log('Token scope:', credentials.scope);
-      this.logger.log('Token expires:', credentials.expiresAt);
+      this.logger.log(`Token scope: ${credentials.scope}`);
+      this.logger.log(`Token expires: ${credentials.expiresAt}`);
 
       const response = await this.httpClient.get('/businesses', {
         headers: { Authorization: `Bearer ${credentials.accessToken}` },
       });
 
-      this.logger.log('Thumbtack businesses response:', JSON.stringify(response.data));
+      this.logger.log(`Thumbtack businesses response: ${JSON.stringify(response.data)}`);
 
       const businesses = response.data.data || response.data.businesses || response.data || [];
       this.logger.log(`Found ${businesses.length} businesses`);
@@ -254,8 +254,8 @@ export class ThumbtackAdapter implements IPlatformAdapter {
 
       return businesses;
     } catch (error) {
-      this.logger.error('Error fetching businesses:', error.response?.data || error.message);
-      this.logger.error('Full error:', error.response?.status, error.response?.statusText);
+      this.logger.error(`Error fetching businesses: ${JSON.stringify(error.response?.data) || error.message}`);
+      this.logger.error(`Full error: status=${error.response?.status} ${error.response?.statusText}`);
       throw new Error(`Failed to fetch businesses from Thumbtack: ${error.response?.data?.message || error.message}`);
     }
   }
