@@ -104,8 +104,9 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
       }, 1500);
     } catch (err: any) {
       console.error('[Reconnect] API failed:', err?.response?.status, err?.response?.data || err?.message);
-      setError('Could not reconnect automatically. Redirecting to Thumbtack to re-authorize...');
-      setTimeout(handleStartOAuth, 2000);
+      setError('Token expired. Logging out of Thumbtack and re-authorizing...');
+      // Use the full logout + OAuth flow so user can pick the correct account
+      setTimeout(handleSwitchAccount, 1500);
     } finally {
       setReconnecting(false);
     }
