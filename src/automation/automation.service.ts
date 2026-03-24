@@ -576,10 +576,16 @@ export class AutomationService implements OnModuleInit {
         // Extract structured lead details from rawJson
         const leadDetails = this.extractLeadDetails(lead.rawJson);
 
+        // Use the customer's actual first message (from conversation) if available,
+        // fall back to request.description (form data only).
+        // The first customer message often contains the real intent/details.
+        const firstCustomerMsg = conversationHistory.find(m => m.role === 'customer')?.content;
+        const customerMessage = firstCustomerMsg || context.customerMessage || lead.message || '';
+
         // Generate reply via OpenAI
         messageToSend = await this.aiService.generateReply({
           customerName: context.customerName,
-          customerMessage: context.customerMessage || lead.message || '',
+          customerMessage,
           category: context.category,
           city: context.city,
           state: context.state,
@@ -589,7 +595,7 @@ export class AutomationService implements OnModuleInit {
           conversationHistory,
           leadDetails,
         });
-        this.logger.log(`[AI] Generated reply for pending message ${pendingId} (history: ${conversationHistory.length} msgs)`);
+        this.logger.log(`[AI] Generated reply for pending message ${pendingId} (history: ${conversationHistory.length} msgs, customerMsg: ${firstCustomerMsg ? 'from-thread' : 'from-request'})`);
       } else {
         // Use static template
         if (!rule.template) {
