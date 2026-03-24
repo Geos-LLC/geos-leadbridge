@@ -70,10 +70,9 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       audience: 'urn:partner-api',
     });
 
-    // Force login prompt when switching accounts (OIDC standard param)
-    if (forceLogin) {
-      params.set('prompt', 'login');
-    }
+    // Always force login prompt so user picks the correct Thumbtack account
+    // (prevents auto-login to a personal account instead of the Pro account)
+    params.set('prompt', 'login');
 
     return `${this.authBaseUrl}/auth?${params.toString()}`;
   }
