@@ -70,9 +70,11 @@ export class ThumbtackAdapter implements IPlatformAdapter {
       audience: 'urn:partner-api',
     });
 
-    // Always force login prompt so user picks the correct Thumbtack account
+    // Force re-authentication so user picks the correct Thumbtack account
     // (prevents auto-login to a personal account instead of the Pro account)
+    // max_age=0 tells the OIDC provider the auth must be fresh (no cached session)
     params.set('prompt', 'login');
+    params.set('max_age', '0');
 
     return `${this.authBaseUrl}/auth?${params.toString()}`;
   }
