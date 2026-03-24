@@ -15,7 +15,7 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [businesses, setBusinesses] = useState<Business[]>([]);
-  const [reconnecting, setReconnecting] = useState(false);
+  const reconnecting = loading; // reuse loading state from switch flow
   const [reconnectSuccess, setReconnectSuccess] = useState(false);
 
   useEffect(() => {
@@ -90,26 +90,9 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
 
   const handleReconnect = async () => {
     if (!accountToReconnect) return;
-
-    console.log('[Reconnect] Starting reconnect for account:', accountToReconnect.id, accountToReconnect.businessName);
-    try {
-      setReconnecting(true);
-      setError(null);
-      const result = await thumbtackApi.reconnectAccount(accountToReconnect.id);
-      console.log('[Reconnect] API success, result:', result);
-      setReconnectSuccess(true);
-      setTimeout(() => {
-        onSuccess?.();
-        onClose();
-      }, 1500);
-    } catch (err: any) {
-      console.error('[Reconnect] API failed:', err?.response?.status, err?.response?.data || err?.message);
-      setError('Token expired. Logging out of Thumbtack and re-authorizing...');
-      // Use the full logout + OAuth flow so user can pick the correct account
-      setTimeout(handleSwitchAccount, 1500);
-    } finally {
-      setReconnecting(false);
-    }
+    console.log('[Reconnect] Starting full re-auth for account:', accountToReconnect.id, accountToReconnect.businessName);
+    // Always do full logout + OAuth — quick webhook reconnect is useless when token is dead
+    handleSwitchAccount();
   };
 
   const handleSetupWebhook = async (business: Business) => {
