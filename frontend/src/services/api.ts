@@ -252,6 +252,14 @@ export const platformsApi = {
   disconnect: async (): Promise<void> => {
     await api.post('/v1/thumbtack/auth/disconnect');
   },
+  // Yelp OAuth
+  getYelpAuthUrl: async (): Promise<{ url: string }> => {
+    const { data } = await api.get('/v1/yelp/auth/url');
+    return data;
+  },
+  disconnectYelp: async (accountId: string): Promise<void> => {
+    await api.post('/v1/yelp/auth/disconnect', { accountId });
+  },
   // Diagnostic endpoints
   verifyWebhooks: async (): Promise<{ accounts: WebhookVerifyResult[] }> => {
     const { data } = await api.get('/v1/platforms/webhooks/verify');

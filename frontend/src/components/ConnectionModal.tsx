@@ -15,8 +15,9 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [businesses, setBusinesses] = useState<Business[]>([]);
-  const reconnecting = loading; // reuse loading state from switch flow
+  const reconnecting = loading;
   const [reconnectSuccess, setReconnectSuccess] = useState(false);
+  const [selectedPlatform, setSelectedPlatform] = useState<'thumbtack' | 'yelp' | null>(null);
 
   useEffect(() => {
     if (isOpen && !accountToReconnect && savedAccounts.length > 0) {
@@ -25,10 +26,10 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
       loadBusinesses();
     }
     if (!isOpen) {
-      // Reset state when modal closes
       setError(null);
       setReconnectSuccess(false);
       setBusinesses([]);
+      setSelectedPlatform(null);
     }
   }, [isOpen, accountToReconnect]);
 
@@ -95,6 +96,18 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
     handleSwitchAccount();
   };
 
+  const handleStartYelpOAuth = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const { url } = await platformsApi.getYelpAuthUrl();
+      window.location.href = url;
+    } catch (err: any) {
+      setError(err.message || 'Failed to start Yelp connection');
+      setLoading(false);
+    }
+  };
+
   const handleSetupWebhook = async (business: Business) => {
     try {
       setLoading(true);
@@ -124,12 +137,13 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-2xl font-bold text-slate-900">
-              {accountToReconnect ? 'Reconnect Account' : 'Connect Thumbtack'}
+              {accountToReconnect ? 'Reconnect Account' : selectedPlatform === 'yelp' ? 'Connect Yelp' : selectedPlatform === 'thumbtack' ? 'Connect Thumbtack' : 'Connect Platform'}
             </h2>
             <p className="text-sm text-slate-500 mt-1">
               {accountToReconnect
                 ? `Reconnect "${accountToReconnect.businessName}" to resume automation`
-                : 'Connect your Thumbtack business to start automating'}
+                : selectedPlatform ? `Connect your ${selectedPlatform === 'yelp' ? 'Yelp' : 'Thumbtack'} business to start automating`
+                : 'Choose a platform to connect'}
             </p>
           </div>
           <button
@@ -188,8 +202,68 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
           </div>
         )}
 
-        {/* Connect new account or choose business */}
-        {!accountToReconnect && (
+        {/* Platform picker — shown when no account to reconnect and no platform selected */}
+        {!accountToReconnect && !selectedPlatform && (
+          <div className="space-y-3">
+            <button
+              onClick={() => { setSelectedPlatform('thumbtack'); if (savedAccounts.length > 0) loadBusinesses(); }}
+              className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-blue-200 transition-all cursor-pointer flex items-center gap-4 group"
+            >
+              <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 text-lg font-bold">T</div>
+              <div className="flex-1 text-left">
+                <h3 className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors">Thumbtack</h3>
+                <p className="text-xs text-slate-500">Connect your Thumbtack Pro account</p>
+              </div>
+              <ExternalLink size={16} className="text-slate-400 group-hover:text-blue-600 transition-colors" />
+            </button>
+            <button
+              onClick={() => setSelectedPlatform('yelp')}
+              className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-red-200 transition-all cursor-pointer flex items-center gap-4 group"
+            >
+              <div className="w-12 h-12 bg-red-50 rounded-xl flex items-center justify-center text-red-600 text-lg font-bold">Y</div>
+              <div className="flex-1 text-left">
+                <h3 className="font-bold text-slate-900 group-hover:text-red-600 transition-colors">Yelp</h3>
+                <p className="text-xs text-slate-500">Connect your Yelp business owner account</p>
+              </div>
+              <ExternalLink size={16} className="text-slate-400 group-hover:text-red-600 transition-colors" />
+            </button>
+          </div>
+        )}
+
+        {/* Yelp connect — simple OAuth redirect */}
+        {!accountToReconnect && selectedPlatform === 'yelp' && (
+          <div className="space-y-4">
+            <div className="text-center py-8">
+              <div className="w-16 h-16 bg-red-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <ExternalLink size={24} className="text-red-600" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900 mb-2">Connect to Yelp</h3>
+              <p className="text-sm text-slate-600 mb-6 max-w-md mx-auto">
+                Authorize LeadBridge to access your Yelp business leads. You'll be redirected to Yelp to sign in as a business owner.
+              </p>
+            </div>
+            <button
+              onClick={handleStartYelpOAuth}
+              disabled={loading}
+              className="w-full px-6 py-3 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 shadow-lg shadow-red-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <><Loader2 size={16} className="animate-spin" /> Connecting...</>
+              ) : (
+                <><ExternalLink size={16} /> Connect with Yelp</>
+              )}
+            </button>
+            <button
+              onClick={() => setSelectedPlatform(null)}
+              className="w-full px-4 py-2 text-sm text-slate-500 hover:text-slate-700 transition-all"
+            >
+              Back to platform selection
+            </button>
+          </div>
+        )}
+
+        {/* Connect new Thumbtack account or choose business */}
+        {!accountToReconnect && selectedPlatform === 'thumbtack' && (
           <div className="space-y-4">
             {loading ? (
               <div className="flex flex-col items-center justify-center py-12">

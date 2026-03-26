@@ -1221,11 +1221,23 @@ export default function SettingsPage() {
           </div>
 
           {/* Yelp */}
-          <div className="bg-slate-50 rounded-[2rem] border border-slate-200 border-dashed p-6 flex flex-col items-center justify-center text-center">
-            <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-300 font-bold mb-3 border border-slate-100 text-lg">Y</div>
-            <h4 className="font-bold text-slate-400">Yelp Integration</h4>
-            <p className="text-xs text-slate-400 mb-4">Coming very soon to LeadBridge</p>
-            <span className="px-4 py-1.5 bg-white text-slate-400 text-[10px] font-bold rounded-full border border-slate-200 uppercase tracking-widest">Waitlist Only</span>
+          <div className="bg-white rounded-[2rem] border border-slate-100 p-6 flex flex-col items-center justify-center text-center">
+            <div className="w-12 h-12 bg-red-50 rounded-2xl flex items-center justify-center text-red-600 font-bold mb-3 border border-red-100 text-lg">Y</div>
+            <h4 className="font-bold text-slate-900">Yelp Integration</h4>
+            <p className="text-xs text-slate-500 mb-4">Connect your Yelp business to receive and auto-reply to leads</p>
+            <button
+              onClick={async () => {
+                try {
+                  const { url } = await platformsApi.getYelpAuthUrl();
+                  window.location.href = url;
+                } catch (err: any) {
+                  alert(err.message || 'Failed to start Yelp connection');
+                }
+              }}
+              className="px-4 py-1.5 bg-red-600 text-white text-xs font-bold rounded-full uppercase tracking-widest hover:bg-red-700 transition-colors"
+            >
+              Connect Yelp
+            </button>
           </div>
         </div>
       </div>

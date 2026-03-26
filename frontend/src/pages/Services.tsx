@@ -2083,8 +2083,8 @@ export function Services() {
             </div>
           </ServiceCard>
 
-          {/* 4. Yelp Automation — Coming Soon */}
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden opacity-60 pointer-events-none select-none">
+          {/* 4. Yelp Automation — Active */}
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
             <div className="p-6 flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-red-50 rounded-2xl flex items-center justify-center">
@@ -2093,12 +2093,11 @@ export function Services() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-lg font-bold text-slate-900">Yelp Automation</h3>
-                    <span className="px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-red-100 text-red-600 rounded-full">Coming Soon</span>
+                    <span className="px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-600 rounded-full">Active</span>
                   </div>
-                  <p className="text-sm text-slate-400 mt-0.5">Schedule replies and follow-ups for Yelp conversations.</p>
+                  <p className="text-sm text-slate-500 mt-0.5">Auto-reply and follow-ups for Yelp leads. Connect your Yelp business to get started.</p>
                 </div>
               </div>
-              <div className="relative w-11 h-6 bg-slate-200 rounded-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5" />
             </div>
           </div>
 
