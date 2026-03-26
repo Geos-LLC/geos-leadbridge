@@ -12,6 +12,7 @@ import { AutomationService } from '../automation/automation.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CallConnectService } from '../call-connect/call-connect.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { EncryptionUtil } from '../common/utils/encryption.util';
 
 @Injectable()
 export class WebhooksService {
@@ -1393,13 +1394,22 @@ export class WebhooksService {
 
     const userId = savedAccount.userId;
 
-    // Fetch full lead details from Yelp API
-    const apiKey = this.configService.get<string>('yelp.apiKey') || '';
-    const { YelpAdapter } = await import('../platforms/yelp/yelp.adapter');
-    const yelpAdapter = this.platformFactory.getAdapter('yelp') as InstanceType<typeof YelpAdapter>;
+    // Use per-business OAuth token if available, fallback to API key
+    let accessToken = this.configService.get<string>('yelp.apiKey') || '';
+    if (savedAccount.credentialsJson) {
+      try {
+        const encryptionKey = this.configService.get<string>('encryptionKey') || '';
+        const creds = EncryptionUtil.decryptObject<any>(savedAccount.credentialsJson, encryptionKey);
+        if (creds.accessToken) accessToken = creds.accessToken;
+      } catch (err: any) {
+        this.logger.warn(`Failed to decrypt Yelp credentials for business ${businessId}, using API key: ${err.message}`);
+      }
+    }
+
+    const yelpAdapter = this.platformFactory.getAdapter('yelp') as any;
     let leadData: any;
     try {
-      leadData = await yelpAdapter.getLead({ accessToken: apiKey }, leadId);
+      leadData = await yelpAdapter.getLead({ accessToken }, leadId);
     } catch (err: any) {
       this.logger.error(`Failed to fetch Yelp lead ${leadId}: ${err.message}`);
       // Still upsert a minimal lead so we don't lose it

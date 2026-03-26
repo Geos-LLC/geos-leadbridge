@@ -1,10 +1,10 @@
 /**
  * Yelp Platform Adapter
  * Implements IPlatformAdapter for Yelp Leads integration
- * Auth: API key (no OAuth) — YELP_API_KEY env var
+ * Auth: API Key (webhooks/subscriptions) + OAuth (per-business lead access/reply)
  */
 
-import { Injectable, Logger, NotImplementedException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
 import * as crypto from 'crypto';
@@ -30,10 +30,18 @@ export class YelpAdapter implements IPlatformAdapter {
   private readonly logger = new Logger(YelpAdapter.name);
   private readonly httpClient: AxiosInstance;
   private readonly apiKey: string;
+  private readonly clientId: string;
+  private readonly clientSecret: string;
+  private readonly redirectUri: string;
   private readonly apiBaseUrl: string;
+  private readonly authBaseUrl = 'https://biz.yelp.com/oauth2';
+  private readonly tokenUrl = 'https://api.yelp.com/oauth2/token';
 
   constructor(private configService: ConfigService) {
     this.apiKey = this.configService.get<string>('yelp.apiKey') || '';
+    this.clientId = this.configService.get<string>('yelp.clientId') || '';
+    this.clientSecret = this.configService.get<string>('yelp.clientSecret') || '';
+    this.redirectUri = this.configService.get<string>('yelp.redirectUri') || '';
     this.apiBaseUrl = this.configService.get<string>('yelp.apiBaseUrl') || 'https://api.yelp.com/v3';
 
     this.httpClient = axios.create({
@@ -48,31 +56,115 @@ export class YelpAdapter implements IPlatformAdapter {
   }
 
   // ==========================================
-  // Auth — Yelp uses API key, not OAuth
+  // OAuth — Business Owner authorization
   // ==========================================
 
-  getAuthUrl(_userId: string, _state: string): string {
-    throw new NotImplementedException('Yelp uses API key authentication, not OAuth');
+  getAuthUrl(_userId: string, state: string): string {
+    const params = new URLSearchParams({
+      client_id: this.clientId,
+      redirect_uri: this.redirectUri,
+      response_type: 'code',
+      scope: 'leads r2r_business_owner r2r_get_businesses',
+      state,
+    });
+
+    return `${this.authBaseUrl}/authorize?${params.toString()}`;
   }
 
-  async handleCallback(_code: string, _userId: string): Promise<PlatformCredentials> {
-    throw new NotImplementedException('Yelp uses API key authentication, not OAuth');
+  async handleCallback(code: string, _userId: string): Promise<PlatformCredentials> {
+    try {
+      const params = new URLSearchParams();
+      params.append('grant_type', 'authorization_code');
+      params.append('client_id', this.clientId);
+      params.append('client_secret', this.clientSecret);
+      params.append('code', code);
+      params.append('redirect_uri', this.redirectUri);
+
+      this.logger.log('Exchanging Yelp authorization code for tokens...');
+
+      const response = await axios.post(this.tokenUrl, params, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+
+      const { access_token, refresh_token, expires_in, token_type } = response.data;
+
+      this.logger.log(`Yelp OAuth token received, type=${token_type}, expires_in=${expires_in}`);
+
+      return {
+        accessToken: access_token,
+        refreshToken: refresh_token,
+        expiresAt: expires_in ? new Date(Date.now() + expires_in * 1000) : undefined,
+      };
+    } catch (error) {
+      const status = error.response?.status;
+      const data = error.response?.data;
+      this.logger.error(`Yelp OAuth callback error — status=${status} data=${JSON.stringify(data)}`);
+      throw new Error(`Failed to exchange Yelp authorization code: ${data?.error_description || error.message}`);
+    }
   }
 
-  async refreshAccessToken(_refreshToken: string): Promise<PlatformCredentials> {
-    throw new NotImplementedException('Yelp API key does not expire or rotate');
+  async refreshAccessToken(refreshToken: string): Promise<PlatformCredentials> {
+    this.logger.log('Attempting to refresh Yelp access token...');
+    try {
+      const params = new URLSearchParams();
+      params.append('grant_type', 'refresh_token');
+      params.append('client_id', this.clientId);
+      params.append('client_secret', this.clientSecret);
+      params.append('refresh_token', refreshToken);
+
+      const response = await axios.post(this.tokenUrl, params, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+
+      const { access_token, refresh_token: new_refresh_token, expires_in } = response.data;
+
+      const newExpiresAt = expires_in ? new Date(Date.now() + expires_in * 1000) : undefined;
+      this.logger.log(`Yelp token refreshed successfully! Expires at: ${newExpiresAt?.toISOString() || 'unknown'}`);
+
+      return {
+        accessToken: access_token,
+        refreshToken: new_refresh_token || refreshToken,
+        expiresAt: newExpiresAt,
+      };
+    } catch (error) {
+      const status = error.response?.status;
+      const data = error.response?.data;
+      this.logger.error(`Yelp token refresh failed — status=${status} data=${JSON.stringify(data)}`);
+      throw new Error(`Failed to refresh Yelp token: ${data?.error_description || error.message} (status=${status})`);
+    }
   }
 
   async disconnect(_userId: string): Promise<void> {
-    // No-op — API key is global, not per-user
+    // No revocation endpoint documented for Yelp
   }
 
   /**
    * Returns credentials using the configured API key.
-   * Since Yelp is API-key based, all users share the same key.
+   * Used for subscription management (not lead access).
    */
   getApiCredentials(): PlatformCredentials {
     return { accessToken: this.apiKey };
+  }
+
+  // ==========================================
+  // Business Owner — fetch claimed businesses
+  // ==========================================
+
+  async getClaimedBusinesses(accessToken: string): Promise<any[]> {
+    try {
+      const response = await this.httpClient.get('/businesses/claimed', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const businesses = response.data?.businesses || [];
+      this.logger.log(`Yelp claimed businesses response: ${JSON.stringify(response.data)}`);
+      this.logger.log(`Found ${businesses.length} claimed businesses`);
+      return businesses;
+    } catch (error) {
+      const status = error.response?.status;
+      const data = error.response?.data;
+      this.logger.error(`Error fetching Yelp claimed businesses — status=${status} data=${JSON.stringify(data)}`);
+      return [];
+    }
   }
 
   // ==========================================
@@ -80,8 +172,6 @@ export class YelpAdapter implements IPlatformAdapter {
   // ==========================================
 
   async getLeads(_credentials: PlatformCredentials, _options?: LeadFetchOptions): Promise<NormalizedLead[]> {
-    // Yelp delivers leads via webhooks; polling is not the primary flow.
-    // For backfill, use getLead() per lead_id from webhook history.
     return [];
   }
 
@@ -99,14 +189,10 @@ export class YelpAdapter implements IPlatformAdapter {
     }
   }
 
-  /**
-   * Fetch lead events (messages) for a given lead.
-   * Yelp webhook payloads don't include message content — call this to get actual text.
-   */
-  async getLeadEvents(leadId: string): Promise<any[]> {
+  async getLeadEvents(credentials: PlatformCredentials, leadId: string): Promise<any[]> {
     try {
       const response = await this.httpClient.get(`/leads/${leadId}/events`, {
-        headers: { Authorization: `Bearer ${this.apiKey}` },
+        headers: { Authorization: `Bearer ${credentials.accessToken}` },
       });
       return response.data?.events || response.data?.data || [];
     } catch (error) {
@@ -130,10 +216,9 @@ export class YelpAdapter implements IPlatformAdapter {
 
   async sendMessage(credentials: PlatformCredentials, leadId: string, message: string): Promise<NormalizedMessage> {
     try {
-      // POST /v3/leads/{leadId}/events — send a message reply on a lead
       const response = await this.httpClient.post(
         `/leads/${leadId}/events`,
-        { event_type: 'MESSAGE', text: message },
+        { request_type: 'TEXT', request_content: message },
         { headers: { Authorization: `Bearer ${credentials.accessToken}` } },
       );
       const data = response.data;
@@ -152,7 +237,7 @@ export class YelpAdapter implements IPlatformAdapter {
       const status = error.response?.status;
       const data = error.response?.data;
       this.logger.error(`Error sending Yelp message — status=${status} data=${JSON.stringify(data)} msg=${error.message}`);
-      if (status === 401) throw new Error('Yelp API key invalid or expired — check YELP_API_KEY');
+      if (status === 401) throw new Error('Yelp token expired — please reconnect your Yelp account');
       throw new Error(`Failed to send message to Yelp: ${error.message}`);
     }
   }
@@ -162,7 +247,7 @@ export class YelpAdapter implements IPlatformAdapter {
   // ==========================================
 
   async sendQuote(_credentials: PlatformCredentials, _requestId: string, _quote: QuoteData): Promise<NormalizedQuote> {
-    throw new NotImplementedException('Yelp does not support quotes');
+    throw new Error('Yelp does not support quotes');
   }
 
   // ==========================================
@@ -173,7 +258,6 @@ export class YelpAdapter implements IPlatformAdapter {
     if (!signature || !secret) return true;
     try {
       const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex');
-      // Constant-time comparison
       const sigBuf = Buffer.from(signature.replace(/^sha256=/, ''));
       const expBuf = Buffer.from(expected);
       if (sigBuf.length !== expBuf.length) return false;
@@ -189,21 +273,14 @@ export class YelpAdapter implements IPlatformAdapter {
   }
 
   // ==========================================
-  // Business Subscriptions
+  // Business Subscriptions (uses API key)
   // ==========================================
 
-  /**
-   * Subscribe businesses to Yelp lead webhooks.
-   * Should be called for each business and synced at least every 24h.
-   */
   async subscribeToBusinesses(businessIds: string[]): Promise<void> {
     try {
       await this.httpClient.post(
         '/leads/subscriptions',
-        {
-          business_ids: businessIds,
-          subscription_types: ['WEBHOOK'],
-        },
+        { business_ids: businessIds, subscription_types: ['WEBHOOK'] },
         { headers: { Authorization: `Bearer ${this.apiKey}` } },
       );
       this.logger.log(`Subscribed ${businessIds.length} businesses to Yelp lead webhooks`);
@@ -215,9 +292,6 @@ export class YelpAdapter implements IPlatformAdapter {
     }
   }
 
-  /**
-   * Unsubscribe businesses from Yelp lead webhooks.
-   */
   async unsubscribeFromBusinesses(businessIds: string[]): Promise<void> {
     try {
       await this.httpClient.delete('/leads/subscriptions', {
@@ -247,7 +321,7 @@ export class YelpAdapter implements IPlatformAdapter {
     lead.state = data.location?.state;
     lead.postcode = data.location?.zip_code || data.location?.zipCode;
     lead.category = data.services?.[0]?.name || data.category;
-    lead.threadId = data.id || data.lead_id; // lead_id doubles as thread ID on Yelp
+    lead.threadId = data.id || data.lead_id;
     lead.status = data.status || 'new';
     lead.createdAt = new Date(data.time_created || data.created_at || Date.now());
     lead.updatedAt = new Date(data.time_updated || data.updated_at || Date.now());

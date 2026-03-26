@@ -34,6 +34,7 @@ export default () => ({
     apiKey: process.env.YELP_API_KEY,
     clientId: process.env.YELP_CLIENT_ID,
     clientSecret: process.env.YELP_CLIENT_SECRET,
+    redirectUri: process.env.YELP_REDIRECT_URI || 'http://localhost:3000/api/v1/yelp/auth/callback',
     webhookSecret: process.env.YELP_WEBHOOK_SECRET,
     apiBaseUrl: 'https://api.yelp.com/v3',
   },

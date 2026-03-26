@@ -1,6 +1,6 @@
 /**
  * Yelp Controller
- * Manages Yelp-specific API endpoints: business subscriptions, account setup
+ * Manages Yelp OAuth, business subscriptions, and account setup
  */
 
 import {
@@ -10,26 +10,169 @@ import {
   Get,
   Body,
   Param,
+  Query,
+  Res,
   UseGuards,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
+import { Response } from 'express';
+import { ConfigService } from '@nestjs/config';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../common/utils/prisma.service';
+import { PlatformService } from '../platform.service';
 import { YelpAdapter } from './yelp.adapter';
 import { PlatformName } from '../../common/interfaces/platform.interface';
+import { EncryptionUtil } from '../../common/utils/encryption.util';
 
 @Controller('v1/yelp')
 @UseGuards(JwtAuthGuard)
 export class YelpController {
+  private readonly logger = new Logger(YelpController.name);
+  private readonly frontendUrl: string;
+  private readonly encryptionKey: string;
+
   constructor(
     private yelpAdapter: YelpAdapter,
+    private platformService: PlatformService,
     private prisma: PrismaService,
-  ) {}
+    private configService: ConfigService,
+  ) {
+    const rawUrl = this.configService.get<string>('frontendUrl') || 'http://localhost:5173';
+    this.frontendUrl = rawUrl.trim().replace(/\/+$/, '');
+    this.encryptionKey = this.configService.get<string>('encryptionKey') || '';
+  }
+
+  // ==========================================
+  // OAuth Flow
+  // ==========================================
 
   /**
-   * Save a Yelp business and subscribe it to lead webhooks.
-   * Call this once per business after receiving the Yelp business_id from your Yelp rep.
+   * Get Yelp OAuth authorization URL.
+   * Business owner clicks this to authorize LeadBridge to access their leads.
+   */
+  @Get('auth/url')
+  async getAuthUrl(@CurrentUser() user: any) {
+    const authUrl = await this.platformService.getAuthUrl(user.id, PlatformName.YELP);
+    return { url: authUrl };
+  }
+
+  /**
+   * OAuth callback — Yelp redirects here after business owner authorizes.
+   * Exchanges code for tokens, fetches claimed businesses, saves per-business credentials.
+   */
+  @Public()
+  @Get('auth/callback')
+  async handleCallback(
+    @Query('code') code: string,
+    @Query('state') state: string,
+    @Query('error') error: string,
+    @Query('error_description') errorDescription: string,
+    @Res() res: Response,
+  ) {
+    if (error) {
+      const params = new URLSearchParams({ error, error_description: errorDescription || 'Yelp OAuth failed' });
+      return res.redirect(`${this.frontendUrl}/dashboard?${params.toString()}`);
+    }
+
+    if (!code) {
+      return res.redirect(`${this.frontendUrl}/dashboard?error=missing_code&error_description=Authorization code is required`);
+    }
+
+    try {
+      const userId = await this.platformService.getUserIdFromState(state);
+      if (!userId) {
+        return res.redirect(`${this.frontendUrl}/dashboard?error=invalid_state&error_description=OAuth state expired. Please try again.`);
+      }
+
+      // Exchange code for tokens
+      const credentials = await this.yelpAdapter.handleCallback(code, userId);
+
+      // Fetch claimed businesses using the new OAuth token
+      const businesses = await this.yelpAdapter.getClaimedBusinesses(credentials.accessToken);
+
+      if (businesses.length === 0) {
+        this.logger.warn('Yelp OAuth succeeded but no claimed businesses found');
+        return res.redirect(`${this.frontendUrl}/dashboard?connected=yelp&warning=no_businesses`);
+      }
+
+      // Save each business as a SavedAccount with per-business OAuth credentials
+      const encryptedCreds = EncryptionUtil.encryptObject({
+        accessToken: credentials.accessToken,
+        refreshToken: credentials.refreshToken,
+        expiresAt: credentials.expiresAt?.toISOString(),
+      }, this.encryptionKey);
+
+      for (const biz of businesses) {
+        const businessId = biz.id || biz.business_id;
+        const businessName = biz.name || 'Yelp Business';
+
+        const existing = await this.prisma.savedAccount.findFirst({
+          where: { userId, platform: PlatformName.YELP, businessId },
+        });
+
+        if (existing) {
+          this.logger.log(`Updating credentials for existing Yelp account: ${businessName} (${businessId})`);
+          await this.prisma.savedAccount.update({
+            where: { id: existing.id },
+            data: { businessName, credentialsJson: encryptedCreds },
+          });
+        } else {
+          this.logger.log(`Creating new Yelp account: ${businessName} (${businessId})`);
+          await this.prisma.savedAccount.create({
+            data: {
+              userId,
+              platform: PlatformName.YELP,
+              businessId,
+              businessName,
+              imageUrl: biz.image_url || biz.photos?.[0],
+              credentialsJson: encryptedCreds,
+            },
+          });
+        }
+
+        // Subscribe this business to webhooks (uses API key, not OAuth)
+        try {
+          await this.yelpAdapter.subscribeToBusinesses([businessId]);
+        } catch (err: any) {
+          this.logger.error(`Failed to subscribe Yelp business ${businessId}: ${err.message}`);
+        }
+      }
+
+      this.logger.log(`Yelp OAuth complete: ${businesses.length} businesses connected for user ${userId}`);
+      return res.redirect(`${this.frontendUrl}/dashboard?connected=yelp&businesses=${businesses.length}`);
+    } catch (err: any) {
+      this.logger.error(`Yelp OAuth callback failed: ${err.message}`);
+      const params = new URLSearchParams({ error: 'oauth_failed', error_description: err.message });
+      return res.redirect(`${this.frontendUrl}/dashboard?${params.toString()}`);
+    }
+  }
+
+  /**
+   * Disconnect a Yelp business (unsubscribe from webhooks, remove account).
+   */
+  @Post('auth/disconnect')
+  async disconnect(@CurrentUser() user: any, @Body('accountId') accountId: string) {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: accountId, userId: user.id, platform: PlatformName.YELP },
+    });
+
+    if (!account) throw new BadRequestException('Yelp account not found');
+
+    await this.yelpAdapter.unsubscribeFromBusinesses([account.businessId]);
+    await this.prisma.savedAccount.delete({ where: { id: accountId } });
+
+    return { success: true, message: `Yelp business "${account.businessName}" disconnected` };
+  }
+
+  // ==========================================
+  // Business Management
+  // ==========================================
+
+  /**
+   * Manually add a Yelp business (for cases where OAuth doesn't return it).
    */
   @Post('businesses')
   async addBusiness(
@@ -42,67 +185,41 @@ export class YelpController {
       throw new BadRequestException('businessId and businessName are required');
     }
 
-    // Save as SavedAccount (same pattern as Thumbtack)
     await this.prisma.savedAccount.upsert({
       where: { userId_platform_businessId: { userId: user.id, platform: PlatformName.YELP, businessId } },
-      create: {
-        userId: user.id,
-        platform: PlatformName.YELP,
-        businessId,
-        businessName,
-        imageUrl,
-      },
+      create: { userId: user.id, platform: PlatformName.YELP, businessId, businessName, imageUrl },
       update: { businessName, imageUrl },
     });
 
-    // Subscribe to Yelp lead webhooks for this business
     await this.yelpAdapter.subscribeToBusinesses([businessId]);
 
-    return {
-      success: true,
-      message: `Yelp business "${businessName}" saved and subscribed to lead webhooks`,
-    };
+    return { success: true, message: `Yelp business "${businessName}" saved and subscribed` };
   }
 
-  /**
-   * List all Yelp businesses for this user.
-   */
   @Get('businesses')
   async getBusinesses(@CurrentUser() user: any) {
     const accounts = await this.prisma.savedAccount.findMany({
       where: { userId: user.id, platform: PlatformName.YELP },
       orderBy: { lastUsedAt: 'desc' },
     });
-
-    return {
-      platform: PlatformName.YELP,
-      count: accounts.length,
-      businesses: accounts,
-    };
+    return { platform: PlatformName.YELP, count: accounts.length, businesses: accounts };
   }
 
-  /**
-   * Remove a Yelp business and unsubscribe from webhooks.
-   */
   @Delete('businesses/:id')
   async removeBusiness(@CurrentUser() user: any, @Param('id') id: string) {
     const account = await this.prisma.savedAccount.findFirst({
       where: { id, userId: user.id, platform: PlatformName.YELP },
     });
-
     if (!account) throw new BadRequestException('Business not found');
 
     await this.yelpAdapter.unsubscribeFromBusinesses([account.businessId]);
-
     await this.prisma.savedAccount.delete({ where: { id } });
 
-    return { success: true, message: 'Business removed and unsubscribed from Yelp webhooks' };
+    return { success: true, message: 'Business removed and unsubscribed' };
   }
 
   /**
-   * Re-subscribe all Yelp businesses to webhooks.
-   * Yelp requires subscriptions to be refreshed at least every 24h.
-   * Call this on a schedule or on-demand if webhooks stop arriving.
+   * Re-subscribe all Yelp businesses to webhooks (required every 24h).
    */
   @Post('businesses/resubscribe')
   async resubscribeAll(@CurrentUser() user: any) {
@@ -110,23 +227,14 @@ export class YelpController {
       where: { userId: user.id, platform: PlatformName.YELP },
     });
 
-    if (accounts.length === 0) {
-      return { success: true, message: 'No Yelp businesses to resubscribe', subscribed: 0 };
-    }
+    if (accounts.length === 0) return { success: true, subscribed: 0 };
 
     const businessIds = accounts.map((a: any) => a.businessId);
     await this.yelpAdapter.subscribeToBusinesses(businessIds);
 
-    return {
-      success: true,
-      message: `Resubscribed ${accounts.length} businesses to Yelp lead webhooks`,
-      subscribed: accounts.length,
-    };
+    return { success: true, subscribed: accounts.length };
   }
 
-  /**
-   * Get Yelp leads for this user (from local DB — delivered via webhooks).
-   */
   @Get('leads')
   async getLeads(@CurrentUser() user: any) {
     const leads = await this.prisma.lead.findMany({
@@ -134,11 +242,6 @@ export class YelpController {
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
-
-    return {
-      platform: PlatformName.YELP,
-      count: leads.length,
-      leads,
-    };
+    return { platform: PlatformName.YELP, count: leads.length, leads };
   }
 }
