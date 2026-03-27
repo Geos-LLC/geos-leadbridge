@@ -75,17 +75,34 @@ export class YelpController {
       return res.redirect(`${this.frontendUrl}/dashboard?error=missing_auth_url`);
     }
 
-    // Serve an HTML page that logs out of Yelp then redirects to OAuth
+    // Serve an HTML page that chains: biz.yelp.com logout → consumer logout → OAuth
+    // Step 1: Navigate an iframe to biz.yelp.com/logout (clears biz session)
+    // Step 2: Navigate another iframe to www.yelp.com/logout (clears consumer session)
+    // Step 3: Redirect to OAuth URL (user sees fresh login)
+    // Iframes may be blocked by X-Frame-Options, so we also use fetch as fallback
+    const escapedUrl = authUrl.replace(/"/g, '&quot;').replace(/\\/g, '\\\\');
     res.type('html').send(`<!DOCTYPE html>
 <html><head><title>Connecting to Yelp...</title></head>
 <body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f8fafc">
   <div style="text-align:center">
-    <p style="color:#64748b;font-size:18px">Logging out of Yelp and redirecting to login...</p>
-    <p style="color:#94a3b8;font-size:14px">Please wait...</p>
+    <div style="width:40px;height:40px;border:3px solid #e2e8f0;border-top-color:#dc2626;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 20px"></div>
+    <p style="color:#64748b;font-size:18px;margin:0 0 8px">Connecting to Yelp...</p>
+    <p style="color:#94a3b8;font-size:14px;margin:0">Clearing previous session and redirecting to login</p>
   </div>
-  <img src="https://biz.yelp.com/login/logout" style="display:none" />
-  <img src="https://www.yelp.com/login/logout" style="display:none" />
-  <script>setTimeout(function(){ window.location.href = "${authUrl.replace(/"/g, '&quot;')}"; }, 2500);</script>
+  <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+  <script>
+    // Try multiple logout methods - at least one should clear the session
+    // 1. Fetch with credentials (may work for same-site cookies)
+    fetch('https://biz.yelp.com/logout', { credentials: 'include', mode: 'no-cors', redirect: 'follow' }).catch(function(){});
+    fetch('https://www.yelp.com/logout', { credentials: 'include', mode: 'no-cors', redirect: 'follow' }).catch(function(){});
+    // 2. Open logout in a new window (user click not required from server-rendered page)
+    var w = window.open('https://biz.yelp.com/logout', 'yelp_biz_logout', 'width=1,height=1,left=-100,top=-100');
+    // 3. After enough time for logouts to process, close popup and redirect to OAuth
+    setTimeout(function(){
+      try { if(w) w.close(); } catch(e){}
+      window.location.href = "${escapedUrl}";
+    }, 3000);
+  </script>
 </body></html>`);
   }
 

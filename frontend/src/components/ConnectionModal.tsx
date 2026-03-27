@@ -101,10 +101,9 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
       setLoading(true);
       setError(null);
       const { url } = await platformsApi.getYelpAuthUrl();
-      // Store OAuth URL — dashboard will auto-redirect when user returns
-      sessionStorage.setItem('yelp_pending_oauth', url);
-      // Navigate to Yelp logout to clear session cookies
-      window.location.href = 'https://www.yelp.com/logout';
+      // Use backend intermediate page to chain both logouts then redirect to OAuth
+      const baseUrl = import.meta.env.VITE_API_URL || '';
+      window.location.href = `${baseUrl}/v1/yelp/auth/logout-and-connect?authUrl=${encodeURIComponent(url)}`;
     } catch (err: any) {
       setError(err.message || 'Failed to start Yelp connection');
       setLoading(false);
