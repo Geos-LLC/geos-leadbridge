@@ -418,13 +418,18 @@ export class ThumbtackController {
       options.since = new Date(since);
     }
 
-    const leads = await this.leadsService.getLeads(user.id, PlatformName.THUMBTACK, options);
+    // Fetch leads from all webhook-based platforms (Thumbtack + Yelp)
+    const [thumbtackLeads, yelpLeads] = await Promise.all([
+      this.leadsService.getLeads(user.id, PlatformName.THUMBTACK, options),
+      this.leadsService.getLeads(user.id, PlatformName.YELP, options).catch(() => []),
+    ]);
+    const leads = [...thumbtackLeads, ...yelpLeads].sort((a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
 
     return {
-      platform: PlatformName.THUMBTACK,
       count: leads.length,
       leads,
-      note: 'Thumbtack delivers leads via webhooks. This returns leads stored from webhook events.',
     };
   }
 

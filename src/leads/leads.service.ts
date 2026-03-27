@@ -48,8 +48,8 @@ export class LeadsService {
   async getLeads(userId: string, platformName: string, options?: any): Promise<NormalizedLead[]> {
     console.log(`[LeadsService] getLeads called - userId: ${userId}, platform: ${platformName}, options:`, options);
 
-    // For webhook-based platforms like Thumbtack, query local database
-    if (platformName === 'thumbtack') {
+    // For webhook-based platforms (Thumbtack, Yelp), query local database
+    if (platformName === 'thumbtack' || platformName === 'yelp') {
       // Return ALL leads for the user (no businessId filter)
       // Frontend filters by businessId if needed for account switching
       const leads = await this.getCachedLeads(userId, {
