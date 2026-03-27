@@ -80,7 +80,7 @@ export class YelpAdapter implements IPlatformAdapter {
       params.append('code', code);
       params.append('redirect_uri', this.redirectUri);
 
-      this.logger.log('Exchanging Yelp authorization code for tokens...');
+      this.logger.log(`Exchanging Yelp authorization code for tokens — client_id=${this.clientId}, redirect_uri=${this.redirectUri}, code=${code.substring(0, 10)}...`);
 
       const response = await axios.post(this.tokenUrl, params, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
