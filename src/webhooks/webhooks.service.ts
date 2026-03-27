@@ -1344,7 +1344,9 @@ export class WebhooksService {
         data: { processed: true, processedAt: new Date() },
       });
     } catch (error: any) {
-      this.logger.error(`Error processing Yelp webhook: ${error.message || error} — ${error.stack?.split('\n')[1]?.trim() || 'no stack'}`);
+      const errMsg = error?.message || String(error) || 'unknown';
+      const errStack = error?.stack?.split('\n').slice(0, 3).join(' | ') || 'no stack';
+      this.logger.error(`Error processing Yelp webhook: msg=${errMsg} stack=${errStack} name=${error?.name} code=${error?.code}`);
       await this.prisma.webhookEvent.update({
         where: { id: event.id },
         data: { processed: true, processingError: error.message, processedAt: new Date() },
@@ -1384,6 +1386,7 @@ export class WebhooksService {
     }
 
     // Find saved account for this business
+    this.logger.log(`[Yelp] Step 1: Finding saved account for business ${businessId}`);
     const savedAccount = await this.prisma.savedAccount.findFirst({
       where: { platform: 'yelp', businessId },
     });
@@ -1394,6 +1397,7 @@ export class WebhooksService {
     }
 
     const userId = savedAccount.userId;
+    this.logger.log(`[Yelp] Step 2: Found account ${savedAccount.id} for user ${userId}, decrypting credentials`);
 
     // Use per-business OAuth token if available, fallback to API key
     let accessToken = this.configService.get<string>('yelp.apiKey') || '';
@@ -1401,18 +1405,23 @@ export class WebhooksService {
       try {
         const encryptionKey = this.configService.get<string>('encryptionKey') || '';
         const creds = EncryptionUtil.decryptObject<any>(savedAccount.credentialsJson, encryptionKey);
-        if (creds.accessToken) accessToken = creds.accessToken;
+        if (creds.accessToken) {
+          accessToken = creds.accessToken;
+          this.logger.log(`[Yelp] Using OAuth token (${accessToken.substring(0, 10)}...)`);
+        }
       } catch (err: any) {
         this.logger.warn(`Failed to decrypt Yelp credentials for business ${businessId}, using API key: ${err.message}`);
       }
     }
 
+    this.logger.log(`[Yelp] Step 3: Fetching lead ${leadId}`);
     const yelpAdapter = this.platformFactory.getAdapter('yelp') as any;
     let leadData: any;
     try {
       leadData = await yelpAdapter.getLead({ accessToken }, leadId);
+      this.logger.log(`[Yelp] Lead fetched: customer=${leadData.customerName}, category=${leadData.category}`);
     } catch (err: any) {
-      this.logger.error(`Failed to fetch Yelp lead ${leadId}: ${err.message}`);
+      this.logger.error(`Failed to fetch Yelp lead ${leadId}: ${err.message} status=${err.response?.status}`);
       // Still upsert a minimal lead so we don't lose it
       leadData = {
         platform: 'yelp',
