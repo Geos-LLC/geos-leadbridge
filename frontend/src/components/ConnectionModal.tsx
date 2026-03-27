@@ -104,7 +104,7 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
       // Store OAuth URL — dashboard will auto-redirect when user returns
       sessionStorage.setItem('yelp_pending_oauth', url);
       // Navigate to Yelp logout to clear session cookies
-      window.location.href = 'https://biz.yelp.com/login/logout';
+      window.location.href = 'https://biz.yelp.com/logout';
     } catch (err: any) {
       setError(err.message || 'Failed to start Yelp connection');
       setLoading(false);
