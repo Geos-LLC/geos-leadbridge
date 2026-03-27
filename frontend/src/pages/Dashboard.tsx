@@ -8,7 +8,7 @@ import {
 import { useAppStore } from '../store/appStore';
 import type { DashboardStats } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
-import { thumbtackApi, analyticsApi, notificationsApi } from '../services/api';
+import { thumbtackApi, analyticsApi, notificationsApi, platformsApi } from '../services/api';
 import ConnectionModal from '../components/ConnectionModal';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import type { SavedAccount } from '../types';
@@ -460,7 +460,7 @@ export function Dashboard() {
                           ) : (
                             <>
                               <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                              <span className="text-xs text-slate-500 font-medium">Synced: Thumbtack</span>
+                              <span className="text-xs text-slate-500 font-medium">Synced: {account.platform === 'yelp' ? 'Yelp' : 'Thumbtack'}</span>
                             </>
                           )}
                         </div>
@@ -492,7 +492,15 @@ export function Dashboard() {
                           </button>
                           {menuOpenId === account.id && (
                             <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg py-1 z-20 min-w-[180px]">
-                              {account.webhookId ? (
+                              {account.platform === 'yelp' ? (
+                                <button
+                                  onClick={async (e) => { e.stopPropagation(); await platformsApi.disconnectYelp(account.id); loadAccounts(); setMenuOpenId(null); }}
+                                  className="w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
+                                >
+                                  <Unlink className="w-4 h-4 text-slate-400" />
+                                  Disconnect Yelp
+                                </button>
+                              ) : account.webhookId ? (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleDisconnectWebhook(account); }}
                                   className="w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"

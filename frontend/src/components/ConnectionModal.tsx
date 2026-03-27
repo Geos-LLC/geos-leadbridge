@@ -100,13 +100,11 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
     try {
       setLoading(true);
       setError(null);
-      // Log out of Yelp business account first so user can choose which account to sign in with
-      const logoutWin = window.open('https://biz.yelp.com/login/logout', 'yelp_logout', 'width=500,height=400');
-      setTimeout(async () => {
-        try { logoutWin?.close(); } catch (_) { /* popup may be blocked */ }
-        const { url } = await platformsApi.getYelpAuthUrl();
-        window.location.href = url;
-      }, 2000);
+      const { url } = await platformsApi.getYelpAuthUrl();
+      // Store OAuth URL, then redirect to Yelp logout first.
+      // Yelp logout redirects to biz.yelp.com login page, but we need to go to our OAuth URL.
+      // So we go directly to OAuth — Yelp will show login if no session, or consent if logged in.
+      window.location.href = url;
     } catch (err: any) {
       setError(err.message || 'Failed to start Yelp connection');
       setLoading(false);

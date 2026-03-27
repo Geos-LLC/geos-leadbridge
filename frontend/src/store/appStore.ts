@@ -133,6 +133,19 @@ export const useAppStore = create<AppState>()(
         const diagnosticsMap: Record<string, AccountDiagnostics> = {};
         for (const account of accounts) {
           try {
+            // Yelp accounts don't have Thumbtack-style health checks
+            if (account.platform === 'yelp') {
+              diagnosticsMap[account.id] = {
+                healthy: true, issues: [], notificationIssues: [],
+                platform: { connected: true },
+                account: { hasWebhook: true },
+                notifications: { settingsExist: false, hasSigcoreApiKey: false, newLeadRules: 0, customerReplyRules: 0, rules: [] },
+                automation: { totalRules: 0 },
+                recentLogs: [],
+              };
+              set({ accountDiagnostics: { ...diagnosticsMap } });
+              continue;
+            }
             const diag = await thumbtackApi.getAccountHealth(account.id);
             diagnosticsMap[account.id] = diag;
             // Update incrementally so UI updates as each completes
