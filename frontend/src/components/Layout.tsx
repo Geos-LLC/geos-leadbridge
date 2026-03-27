@@ -19,9 +19,10 @@ export function Layout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const loadAnalytics = useAppStore(state => state.loadAnalytics);
-  const hasAccounts = savedAccounts.length > 0;
-  const allDisconnected = hasAccounts && savedAccounts.every(a => !a.webhookId);
-  const someDisconnected = hasAccounts && !allDisconnected && savedAccounts.some(a => !a.webhookId);
+  // Yelp accounts don't use webhookIds — they're connected if they exist (OAuth token stored)
+  const thumbtackAccounts = savedAccounts.filter(a => a.platform === 'thumbtack');
+  const allDisconnected = thumbtackAccounts.length > 0 && thumbtackAccounts.every(a => !a.webhookId);
+  const someDisconnected = thumbtackAccounts.length > 0 && !allDisconnected && thumbtackAccounts.some(a => !a.webhookId);
 
   // Preload analytics data on app start — always force-refresh so cache stays current
   useEffect(() => {

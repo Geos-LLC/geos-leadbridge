@@ -81,7 +81,7 @@ export function Dashboard() {
     }
 
     if (reconnect === '1' && savedAccounts.length > 0) {
-      const unhealthy = savedAccounts.find(a => !a.webhookId);
+      const unhealthy = savedAccounts.find(a => a.platform === 'thumbtack' && !a.webhookId);
       if (unhealthy) {
         setAccountToReconnect(unhealthy);
         setConnectionModalOpen(true);
@@ -197,7 +197,7 @@ export function Dashboard() {
 
   const handleAccountClick = (account: SavedAccount) => {
     const diag = accountDiagnostics[account.id];
-    const hasConnectionIssues = !account.webhookId || (diag && !diag.healthy);
+    const hasConnectionIssues = (account.platform === 'thumbtack' && !account.webhookId) || (diag && !diag.healthy);
     const hasSmsIssues = diag && (diag.notificationIssues?.length ?? 0) > 0;
 
     if (hasConnectionIssues) {
@@ -544,6 +544,8 @@ export function Dashboard() {
             const hasAccounts = savedAccounts.length > 0;
             const healthyAccounts = savedAccounts.filter(a => {
               const diag = accountDiagnostics[a.id];
+              // Yelp accounts are healthy if they exist (OAuth-based, no webhookId)
+              if (a.platform === 'yelp') return true;
               return a.webhookId && diag?.healthy;
             });
 
@@ -611,10 +613,12 @@ export function Dashboard() {
           {(() => {
             const isCheckingHealth = loadingDiagnostics || (savedAccounts.length > 0 && Object.keys(accountDiagnostics).length === 0);
             const disconnectedAccounts = savedAccounts.filter(a => {
+              if (a.platform === 'yelp') return false;
               const diag = accountDiagnostics[a.id];
               return !a.webhookId || (diag && !diag.healthy);
             });
             const configIssueAccounts = savedAccounts.filter(a => {
+              if (a.platform === 'yelp') return false;
               const diag = accountDiagnostics[a.id];
               const hasConnIssue = !a.webhookId || (diag && !diag.healthy);
               const issues = diag?.notificationIssues || [];
