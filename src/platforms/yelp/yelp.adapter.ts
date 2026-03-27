@@ -300,7 +300,7 @@ export class YelpAdapter implements IPlatformAdapter {
   async subscribeToBusinesses(businessIds: string[]): Promise<void> {
     try {
       await this.httpClient.post(
-        '/leads/subscriptions',
+        '/businesses/subscriptions',
         { business_ids: businessIds, subscription_types: ['WEBHOOK'] },
         { headers: { Authorization: `Bearer ${this.apiKey}` } },
       );
@@ -315,7 +315,7 @@ export class YelpAdapter implements IPlatformAdapter {
 
   async unsubscribeFromBusinesses(businessIds: string[]): Promise<void> {
     try {
-      await this.httpClient.delete('/leads/subscriptions', {
+      await this.httpClient.delete('/businesses/subscriptions', {
         data: { business_ids: businessIds },
         headers: { Authorization: `Bearer ${this.apiKey}` },
       });
