@@ -100,11 +100,23 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
     try {
       setLoading(true);
       setError(null);
-      const { url } = await platformsApi.getYelpAuthUrl();
-      // Store OAuth URL, then redirect to Yelp logout first.
-      // Yelp logout redirects to biz.yelp.com login page, but we need to go to our OAuth URL.
-      // So we go directly to OAuth — Yelp will show login if no session, or consent if logged in.
-      window.location.href = url;
+      // Open Yelp logout in a popup (must be in click handler to avoid popup blocker)
+      const logoutWin = window.open(
+        'https://biz.yelp.com/login/logout',
+        'yelp_logout',
+        'width=500,height=400',
+      );
+      // Wait for logout to complete, then close popup and start OAuth
+      setTimeout(async () => {
+        try { logoutWin?.close(); } catch (_) { /* popup may be blocked */ }
+        try {
+          const { url } = await platformsApi.getYelpAuthUrl();
+          window.location.href = url;
+        } catch (err: any) {
+          setError(err.message || 'Failed to start Yelp connection');
+          setLoading(false);
+        }
+      }, 2000);
     } catch (err: any) {
       setError(err.message || 'Failed to start Yelp connection');
       setLoading(false);
