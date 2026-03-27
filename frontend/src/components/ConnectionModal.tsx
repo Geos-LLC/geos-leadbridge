@@ -100,8 +100,13 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
     try {
       setLoading(true);
       setError(null);
-      const { url } = await platformsApi.getYelpAuthUrl();
-      window.location.href = url;
+      // Log out of Yelp business account first so user can choose which account to sign in with
+      const logoutWin = window.open('https://biz.yelp.com/login/logout', 'yelp_logout', 'width=500,height=400');
+      setTimeout(async () => {
+        try { logoutWin?.close(); } catch (_) { /* popup may be blocked */ }
+        const { url } = await platformsApi.getYelpAuthUrl();
+        window.location.href = url;
+      }, 2000);
     } catch (err: any) {
       setError(err.message || 'Failed to start Yelp connection');
       setLoading(false);
