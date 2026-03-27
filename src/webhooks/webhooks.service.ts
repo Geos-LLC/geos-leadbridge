@@ -1448,7 +1448,7 @@ export class WebhooksService {
         platform: 'yelp',
         businessId,
         externalRequestId: leadId,
-        threadId: leadId, // lead_id is the thread on Yelp
+        // threadId references Conversation table — leave null for Yelp (no conversation model)
         customerName: leadData.customerName,
         customerPhone: leadData.customerPhone,
         customerEmail: leadData.customerEmail,
