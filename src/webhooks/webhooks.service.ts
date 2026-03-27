@@ -1369,6 +1369,7 @@ export class WebhooksService {
   }
 
   private async handleYelpNewEvent(businessId: string, data: any): Promise<void> {
+    this.logger.log(`[Yelp NEW_EVENT] businessId=${businessId} data=${JSON.stringify(data).substring(0, 500)}`);
     const leadId = data?.lead_id;
     const eventId = data?.event_id;
 
