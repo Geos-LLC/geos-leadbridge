@@ -60,6 +60,36 @@ export class YelpController {
   }
 
   /**
+   * Logout from Yelp then redirect to OAuth.
+   * Serves an HTML page that:
+   * 1. Fetches biz.yelp.com logout to clear cookies
+   * 2. Redirects to Yelp OAuth login page
+   */
+  @Public()
+  @Get('auth/logout-and-connect')
+  async logoutAndConnect(
+    @Query('authUrl') authUrl: string,
+    @Res() res: Response,
+  ) {
+    if (!authUrl) {
+      return res.redirect(`${this.frontendUrl}/dashboard?error=missing_auth_url`);
+    }
+
+    // Serve an HTML page that logs out of Yelp then redirects to OAuth
+    res.type('html').send(`<!DOCTYPE html>
+<html><head><title>Connecting to Yelp...</title></head>
+<body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f8fafc">
+  <div style="text-align:center">
+    <p style="color:#64748b;font-size:18px">Logging out of Yelp and redirecting to login...</p>
+    <p style="color:#94a3b8;font-size:14px">Please wait...</p>
+  </div>
+  <img src="https://biz.yelp.com/login/logout" style="display:none" />
+  <img src="https://www.yelp.com/login/logout" style="display:none" />
+  <script>setTimeout(function(){ window.location.href = "${authUrl.replace(/"/g, '&quot;')}"; }, 2500);</script>
+</body></html>`);
+  }
+
+  /**
    * OAuth callback — Yelp redirects here after business owner authorizes.
    * Exchanges code for tokens, fetches claimed businesses, saves per-business credentials.
    */

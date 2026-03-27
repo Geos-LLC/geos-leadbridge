@@ -100,23 +100,12 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
     try {
       setLoading(true);
       setError(null);
-      // Open Yelp logout in a popup (must be in click handler to avoid popup blocker)
-      const logoutWin = window.open(
-        'https://biz.yelp.com/login/logout',
-        'yelp_logout',
-        'width=500,height=400',
-      );
-      // Wait for logout to complete, then close popup and start OAuth
-      setTimeout(async () => {
-        try { logoutWin?.close(); } catch (_) { /* popup may be blocked */ }
-        try {
-          const { url } = await platformsApi.getYelpAuthUrl();
-          window.location.href = url;
-        } catch (err: any) {
-          setError(err.message || 'Failed to start Yelp connection');
-          setLoading(false);
-        }
-      }, 2000);
+      const { url } = await platformsApi.getYelpAuthUrl();
+      // Redirect to our backend logout-and-connect page which:
+      // 1. Loads Yelp logout URLs as hidden images to clear cookies
+      // 2. After 2.5s redirects to the Yelp OAuth login page
+      const baseUrl = import.meta.env.VITE_API_URL || '';
+      window.location.href = `${baseUrl}/v1/yelp/auth/logout-and-connect?authUrl=${encodeURIComponent(url)}`;
     } catch (err: any) {
       setError(err.message || 'Failed to start Yelp connection');
       setLoading(false);
