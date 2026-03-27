@@ -151,32 +151,22 @@ export class YelpAdapter implements IPlatformAdapter {
   // ==========================================
 
   async getClaimedBusinesses(accessToken: string): Promise<any[]> {
-    // Try multiple endpoints — Yelp has different APIs for different partner tiers
-    const endpoints = [
-      { url: 'https://api.yelp.com/v3/businesses/me', label: 'v3/businesses/me' },
-      { url: 'https://partner-api.yelp.com/v1/business_owner/me/businesses', label: 'partner-api businesses' },
-    ];
-
-    for (const ep of endpoints) {
-      try {
-        this.logger.log(`Trying Yelp businesses endpoint: ${ep.label}`);
-        const response = await axios.get(ep.url, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          timeout: 10000,
-        });
-        const data = response.data;
-        const businesses = data?.businesses || (Array.isArray(data) ? data : [data]);
-        this.logger.log(`${ep.label} returned ${businesses.length} businesses: ${JSON.stringify(data).substring(0, 500)}`);
-        if (businesses.length > 0) return businesses;
-      } catch (error) {
-        const status = error.response?.status;
-        const errData = error.response?.data;
-        this.logger.warn(`${ep.label} failed — status=${status} data=${JSON.stringify(errData)}`);
-      }
+    try {
+      // Per Yelp docs: partner-api.yelp.com/token/v1/businesses with OAuth token
+      const response = await axios.get('https://partner-api.yelp.com/token/v1/businesses', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 10000,
+      });
+      const data = response.data;
+      const businesses = data?.businesses || (Array.isArray(data) ? data : []);
+      this.logger.log(`Yelp claimed businesses: ${businesses.length} found — ${JSON.stringify(data).substring(0, 500)}`);
+      return businesses;
+    } catch (error) {
+      const status = error.response?.status;
+      const errData = error.response?.data;
+      this.logger.error(`Error fetching Yelp claimed businesses — status=${status} data=${JSON.stringify(errData)}`);
+      return [];
     }
-
-    this.logger.warn('All Yelp business discovery endpoints failed — returning empty');
-    return [];
   }
 
   // ==========================================
