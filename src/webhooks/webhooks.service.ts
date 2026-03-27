@@ -1344,7 +1344,7 @@ export class WebhooksService {
         data: { processed: true, processedAt: new Date() },
       });
     } catch (error: any) {
-      this.logger.error(`Error processing Yelp webhook: ${error.message}`);
+      this.logger.error(`Error processing Yelp webhook: ${error.message || error} — ${error.stack?.split('\n')[1]?.trim() || 'no stack'}`);
       await this.prisma.webhookEvent.update({
         where: { id: event.id },
         data: { processed: true, processingError: error.message, processedAt: new Date() },
