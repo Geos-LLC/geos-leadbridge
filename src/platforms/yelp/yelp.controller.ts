@@ -94,7 +94,10 @@ export class YelpController {
       const businesses = await this.yelpAdapter.getClaimedBusinesses(credentials.accessToken);
 
       if (businesses.length === 0) {
-        this.logger.warn('Yelp OAuth succeeded but no claimed businesses found');
+        // Business discovery failed — store credentials at platform level
+        // so they can be associated with businesses later (manual add or webhook)
+        this.logger.warn('Yelp OAuth succeeded but business discovery failed — storing credentials for later use');
+        await this.platformService.storeCredentials(userId, PlatformName.YELP, credentials);
         return res.redirect(`${this.frontendUrl}/dashboard?connected=yelp&warning=no_businesses`);
       }
 

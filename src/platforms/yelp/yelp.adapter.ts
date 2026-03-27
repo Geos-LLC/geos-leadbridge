@@ -151,20 +151,32 @@ export class YelpAdapter implements IPlatformAdapter {
   // ==========================================
 
   async getClaimedBusinesses(accessToken: string): Promise<any[]> {
-    try {
-      const response = await this.httpClient.get('/businesses/claimed', {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      const businesses = response.data?.businesses || [];
-      this.logger.log(`Yelp claimed businesses response: ${JSON.stringify(response.data)}`);
-      this.logger.log(`Found ${businesses.length} claimed businesses`);
-      return businesses;
-    } catch (error) {
-      const status = error.response?.status;
-      const data = error.response?.data;
-      this.logger.error(`Error fetching Yelp claimed businesses — status=${status} data=${JSON.stringify(data)}`);
-      return [];
+    // Try multiple endpoints — Yelp has different APIs for different partner tiers
+    const endpoints = [
+      { url: 'https://api.yelp.com/v3/businesses/me', label: 'v3/businesses/me' },
+      { url: 'https://partner-api.yelp.com/v1/business_owner/me/businesses', label: 'partner-api businesses' },
+    ];
+
+    for (const ep of endpoints) {
+      try {
+        this.logger.log(`Trying Yelp businesses endpoint: ${ep.label}`);
+        const response = await axios.get(ep.url, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 10000,
+        });
+        const data = response.data;
+        const businesses = data?.businesses || (Array.isArray(data) ? data : [data]);
+        this.logger.log(`${ep.label} returned ${businesses.length} businesses: ${JSON.stringify(data).substring(0, 500)}`);
+        if (businesses.length > 0) return businesses;
+      } catch (error) {
+        const status = error.response?.status;
+        const errData = error.response?.data;
+        this.logger.warn(`${ep.label} failed — status=${status} data=${JSON.stringify(errData)}`);
+      }
     }
+
+    this.logger.warn('All Yelp business discovery endpoints failed — returning empty');
+    return [];
   }
 
   // ==========================================
