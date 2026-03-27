@@ -301,7 +301,7 @@ export const thumbtackApi = {
   },
   // Saved accounts for multi-account switching
   getSavedAccounts: async (): Promise<{ accounts: SavedAccount[]; count: number }> => {
-    const { data } = await api.get('/v1/thumbtack/saved-accounts');
+    const { data } = await api.get('/v1/platforms/saved-accounts');
     return data;
   },
   saveAccount: async (

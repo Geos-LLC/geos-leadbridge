@@ -3,7 +3,7 @@
  * Handles platform connection status and configuration
  */
 
-import { Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Header, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PlatformService } from './platform.service';
@@ -45,6 +45,16 @@ export class PlatformsController {
     });
 
     return { platforms: platformStatus };
+  }
+
+  /**
+   * Get all saved accounts across all platforms (Thumbtack, Yelp, etc.)
+   */
+  @Get('saved-accounts')
+  @Header('Cache-Control', 'no-store')
+  async getAllSavedAccounts(@CurrentUser() user: any) {
+    const accounts = await this.platformService.getSavedAccounts(user.id);
+    return { count: accounts.length, accounts };
   }
 
   /**
