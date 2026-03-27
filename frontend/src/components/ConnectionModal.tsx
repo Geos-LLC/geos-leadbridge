@@ -101,11 +101,10 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
       setLoading(true);
       setError(null);
       const { url } = await platformsApi.getYelpAuthUrl();
-      // Redirect to our backend logout-and-connect page which:
-      // 1. Loads Yelp logout URLs as hidden images to clear cookies
-      // 2. After 2.5s redirects to the Yelp OAuth login page
-      const baseUrl = import.meta.env.VITE_API_URL || '';
-      window.location.href = `${baseUrl}/v1/yelp/auth/logout-and-connect?authUrl=${encodeURIComponent(url)}`;
+      // Store OAuth URL — dashboard will auto-redirect when user returns
+      sessionStorage.setItem('yelp_pending_oauth', url);
+      // Navigate to Yelp logout to clear session cookies
+      window.location.href = 'https://biz.yelp.com/login/logout';
     } catch (err: any) {
       setError(err.message || 'Failed to start Yelp connection');
       setLoading(false);

@@ -59,6 +59,15 @@ export function Dashboard() {
     loadDashboardStats();
   }, []);
 
+  // Auto-redirect to Yelp OAuth if returning from Yelp logout
+  useEffect(() => {
+    const pendingYelpOAuth = sessionStorage.getItem('yelp_pending_oauth');
+    if (pendingYelpOAuth) {
+      sessionStorage.removeItem('yelp_pending_oauth');
+      window.location.href = pendingYelpOAuth;
+    }
+  }, []);
+
   // Handle OAuth callback params and auto-open reconnect modal
   useEffect(() => {
     const webhookError = searchParams.get('webhook_error');
