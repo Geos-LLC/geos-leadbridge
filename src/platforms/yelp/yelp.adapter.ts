@@ -152,14 +152,33 @@ export class YelpAdapter implements IPlatformAdapter {
 
   async getClaimedBusinesses(accessToken: string): Promise<any[]> {
     try {
-      // Per Yelp docs: partner-api.yelp.com/token/v1/businesses with OAuth token
+      // Per Yelp docs: partner-api.yelp.com/token/v1/businesses returns { business_ids: [...] }
       const response = await axios.get('https://partner-api.yelp.com/token/v1/businesses', {
         headers: { Authorization: `Bearer ${accessToken}` },
         timeout: 10000,
       });
       const data = response.data;
-      const businesses = data?.businesses || (Array.isArray(data) ? data : []);
-      this.logger.log(`Yelp claimed businesses: ${businesses.length} found — ${JSON.stringify(data).substring(0, 500)}`);
+      const businessIds: string[] = data?.business_ids || [];
+      this.logger.log(`Yelp claimed business IDs: ${businessIds.length} found — ${JSON.stringify(businessIds)}`);
+
+      if (businessIds.length === 0) return [];
+
+      // Fetch business details for each ID using the Yelp Fusion API (API key)
+      const businesses: any[] = [];
+      for (const bizId of businessIds) {
+        try {
+          const bizResponse = await this.httpClient.get(`/businesses/${bizId}`, {
+            headers: { Authorization: `Bearer ${this.apiKey}` },
+          });
+          businesses.push(bizResponse.data);
+        } catch (err) {
+          // If detail fetch fails, still return the ID so we can create a SavedAccount
+          this.logger.warn(`Failed to fetch details for business ${bizId}, using ID only`);
+          businesses.push({ id: bizId, name: bizId });
+        }
+      }
+
+      this.logger.log(`Yelp businesses resolved: ${businesses.map(b => `${b.name} (${b.id})`).join(', ')}`);
       return businesses;
     } catch (error) {
       const status = error.response?.status;
