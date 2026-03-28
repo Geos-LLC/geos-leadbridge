@@ -810,6 +810,23 @@ export class ThumbtackController {
       }
     }
 
+    // Check for recent token refresh failures (indicates dead token)
+    const recentTokenError = await this.prisma.systemErrorLog.findFirst({
+      where: {
+        category: 'token_refresh',
+        resolved: false,
+        createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, // last 24h
+        OR: [
+          { accountId: account.id },
+          { accountName: account.businessName, userId: account.userId },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (recentTokenError) {
+      connectionIssues.push('Token expired — please reconnect this account');
+    }
+
     const healthy = connectionIssues.length === 0;
 
     // Diagnostic log — track exactly what the health check finds

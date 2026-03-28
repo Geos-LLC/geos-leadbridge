@@ -856,11 +856,12 @@ export class PlatformService {
           } catch (refreshError: any) {
             console.error(`[PlatformService] Failed to refresh account token for business ${businessId}: ${refreshError.message}`);
 
-            const savedAcct = await this.prisma.savedAccount.findFirst({ where: { userId, platform, businessId }, select: { businessName: true } }).catch(() => null);
+            const savedAcct = await this.prisma.savedAccount.findFirst({ where: { userId, platform, businessId }, select: { id: true, businessName: true } }).catch(() => null);
             this.monitoring.captureError({
               category: 'token_refresh',
               message: `${platform} token refresh failed for business ${businessId} — ${refreshError.message}`,
               userId,
+              accountId: savedAcct?.id,
               accountName: savedAcct?.businessName,
               context: { platform, businessId },
             });
