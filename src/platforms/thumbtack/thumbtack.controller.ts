@@ -700,9 +700,10 @@ export class ThumbtackController {
     @CurrentUser() user: any,
     @Param('id') id: string,
   ) {
+    console.log(`[health] getAccountHealth called for account ${id}, user ${user.id}`);
     const account = await this.prisma.savedAccount.findFirst({
       where: { id, userId: user.id },
-      select: { id: true, businessId: true, businessName: true, webhookId: true, userId: true },
+      select: { id: true, businessId: true, businessName: true, webhookId: true, userId: true, platform: true },
     });
 
     if (!account) {
@@ -812,12 +813,14 @@ export class ThumbtackController {
 
     // Validate token by attempting a lightweight API call
     try {
+      console.log(`[health] Validating token for ${account.businessName} (${account.id})`);
       const tokenCheck = await this.platformService.validateAccountToken(account.userId, account.id);
+      console.log(`[health] Token validation result for ${account.businessName}: valid=${tokenCheck.valid} reason=${tokenCheck.reason || 'none'}`);
       if (!tokenCheck.valid) {
         connectionIssues.push('Token expired — please reconnect this account');
       }
-    } catch {
-      // If validation throws, assume token is bad
+    } catch (err: any) {
+      console.log(`[health] Token validation threw for ${account.businessName}: ${err.message}`);
       connectionIssues.push('Token expired — please reconnect this account');
     }
 
