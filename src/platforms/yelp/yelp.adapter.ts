@@ -59,6 +59,10 @@ export class YelpAdapter implements IPlatformAdapter {
   // OAuth — Business Owner authorization
   // ==========================================
 
+  /**
+   * Returns the OAuth authorize URL (direct, no logout chain).
+   * Frontend handles logout separately via popup before redirecting here.
+   */
   getAuthUrl(_userId: string, state: string): string {
     const params = new URLSearchParams({
       client_id: this.clientId,
@@ -68,21 +72,7 @@ export class YelpAdapter implements IPlatformAdapter {
       state,
     });
 
-    // Chain: logout → login → OAuth (all on biz.yelp.com, relative path)
-    // 1. biz.yelp.com/logout?return_url=<encoded-oauth-path>
-    // 2. Yelp clears session → redirects to /login?return_url=<encoded-oauth-path>
-    // 3. User logs in → Yelp decodes return_url → redirects to /oauth2/authorize?...
-    // 4. OAuth consent → redirects to our callback
-    //
-    // Build OAuth path with properly encoded values, then encodeURIComponent the whole path
-    // so & chars stay inside return_url (not parsed as logout params)
-    const oauthPath = '/oauth2/authorize?client_id=' + this.clientId
-      + '&redirect_uri=' + encodeURIComponent(this.redirectUri)
-      + '&response_type=code'
-      + '&scope=' + encodeURIComponent('leads r2r_business_owner r2r_get_businesses')
-      + '&state=' + encodeURIComponent(state);
-
-    return `https://biz.yelp.com/logout?return_url=${encodeURIComponent(oauthPath)}`;
+    return `${this.authBaseUrl}/authorize?${params.toString()}`;
   }
 
   async handleCallback(code: string, _userId: string): Promise<PlatformCredentials> {

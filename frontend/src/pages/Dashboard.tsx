@@ -59,12 +59,37 @@ export function Dashboard() {
     loadDashboardStats();
   }, []);
 
-  // Auto-redirect to Yelp OAuth if returning from Yelp logout
+  // Auto-redirect to Yelp OAuth after user logs in and returns to dashboard
   useEffect(() => {
-    const pendingYelpOAuth = sessionStorage.getItem('yelp_pending_oauth');
-    if (pendingYelpOAuth) {
-      sessionStorage.removeItem('yelp_pending_oauth');
-      window.location.href = pendingYelpOAuth;
+    // Don't redirect if this is already a callback from OAuth
+    if (searchParams.get('connected') || searchParams.get('error')) return;
+
+    const stored = sessionStorage.getItem('yelp_oauth_url');
+    if (stored) {
+      try {
+        const { url, exp } = JSON.parse(stored);
+        sessionStorage.removeItem('yelp_oauth_url');
+        if (Date.now() < exp) {
+          window.location.href = url;
+          return;
+        }
+      } catch {
+        sessionStorage.removeItem('yelp_oauth_url');
+      }
+    }
+  }, []);
+
+  // Handle Yelp OAuth success (callback redirects here with ?connected=yelp)
+  useEffect(() => {
+    const connected = searchParams.get('connected');
+    if (connected === 'yelp') {
+      const warning = searchParams.get('warning');
+      if (warning === 'no_businesses') {
+        setOauthError('Yelp authorization succeeded but no businesses were found. Please add a business manually or contact support.');
+      }
+      // Reload accounts to show the newly connected Yelp business
+      loadAccounts(true);
+      setSearchParams({}, { replace: true });
     }
   }, []);
 
