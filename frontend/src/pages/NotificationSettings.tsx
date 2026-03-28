@@ -397,7 +397,7 @@ export function NotificationSettings() {
               <option value="all">All Accounts ({accounts.length})</option>
               {accounts.map(acc => (
                 <option key={acc.id} value={acc.id}>
-                  {acc.businessName} [{acc.platform === 'yelp' ? 'Yelp' : 'TT'}]
+                  {acc.platform === 'yelp' ? '\uD83D\uDD34 ' : '\uD83D\uDD35 '}{acc.businessName}
                 </option>
               ))}
             </select>
@@ -452,7 +452,7 @@ export function NotificationSettings() {
                             <option value="">Choose which account this rule applies to...</option>
                             {accounts.map(acc => (
                               <option key={acc.id} value={acc.id}>
-                                {acc.businessName} [{acc.platform === 'yelp' ? 'Yelp' : 'TT'}]
+                                {acc.platform === 'yelp' ? '\uD83D\uDD34 ' : '\uD83D\uDD35 '}{acc.businessName}
                               </option>
                             ))}
                           </select>

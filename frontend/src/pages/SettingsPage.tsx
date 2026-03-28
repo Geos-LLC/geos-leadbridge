@@ -949,7 +949,7 @@ export default function SettingsPage() {
                       >
                         <option value="">Choose account...</option>
                         {accounts.map(a => (
-                          <option key={a.id} value={a.id}>{a.businessName} [{a.platform === 'yelp' ? 'Yelp' : 'TT'}]</option>
+                          <option key={a.id} value={a.id}>{a.platform === 'yelp' ? '\uD83D\uDD34' : '\uD83D\uDD35'} {a.businessName}</option>
                         ))}
                       </select>
                     </div>

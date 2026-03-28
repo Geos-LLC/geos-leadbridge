@@ -127,7 +127,7 @@ export default function AccountManagement({
                     className="account-name-select"
                   >
                     {savedAccounts.map((acc, idx) => (
-                      <option key={acc.id} value={idx}>{acc.businessName} [{acc.platform === 'yelp' ? 'Yelp' : 'TT'}]</option>
+                      <option key={acc.id} value={idx}>{acc.platform === 'yelp' ? '\uD83D\uDD34 ' : '\uD83D\uDD35 '}{acc.businessName}</option>
                     ))}
                   </select>
                   <ChevronDown size={14} className="dropdown-chevron" />

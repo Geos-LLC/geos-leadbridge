@@ -1063,10 +1063,10 @@ export function Messages() {
                 <option value="all">All Accounts ({leadsFromSavedAccounts.length})</option>
                 {accountsInLeads.map((account) => {
                   const count = leadsFromSavedAccounts.filter(l => l.businessId === account.businessId).length;
-                  const platformLabel = account.platform === 'yelp' ? 'Yelp' : 'TT';
+                  const dot = account.platform === 'yelp' ? '\uD83D\uDD34' : '\uD83D\uDD35';
                   return (
                     <option key={account.id} value={account.businessId}>
-                      {account.businessName} [{platformLabel}] ({count})
+                      {dot} {account.businessName} ({count})
                     </option>
                   );
                 })}

@@ -441,18 +441,19 @@ export function Dashboard() {
                   const isJustDisabled = !isCheckingDiag && !hasConnectionIssues && notifIssues.length > 0 && notifIssues.every((i: string) => i.toLowerCase().includes('disabled'));
                   const hasConfigIssues = !isCheckingDiag && !hasConnectionIssues && notifIssues.length > 0 && !isJustDisabled;
 
+                  const platformBorder = account.platform === 'yelp' ? 'border-[#FF1A1A]/30' : 'border-[#41B1E1]/30';
                   const borderClass = isCheckingDiag
                     ? 'border-slate-200'
                     : hasConnectionIssues
                       ? 'border-amber-200 hover:border-amber-300'
                       : hasConfigIssues
                         ? 'border-orange-200 hover:border-orange-300'
-                        : 'border-slate-100 hover:border-blue-200';
+                        : `${platformBorder} hover:border-[${account.platform === 'yelp' ? '#FF1A1A' : '#41B1E1'}]/50`;
 
                   return (
                     <div
                       key={account.id}
-                      className={`bg-white border rounded-3xl p-5 flex items-center gap-5 transition-all cursor-pointer group shadow-sm ${borderClass}`}
+                      className={`bg-white border-2 rounded-3xl p-5 flex items-center gap-5 transition-all cursor-pointer group shadow-sm ${borderClass}`}
                       onClick={() => handleAccountClick(account)}
                     >
                       {account.imageUrl ? (
@@ -494,7 +495,10 @@ export function Dashboard() {
                           ) : (
                             <>
                               <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                              <span className="text-xs text-slate-500 font-medium">Synced: {account.platform === 'yelp' ? 'Yelp' : 'Thumbtack'}</span>
+                              <span className="text-xs text-slate-500 font-medium">Synced</span>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md text-white ${account.platform === 'yelp' ? 'bg-[#FF1A1A]' : 'bg-[#41B1E1]'}`}>
+                                {account.platform === 'yelp' ? 'Yelp' : 'TT'}
+                              </span>
                             </>
                           )}
                         </div>
