@@ -752,8 +752,33 @@ export function Messages() {
   };
 
   const getLeadDetails = (lead: Lead) => {
-    const details: { question: string; answer: string }[] = lead.raw?.request?.details || [];
-    return details;
+    // Thumbtack format
+    if (lead.raw?.request?.details) {
+      return lead.raw.request.details as { question: string; answer: string }[];
+    }
+    // Yelp format — build from project survey_answers + availability + location
+    if (lead.raw?.project || lead.platform === 'yelp') {
+      const details: { question: string; answer: string }[] = [];
+      const project = lead.raw?.project;
+      if (project?.job_names?.length) {
+        details.push({ question: 'Service', answer: project.job_names.join(', ') });
+      }
+      for (const q of project?.survey_answers || []) {
+        const answer = Array.isArray(q.answer_text) ? q.answer_text.join(', ') : q.answer_text;
+        details.push({ question: q.question_text, answer });
+      }
+      if (project?.availability?.status) {
+        details.push({ question: 'When do you require this service?', answer: project.availability.status === 'ASAP' ? 'As soon as possible' : project.availability.status === 'FLEXIBLE' ? "I'm flexible" : project.availability.status });
+      }
+      if (project?.location?.postal_code) {
+        details.push({ question: 'Location', answer: project.location.postal_code });
+      }
+      if (project?.additional_info) {
+        details.push({ question: 'Additional details', answer: project.additional_info });
+      }
+      return details;
+    }
+    return [];
   };
 
   // Get account name for a lead
