@@ -1373,7 +1373,8 @@ export class NotificationsService {
 
     const template = templateOverride || rule?.messageTemplate?.content || rule?.template || settings.template;
     const ruleName = rule?.name || 'Test';
-    const accountLabel = account.businessName ? `[${account.businessName}] ` : '';
+    const platformTag = account.platform === 'yelp' ? '[Yelp]' : '[TT]';
+    const accountLabel = account.businessName ? `${platformTag} [${account.businessName}] ` : `${platformTag} `;
     const messageBody = `${accountLabel}${this.renderTemplate(template, testLead, account.businessName)}`;
 
     // Always use tenant API key for dedicated numbers
