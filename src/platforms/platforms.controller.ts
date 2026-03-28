@@ -55,10 +55,12 @@ export class PlatformsController {
   @Get('saved-accounts')
   @Header('Cache-Control', 'no-store')
   async getAllSavedAccounts(@CurrentUser() user: any) {
-    this.logger.log(`[saved-accounts] request from user ${user.id}`);
     const accounts = await this.platformService.getSavedAccounts(user.id);
     const deadOnes = accounts.filter((a: any) => a.tokenDead);
-    this.logger.log(`[saved-accounts] returning ${accounts.length} accounts, ${deadOnes.length} with dead tokens: ${deadOnes.map((a: any) => a.businessName).join(', ') || 'none'}`);
+    if (deadOnes.length > 0 || accounts.length > 0) {
+      // Use same logging pattern as analytics service (proven to reach Loki)
+      console.log(`[saved-accounts] ${accounts.length} accounts, ${deadOnes.length} dead tokens: ${deadOnes.map((a: any) => a.businessName).join(', ') || 'none'}`);
+    }
     return { count: accounts.length, accounts };
   }
 
