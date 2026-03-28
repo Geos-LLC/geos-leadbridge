@@ -931,22 +931,30 @@ export class PlatformService {
     const errorAccountIds = new Set(tokenErrors.map(e => e.accountId).filter(Boolean));
     const errorAccountNames = new Set(tokenErrors.map(e => e.accountName).filter(Boolean));
 
-    // Auto-resolve stale errors: if account received leads recently, token works
+    // Auto-resolve stale errors: only if the LATEST lead is NEWER than the LATEST error
+    // (proves token worked AFTER the error occurred)
     if (tokenErrors.length > 0) {
-      const recentLeadAccounts = await this.prisma.lead.groupBy({
-        by: ['businessId'],
-        where: {
-          userId,
-          platform: 'thumbtack',
-          createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-          businessId: { in: ttAccounts.map(a => a.businessId) },
-        },
-      });
-      const activeBusinessIds = new Set(recentLeadAccounts.map(r => r.businessId));
-
       for (const account of ttAccounts) {
-        if (activeBusinessIds.has(account.businessId) && (errorAccountIds.has(account.id) || errorAccountNames.has(account.businessName))) {
-          this.logger.log(`[getSavedAccounts] Auto-resolving stale token errors for ${account.businessName} — received leads recently`);
+        const hasError = errorAccountIds.has(account.id) || errorAccountNames.has(account.businessName);
+        if (!hasError) continue;
+
+        // Find the latest error timestamp for this account
+        const accountErrors = tokenErrors.filter(e => e.accountId === account.id || e.accountName === account.businessName);
+        const latestErrorAt = Math.max(...accountErrors.map(e => new Date(e.createdAt).getTime()));
+
+        // Find the latest lead AFTER the error
+        const leadAfterError = await this.prisma.lead.findFirst({
+          where: {
+            userId,
+            platform: 'thumbtack',
+            businessId: account.businessId,
+            createdAt: { gt: new Date(latestErrorAt) },
+          },
+          select: { id: true },
+        });
+
+        if (leadAfterError) {
+          this.logger.log(`[getSavedAccounts] Auto-resolving stale token errors for ${account.businessName} — lead arrived after last error`);
           await this.prisma.systemErrorLog.updateMany({
             where: {
               category: 'token_refresh',
