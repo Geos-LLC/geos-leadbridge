@@ -277,10 +277,6 @@ export class LeadsService {
   ): Promise<any> {
     const lead = await this.getLead(userId, leadId);
 
-    if (!lead.threadId) {
-      throw new NotFoundException('No conversation thread found for this lead');
-    }
-
     // Get account-specific credentials first, then fall back to platform credentials
     let credentials: { accessToken: string; refreshToken?: string };
     if (lead.businessId) {
@@ -323,6 +319,15 @@ export class LeadsService {
             status: 'active',
           },
         });
+      }
+
+      // Link lead to conversation if not already linked (needed for Yelp leads
+      // created before conversation support, and for lastMessageAt sorting)
+      if (!lead.threadId) {
+        await this.prisma.lead.update({
+          where: { id: leadId },
+          data: { threadId: conversation.id },
+        }).catch(() => {}); // non-critical
       }
 
       // Check if message already exists (webhook might have already stored it)
