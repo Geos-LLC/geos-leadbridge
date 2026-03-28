@@ -1640,7 +1640,7 @@ export function Messages() {
             {selectedLead.message && (
               <div>
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Customer Message</h4>
-                <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-3 rounded-xl">{selectedLead.message}</p>
+                <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-3 rounded-xl whitespace-pre-wrap">{selectedLead.message}</p>
               </div>
             )}
           </div>
