@@ -104,7 +104,9 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
       // When user returns to dashboard after logging out, auto-redirect to OAuth
       const { url } = await platformsApi.getYelpAuthUrl();
       sessionStorage.setItem('yelp_pending_oauth', url);
-      // Redirect to Yelp logout — clears session, lands on login page
+      // Navigate to logout — Yelp clears session and 303 redirects to /login
+      // User sees login page, logs in, then comes back to dashboard
+      // Dashboard auto-detects pending OAuth and redirects
       window.location.href = 'https://biz.yelp.com/logout';
     } catch (err: any) {
       setError(err.message || 'Failed to start Yelp connection');
