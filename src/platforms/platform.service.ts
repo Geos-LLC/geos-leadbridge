@@ -244,13 +244,25 @@ export class PlatformService {
         try {
           const account = await this.prisma.savedAccount.findUnique({
             where: { id: accountId },
-            select: { userId: true },
+            select: { userId: true, businessName: true },
           });
           if (account) {
             await this.storeCredentials(account.userId, platform, newCredentials);
+            // Auto-resolve stale token_refresh errors — token is working now
+            await this.prisma.systemErrorLog.updateMany({
+              where: {
+                category: 'token_refresh',
+                resolved: false,
+                OR: [
+                  { accountId },
+                  { accountName: account.businessName, userId: account.userId },
+                ],
+              },
+              data: { resolved: true },
+            });
           }
         } catch {
-          // Non-critical: platform table sync failure doesn't block the main flow
+          // Non-critical: platform table sync / error cleanup failure doesn't block the main flow
         }
 
         return {

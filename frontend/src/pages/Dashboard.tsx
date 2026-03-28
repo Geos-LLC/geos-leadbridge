@@ -470,10 +470,14 @@ export function Dashboard() {
                       <div className="flex-1">
                         <h4 className="font-bold text-slate-900">{account.businessName}</h4>
                         <div className="flex items-center gap-2 mt-1">
+                          {/* Platform badge — always visible */}
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md text-white ${account.platform === 'yelp' ? 'bg-[#FF1A1A]' : 'bg-[#41B1E1]'}`}>
+                            {account.platform === 'yelp' ? 'Yelp' : 'TT'}
+                          </span>
                           {isCheckingDiag ? (
                             <>
                               <Loader2 className="w-3 h-3 animate-spin text-slate-400" />
-                              <span className="text-xs text-slate-400 font-medium">Checking health...</span>
+                              <span className="text-xs text-slate-400 font-medium">Checking...</span>
                             </>
                           ) : hasConnectionIssues ? (
                             <>
@@ -496,9 +500,6 @@ export function Dashboard() {
                             <>
                               <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                               <span className="text-xs text-slate-500 font-medium">Synced</span>
-                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md text-white ${account.platform === 'yelp' ? 'bg-[#FF1A1A]' : 'bg-[#41B1E1]'}`}>
-                                {account.platform === 'yelp' ? 'Yelp' : 'TT'}
-                              </span>
                             </>
                           )}
                         </div>
