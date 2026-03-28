@@ -71,9 +71,10 @@ export class YelpAdapter implements IPlatformAdapter {
     // Chain: logout → login → OAuth authorize
     // biz.yelp.com/logout clears session and redirects to login with return_url
     // After login, user hits OAuth consent, then our callback
-    // IMPORTANT: Don't encode the OAuth path — Yelp's login page handles the query params
-    const oauthPath = `/oauth2/authorize?${params.toString()}`;
-    return `https://biz.yelp.com/logout?return_url=${oauthPath}`;
+    // Encode the full OAuth path so & chars aren't parsed as logout URL params
+    // Use manual encoding to avoid double-encoding of already-encoded values in params
+    const oauthPath = `/oauth2/authorize?client_id=${this.clientId}&redirect_uri=${encodeURIComponent(this.redirectUri)}&response_type=code&scope=${encodeURIComponent('leads r2r_business_owner r2r_get_businesses')}&state=${encodeURIComponent(state)}`;
+    return `https://biz.yelp.com/logout?return_url=${encodeURIComponent(oauthPath)}`;
   }
 
   async handleCallback(code: string, _userId: string): Promise<PlatformCredentials> {
