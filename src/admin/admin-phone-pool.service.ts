@@ -979,7 +979,7 @@ export class AdminPhonePoolService {
     dates:              'Flexible',
   };
 
-  async getAdminConfig(): Promise<{ id: string; testData: Record<string, string> }> {
+  async getAdminConfig(): Promise<{ id: string; testData: Record<string, string>; yelpTestData: Record<string, string> }> {
     const config = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
     const saved = (config?.testData as Record<string, string> | null) ?? {};
     // Merge: defaults → old individual columns → new testData JSON
@@ -990,14 +990,15 @@ export class AdminPhonePoolService {
       ...(config?.testLocation     ? { location:      config.testLocation }     : {}),
       ...saved,
     };
-    return { id: 'global', testData };
+    const yelpTestData = ((config as any)?.yelpTestData as Record<string, string> | null) ?? {};
+    return { id: 'global', testData, yelpTestData };
   }
 
-  async updateAdminConfig(testData: Record<string, string>) {
+  async updateAdminConfig(testData: Record<string, string>, yelpTestData?: Record<string, string>) {
     return this.prisma.adminConfig.upsert({
       where: { id: 'global' },
-      create: { id: 'global', testData },
-      update: { testData },
+      create: { id: 'global', testData, ...(yelpTestData && { yelpTestData }) },
+      update: { testData, ...(yelpTestData && { yelpTestData }) },
     });
   }
 

@@ -53,11 +53,11 @@ export class AdminPhonePoolController {
   }
 
   /**
-   * Update global admin config — body is { testData: Record<string, string> }
+   * Update global admin config — body is { testData, yelpTestData }
    */
   @Patch('admin-config')
-  async updateAdminConfig(@Body() body: { testData: Record<string, string> }) {
-    const config = await this.phonePoolService.updateAdminConfig(body.testData ?? {});
+  async updateAdminConfig(@Body() body: { testData?: Record<string, string>; yelpTestData?: Record<string, string> }) {
+    const config = await this.phonePoolService.updateAdminConfig(body.testData ?? {}, body.yelpTestData);
     return { success: true, data: config };
   }
 

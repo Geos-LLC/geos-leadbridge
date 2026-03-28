@@ -1340,36 +1340,67 @@ export class NotificationsService {
       return { success: false, error: 'No dedicated number assigned. Get a dedicated number first.' };
     }
 
-    // Load test customer data from admin config
+    // Load test customer data from admin config — use platform-specific data
     const adminCfg = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
-    const td = (adminCfg?.testData as Record<string, string> | null) ?? {};
+    const isYelp = account.platform === 'yelp';
+    const td = isYelp
+      ? ((adminCfg as any)?.yelpTestData as Record<string, string> | null) ?? {}
+      : (adminCfg?.testData as Record<string, string> | null) ?? {};
 
-    const testLead = {
-      customerName: td.customerName || 'Test Customer',
-      customerPhone: '+15551234567',
-      category: td.category || 'House Cleaning',
-      city: td.city || 'Tampa',
-      state: td.state || 'FL',
-      postcode: td.zip || '33602',
-      message: td.message || 'I need my house cleaned weekly. Looking for someone reliable.',
-      rawJson: JSON.stringify({
-        request: {
-          details: {
-            serviceDescription: td.serviceDescription || 'Weekly house cleaning service',
-            addOns: td.addons
-              ? td.addons.split(',').map((s: string) => s.trim()).filter(Boolean)
-              : ['Deep clean', 'Laundry'],
-            frequency: td.frequency || 'Weekly',
-            ...(td.bedrooms && { bedrooms: td.bedrooms }),
-            ...(td.bathrooms && { bathrooms: td.bathrooms }),
-            ...(td.price && { price: td.price }),
-            ...(td.pets && { pets: td.pets }),
-            ...(td.estimate && { estimate: td.estimate }),
-            ...(td.dates && { dates: td.dates }),
-          },
-        },
-      }),
-    };
+    const testLead = isYelp
+      ? {
+          // Yelp test lead — survey Q&A format, no phone by default
+          customerName: td.customerName || 'Yelp Test Customer',
+          customerPhone: td.customerPhone || null,
+          category: td.category || 'Deep Cleaning',
+          city: td.city || 'Jacksonville',
+          state: td.state || 'FL',
+          postcode: td.zip || '32210',
+          message: td.message || 'What kind of cleaning? Deep cleaning\nHow often? Just once\nBedrooms: 2\nBathrooms: 2',
+          rawJson: JSON.stringify({
+            project: {
+              survey_answers: [
+                { question_text: 'What kind of cleaning service are you looking for?', answer_text: [td.serviceDescription || 'Deep cleaning'] },
+                { question_text: 'How often do you want your home cleaned?', answer_text: [td.frequency || 'Just once'] },
+                { question_text: 'How many bedrooms are in your home?', answer_text: [td.bedrooms || '2 bedrooms'] },
+                { question_text: 'How many bathrooms are in your home?', answer_text: [td.bathrooms || '2 bathrooms'] },
+                { question_text: 'When do you require this service?', answer_text: [td.dates || 'As soon as possible'] },
+                ...(td.addons ? [{ question_text: 'Do you need any of these other services?', answer_text: td.addons.split(',').map((s: string) => s.trim()) }] : []),
+                ...(td.pets ? [{ question_text: 'Do you have pets?', answer_text: [td.pets] }] : []),
+              ],
+              location: { postal_code: td.zip || '32210', city: td.city || 'Jacksonville', state: td.state || 'FL' },
+              job_names: [td.category || 'Deep Cleaning'],
+              availability: { status: td.dates || 'FLEXIBLE' },
+            },
+          }),
+        }
+      : {
+          // Thumbtack test lead — structured details format
+          customerName: td.customerName || 'Test Customer',
+          customerPhone: '+15551234567',
+          category: td.category || 'House Cleaning',
+          city: td.city || 'Tampa',
+          state: td.state || 'FL',
+          postcode: td.zip || '33602',
+          message: td.message || 'I need my house cleaned weekly. Looking for someone reliable.',
+          rawJson: JSON.stringify({
+            request: {
+              details: {
+                serviceDescription: td.serviceDescription || 'Weekly house cleaning service',
+                addOns: td.addons
+                  ? td.addons.split(',').map((s: string) => s.trim()).filter(Boolean)
+                  : ['Deep clean', 'Laundry'],
+                frequency: td.frequency || 'Weekly',
+                ...(td.bedrooms && { bedrooms: td.bedrooms }),
+                ...(td.bathrooms && { bathrooms: td.bathrooms }),
+                ...(td.price && { price: td.price }),
+                ...(td.pets && { pets: td.pets }),
+                ...(td.estimate && { estimate: td.estimate }),
+                ...(td.dates && { dates: td.dates }),
+              },
+            },
+          }),
+        };
 
     const template = templateOverride || rule?.messageTemplate?.content || rule?.template || settings.template;
     const ruleName = rule?.name || 'Test';
@@ -1508,21 +1539,29 @@ export class NotificationsService {
       try {
         const raw = JSON.parse(lead.rawJson);
         const request = raw.request || {};
-        const details = request.details || [];
+        // Thumbtack: request.details array; Yelp: project.survey_answers array
+        const details = request.details || raw.project?.survey_answers || [];
 
-        // Log details for debugging which fields Thumbtack sends
+        // Log details for debugging
         if (details.length > 0) {
           this.logger.debug(
-            `Lead template details (${details.length} items): ${JSON.stringify(details.map((d: any) => ({ q: d.question, a: d.answer })))}`,
+            `Lead template details (${details.length} items): ${JSON.stringify(details.slice(0, 5).map((d: any) => ({ q: d.question || d.question_text, a: d.answer || d.answer_text })))}`,
           );
-        } else {
-          this.logger.debug('Lead template: no request.details in webhook payload');
         }
 
-        // Details is an array of {question, answer} objects
-        // Use the description field as service description
+        // Thumbtack: use description field as service description
         if (request.description) {
           serviceDescription = request.description;
+        }
+
+        // Yelp: use job_names as service description
+        if (raw.project?.job_names?.[0] && serviceDescription === 'Not specified') {
+          serviceDescription = raw.project.job_names[0];
+        }
+
+        // Yelp: use availability as dates
+        if (raw.project?.availability?.status && dates === 'Not specified') {
+          dates = raw.project.availability.status;
         }
 
         // Find specific answers from details array
@@ -2796,11 +2835,15 @@ export class NotificationsService {
     if (!Array.isArray(details)) return null;
 
     for (const item of details) {
-      if (item.question && item.answer) {
-        const question = String(item.question).toLowerCase();
+      // Thumbtack format: {question, answer}
+      // Yelp format: {question_text, answer_text}
+      const question = item.question || item.question_text;
+      const answer = item.answer || item.answer_text;
+      if (question && answer) {
+        const questionLower = String(question).toLowerCase();
         for (const variant of questionVariants) {
-          if (question.includes(variant.toLowerCase())) {
-            return String(item.answer);
+          if (questionLower.includes(variant.toLowerCase())) {
+            return Array.isArray(answer) ? answer.join(', ') : String(answer);
           }
         }
       }

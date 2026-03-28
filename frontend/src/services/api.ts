@@ -1026,12 +1026,12 @@ export const adminApi = {
     const { data } = await api.get(`/v1/admin/phone-pool/users${params}`);
     return data;
   },
-  getAdminConfig: async (): Promise<{ id: string; testData: Record<string, string> }> => {
+  getAdminConfig: async (): Promise<{ id: string; testData: Record<string, string>; yelpTestData?: Record<string, string> }> => {
     const { data } = await api.get('/v1/admin/phone-pool/admin-config');
     return data.data;
   },
-  updateAdminConfig: async (testData: Record<string, string>): Promise<{ id: string; testData: Record<string, string> }> => {
-    const { data } = await api.patch('/v1/admin/phone-pool/admin-config', { testData });
+  updateAdminConfig: async (testData: Record<string, string>, yelpTestData?: Record<string, string>): Promise<{ id: string; testData: Record<string, string>; yelpTestData?: Record<string, string> }> => {
+    const { data } = await api.patch('/v1/admin/phone-pool/admin-config', { testData, yelpTestData });
     return data.data;
   },
   // Phone Pricing
