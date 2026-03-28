@@ -901,44 +901,37 @@ export class PlatformService {
       orderBy: { lastUsedAt: 'desc' },
     });
 
-    // Check token health by reading expiresAt from encrypted credentials.
-    // If a Thumbtack access token has been expired for 2+ hours, it means no successful
-    // refresh happened — the refresh token is dead and the account needs reconnection.
-    // (Thumbtack access tokens last 1 hour; any healthy flow refreshes well within 2 hours.)
-    const TOKEN_DEAD_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
-    const now = Date.now();
+    // Check token health via SystemErrorLog: an unresolved token_refresh error means
+    // the refresh token is dead and the account needs reconnection.
+    // NOTE: Do NOT use credential expiresAt — TT access tokens expire every hour and
+    // are only refreshed on-demand. An expired access token is normal idle behavior,
+    // not a dead token. SystemErrorLog records actual refresh failures.
+    const ttAccountIds = accounts.filter(a => a.platform === 'thumbtack').map(a => a.id);
     const deadAccountIds = new Set<string>();
 
-    for (const account of accounts) {
-      if (account.platform !== 'thumbtack' || !account.credentialsJson) continue;
-      try {
-        const creds = EncryptionUtil.decryptObject<any>(account.credentialsJson, this.encryptionKey);
-        const expiresAt = creds.expiresAt ? new Date(creds.expiresAt).getTime() : null;
-        if (expiresAt && (now - expiresAt) > TOKEN_DEAD_THRESHOLD_MS) {
-          deadAccountIds.add(account.id);
-        }
-      } catch {
-        // Decryption failed — treat as dead
-        deadAccountIds.add(account.id);
+    if (ttAccountIds.length > 0) {
+      const tokenErrors = await this.prisma.systemErrorLog.findMany({
+        where: {
+          category: 'token_refresh',
+          resolved: false,
+          accountId: { in: ttAccountIds },
+        },
+        select: { accountId: true },
+      });
+      for (const err of tokenErrors) {
+        if (err.accountId) deadAccountIds.add(err.accountId);
       }
     }
 
     if (deadAccountIds.size > 0) {
       const deadNames = accounts.filter(a => deadAccountIds.has(a.id)).map(a => a.businessName);
-      this.logger.warn(`[getSavedAccounts] Dead tokens (expired 2h+): ${deadNames.join(', ')}`);
+      this.logger.warn(`[getSavedAccounts] Dead tokens (unresolved token_refresh errors): ${deadNames.join(', ')}`);
     }
 
-    const result = accounts.map(({ credentialsJson: _, ...a }) => ({
+    return accounts.map(({ credentialsJson: _, ...a }) => ({
       ...a,
       tokenDead: deadAccountIds.has(a.id),
     }));
-
-    const deadAccounts = result.filter(a => a.tokenDead);
-    if (deadAccounts.length > 0) {
-      this.logger.warn(`[getSavedAccounts] Dead tokens: ${deadAccounts.map(a => a.businessName).join(', ')}`);
-    }
-
-    return result;
   }
 
   /**
