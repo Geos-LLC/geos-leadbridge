@@ -892,7 +892,7 @@ export class PlatformService {
     // Check for recent token refresh failures per account
     const accountIds = accounts.map(a => a.id);
     const accountNames = accounts.map(a => a.businessName).filter(Boolean);
-    console.log(`[getSavedAccounts] ${accounts.length} accounts for user ${userId}, checking token errors for IDs: ${accountIds.join(',')} names: ${accountNames.join(',')}`);
+    this.logger.log(`[getSavedAccounts] ${accounts.length} accounts for user ${userId}, checking token errors for IDs: ${accountIds.join(',')} names: ${accountNames.join(',')}`);
 
     const tokenErrors = accountIds.length > 0 ? await this.prisma.systemErrorLog.findMany({
       where: {
@@ -907,7 +907,7 @@ export class PlatformService {
       select: { id: true, accountId: true, accountName: true, message: true, createdAt: true },
     }) : [];
 
-    console.log(`[getSavedAccounts] Found ${tokenErrors.length} token errors: ${JSON.stringify(tokenErrors.map(e => ({ id: e.id, accountId: e.accountId, accountName: e.accountName, created: e.createdAt })))}`);
+    this.logger.log(`[getSavedAccounts] Found ${tokenErrors.length} token errors: ${JSON.stringify(tokenErrors.map(e => ({ id: e.id, accountId: e.accountId, accountName: e.accountName, created: e.createdAt })))}`);
 
     const errorAccountIds = new Set(tokenErrors.map(e => e.accountId).filter(Boolean));
     const errorAccountNames = new Set(tokenErrors.map(e => e.accountName).filter(Boolean));
@@ -919,7 +919,7 @@ export class PlatformService {
 
     const deadAccounts = result.filter(a => a.tokenDead);
     if (deadAccounts.length > 0) {
-      console.log(`[getSavedAccounts] Dead tokens: ${deadAccounts.map(a => a.businessName).join(', ')}`);
+      this.logger.warn(`[getSavedAccounts] Dead tokens: ${deadAccounts.map(a => a.businessName).join(', ')}`);
     }
 
     return result;
