@@ -70,9 +70,9 @@ export class YelpAdapter implements IPlatformAdapter {
 
     // Chain: logout → login → OAuth authorize
     // biz.yelp.com/logout clears session and redirects to login with return_url
-    // After login, user hits OAuth consent, then our callback
-    // Don't encode — Yelp's logout only reads return_url, ignores other params
-    const oauthPath = `/oauth2/authorize?${params.toString()}`;
+    // Encode & as %26 so OAuth params stay inside return_url
+    // But don't fully encodeURIComponent — that double-encodes redirect_uri
+    const oauthPath = `/oauth2/authorize?${params.toString().replace(/&/g, '%26')}`;
     return `https://biz.yelp.com/logout?return_url=${oauthPath}`;
   }
 
