@@ -194,9 +194,10 @@ export class LeadsService {
       const yelpAdapter = this.platformFactory.getAdapter('yelp') as any;
       const events = await yelpAdapter.getLeadEvents({ accessToken: creds.accessToken }, lead.externalRequestId);
 
-      // Convert Yelp events to message format expected by frontend
+      // Convert Yelp events to message format expected by frontend.
+      // Skip RAQ_SUBMIT (initial lead request) — it duplicates the lead data shown above.
       return events
-        .filter((e: any) => e.event_type === 'TEXT' || e.event_type === 'RAQ_SUBMIT')
+        .filter((e: any) => e.event_type === 'TEXT')
         .map((e: any) => ({
           id: e.id,
           conversationId: lead.externalRequestId,
