@@ -215,12 +215,11 @@ export class YelpAdapter implements IPlatformAdapter {
       try {
         const events = await this.getLeadEvents(credentials, leadId);
         this.logger.log(`Yelp lead events: ${events.length} events — ${JSON.stringify(events).substring(0, 1000)}`);
-        // Find the first consumer message
+        // Find the first consumer message (Yelp uses event_type=TEXT, user_type=CONSUMER)
         const firstMessage = events.find((e: any) =>
-          e.event_type === 'RAQ_SUBMIT' || e.event_type === 'MESSAGE' ||
-          (e.user_type === 'CONSUMER' && e.text),
+          e.user_type === 'CONSUMER' && (e.event_type === 'TEXT' || e.event_type === 'RAQ_SUBMIT'),
         );
-        if (firstMessage?.text) messageText = firstMessage.text;
+        messageText = firstMessage?.event_content?.text || firstMessage?.event_content?.fallback_text || firstMessage?.text || '';
       } catch (evErr: any) {
         this.logger.warn(`Failed to fetch events for lead ${leadId}: ${evErr.message}`);
       }
@@ -361,18 +360,32 @@ export class YelpAdapter implements IPlatformAdapter {
     lead.platform = PlatformName.YELP;
     lead.externalRequestId = data.id || data.lead_id;
     lead.businessId = data.business_id || data.businessId;
-    lead.customerName = data.consumer?.name || data.customer?.name || 'Unknown';
-    lead.customerPhone = data.consumer?.phone || data.customer?.phone;
-    lead.customerEmail = data.consumer?.email || data.customer?.email;
-    lead.message = data.request_text || data.message?.text || data.description || '';
-    lead.city = data.location?.city;
-    lead.state = data.location?.state;
-    lead.postcode = data.location?.zip_code || data.location?.zipCode;
-    lead.category = data.services?.[0]?.name || data.category;
-    lead.threadId = data.id || data.lead_id;
-    lead.status = data.status || 'new';
+
+    // Customer info — Yelp uses "user.display_name" not "consumer.name"
+    lead.customerName = data.user?.display_name || data.consumer?.name || 'Unknown';
+    lead.customerEmail = data.temporary_email_address || data.consumer?.email;
+    // Phone only available after CONSUMER_PHONE_NUMBER_OPT_IN_EVENT
+    lead.customerPhone = data.user?.phone || data.consumer?.phone;
+
+    // Message — Yelp puts details in project.additional_info and survey answers
+    const surveyText = (data.project?.survey_answers || [])
+      .map((q: any) => `${q.question_text}: ${Array.isArray(q.answer_text) ? q.answer_text.join(', ') : q.answer_text}`)
+      .join('\n');
+    const additionalInfo = data.project?.additional_info || '';
+    lead.message = additionalInfo || surveyText || data.request_text || '';
+
+    // Location — Yelp uses project.location.postal_code
+    lead.postcode = data.project?.location?.postal_code || data.location?.zip_code;
+    lead.city = data.project?.location?.city || data.location?.city;
+    lead.state = data.project?.location?.state || data.location?.state;
+
+    // Category — Yelp uses project.job_names
+    lead.category = data.project?.job_names?.[0] || data.services?.[0]?.name || data.category;
+
+    // Don't set threadId — it's a FK to Conversation table (not applicable for Yelp)
+    lead.status = data.ilq?.status || data.status || 'new';
     lead.createdAt = new Date(data.time_created || data.created_at || Date.now());
-    lead.updatedAt = new Date(data.time_updated || data.updated_at || Date.now());
+    lead.updatedAt = new Date(data.last_event_time || data.time_updated || Date.now());
     lead.raw = data;
     return lead;
   }
