@@ -810,30 +810,15 @@ export class ThumbtackController {
       }
     }
 
-    // Check for recent token refresh failures (indicates dead token)
-    const recentTokenError = await this.prisma.systemErrorLog.findFirst({
-      where: {
-        category: 'token_refresh',
-        resolved: false,
-        createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, // last 24h
-        OR: [
-          { accountId: account.id },
-          { accountName: account.businessName, userId: account.userId },
-        ],
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (recentTokenError) {
-      console.warn(`[health] Dead token detected for ${account.businessName}: errorId=${recentTokenError.id} accountName=${recentTokenError.accountName}`);
-      connectionIssues.push('Token expired — please reconnect this account');
-    } else {
-      // Debug: count all token_refresh errors for this user to see if query is wrong
-      const allTokenErrors = await this.prisma.systemErrorLog.count({
-        where: { category: 'token_refresh', resolved: false, userId: account.userId },
-      });
-      if (allTokenErrors > 0) {
-        console.warn(`[health] Found ${allTokenErrors} unresolved token_refresh errors for user ${account.userId} but none matched account ${account.id} / "${account.businessName}"`);
+    // Validate token by attempting a lightweight API call
+    try {
+      const tokenCheck = await this.platformService.validateAccountToken(account.userId, account.id);
+      if (!tokenCheck.valid) {
+        connectionIssues.push('Token expired — please reconnect this account');
       }
+    } catch {
+      // If validation throws, assume token is bad
+      connectionIssues.push('Token expired — please reconnect this account');
     }
 
     const healthy = connectionIssues.length === 0;
