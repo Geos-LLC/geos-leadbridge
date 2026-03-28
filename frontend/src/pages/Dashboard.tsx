@@ -435,7 +435,7 @@ export function Dashboard() {
                 return savedAccounts.map((account) => {
                   const diag = accountDiagnostics[account.id];
                   const isCheckingDiag = !diag;
-                  const hasConnectionIssues = !isCheckingDiag && (diag && !diag.healthy);
+                  const hasConnectionIssues = account.tokenDead || (!isCheckingDiag && (diag && !diag.healthy));
                   const notifIssues = diag?.notificationIssues || [];
                   // "disabled" = rule exists but toggled off; everything else = real config problem
                   const isJustDisabled = !isCheckingDiag && !hasConnectionIssues && notifIssues.length > 0 && notifIssues.every((i: string) => i.toLowerCase().includes('disabled'));
@@ -478,7 +478,7 @@ export function Dashboard() {
                             <>
                               <span className="w-2 h-2 rounded-full bg-amber-500"></span>
                               <span className="text-xs text-slate-500 font-medium">
-                                {diag && !diag.healthy ? 'Needs attention' : 'Disconnected'}
+                                {account.tokenDead ? 'Token expired — reconnect' : diag && !diag.healthy ? 'Needs attention' : 'Disconnected'}
                               </span>
                             </>
                           ) : hasConfigIssues ? (

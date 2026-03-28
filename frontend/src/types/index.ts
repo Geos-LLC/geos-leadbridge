@@ -81,6 +81,7 @@ export interface SavedAccount {
   imageUrl?: string;
   webhookId?: string | null; // Webhook subscription ID (null = disconnected)
   agentPhoneOverride?: string | null; // Per-business agent phone; null = inherit User.businessPhone
+  tokenDead?: boolean; // Token refresh failed — account needs reconnection
   lastUsedAt: string;
   createdAt: string;
 }

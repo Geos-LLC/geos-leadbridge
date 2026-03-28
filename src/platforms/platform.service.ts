@@ -881,13 +881,36 @@ export class PlatformService {
    * Get all saved accounts for a user
    */
   async getSavedAccounts(userId: string, platform?: string) {
-    return this.prisma.savedAccount.findMany({
+    const accounts = await this.prisma.savedAccount.findMany({
       where: {
         userId,
         ...(platform && { platform }),
       },
       orderBy: { lastUsedAt: 'desc' },
     });
+
+    // Check for recent token refresh failures per account
+    const accountIds = accounts.map(a => a.id);
+    const tokenErrors = accountIds.length > 0 ? await this.prisma.systemErrorLog.findMany({
+      where: {
+        category: 'token_refresh',
+        resolved: false,
+        createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        OR: [
+          { accountId: { in: accountIds } },
+          { accountName: { in: accounts.map(a => a.businessName) }, userId },
+        ],
+      },
+      select: { accountId: true, accountName: true },
+    }) : [];
+
+    const errorAccountIds = new Set(tokenErrors.map(e => e.accountId).filter(Boolean));
+    const errorAccountNames = new Set(tokenErrors.map(e => e.accountName).filter(Boolean));
+
+    return accounts.map(a => ({
+      ...a,
+      tokenDead: errorAccountIds.has(a.id) || errorAccountNames.has(a.businessName),
+    }));
   }
 
   /**
