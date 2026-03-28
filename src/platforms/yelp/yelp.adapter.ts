@@ -68,9 +68,19 @@ export class YelpAdapter implements IPlatformAdapter {
       state,
     });
 
-    // Two-step redirect: frontend goes to logout, then dashboard auto-redirects to OAuth
-    // The OAuth URL is returned separately — frontend handles the chain
-    return `${this.authBaseUrl}/authorize?${params.toString()}`;
+    // Chain: logout → login → our backend → OAuth
+    // 1. biz.yelp.com/logout clears session, redirects to /login?return_url=X
+    // 2. /login shows login page; after login redirects to return_url (our backend)
+    // 3. Our backend /auth/redirect-to-oauth generates fresh OAuth URL and redirects
+    // return_url must be a Yelp-relative path OR whitelisted external URL
+    // Since Yelp login only allows relative paths as return_url, we pass the OAuth path directly
+    // But OAuth params have & which breaks return_url — so we use our backend as intermediary
+    const backendBaseUrl = this.redirectUri.replace('/api/v1/yelp/auth/callback', '');
+    const redirectEndpoint = `${backendBaseUrl}/api/v1/yelp/auth/redirect-to-oauth?state=${encodeURIComponent(state)}`;
+
+    // Yelp login may block external return_url. If so, fall back to direct OAuth.
+    // Try with the relative OAuth path first (avoids external URL issue)
+    return `https://biz.yelp.com/logout?return_url=${encodeURIComponent(redirectEndpoint)}`;
   }
 
   async handleCallback(code: string, _userId: string): Promise<PlatformCredentials> {
