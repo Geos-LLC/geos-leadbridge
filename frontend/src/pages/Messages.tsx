@@ -361,32 +361,30 @@ export function Messages() {
     };
 
     eventSource.onerror = () => {
-      console.error('[Messages] SSE connection error');
-      eventSource.close();
+      console.warn('[Messages] SSE connection error — browser will auto-reconnect');
 
-      // Check if this is an authentication error
-      // EventSource doesn't expose HTTP status, but we can check if the token is still valid
+      // Only close + redirect for auth errors. For transient errors (Railway proxy timeout),
+      // let the browser's built-in EventSource auto-reconnect handle it.
       const currentToken = localStorage.getItem('token');
       if (!currentToken) {
-        // Token was removed (probably by 401 handler elsewhere), redirect to login
+        eventSource.close();
         console.warn('[Messages] SSE error: No token found, redirecting to login');
         window.location.href = '/login';
       } else {
-        // Try to verify token expiration
         try {
           const payload = JSON.parse(atob(currentToken.split('.')[1]));
-          const exp = payload.exp * 1000; // Convert to milliseconds
+          const exp = payload.exp * 1000;
           if (Date.now() >= exp) {
-            // Token is expired
+            eventSource.close();
             console.warn('[Messages] SSE error: Token expired, redirecting to login');
             localStorage.removeItem('token');
             localStorage.removeItem('user');
             localStorage.removeItem('auth-storage');
             window.location.href = '/login';
           } else {
-            // Token not expired but SSE still failed - likely JWT_SECRET mismatch or server issue
-            // Don't spam reconnects, just log it once
-            console.warn('[Messages] SSE error: Token valid but connection failed. Real-time updates disabled.');
+            // Token valid — Railway proxy dropped connection (60s idle or 15-min max)
+            // EventSource auto-reconnects with exponential backoff — don't close it
+            console.log('[Messages] SSE will auto-reconnect (Railway proxy timeout)');
           }
         } catch (e) {
           console.error('[Messages] Failed to parse token:', e);
