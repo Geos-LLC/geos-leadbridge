@@ -1066,12 +1066,14 @@ export class PlatformService {
         return { valid: false, reason: firstError.message || 'Failed to validate token' };
       }
 
-      // Auth error — try silent token refresh before giving up
+      // Auth error — try silent token refresh before giving up (use serialized lock!)
       console.log(`[PlatformService] Token invalid for account ${accountId}, attempting silent refresh...`);
       if (credentials.refreshToken) {
         try {
-          const refreshed = await adapter.refreshAccessToken(credentials.refreshToken);
-          await this.updateAccountCredentials(accountId, { ...credentials, ...refreshed });
+          const lockKey = `${account.platform}:${account.businessId}`;
+          const refreshed = await this.serializedAccountRefresh(
+            lockKey, accountId, account.platform, credentials.refreshToken, credentials.email,
+          );
           await tryCall({ ...credentials, ...refreshed });
           console.log(`[PlatformService] Silent token refresh succeeded for account ${accountId}`);
           return { valid: true };
