@@ -20,7 +20,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { LeadsService } from './leads.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Observable, fromEvent, merge } from 'rxjs';
+import { Observable, fromEvent, merge, interval } from 'rxjs';
 import { map } from 'rxjs/operators';
 
 @Controller('v1/leads')
@@ -42,8 +42,12 @@ export class LeadsController {
   leadEvents(@CurrentUser() user: any): Observable<MessageEvent> {
     const userId = user.id;
 
-    // Listen for lead events and SMS events for this user
+    // Listen for lead events, SMS events, and send keepalive heartbeat
+    // Heartbeat every 30s prevents Railway's HTTP/2 proxy from killing the connection
     return merge(
+      interval(30000).pipe(
+        map(() => ({ data: { type: 'heartbeat' } })),
+      ),
       fromEvent(this.eventEmitter, `lead.created.${userId}`).pipe(
         map((lead) => ({
           data: { type: 'lead.created', lead },
