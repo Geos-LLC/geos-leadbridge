@@ -3,7 +3,7 @@
  * Handles platform connection status and configuration
  */
 
-import { Controller, Get, Post, Header, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Header, UseGuards, Logger } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PlatformService } from './platform.service';
@@ -21,6 +21,8 @@ export interface HealthIssue {
 @Controller('v1/platforms')
 @UseGuards(JwtAuthGuard)
 export class PlatformsController {
+  private readonly logger = new Logger(PlatformsController.name);
+
   constructor(
     private platformService: PlatformService,
     private prisma: PrismaService,
@@ -53,7 +55,10 @@ export class PlatformsController {
   @Get('saved-accounts')
   @Header('Cache-Control', 'no-store')
   async getAllSavedAccounts(@CurrentUser() user: any) {
+    this.logger.log(`[saved-accounts] request from user ${user.id}`);
     const accounts = await this.platformService.getSavedAccounts(user.id);
+    const deadOnes = accounts.filter((a: any) => a.tokenDead);
+    this.logger.log(`[saved-accounts] returning ${accounts.length} accounts, ${deadOnes.length} with dead tokens: ${deadOnes.map((a: any) => a.businessName).join(', ') || 'none'}`);
     return { count: accounts.length, accounts };
   }
 
