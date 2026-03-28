@@ -225,7 +225,9 @@ export class YelpAdapter implements IPlatformAdapter {
       }
 
       const lead = this.normalizeLead(response.data);
-      if (messageText && !lead.message) lead.message = messageText;
+      // Always prefer the full event message — it contains all survey Q&A
+      // The normalizeLead message is just a subset from survey_answers
+      if (messageText) lead.message = messageText;
       return lead;
     } catch (error) {
       const status = error.response?.status;
