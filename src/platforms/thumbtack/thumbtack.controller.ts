@@ -824,7 +824,16 @@ export class ThumbtackController {
       orderBy: { createdAt: 'desc' },
     });
     if (recentTokenError) {
+      this.logger.warn(`[health] Dead token detected for ${account.businessName}: errorId=${recentTokenError.id} accountName=${recentTokenError.accountName}`);
       connectionIssues.push('Token expired — please reconnect this account');
+    } else {
+      // Debug: count all token_refresh errors for this user to see if query is wrong
+      const allTokenErrors = await this.prisma.systemErrorLog.count({
+        where: { category: 'token_refresh', resolved: false, userId: account.userId },
+      });
+      if (allTokenErrors > 0) {
+        this.logger.warn(`[health] Found ${allTokenErrors} unresolved token_refresh errors for user ${account.userId} but none matched account ${account.id} / "${account.businessName}"`);
+      }
     }
 
     const healthy = connectionIssues.length === 0;
