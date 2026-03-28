@@ -203,10 +203,31 @@ export class YelpAdapter implements IPlatformAdapter {
 
   async getLead(credentials: PlatformCredentials, leadId: string): Promise<NormalizedLead> {
     try {
+      // Fetch lead details
       const response = await this.httpClient.get(`/leads/${leadId}`, {
         headers: { Authorization: `Bearer ${credentials.accessToken}` },
       });
-      return this.normalizeLead(response.data);
+      this.logger.log(`Yelp getLead raw response: ${JSON.stringify(response.data).substring(0, 1000)}`);
+
+      // Also fetch lead events to get the actual message text
+      // (Yelp's getLead doesn't include message content — only events do)
+      let messageText = '';
+      try {
+        const events = await this.getLeadEvents(credentials, leadId);
+        this.logger.log(`Yelp lead events: ${events.length} events — ${JSON.stringify(events).substring(0, 1000)}`);
+        // Find the first consumer message
+        const firstMessage = events.find((e: any) =>
+          e.event_type === 'RAQ_SUBMIT' || e.event_type === 'MESSAGE' ||
+          (e.user_type === 'CONSUMER' && e.text),
+        );
+        if (firstMessage?.text) messageText = firstMessage.text;
+      } catch (evErr: any) {
+        this.logger.warn(`Failed to fetch events for lead ${leadId}: ${evErr.message}`);
+      }
+
+      const lead = this.normalizeLead(response.data);
+      if (messageText && !lead.message) lead.message = messageText;
+      return lead;
     } catch (error) {
       const status = error.response?.status;
       const data = error.response?.data;
@@ -220,6 +241,7 @@ export class YelpAdapter implements IPlatformAdapter {
       const response = await this.httpClient.get(`/leads/${leadId}/events`, {
         headers: { Authorization: `Bearer ${credentials.accessToken}` },
       });
+      this.logger.log(`Yelp getLeadEvents raw: ${JSON.stringify(response.data).substring(0, 500)}`);
       return response.data?.events || response.data?.data || [];
     } catch (error) {
       const status = error.response?.status;
