@@ -294,7 +294,7 @@ export function Analytics() {
               <option value="all">All Accounts</option>
               {savedAccounts.map((account) => (
                 <option key={account.id} value={account.businessId}>
-                  {account.businessName}
+                  {account.businessName} [{account.platform === 'yelp' ? 'Yelp' : 'TT'}]
                 </option>
               ))}
             </select>
