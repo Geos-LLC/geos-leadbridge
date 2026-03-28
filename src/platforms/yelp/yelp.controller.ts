@@ -60,50 +60,38 @@ export class YelpController {
   }
 
   /**
-   * Logout from Yelp then redirect to OAuth.
-   * Serves an HTML page that:
-   * 1. Fetches biz.yelp.com logout to clear cookies
-   * 2. Redirects to Yelp OAuth login page
+   * Step 1: Frontend calls GET /auth/url → gets the connect URL
+   * Step 2: Frontend redirects to that URL (which is biz.yelp.com/logout?return_url=<our-redirect-endpoint>)
+   * Step 3: Yelp logs out → shows login page with return_url=<our-redirect-endpoint>
+   * Step 4: User logs in → Yelp redirects to our redirect endpoint
+   * Step 5: Our redirect endpoint redirects to the OAuth authorize URL
+   * Step 6: User consents → Yelp redirects to callback → dashboard
    */
   @Public()
-  @Get('auth/logout-and-connect')
-  async logoutAndConnect(
-    @Query('authUrl') authUrl: string,
+  @Get('auth/redirect-to-oauth')
+  async redirectToOauth(
+    @Query('state') state: string,
     @Res() res: Response,
   ) {
-    if (!authUrl) {
-      return res.redirect(`${this.frontendUrl}/dashboard?error=missing_auth_url`);
+    if (!state) {
+      return res.redirect(`${this.frontendUrl}/dashboard?error=missing_state`);
     }
 
-    // Serve an HTML page that chains: biz.yelp.com logout → consumer logout → OAuth
-    // Step 1: Navigate an iframe to biz.yelp.com/logout (clears biz session)
-    // Step 2: Navigate another iframe to www.yelp.com/logout (clears consumer session)
-    // Step 3: Redirect to OAuth URL (user sees fresh login)
-    // Iframes may be blocked by X-Frame-Options, so we also use fetch as fallback
-    const escapedUrl = authUrl.replace(/"/g, '&quot;').replace(/\\/g, '\\\\');
-    res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Connecting to Yelp...</title></head>
-<body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f8fafc">
-  <div style="text-align:center">
-    <div style="width:40px;height:40px;border:3px solid #e2e8f0;border-top-color:#dc2626;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 20px"></div>
-    <p style="color:#64748b;font-size:18px;margin:0 0 8px">Connecting to Yelp...</p>
-    <p style="color:#94a3b8;font-size:14px;margin:0">Clearing previous session and redirecting to login</p>
-  </div>
-  <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
-  <script>
-    // Try multiple logout methods - at least one should clear the session
-    // 1. Fetch with credentials (may work for same-site cookies)
-    fetch('https://biz.yelp.com/logout', { credentials: 'include', mode: 'no-cors', redirect: 'follow' }).catch(function(){});
-    fetch('https://www.yelp.com/logout', { credentials: 'include', mode: 'no-cors', redirect: 'follow' }).catch(function(){});
-    // 2. Open logout in a new window (user click not required from server-rendered page)
-    var w = window.open('https://biz.yelp.com/logout', 'yelp_biz_logout', 'width=1,height=1,left=-100,top=-100');
-    // 3. After enough time for logouts to process, close popup and redirect to OAuth
-    setTimeout(function(){
-      try { if(w) w.close(); } catch(e){}
-      window.location.href = "${escapedUrl}";
-    }, 3000);
-  </script>
-</body></html>`);
+    // Decrypt state to get userId, then build the OAuth URL
+    try {
+      const userId = await this.platformService.getUserIdFromState(state);
+      if (!userId) {
+        return res.redirect(`${this.frontendUrl}/dashboard?error=invalid_state&error_description=OAuth state expired. Please try again.`);
+      }
+
+      // Build the OAuth authorize URL
+      const authUrl = await this.platformService.getAuthUrl(userId, PlatformName.YELP);
+      this.logger.log(`[Yelp] Redirecting to OAuth after login: ${authUrl.substring(0, 80)}...`);
+      return res.redirect(authUrl);
+    } catch (err: any) {
+      this.logger.error(`[Yelp] redirect-to-oauth failed: ${err.message}`);
+      return res.redirect(`${this.frontendUrl}/dashboard?error=oauth_failed&error_description=${encodeURIComponent(err.message)}`);
+    }
   }
 
   /**
