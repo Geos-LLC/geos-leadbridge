@@ -397,6 +397,7 @@ export class WebhooksService {
             savedAccountId: savedAccount.id,
             leadId: lead.id,
             accountName: savedAccount.businessName,
+            platform: 'thumbtack',
             lead: {
               customerName,
               customerPhone: customer.phone,
@@ -754,6 +755,7 @@ export class WebhooksService {
             savedAccountId: savedAccount.id,
             leadId: lead.id,
             accountName: savedAccount.businessName,
+            platform: 'thumbtack',
             lead: {
               customerName: lead.customerName,
               customerPhone: lead.customerPhone,
@@ -1195,6 +1197,7 @@ export class WebhooksService {
             userId: lead.userId,
             savedAccountId: savedAccount.id,
             leadId: lead.id,
+            platform: savedAccount.platform,
             lead: {
               customerName: lead.customerName,
               customerPhone: lead.customerPhone || fromNumber,
@@ -1521,6 +1524,7 @@ export class WebhooksService {
           savedAccountId: savedAccount.id,
           leadId: lead.id,
           accountName: savedAccount.businessName,
+          platform: 'yelp',
           lead: {
             customerName: leadData.customerName,
             customerPhone: leadData.customerPhone,

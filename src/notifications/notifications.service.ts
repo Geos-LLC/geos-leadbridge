@@ -86,6 +86,7 @@ export interface CustomerReplyContext {
   savedAccountId: string;
   leadId: string;
   accountName?: string;
+  platform?: string;
   lead: {
     customerName: string;
     customerPhone?: string | null;
@@ -155,6 +156,7 @@ export interface SendNotificationContext {
   savedAccountId: string;
   leadId: string;
   accountName?: string;
+  platform?: string;
   lead: {
     customerName: string;
     customerPhone?: string | null;
@@ -1093,7 +1095,7 @@ export class NotificationsService {
         continue;
       }
 
-      await this.sendNotificationWithRule(settings, rule, { userId, savedAccountId, leadId, accountName: context.accountName, lead });
+      await this.sendNotificationWithRule(settings, rule, { userId, savedAccountId, leadId, accountName: context.accountName, platform: context.platform, lead });
     }
   }
 
@@ -1143,8 +1145,9 @@ export class NotificationsService {
       }
     }
 
-    // Render the message template
-    const messageBody = this.renderTemplate(template, lead, context.accountName);
+    // Render the message template, prefix with platform label if known
+    const platformLabel = context.platform === 'yelp' ? '[Yelp] ' : context.platform === 'thumbtack' ? '[TT] ' : '';
+    const messageBody = `${platformLabel}${this.renderTemplate(template, lead, context.accountName)}`;
 
     this.logger.log(
       `[sendNotificationWithRule] rule=${ruleName} sendToCustomer=${!!rule?.sendToCustomer} ` +
