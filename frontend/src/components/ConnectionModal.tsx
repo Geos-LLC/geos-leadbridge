@@ -100,9 +100,12 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
     try {
       setLoading(true);
       setError(null);
-      // Backend returns a URL that chains: logout → login → OAuth authorize
+      // Get OAuth URL, store it, then redirect to Yelp logout
+      // When user returns to dashboard after logging out, auto-redirect to OAuth
       const { url } = await platformsApi.getYelpAuthUrl();
-      window.location.href = url;
+      sessionStorage.setItem('yelp_pending_oauth', url);
+      // Redirect to Yelp logout — clears session, lands on login page
+      window.location.href = 'https://biz.yelp.com/logout';
     } catch (err: any) {
       setError(err.message || 'Failed to start Yelp connection');
       setLoading(false);
@@ -239,8 +242,11 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
                 <ExternalLink size={24} className="text-red-600" />
               </div>
               <h3 className="text-lg font-bold text-slate-900 mb-2">Connect to Yelp</h3>
-              <p className="text-sm text-slate-600 mb-6 max-w-md mx-auto">
-                Authorize LeadBridge to access your Yelp business leads. You'll be redirected to Yelp to sign in as a business owner.
+              <p className="text-sm text-slate-600 mb-4 max-w-md mx-auto">
+                You'll be logged out of Yelp and redirected to the login page. Sign in with the business owner account you want to connect.
+              </p>
+              <p className="text-xs text-slate-400 max-w-md mx-auto mb-2">
+                After logging in, come back to this page — you'll be automatically redirected to authorize LeadBridge.
               </p>
             </div>
             <button
