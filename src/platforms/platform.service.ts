@@ -901,77 +901,36 @@ export class PlatformService {
       orderBy: { lastUsedAt: 'desc' },
     });
 
-    // Check for recent token refresh failures per account
-    const accountIds = accounts.map(a => a.id);
-    const accountNames = accounts.map(a => a.businessName).filter(Boolean);
-    this.logger.log(`[getSavedAccounts] ${accounts.length} accounts for user ${userId}, checking token errors for IDs: ${accountIds.join(',')} names: ${accountNames.join(',')}`);
+    // Check token health by reading expiresAt from encrypted credentials.
+    // If a Thumbtack access token has been expired for 2+ hours, it means no successful
+    // refresh happened — the refresh token is dead and the account needs reconnection.
+    // (Thumbtack access tokens last 1 hour; any healthy flow refreshes well within 2 hours.)
+    const TOKEN_DEAD_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
+    const now = Date.now();
+    const deadAccountIds = new Set<string>();
 
-    // Only check Thumbtack accounts — Yelp tokens last 7 days and aren't rotated
-    const ttAccounts = accounts.filter(a => a.platform === 'thumbtack');
-    const ttAccountIds = ttAccounts.map(a => a.id);
-    const ttAccountNames = ttAccounts.map(a => a.businessName).filter(Boolean);
-
-    const tokenErrors = ttAccountIds.length > 0 ? await this.prisma.systemErrorLog.findMany({
-      where: {
-        category: 'token_refresh',
-        resolved: false,
-        createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-        // Match by message containing "thumbtack" to avoid false-positive on Yelp accounts with same name
-        message: { contains: 'thumbtack', mode: 'insensitive' as any },
-        OR: [
-          { accountId: { in: ttAccountIds } },
-          { accountName: { in: ttAccountNames }, userId },
-        ],
-      },
-      select: { id: true, accountId: true, accountName: true, createdAt: true },
-    }) : [];
-
-    this.logger.log(`[getSavedAccounts] Found ${tokenErrors.length} TT token errors: ${JSON.stringify(tokenErrors.map(e => ({ id: e.id, accountName: e.accountName })))}`);
-
-    const errorAccountIds = new Set(tokenErrors.map(e => e.accountId).filter(Boolean));
-    const errorAccountNames = new Set(tokenErrors.map(e => e.accountName).filter(Boolean));
-
-    // Auto-resolve stale errors: only if the LATEST lead is NEWER than the LATEST error
-    // (proves token worked AFTER the error occurred)
-    if (tokenErrors.length > 0) {
-      for (const account of ttAccounts) {
-        const hasError = errorAccountIds.has(account.id) || errorAccountNames.has(account.businessName);
-        if (!hasError) continue;
-
-        // Find the latest error timestamp for this account
-        const accountErrors = tokenErrors.filter(e => e.accountId === account.id || e.accountName === account.businessName);
-        const latestErrorAt = Math.max(...accountErrors.map(e => new Date(e.createdAt).getTime()));
-
-        // Find the latest lead AFTER the error
-        const leadAfterError = await this.prisma.lead.findFirst({
-          where: {
-            userId,
-            platform: 'thumbtack',
-            businessId: account.businessId,
-            createdAt: { gt: new Date(latestErrorAt) },
-          },
-          select: { id: true },
-        });
-
-        if (leadAfterError) {
-          this.logger.log(`[getSavedAccounts] Auto-resolving stale token errors for ${account.businessName} — lead arrived after last error`);
-          await this.prisma.systemErrorLog.updateMany({
-            where: {
-              category: 'token_refresh',
-              resolved: false,
-              OR: [{ accountId: account.id }, { accountName: account.businessName, userId }],
-            },
-            data: { resolved: true },
-          }).catch(() => {});
-          errorAccountIds.delete(account.id);
-          errorAccountNames.delete(account.businessName);
+    for (const account of accounts) {
+      if (account.platform !== 'thumbtack' || !account.credentialsJson) continue;
+      try {
+        const creds = EncryptionUtil.decryptObject<any>(account.credentialsJson, this.encryptionKey);
+        const expiresAt = creds.expiresAt ? new Date(creds.expiresAt).getTime() : null;
+        if (expiresAt && (now - expiresAt) > TOKEN_DEAD_THRESHOLD_MS) {
+          deadAccountIds.add(account.id);
         }
+      } catch {
+        // Decryption failed — treat as dead
+        deadAccountIds.add(account.id);
       }
     }
 
-    const result = accounts.map(a => ({
+    if (deadAccountIds.size > 0) {
+      const deadNames = accounts.filter(a => deadAccountIds.has(a.id)).map(a => a.businessName);
+      this.logger.warn(`[getSavedAccounts] Dead tokens (expired 2h+): ${deadNames.join(', ')}`);
+    }
+
+    const result = accounts.map(({ credentialsJson: _, ...a }) => ({
       ...a,
-      tokenDead: a.platform === 'thumbtack' && (errorAccountIds.has(a.id) || errorAccountNames.has(a.businessName)),
+      tokenDead: deadAccountIds.has(a.id),
     }));
 
     const deadAccounts = result.filter(a => a.tokenDead);
