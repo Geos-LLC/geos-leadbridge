@@ -931,6 +931,36 @@ export class PlatformService {
     const errorAccountIds = new Set(tokenErrors.map(e => e.accountId).filter(Boolean));
     const errorAccountNames = new Set(tokenErrors.map(e => e.accountName).filter(Boolean));
 
+    // Auto-resolve stale errors: if account received leads recently, token works
+    if (tokenErrors.length > 0) {
+      const recentLeadAccounts = await this.prisma.lead.groupBy({
+        by: ['businessId'],
+        where: {
+          userId,
+          platform: 'thumbtack',
+          createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+          businessId: { in: ttAccounts.map(a => a.businessId) },
+        },
+      });
+      const activeBusinessIds = new Set(recentLeadAccounts.map(r => r.businessId));
+
+      for (const account of ttAccounts) {
+        if (activeBusinessIds.has(account.businessId) && (errorAccountIds.has(account.id) || errorAccountNames.has(account.businessName))) {
+          this.logger.log(`[getSavedAccounts] Auto-resolving stale token errors for ${account.businessName} — received leads recently`);
+          await this.prisma.systemErrorLog.updateMany({
+            where: {
+              category: 'token_refresh',
+              resolved: false,
+              OR: [{ accountId: account.id }, { accountName: account.businessName, userId }],
+            },
+            data: { resolved: true },
+          }).catch(() => {});
+          errorAccountIds.delete(account.id);
+          errorAccountNames.delete(account.businessName);
+        }
+      }
+    }
+
     const result = accounts.map(a => ({
       ...a,
       tokenDead: a.platform === 'thumbtack' && (errorAccountIds.has(a.id) || errorAccountNames.has(a.businessName)),

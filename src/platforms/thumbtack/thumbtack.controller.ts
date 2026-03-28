@@ -811,18 +811,8 @@ export class ThumbtackController {
       }
     }
 
-    // Validate token by attempting a lightweight API call
-    try {
-      console.log(`[health] Validating token for ${account.businessName} (${account.id})`);
-      const tokenCheck = await this.platformService.validateAccountToken(account.userId, account.id);
-      console.log(`[health] Token validation result for ${account.businessName}: valid=${tokenCheck.valid} reason=${tokenCheck.reason || 'none'}`);
-      if (!tokenCheck.valid) {
-        connectionIssues.push('Token expired — please reconnect this account');
-      }
-    } catch (err: any) {
-      console.log(`[health] Token validation threw for ${account.businessName}: ${err.message}`);
-      connectionIssues.push('Token expired — please reconnect this account');
-    }
+    // Token health is determined by tokenDead flag in getSavedAccounts (from SystemErrorLog).
+    // No proactive API call here — too slow and causes race conditions.
 
     const healthy = connectionIssues.length === 0;
 
