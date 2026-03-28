@@ -1309,7 +1309,7 @@ export function Services() {
             className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-xl focus:ring-blue-500 focus:border-blue-500 block p-3 appearance-none font-semibold"
           >
             {accounts.map(acc => (
-              <option key={acc.id} value={acc.id}>{acc.businessName}</option>
+              <option key={acc.id} value={acc.id}>{acc.businessName} [{acc.platform === 'yelp' ? 'Yelp' : 'TT'}]</option>
             ))}
           </select>
           <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">

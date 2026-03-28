@@ -48,7 +48,7 @@ export default function AccountSelector({
         >
           {accounts.map(account => (
             <option key={account.id} value={account.id}>
-              {account.businessName}
+              {account.businessName} [{account.platform === 'yelp' ? 'Yelp' : 'TT'}]
             </option>
           ))}
           <option value="__all__">All Accounts</option>
