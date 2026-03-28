@@ -164,11 +164,52 @@ export class LeadsService {
 
     const negotiationId = lead.externalRequestId;
 
+    // For Yelp leads, fetch messages from Yelp API (events endpoint)
+    if (lead.platform === 'yelp') {
+      return this.getYelpMessages(userId, lead);
+    }
+
     // Get messages from database (stored via webhooks)
     const messages = await this.getLocalMessages(userId, lead.platform, negotiationId);
     console.log(`[LeadsService] Found ${messages.length} messages in database for negotiation ${negotiationId}`);
 
     return messages;
+  }
+
+  private async getYelpMessages(userId: string, lead: any): Promise<any[]> {
+    try {
+      // Get OAuth credentials for this business
+      const savedAccount = await this.prisma.savedAccount.findFirst({
+        where: { userId, platform: 'yelp', businessId: lead.businessId },
+      });
+
+      if (!savedAccount?.credentialsJson) {
+        console.log(`[LeadsService] No Yelp credentials for business ${lead.businessId}`);
+        return [];
+      }
+
+      const encryptionKey = this.configService.get<string>('encryptionKey') || '';
+      const creds = EncryptionUtil.decryptObject<any>(savedAccount.credentialsJson, encryptionKey);
+      const yelpAdapter = this.platformFactory.getAdapter('yelp') as any;
+      const events = await yelpAdapter.getLeadEvents({ accessToken: creds.accessToken }, lead.externalRequestId);
+
+      // Convert Yelp events to message format expected by frontend
+      return events
+        .filter((e: any) => e.event_type === 'TEXT' || e.event_type === 'RAQ_SUBMIT')
+        .map((e: any) => ({
+          id: e.id,
+          conversationId: lead.externalRequestId,
+          platform: 'yelp',
+          externalMessageId: e.id,
+          sender: e.user_type === 'CONSUMER' ? 'customer' : 'pro',
+          content: e.event_content?.text || e.event_content?.fallback_text || e.text || '',
+          isRead: true,
+          sentAt: e.time_created,
+        }));
+    } catch (err: any) {
+      console.error(`[LeadsService] Failed to fetch Yelp messages: ${err.message}`);
+      return [];
+    }
   }
 
   /**
