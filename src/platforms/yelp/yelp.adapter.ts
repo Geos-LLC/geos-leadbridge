@@ -367,12 +367,17 @@ export class YelpAdapter implements IPlatformAdapter {
     // Phone only available after CONSUMER_PHONE_NUMBER_OPT_IN_EVENT
     lead.customerPhone = data.user?.phone || data.consumer?.phone;
 
-    // Message — Yelp puts details in project.additional_info and survey answers
-    const surveyText = (data.project?.survey_answers || [])
-      .map((q: any) => `${q.question_text}: ${Array.isArray(q.answer_text) ? q.answer_text.join(', ') : q.answer_text}`)
-      .join('\n');
-    const additionalInfo = data.project?.additional_info || '';
-    lead.message = additionalInfo || surveyText || data.request_text || '';
+    // Message — combine survey answers + additional info for a complete picture
+    const surveyParts: string[] = [];
+    for (const q of data.project?.survey_answers || []) {
+      const answer = Array.isArray(q.answer_text) ? q.answer_text.join(', ') : q.answer_text;
+      surveyParts.push(`${q.question_text}: ${answer}`);
+    }
+    const availability = data.project?.availability?.status;
+    if (availability) surveyParts.push(`Availability: ${availability}`);
+    const additionalInfo = data.project?.additional_info;
+    if (additionalInfo) surveyParts.push(`Additional details: ${additionalInfo}`);
+    lead.message = surveyParts.join('\n') || data.request_text || '';
 
     // Location — Yelp uses project.location.postal_code
     lead.postcode = data.project?.location?.postal_code || data.location?.zip_code;
