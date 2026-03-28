@@ -894,27 +894,34 @@ export class PlatformService {
     const accountNames = accounts.map(a => a.businessName).filter(Boolean);
     this.logger.log(`[getSavedAccounts] ${accounts.length} accounts for user ${userId}, checking token errors for IDs: ${accountIds.join(',')} names: ${accountNames.join(',')}`);
 
-    const tokenErrors = accountIds.length > 0 ? await this.prisma.systemErrorLog.findMany({
+    // Only check Thumbtack accounts — Yelp tokens last 7 days and aren't rotated
+    const ttAccounts = accounts.filter(a => a.platform === 'thumbtack');
+    const ttAccountIds = ttAccounts.map(a => a.id);
+    const ttAccountNames = ttAccounts.map(a => a.businessName).filter(Boolean);
+
+    const tokenErrors = ttAccountIds.length > 0 ? await this.prisma.systemErrorLog.findMany({
       where: {
         category: 'token_refresh',
         resolved: false,
         createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        // Match by message containing "thumbtack" to avoid false-positive on Yelp accounts with same name
+        message: { contains: 'thumbtack', mode: 'insensitive' as any },
         OR: [
-          { accountId: { in: accountIds } },
-          { accountName: { in: accountNames }, userId },
+          { accountId: { in: ttAccountIds } },
+          { accountName: { in: ttAccountNames }, userId },
         ],
       },
-      select: { id: true, accountId: true, accountName: true, message: true, createdAt: true },
+      select: { id: true, accountId: true, accountName: true, createdAt: true },
     }) : [];
 
-    this.logger.log(`[getSavedAccounts] Found ${tokenErrors.length} token errors: ${JSON.stringify(tokenErrors.map(e => ({ id: e.id, accountId: e.accountId, accountName: e.accountName, created: e.createdAt })))}`);
+    this.logger.log(`[getSavedAccounts] Found ${tokenErrors.length} TT token errors: ${JSON.stringify(tokenErrors.map(e => ({ id: e.id, accountName: e.accountName })))}`);
 
     const errorAccountIds = new Set(tokenErrors.map(e => e.accountId).filter(Boolean));
     const errorAccountNames = new Set(tokenErrors.map(e => e.accountName).filter(Boolean));
 
     const result = accounts.map(a => ({
       ...a,
-      tokenDead: errorAccountIds.has(a.id) || errorAccountNames.has(a.businessName),
+      tokenDead: a.platform === 'thumbtack' && (errorAccountIds.has(a.id) || errorAccountNames.has(a.businessName)),
     }));
 
     const deadAccounts = result.filter(a => a.tokenDead);
