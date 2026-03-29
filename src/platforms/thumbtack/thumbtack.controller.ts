@@ -719,10 +719,9 @@ export class ThumbtackController {
       };
     }
 
-    const platformConnection = await this.prisma.platform.findFirst({
-      where: { platformName: 'thumbtack', userId: user.id, connected: true },
-      select: { id: true, externalBusinessId: true, connected: true },
-    });
+    // NOTE: Platform.connected is a stale legacy flag (set to false on disconnect,
+    // never re-set on per-account reconnect). Don't use it — webhookId on the
+    // individual SavedAccount is the real connection signal.
 
     const notifSettings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId: id },
@@ -751,7 +750,6 @@ export class ThumbtackController {
     });
 
     const connectionIssues: string[] = [];
-    if (!platformConnection) connectionIssues.push('No active Thumbtack connection found for this user');
     if (!account.webhookId) connectionIssues.push('No webhook registered — tap Reconnect to fix');
 
     // Check notification health based on what actually matters for SMS delivery.
@@ -831,8 +829,8 @@ export class ThumbtackController {
         hasWebhook: !!account.webhookId,
       },
       platform: {
-        connected: !!platformConnection,
-        externalBusinessId: platformConnection?.externalBusinessId || null,
+        connected: !!account.webhookId,
+        externalBusinessId: account.businessId || null,
       },
       notifications: {
         settingsExist: !!notifSettings,
