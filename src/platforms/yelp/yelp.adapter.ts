@@ -105,9 +105,9 @@ export class YelpAdapter implements IPlatformAdapter {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
-      const { access_token, refresh_token, expires_in, token_type } = response.data;
+      const { access_token, refresh_token, expires_in, token_type, scope } = response.data;
 
-      this.logger.log(`Yelp OAuth token received, type=${token_type}, expires_in=${expires_in}`);
+      this.logger.log(`[Yelp OAuth] Token received — type=${token_type}, expires_in=${expires_in}, scope="${scope || 'NOT_RETURNED'}", all_fields=${Object.keys(response.data).join(',')}`);
 
       return {
         accessToken: access_token,
@@ -283,11 +283,13 @@ export class YelpAdapter implements IPlatformAdapter {
 
   async sendMessage(credentials: PlatformCredentials, leadId: string, message: string): Promise<NormalizedMessage> {
     try {
+      this.logger.log(`[Yelp sendMessage] POST /leads/${leadId}/events — token=${credentials.accessToken?.substring(0, 15)}... msgLen=${message.length}`);
       const response = await this.httpClient.post(
         `/leads/${leadId}/events`,
         { request_type: 'TEXT', request_content: message },
         { headers: { Authorization: `Bearer ${credentials.accessToken}` } },
       );
+      this.logger.log(`[Yelp sendMessage] SUCCESS — status=${response.status}`);
       const data = response.data;
       const msg = new NormalizedMessage();
       msg.id = data.id || crypto.randomUUID();
