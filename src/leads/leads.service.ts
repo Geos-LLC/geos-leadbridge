@@ -293,8 +293,19 @@ export class LeadsService {
     }
     const adapter = this.platformFactory.getAdapter(lead.platform);
 
-    // Send to Thumbtack
-    const sentMessage = await adapter.sendMessage(credentials, lead.externalRequestId, message);
+    // Send message via platform adapter
+    let sentMessage;
+    try {
+      sentMessage = await adapter.sendMessage(credentials, lead.externalRequestId, message);
+    } catch (err: any) {
+      // Surface platform errors as 403 (auth/access) or 502 (upstream failure)
+      const is403 = err.message?.includes('403') || err.message?.includes('NO_BUSINESS_ACCESS') || err.message?.includes('no_business_access');
+      const is401 = err.message?.includes('401') || err.message?.includes('expired');
+      if (is403 || is401) {
+        throw new BadRequestException(`${lead.platform} access denied — reconnect your account to re-authorize (${err.message})`);
+      }
+      throw new BadRequestException(`Failed to send message: ${err.message}`);
+    }
 
     // Store the sent message locally
     // This ensures it appears immediately even if webhook is delayed
