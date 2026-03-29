@@ -397,6 +397,7 @@ export class WebhooksService {
             savedAccountId: savedAccount.id,
             leadId: lead.id,
             accountName: savedAccount.businessName,
+            platform: 'thumbtack',
             lead: {
               customerName,
               customerPhone: customer.phone,
@@ -754,6 +755,7 @@ export class WebhooksService {
             savedAccountId: savedAccount.id,
             leadId: lead.id,
             accountName: savedAccount.businessName,
+            platform: 'thumbtack',
             lead: {
               customerName: lead.customerName,
               customerPhone: lead.customerPhone,
@@ -1195,6 +1197,7 @@ export class WebhooksService {
             userId: lead.userId,
             savedAccountId: savedAccount.id,
             leadId: lead.id,
+            platform: savedAccount.platform,
             lead: {
               customerName: lead.customerName,
               customerPhone: lead.customerPhone || fromNumber,
@@ -1441,6 +1444,23 @@ export class WebhooksService {
       where: { platform_externalRequestId: { platform: 'yelp', externalRequestId: leadId } },
     });
 
+    // Ensure conversation exists for this Yelp lead (same pattern as Thumbtack).
+    // This powers lastMessageAt sorting — without it, Yelp leads stay stuck at createdAt.
+    const conversation = await this.prisma.conversation.upsert({
+      where: { platform_externalThreadId: { platform: 'yelp', externalThreadId: leadId } },
+      create: {
+        userId,
+        platform: 'yelp',
+        externalThreadId: leadId,
+        customerName: leadData.customerName || 'Unknown',
+        lastMessageAt: new Date(),
+        status: 'active',
+      },
+      update: {
+        lastMessageAt: new Date(),
+      },
+    });
+
     const lead = await this.prisma.lead.upsert({
       where: { platform_externalRequestId: { platform: 'yelp', externalRequestId: leadId } },
       create: {
@@ -1448,7 +1468,7 @@ export class WebhooksService {
         platform: 'yelp',
         businessId,
         externalRequestId: leadId,
-        // threadId references Conversation table — leave null for Yelp (no conversation model)
+        threadId: conversation.id,
         customerName: leadData.customerName,
         customerPhone: leadData.customerPhone,
         customerEmail: leadData.customerEmail,
@@ -1465,6 +1485,8 @@ export class WebhooksService {
         message: leadData.message || undefined,
         status: leadData.status || undefined,
         rawJson: JSON.stringify(leadData.raw || data),
+        // Link to conversation if not already linked
+        threadId: conversation.id,
       },
     });
 
@@ -1472,7 +1494,7 @@ export class WebhooksService {
     this.eventEmitter.emit(`lead.created.${userId}`, lead);
 
     if (existingLead) {
-      // Customer replied — store message and trigger reply automation
+      // Customer replied — conversation.lastMessageAt already updated above
       this.logger.log(`Yelp customer reply on lead ${leadId}`);
       try {
         await this.automationService.handleCustomerReply({
@@ -1521,6 +1543,7 @@ export class WebhooksService {
           savedAccountId: savedAccount.id,
           leadId: lead.id,
           accountName: savedAccount.businessName,
+          platform: 'yelp',
           lead: {
             customerName: leadData.customerName,
             customerPhone: leadData.customerPhone,

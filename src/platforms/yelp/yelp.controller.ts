@@ -51,47 +51,13 @@ export class YelpController {
 
   /**
    * Get Yelp OAuth authorization URL.
-   * Business owner clicks this to authorize LeadBridge to access their leads.
+   * Flow: frontend opens biz.yelp.com/logout in popup (clears session),
+   * then redirects main window to this OAuth URL → login → consent → callback.
    */
   @Get('auth/url')
   async getAuthUrl(@CurrentUser() user: any) {
     const authUrl = await this.platformService.getAuthUrl(user.id, PlatformName.YELP);
     return { url: authUrl };
-  }
-
-  /**
-   * Step 1: Frontend calls GET /auth/url → gets the connect URL
-   * Step 2: Frontend redirects to that URL (which is biz.yelp.com/logout?return_url=<our-redirect-endpoint>)
-   * Step 3: Yelp logs out → shows login page with return_url=<our-redirect-endpoint>
-   * Step 4: User logs in → Yelp redirects to our redirect endpoint
-   * Step 5: Our redirect endpoint redirects to the OAuth authorize URL
-   * Step 6: User consents → Yelp redirects to callback → dashboard
-   */
-  @Public()
-  @Get('auth/redirect-to-oauth')
-  async redirectToOauth(
-    @Query('state') state: string,
-    @Res() res: Response,
-  ) {
-    if (!state) {
-      return res.redirect(`${this.frontendUrl}/dashboard?error=missing_state`);
-    }
-
-    // Decrypt state to get userId, then build the OAuth URL
-    try {
-      const userId = await this.platformService.getUserIdFromState(state);
-      if (!userId) {
-        return res.redirect(`${this.frontendUrl}/dashboard?error=invalid_state&error_description=OAuth state expired. Please try again.`);
-      }
-
-      // Build the OAuth authorize URL
-      const authUrl = await this.platformService.getAuthUrl(userId, PlatformName.YELP);
-      this.logger.log(`[Yelp] Redirecting to OAuth after login: ${authUrl.substring(0, 80)}...`);
-      return res.redirect(authUrl);
-    } catch (err: any) {
-      this.logger.error(`[Yelp] redirect-to-oauth failed: ${err.message}`);
-      return res.redirect(`${this.frontendUrl}/dashboard?error=oauth_failed&error_description=${encodeURIComponent(err.message)}`);
-    }
   }
 
   /**

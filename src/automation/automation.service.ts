@@ -350,11 +350,10 @@ export class AutomationService implements OnModuleInit {
   async handleNewLead(context: AutomationTriggerContext): Promise<void> {
     this.logger.log(`Handling new lead automation: ${context.negotiationId} for business ${context.businessId}`);
 
-    // Find saved account by businessId
+    // Find saved account by businessId (any platform — Thumbtack, Yelp, etc.)
     const savedAccount = await this.prisma.savedAccount.findFirst({
       where: {
         userId: context.userId,
-        platform: 'thumbtack',
         businessId: context.businessId,
       },
     });
@@ -400,11 +399,10 @@ export class AutomationService implements OnModuleInit {
 
     this.logger.log(`[AUTOMATION] ✓ ELIGIBLE: This is a customer reply (not the first message)`);
 
-    // Find saved account by businessId
+    // Find saved account by businessId (any platform — Thumbtack, Yelp, etc.)
     const savedAccount = await this.prisma.savedAccount.findFirst({
       where: {
         userId: context.userId,
-        platform: 'thumbtack',
         businessId: context.businessId,
       },
     });

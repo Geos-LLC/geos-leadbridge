@@ -9,6 +9,9 @@
       "Grep(*)",
       "WebFetch(*)",
       "WebSearch(*)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\HP\\.claude"
     ]
   }
 }

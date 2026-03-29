@@ -59,12 +59,37 @@ export function Dashboard() {
     loadDashboardStats();
   }, []);
 
-  // Auto-redirect to Yelp OAuth if returning from Yelp logout
+  // Auto-redirect to Yelp OAuth after user logs in and returns to dashboard
   useEffect(() => {
-    const pendingYelpOAuth = sessionStorage.getItem('yelp_pending_oauth');
-    if (pendingYelpOAuth) {
-      sessionStorage.removeItem('yelp_pending_oauth');
-      window.location.href = pendingYelpOAuth;
+    // Don't redirect if this is already a callback from OAuth
+    if (searchParams.get('connected') || searchParams.get('error')) return;
+
+    const stored = sessionStorage.getItem('yelp_oauth_url');
+    if (stored) {
+      try {
+        const { url, exp } = JSON.parse(stored);
+        sessionStorage.removeItem('yelp_oauth_url');
+        if (Date.now() < exp) {
+          window.location.href = url;
+          return;
+        }
+      } catch {
+        sessionStorage.removeItem('yelp_oauth_url');
+      }
+    }
+  }, []);
+
+  // Handle Yelp OAuth success (callback redirects here with ?connected=yelp)
+  useEffect(() => {
+    const connected = searchParams.get('connected');
+    if (connected === 'yelp') {
+      const warning = searchParams.get('warning');
+      if (warning === 'no_businesses') {
+        setOauthError('Yelp authorization succeeded but no businesses were found. Please add a business manually or contact support.');
+      }
+      // Reload accounts to show the newly connected Yelp business
+      loadAccounts(true);
+      setSearchParams({}, { replace: true });
     }
   }, []);
 
@@ -410,24 +435,25 @@ export function Dashboard() {
                 return savedAccounts.map((account) => {
                   const diag = accountDiagnostics[account.id];
                   const isCheckingDiag = !diag;
-                  const hasConnectionIssues = !isCheckingDiag && (diag && !diag.healthy);
+                  const hasConnectionIssues = account.tokenDead || (!isCheckingDiag && (diag && !diag.healthy));
                   const notifIssues = diag?.notificationIssues || [];
                   // "disabled" = rule exists but toggled off; everything else = real config problem
                   const isJustDisabled = !isCheckingDiag && !hasConnectionIssues && notifIssues.length > 0 && notifIssues.every((i: string) => i.toLowerCase().includes('disabled'));
                   const hasConfigIssues = !isCheckingDiag && !hasConnectionIssues && notifIssues.length > 0 && !isJustDisabled;
 
+                  const platformBorder = account.platform === 'yelp' ? 'border-[#FF1A1A]/30' : 'border-[#41B1E1]/30';
                   const borderClass = isCheckingDiag
                     ? 'border-slate-200'
                     : hasConnectionIssues
                       ? 'border-amber-200 hover:border-amber-300'
                       : hasConfigIssues
                         ? 'border-orange-200 hover:border-orange-300'
-                        : 'border-slate-100 hover:border-blue-200';
+                        : `${platformBorder} hover:border-[${account.platform === 'yelp' ? '#FF1A1A' : '#41B1E1'}]/50`;
 
                   return (
                     <div
                       key={account.id}
-                      className={`bg-white border rounded-3xl p-5 flex items-center gap-5 transition-all cursor-pointer group shadow-sm ${borderClass}`}
+                      className={`bg-white border-2 rounded-3xl p-5 flex items-center gap-5 transition-all cursor-pointer group shadow-sm ${borderClass}`}
                       onClick={() => handleAccountClick(account)}
                     >
                       {account.imageUrl ? (
@@ -444,16 +470,20 @@ export function Dashboard() {
                       <div className="flex-1">
                         <h4 className="font-bold text-slate-900">{account.businessName}</h4>
                         <div className="flex items-center gap-2 mt-1">
+                          {/* Platform badge — always visible */}
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md text-white ${account.platform === 'yelp' ? 'bg-[#FF1A1A]' : 'bg-[#41B1E1]'}`}>
+                            {account.platform === 'yelp' ? 'Yelp' : 'TT'}
+                          </span>
                           {isCheckingDiag ? (
                             <>
                               <Loader2 className="w-3 h-3 animate-spin text-slate-400" />
-                              <span className="text-xs text-slate-400 font-medium">Checking health...</span>
+                              <span className="text-xs text-slate-400 font-medium">Checking...</span>
                             </>
                           ) : hasConnectionIssues ? (
                             <>
                               <span className="w-2 h-2 rounded-full bg-amber-500"></span>
                               <span className="text-xs text-slate-500 font-medium">
-                                {diag && !diag.healthy ? 'Needs attention' : 'Disconnected'}
+                                {account.tokenDead ? 'Token expired — reconnect' : diag && !diag.healthy ? 'Needs attention' : 'Disconnected'}
                               </span>
                             </>
                           ) : hasConfigIssues ? (
@@ -469,7 +499,7 @@ export function Dashboard() {
                           ) : (
                             <>
                               <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                              <span className="text-xs text-slate-500 font-medium">Synced: {account.platform === 'yelp' ? 'Yelp' : 'Thumbtack'}</span>
+                              <span className="text-xs text-slate-500 font-medium">Synced</span>
                             </>
                           )}
                         </div>

@@ -13,4 +13,10 @@ For this project you are authorized to:
 - Execute bash commands needed for development (npm, npx, git, curl, aws cli) without confirmation
 - Query Grafana/Loki logs without confirmation
 
+### Log Querying — Crash Detection
+When checking Railway logs for crashes, ALWAYS search for ALL of these patterns:
+- `ExceptionHandler` — NestJS uncaught exceptions (may be empty `{}` with no message/stack)
+- `error`, `Error`, `FATAL`, `Cannot`, `Nest`
+- Unfiltered last 50 lines as a fallback
+
 Do NOT push to `main` without explicit confirmation.

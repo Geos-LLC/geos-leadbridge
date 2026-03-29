@@ -50,13 +50,22 @@ export default function AdminDashboard() {
   const [messagingServiceSid, setMessagingServiceSid] = useState<string>('');
   const [messagingServiceSaving, setMessagingServiceSaving] = useState(false);
 
-  // Test customer setup
+  // Test customer setup — Thumbtack
   const [testData, setTestData] = useState<Record<string, string>>({
     customerName: 'Test Customer', firstName: 'Test', accountName: 'Test Business',
     category: 'House Cleaning', city: 'Tampa', state: 'FL', location: 'Tampa, FL', zip: '33601',
     message: 'Looking for reliable cleaning services', serviceDescription: 'Standard home cleaning',
     addons: '', frequency: 'Weekly', bedrooms: '3', bathrooms: '2',
     price: '$120', pets: 'None', estimate: '$120', dates: 'Flexible',
+  });
+  // Test customer setup — Yelp
+  const [yelpTestData, setYelpTestData] = useState<Record<string, string>>({
+    customerName: 'Yelp Test Customer', firstName: 'Yelp',
+    category: 'Deep Cleaning', city: 'Jacksonville', state: 'FL', location: 'Jacksonville, FL', zip: '32210',
+    message: 'Deep cleaning, 2 bedrooms, 2 bathrooms, pet odor treatment',
+    serviceDescription: 'Deep cleaning', addons: 'Pet odor treatment', frequency: 'Just once',
+    bedrooms: '2 bedrooms', bathrooms: '2 bathrooms', pets: 'Yes - pet odor treatment needed',
+    dates: 'As soon as possible',
   });
   const [testConfigSaving, setTestConfigSaving] = useState(false);
 
@@ -171,6 +180,7 @@ export default function AdminDashboard() {
     try {
       const cfg = await adminApi.getAdminConfig();
       if (cfg?.testData) setTestData(prev => ({ ...prev, ...cfg.testData }));
+      if (cfg?.yelpTestData) setYelpTestData(prev => ({ ...prev, ...cfg.yelpTestData }));
     } catch {
       // keep defaults
     }
@@ -179,8 +189,9 @@ export default function AdminDashboard() {
   const handleSaveTestConfig = async () => {
     try {
       setTestConfigSaving(true);
-      const updated = await adminApi.updateAdminConfig(testData);
+      const updated = await adminApi.updateAdminConfig(testData, yelpTestData);
       if (updated?.testData) setTestData(prev => ({ ...prev, ...updated.testData }));
+      if (updated?.yelpTestData) setYelpTestData(prev => ({ ...prev, ...updated.yelpTestData }));
       notify.success('Saved', 'Test customer settings updated');
     } catch {
       notify.error('Error', 'Failed to save test customer settings');
@@ -618,7 +629,7 @@ export default function AdminDashboard() {
       <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-4 md:p-6 border-b border-slate-100">
           <h2 className="text-lg md:text-xl font-bold text-slate-900">Test Customer Setup</h2>
-          <p className="text-sm text-slate-500 mt-1">Placeholder data injected into template variables when any tenant runs a test call.</p>
+          <p className="text-sm text-slate-500 mt-1">Placeholder data for test notifications. Thumbtack and Yelp use different data structures.</p>
         </div>
         <div className="p-4 md:p-6 space-y-6">
           {(() => {
@@ -641,6 +652,9 @@ export default function AdminDashboard() {
             );
             return (
               <>
+                <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5">
+                  <p className="text-sm font-bold text-blue-800">Thumbtack [TT] Test Data</p>
+                </div>
                 {/* Customer */}
                 <div>
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Customer</p>
@@ -704,22 +718,74 @@ export default function AdminDashboard() {
                   </div>
                 </div>
 
-                {/* Auto-built / read-only variables */}
-                <div className="bg-slate-50 rounded-xl p-4">
-                  <p className="text-xs font-bold text-slate-600 mb-3">Auto-built variables (read-only)</p>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      { name: '{summary}', value: `${testData['customerName'] || 'Test Customer'} — ${testData['category'] || 'House Cleaning'} — ${testData['location'] || 'Tampa, FL'}` },
-                      { name: '{phone}',   value: 'from test call input' },
-                      { name: '{digit}',   value: 'from agent accept digits' },
-                    ].map(v => (
-                      <div key={v.name} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs">
-                        <span className="font-mono text-blue-700 font-semibold">{v.name}</span>
-                        <span className="text-slate-300">→</span>
-                        <span className="text-slate-500 italic">{v.value}</span>
+                {/* Yelp Test Data */}
+                <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mt-4">
+                  <p className="text-sm font-bold text-red-800">Yelp Test Data</p>
+                  <p className="text-xs text-red-600 mt-0.5">Yelp leads use survey Q&A format. No price/estimate. Phone only after customer opt-in.</p>
+                </div>
+
+                {/* Yelp Customer */}
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Yelp Customer</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {(() => { const yf = (key: string, label: string, placeholder: string) => (
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-700">{label}</label>
+                        <input type="text" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-transparent transition-all"
+                          value={yelpTestData[key] ?? ''} onChange={e => setYelpTestData(prev => ({ ...prev, [key]: e.target.value }))} placeholder={placeholder} />
                       </div>
-                    ))}
+                    ); return (<>
+                      {yf('customerName', 'Full Name', 'Yelp Test Customer')}
+                      {yf('category', 'Category (job_name)', 'Deep Cleaning')}
+                      {yf('serviceDescription', 'Service Type', 'Deep cleaning')}
+                    </>); })()}
                   </div>
+                </div>
+
+                {/* Yelp Location */}
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Yelp Location</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {(() => { const yf = (key: string, label: string, placeholder: string) => (
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-700">{label}</label>
+                        <input type="text" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-transparent transition-all"
+                          value={yelpTestData[key] ?? ''} onChange={e => setYelpTestData(prev => ({ ...prev, [key]: e.target.value }))} placeholder={placeholder} />
+                      </div>
+                    ); return (<>
+                      {yf('city', 'City', 'Jacksonville')}
+                      {yf('state', 'State', 'FL')}
+                      {yf('zip', 'ZIP', '32210')}
+                    </>); })()}
+                  </div>
+                </div>
+
+                {/* Yelp Survey Answers */}
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Yelp Survey Answers</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {(() => { const yf = (key: string, label: string, placeholder: string) => (
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-700">{label}</label>
+                        <input type="text" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-transparent transition-all"
+                          value={yelpTestData[key] ?? ''} onChange={e => setYelpTestData(prev => ({ ...prev, [key]: e.target.value }))} placeholder={placeholder} />
+                      </div>
+                    ); return (<>
+                      {yf('frequency', 'How often?', 'Just once')}
+                      {yf('bedrooms', 'Bedrooms', '2 bedrooms')}
+                      {yf('bathrooms', 'Bathrooms', '2 bathrooms')}
+                      {yf('addons', 'Other services (comma-sep)', 'Pet odor treatment')}
+                      {yf('pets', 'Pets', 'Yes')}
+                      {yf('dates', 'When needed?', 'As soon as possible')}
+                    </>); })()}
+                  </div>
+                </div>
+
+                {/* Yelp Message */}
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Yelp Message</p>
+                  <textarea rows={2} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-transparent transition-all resize-none"
+                    value={yelpTestData['message'] ?? ''} onChange={e => setYelpTestData(prev => ({ ...prev, message: e.target.value }))} placeholder="Deep cleaning, 2 bedrooms, 2 bathrooms" />
                 </div>
               </>
             );

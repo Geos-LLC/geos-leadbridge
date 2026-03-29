@@ -700,9 +700,10 @@ export class ThumbtackController {
     @CurrentUser() user: any,
     @Param('id') id: string,
   ) {
+    console.log(`[health] getAccountHealth called for account ${id}, user ${user.id}`);
     const account = await this.prisma.savedAccount.findFirst({
       where: { id, userId: user.id },
-      select: { id: true, businessId: true, businessName: true, webhookId: true, userId: true },
+      select: { id: true, businessId: true, businessName: true, webhookId: true, userId: true, platform: true },
     });
 
     if (!account) {
@@ -809,6 +810,9 @@ export class ThumbtackController {
         }
       }
     }
+
+    // Token health is determined by tokenDead flag in getSavedAccounts (from SystemErrorLog).
+    // No proactive API call here — too slow and causes race conditions.
 
     const healthy = connectionIssues.length === 0;
 

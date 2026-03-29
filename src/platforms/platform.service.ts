@@ -244,13 +244,25 @@ export class PlatformService {
         try {
           const account = await this.prisma.savedAccount.findUnique({
             where: { id: accountId },
-            select: { userId: true },
+            select: { userId: true, businessName: true },
           });
           if (account) {
             await this.storeCredentials(account.userId, platform, newCredentials);
+            // Auto-resolve stale token_refresh errors — token is working now
+            await this.prisma.systemErrorLog.updateMany({
+              where: {
+                category: 'token_refresh',
+                resolved: false,
+                OR: [
+                  { accountId },
+                  { accountName: account.businessName, userId: account.userId },
+                ],
+              },
+              data: { resolved: true },
+            });
           }
         } catch {
-          // Non-critical: platform table sync failure doesn't block the main flow
+          // Non-critical: platform table sync / error cleanup failure doesn't block the main flow
         }
 
         return {
@@ -856,16 +868,17 @@ export class PlatformService {
           } catch (refreshError: any) {
             console.error(`[PlatformService] Failed to refresh account token for business ${businessId}: ${refreshError.message}`);
 
-            const savedAcct = await this.prisma.savedAccount.findFirst({ where: { userId, platform, businessId }, select: { businessName: true } }).catch(() => null);
+            const savedAcct = await this.prisma.savedAccount.findFirst({ where: { userId, platform, businessId }, select: { id: true, businessName: true } }).catch(() => null);
             this.monitoring.captureError({
               category: 'token_refresh',
               message: `${platform} token refresh failed for business ${businessId} — ${refreshError.message}`,
               userId,
+              accountId: savedAcct?.id,
               accountName: savedAcct?.businessName,
               context: { platform, businessId },
             });
 
-            throw new Error(`Thumbtack token expired and could not be refreshed — please reconnect your Thumbtack account (${refreshError.message})`);
+            throw new Error(`${platform} token expired and could not be refreshed — please reconnect your account (${refreshError.message})`);
           }
         }
       }
@@ -880,13 +893,45 @@ export class PlatformService {
    * Get all saved accounts for a user
    */
   async getSavedAccounts(userId: string, platform?: string) {
-    return this.prisma.savedAccount.findMany({
+    const accounts = await this.prisma.savedAccount.findMany({
       where: {
         userId,
         ...(platform && { platform }),
       },
       orderBy: { lastUsedAt: 'desc' },
     });
+
+    // Check token health via SystemErrorLog: an unresolved token_refresh error means
+    // the refresh token is dead and the account needs reconnection.
+    // NOTE: Do NOT use credential expiresAt — TT access tokens expire every hour and
+    // are only refreshed on-demand. An expired access token is normal idle behavior,
+    // not a dead token. SystemErrorLog records actual refresh failures.
+    const ttAccountIds = accounts.filter(a => a.platform === 'thumbtack').map(a => a.id);
+    const deadAccountIds = new Set<string>();
+
+    if (ttAccountIds.length > 0) {
+      const tokenErrors = await this.prisma.systemErrorLog.findMany({
+        where: {
+          category: 'token_refresh',
+          resolved: false,
+          accountId: { in: ttAccountIds },
+        },
+        select: { accountId: true },
+      });
+      for (const err of tokenErrors) {
+        if (err.accountId) deadAccountIds.add(err.accountId);
+      }
+    }
+
+    if (deadAccountIds.size > 0) {
+      const deadNames = accounts.filter(a => deadAccountIds.has(a.id)).map(a => a.businessName);
+      this.logger.warn(`[getSavedAccounts] Dead tokens (unresolved token_refresh errors): ${deadNames.join(', ')}`);
+    }
+
+    return accounts.map(({ credentialsJson: _, ...a }) => ({
+      ...a,
+      tokenDead: deadAccountIds.has(a.id),
+    }));
   }
 
   /**
@@ -1066,12 +1111,14 @@ export class PlatformService {
         return { valid: false, reason: firstError.message || 'Failed to validate token' };
       }
 
-      // Auth error — try silent token refresh before giving up
+      // Auth error — try silent token refresh before giving up (use serialized lock!)
       console.log(`[PlatformService] Token invalid for account ${accountId}, attempting silent refresh...`);
       if (credentials.refreshToken) {
         try {
-          const refreshed = await adapter.refreshAccessToken(credentials.refreshToken);
-          await this.updateAccountCredentials(accountId, { ...credentials, ...refreshed });
+          const lockKey = `${account.platform}:${account.businessId}`;
+          const refreshed = await this.serializedAccountRefresh(
+            lockKey, accountId, account.platform, credentials.refreshToken, credentials.email,
+          );
           await tryCall({ ...credentials, ...refreshed });
           console.log(`[PlatformService] Silent token refresh succeeded for account ${accountId}`);
           return { valid: true };

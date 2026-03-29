@@ -770,6 +770,8 @@ model AdminConfig {
   testLocation     String   @default("Tampa, FL")
   /// Full map of template variable test values — keys match variable names (without braces)
   testData         Json?    @map("test_data")
+  /// Yelp-specific test data (survey answers, different structure from Thumbtack)
+  yelpTestData     Json?    @map("yelp_test_data")
 
   // Phone number reselling pricing
   phonePriceMonthly    Decimal?  @db.Decimal(10, 2) @map("phone_price_monthly")

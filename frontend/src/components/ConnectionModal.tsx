@@ -100,11 +100,17 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
     try {
       setLoading(true);
       setError(null);
-      // Get OAuth URL, store it, then redirect to Yelp logout
-      // When user returns to dashboard after logging out, auto-redirect to OAuth
-      // Backend returns a URL that chains: logout → login → our backend → OAuth
+      // Get the OAuth authorize URL from backend
       const { url } = await platformsApi.getYelpAuthUrl();
-      window.location.href = url;
+      // Store OAuth URL so Dashboard can auto-redirect after Yelp login
+      sessionStorage.setItem('yelp_oauth_url', JSON.stringify({
+        url,
+        exp: Date.now() + 10 * 60 * 1000, // expires in 10 minutes
+      }));
+      // Full-page redirect to Yelp logout → clears session → shows login page
+      // return_url attempts to bring user back to our dashboard after login
+      const dashboardUrl = window.location.origin + '/dashboard';
+      window.location.href = `https://biz.yelp.com/logout?return_url=${encodeURIComponent(dashboardUrl)}`;
     } catch (err: any) {
       setError(err.message || 'Failed to start Yelp connection');
       setLoading(false);
@@ -242,10 +248,8 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
               </div>
               <h3 className="text-lg font-bold text-slate-900 mb-2">Connect to Yelp</h3>
               <p className="text-sm text-slate-600 mb-4 max-w-md mx-auto">
-                You'll be logged out of Yelp and redirected to the login page. Sign in with the business owner account you want to connect.
-              </p>
-              <p className="text-xs text-slate-400 max-w-md mx-auto mb-2">
-                After logging in, come back to this page — you'll be automatically redirected to authorize LeadBridge.
+                You'll be redirected to Yelp to log out and sign in with the business account you want to connect.
+                After signing in, you'll be brought back here to authorize LeadBridge.
               </p>
             </div>
             <button
