@@ -60,8 +60,9 @@ export class YelpAdapter implements IPlatformAdapter {
   // ==========================================
 
   /**
-   * Returns the OAuth authorize URL (direct, no logout chain).
-   * Frontend handles logout separately via popup before redirecting here.
+   * Returns the full logout → login → OAuth authorize chain URL.
+   * Chain: biz.yelp.com/logout clears session → forces login → OAuth consent → callback.
+   * The & in OAuth params is encoded as %26 so they stay inside return_url.
    */
   getAuthUrl(_userId: string, state: string): string {
     const params = new URLSearchParams({
@@ -72,7 +73,10 @@ export class YelpAdapter implements IPlatformAdapter {
       state,
     });
 
-    return `${this.authBaseUrl}/authorize?${params.toString()}`;
+    // Encode & as %26 so OAuth params stay inside return_url
+    // Don't fully encodeURIComponent — that double-encodes redirect_uri
+    const oauthPath = `/oauth2/authorize?${params.toString().replace(/&/g, '%26')}`;
+    return `https://biz.yelp.com/logout?return_url=${oauthPath}`;
   }
 
   async handleCallback(code: string, _userId: string): Promise<PlatformCredentials> {
