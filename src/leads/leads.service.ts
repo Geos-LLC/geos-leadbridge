@@ -189,7 +189,7 @@ export class LeadsService {
         return [];
       }
 
-      const encryptionKey = this.configService.get<string>('encryptionKey') || '';
+      const encryptionKey = this.configService.get<string>('encryption.key') || '';
       const creds = EncryptionUtil.decryptObject<any>(savedAccount.credentialsJson, encryptionKey);
       const yelpAdapter = this.platformFactory.getAdapter('yelp') as any;
       const events = await yelpAdapter.getLeadEvents({ accessToken: creds.accessToken }, lead.externalRequestId);

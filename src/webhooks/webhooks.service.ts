@@ -1358,7 +1358,7 @@ export class WebhooksService {
     let accessToken = this.configService.get<string>('yelp.apiKey') || '';
     if (savedAccount.credentialsJson) {
       try {
-        const encryptionKey = this.configService.get<string>('encryptionKey') || '';
+        const encryptionKey = this.configService.get<string>('encryption.key') || '';
         const creds = EncryptionUtil.decryptObject<any>(savedAccount.credentialsJson, encryptionKey);
         if (creds.accessToken) {
           accessToken = creds.accessToken;
