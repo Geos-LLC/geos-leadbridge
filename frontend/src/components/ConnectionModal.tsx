@@ -104,13 +104,11 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
       setLoading(true);
       setError(null);
       const { url } = await platformsApi.getYelpAuthUrl();
-      // Store OAuth URL so Dashboard can auto-redirect after Yelp login
-      sessionStorage.setItem('yelp_oauth_url', JSON.stringify({
-        url,
-        exp: Date.now() + 10 * 60 * 1000,
-      }));
-      // Logout → login page. User logs in, lands on our dashboard, which picks up the stored OAuth URL.
-      window.location.href = `https://biz.yelp.com/logout?return_url=${encodeURIComponent('https://biz.yelp.com/login')}`;
+      // Chain: logout → login → OAuth consent → callback to LeadBridge.
+      // Yelp logout return_url accepts relative paths on biz.yelp.com.
+      // Extract path from OAuth URL and encode & as %26 so Yelp parses it correctly.
+      const oauthPath = url.replace('https://biz.yelp.com', '').replace(/&/g, '%26');
+      window.location.href = `https://biz.yelp.com/logout?return_url=${oauthPath}`;
     } catch (err: any) {
       setError(err.message || 'Failed to start Yelp connection');
       setLoading(false);
