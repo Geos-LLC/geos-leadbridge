@@ -289,7 +289,10 @@ export class YelpAdapter implements IPlatformAdapter {
       const status = error.response?.status;
       const data = error.response?.data;
       this.logger.error(`Error sending Yelp message — status=${status} data=${JSON.stringify(data)} msg=${error.message}`);
-      if (status === 401) throw new Error('Yelp token expired — please reconnect your Yelp account');
+      if (status === 401 || status === 403) {
+        const reason = data?.error?.code || (status === 401 ? 'token_expired' : 'no_business_access');
+        throw new Error(`Yelp ${reason} (${status}) — reconnect your Yelp account to re-authorize`);
+      }
       throw new Error(`Failed to send message to Yelp: ${error.message}`);
     }
   }

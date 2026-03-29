@@ -878,7 +878,7 @@ export class PlatformService {
               context: { platform, businessId },
             });
 
-            throw new Error(`Thumbtack token expired and could not be refreshed — please reconnect your Thumbtack account (${refreshError.message})`);
+            throw new Error(`${platform} token expired and could not be refreshed — please reconnect your account (${refreshError.message})`);
           }
         }
       }

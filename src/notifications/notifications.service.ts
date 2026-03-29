@@ -924,11 +924,9 @@ export class NotificationsService {
       return;
     }
 
-    // Check if lead has phone (if required)
-    if (settings.requirePhone && !lead.customerPhone) {
-      this.logger.log(`Lead ${leadId} has no phone, skipping notification`);
-      return;
-    }
+    // requirePhone only gates customer-facing SMS (sendToCustomer=true rules).
+    // Business-owner alerts should always fire — Yelp leads often have no phone at creation.
+    // The per-rule check happens inside sendNotificationWithRule.
 
     // Check quiet hours
     if (this.isQuietHours(settings)) {
