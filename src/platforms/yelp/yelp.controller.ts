@@ -239,6 +239,87 @@ export class YelpController {
     return { success: true, subscribed: accounts.length };
   }
 
+  /**
+   * Yelp account health check.
+   * Validates OAuth token still grants access to this business by calling
+   * partner-api.yelp.com/token/v1/businesses and checking if the businessId
+   * is in the returned list. Also checks notification settings.
+   */
+  @Get('saved-accounts/:id/health')
+  async getAccountHealth(@CurrentUser() user: any, @Param('id') id: string) {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id, userId: user.id, platform: PlatformName.YELP },
+      select: { id: true, businessId: true, businessName: true, userId: true, credentialsJson: true },
+    });
+
+    if (!account) {
+      return { healthy: true, issues: [], notificationIssues: [], platform: { connected: false }, account: { hasWebhook: false }, notifications: { settingsExist: false, hasSigcoreApiKey: false, newLeadRules: 0, customerReplyRules: 0, rules: [] }, automation: { totalRules: 0 }, recentLogs: [] };
+    }
+
+    const connectionIssues: string[] = [];
+
+    // Check OAuth token validity: does the token still grant access to this business?
+    if (account.credentialsJson) {
+      try {
+        const creds = EncryptionUtil.decryptObject<any>(account.credentialsJson, this.encryptionKey);
+        if (creds.accessToken) {
+          const authorizedBusinesses = await this.yelpAdapter.getClaimedBusinesses(creds.accessToken);
+          const authorizedIds = authorizedBusinesses.map((b: any) => b.id || b.business_id);
+          if (!authorizedIds.includes(account.businessId)) {
+            connectionIssues.push('Yelp token lacks access to this business — reconnect Yelp to re-authorize');
+          }
+        } else {
+          connectionIssues.push('No Yelp OAuth token — reconnect Yelp account');
+        }
+      } catch {
+        connectionIssues.push('Failed to validate Yelp credentials — reconnect Yelp account');
+      }
+    } else {
+      connectionIssues.push('No Yelp credentials stored — reconnect Yelp account');
+    }
+
+    // Check notification settings (same pattern as Thumbtack health)
+    const notifSettings = await this.prisma.notificationSettings.findUnique({
+      where: { savedAccountId: id },
+      include: { notificationRules: { select: { id: true, name: true, triggerType: true, toPhone: true, fromPhone: true, enabled: true, sendToCustomer: true } } },
+    });
+
+    const notificationIssues: string[] = [];
+    const allNewLeadRules = (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead');
+    const enabledNewLeadRules = allNewLeadRules.filter((r: any) => r.enabled);
+
+    if (allNewLeadRules.length === 0) {
+      notificationIssues.push('No "new_lead" SMS rules configured');
+    } else if (enabledNewLeadRules.length === 0) {
+      notificationIssues.push('Lead alert rule exists but is disabled');
+    }
+
+    const automationRules = await this.prisma.automationRule.findMany({
+      where: { savedAccountId: id, enabled: true },
+      select: { id: true, name: true, triggerType: true },
+    });
+
+    const healthy = connectionIssues.length === 0;
+
+    return {
+      healthy,
+      issues: [...connectionIssues, ...notificationIssues],
+      notificationIssues,
+      platform: { connected: healthy },
+      account: { id: account.id, businessId: account.businessId, businessName: account.businessName, hasWebhook: true },
+      notifications: {
+        settingsExist: !!notifSettings,
+        settingsEnabled: notifSettings?.enabled ?? false,
+        hasSigcoreApiKey: !!notifSettings?.sigcoreApiKey,
+        totalRules: notifSettings?.notificationRules?.length || 0,
+        newLeadRules: enabledNewLeadRules.length,
+        customerReplyRules: (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'customer_reply' && r.enabled).length,
+      },
+      automation: { totalRules: automationRules.length, rules: automationRules.map(r => ({ name: r.name, triggerType: r.triggerType })) },
+      recentLogs: [],
+    };
+  }
+
   @Get('leads')
   async getLeads(@CurrentUser() user: any) {
     const leads = await this.prisma.lead.findMany({
