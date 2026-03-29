@@ -91,9 +91,12 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
 
   const handleReconnect = async () => {
     if (!accountToReconnect) return;
-    console.log('[Reconnect] Starting full re-auth for account:', accountToReconnect.id, accountToReconnect.businessName);
-    // Always do full logout + OAuth — quick webhook reconnect is useless when token is dead
-    handleSwitchAccount();
+    console.log('[Reconnect] Starting full re-auth for account:', accountToReconnect.id, accountToReconnect.businessName, accountToReconnect.platform);
+    if (accountToReconnect.platform === 'yelp') {
+      handleStartYelpOAuth();
+    } else {
+      handleSwitchAccount();
+    }
   };
 
   const handleStartYelpOAuth = async () => {
@@ -191,7 +194,7 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
                 </div>
               </div>
               <p className="text-sm text-slate-600">
-                This will re-register webhooks and resume automation for this account. You may need to authenticate with Thumbtack if your session expired.
+                This will re-authorize and resume automation for this account. You may need to log in to {accountToReconnect.platform === 'yelp' ? 'Yelp' : 'Thumbtack'} if your session expired.
               </p>
             </div>
 
