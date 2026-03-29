@@ -56,7 +56,9 @@ export class YelpController {
    */
   @Get('auth/url')
   async getAuthUrl(@CurrentUser() user: any) {
+    this.logger.log(`[Yelp OAuth] Step 1: GET /auth/url called by user ${user.id}`);
     const authUrl = await this.platformService.getAuthUrl(user.id, PlatformName.YELP);
+    this.logger.log(`[Yelp OAuth] Step 1: Returning URL → ${authUrl.substring(0, 120)}...`);
     return { url: authUrl };
   }
 
@@ -73,31 +75,41 @@ export class YelpController {
     @Query('error_description') errorDescription: string,
     @Res() res: Response,
   ) {
+    this.logger.log(`[Yelp OAuth] Step 3: GET /auth/callback — code=${code?.substring(0, 10) || 'NONE'}... state=${state?.substring(0, 20) || 'NONE'}... error=${error || 'none'}`);
+
     if (error) {
+      this.logger.error(`[Yelp OAuth] Step 3: ERROR from Yelp — error=${error} desc=${errorDescription}`);
       const params = new URLSearchParams({ error, error_description: errorDescription || 'Yelp OAuth failed' });
-      return res.redirect(`${this.frontendUrl}/dashboard?${params.toString()}`);
+      const redirectUrl = `${this.frontendUrl}/dashboard?${params.toString()}`;
+      this.logger.log(`[Yelp OAuth] Step 3: Redirecting to ${redirectUrl}`);
+      return res.redirect(redirectUrl);
     }
 
     if (!code) {
+      this.logger.error(`[Yelp OAuth] Step 3: Missing authorization code`);
       return res.redirect(`${this.frontendUrl}/dashboard?error=missing_code&error_description=Authorization code is required`);
     }
 
     try {
       const userId = await this.platformService.getUserIdFromState(state);
+      this.logger.log(`[Yelp OAuth] Step 3: State decoded → userId=${userId || 'INVALID'}`);
       if (!userId) {
+        this.logger.error(`[Yelp OAuth] Step 3: Invalid/expired state`);
         return res.redirect(`${this.frontendUrl}/dashboard?error=invalid_state&error_description=OAuth state expired. Please try again.`);
       }
 
       // Exchange code for tokens
+      this.logger.log(`[Yelp OAuth] Step 4: Exchanging code for tokens...`);
       const credentials = await this.yelpAdapter.handleCallback(code, userId);
+      this.logger.log(`[Yelp OAuth] Step 4: Token received — accessToken=${credentials.accessToken?.substring(0, 15)}... expiresAt=${credentials.expiresAt?.toISOString() || 'none'} hasRefresh=${!!credentials.refreshToken}`);
 
       // Fetch claimed businesses using the new OAuth token
+      this.logger.log(`[Yelp OAuth] Step 5: Fetching claimed businesses...`);
       const businesses = await this.yelpAdapter.getClaimedBusinesses(credentials.accessToken);
+      this.logger.log(`[Yelp OAuth] Step 5: Found ${businesses.length} businesses: ${businesses.map((b: any) => `${b.name || b.id}`).join(', ')}`);
 
       if (businesses.length === 0) {
-        // Business discovery failed — store credentials at platform level
-        // so they can be associated with businesses later (manual add or webhook)
-        this.logger.warn('Yelp OAuth succeeded but business discovery failed — storing credentials for later use');
+        this.logger.warn(`[Yelp OAuth] Step 5: No businesses found — storing credentials at platform level`);
         await this.platformService.storeCredentials(userId, PlatformName.YELP, credentials);
         return res.redirect(`${this.frontendUrl}/dashboard?connected=yelp&warning=no_businesses`);
       }
@@ -145,12 +157,16 @@ export class YelpController {
         }
       }
 
-      this.logger.log(`Yelp OAuth complete: ${businesses.length} businesses connected for user ${userId}`);
-      return res.redirect(`${this.frontendUrl}/dashboard?connected=yelp&businesses=${businesses.length}`);
+      this.logger.log(`[Yelp OAuth] Step 6: Complete — ${businesses.length} businesses connected for user ${userId}`);
+      const successUrl = `${this.frontendUrl}/dashboard?connected=yelp&businesses=${businesses.length}`;
+      this.logger.log(`[Yelp OAuth] Step 6: Redirecting to ${successUrl}`);
+      return res.redirect(successUrl);
     } catch (err: any) {
-      this.logger.error(`Yelp OAuth callback failed: ${err.message}`);
+      this.logger.error(`[Yelp OAuth] FAILED at callback: ${err.message} stack=${err.stack?.split('\n').slice(0, 3).join(' | ')}`);
       const params = new URLSearchParams({ error: 'oauth_failed', error_description: err.message });
-      return res.redirect(`${this.frontendUrl}/dashboard?${params.toString()}`);
+      const failUrl = `${this.frontendUrl}/dashboard?${params.toString()}`;
+      this.logger.log(`[Yelp OAuth] Redirecting to error URL: ${failUrl}`);
+      return res.redirect(failUrl);
     }
   }
 

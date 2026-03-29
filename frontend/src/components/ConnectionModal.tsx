@@ -91,7 +91,7 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
 
   const handleReconnect = async () => {
     if (!accountToReconnect) return;
-    console.log('[Reconnect] Starting full re-auth for account:', accountToReconnect.id, accountToReconnect.businessName, accountToReconnect.platform);
+    console.log('[Yelp OAuth] Step 0: handleReconnect called', { id: accountToReconnect.id, name: accountToReconnect.businessName, platform: accountToReconnect.platform });
     if (accountToReconnect.platform === 'yelp') {
       handleStartYelpOAuth();
     } else {
@@ -103,10 +103,14 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
     try {
       setLoading(true);
       setError(null);
-      // Backend returns the full logout→login→consent chain URL
+      console.log('[Yelp OAuth] Step 1: Fetching OAuth URL from backend...');
       const { url } = await platformsApi.getYelpAuthUrl();
+      console.log('[Yelp OAuth] Step 1: Backend returned URL:', url);
+      console.log('[Yelp OAuth] Step 2: Redirecting browser to Yelp logout→login→consent chain...');
+      console.log('[Yelp OAuth] Expected flow: logout (clear session) → login page → consent → callback to LeadBridge');
       window.location.href = url;
     } catch (err: any) {
+      console.error('[Yelp OAuth] Step 1 FAILED:', err.message);
       setError(err.message || 'Failed to start Yelp connection');
       setLoading(false);
     }

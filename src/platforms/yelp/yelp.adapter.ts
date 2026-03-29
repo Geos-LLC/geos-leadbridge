@@ -75,8 +75,19 @@ export class YelpAdapter implements IPlatformAdapter {
       state,
     });
 
-    const oauthPath = `/oauth2/authorize?${params.toString().replace(/&/g, '%26')}`;
-    return `https://biz.yelp.com/logout?return_url=${oauthPath}`;
+    const rawOAuthPath = `/oauth2/authorize?${params.toString()}`;
+    const encodedOAuthPath = `/oauth2/authorize?${params.toString().replace(/&/g, '%26')}`;
+    const finalUrl = `https://biz.yelp.com/logout?return_url=${encodedOAuthPath}`;
+
+    this.logger.log(`[Yelp OAuth] getAuthUrl built:`);
+    this.logger.log(`[Yelp OAuth]   client_id=${this.clientId}`);
+    this.logger.log(`[Yelp OAuth]   redirect_uri=${this.redirectUri}`);
+    this.logger.log(`[Yelp OAuth]   state=${state.substring(0, 20)}...`);
+    this.logger.log(`[Yelp OAuth]   raw OAuth path=${rawOAuthPath.substring(0, 100)}...`);
+    this.logger.log(`[Yelp OAuth]   encoded OAuth path=${encodedOAuthPath.substring(0, 100)}...`);
+    this.logger.log(`[Yelp OAuth]   final URL=${finalUrl.substring(0, 150)}...`);
+
+    return finalUrl;
   }
 
   async handleCallback(code: string, _userId: string): Promise<PlatformCredentials> {

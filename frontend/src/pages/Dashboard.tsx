@@ -61,19 +61,29 @@ export function Dashboard() {
 
   // Auto-redirect to Yelp OAuth after user logs in and returns to dashboard
   useEffect(() => {
+    console.log('[Yelp OAuth] Dashboard mount — checking for stored OAuth URL', { connected: searchParams.get('connected'), error: searchParams.get('error'), hasStored: !!sessionStorage.getItem('yelp_oauth_url') });
+
     // Don't redirect if this is already a callback from OAuth
-    if (searchParams.get('connected') || searchParams.get('error')) return;
+    if (searchParams.get('connected') || searchParams.get('error')) {
+      console.log('[Yelp OAuth] Dashboard: skipping redirect — already a callback');
+      return;
+    }
 
     const stored = sessionStorage.getItem('yelp_oauth_url');
     if (stored) {
       try {
         const { url, exp } = JSON.parse(stored);
         sessionStorage.removeItem('yelp_oauth_url');
-        if (Date.now() < exp) {
+        const expired = Date.now() >= exp;
+        console.log('[Yelp OAuth] Dashboard: found stored OAuth URL', { url: url?.substring(0, 80), expired, expiresIn: Math.round((exp - Date.now()) / 1000) + 's' });
+        if (!expired) {
+          console.log('[Yelp OAuth] Dashboard: redirecting to stored OAuth URL...');
           window.location.href = url;
           return;
         }
+        console.log('[Yelp OAuth] Dashboard: stored URL expired, ignoring');
       } catch {
+        console.error('[Yelp OAuth] Dashboard: failed to parse stored OAuth URL');
         sessionStorage.removeItem('yelp_oauth_url');
       }
     }
@@ -83,7 +93,9 @@ export function Dashboard() {
   useEffect(() => {
     const connected = searchParams.get('connected');
     if (connected === 'yelp') {
+      const businesses = searchParams.get('businesses');
       const warning = searchParams.get('warning');
+      console.log(`[Yelp OAuth] Step 7: Callback success — connected=yelp businesses=${businesses} warning=${warning}`);
       if (warning === 'no_businesses') {
         setOauthError('Yelp authorization succeeded but no businesses were found. Please add a business manually or contact support.');
       }
