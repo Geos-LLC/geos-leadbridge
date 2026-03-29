@@ -103,17 +103,11 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
     try {
       setLoading(true);
       setError(null);
-      // Get the OAuth authorize URL from backend
       const { url } = await platformsApi.getYelpAuthUrl();
-      // Store OAuth URL so Dashboard can auto-redirect after Yelp login
-      sessionStorage.setItem('yelp_oauth_url', JSON.stringify({
-        url,
-        exp: Date.now() + 10 * 60 * 1000, // expires in 10 minutes
-      }));
-      // Full-page redirect to Yelp logout → clears session → shows login page
-      // return_url attempts to bring user back to our dashboard after login
-      const dashboardUrl = window.location.origin + '/dashboard';
-      window.location.href = `https://biz.yelp.com/logout?return_url=${encodeURIComponent(dashboardUrl)}`;
+      // Yelp logout → login page → OAuth authorize.
+      // Chain: /logout?return_url=/oauth2/authorize?...
+      // This clears the old session so user can pick a different account if needed.
+      window.location.href = `https://biz.yelp.com/logout?return_url=${encodeURIComponent(url.replace('https://biz.yelp.com', ''))}`;
     } catch (err: any) {
       setError(err.message || 'Failed to start Yelp connection');
       setLoading(false);
