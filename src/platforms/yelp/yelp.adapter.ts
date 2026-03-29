@@ -61,9 +61,10 @@ export class YelpAdapter implements IPlatformAdapter {
 
   /**
    * Returns the full logout → login → OAuth authorize chain URL.
-   * Chain: logout → /login?return_url=/oauth2/authorize?... → consent → callback.
-   * Three-level nesting: logout return_url = /login?return_url=/oauth2/authorize?...
-   * This ensures the user always sees the login page (can pick a different account).
+   * Yelp's /logout automatically redirects to /login?return_url=<whatever>.
+   * So: logout?return_url=/oauth2/authorize?... becomes
+   *     login?return_url=/oauth2/authorize?... → consent → callback.
+   * The & in OAuth params is encoded as %26 so they stay inside return_url.
    */
   getAuthUrl(_userId: string, state: string): string {
     const params = new URLSearchParams({
@@ -74,13 +75,8 @@ export class YelpAdapter implements IPlatformAdapter {
       state,
     });
 
-    // Build: /login?return_url=/oauth2/authorize?client_id=...%26redirect_uri=...
-    // Inner & encoded as %26 so they stay inside the OAuth path
     const oauthPath = `/oauth2/authorize?${params.toString().replace(/&/g, '%26')}`;
-    // Outer: logout return_url = /login?return_url=<oauthPath>
-    // Encode the oauthPath for the login return_url param
-    const loginPath = `/login?return_url=${encodeURIComponent(oauthPath)}`;
-    return `https://biz.yelp.com/logout?return_url=${loginPath}`;
+    return `https://biz.yelp.com/logout?return_url=${oauthPath}`;
   }
 
   async handleCallback(code: string, _userId: string): Promise<PlatformCredentials> {
