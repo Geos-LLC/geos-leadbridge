@@ -42,7 +42,7 @@ export class YelpController {
   ) {
     const rawUrl = this.configService.get<string>('frontendUrl') || 'http://localhost:5173';
     this.frontendUrl = rawUrl.trim().replace(/\/+$/, '');
-    this.encryptionKey = this.configService.get<string>('encryptionKey') || '';
+    this.encryptionKey = this.configService.get<string>('encryption.key') || '';
   }
 
   // ==========================================
