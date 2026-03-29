@@ -166,19 +166,36 @@ export class WebhooksService {
     const requestId = payload.request_id;
     const uniqueId = messageId || negotiationId || requestId;
 
-    // Check for duplicate webhook (same event received multiple times from different subscriptions)
+    // Check for duplicate webhook — in-memory (same process) + DB (cross-instance).
+    // DB check prevents staging+production from both processing the same event.
     if (uniqueId && this.isDuplicateWebhook(eventType, uniqueId)) {
-      this.logger.log(`Skipping duplicate ${eventType} webhook for ${uniqueId}`);
-      // Mark as processed but note it was a duplicate
+      this.logger.log(`Skipping duplicate ${eventType} webhook for ${uniqueId} (in-memory)`);
       await this.prisma.webhookEvent.update({
         where: { id: eventId },
-        data: {
-          processed: true,
-          processingError: 'Duplicate webhook - already processed',
-          processedAt: new Date(),
-        },
+        data: { processed: true, processingError: 'Duplicate (in-memory)', processedAt: new Date() },
       });
       return;
+    }
+    if (uniqueId) {
+      const alreadyProcessed = await this.prisma.webhookEvent.findFirst({
+        where: {
+          platform,
+          eventType,
+          processed: true,
+          processingError: null, // successfully processed, not a duplicate itself
+          id: { not: eventId },  // exclude current event
+          payload: { contains: uniqueId },
+        },
+        select: { id: true },
+      });
+      if (alreadyProcessed) {
+        this.logger.log(`Skipping duplicate ${eventType} webhook for ${uniqueId} (DB: already processed by ${alreadyProcessed.id})`);
+        await this.prisma.webhookEvent.update({
+          where: { id: eventId },
+          data: { processed: true, processingError: 'Duplicate (cross-instance)', processedAt: new Date() },
+        });
+        return;
+      }
     }
 
     this.logger.log(`Processing: ${eventType}, negId: ${negotiationId}, msgId: ${messageId}`);
@@ -1308,9 +1325,19 @@ export class WebhooksService {
       return;
     }
 
-    // Deduplicate by event_id
+    // Deduplicate by event_id — in-memory + DB (cross-instance)
     if (eventId && this.isDuplicateWebhook('yelp.NEW_EVENT', eventId)) {
       return;
+    }
+    if (eventId) {
+      const alreadyProcessed = await this.prisma.webhookEvent.findFirst({
+        where: { platform: 'yelp', processed: true, processingError: null, payload: { contains: eventId } },
+        select: { id: true },
+      });
+      if (alreadyProcessed) {
+        this.logger.log(`Skipping duplicate Yelp NEW_EVENT ${eventId} (DB: already processed)`);
+        return;
+      }
     }
 
     // Find saved account for this business
