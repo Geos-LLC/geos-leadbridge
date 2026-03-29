@@ -42,6 +42,7 @@ export interface AutomationTriggerContext {
   customerName: string;
   customerMessage?: string;
   accountName?: string;
+  savedAccountId?: string;
   category?: string;
   city?: string;
   state?: string;
@@ -377,8 +378,9 @@ export class AutomationService implements OnModuleInit {
 
     this.logger.log(`Found ${rules.length} new_lead rules for account ${savedAccount.businessName}`);
 
+    const enrichedContext = { ...context, savedAccountId: savedAccount.id, accountName: context.accountName || savedAccount.businessName };
     for (const rule of rules) {
-      await this.scheduleAutomatedMessage(rule, context);
+      await this.scheduleAutomatedMessage(rule, enrichedContext);
     }
   }
 
@@ -426,6 +428,7 @@ export class AutomationService implements OnModuleInit {
 
     this.logger.log(`[AUTOMATION] Found ${rules.length} customer_reply rule(s) for account ${savedAccount.businessName}`);
 
+    const enrichedContext = { ...context, savedAccountId: savedAccount.id, accountName: context.accountName || savedAccount.businessName };
     for (const rule of rules) {
       // Check reply trigger mode - "first_only" means the first reply AFTER initial message (2nd message)
       if (rule.replyTriggerMode === 'first_only' && context.isSecondCustomerMessage !== true) {
@@ -434,7 +437,7 @@ export class AutomationService implements OnModuleInit {
       }
 
       this.logger.log(`[AUTOMATION] ✓ TRIGGERING rule "${rule.name}" (${rule.id}): mode=${rule.replyTriggerMode || 'every_reply'}`);
-      await this.scheduleAutomatedMessage(rule, context);
+      await this.scheduleAutomatedMessage(rule, enrichedContext);
     }
   }
 
@@ -636,6 +639,7 @@ export class AutomationService implements OnModuleInit {
         category: 'automation',
         message: error.message || 'Failed to send automated message',
         userId: context.userId,
+        accountId: context.savedAccountId,
         accountName: context.accountName,
         context: { pendingId, leadId: context.leadId, negotiationId: context.negotiationId },
       });
