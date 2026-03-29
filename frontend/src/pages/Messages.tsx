@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft,
+  ArrowLeft, ArrowRight,
   Send,
   Phone,
   MapPin,
@@ -1461,7 +1461,21 @@ export function Messages() {
                                 <Loader2 size={11} className="animate-spin" /> Generating…
                               </div>
                             ) : (
-                              <p className="text-xs text-slate-700 leading-relaxed">{aiPreview[event.id].reply}</p>
+                              <>
+                                <p className="text-xs text-slate-700 leading-relaxed">{aiPreview[event.id].reply}</p>
+                                <button
+                                  onClick={() => {
+                                    setMessageText(aiPreview[event.id].reply || '');
+                                    // Scroll to and focus message input
+                                    const input = document.querySelector<HTMLTextAreaElement>('textarea[placeholder*="message"]');
+                                    if (input) { input.focus(); input.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+                                  }}
+                                  className="mt-1.5 flex items-center gap-1 text-[10px] font-semibold text-violet-600 hover:text-violet-800 bg-violet-100 hover:bg-violet-200 px-2 py-1 rounded-lg transition-colors"
+                                >
+                                  <ArrowRight size={10} />
+                                  Use this reply
+                                </button>
+                              </>
                             )}
                           </div>
                         )}
