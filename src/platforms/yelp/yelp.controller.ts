@@ -258,24 +258,36 @@ export class YelpController {
 
     const connectionIssues: string[] = [];
 
-    // Check OAuth token validity: does the token still grant access to this business?
-    if (account.credentialsJson) {
+    // Check credentials exist
+    if (!account.credentialsJson) {
+      connectionIssues.push('No Yelp credentials stored — reconnect Yelp account');
+    } else {
       try {
         const creds = EncryptionUtil.decryptObject<any>(account.credentialsJson, this.encryptionKey);
-        if (creds.accessToken) {
-          const authorizedBusinesses = await this.yelpAdapter.getClaimedBusinesses(creds.accessToken);
-          const authorizedIds = authorizedBusinesses.map((b: any) => b.id || b.business_id);
-          if (!authorizedIds.includes(account.businessId)) {
-            connectionIssues.push('Yelp token lacks access to this business — reconnect Yelp to re-authorize');
-          }
-        } else {
+        if (!creds.accessToken) {
           connectionIssues.push('No Yelp OAuth token — reconnect Yelp account');
         }
       } catch {
-        connectionIssues.push('Failed to validate Yelp credentials — reconnect Yelp account');
+        connectionIssues.push('Failed to decrypt Yelp credentials — reconnect Yelp account');
       }
-    } else {
-      connectionIssues.push('No Yelp credentials stored — reconnect Yelp account');
+    }
+
+    // Check for recent send failures (403 NO_BUSINESS_ACCESS, token errors)
+    // This is the real signal — the token was tested against Yelp's API and failed.
+    const recentSendError = await this.prisma.systemErrorLog.findFirst({
+      where: {
+        resolved: false,
+        accountId: account.id,
+        OR: [
+          { category: 'automation', message: { contains: 'NO_BUSINESS_ACCESS' } },
+          { category: 'automation', message: { contains: '403' } },
+          { category: 'yelp' },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (recentSendError) {
+      connectionIssues.push('Yelp message send failed — reconnect Yelp to re-authorize');
     }
 
     // Check notification settings (same pattern as Thumbtack health)
