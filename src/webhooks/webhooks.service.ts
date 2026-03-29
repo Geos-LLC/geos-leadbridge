@@ -239,71 +239,43 @@ export class WebhooksService {
 
     this.logger.log(`NegotiationCreated: ${negotiationId}, business: ${business.businessID}`);
 
-    // Parallel user lookup: fire all strategies concurrently, pick first match
-    // This replaces the sequential fallback chain (was 4 round-trips, now 1)
-    const [directMatch, existingLead, savedAccountMatch] = await Promise.all([
-      // Strategy 1: exact Platform match by businessId
-      this.prisma.platform.findFirst({
-        where: { platformName: platform, externalBusinessId: business.businessID },
-      }),
-      // Strategy 2: find user via existing lead for this business
-      this.prisma.lead.findFirst({
+    // Resolve user via SavedAccount (source of truth for business→user mapping).
+    // SavedAccount is created during account setup and always has the correct userId.
+    // NOTE: Do NOT use Platform.connected — it's a stale legacy flag that breaks lookups.
+    const accountForLookup = await this.prisma.savedAccount.findFirst({
+      where: { platform, businessId: business.businessID },
+      select: { userId: true, id: true, businessName: true },
+    });
+
+    let userId: string;
+
+    if (accountForLookup) {
+      userId = accountForLookup.userId;
+      this.logger.log(`User resolved via SavedAccount: userId=${userId} account=${accountForLookup.businessName}`);
+    } else {
+      // Fallback: try existing lead or Platform table
+      const existingLead = await this.prisma.lead.findFirst({
         where: { platform, businessId: business.businessID },
         select: { userId: true },
-      }),
-      // Strategy 3: find user via SavedAccount
-      this.prisma.savedAccount.findFirst({
-        where: { platform, businessId: business.businessID },
-        select: { userId: true },
-      }),
-    ]);
-
-    this.logger.log(`[timing] parallel user lookup: +${Date.now() - _ncStart}ms`);
-
-    let platformConnection = directMatch;
-
-    // If no direct match, resolve via lead or savedAccount userId
-    if (!platformConnection && (existingLead || savedAccountMatch)) {
-      const fallbackUserId = existingLead?.userId || savedAccountMatch?.userId;
-      if (savedAccountMatch && !existingLead) {
-        this.logger.log('Found user via SavedAccount lookup for negotiation', {
-          userId: fallbackUserId,
-          businessID: business.businessID,
-        });
-      }
-      platformConnection = await this.prisma.platform.findFirst({
-        where: { platformName: platform, userId: fallbackUserId, connected: true },
       });
-    }
-
-    // Last resort: find any connected Thumbtack platform
-    if (!platformConnection) {
-      this.logger.warn('No exact platform match, searching for any connected Thumbtack user', { businessID: business.businessID });
-      const connectedPlatforms = await this.prisma.platform.findMany({
-        where: { platformName: platform, connected: true },
-      });
-      if (connectedPlatforms.length === 1) {
-        platformConnection = connectedPlatforms[0];
-        this.logger.log('Using single connected platform for webhook', {
-          userId: platformConnection.userId,
-          businessID: business.businessID
+      if (existingLead) {
+        userId = existingLead.userId;
+        this.logger.log(`User resolved via existing lead: userId=${userId}`);
+      } else {
+        const platformRecord = await this.prisma.platform.findFirst({
+          where: { platformName: platform, externalBusinessId: business.businessID },
         });
-      } else if (connectedPlatforms.length > 1) {
-        this.logger.warn('Multiple connected platforms found, cannot determine user', {
-          businessID: business.businessID,
-          platformCount: connectedPlatforms.length
-        });
-        return;
+        if (platformRecord) {
+          userId = platformRecord.userId;
+          this.logger.log(`User resolved via Platform record: userId=${userId}`);
+        } else {
+          this.logger.warn('No user found for business', { businessID: business.businessID });
+          return;
+        }
       }
     }
 
-    if (!platformConnection) {
-      this.logger.warn('No user found for business', { businessID: business.businessID });
-      return;
-    }
     this.logger.log(`[timing] user resolved: +${Date.now() - _ncStart}ms`);
-
-    const userId = platformConnection.userId;
     const customerName = `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown';
 
     // Parse original createdAt from Thumbtack data
@@ -508,83 +480,36 @@ export class WebhooksService {
       return;
     }
 
-    // Find user by businessID - use same fallback logic as handleNegotiationCreated
-    let platformConnection = await this.prisma.platform.findFirst({
-      where: {
-        platformName: platform,
-        externalBusinessId: businessId,
-      },
+    // Resolve user via SavedAccount (source of truth), same pattern as handleNegotiationCreated
+    const savedAccount = await this.prisma.savedAccount.findFirst({
+      where: { platform, businessId },
+      select: { userId: true, id: true, businessName: true },
     });
 
-    // If no exact match, check if lead already exists for this business
-    if (!platformConnection) {
-      const existingLeadForBusiness = await this.prisma.lead.findFirst({
-        where: {
-          platform,
-          businessId,
-        },
-      });
+    let userId: string;
 
-      if (existingLeadForBusiness) {
-        platformConnection = await this.prisma.platform.findFirst({
-          where: {
-            platformName: platform,
-            userId: existingLeadForBusiness.userId,
-            connected: true,
-          },
+    if (savedAccount) {
+      userId = savedAccount.userId;
+    } else {
+      // Fallback: existing lead or Platform record
+      const existingLead = await this.prisma.lead.findFirst({
+        where: { platform, businessId },
+        select: { userId: true },
+      });
+      if (existingLead) {
+        userId = existingLead.userId;
+      } else {
+        const platformRecord = await this.prisma.platform.findFirst({
+          where: { platformName: platform, externalBusinessId: businessId },
         });
+        if (platformRecord) {
+          userId = platformRecord.userId;
+        } else {
+          this.logger.warn('No user found for business in MessageCreated', { businessId });
+          return;
+        }
       }
     }
-
-    // Fallback: check SavedAccount table for businessId -> userId mapping
-    // This handles multi-account scenarios where the businessId isn't the currently connected one
-    if (!platformConnection) {
-      const savedAccount = await this.prisma.savedAccount.findFirst({
-        where: {
-          platform,
-          businessId,
-        },
-      });
-
-      if (savedAccount) {
-        this.logger.log('Found user via SavedAccount lookup', {
-          userId: savedAccount.userId,
-          businessId,
-        });
-        platformConnection = await this.prisma.platform.findFirst({
-          where: {
-            platformName: platform,
-            userId: savedAccount.userId,
-            connected: true,
-          },
-        });
-      }
-    }
-
-    // Last resort fallback: if only one connected platform, use that
-    if (!platformConnection) {
-      const connectedPlatforms = await this.prisma.platform.findMany({
-        where: {
-          platformName: platform,
-          connected: true,
-        },
-      });
-
-      if (connectedPlatforms.length === 1) {
-        platformConnection = connectedPlatforms[0];
-        this.logger.log('Using single connected platform for message webhook', {
-          userId: platformConnection.userId,
-          businessId
-        });
-      }
-    }
-
-    if (!platformConnection) {
-      this.logger.warn('No platform connection found for business', { businessId });
-      return;
-    }
-
-    const userId = platformConnection.userId;
 
     // Ensure lead exists using upsert to handle race conditions
     const customer = data.customer || {};
