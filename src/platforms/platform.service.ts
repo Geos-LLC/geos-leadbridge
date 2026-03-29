@@ -296,11 +296,17 @@ export class PlatformService {
 
     await adapter.disconnect(userId);
 
-    // Use updateMany to avoid P2025 when no Platform record exists (first-time users)
-    await this.prisma.platform.updateMany({
-      where: { userId, platformName },
-      data: { connected: false },
+    // Only set connected=false if the user has NO remaining saved accounts with webhooks.
+    // Previously this always set false, breaking all other accounts for this user.
+    const remainingAccounts = await this.prisma.savedAccount.count({
+      where: { userId, platform: platformName, webhookId: { not: null } },
     });
+    if (remainingAccounts === 0) {
+      await this.prisma.platform.updateMany({
+        where: { userId, platformName },
+        data: { connected: false },
+      });
+    }
   }
 
   /**
@@ -374,17 +380,29 @@ export class PlatformService {
     // Register webhook with Thumbtack
     const result = await adapter.registerWebhook(credentials, businessId, webhookUrl);
 
-    // Store businessId and webhookId in platform connection
-    await this.prisma.platform.update({
+    // Store businessId and webhookId in platform connection.
+    // CRITICAL: always set connected=true here — this is the only reliable place
+    // to keep Platform.connected in sync. Without this, all downstream lookups
+    // that filter by connected=true silently fail (webhooks, credentials, health).
+    await this.prisma.platform.upsert({
       where: {
         userId_platformName: {
           userId,
           platformName: 'thumbtack',
         },
       },
-      data: {
+      update: {
+        connected: true,
         externalBusinessId: businessId,
         webhookId: result.webhookId,
+      },
+      create: {
+        userId,
+        platformName: 'thumbtack',
+        connected: true,
+        externalBusinessId: businessId,
+        webhookId: result.webhookId,
+        credentialsJson: '',
       },
     });
 
