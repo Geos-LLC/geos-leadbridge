@@ -38,9 +38,12 @@ export class PlatformService {
   async getAuthUrl(userId: string, platformName: string, forceLogin = false, callbackUrl?: string): Promise<string> {
     const adapter = this.platformFactory.getAdapter(platformName);
 
-    // Encode userId + expiry into the state param itself (no in-memory Map needed)
-    const statePayload = JSON.stringify({ userId, exp: Date.now() + 10 * 60 * 1000 });
-    const state = encodeURIComponent(EncryptionUtil.encrypt(statePayload, this.encryptionKey));
+    // Encode userId + expiry into the state param itself (no in-memory Map needed).
+    // Use base64url encoding (no +/= chars) so the state survives multi-redirect chains
+    // (Yelp logout → login → authorize → callback) without double-encoding corruption.
+    const statePayload = JSON.stringify({ userId, exp: Date.now() + 30 * 60 * 1000 });
+    const encrypted = EncryptionUtil.encrypt(statePayload, this.encryptionKey);
+    const state = encrypted.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
     return adapter.getAuthUrl(userId, state, forceLogin, callbackUrl);
   }
@@ -51,7 +54,12 @@ export class PlatformService {
    */
   async getUserIdFromState(state: string): Promise<string | null> {
     try {
-      const decoded = decodeURIComponent(state);
+      // Reverse base64url encoding: restore +/= chars stripped during getAuthUrl
+      let decoded = decodeURIComponent(state);
+      decoded = decoded.replace(/-/g, '+').replace(/_/g, '/');
+      // Re-add base64 padding
+      while (decoded.length % 4 !== 0) decoded += '=';
+
       const payload = JSON.parse(EncryptionUtil.decrypt(decoded, this.encryptionKey));
 
       if (!payload.userId || !payload.exp) return null;
