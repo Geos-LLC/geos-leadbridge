@@ -591,8 +591,7 @@ export function Dashboard() {
             const hasAccounts = savedAccounts.length > 0;
             const healthyAccounts = savedAccounts.filter(a => {
               const diag = accountDiagnostics[a.id];
-              // Yelp accounts are healthy if they exist (OAuth-based, no webhookId)
-              if (a.platform === 'yelp') return true;
+              if (a.platform === 'yelp') return diag?.healthy !== false;
               return a.webhookId && diag?.healthy;
             });
 
@@ -632,7 +631,7 @@ export function Dashboard() {
                   <div className="grid grid-cols-2 gap-3 md:gap-4 flex-1">
                     <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
                       <div className={`w-2 h-2 rounded-full shrink-0 ${accountConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-slate-500'}`}></div>
-                      <span className="text-xs md:text-sm font-medium">Thumbtack: {accountConnected ? 'Connected' : 'Not Connected'}</span>
+                      <span className="text-xs md:text-sm font-medium">Accounts: {accountConnected ? 'Connected' : 'Not Connected'}</span>
                     </div>
                     <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
                       <div className={`w-2 h-2 rounded-full shrink-0 ${smsConfigured ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-slate-500'}`}></div>
@@ -660,13 +659,16 @@ export function Dashboard() {
           {(() => {
             const isCheckingHealth = loadingDiagnostics || (savedAccounts.length > 0 && Object.keys(accountDiagnostics).length === 0);
             const disconnectedAccounts = savedAccounts.filter(a => {
-              if (a.platform === 'yelp') return false;
               const diag = accountDiagnostics[a.id];
+              if (a.platform === 'yelp') return diag && !diag.healthy;
               return !a.webhookId || (diag && !diag.healthy);
             });
             const configIssueAccounts = savedAccounts.filter(a => {
-              if (a.platform === 'yelp') return false;
               const diag = accountDiagnostics[a.id];
+              if (a.platform === 'yelp') {
+                const issues = diag?.notificationIssues || [];
+                return diag?.healthy && issues.length > 0 && !issues.every((i: string) => i.toLowerCase().includes('disabled'));
+              }
               const hasConnIssue = !a.webhookId || (diag && !diag.healthy);
               const issues = diag?.notificationIssues || [];
               return !hasConnIssue && issues.length > 0 && !issues.every((i: string) => i.toLowerCase().includes('disabled'));
