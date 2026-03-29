@@ -1149,6 +1149,9 @@ export function Messages() {
                       <span className="text-xs text-slate-400 flex-shrink-0">{formatLeadTime(lead.lastMessageAt || lead.createdAt)}</span>
                     </div>
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded text-white ${lead.platform === 'yelp' ? 'bg-[#FF1A1A]' : 'bg-[#41B1E1]'}`}>
+                        {lead.platform === 'yelp' ? 'Yelp' : 'TT'}
+                      </span>
                       <span className="text-xs text-slate-600 truncate">{lead.category || 'Service Request'}</span>
                       <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded uppercase ${
                         lead.status?.toLowerCase() === 'new' ? 'bg-blue-100 text-blue-700' :
@@ -1196,6 +1199,9 @@ export function Messages() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <h3 className="font-bold text-slate-900 truncate">{selectedLead.customerName}</h3>
+                      <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded text-white ${selectedLead.platform === 'yelp' ? 'bg-[#FF1A1A]' : 'bg-[#41B1E1]'}`}>
+                        {selectedLead.platform === 'yelp' ? 'Yelp' : 'TT'}
+                      </span>
                       <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase ${
                         selectedLead.status?.toLowerCase() === 'new' ? 'bg-blue-100 text-blue-700' :
                         selectedLead.status?.toLowerCase() === 'contacted' ? 'bg-green-100 text-green-700' :
