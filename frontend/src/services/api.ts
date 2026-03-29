@@ -260,6 +260,10 @@ export const platformsApi = {
   disconnectYelp: async (accountId: string): Promise<void> => {
     await api.post('/v1/yelp/auth/disconnect', { accountId });
   },
+  getYelpAccountHealth: async (id: string): Promise<AccountDiagnostics> => {
+    const { data } = await api.get(`/v1/yelp/saved-accounts/${id}/health`);
+    return data;
+  },
   // Diagnostic endpoints
   verifyWebhooks: async (): Promise<{ accounts: WebhookVerifyResult[] }> => {
     const { data } = await api.get('/v1/platforms/webhooks/verify');
