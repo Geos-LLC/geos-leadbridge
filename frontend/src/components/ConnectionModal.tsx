@@ -103,12 +103,9 @@ export default function ConnectionModal({ isOpen, onClose, accountToReconnect, s
     try {
       setLoading(true);
       setError(null);
+      // Backend returns the full logout→login→consent chain URL
       const { url } = await platformsApi.getYelpAuthUrl();
-      // Chain: logout → login → OAuth consent → callback to LeadBridge.
-      // Yelp logout return_url accepts relative paths on biz.yelp.com.
-      // Extract path from OAuth URL and encode & as %26 so Yelp parses it correctly.
-      const oauthPath = url.replace('https://biz.yelp.com', '').replace(/&/g, '%26');
-      window.location.href = `https://biz.yelp.com/logout?return_url=${oauthPath}`;
+      window.location.href = url;
     } catch (err: any) {
       setError(err.message || 'Failed to start Yelp connection');
       setLoading(false);
