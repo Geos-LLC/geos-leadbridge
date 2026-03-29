@@ -130,11 +130,20 @@ export class YelpController {
         });
 
         if (existing) {
-          this.logger.log(`Updating credentials for existing Yelp account: ${businessName} (${businessId})`);
+          this.logger.log(`[Yelp OAuth] Step 5b: Updating credentials for existing account: ${businessName} (${businessId})`);
           await this.prisma.savedAccount.update({
             where: { id: existing.id },
             data: { businessName, credentialsJson: encryptedCreds },
           });
+
+          // Auto-resolve any stale automation/yelp errors for this account — token is fresh now
+          const resolved = await this.prisma.systemErrorLog.updateMany({
+            where: { accountId: existing.id, resolved: false },
+            data: { resolved: true },
+          });
+          if (resolved.count > 0) {
+            this.logger.log(`[Yelp OAuth] Step 5b: Auto-resolved ${resolved.count} stale errors for ${businessName}`);
+          }
         } else {
           this.logger.log(`Creating new Yelp account: ${businessName} (${businessId})`);
           await this.prisma.savedAccount.create({
