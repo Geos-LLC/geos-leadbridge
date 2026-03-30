@@ -1371,18 +1371,29 @@ export class WebhooksService {
       return;
     }
 
-    // Deduplicate by event_id — in-memory + DB (cross-instance)
+    // Deduplicate by event_id — in-memory (same process) + first-event-wins (cross-instance)
     if (eventId && this.isDuplicateWebhook('yelp.NEW_EVENT', eventId)) {
       return;
     }
     if (eventId) {
-      const alreadyProcessed = await this.prisma.webhookEvent.findFirst({
-        where: { platform: 'yelp', processed: true, processingError: null, payload: { contains: eventId } },
+      // Cross-instance dedup: both staging and production create webhookEvent records.
+      // The earliest one (by receivedAt) wins. Deterministic — no TOCTOU race.
+      const firstEvent = await this.prisma.webhookEvent.findFirst({
+        where: { platform: 'yelp', payload: { contains: eventId } },
+        orderBy: { receivedAt: 'asc' },
         select: { id: true },
       });
-      if (alreadyProcessed) {
-        this.logger.log(`Skipping duplicate Yelp NEW_EVENT ${eventId} (DB: already processed)`);
-        return;
+      // If another event for this eventId was recorded before ours, skip
+      if (firstEvent) {
+        const myEvent = await this.prisma.webhookEvent.findFirst({
+          where: { platform: 'yelp', payload: { contains: eventId } },
+          orderBy: { receivedAt: 'desc' },
+          select: { id: true },
+        });
+        if (myEvent && firstEvent.id !== myEvent.id) {
+          this.logger.log(`Skipping duplicate Yelp NEW_EVENT ${eventId} (cross-instance: not first)`);
+          return;
+        }
       }
     }
 
