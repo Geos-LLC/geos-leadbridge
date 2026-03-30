@@ -12,6 +12,7 @@ import { AutomationService } from '../automation/automation.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CallConnectService } from '../call-connect/call-connect.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 
 @Injectable()
@@ -36,6 +37,7 @@ export class WebhooksService {
     @Inject(forwardRef(() => CallConnectService))
     private callConnectService: CallConnectService,
     private analyticsService: AnalyticsService,
+    private conversationContextService: ConversationContextService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -648,6 +650,20 @@ export class WebhooksService {
     });
 
     this.logger.log('Message stored successfully', { messageId, conversationId: conversation.id });
+
+    // Update thread context (conversation intelligence layer)
+    try {
+      await this.conversationContextService.recordMessage({
+        conversationId: conversation.id,
+        leadId: lead?.id,
+        platform,
+        sender,
+        content: messageContent,
+        timestamp: messageTimestamp,
+      });
+    } catch (err: any) {
+      this.logger.warn(`Failed to update thread context: ${err.message}`);
+    }
 
     // Backfill missing pro messages: when a customer replies, fetch the full thread
     // from Thumbtack to capture messages sent directly on the platform
@@ -1501,6 +1517,20 @@ export class WebhooksService {
 
     // Emit SSE for real-time frontend update
     this.eventEmitter.emit(`lead.created.${userId}`, lead);
+
+    // Update thread context (conversation intelligence layer)
+    try {
+      await this.conversationContextService.recordMessage({
+        conversationId: lead.threadId || '',
+        leadId: lead.id,
+        platform: 'yelp',
+        sender: existingLead ? 'customer' : 'customer', // Yelp NEW_EVENT is always customer-initiated
+        content: leadData.message || '',
+        timestamp: leadData.createdAt || new Date(),
+      });
+    } catch (err: any) {
+      this.logger.warn(`Failed to update Yelp thread context: ${err.message}`);
+    }
 
     if (existingLead) {
       // Customer replied — conversation.lastMessageAt already updated above

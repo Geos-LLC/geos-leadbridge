@@ -194,6 +194,7 @@ model Lead {
   pendingNotificationMsgs PendingNotificationMessage[]
   callConnectSessions     LeadCallConnect[]
   leadConversations       LeadConversation[]
+  threadContexts          ThreadContext[]       // Intelligence layer (multiple if lead has multiple threads)
 
   @@unique([platform, externalRequestId])
   @@index([userId])
@@ -222,9 +223,10 @@ model Conversation {
   updatedAt       DateTime @updatedAt
 
   // Relationships
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages Message[]
-  leads    Lead[]
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages      Message[]
+  leads         Lead[]
+  threadContext ThreadContext?  // Intelligence layer (1:1, owned by conversation-context module)
 
   @@unique([platform, externalThreadId])
   @@index([userId])
@@ -946,4 +948,70 @@ model SystemErrorLog {
   @@index([resolved, createdAt])
   @@index([userId, createdAt])
   @@map("system_error_logs")
+}
+
+// ==========================================
+// Conversation Context — Intelligence Layer
+// Owned by conversation-context module.
+// Reads from Conversation + Message; writes here.
+// Designed for future extraction to Behavior IQ service.
+// ==========================================
+
+model ThreadContext {
+  id                String   @id @default(cuid())
+  conversationId    String   @unique // 1:1 with Conversation
+  leadId            String?  // Denormalized for lead-level queries
+  platform          String   // Denormalized: "thumbtack" | "yelp"
+
+  // Conversation stage & strategy
+  stage             String   @default("new") // new, qualification, quoting, negotiation, booked, lost, closed
+  customerIntent    String?  // price_shopping, ready_to_book, just_browsing, urgent, unknown
+  engagementLevel   String   @default("unknown") // cold, warm, hot, unknown
+  activeStrategy    String?  // Current strategy being used
+  suggestedStrategy String?  // AI-suggested next strategy
+
+  // Rolling summary — AI-friendly, updated after messages
+  summary           String?  @db.Text
+
+  // Full structured state — machine-readable JSON
+  stateJson         String?  @db.Text
+
+  // Price tracking
+  priceDiscussed    Boolean  @default(false)
+  priceRange        String?  // e.g. "$120-$180"
+
+  // Conversation progress
+  lastQuestionAsked String?  @db.Text
+  missingFields     Json?    // Array of field names still needed
+  awaitingCustomerReply Boolean @default(false)
+
+  // Follow-up tracking
+  followUpCount     Int      @default(0)
+  lastFollowUpAt    DateTime?
+  followUpStatus    String?  // none, scheduled, sent, overdue
+
+  // Per-sender-type timestamps
+  lastCustomerMessageAt  DateTime?
+  lastBusinessMessageAt  DateTime?
+  lastAiMessageAt        DateTime?
+
+  // Message stats (denormalized for quick reads)
+  totalMessages      Int     @default(0)
+  customerMessages   Int     @default(0)
+  businessMessages   Int     @default(0)
+  aiMessages         Int     @default(0)
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relationships
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  lead         Lead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([leadId])
+  @@index([platform])
+  @@index([stage])
+  @@index([awaitingCustomerReply])
+  @@index([updatedAt])
+  @@map("thread_contexts")
 }
