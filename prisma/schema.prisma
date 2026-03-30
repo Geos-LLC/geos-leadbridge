@@ -388,6 +388,12 @@ model AutomationRule {
   enabled          Boolean   @default(true)
   useAi            Boolean   @default(false) // Use AI to generate reply instead of template
   aiSystemPrompt   String?   // DEPRECATED — use promptTemplateId. Kept for backward compat.
+  // Follow-up active hours — window when delayed follow-ups are allowed to fire
+  activeHoursStart String?   @map("active_hours_start") // e.g. "09:00"
+  activeHoursEnd   String?   @map("active_hours_end")   // e.g. "21:00"
+  activeHoursTimezone String? @map("active_hours_tz") @default("America/New_York")
+  isFollowUp       Boolean   @default(false) @map("is_follow_up") // Marks as follow-up (vs immediate auto-reply)
+  stopOnCustomerReply Boolean @default(true) @map("stop_on_customer_reply")
   triggerCount     Int       @default(0)
   lastTriggeredAt  DateTime?
   createdAt        DateTime  @default(now())

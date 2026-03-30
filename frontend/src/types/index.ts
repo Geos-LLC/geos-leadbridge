@@ -171,6 +171,12 @@ export interface AutomationRule {
     name: string;
     content: string;
   };
+  // Follow-up fields
+  isFollowUp?: boolean;
+  activeHoursStart?: string;
+  activeHoursEnd?: string;
+  activeHoursTimezone?: string;
+  stopOnCustomerReply?: boolean;
 }
 
 export interface PendingAutomatedMessage {

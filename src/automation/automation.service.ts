@@ -23,6 +23,12 @@ export interface CreateAutomationRuleDto {
   enabled?: boolean;
   useAi?: boolean;
   aiSystemPrompt?: string; // deprecated — use promptTemplateId
+  // Follow-up fields
+  isFollowUp?: boolean;
+  activeHoursStart?: string; // e.g. "09:00"
+  activeHoursEnd?: string;   // e.g. "21:00"
+  activeHoursTimezone?: string;
+  stopOnCustomerReply?: boolean;
 }
 
 export interface UpdateAutomationRuleDto {
@@ -35,6 +41,12 @@ export interface UpdateAutomationRuleDto {
   enabled?: boolean;
   useAi?: boolean;
   aiSystemPrompt?: string; // deprecated — use promptTemplateId
+  // Follow-up fields
+  isFollowUp?: boolean;
+  activeHoursStart?: string;
+  activeHoursEnd?: string;
+  activeHoursTimezone?: string;
+  stopOnCustomerReply?: boolean;
 }
 
 export interface AutomationTriggerContext {
@@ -192,6 +204,11 @@ export class AutomationService implements OnModuleInit {
         useAi: data.useAi ?? false,
         promptTemplateId: data.useAi ? (data.promptTemplateId ?? null) : null,
         aiSystemPrompt: data.aiSystemPrompt ?? null,
+        isFollowUp: data.isFollowUp ?? false,
+        activeHoursStart: data.activeHoursStart ?? null,
+        activeHoursEnd: data.activeHoursEnd ?? null,
+        activeHoursTimezone: data.activeHoursTimezone ?? 'America/New_York',
+        stopOnCustomerReply: data.stopOnCustomerReply ?? true,
       },
       include: {
         savedAccount: {
@@ -537,6 +554,42 @@ export class AutomationService implements OnModuleInit {
     this.logger.log(`Executing pending message: ${pendingId} (useAi=${rule.useAi})`);
 
     try {
+      // Check active hours for follow-up rules
+      const fullRule = await this.prisma.automationRule.findUnique({ where: { id: rule.id } });
+      if (fullRule?.isFollowUp && fullRule.activeHoursStart && fullRule.activeHoursEnd) {
+        if (!this.isInActiveHours(fullRule.activeHoursStart, fullRule.activeHoursEnd, fullRule.activeHoursTimezone || 'America/New_York')) {
+          // Outside active hours — reschedule to check again in 15 min
+          this.logger.log(`Follow-up ${pendingId} outside active hours (${fullRule.activeHoursStart}-${fullRule.activeHoursEnd}), rescheduling in 15 min`);
+          this.scheduleTimer(pendingId, 15 * 60 * 1000, rule, context);
+          return;
+        }
+      }
+
+      // Check stopOnCustomerReply — cancel if customer replied after scheduling
+      if (fullRule?.stopOnCustomerReply && fullRule.isFollowUp) {
+        const pending = await this.prisma.pendingAutomatedMessage.findUnique({ where: { id: pendingId } });
+        if (pending) {
+          const customerReplySince = await this.prisma.message.findFirst({
+            where: {
+              conversationId: { not: undefined },
+              userId: context.userId,
+              sender: 'customer',
+              sentAt: { gt: pending.createdAt },
+            },
+            orderBy: { sentAt: 'desc' },
+            select: { id: true },
+          });
+          if (customerReplySince) {
+            this.logger.log(`Follow-up ${pendingId} cancelled — customer replied since scheduling`);
+            await this.prisma.pendingAutomatedMessage.update({
+              where: { id: pendingId },
+              data: { status: 'cancelled', failureReason: 'Customer replied' },
+            });
+            return;
+          }
+        }
+      }
+
       // Verify lead still has a thread
       const lead = await this.prisma.lead.findUnique({
         where: { id: context.leadId },
@@ -720,6 +773,37 @@ export class AutomationService implements OnModuleInit {
 
     this.pendingTimers.set(pendingId, timer);
     this.logger.log(`Scheduled timer for ${pendingId}, delay: ${delayMs}ms`);
+  }
+
+  /**
+   * Check if current time is within the active hours window.
+   * Used by follow-up rules to only send during business hours.
+   */
+  private isInActiveHours(start: string, end: string, timezone: string): boolean {
+    try {
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+      const currentTime = formatter.format(new Date());
+      const [currentHour, currentMin] = currentTime.split(':').map(Number);
+      const [startHour, startMin] = start.split(':').map(Number);
+      const [endHour, endMin] = end.split(':').map(Number);
+
+      const currentMinutes = currentHour * 60 + currentMin;
+      const startMinutes = startHour * 60 + startMin;
+      const endMinutes = endHour * 60 + endMin;
+
+      // Handle overnight active hours (e.g., 22:00 to 06:00)
+      if (startMinutes > endMinutes) {
+        return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+      }
+      return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+    } catch {
+      return true; // On error, allow sending
+    }
   }
 
   /**
