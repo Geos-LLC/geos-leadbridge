@@ -1253,19 +1253,24 @@ export default function SettingsPage() {
                       <div className="flex items-center justify-between">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold text-slate-900 truncate">{account.businessName}</p>
+                          <p className="text-[10px] text-slate-400 font-medium uppercase">ID: {account.businessId}</p>
                           {isCheckingDiag && (
                             <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Checking...</p>
                           )}
                           {hasConnectionIssues && diag?.issues?.[0] && (
-                            <p className="text-[10px] text-amber-700 mt-1">{diag.issues[0]}</p>
+                            <p className="text-[10px] text-amber-700 mt-1 flex items-center gap-1"><Info size={10} /> {diag.issues[0]}</p>
                           )}
                           {hasConfigIssues && (
-                            <p className="text-[10px] text-orange-700 mt-1">{notifIssuesArr[0]}</p>
+                            <p className="text-[10px] text-orange-700 mt-1 flex items-center gap-1"><Info size={10} /> {notifIssuesArr[0]}</p>
+                          )}
+                          {!isCheckingDiag && !hasConnectionIssues && !hasConfigIssues && (
+                            <p className="text-[10px] text-emerald-600 mt-1">Connected</p>
                           )}
                         </div>
                         <div className="shrink-0">
                           {isCheckingDiag ? <Loader2 className="w-5 h-5 text-slate-300 animate-spin" />
                             : hasConnectionIssues ? <AlertCircle className="w-5 h-5 text-amber-500" />
+                            : hasConfigIssues ? <AlertCircle className="w-5 h-5 text-orange-400" />
                             : <CheckCircle className="w-5 h-5 text-emerald-500" />}
                         </div>
                       </div>
