@@ -5,7 +5,7 @@
  * Used by frontend debug panel and admin tools.
  */
 
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ConversationContextService } from './conversation-context.service';
@@ -48,6 +48,7 @@ export class ConversationContextController {
 
   /**
    * List all thread contexts for the current user.
+   * Supports filtering by platform and stage.
    */
   @Get()
   async listContexts(
@@ -57,5 +58,40 @@ export class ConversationContextController {
   ) {
     const contexts = await this.contextService.getThreadContextsForUser(user.id, { platform, stage });
     return { success: true, count: contexts.length, contexts };
+  }
+
+  /**
+   * Manually update thread stage.
+   */
+  @Post(':conversationId/stage')
+  async updateStage(
+    @Param('conversationId') conversationId: string,
+    @Body('stage') stage: string,
+  ) {
+    await this.contextService.updateStage(conversationId, stage);
+    return { success: true };
+  }
+
+  /**
+   * Manually update thread strategy.
+   */
+  @Post(':conversationId/strategy')
+  async updateStrategy(
+    @Param('conversationId') conversationId: string,
+    @Body('activeStrategy') activeStrategy: string,
+    @Body('suggestedStrategy') suggestedStrategy?: string,
+  ) {
+    await this.contextService.updateStrategy(conversationId, activeStrategy, suggestedStrategy);
+    return { success: true };
+  }
+
+  /**
+   * Force summary regeneration for a thread.
+   */
+  @Post(':conversationId/regenerate-summary')
+  async regenerateSummary(@Param('conversationId') conversationId: string) {
+    await this.contextService.forceSummaryUpdate(conversationId);
+    const ctx = await this.contextService.getContext(conversationId);
+    return { success: true, summary: ctx?.summary || null };
   }
 }

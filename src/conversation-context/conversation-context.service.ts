@@ -407,6 +407,13 @@ export class ConversationContextService {
   }
 
   /**
+   * Force summary regeneration (bypasses throttle). Used by admin/debug endpoint.
+   */
+  async forceSummaryUpdate(conversationId: string): Promise<void> {
+    return this._generateSummary(conversationId);
+  }
+
+  /**
    * Update the rolling thread summary using AI.
    * Called after recordMessage when the conversation has enough messages.
    * Uses the last N messages + existing summary to generate an updated summary.
@@ -424,6 +431,20 @@ export class ConversationContextService {
 
     // Only update summary every 3 messages to avoid excessive AI calls
     if (ctx.totalMessages < 2 || ctx.totalMessages % 3 !== 0) return;
+
+    return this._generateSummary(conversationId);
+  }
+
+  private async _generateSummary(conversationId: string): Promise<void> {
+    if (!this.openai) {
+      this.logger.debug('OpenAI not configured — skipping summary generation');
+      return;
+    }
+
+    const ctx = await this.prisma.threadContext.findUnique({
+      where: { conversationId },
+    });
+    if (!ctx) return;
 
     // Load recent messages for summarization
     const messages = await this.prisma.message.findMany({

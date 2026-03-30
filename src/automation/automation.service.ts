@@ -10,6 +10,7 @@ import { LeadsService } from '../leads/leads.service';
 import { ConfigService } from '@nestjs/config';
 import { AiService } from '../ai/ai.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
+import { ConversationContextService } from '../conversation-context/conversation-context.service';
 
 export interface CreateAutomationRuleDto {
   savedAccountId: string;
@@ -69,6 +70,7 @@ export class AutomationService implements OnModuleInit {
     private configService: ConfigService,
     private aiService: AiService,
     private monitoring: MonitoringService,
+    private conversationContext: ConversationContextService,
   ) {}
 
   /**
@@ -574,26 +576,42 @@ export class AutomationService implements OnModuleInit {
       let messageToSend: string;
 
       if (rule.useAi) {
-        // Fetch conversation history for context (via lead's threadId)
-        const existingMessages = lead.threadId ? await this.prisma.message.findMany({
-          where: { conversationId: lead.threadId },
-          orderBy: { createdAt: 'asc' },
-        }) : [];
-        const conversationHistory = existingMessages
-          .filter(m => m.content?.trim())
-          .map(m => ({
-            role: (m.sender === 'customer' ? 'customer' : 'pro') as 'customer' | 'pro',
-            content: m.content!,
-          }));
+        // Try thread context first (summary + state + recent messages)
+        // Falls back to raw transcript if no ThreadContext exists yet
+        const threadCtx = lead.threadId
+          ? await this.conversationContext.buildContext(lead.threadId).catch(() => null)
+          : null;
+
+        let conversationHistory: { role: 'customer' | 'pro'; content: string }[];
+        let customerMessage: string;
+        let threadContextPrompt: string | undefined;
+
+        if (threadCtx) {
+          // Use enriched context — summary + state instead of full transcript
+          conversationHistory = threadCtx.recentMessages;
+          threadContextPrompt = threadCtx.systemContext;
+          const firstCustomerMsg = conversationHistory.find(m => m.role === 'customer')?.content;
+          customerMessage = firstCustomerMsg || context.customerMessage || lead.message || '';
+          this.logger.log(`[AI] Using thread context for ${pendingId} (stage: ${threadCtx.threadState.stage}, msgs: ${conversationHistory.length})`);
+        } else {
+          // Fallback: load raw transcript (no ThreadContext yet)
+          const existingMessages = lead.threadId ? await this.prisma.message.findMany({
+            where: { conversationId: lead.threadId },
+            orderBy: { createdAt: 'asc' },
+          }) : [];
+          conversationHistory = existingMessages
+            .filter(m => m.content?.trim())
+            .map(m => ({
+              role: (m.sender === 'customer' ? 'customer' : 'pro') as 'customer' | 'pro',
+              content: m.content!,
+            }));
+          const firstCustomerMsg = conversationHistory.find(m => m.role === 'customer')?.content;
+          customerMessage = firstCustomerMsg || context.customerMessage || lead.message || '';
+          this.logger.log(`[AI] Using raw transcript for ${pendingId} (no thread context, ${conversationHistory.length} msgs)`);
+        }
 
         // Extract structured lead details from rawJson
         const leadDetails = this.extractLeadDetails(lead.rawJson);
-
-        // Use the customer's actual first message (from conversation) if available,
-        // fall back to request.description (form data only).
-        // The first customer message often contains the real intent/details.
-        const firstCustomerMsg = conversationHistory.find(m => m.role === 'customer')?.content;
-        const customerMessage = firstCustomerMsg || context.customerMessage || lead.message || '';
 
         // Fetch user's global AI prompt
         const userRecord = await this.prisma.user.findUnique({
@@ -601,7 +619,13 @@ export class AutomationService implements OnModuleInit {
           select: { globalAiPrompt: true },
         });
 
-        // Generate reply via OpenAI — global prompt + strategy prompt
+        // Build strategy prompt — inject thread context if available
+        const strategyPrompt = rule.promptTemplate?.content || rule.aiSystemPrompt || undefined;
+        const systemPrompt = threadContextPrompt
+          ? `${strategyPrompt || ''}\n\n${threadContextPrompt}`.trim()
+          : strategyPrompt;
+
+        // Generate reply via OpenAI
         messageToSend = await this.aiService.generateReply({
           customerName: context.customerName,
           customerMessage,
@@ -611,11 +635,11 @@ export class AutomationService implements OnModuleInit {
           budget: context.budget,
           accountName: context.accountName,
           globalPrompt: userRecord?.globalAiPrompt || undefined,
-          systemPrompt: rule.promptTemplate?.content || rule.aiSystemPrompt || undefined,
+          systemPrompt,
           conversationHistory,
           leadDetails,
         });
-        this.logger.log(`[AI] Generated reply for pending message ${pendingId} (history: ${conversationHistory.length} msgs, customerMsg: ${firstCustomerMsg ? 'from-thread' : 'from-request'})`);
+        this.logger.log(`[AI] Generated reply for pending message ${pendingId} (threadCtx: ${!!threadCtx}, history: ${conversationHistory.length} msgs)`);
       } else {
         // Use static template
         if (!rule.template) {
@@ -632,6 +656,21 @@ export class AutomationService implements OnModuleInit {
 
       // Send the message
       await this.leadsService.sendMessage(context.userId, context.leadId, messageToSend);
+
+      // Record outbound message in thread context
+      if (lead.threadId) {
+        this.conversationContext.recordMessage({
+          conversationId: lead.threadId,
+          leadId: lead.id,
+          platform: lead.platform,
+          sender: 'pro',
+          senderType: rule.useAi ? 'ai' : 'business',
+          content: messageToSend,
+          aiGenerated: rule.useAi,
+          strategyUsed: (rule.promptTemplate as any)?.name || undefined,
+          isAutoFollowUp: (rule as any).delayMinutes > 0,
+        }).catch(err => this.logger.warn(`Failed to record outbound in context: ${err.message}`));
+      }
 
       // Mark as sent
       await this.prisma.pendingAutomatedMessage.update({
