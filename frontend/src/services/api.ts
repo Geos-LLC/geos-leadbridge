@@ -412,8 +412,8 @@ export const leadsApi = {
 
 // Message Templates
 export const templatesApi = {
-  getTemplates: async (): Promise<{ templates: MessageTemplate[]; count: number }> => {
-    const { data } = await api.get('/v1/templates');
+  getTemplates: async (type?: 'message' | 'prompt'): Promise<{ templates: MessageTemplate[]; count: number }> => {
+    const { data } = await api.get('/v1/templates', { params: type ? { type } : undefined });
     return data;
   },
   getTemplate: async (id: string): Promise<MessageTemplate> => {
@@ -453,6 +453,7 @@ export interface CreateAutomationRuleDto {
   triggerType: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply';
   templateId?: string;
+  promptTemplateId?: string;
   delayMinutes?: number;
   enabled?: boolean;
   useAi?: boolean;
@@ -464,6 +465,7 @@ export interface UpdateAutomationRuleDto {
   triggerType?: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply';
   templateId?: string;
+  promptTemplateId?: string;
   delayMinutes?: number;
   enabled?: boolean;
   useAi?: boolean;

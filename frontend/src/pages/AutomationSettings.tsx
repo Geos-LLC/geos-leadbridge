@@ -54,6 +54,8 @@ export function AutomationSettings() {
   const [formEnabled, setFormEnabled] = useState(true);
   const [formUseAi, setFormUseAi] = useState(false);
   const [formAiSystemPrompt, setFormAiSystemPrompt] = useState('');
+  const [formPromptTemplateId, setFormPromptTemplateId] = useState('');
+  const [promptTemplates, setPromptTemplates] = useState<MessageTemplate[]>([]);
 
   // Delete confirmation
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -102,15 +104,17 @@ export function AutomationSettings() {
       if (!_autoCache) setLoading(true);
       setError(null);
 
-      const [rulesRes, accountsRes, templatesRes] = await Promise.all([
+      const [rulesRes, accountsRes, templatesRes, promptsRes] = await Promise.all([
         automationApi.getRules(),
         thumbtackApi.getSavedAccounts(),
-        templatesApi.getTemplates(),
+        templatesApi.getTemplates('message'),
+        templatesApi.getTemplates('prompt'),
       ]);
 
       setRules(rulesRes.rules);
       setAccounts(accountsRes.accounts);
       setTemplates(templatesRes.templates);
+      setPromptTemplates(promptsRes.templates);
       _autoCache = { rules: rulesRes.rules, accounts: accountsRes.accounts, templates: templatesRes.templates };
 
       // Pre-select first account if available
@@ -222,6 +226,7 @@ export function AutomationSettings() {
     setFormEnabled(true);
     setFormUseAi(false);
     setFormAiSystemPrompt('');
+    setFormPromptTemplateId(promptTemplates.find(p => p.isDefault)?.id || promptTemplates[0]?.id || '');
   }
 
   function startEdit(rule: AutomationRule) {
@@ -236,6 +241,7 @@ export function AutomationSettings() {
     setFormEnabled(rule.enabled);
     setFormUseAi(rule.useAi ?? false);
     setFormAiSystemPrompt(rule.aiSystemPrompt || '');
+    setFormPromptTemplateId(rule.promptTemplateId || promptTemplates.find(p => p.isDefault)?.id || '');
   }
 
   function cancelEdit() {
@@ -264,6 +270,7 @@ export function AutomationSettings() {
           triggerType: formTriggerType,
           replyTriggerMode: formTriggerType === 'customer_reply' ? formReplyMode : undefined,
           templateId: formUseAi ? undefined : formTemplateId,
+          promptTemplateId: formUseAi ? formPromptTemplateId || undefined : undefined,
           delayMinutes: formDelayMinutes,
           enabled: formEnabled,
           useAi: formUseAi,
@@ -276,6 +283,7 @@ export function AutomationSettings() {
           triggerType: formTriggerType,
           replyTriggerMode: formTriggerType === 'customer_reply' ? formReplyMode : undefined,
           templateId: formUseAi ? undefined : formTemplateId,
+          promptTemplateId: formUseAi ? formPromptTemplateId || undefined : undefined,
           delayMinutes: formDelayMinutes,
           enabled: formEnabled,
           useAi: formUseAi,
@@ -700,20 +708,36 @@ export function AutomationSettings() {
                 ) : (
                   <>
                     <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '10px 12px', marginBottom: '10px', fontSize: '12px', color: '#1e40af' }}>
-                      ✨ AI will read the customer's message and generate a personalized reply automatically.
+                      ✨ AI will read the customer's message and generate a personalized reply using the prompt below.
                     </div>
                     <label style={{ fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '4px', display: 'block' }}>
-                      AI Instructions <span style={{ fontWeight: 400, color: '#94a3b8' }}>(optional)</span>
+                      AI Prompt Template
                     </label>
+                    <div className="select-wrapper" style={{ marginBottom: '8px' }}>
+                      <select
+                        value={formPromptTemplateId}
+                        onChange={e => {
+                          setFormPromptTemplateId(e.target.value);
+                          const selected = promptTemplates.find(p => p.id === e.target.value);
+                          if (selected) setFormAiSystemPrompt(selected.content);
+                        }}
+                        style={{ width: '100%', padding: '8px 12px', borderRadius: '10px', border: '1.5px solid #e2e8f0', fontSize: '13px', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', background: '#fff' }}
+                      >
+                        {promptTemplates.map(p => (
+                          <option key={p.id} value={p.id}>{p.name}{p.isDefault ? ' (default)' : ''}</option>
+                        ))}
+                        <option value="">Custom prompt...</option>
+                      </select>
+                    </div>
                     <textarea
                       rows={4}
-                      placeholder="e.g. You are a friendly assistant for a cleaning business. Always ask for their availability and confirm the address. Keep responses under 3 sentences."
+                      placeholder="e.g. You are a friendly assistant for a cleaning business..."
                       value={formAiSystemPrompt}
-                      onChange={e => setFormAiSystemPrompt(e.target.value)}
+                      onChange={e => { setFormAiSystemPrompt(e.target.value); setFormPromptTemplateId(''); }}
                       style={{ width: '100%', padding: '8px 12px', borderRadius: '10px', border: '1.5px solid #e2e8f0', fontSize: '13px', resize: 'vertical', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }}
                     />
                     <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
-                      Leave blank to use the default prompt. The AI always knows the customer's name, message, service, and location.
+                      Select a prompt or edit directly. The AI always knows the customer's name, message, service, and location.
                     </p>
                   </>
                 )}
@@ -824,7 +848,7 @@ export function AutomationSettings() {
 
                       <div className="rule-template">
                         {rule.useAi
-                          ? <span>✨ <strong>AI Reply</strong>{rule.aiSystemPrompt ? ' (custom prompt)' : ' (default prompt)'}</span>
+                          ? <span>✨ <strong>AI Reply</strong> — {rule.promptTemplate?.name || (rule.aiSystemPrompt ? 'Custom prompt' : 'Default prompt')}</span>
                           : <>Template: <strong>{rule.template?.name}</strong></>
                         }
                       </div>

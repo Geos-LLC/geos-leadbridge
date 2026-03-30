@@ -113,11 +113,12 @@ export interface AccountDiagnostics {
   }[];
 }
 
-// Message Templates for bulk follow-up messages
+// Message Templates (type=message) and AI Prompt Templates (type=prompt)
 export interface MessageTemplate {
   id: string;
   name: string;
   content: string;
+  type: 'message' | 'prompt';
   isDefault: boolean;
   usageCount: number;
   lastUsedAt: string | null;
@@ -150,6 +151,7 @@ export interface AutomationRule {
   delayMinutes: number;
   enabled: boolean;
   useAi: boolean;
+  promptTemplateId?: string | null;
   aiSystemPrompt: string | null;
   triggerCount: number;
   lastTriggeredAt: string | null;
@@ -160,6 +162,11 @@ export interface AutomationRule {
     businessName: string;
   };
   template?: {
+    id: string;
+    name: string;
+    content: string;
+  };
+  promptTemplate?: {
     id: string;
     name: string;
     content: string;
