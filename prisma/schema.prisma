@@ -102,6 +102,9 @@ model User {
   phoneNumber           String?  // User's dedicated Sigcore/Twilio number
   sigcoreAllocationId   String?  @map("callioAllocationId") // Sigcore's allocation ID for this number
 
+  // AI settings
+  globalAiPrompt        String?   @db.Text @map("global_ai_prompt") // Global AI system prompt — applied to all AI replies
+
   // Password reset
   passwordResetToken    String?
   passwordResetExpires  DateTime?

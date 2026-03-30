@@ -595,7 +595,13 @@ export class AutomationService implements OnModuleInit {
         const firstCustomerMsg = conversationHistory.find(m => m.role === 'customer')?.content;
         const customerMessage = firstCustomerMsg || context.customerMessage || lead.message || '';
 
-        // Generate reply via OpenAI
+        // Fetch user's global AI prompt
+        const userRecord = await this.prisma.user.findUnique({
+          where: { id: context.userId },
+          select: { globalAiPrompt: true },
+        });
+
+        // Generate reply via OpenAI — global prompt + strategy prompt
         messageToSend = await this.aiService.generateReply({
           customerName: context.customerName,
           customerMessage,
@@ -604,6 +610,7 @@ export class AutomationService implements OnModuleInit {
           state: context.state,
           budget: context.budget,
           accountName: context.accountName,
+          globalPrompt: userRecord?.globalAiPrompt || undefined,
           systemPrompt: rule.promptTemplate?.content || rule.aiSystemPrompt || undefined,
           conversationHistory,
           leadDetails,

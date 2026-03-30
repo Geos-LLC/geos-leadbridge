@@ -916,6 +916,14 @@ export const usersApi = {
     const { data } = await api.delete('/v1/users/me');
     return data;
   },
+  getGlobalAiPrompt: async (): Promise<{ prompt: string; isDefault: boolean }> => {
+    const { data } = await api.get('/v1/users/me/ai-prompt');
+    return data;
+  },
+  updateGlobalAiPrompt: async (prompt: string): Promise<{ success: boolean }> => {
+    const { data } = await api.patch('/v1/users/me/ai-prompt', { prompt });
+    return data;
+  },
 };
 
 // Admin API
