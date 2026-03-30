@@ -969,15 +969,23 @@ export class PlatformService {
         const accErrors = tokenErrors.filter(e => e.accountId === accId || e.accountName === acc.businessName);
         const latestErrorAt = Math.max(...accErrors.map(e => new Date(e.createdAt).getTime()));
 
-        // Check 1: lead arrived after error (token worked)
-        // Check 2: account credentials updated after error (reconnected)
-        const accountUpdatedAfter = acc.updatedAt && new Date(acc.updatedAt).getTime() > latestErrorAt;
-        const leadAfter = !accountUpdatedAfter ? await this.prisma.lead.findFirst({
+        // Check 1: credentials have fresh expiresAt after error (reconnected/refreshed)
+        let credsFreshAfterError = false;
+        if (acc.credentialsJson) {
+          try {
+            const creds = EncryptionUtil.decryptObject<any>(acc.credentialsJson, this.encryptionKey);
+            const expiresAt = creds.expiresAt ? new Date(creds.expiresAt).getTime() : 0;
+            // If token expires in the future or was issued after the error, creds are fresh
+            credsFreshAfterError = expiresAt > latestErrorAt;
+          } catch { /* decryption failed — not fresh */ }
+        }
+        // Check 2: lead arrived after error (token worked)
+        const leadAfter = !credsFreshAfterError ? await this.prisma.lead.findFirst({
           where: { userId, platform: 'thumbtack', businessId: acc.businessId, createdAt: { gt: new Date(latestErrorAt) } },
           select: { id: true },
         }) : null;
 
-        if (accountUpdatedAfter || leadAfter) {
+        if (credsFreshAfterError || leadAfter) {
           // Token is alive — resolve stale errors
           await this.prisma.systemErrorLog.updateMany({
             where: { category: 'token_refresh', resolved: false, OR: [{ accountId: accId }, { accountName: acc.businessName, userId }] },
