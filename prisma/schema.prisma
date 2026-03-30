@@ -283,14 +283,17 @@ model Quote {
 }
 
 // ==========================================
-// Message Templates (for bulk follow-up messages)
+// Message Templates & AI Prompt Templates
+// type="message" — SMS/reply templates with {variables}
+// type="prompt"  — AI system prompts for auto-reply
 // ==========================================
 
 model MessageTemplate {
   id          String    @id @default(uuid())
   userId      String
   name        String    // Template name for identification
-  content     String    @db.Text // Template content with {variables}
+  content     String    @db.Text // Template content with {variables} OR AI system prompt text
+  type        String    @default("message") // "message" | "prompt"
   isDefault   Boolean   @default(false)
   usageCount  Int       @default(0)
   lastUsedAt  DateTime?
@@ -298,12 +301,14 @@ model MessageTemplate {
   updatedAt   DateTime  @updatedAt
 
   // Relationships
-  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  automationRules   AutomationRule[]
-  notificationRules NotificationRule[]
+  user                    User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  automationRules         AutomationRule[]   @relation("RuleMessageTemplate")
+  automationPromptRules   AutomationRule[]   @relation("RulePromptTemplate")
+  notificationRules       NotificationRule[]
 
   @@unique([userId, name])
   @@index([userId])
+  @@index([type])
   @@map("message_templates")
 }
 
@@ -372,11 +377,12 @@ model AutomationRule {
   name             String    // User-friendly rule name
   triggerType      String    // "new_lead" | "customer_reply"
   replyTriggerMode String?   // For customer_reply: "first_only" | "every_reply"
-  templateId       String?   // Reference to MessageTemplate (null when useAi=true)
+  templateId       String?   // Message template (null when useAi=true)
+  promptTemplateId String?   @map("prompt_template_id") // AI prompt template (type="prompt")
   delayMinutes     Int       @default(0) // Delay before sending (0 = immediate)
   enabled          Boolean   @default(true)
   useAi            Boolean   @default(false) // Use AI to generate reply instead of template
-  aiSystemPrompt   String?   // Custom instructions for AI (tone, what to ask, etc.)
+  aiSystemPrompt   String?   // DEPRECATED — use promptTemplateId. Kept for backward compat.
   triggerCount     Int       @default(0)
   lastTriggeredAt  DateTime?
   createdAt        DateTime  @default(now())
@@ -385,7 +391,8 @@ model AutomationRule {
   // Relationships
   savedAccount    SavedAccount              @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
   user            User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  template        MessageTemplate?          @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  template        MessageTemplate?          @relation("RuleMessageTemplate", fields: [templateId], references: [id], onDelete: SetNull)
+  promptTemplate  MessageTemplate?          @relation("RulePromptTemplate", fields: [promptTemplateId], references: [id], onDelete: SetNull)
   pendingMessages PendingAutomatedMessage[]
 
   @@index([savedAccountId])

@@ -17,10 +17,11 @@ export interface CreateAutomationRuleDto {
   triggerType: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply';
   templateId?: string;
+  promptTemplateId?: string;
   delayMinutes?: number;
   enabled?: boolean;
   useAi?: boolean;
-  aiSystemPrompt?: string;
+  aiSystemPrompt?: string; // deprecated — use promptTemplateId
 }
 
 export interface UpdateAutomationRuleDto {
@@ -28,10 +29,11 @@ export interface UpdateAutomationRuleDto {
   triggerType?: 'new_lead' | 'customer_reply';
   replyTriggerMode?: 'first_only' | 'every_reply';
   templateId?: string;
+  promptTemplateId?: string;
   delayMinutes?: number;
   enabled?: boolean;
   useAi?: boolean;
-  aiSystemPrompt?: string;
+  aiSystemPrompt?: string; // deprecated — use promptTemplateId
 }
 
 export interface AutomationTriggerContext {
@@ -93,6 +95,9 @@ export class AutomationService implements OnModuleInit {
         template: {
           select: { id: true, name: true, content: true },
         },
+        promptTemplate: {
+          select: { id: true, name: true, content: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -111,6 +116,9 @@ export class AutomationService implements OnModuleInit {
           select: { id: true, businessId: true, businessName: true },
         },
         template: {
+          select: { id: true, name: true, content: true },
+        },
+        promptTemplate: {
           select: { id: true, name: true, content: true },
         },
       },
@@ -180,6 +188,7 @@ export class AutomationService implements OnModuleInit {
         delayMinutes: data.delayMinutes ?? 0,
         enabled: data.enabled ?? true,
         useAi: data.useAi ?? false,
+        promptTemplateId: data.useAi ? (data.promptTemplateId ?? null) : null,
         aiSystemPrompt: data.aiSystemPrompt ?? null,
       },
       include: {
@@ -229,6 +238,7 @@ export class AutomationService implements OnModuleInit {
         ...(data.delayMinutes !== undefined && { delayMinutes: data.delayMinutes }),
         ...(data.enabled !== undefined && { enabled: data.enabled }),
         ...(data.useAi !== undefined && { useAi: data.useAi }),
+        ...(data.promptTemplateId !== undefined && { promptTemplateId: data.promptTemplateId || null }),
         ...(data.aiSystemPrompt !== undefined && { aiSystemPrompt: data.aiSystemPrompt }),
       },
       include: {
@@ -373,6 +383,7 @@ export class AutomationService implements OnModuleInit {
       },
       include: {
         template: true,
+        promptTemplate: true,
       },
     });
 
@@ -423,6 +434,7 @@ export class AutomationService implements OnModuleInit {
       },
       include: {
         template: true,
+        promptTemplate: true,
       },
     });
 
@@ -517,7 +529,7 @@ export class AutomationService implements OnModuleInit {
    */
   private async executePendingMessage(
     pendingId: string,
-    rule: { id: string; useAi: boolean; aiSystemPrompt?: string | null; template?: { id: string; content: string } | null },
+    rule: { id: string; useAi: boolean; aiSystemPrompt?: string | null; promptTemplate?: { id: string; content: string } | null; template?: { id: string; content: string } | null },
     context: AutomationTriggerContext,
   ): Promise<void> {
     this.logger.log(`Executing pending message: ${pendingId} (useAi=${rule.useAi})`);
@@ -592,7 +604,7 @@ export class AutomationService implements OnModuleInit {
           state: context.state,
           budget: context.budget,
           accountName: context.accountName,
-          systemPrompt: rule.aiSystemPrompt ?? undefined,
+          systemPrompt: rule.promptTemplate?.content || rule.aiSystemPrompt || undefined,
           conversationHistory,
           leadDetails,
         });
@@ -652,7 +664,7 @@ export class AutomationService implements OnModuleInit {
   private scheduleTimer(
     pendingId: string,
     delayMs: number,
-    rule: { id: string; useAi: boolean; aiSystemPrompt?: string | null; template?: { id: string; content: string } | null },
+    rule: { id: string; useAi: boolean; aiSystemPrompt?: string | null; promptTemplate?: { id: string; content: string } | null; template?: { id: string; content: string } | null },
     context: AutomationTriggerContext,
   ): void {
     const timer = setTimeout(async () => {
@@ -689,6 +701,7 @@ export class AutomationService implements OnModuleInit {
         automationRule: {
           include: {
             template: true,
+            promptTemplate: true,
           },
         },
         lead: true,
@@ -766,12 +779,14 @@ export class AutomationService implements OnModuleInit {
       delayMinutes: rule.delayMinutes,
       enabled: rule.enabled,
       useAi: rule.useAi,
+      promptTemplateId: rule.promptTemplateId || null,
       aiSystemPrompt: rule.aiSystemPrompt || null,
       triggerCount: rule.triggerCount,
       lastTriggeredAt: rule.lastTriggeredAt?.toISOString() || null,
       createdAt: rule.createdAt.toISOString(),
       savedAccount: rule.savedAccount,
       template: rule.template,
+      promptTemplate: (rule as any).promptTemplate || null,
     };
   }
 }
