@@ -110,8 +110,13 @@ export default function TrialBanner() {
     return null;
   }
 
-  // Trial expired - show urgent banner overlaying the header
+  // Trial expired - show urgent banner with leads info
   if (trialStatus.trialExpired) {
+    const leadsUsed = trialStatus.trialLeadsHandled || 0;
+    const leadsLimit = trialStatus.trialLeadsLimit || 10;
+    const leadsRemaining = trialStatus.trialLeadsRemaining || 0;
+    const expiredByUsage = trialStatus.trialExpiredByUsage;
+
     return (
       <div className="fixed top-0 left-0 lg:left-72 right-0 z-40 px-6 py-3 bg-red-600 border-b border-red-700 shadow-lg">
         <div className="flex items-center gap-4 max-w-7xl mx-auto">
@@ -119,7 +124,15 @@ export default function TrialBanner() {
             <AlertCircle className="w-4 h-4 text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-white">Your trial has expired — Subscribe to continue using all features</p>
+            <p className="text-sm font-bold text-white">
+              {expiredByUsage
+                ? `All ${leadsLimit} trial leads used — Subscribe to continue`
+                : `Trial period ended — ${leadsUsed}/${leadsLimit} leads used (${leadsRemaining} remaining)`
+              }
+            </p>
+            <p className="text-xs text-red-200 mt-0.5">
+              Subscribe to unlock unlimited leads + premium features
+            </p>
           </div>
           <Link
             to="/pricing"
