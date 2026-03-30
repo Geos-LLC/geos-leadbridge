@@ -826,7 +826,7 @@ export default function SettingsPage() {
               {accounts.filter(a => a.platform === 'thumbtack').map(account => {
                 const diag = accountDiagnostics[account.id];
                 const isCheckingDiag = !diag;
-                const hasConnectionIssues = !isCheckingDiag && (!account.webhookId || (diag && !diag.healthy));
+                const hasConnectionIssues = account.tokenDead || (!isCheckingDiag && (!account.webhookId || (diag && !diag.healthy)));
                 const notifIssuesArr = diag?.notificationIssues || [];
                 const isJustDisabled = !isCheckingDiag && !hasConnectionIssues && notifIssuesArr.length > 0 && notifIssuesArr.every((i: string) => i.toLowerCase().includes('disabled'));
                 const hasConfigIssues = !isCheckingDiag && !hasConnectionIssues && notifIssuesArr.length > 0 && !isJustDisabled;
@@ -855,7 +855,12 @@ export default function SettingsPage() {
                             <Loader2 size={10} className="animate-spin" /> Checking health...
                           </p>
                         )}
-                        {hasConnectionIssues && diag && diag.issues.length > 0 && (
+                        {account.tokenDead && (
+                          <p className="text-[10px] text-amber-700 mt-1 flex items-center gap-1">
+                            <AlertCircle size={10} /> Token expired — reconnect
+                          </p>
+                        )}
+                        {hasConnectionIssues && !account.tokenDead && diag && diag.issues.length > 0 && (
                           <p className="text-[10px] text-amber-700 mt-1 flex items-center gap-1">
                             <Info size={10} /> Click for details
                           </p>

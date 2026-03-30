@@ -243,7 +243,7 @@ export function Dashboard() {
 
   const handleAccountClick = (account: SavedAccount) => {
     const diag = accountDiagnostics[account.id];
-    const hasConnectionIssues = (account.platform === 'thumbtack' && !account.webhookId) || (diag && !diag.healthy);
+    const hasConnectionIssues = account.tokenDead || (account.platform === 'thumbtack' && !account.webhookId) || (diag && !diag.healthy);
     const hasSmsIssues = diag && (diag.notificationIssues?.length ?? 0) > 0;
 
     if (hasConnectionIssues) {
