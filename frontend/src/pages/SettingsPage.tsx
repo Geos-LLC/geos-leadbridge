@@ -821,9 +821,9 @@ export default function SettingsPage() {
                 <span className="bg-emerald-50 text-emerald-600 text-[10px] font-bold px-2 py-1 rounded-full border border-emerald-100 uppercase tracking-tighter">Active</span>
               )}
             </div>
-            {accounts.length > 0 ? (
+            {accounts.filter(a => a.platform === 'thumbtack').length > 0 ? (
               <div className="space-y-3">
-              {accounts.map(account => {
+              {accounts.filter(a => a.platform === 'thumbtack').map(account => {
                 const diag = accountDiagnostics[account.id];
                 const isCheckingDiag = !diag;
                 const hasConnectionIssues = !isCheckingDiag && (!account.webhookId || (diag && !diag.healthy));
@@ -1221,10 +1221,63 @@ export default function SettingsPage() {
           </div>
 
           {/* Yelp */}
-          <div className="bg-white rounded-[2rem] border border-slate-100 p-6 flex flex-col items-center justify-center text-center">
-            <div className="w-12 h-12 bg-red-50 rounded-2xl flex items-center justify-center text-red-600 font-bold mb-3 border border-red-100 text-lg">Y</div>
-            <h4 className="font-bold text-slate-900">Yelp Integration</h4>
-            <p className="text-xs text-slate-500 mb-4">Connect your Yelp business to receive and auto-reply to leads</p>
+          <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center text-white font-bold text-xs shadow-lg shadow-red-100">Y</div>
+                <span className="font-bold text-slate-900">Yelp</span>
+              </div>
+              {accounts.filter(a => a.platform === 'yelp').length > 0 && (
+                <span className="bg-emerald-50 text-emerald-600 text-[10px] font-bold px-2 py-1 rounded-full border border-emerald-100 uppercase tracking-tighter">Active</span>
+              )}
+            </div>
+            {accounts.filter(a => a.platform === 'yelp').length > 0 ? (
+              <div className="space-y-3">
+                {accounts.filter(a => a.platform === 'yelp').map(account => {
+                  const diag = accountDiagnostics[account.id];
+                  const isCheckingDiag = !diag;
+                  const hasConnectionIssues = !isCheckingDiag && diag && !diag.healthy;
+                  const notifIssuesArr = diag?.notificationIssues || [];
+                  const hasConfigIssues = !isCheckingDiag && !hasConnectionIssues && notifIssuesArr.length > 0;
+
+                  return (
+                    <div
+                      key={account.id}
+                      className={`p-3 rounded-2xl border transition-all ${
+                        isCheckingDiag ? 'bg-slate-50 border-slate-200'
+                          : hasConnectionIssues ? 'bg-amber-50/50 border-amber-200'
+                          : hasConfigIssues ? 'bg-orange-50/50 border-orange-200'
+                          : 'bg-slate-50 border-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-slate-900 truncate">{account.businessName}</p>
+                          {isCheckingDiag && (
+                            <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Checking...</p>
+                          )}
+                          {hasConnectionIssues && diag?.issues?.[0] && (
+                            <p className="text-[10px] text-amber-700 mt-1">{diag.issues[0]}</p>
+                          )}
+                          {hasConfigIssues && (
+                            <p className="text-[10px] text-orange-700 mt-1">{notifIssuesArr[0]}</p>
+                          )}
+                        </div>
+                        <div className="shrink-0">
+                          {isCheckingDiag ? <Loader2 className="w-5 h-5 text-slate-300 animate-spin" />
+                            : hasConnectionIssues ? <AlertCircle className="w-5 h-5 text-amber-500" />
+                            : <CheckCircle className="w-5 h-5 text-emerald-500" />}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-2">
+                <p className="text-xs text-slate-400 mb-3">No Yelp businesses connected</p>
+              </div>
+            )}
             <button
               onClick={async () => {
                 try {
@@ -1234,9 +1287,9 @@ export default function SettingsPage() {
                   alert(err.message || 'Failed to start Yelp connection');
                 }
               }}
-              className="px-4 py-1.5 bg-red-600 text-white text-xs font-bold rounded-full uppercase tracking-widest hover:bg-red-700 transition-colors"
+              className="w-full px-4 py-2 bg-red-50 text-red-600 text-xs font-bold rounded-xl hover:bg-red-100 transition-colors"
             >
-              Connect Yelp
+              {accounts.filter(a => a.platform === 'yelp').length > 0 ? 'Reconnect Yelp' : 'Connect Yelp'}
             </button>
           </div>
         </div>
