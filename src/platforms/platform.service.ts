@@ -949,15 +949,37 @@ export class PlatformService {
             { accountId: null, accountName: { in: ttAccountNames }, userId, message: { contains: 'thumbtack', mode: 'insensitive' as any } },
           ],
         },
-        select: { accountId: true, accountName: true },
+        select: { accountId: true, accountName: true, createdAt: true },
       });
+      // Map errors to account IDs
+      const candidateDeadIds = new Set<string>();
       for (const err of tokenErrors) {
         if (err.accountId) {
-          deadAccountIds.add(err.accountId);
+          candidateDeadIds.add(err.accountId);
         } else if (err.accountName) {
-          // Match old errors (no accountId) back to the TT account by name
           const match = ttAccounts.find(a => a.businessName === err.accountName);
-          if (match) deadAccountIds.add(match.id);
+          if (match) candidateDeadIds.add(match.id);
+        }
+      }
+
+      // Filter out accounts that received leads AFTER their latest error (token works)
+      for (const accId of candidateDeadIds) {
+        const acc = ttAccounts.find(a => a.id === accId);
+        if (!acc) continue;
+        const accErrors = tokenErrors.filter(e => e.accountId === accId || e.accountName === acc.businessName);
+        const latestErrorAt = Math.max(...accErrors.map(e => new Date(e.createdAt).getTime()));
+        const leadAfter = await this.prisma.lead.findFirst({
+          where: { userId, platform: 'thumbtack', businessId: acc.businessId, createdAt: { gt: new Date(latestErrorAt) } },
+          select: { id: true },
+        });
+        if (leadAfter) {
+          // Token worked after the error — resolve stale errors and skip
+          await this.prisma.systemErrorLog.updateMany({
+            where: { category: 'token_refresh', resolved: false, OR: [{ accountId: accId }, { accountName: acc.businessName, userId }] },
+            data: { resolved: true },
+          }).catch(() => {});
+        } else {
+          deadAccountIds.add(accId);
         }
       }
     }
