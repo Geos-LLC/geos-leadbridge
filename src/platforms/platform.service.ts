@@ -962,18 +962,23 @@ export class PlatformService {
         }
       }
 
-      // Filter out accounts that received leads AFTER their latest error (token works)
+      // Filter out accounts where token was refreshed/reconnected AFTER the error
       for (const accId of candidateDeadIds) {
         const acc = ttAccounts.find(a => a.id === accId);
         if (!acc) continue;
         const accErrors = tokenErrors.filter(e => e.accountId === accId || e.accountName === acc.businessName);
         const latestErrorAt = Math.max(...accErrors.map(e => new Date(e.createdAt).getTime()));
-        const leadAfter = await this.prisma.lead.findFirst({
+
+        // Check 1: lead arrived after error (token worked)
+        // Check 2: account credentials updated after error (reconnected)
+        const accountUpdatedAfter = acc.updatedAt && new Date(acc.updatedAt).getTime() > latestErrorAt;
+        const leadAfter = !accountUpdatedAfter ? await this.prisma.lead.findFirst({
           where: { userId, platform: 'thumbtack', businessId: acc.businessId, createdAt: { gt: new Date(latestErrorAt) } },
           select: { id: true },
-        });
-        if (leadAfter) {
-          // Token worked after the error — resolve stale errors and skip
+        }) : null;
+
+        if (accountUpdatedAfter || leadAfter) {
+          // Token is alive — resolve stale errors
           await this.prisma.systemErrorLog.updateMany({
             where: { category: 'token_refresh', resolved: false, OR: [{ accountId: accId }, { accountName: acc.businessName, userId }] },
             data: { resolved: true },
