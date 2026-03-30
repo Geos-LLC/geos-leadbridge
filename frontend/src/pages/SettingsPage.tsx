@@ -1994,6 +1994,7 @@ function GlobalAiPromptSection() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [expanded, setExpanded] = useState(true);
 
   useEffect(() => {
     usersApi.getGlobalAiPrompt().then(res => {
@@ -2039,45 +2040,53 @@ function GlobalAiPromptSection() {
     <div className="space-y-4">
       <h3 className="text-xl font-bold text-slate-900 px-2">AI Global Prompt</h3>
       <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="p-6 space-y-4">
-          <div>
-            <p className="text-sm text-slate-600 mb-3">
-              This prompt is applied to <strong>all AI auto-replies</strong> across all accounts. It defines the AI's personality, rules, and behavior.
-              Each auto-reply rule adds its own strategy on top of this.
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-50/50 transition-colors"
+        >
+          <div className="flex items-center gap-3 text-left">
+            <Zap className="w-5 h-5 text-violet-500" />
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Core AI Behavior</p>
+              <p className="text-xs text-slate-400">{isDefault ? 'Using default prompt' : 'Custom prompt active'}</p>
+            </div>
+          </div>
+          {expanded ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+        </button>
+
+        {expanded && (
+          <div className="px-6 pb-6 space-y-4 border-t border-slate-100 pt-4">
+            <p className="text-xs text-slate-500">
+              Applied to all AI auto-replies. Strategy prompts (Hybrid, Price-Anchor, etc.) are added on top.
             </p>
-            {isDefault && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-600 text-xs font-semibold rounded-lg mb-3">
-                Using default prompt
-              </span>
-            )}
-          </div>
-          <textarea
-            value={prompt}
-            onChange={e => { setPrompt(e.target.value); setIsDefault(false); setSaved(false); }}
-            rows={12}
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm font-mono leading-relaxed resize-vertical focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-300"
-          />
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-all"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <CheckCircle className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
-              {saved ? 'Saved' : 'Save Prompt'}
-            </button>
-            {!isDefault && (
+            <textarea
+              value={prompt}
+              onChange={e => { setPrompt(e.target.value); setIsDefault(false); setSaved(false); }}
+              rows={10}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs font-mono leading-relaxed resize-vertical focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-300"
+            />
+            <div className="flex items-center gap-3">
               <button
-                onClick={handleReset}
+                onClick={handleSave}
                 disabled={saving}
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-sm font-semibold hover:bg-slate-200 disabled:opacity-50 transition-all"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 transition-all"
               >
-                <RefreshCw className="w-4 h-4" />
-                Reset to Default
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : saved ? <CheckCircle className="w-3.5 h-3.5" /> : null}
+                {saved ? 'Saved' : 'Save'}
               </button>
-            )}
+              {!isDefault && (
+                <button
+                  onClick={handleReset}
+                  disabled={saving}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-semibold hover:bg-slate-200 disabled:opacity-50 transition-all"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Reset to Default
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
