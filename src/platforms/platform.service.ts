@@ -932,7 +932,9 @@ export class PlatformService {
     // NOTE: Do NOT use credential expiresAt — TT access tokens expire every hour and
     // are only refreshed on-demand. An expired access token is normal idle behavior,
     // not a dead token. SystemErrorLog records actual refresh failures.
-    const ttAccountIds = accounts.filter(a => a.platform === 'thumbtack').map(a => a.id);
+    const ttAccounts = accounts.filter(a => a.platform === 'thumbtack');
+    const ttAccountIds = ttAccounts.map(a => a.id);
+    const ttAccountNames = ttAccounts.map(a => a.businessName).filter(Boolean);
     const deadAccountIds = new Set<string>();
 
     if (ttAccountIds.length > 0) {
@@ -940,12 +942,23 @@ export class PlatformService {
         where: {
           category: 'token_refresh',
           resolved: false,
-          accountId: { in: ttAccountIds },
+          OR: [
+            // New errors: matched by accountId
+            { accountId: { in: ttAccountIds } },
+            // Old errors (accountId null): matched by name + user + platform in message
+            { accountId: null, accountName: { in: ttAccountNames }, userId, message: { contains: 'thumbtack', mode: 'insensitive' as any } },
+          ],
         },
-        select: { accountId: true },
+        select: { accountId: true, accountName: true },
       });
       for (const err of tokenErrors) {
-        if (err.accountId) deadAccountIds.add(err.accountId);
+        if (err.accountId) {
+          deadAccountIds.add(err.accountId);
+        } else if (err.accountName) {
+          // Match old errors (no accountId) back to the TT account by name
+          const match = ttAccounts.find(a => a.businessName === err.accountName);
+          if (match) deadAccountIds.add(match.id);
+        }
       }
     }
 
