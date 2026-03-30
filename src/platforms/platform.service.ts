@@ -932,7 +932,9 @@ export class PlatformService {
     // NOTE: Do NOT use credential expiresAt — TT access tokens expire every hour and
     // are only refreshed on-demand. An expired access token is normal idle behavior,
     // not a dead token. SystemErrorLog records actual refresh failures.
-    const ttAccountIds = accounts.filter(a => a.platform === 'thumbtack').map(a => a.id);
+    const ttAccounts = accounts.filter(a => a.platform === 'thumbtack');
+    const ttAccountIds = ttAccounts.map(a => a.id);
+    const ttAccountNames = ttAccounts.map(a => a.businessName).filter(Boolean);
     const deadAccountIds = new Set<string>();
 
     if (ttAccountIds.length > 0) {
@@ -940,12 +942,58 @@ export class PlatformService {
         where: {
           category: 'token_refresh',
           resolved: false,
-          accountId: { in: ttAccountIds },
+          OR: [
+            // New errors: matched by accountId
+            { accountId: { in: ttAccountIds } },
+            // Old errors (accountId null): matched by name + user + platform in message
+            { accountId: null, accountName: { in: ttAccountNames }, userId, message: { contains: 'thumbtack', mode: 'insensitive' as any } },
+          ],
         },
-        select: { accountId: true },
+        select: { accountId: true, accountName: true, createdAt: true },
       });
+      // Map errors to account IDs
+      const candidateDeadIds = new Set<string>();
       for (const err of tokenErrors) {
-        if (err.accountId) deadAccountIds.add(err.accountId);
+        if (err.accountId) {
+          candidateDeadIds.add(err.accountId);
+        } else if (err.accountName) {
+          const match = ttAccounts.find(a => a.businessName === err.accountName);
+          if (match) candidateDeadIds.add(match.id);
+        }
+      }
+
+      // Filter out accounts where token was refreshed/reconnected AFTER the error
+      for (const accId of candidateDeadIds) {
+        const acc = ttAccounts.find(a => a.id === accId);
+        if (!acc) continue;
+        const accErrors = tokenErrors.filter(e => e.accountId === accId || e.accountName === acc.businessName);
+        const latestErrorAt = Math.max(...accErrors.map(e => new Date(e.createdAt).getTime()));
+
+        // Check 1: credentials have fresh expiresAt after error (reconnected/refreshed)
+        let credsFreshAfterError = false;
+        if (acc.credentialsJson) {
+          try {
+            const creds = EncryptionUtil.decryptObject<any>(acc.credentialsJson, this.encryptionKey);
+            const expiresAt = creds.expiresAt ? new Date(creds.expiresAt).getTime() : 0;
+            // If token expires in the future or was issued after the error, creds are fresh
+            credsFreshAfterError = expiresAt > latestErrorAt;
+          } catch { /* decryption failed — not fresh */ }
+        }
+        // Check 2: lead arrived after error (token worked)
+        const leadAfter = !credsFreshAfterError ? await this.prisma.lead.findFirst({
+          where: { userId, platform: 'thumbtack', businessId: acc.businessId, createdAt: { gt: new Date(latestErrorAt) } },
+          select: { id: true },
+        }) : null;
+
+        if (credsFreshAfterError || leadAfter) {
+          // Token is alive — resolve stale errors
+          await this.prisma.systemErrorLog.updateMany({
+            where: { category: 'token_refresh', resolved: false, OR: [{ accountId: accId }, { accountName: acc.businessName, userId }] },
+            data: { resolved: true },
+          }).catch(() => {});
+        } else {
+          deadAccountIds.add(accId);
+        }
       }
     }
 

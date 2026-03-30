@@ -417,6 +417,11 @@ export function Services() {
         setAutoReplyUseAi(loadedFirstRule.useAi ?? false);
         setAutoReplyAiPrompt(loadedFirstRule.aiSystemPrompt ?? '');
         setAutoReplyPromptTemplateId(loadedFirstRule.promptTemplateId || '');
+      } else {
+        // No rules for this account — reset to defaults so auto-select can run
+        setAutoReplyUseAi(false);
+        setAutoReplyAiPrompt('');
+        setAutoReplyPromptTemplateId('');
       }
 
       // Find lead alert rules (non-customer-facing)
@@ -465,10 +470,12 @@ export function Services() {
       setPromptTemplatesLoaded(true);
 
       // Auto-select Hybrid (default) prompt if nothing selected yet
-      if (!autoReplyPromptTemplateId && promptsRes.templates.length > 0) {
+      // Use loadedFirstRule (local) instead of state to avoid stale closure
+      const currentPromptId = loadedFirstRule?.promptTemplateId || '';
+      if (!currentPromptId && promptsRes.templates.length > 0) {
         const hybrid = promptsRes.templates.find((p: any) => p.isDefault) || promptsRes.templates[0];
         setAutoReplyPromptTemplateId(hybrid.id);
-        if (!autoReplyAiPrompt) setAutoReplyAiPrompt(hybrid.content);
+        setAutoReplyAiPrompt(hybrid.content);
       }
 
       // Pre-select CC templates: use saved setting content if set, otherwise load the default template

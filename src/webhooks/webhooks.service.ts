@@ -649,6 +649,52 @@ export class WebhooksService {
 
     this.logger.log('Message stored successfully', { messageId, conversationId: conversation.id });
 
+    // Backfill missing pro messages: when a customer replies, fetch the full thread
+    // from Thumbtack to capture messages sent directly on the platform
+    if (sender === 'customer' && platform === 'thumbtack') {
+      try {
+        const account = await this.prisma.savedAccount.findFirst({
+          where: { userId, platform, businessId },
+          select: { credentialsJson: true },
+        });
+        if (account?.credentialsJson) {
+          const encKey = this.configService.get<string>('encryption.key') || '';
+          const creds = EncryptionUtil.decryptObject<any>(account.credentialsJson, encKey);
+          if (creds.accessToken) {
+            const adapter = this.platformFactory.getAdapter(platform);
+            const allMessages = await adapter.getConversation(creds, negotiationId);
+            let backfilled = 0;
+            for (const msg of allMessages) {
+              if (msg.sender !== 'pro' || !msg.externalMessageId) continue;
+              try {
+                await this.prisma.message.upsert({
+                  where: { platform_externalMessageId: { platform, externalMessageId: msg.externalMessageId } },
+                  create: {
+                    conversationId: conversation.id,
+                    userId,
+                    platform,
+                    externalMessageId: msg.externalMessageId,
+                    sender: 'pro',
+                    content: msg.content || '',
+                    isRead: true,
+                    sentAt: msg.sentAt || new Date(),
+                    rawJson: JSON.stringify(msg.raw || {}),
+                  },
+                  update: {},
+                });
+                backfilled++;
+              } catch { /* duplicate — skip */ }
+            }
+            if (backfilled > 0) {
+              this.logger.log(`Backfilled ${backfilled} pro messages for negotiation ${negotiationId}`);
+            }
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`Failed to backfill pro messages for ${negotiationId}: ${err.message}`);
+      }
+    }
+
     // Trigger automation rules and SMS notifications for customer replies (excludes first message)
     if (sender === 'customer') {
       // Count customer messages to determine reply position

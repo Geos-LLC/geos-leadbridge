@@ -123,6 +123,11 @@ export class ThumbtackController {
               console.log(`Updated credentials for existing account: ${business.name}`);
             }
             await this.platformService.setupThumbtackWebhook(userId, business.businessID);
+            // Clear stale token errors — fresh OAuth means token is alive
+            await this.prisma.systemErrorLog.updateMany({
+              where: { category: 'token_refresh', resolved: false, OR: [{ accountId: ownAccount.id }, { accountName: business.name, userId }] },
+              data: { resolved: true },
+            }).catch(() => {});
             console.log(`Webhook refreshed for business: ${business.name} (${business.businessID})`);
             continue;
           }

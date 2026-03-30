@@ -826,7 +826,7 @@ export default function SettingsPage() {
               {accounts.filter(a => a.platform === 'thumbtack').map(account => {
                 const diag = accountDiagnostics[account.id];
                 const isCheckingDiag = !diag;
-                const hasConnectionIssues = !isCheckingDiag && (!account.webhookId || (diag && !diag.healthy));
+                const hasConnectionIssues = account.tokenDead || (!isCheckingDiag && (!account.webhookId || (diag && !diag.healthy)));
                 const notifIssuesArr = diag?.notificationIssues || [];
                 const isJustDisabled = !isCheckingDiag && !hasConnectionIssues && notifIssuesArr.length > 0 && notifIssuesArr.every((i: string) => i.toLowerCase().includes('disabled'));
                 const hasConfigIssues = !isCheckingDiag && !hasConnectionIssues && notifIssuesArr.length > 0 && !isJustDisabled;
@@ -855,7 +855,12 @@ export default function SettingsPage() {
                             <Loader2 size={10} className="animate-spin" /> Checking health...
                           </p>
                         )}
-                        {hasConnectionIssues && diag && diag.issues.length > 0 && (
+                        {account.tokenDead && (
+                          <p className="text-[10px] text-amber-700 mt-1 flex items-center gap-1">
+                            <AlertCircle size={10} /> Token expired — reconnect
+                          </p>
+                        )}
+                        {hasConnectionIssues && !account.tokenDead && diag && diag.issues.length > 0 && (
                           <p className="text-[10px] text-amber-700 mt-1 flex items-center gap-1">
                             <Info size={10} /> Click for details
                           </p>
@@ -867,6 +872,9 @@ export default function SettingsPage() {
                         )}
                         {isJustDisabled && (
                           <p className="text-[10px] text-slate-400 mt-1">Lead alerts off</p>
+                        )}
+                        {!isCheckingDiag && !hasConnectionIssues && !hasConfigIssues && !isJustDisabled && (
+                          <p className="text-[10px] text-emerald-600 mt-1">Connected</p>
                         )}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -1253,19 +1261,24 @@ export default function SettingsPage() {
                       <div className="flex items-center justify-between">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold text-slate-900 truncate">{account.businessName}</p>
+                          <p className="text-[10px] text-slate-400 font-medium uppercase">ID: {account.businessId}</p>
                           {isCheckingDiag && (
                             <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Checking...</p>
                           )}
                           {hasConnectionIssues && diag?.issues?.[0] && (
-                            <p className="text-[10px] text-amber-700 mt-1">{diag.issues[0]}</p>
+                            <p className="text-[10px] text-amber-700 mt-1 flex items-center gap-1"><Info size={10} /> {diag.issues[0]}</p>
                           )}
                           {hasConfigIssues && (
-                            <p className="text-[10px] text-orange-700 mt-1">{notifIssuesArr[0]}</p>
+                            <p className="text-[10px] text-orange-700 mt-1 flex items-center gap-1"><Info size={10} /> {notifIssuesArr[0]}</p>
+                          )}
+                          {!isCheckingDiag && !hasConnectionIssues && !hasConfigIssues && (
+                            <p className="text-[10px] text-emerald-600 mt-1">Connected</p>
                           )}
                         </div>
                         <div className="shrink-0">
                           {isCheckingDiag ? <Loader2 className="w-5 h-5 text-slate-300 animate-spin" />
                             : hasConnectionIssues ? <AlertCircle className="w-5 h-5 text-amber-500" />
+                            : hasConfigIssues ? <AlertCircle className="w-5 h-5 text-orange-400" />
                             : <CheckCircle className="w-5 h-5 text-emerald-500" />}
                         </div>
                       </div>
@@ -1278,19 +1291,39 @@ export default function SettingsPage() {
                 <p className="text-xs text-slate-400 mb-3">No Yelp businesses connected</p>
               </div>
             )}
-            <button
-              onClick={async () => {
-                try {
-                  const { url } = await platformsApi.getYelpAuthUrl();
-                  window.location.href = url;
-                } catch (err: any) {
-                  alert(err.message || 'Failed to start Yelp connection');
-                }
-              }}
-              className="w-full px-4 py-2 bg-red-50 text-red-600 text-xs font-bold rounded-xl hover:bg-red-100 transition-colors"
-            >
-              {accounts.filter(a => a.platform === 'yelp').length > 0 ? 'Reconnect Yelp' : 'Connect Yelp'}
-            </button>
+            {/* Import Negotiations — placeholder for future Yelp extension */}
+            {accounts.filter(a => a.platform === 'yelp').length > 0 && (
+              <div className="bg-red-50/50 rounded-2xl border border-red-100 overflow-hidden">
+                <div className="flex items-center justify-between p-3">
+                  <div className="flex items-center gap-2">
+                    <Download size={14} className="text-red-400" />
+                    <h4 className="text-sm font-bold text-slate-900">Import Negotiations</h4>
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Coming soon</span>
+                </div>
+                <div className="px-3 pb-3">
+                  <p className="text-xs text-slate-500">Yelp doesn't provide a lead listing API. A Chrome extension (like the Thumbtack one) will scrape historical leads from biz.yelp.com.</p>
+                </div>
+              </div>
+            )}
+
+            {accounts.filter(a => a.platform === 'yelp').length === 0 && (
+              <button
+                onClick={async () => {
+                  try {
+                    const { url } = await platformsApi.getYelpAuthUrl();
+                    sessionStorage.setItem('yelp_oauth_url', JSON.stringify({ url, exp: Date.now() + 10 * 60 * 1000 }));
+                    const dashboardUrl = window.location.origin + '/dashboard';
+                    window.location.href = `https://biz.yelp.com/logout?return_url=${encodeURIComponent(dashboardUrl)}`;
+                  } catch (err: any) {
+                    alert(err.message || 'Failed to start Yelp connection');
+                  }
+                }}
+                className="w-full px-4 py-2 bg-red-50 text-red-600 text-xs font-bold rounded-xl hover:bg-red-100 transition-colors"
+              >
+                Connect Yelp
+              </button>
+            )}
           </div>
         </div>
       </div>
