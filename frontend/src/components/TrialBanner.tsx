@@ -110,12 +110,9 @@ export default function TrialBanner() {
     return null;
   }
 
-  // Trial expired - show urgent banner with leads info
+  // All leads used — hard block
   if (trialStatus.trialExpired) {
-    const leadsUsed = trialStatus.trialLeadsHandled || 0;
     const leadsLimit = trialStatus.trialLeadsLimit || 10;
-    const leadsRemaining = trialStatus.trialLeadsRemaining || 0;
-    const expiredByUsage = trialStatus.trialExpiredByUsage;
 
     return (
       <div className="fixed top-0 left-0 lg:left-72 right-0 z-40 px-6 py-3 bg-red-600 border-b border-red-700 shadow-lg">
@@ -124,15 +121,8 @@ export default function TrialBanner() {
             <AlertCircle className="w-4 h-4 text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-white">
-              {expiredByUsage
-                ? `All ${leadsLimit} trial leads used — Subscribe to continue`
-                : `Trial period ended — ${leadsUsed}/${leadsLimit} leads used (${leadsRemaining} remaining)`
-              }
-            </p>
-            <p className="text-xs text-red-200 mt-0.5">
-              Subscribe to unlock unlimited leads + premium features
-            </p>
+            <p className="text-sm font-bold text-white">All {leadsLimit} trial leads used — Subscribe to continue</p>
+            <p className="text-xs text-red-200 mt-0.5">Upgrade to unlock unlimited leads + premium features</p>
           </div>
           <Link
             to="/pricing"
@@ -146,16 +136,14 @@ export default function TrialBanner() {
     );
   }
 
-  // Active trial - show countdown (both time AND usage)
+  // Active trial - show leads remaining (no date countdown)
   const leadsRemaining = trialStatus.trialLeadsRemaining || 0;
   const leadsUsed = trialStatus.trialLeadsHandled || 0;
   const leadsLimit = trialStatus.trialLeadsLimit || 10;
 
-  // Determine urgency based on whichever limit is closer
-  const timeUrgent = trialStatus.trialDaysRemaining <= 3;
   const usageUrgent = leadsRemaining <= 2;
-  const isUrgent = timeUrgent || usageUrgent;
-  const isWarning = trialStatus.trialDaysRemaining <= 7 || leadsRemaining <= 5;
+  const isUrgent = usageUrgent;
+  const isWarning = leadsRemaining <= 5;
 
   const bgColor = isUrgent ? 'bg-amber-500' : isWarning ? 'bg-blue-600' : 'bg-slate-800';
   const borderColor = isUrgent ? 'border-amber-600' : isWarning ? 'border-blue-700' : 'border-slate-700';
@@ -182,7 +170,6 @@ export default function TrialBanner() {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-bold text-white">
             {leadsRemaining} of {leadsLimit} trial leads left
-            {trialStatus.trialDaysRemaining > 0 && ` • ${trialStatus.trialDaysRemaining} day${trialStatus.trialDaysRemaining !== 1 ? 's' : ''} remaining`}
           </p>
           <p className={`text-xs ${subtextColor} mt-0.5`}>
             {leadsUsed} leads handled • Upgrade to unlock unlimited leads + premium features
