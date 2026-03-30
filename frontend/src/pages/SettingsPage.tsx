@@ -1307,21 +1307,23 @@ export default function SettingsPage() {
               </div>
             )}
 
-            <button
-              onClick={async () => {
-                try {
-                  const { url } = await platformsApi.getYelpAuthUrl();
-                  sessionStorage.setItem('yelp_oauth_url', JSON.stringify({ url, exp: Date.now() + 10 * 60 * 1000 }));
-                  const dashboardUrl = window.location.origin + '/dashboard';
-                  window.location.href = `https://biz.yelp.com/logout?return_url=${encodeURIComponent(dashboardUrl)}`;
-                } catch (err: any) {
-                  alert(err.message || 'Failed to start Yelp connection');
-                }
-              }}
-              className="w-full px-4 py-2 bg-red-50 text-red-600 text-xs font-bold rounded-xl hover:bg-red-100 transition-colors"
-            >
-              {accounts.filter(a => a.platform === 'yelp').length > 0 ? 'Reconnect Yelp' : 'Connect Yelp'}
-            </button>
+            {accounts.filter(a => a.platform === 'yelp').length === 0 && (
+              <button
+                onClick={async () => {
+                  try {
+                    const { url } = await platformsApi.getYelpAuthUrl();
+                    sessionStorage.setItem('yelp_oauth_url', JSON.stringify({ url, exp: Date.now() + 10 * 60 * 1000 }));
+                    const dashboardUrl = window.location.origin + '/dashboard';
+                    window.location.href = `https://biz.yelp.com/logout?return_url=${encodeURIComponent(dashboardUrl)}`;
+                  } catch (err: any) {
+                    alert(err.message || 'Failed to start Yelp connection');
+                  }
+                }}
+                className="w-full px-4 py-2 bg-red-50 text-red-600 text-xs font-bold rounded-xl hover:bg-red-100 transition-colors"
+              >
+                Connect Yelp
+              </button>
+            )}
           </div>
         </div>
       </div>
