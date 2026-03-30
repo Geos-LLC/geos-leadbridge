@@ -23,22 +23,18 @@ export class AiController {
     @Body('leadId') leadId: string,
     @Body('customerMessage') customerMessage: string,
     @Body('conversationHistory') conversationHistory: ConversationMessage[],
+    @Body('strategyPrompt') strategyPrompt?: string,
   ) {
     const lead = await this.prisma.lead.findFirst({
       where: { id: leadId, userId: user.id },
     });
     if (!lead) throw new Error('Lead not found');
 
-    const aiRule = await this.prisma.automationRule.findFirst({
-      where: { userId: user.id, useAi: true, triggerType: 'new_lead' },
-    });
+    const [userRecord, account] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true } }),
+      this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true } }),
+    ]);
 
-    const account = await this.prisma.savedAccount.findFirst({
-      where: { userId: user.id },
-      select: { businessName: true },
-    });
-
-    // Extract structured details from rawJson (bedrooms, bathrooms, pets, frequency, etc.)
     const details = this.extractLeadDetails(lead.rawJson);
 
     const reply = await this.aiService.generateReply({
@@ -49,7 +45,8 @@ export class AiController {
       state: lead.state ?? undefined,
       budget: lead.budget ? Number(lead.budget) : undefined,
       accountName: account?.businessName ?? undefined,
-      systemPrompt: aiRule?.aiSystemPrompt ?? undefined,
+      globalPrompt: userRecord?.globalAiPrompt ?? undefined,
+      systemPrompt: strategyPrompt ?? undefined,
       conversationHistory: conversationHistory ?? [],
       leadDetails: details,
     });
