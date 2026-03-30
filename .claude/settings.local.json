@@ -8,7 +8,9 @@
       "Glob(*)",
       "Grep(*)",
       "WebFetch(*)",
-      "WebSearch(*)"
+      "WebSearch(*)",
+      "Skill(test)",
+      "Skill(test:*)"
     ],
     "additionalDirectories": [
       "C:\\Users\\HP\\.claude"

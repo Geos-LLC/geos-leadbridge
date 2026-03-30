@@ -1,6 +1,6 @@
 /**
  * Templates Controller
- * REST endpoints for managing message templates
+ * REST endpoints for managing message templates and AI prompt templates
  */
 
 import {
@@ -10,6 +10,7 @@ import {
   Patch,
   Delete,
   Param,
+  Query,
   Body,
   UseGuards,
   HttpCode,
@@ -25,68 +26,42 @@ export class TemplatesController {
   constructor(private templatesService: TemplatesService) {}
 
   /**
-   * Get all templates for the current user
+   * Get templates for the current user.
+   * ?type=message — only SMS/reply templates
+   * ?type=prompt  — only AI system prompt templates
+   * (no type)     — all templates
    */
   @Get()
-  async getTemplates(@CurrentUser() user: any) {
-    const templates = await this.templatesService.getTemplates(user.id);
+  async getTemplates(@CurrentUser() user: any, @Query('type') type?: string) {
+    const validType = type === 'message' || type === 'prompt' ? type : undefined;
+    const templates = await this.templatesService.getTemplates(user.id, validType);
     return {
       count: templates.length,
       templates,
     };
   }
 
-  /**
-   * Get a specific template by ID
-   */
   @Get(':id')
   async getTemplate(@CurrentUser() user: any, @Param('id') id: string) {
     return this.templatesService.getTemplate(user.id, id);
   }
 
-  /**
-   * Create a new template
-   */
   @Post()
-  async createTemplate(
-    @CurrentUser() user: any,
-    @Body() body: CreateTemplateDto,
-  ) {
+  async createTemplate(@CurrentUser() user: any, @Body() body: CreateTemplateDto) {
     const template = await this.templatesService.createTemplate(user.id, body);
-    return {
-      success: true,
-      message: 'Template created successfully',
-      template,
-    };
+    return { success: true, message: 'Template created successfully', template };
   }
 
-  /**
-   * Update an existing template
-   */
   @Patch(':id')
-  async updateTemplate(
-    @CurrentUser() user: any,
-    @Param('id') id: string,
-    @Body() body: UpdateTemplateDto,
-  ) {
+  async updateTemplate(@CurrentUser() user: any, @Param('id') id: string, @Body() body: UpdateTemplateDto) {
     const template = await this.templatesService.updateTemplate(user.id, id, body);
-    return {
-      success: true,
-      message: 'Template updated successfully',
-      template,
-    };
+    return { success: true, message: 'Template updated successfully', template };
   }
 
-  /**
-   * Delete a template
-   */
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   async deleteTemplate(@CurrentUser() user: any, @Param('id') id: string) {
     await this.templatesService.deleteTemplate(user.id, id);
-    return {
-      success: true,
-      message: 'Template deleted successfully',
-    };
+    return { success: true, message: 'Template deleted successfully' };
   }
 }
