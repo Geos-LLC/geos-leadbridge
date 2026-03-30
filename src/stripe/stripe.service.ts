@@ -258,18 +258,17 @@ export class StripeService {
     // Get features based on tier (null if cancelled or no subscription)
     const features = status === SubscriptionStatus.CANCELLED || !tier ? [] : this.getFeaturesForTier(tier);
 
-    // Check trial status - usage-based AND time-based
+    // Check trial status — leads are the hard limit, time is soft (warning only)
     const now = new Date();
-    const timeNotExpired = user.trialEndDate && now <= user.trialEndDate;
     const usageNotExpired = user.trialLeadsHandled < user.trialLeadsLimit;
-
-    // Trial is active if both time AND usage limits not exceeded
-    const isOnTrial = timeNotExpired && usageNotExpired && !user.subscriptionTier;
-
-    // Trial expired if EITHER time OR usage limit exceeded
-    const trialExpiredByTime = user.trialEndDate && now > user.trialEndDate;
+    const trialExpiredByTime = !!(user.trialEndDate && now > user.trialEndDate);
     const trialExpiredByUsage = user.trialLeadsHandled >= user.trialLeadsLimit;
-    const trialExpired = (trialExpiredByTime || trialExpiredByUsage) && !user.subscriptionTier;
+
+    // Trial is active as long as leads remain (time expiry is just a warning)
+    const isOnTrial = usageNotExpired && !user.subscriptionTier;
+
+    // Trial only truly expires when ALL leads are used
+    const trialExpired = trialExpiredByUsage && !user.subscriptionTier;
 
     const trialDaysRemaining = user.trialEndDate
       ? Math.max(0, Math.ceil((user.trialEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
