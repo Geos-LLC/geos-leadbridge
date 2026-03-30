@@ -38,6 +38,15 @@ export class ConversationContextController {
   }
 
   /**
+   * Get AI-ready built context (summary + state + recent messages).
+   */
+  @Get(':conversationId/ai-context')
+  async getAiContext(@Param('conversationId') conversationId: string) {
+    const context = await this.contextService.buildContext(conversationId);
+    return { success: true, context };
+  }
+
+  /**
    * List all thread contexts for the current user.
    */
   @Get()
