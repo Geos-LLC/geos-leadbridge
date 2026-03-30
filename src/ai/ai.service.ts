@@ -15,9 +15,10 @@ export interface AiReplyContext {
   state?: string;
   budget?: number;
   accountName?: string;
-  systemPrompt?: string;
+  globalPrompt?: string;   // Global AI prompt (from user settings)
+  systemPrompt?: string;   // Strategy prompt (from prompt template)
   conversationHistory?: ConversationMessage[];
-  leadDetails?: Record<string, string>; // structured metadata: bedrooms, bathrooms, pets, frequency, etc.
+  leadDetails?: Record<string, string>;
 }
 
 @Injectable()
@@ -37,21 +38,18 @@ export class AiService {
   }
 
   async generateReply(ctx: AiReplyContext): Promise<string> {
-    const defaultSystemPrompt = `You are a friendly, professional assistant for a home service business.
-Your job is to respond to new customer inquiries quickly and warmly to win the job.
+    const { TemplatesService } = require('../templates/templates.service');
 
-Rules:
-- Keep responses short (2-4 sentences), conversational, and focused on moving toward booking.
-- Reference the specific service and details the customer mentioned — show you read their request.
-- If the customer described their needs in detail, acknowledge what they need and confirm you can help.
-- If information is missing, ask ONE specific clarifying question relevant to the job (not generic like "when can we call").
-- Tailor your response to the job details provided (e.g., frequency, add-ons, pets, property type).
-- Never mention AI or automation. Never ask "when would be a good time to call" unless there's truly nothing else to discuss.
-- Sound like a real person who cares about their specific situation.`;
+    // Global prompt: user's custom global prompt → default global prompt
+    const globalPrompt = ctx.globalPrompt?.trim() || TemplatesService.DEFAULT_GLOBAL_AI_PROMPT;
 
-    const systemPrompt = ctx.systemPrompt?.trim()
-      ? ctx.systemPrompt.trim()
-      : defaultSystemPrompt;
+    // Strategy prompt: selected strategy template (e.g., Hybrid, Price-Anchor)
+    const strategyPrompt = ctx.systemPrompt?.trim() || '';
+
+    // Combine: global prompt + strategy add-on
+    const systemPrompt = strategyPrompt
+      ? `${globalPrompt}\n\n${strategyPrompt}`
+      : globalPrompt;
 
     const userPrompt = this.buildUserPrompt(ctx);
 

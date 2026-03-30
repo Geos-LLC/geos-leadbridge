@@ -1491,6 +1491,9 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {/* Section 4: AI Global Prompt */}
+      <GlobalAiPromptSection />
+
       {/* Danger Zone */}
       {user?.role !== 'ADMIN' && (
         <div className="bg-white rounded-3xl shadow-sm border border-red-100 overflow-hidden">
@@ -1977,6 +1980,105 @@ export default function SettingsPage() {
         savedAccounts={accounts}
         onSuccess={handleConnectionSuccess}
       />
+    </div>
+  );
+}
+
+/**
+ * Global AI Prompt section — editable system prompt for all AI auto-replies.
+ * Stored per user. Default provided from backend.
+ */
+function GlobalAiPromptSection() {
+  const [prompt, setPrompt] = useState('');
+  const [isDefault, setIsDefault] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    usersApi.getGlobalAiPrompt().then(res => {
+      setPrompt(res.prompt);
+      setIsDefault(res.isDefault);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    try {
+      await usersApi.updateGlobalAiPrompt(prompt);
+      setIsDefault(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch {
+      notify.error('Error', 'Failed to save AI prompt');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReset = async () => {
+    setSaving(true);
+    try {
+      await usersApi.updateGlobalAiPrompt('');
+      const res = await usersApi.getGlobalAiPrompt();
+      setPrompt(res.prompt);
+      setIsDefault(true);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch {
+      notify.error('Error', 'Failed to reset AI prompt');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return null;
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-xl font-bold text-slate-900 px-2">AI Global Prompt</h3>
+      <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="p-6 space-y-4">
+          <div>
+            <p className="text-sm text-slate-600 mb-3">
+              This prompt is applied to <strong>all AI auto-replies</strong> across all accounts. It defines the AI's personality, rules, and behavior.
+              Each auto-reply rule adds its own strategy on top of this.
+            </p>
+            {isDefault && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-600 text-xs font-semibold rounded-lg mb-3">
+                Using default prompt
+              </span>
+            )}
+          </div>
+          <textarea
+            value={prompt}
+            onChange={e => { setPrompt(e.target.value); setIsDefault(false); setSaved(false); }}
+            rows={12}
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm font-mono leading-relaxed resize-vertical focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-300"
+          />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-all"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <CheckCircle className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
+              {saved ? 'Saved' : 'Save Prompt'}
+            </button>
+            {!isDefault && (
+              <button
+                onClick={handleReset}
+                disabled={saving}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-sm font-semibold hover:bg-slate-200 disabled:opacity-50 transition-all"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Reset to Default
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

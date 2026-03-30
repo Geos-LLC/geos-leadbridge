@@ -284,6 +284,32 @@ export class UsersService {
   }
 
   /**
+   * Get the user's global AI prompt (returns default if not set)
+   */
+  async getGlobalAiPrompt(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { globalAiPrompt: true },
+    });
+    const { TemplatesService } = require('../templates/templates.service');
+    return {
+      prompt: user?.globalAiPrompt || TemplatesService.DEFAULT_GLOBAL_AI_PROMPT,
+      isDefault: !user?.globalAiPrompt,
+    };
+  }
+
+  /**
+   * Update the user's global AI prompt
+   */
+  async updateGlobalAiPrompt(userId: string, prompt: string) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { globalAiPrompt: prompt || null },
+    });
+    return { success: true };
+  }
+
+  /**
    * Delete the current user's own account
    */
   async deleteOwnAccount(userId: string) {

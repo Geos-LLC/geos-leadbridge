@@ -84,6 +84,24 @@ export class UsersController {
   }
 
   /**
+   * Get the user's global AI prompt
+   * GET /v1/users/me/ai-prompt
+   */
+  @Get('me/ai-prompt')
+  async getGlobalAiPrompt(@Request() req: any) {
+    return this.usersService.getGlobalAiPrompt(req.user.id);
+  }
+
+  /**
+   * Update the user's global AI prompt
+   * PATCH /v1/users/me/ai-prompt
+   */
+  @Patch('me/ai-prompt')
+  async updateGlobalAiPrompt(@Request() req: any, @Body() body: { prompt: string }) {
+    return this.usersService.updateGlobalAiPrompt(req.user.id, body.prompt);
+  }
+
+  /**
    * Delete the current user's own account
    * DELETE /v1/users/me
    */
