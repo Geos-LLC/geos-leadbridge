@@ -153,6 +153,7 @@ export function Services() {
   const [autoReplyAiPrompt, setAutoReplyAiPrompt] = useState<string>(firstReplyRule?.aiSystemPrompt ?? '');
   const [autoReplyPromptTemplateId, setAutoReplyPromptTemplateId] = useState<string>(firstReplyRule?.promptTemplateId || '');
   const [promptTemplates, setPromptTemplates] = useState<MessageTemplate[]>([]);
+  const [, setPromptTemplatesLoaded] = useState(false);
 
   // Other service rules
   const [leadAlertRule, setLeadAlertRule] = useState<NotificationRule | null>(sc?.leadAlertRule ?? null);
@@ -461,6 +462,14 @@ export function Services() {
 
       setTemplates(allTemplates);
       setPromptTemplates(promptsRes.templates);
+      setPromptTemplatesLoaded(true);
+
+      // Auto-select Hybrid (default) prompt if nothing selected yet
+      if (!autoReplyPromptTemplateId && promptsRes.templates.length > 0) {
+        const hybrid = promptsRes.templates.find((p: any) => p.isDefault) || promptsRes.templates[0];
+        setAutoReplyPromptTemplateId(hybrid.id);
+        if (!autoReplyAiPrompt) setAutoReplyAiPrompt(hybrid.content);
+      }
 
       // Pre-select CC templates: use saved setting content if set, otherwise load the default template
       const whisperTpl = allTemplates.find(t => t.name === 'CC - Agent Whisper');
@@ -1665,8 +1674,8 @@ export function Services() {
                             onChange={e => { setAutoReplyAiPrompt(e.target.value); setAutoReplyPromptTemplateId(''); }}
                             onBlur={() => firstReplyRule && changeRuleAiMode(firstReplyRule.id, true, autoReplyAiPrompt)}
                             placeholder="e.g. Keep responses under 3 sentences. Always mention we offer free estimates."
-                            rows={3}
-                            className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-200"
+                            rows={5}
+                            className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-200"
                           />
                           <p className="text-xs text-slate-400 mt-1">Select a preset or edit directly. AI always knows the lead details.</p>
                         </div>

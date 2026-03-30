@@ -225,8 +225,9 @@ export function AutomationSettings() {
     setFormDelayMinutes(0);
     setFormEnabled(true);
     setFormUseAi(false);
-    setFormAiSystemPrompt('');
-    setFormPromptTemplateId(promptTemplates.find(p => p.isDefault)?.id || promptTemplates[0]?.id || '');
+    const defaultPrompt = promptTemplates.find(p => p.isDefault) || promptTemplates[0];
+    setFormPromptTemplateId(defaultPrompt?.id || '');
+    setFormAiSystemPrompt(defaultPrompt?.content || '');
   }
 
   function startEdit(rule: AutomationRule) {
@@ -240,8 +241,10 @@ export function AutomationSettings() {
     setFormDelayMinutes(rule.delayMinutes);
     setFormEnabled(rule.enabled);
     setFormUseAi(rule.useAi ?? false);
-    setFormAiSystemPrompt(rule.aiSystemPrompt || '');
-    setFormPromptTemplateId(rule.promptTemplateId || promptTemplates.find(p => p.isDefault)?.id || '');
+    const rulePromptId = rule.promptTemplateId || promptTemplates.find(p => p.isDefault)?.id || '';
+    setFormPromptTemplateId(rulePromptId);
+    const promptContent = rule.aiSystemPrompt || promptTemplates.find(p => p.id === rulePromptId)?.content || '';
+    setFormAiSystemPrompt(promptContent);
   }
 
   function cancelEdit() {
