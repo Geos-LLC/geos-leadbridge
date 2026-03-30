@@ -477,8 +477,9 @@ export const aiApi = {
     leadId: string,
     customerMessage: string,
     conversationHistory: { role: 'customer' | 'pro'; content: string }[],
+    strategyPrompt?: string,
   ): Promise<{ reply: string }> => {
-    const { data } = await api.post('/v1/ai/preview-for-lead', { leadId, customerMessage, conversationHistory });
+    const { data } = await api.post('/v1/ai/preview-for-lead', { leadId, customerMessage, conversationHistory, strategyPrompt });
     return data;
   },
 };

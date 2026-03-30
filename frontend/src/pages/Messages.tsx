@@ -181,6 +181,12 @@ export function Messages() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [aiPreview, setAiPreview] = useState<Record<string, { loading: boolean; reply: string | null }>>({});
+  const AI_STRATEGIES = [
+    { key: 'hybrid', label: 'Hybrid', emoji: '⚖️', prompt: 'Strategy: Hybrid\n\n- Provide a broad price range early\n- Immediately ask one clarifying question\n- Balance speed and accuracy\n- Adjust responses dynamically as more information is received' },
+    { key: 'price', label: 'Price', emoji: '💰', prompt: 'Strategy: Price Anchor\n\n- Provide a realistic price range early in the conversation\n- Reduce uncertainty quickly\n- After giving range, ask 1 clarifying question\n- Avoid exact pricing unless enough details are provided\n- Keep explanation minimal' },
+    { key: 'qualify', label: 'Qualify', emoji: '🧠', prompt: 'Strategy: Qualification First\n\n- Ask 1-2 high-impact questions before giving pricing\n- Focus on understanding scope and details\n- Delay pricing until enough context is gathered\n- Keep questions natural and helpful, not interrogative' },
+    { key: 'convert', label: 'Convert', emoji: '📞', prompt: 'Strategy: Conversion\n\n- Focus on moving toward booking or next step\n- Suggest phone call or scheduling only when appropriate\n- Present next step as convenience, not pressure\n- Continue answering questions if user prefers chat' },
+  ];
   const [resyncingMessages, setResyncingMessages] = useState(false);
   const [resyncError, setResyncError] = useState<string | null>(null);
   const [messageText, setMessageText] = useState('');
@@ -1426,59 +1432,71 @@ export function Messages() {
                       )}
                     </div>
 
-                    {/* AI Reply preview — inbound messages only */}
+                    {/* AI Reply preview — inbound messages only, 4 strategy buttons */}
                     {event.direction === 'inbound' && event.content && (
                       <div className="mt-1">
-                        {!aiPreview[event.id] ? (
-                          <button
-                            onClick={() => {
-                              const idx = timelineEvents.indexOf(event);
-                              const history = timelineEvents.slice(0, idx)
-                                .filter(e => e.content && (e.direction === 'inbound' || e.direction === 'outbound'))
-                                .map(e => ({ role: (e.direction === 'inbound' ? 'customer' : 'pro') as 'customer' | 'pro', content: e.content! }));
-                              setAiPreview(prev => ({ ...prev, [event.id]: { loading: true, reply: null } }));
-                              aiApi.previewForLead(selectedLead!.id, event.content!, history)
-                                .then(({ reply }) => setAiPreview(prev => ({ ...prev, [event.id]: { loading: false, reply } })))
-                                .catch(() => setAiPreview(prev => ({ ...prev, [event.id]: { loading: false, reply: 'Failed to generate reply.' } })));
-                            }}
-                            className="flex items-center gap-1 text-[10px] text-violet-500 hover:text-violet-700 transition-colors"
-                          >
-                            <Sparkles size={10} />
-                            <span>See AI reply</span>
-                          </button>
-                        ) : (
-                          <div className="bg-violet-50 border border-violet-100 rounded-xl px-3 py-2 max-w-sm">
-                            <div className="flex items-center justify-between gap-2 mb-1">
-                              <span className="text-[10px] font-bold text-violet-500 uppercase tracking-widest flex items-center gap-1">
-                                <Sparkles size={9} /> AI would reply
-                              </span>
-                              <button onClick={() => setAiPreview(prev => { const n = { ...prev }; delete n[event.id]; return n; })} className="text-violet-300 hover:text-violet-500">
-                                <X size={11} />
+                        {/* Strategy buttons row */}
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <Sparkles size={10} className="text-violet-400" />
+                          {AI_STRATEGIES.map(strategy => {
+                            const previewKey = `${event.id}:${strategy.key}`;
+                            const preview = aiPreview[previewKey];
+                            return (
+                              <button
+                                key={strategy.key}
+                                onClick={() => {
+                                  if (preview) return; // already loaded
+                                  const idx = timelineEvents.indexOf(event);
+                                  const history = timelineEvents.slice(0, idx)
+                                    .filter(e => e.content && (e.direction === 'inbound' || e.direction === 'outbound'))
+                                    .map(e => ({ role: (e.direction === 'inbound' ? 'customer' : 'pro') as 'customer' | 'pro', content: e.content! }));
+                                  setAiPreview(prev => ({ ...prev, [previewKey]: { loading: true, reply: null } }));
+                                  aiApi.previewForLead(selectedLead!.id, event.content!, history, strategy.prompt)
+                                    .then(({ reply }) => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply } })))
+                                    .catch(() => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply: 'Failed to generate.' } })));
+                                }}
+                                className={`text-[10px] px-1.5 py-0.5 rounded-md transition-colors ${
+                                  preview?.reply ? 'bg-violet-100 text-violet-700 font-semibold' :
+                                  preview?.loading ? 'bg-violet-50 text-violet-400' :
+                                  'text-violet-400 hover:text-violet-600 hover:bg-violet-50'
+                                }`}
+                              >
+                                {preview?.loading ? <Loader2 size={9} className="animate-spin inline" /> : strategy.emoji} {strategy.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Show loaded previews */}
+                        {AI_STRATEGIES.map(strategy => {
+                          const previewKey = `${event.id}:${strategy.key}`;
+                          const preview = aiPreview[previewKey];
+                          if (!preview || preview.loading || !preview.reply) return null;
+                          return (
+                            <div key={strategy.key} className="bg-violet-50 border border-violet-100 rounded-xl px-3 py-2 max-w-sm mt-1.5">
+                              <div className="flex items-center justify-between gap-2 mb-1">
+                                <span className="text-[10px] font-bold text-violet-500 uppercase tracking-widest">
+                                  {strategy.emoji} {strategy.label}
+                                </span>
+                                <button onClick={() => setAiPreview(prev => { const n = { ...prev }; delete n[previewKey]; return n; })} className="text-violet-300 hover:text-violet-500">
+                                  <X size={11} />
+                                </button>
+                              </div>
+                              <p className="text-xs text-slate-700 leading-relaxed">{preview.reply}</p>
+                              <button
+                                onClick={() => {
+                                  setMessageText(preview.reply || '');
+                                  const input = document.querySelector<HTMLTextAreaElement>('textarea[placeholder*="message"]');
+                                  if (input) { input.focus(); input.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+                                }}
+                                className="mt-1.5 flex items-center gap-1 text-[10px] font-semibold text-violet-600 hover:text-violet-800 bg-violet-100 hover:bg-violet-200 px-2 py-1 rounded-lg transition-colors"
+                              >
+                                <ArrowRight size={10} />
+                                Use this reply
                               </button>
                             </div>
-                            {aiPreview[event.id].loading ? (
-                              <div className="flex items-center gap-1.5 text-violet-400 text-xs">
-                                <Loader2 size={11} className="animate-spin" /> Generating…
-                              </div>
-                            ) : (
-                              <>
-                                <p className="text-xs text-slate-700 leading-relaxed">{aiPreview[event.id].reply}</p>
-                                <button
-                                  onClick={() => {
-                                    setMessageText(aiPreview[event.id].reply || '');
-                                    // Scroll to and focus message input
-                                    const input = document.querySelector<HTMLTextAreaElement>('textarea[placeholder*="message"]');
-                                    if (input) { input.focus(); input.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
-                                  }}
-                                  className="mt-1.5 flex items-center gap-1 text-[10px] font-semibold text-violet-600 hover:text-violet-800 bg-violet-100 hover:bg-violet-200 px-2 py-1 rounded-lg transition-colors"
-                                >
-                                  <ArrowRight size={10} />
-                                  Use this reply
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        )}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
