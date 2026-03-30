@@ -873,6 +873,9 @@ export default function SettingsPage() {
                         {isJustDisabled && (
                           <p className="text-[10px] text-slate-400 mt-1">Lead alerts off</p>
                         )}
+                        {!isCheckingDiag && !hasConnectionIssues && !hasConfigIssues && !isJustDisabled && (
+                          <p className="text-[10px] text-emerald-600 mt-1">Connected</p>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         {isCheckingDiag ? (
@@ -1288,11 +1291,29 @@ export default function SettingsPage() {
                 <p className="text-xs text-slate-400 mb-3">No Yelp businesses connected</p>
               </div>
             )}
+            {/* Import Negotiations — placeholder for future Yelp extension */}
+            {accounts.filter(a => a.platform === 'yelp').length > 0 && (
+              <div className="bg-red-50/50 rounded-2xl border border-red-100 overflow-hidden">
+                <div className="flex items-center justify-between p-3">
+                  <div className="flex items-center gap-2">
+                    <Download size={14} className="text-red-400" />
+                    <h4 className="text-sm font-bold text-slate-900">Import Negotiations</h4>
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Coming soon</span>
+                </div>
+                <div className="px-3 pb-3">
+                  <p className="text-xs text-slate-500">Yelp doesn't provide a lead listing API. A Chrome extension (like the Thumbtack one) will scrape historical leads from biz.yelp.com.</p>
+                </div>
+              </div>
+            )}
+
             <button
               onClick={async () => {
                 try {
                   const { url } = await platformsApi.getYelpAuthUrl();
-                  window.location.href = url;
+                  sessionStorage.setItem('yelp_oauth_url', JSON.stringify({ url, exp: Date.now() + 10 * 60 * 1000 }));
+                  const dashboardUrl = window.location.origin + '/dashboard';
+                  window.location.href = `https://biz.yelp.com/logout?return_url=${encodeURIComponent(dashboardUrl)}`;
                 } catch (err: any) {
                   alert(err.message || 'Failed to start Yelp connection');
                 }
