@@ -151,6 +151,8 @@ export function Services() {
   const firstReplyRule = autoReplyRules.find(r => r.delayMinutes === 0 || !r.delayMinutes) || null;
   const [autoReplyUseAi, setAutoReplyUseAi] = useState<boolean>(firstReplyRule?.useAi ?? false);
   const [autoReplyAiPrompt, setAutoReplyAiPrompt] = useState<string>(firstReplyRule?.aiSystemPrompt ?? '');
+  const [autoReplyPromptTemplateId, setAutoReplyPromptTemplateId] = useState<string>(firstReplyRule?.promptTemplateId || '');
+  const [promptTemplates, setPromptTemplates] = useState<MessageTemplate[]>([]);
 
   // Other service rules
   const [leadAlertRule, setLeadAlertRule] = useState<NotificationRule | null>(sc?.leadAlertRule ?? null);
@@ -345,10 +347,11 @@ export function Services() {
       if (!_svcLoaded && !_svcCache.has(accountId)) setLoading(true);
       setError(null);
 
-      const [automationRes, notifRes, templatesRes, poolRes, ccRes, ctRes, notifSettingsRes, tenantPhonesRes] = await Promise.all([
+      const [automationRes, notifRes, templatesRes, promptsRes, poolRes, ccRes, ctRes, notifSettingsRes, tenantPhonesRes] = await Promise.all([
         automationApi.getRulesForAccount(accountId).catch(() => ({ rules: [] as AutomationRule[] })),
         notificationsApi.getRules(accountId).catch(() => ({ rules: [] as NotificationRule[] })),
-        templatesApi.getTemplates().catch(() => ({ templates: [] as MessageTemplate[] })),
+        templatesApi.getTemplates('message').catch(() => ({ templates: [] as MessageTemplate[] })),
+        templatesApi.getTemplates('prompt').catch(() => ({ templates: [] as MessageTemplate[] })),
         Promise.resolve({ phoneNumbers: [] }),
         callConnectApi.getSettings(accountId).catch(() => ({ settings: null })),
         notificationsApi.getCustomerTextingSettings(accountId).catch(() => null),
@@ -412,6 +415,7 @@ export function Services() {
       if (loadedFirstRule) {
         setAutoReplyUseAi(loadedFirstRule.useAi ?? false);
         setAutoReplyAiPrompt(loadedFirstRule.aiSystemPrompt ?? '');
+        setAutoReplyPromptTemplateId(loadedFirstRule.promptTemplateId || '');
       }
 
       // Find lead alert rules (non-customer-facing)
@@ -456,6 +460,7 @@ export function Services() {
       }
 
       setTemplates(allTemplates);
+      setPromptTemplates(promptsRes.templates);
 
       // Pre-select CC templates: use saved setting content if set, otherwise load the default template
       const whisperTpl = allTemplates.find(t => t.name === 'CC - Agent Whisper');
@@ -621,6 +626,7 @@ export function Services() {
             name: 'Auto Reply - Immediate',
             triggerType: 'new_lead',
             useAi: true,
+            promptTemplateId: autoReplyPromptTemplateId || undefined,
             aiSystemPrompt: autoReplyAiPrompt || undefined,
             delayMinutes: 0,
             enabled: true,
@@ -1637,18 +1643,32 @@ export function Services() {
                           )}
                         </div>
                       ) : (
-                        /* AI mode: optional custom instructions */
+                        /* AI mode: prompt template selector + editable content */
                         <div>
-                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Custom AI Instructions <span className="font-normal normal-case">(optional)</span></label>
+                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Prompt Template</label>
+                          <select
+                            value={autoReplyPromptTemplateId}
+                            onChange={e => {
+                              setAutoReplyPromptTemplateId(e.target.value);
+                              const selected = promptTemplates.find(p => p.id === e.target.value);
+                              if (selected) setAutoReplyAiPrompt(selected.content);
+                            }}
+                            className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium mb-2"
+                          >
+                            {promptTemplates.map(p => (
+                              <option key={p.id} value={p.id}>{p.name}{p.isDefault ? ' (default)' : ''}</option>
+                            ))}
+                            <option value="">Custom prompt...</option>
+                          </select>
                           <textarea
                             value={autoReplyAiPrompt}
-                            onChange={e => setAutoReplyAiPrompt(e.target.value)}
+                            onChange={e => { setAutoReplyAiPrompt(e.target.value); setAutoReplyPromptTemplateId(''); }}
                             onBlur={() => firstReplyRule && changeRuleAiMode(firstReplyRule.id, true, autoReplyAiPrompt)}
-                            placeholder="e.g. Keep responses under 3 sentences. Always mention we offer free estimates. Be friendly and professional."
+                            placeholder="e.g. Keep responses under 3 sentences. Always mention we offer free estimates."
                             rows={3}
                             className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-200"
                           />
-                          <p className="text-xs text-slate-400 mt-1">Leave blank to use the default AI instructions.</p>
+                          <p className="text-xs text-slate-400 mt-1">Select a preset or edit directly. AI always knows the lead details.</p>
                         </div>
                       )}
                     </div>
