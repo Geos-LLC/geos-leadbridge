@@ -1995,11 +1995,14 @@ function GlobalAiPromptSection() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [expanded, setExpanded] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     usersApi.getGlobalAiPrompt().then(res => {
       setPrompt(res.prompt);
       setIsDefault(res.isDefault);
+      if (!res.isDefault) setEditing(true);
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
@@ -2061,28 +2064,52 @@ function GlobalAiPromptSection() {
             </p>
             <textarea
               value={prompt}
-              onChange={e => { setPrompt(e.target.value); setIsDefault(false); setSaved(false); }}
+              onChange={e => { setPrompt(e.target.value); setDirty(true); setSaved(false); }}
+              readOnly={!editing}
               rows={10}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs font-mono leading-relaxed resize-vertical focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-300"
+              className={`w-full border rounded-xl p-4 text-xs font-mono leading-relaxed resize-vertical focus:outline-none transition-all ${
+                editing
+                  ? 'bg-white border-blue-300 ring-2 ring-blue-100'
+                  : 'bg-slate-50 border-slate-200 cursor-default'
+              }`}
             />
             <div className="flex items-center gap-3">
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 transition-all"
-              >
-                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : saved ? <CheckCircle className="w-3.5 h-3.5" /> : null}
-                {saved ? 'Saved' : 'Save'}
-              </button>
-              {!isDefault && (
+              {!editing ? (
                 <button
-                  onClick={handleReset}
-                  disabled={saving}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-semibold hover:bg-slate-200 disabled:opacity-50 transition-all"
+                  onClick={() => setEditing(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-200 transition-all"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  Reset to Default
+                  <Pencil className="w-3.5 h-3.5" />
+                  Edit Prompt
                 </button>
+              ) : (
+                <>
+                  <button
+                    onClick={async () => { await handleSave(); setEditing(false); setDirty(false); }}
+                    disabled={saving || !dirty}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 transition-all"
+                  >
+                    {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : saved ? <CheckCircle className="w-3.5 h-3.5" /> : null}
+                    {saved ? 'Saved' : 'Save'}
+                  </button>
+                  <button
+                    onClick={() => { setEditing(false); setDirty(false); usersApi.getGlobalAiPrompt().then(r => { setPrompt(r.prompt); setIsDefault(r.isDefault); }); }}
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-semibold hover:bg-slate-200 disabled:opacity-50 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  {!isDefault && (
+                    <button
+                      onClick={async () => { await handleReset(); setEditing(false); setDirty(false); }}
+                      disabled={saving}
+                      className="inline-flex items-center gap-2 px-4 py-2 text-slate-400 rounded-xl text-xs font-semibold hover:text-red-500 hover:bg-red-50 disabled:opacity-50 transition-all"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Reset to Default
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>
