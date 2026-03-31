@@ -6,12 +6,13 @@
  * Yelp v1, extensible to Thumbtack via platform field.
  */
 
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextModule } from '../conversation-context/conversation-context.module';
+import { LeadsModule } from '../leads/leads.module';
 import { FollowUpEngineService } from './follow-up-engine.service';
 import { FollowUpStateService } from './follow-up-state.service';
 import { FollowUpSchedulerService } from './follow-up-scheduler.service';
@@ -25,6 +26,7 @@ import { FollowUpEngineController } from './follow-up-engine.controller';
     ScheduleModule.forRoot(),
     EventEmitterModule.forRoot(),
     ConversationContextModule,
+    forwardRef(() => LeadsModule),
   ],
   providers: [
     PrismaService,

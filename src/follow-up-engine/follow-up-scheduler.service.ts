@@ -6,11 +6,12 @@
  * Auto-send mode supported but gated by enrollment.mode.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
+import { LeadsService } from '../leads/leads.service';
 import { FollowUpEngineService } from './follow-up-engine.service';
 import { FollowUpGeneratorService, SequenceStep } from './follow-up-generator.service';
 
@@ -22,6 +23,8 @@ export class FollowUpSchedulerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly conversationContext: ConversationContextService,
+    @Inject(forwardRef(() => LeadsService))
+    private readonly leadsService: LeadsService,
     private readonly engineService: FollowUpEngineService,
     private readonly generatorService: FollowUpGeneratorService,
     private readonly eventEmitter: EventEmitter2,
@@ -137,23 +140,56 @@ export class FollowUpSchedulerService {
 
       this.logger.log(`[FollowUpScheduler] Suggested step ${enrollment.currentStepIndex} for enrollment ${enrollment.id}: "${step.objective}"`);
     } else {
-      // Auto-send mode: send immediately (Phase 3 will add platform send)
-      // For now, create execution as 'sent' placeholder
+      // Auto-send mode: send via platform adapter
+      let messageId: string | null = null;
+      let finalMessage = generated.message;
+      let sendStatus = 'sent';
+
+      if (enrollment.leadId) {
+        try {
+          const lead = await this.prisma.lead.findUnique({
+            where: { id: enrollment.leadId },
+            select: { userId: true, id: true },
+          });
+          if (lead) {
+            const sentMsg = await this.leadsService.sendMessage(lead.userId, lead.id, generated.message);
+            messageId = sentMsg?.id || null;
+
+            // Record in thread context
+            await this.conversationContext.recordMessage({
+              conversationId: enrollment.conversationId,
+              leadId: enrollment.leadId,
+              platform: enrollment.platform,
+              sender: 'pro',
+              senderType: 'ai',
+              content: generated.message,
+              aiGenerated: true,
+              isAutoFollowUp: true,
+              strategyUsed: generated.strategyUsed || undefined,
+            });
+          }
+        } catch (err: any) {
+          this.logger.error(`[FollowUpScheduler] Auto-send failed for enrollment ${enrollment.id}: ${err.message}`);
+          sendStatus = 'failed';
+        }
+      }
+
       await this.prisma.followUpStepExecution.create({
         data: {
           enrollmentId: enrollment.id,
           stepIndex: enrollment.currentStepIndex,
           objective: step.objective,
-          status: 'sent',
+          status: sendStatus,
           scheduledAt: enrollment.nextStepDueAt || now,
           executedAt: now,
           generatedMessage: generated.message,
-          finalMessage: generated.message,
+          finalMessage,
+          messageId,
           strategyUsed: generated.strategyUsed,
         },
       });
 
-      this.logger.log(`[FollowUpScheduler] Auto-sent step ${enrollment.currentStepIndex} for enrollment ${enrollment.id}: "${step.objective}"`);
+      this.logger.log(`[FollowUpScheduler] Auto-${sendStatus} step ${enrollment.currentStepIndex} for enrollment ${enrollment.id}: "${step.objective}"`);
     }
 
     // Advance to next step

@@ -6,10 +6,12 @@
  * Phase 3: approve/skip/pause suggestions.
  */
 
-import { Controller, Get, Post, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Query, UseGuards, Inject, forwardRef } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PrismaService } from '../common/utils/prisma.service';
+import { LeadsService } from '../leads/leads.service';
+import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { FollowUpEngineService } from './follow-up-engine.service';
 
 @Controller('v1/follow-ups')
@@ -18,6 +20,9 @@ export class FollowUpEngineController {
   constructor(
     private readonly engineService: FollowUpEngineService,
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => LeadsService))
+    private readonly leadsService: LeadsService,
+    private readonly conversationContext: ConversationContextService,
   ) {}
 
   /**
@@ -143,5 +148,139 @@ export class FollowUpEngineController {
       orderBy: { scheduledAt: 'asc' },
     });
     return { success: true, count: suggestions.length, suggestions };
+  }
+
+  /**
+   * Approve a suggestion — send the generated message.
+   */
+  @Post('suggestions/:id/approve')
+  async approveSuggestion(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    const execution = await this.prisma.followUpStepExecution.findUnique({
+      where: { id },
+      include: { enrollment: { include: { lead: { select: { id: true, userId: true } } } } },
+    });
+
+    if (!execution || execution.status !== 'suggested') {
+      return { success: false, error: 'Suggestion not found or already processed' };
+    }
+
+    const lead = execution.enrollment.lead;
+    if (!lead || lead.userId !== user.id) {
+      return { success: false, error: 'Not authorized' };
+    }
+
+    // Send the message
+    const message = execution.generatedMessage || '';
+    let messageId: string | null = null;
+    try {
+      const sent = await this.leadsService.sendMessage(lead.userId, lead.id, message);
+      messageId = sent?.id || null;
+
+      // Record in thread context
+      await this.conversationContext.recordMessage({
+        conversationId: execution.enrollment.conversationId,
+        leadId: lead.id,
+        platform: execution.enrollment.platform,
+        sender: 'pro',
+        senderType: 'ai',
+        content: message,
+        aiGenerated: true,
+        isAutoFollowUp: true,
+      });
+    } catch (err: any) {
+      await this.prisma.followUpStepExecution.update({
+        where: { id },
+        data: { status: 'failed', metadataJson: JSON.stringify({ error: err.message }) },
+      });
+      return { success: false, error: err.message };
+    }
+
+    await this.prisma.followUpStepExecution.update({
+      where: { id },
+      data: { status: 'sent', executedAt: new Date(), finalMessage: message, messageId },
+    });
+
+    return { success: true, messageId };
+  }
+
+  /**
+   * Edit and approve a suggestion — send a modified message.
+   */
+  @Post('suggestions/:id/edit')
+  async editAndApprove(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body('message') editedMessage: string,
+  ) {
+    const execution = await this.prisma.followUpStepExecution.findUnique({
+      where: { id },
+      include: { enrollment: { include: { lead: { select: { id: true, userId: true } } } } },
+    });
+
+    if (!execution || execution.status !== 'suggested') {
+      return { success: false, error: 'Suggestion not found or already processed' };
+    }
+
+    const lead = execution.enrollment.lead;
+    if (!lead || lead.userId !== user.id) {
+      return { success: false, error: 'Not authorized' };
+    }
+
+    let messageId: string | null = null;
+    try {
+      const sent = await this.leadsService.sendMessage(lead.userId, lead.id, editedMessage);
+      messageId = sent?.id || null;
+
+      await this.conversationContext.recordMessage({
+        conversationId: execution.enrollment.conversationId,
+        leadId: lead.id,
+        platform: execution.enrollment.platform,
+        sender: 'pro',
+        senderType: 'user',
+        content: editedMessage,
+        isAutoFollowUp: true,
+      });
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+
+    await this.prisma.followUpStepExecution.update({
+      where: { id },
+      data: { status: 'approved', executedAt: new Date(), finalMessage: editedMessage, messageId },
+    });
+
+    return { success: true, messageId };
+  }
+
+  /**
+   * Skip a suggestion — advance sequence without sending.
+   */
+  @Post('suggestions/:id/skip')
+  async skipSuggestion(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    const execution = await this.prisma.followUpStepExecution.findUnique({
+      where: { id },
+      include: { enrollment: { include: { lead: { select: { userId: true } } } } },
+    });
+
+    if (!execution || execution.status !== 'suggested') {
+      return { success: false, error: 'Suggestion not found or already processed' };
+    }
+
+    if (execution.enrollment.lead?.userId !== user.id) {
+      return { success: false, error: 'Not authorized' };
+    }
+
+    await this.prisma.followUpStepExecution.update({
+      where: { id },
+      data: { status: 'skipped' },
+    });
+
+    return { success: true };
   }
 }
