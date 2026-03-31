@@ -151,6 +151,37 @@ export class FollowUpEngineController {
   }
 
   /**
+   * Seed preset sequence templates for the current user.
+   */
+  @Post('seed')
+  async seedPresets(
+    @CurrentUser() user: any,
+    @Body() body: { platform?: string; activeHoursStart?: string; activeHoursEnd?: string; activeHoursTimezone?: string },
+  ) {
+    const { seedPresetsForUser } = await import('./follow-up-seed');
+    const seeded = await seedPresetsForUser(
+      this.prisma,
+      user.id,
+      body.platform || 'yelp',
+      body.activeHoursStart || '09:00',
+      body.activeHoursEnd || '21:00',
+      body.activeHoursTimezone || 'America/New_York',
+    );
+    return { success: true, seeded };
+  }
+
+  /**
+   * Run migration from existing AutomationRule follow-ups.
+   */
+  @Post('migrate')
+  async migrate() {
+    const { FollowUpMigrationService } = await import('./follow-up-migration.service');
+    const migrationService = new FollowUpMigrationService(this.prisma);
+    const result = await migrationService.migrateExistingFollowUps();
+    return { success: true, ...result };
+  }
+
+  /**
    * Approve a suggestion — send the generated message.
    */
   @Post('suggestions/:id/approve')

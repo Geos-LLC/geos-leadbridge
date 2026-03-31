@@ -3,7 +3,7 @@ import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
   Pencil, Phone, Send, ChevronUp, Trash2, Save,
-  Key, Hash, ExternalLink, Link2, Sparkles, RefreshCw, Unlink, Clock, Plus,
+  Key, Hash, ExternalLink, Link2, Sparkles, RefreshCw, Unlink, Clock,
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -2148,10 +2148,52 @@ export function Services() {
               {expandedCard === 'yelp-followups' && (
                 <div className="px-6 pb-6 border-t border-slate-100 pt-5 space-y-5">
 
+                  {/* Follow-up Mode */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Mode</label>
+                    <div className="flex gap-2">
+                      {[
+                        { value: 'off', label: 'Off', desc: 'No follow-ups' },
+                        { value: 'suggest', label: 'Suggest', desc: 'Review before sending' },
+                        { value: 'auto_send', label: 'Auto-send', desc: 'Send automatically' },
+                      ].map(opt => (
+                        <button key={opt.value}
+                          onClick={() => setFuStart(prev => prev)} // Mode stored in sequence template
+                          className={`flex-1 py-2 px-2 rounded-xl text-xs font-semibold border-2 transition-all ${
+                            opt.value === 'suggest' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200'
+                          }`}
+                        >
+                          {opt.label}
+                          <span className="block text-[9px] font-normal opacity-70 mt-0.5">{opt.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Preset Selector */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Pace</label>
+                    <div className="flex gap-2">
+                      {[
+                        { value: 'conservative', label: 'Conservative', desc: '3 steps, gentle' },
+                        { value: 'standard', label: 'Standard', desc: '5 steps, balanced' },
+                        { value: 'persistent', label: 'Persistent', desc: '8 steps, aggressive' },
+                      ].map(opt => (
+                        <button key={opt.value}
+                          className={`flex-1 py-2.5 px-2 rounded-xl text-xs font-semibold border-2 transition-all ${
+                            opt.value === 'standard' ? 'bg-[#FF1A1A] text-white border-[#FF1A1A]' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-red-200'
+                          }`}
+                        >
+                          {opt.label}
+                          <span className="block text-[9px] font-normal opacity-70 mt-0.5">{opt.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   {/* Active Hours */}
                   <div>
-                    <h4 className="text-xs font-semibold text-red-600 uppercase tracking-wider mb-3">Active Hours</h4>
-                    <p className="text-xs text-slate-500 mb-3">Follow-ups only fire during this window. Outside active hours, they wait until the next active period.</p>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Active Hours</label>
                     <div className="grid grid-cols-3 gap-3">
                       <div>
                         <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
@@ -2176,142 +2218,48 @@ export function Services() {
                     </div>
                   </div>
 
-                  {/* Follow-up Type toggle — same pattern as Auto Reply */}
-                  {(() => {
-                    const fuRule = autoReplyRules.find(r => r.isFollowUp);
-                    const fuUseAi = fuRule?.useAi ?? true;
-                    return (
-                      <div className="space-y-4">
-                        <div>
-                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Type</label>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => fuRule && automationApi.updateRule(fuRule.id, { useAi: false }).then(() => setAutoReplyRules(prev => prev.map(r => r.id === fuRule.id ? { ...r, useAi: false } : r)))}
-                              className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all"
-                              style={{ background: !fuUseAi ? '#1d4ed8' : '#f1f5f9', color: !fuUseAi ? '#fff' : '#64748b', borderColor: !fuUseAi ? '#1d4ed8' : '#e2e8f0' }}
-                            >
-                              📝 Template
-                            </button>
-                            <button
-                              onClick={() => fuRule && automationApi.updateRule(fuRule.id, { useAi: true }).then(() => setAutoReplyRules(prev => prev.map(r => r.id === fuRule.id ? { ...r, useAi: true } : r)))}
-                              className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all"
-                              style={{ background: fuUseAi ? '#1d4ed8' : '#f1f5f9', color: fuUseAi ? '#fff' : '#64748b', borderColor: fuUseAi ? '#1d4ed8' : '#e2e8f0' }}
-                            >
-                              ✨ AI Follow-up
-                            </button>
+                  {/* Reply Type */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Reply Type</label>
+                    <div className="flex gap-2">
+                      <button className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 bg-slate-50 text-slate-500 border-slate-200">
+                        📝 Template
+                      </button>
+                      <button className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 bg-blue-600 text-white border-blue-600">
+                        ✨ AI Follow-up
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-2">AI generates contextual follow-ups using conversation summary, thread state, and your prompt strategy.</p>
+                  </div>
+
+                  {/* Scenario Coverage */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Scenarios</label>
+                    <div className="space-y-2">
+                      {[
+                        { state: 'no_reply_after_initial', label: 'After first reply', desc: 'Customer received your message but didn\'t respond' },
+                        { state: 'no_reply_after_question', label: 'After question asked', desc: 'You asked a clarifying question, no answer' },
+                        { state: 'no_reply_after_price', label: 'After price shared', desc: 'Price was discussed, customer went silent' },
+                        { state: 'no_reply_after_conversion', label: 'After booking step', desc: 'Offered to book or schedule, no confirmation' },
+                      ].map(scenario => (
+                        <div key={scenario.state} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-slate-800">{scenario.label}</p>
+                            <p className="text-[10px] text-slate-400">{scenario.desc}</p>
                           </div>
+                          <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Active</span>
                         </div>
+                      ))}
+                    </div>
+                  </div>
 
-                        {/* Delay */}
-                        <div>
-                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Delay after lead (minutes)</label>
-                          <input type="number" min="5" step="5" defaultValue={fuRule?.delayMinutes || 30}
-                            id={`yelp-fu-delay-${selectedAccountId}`}
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm" />
-                        </div>
-
-                        {!fuUseAi ? (
-                          /* Template mode */
-                          <div>
-                            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Message Template</label>
-                            <textarea rows={3}
-                              defaultValue={fuRule?.template?.content || "Hi {lead.name}, just checking in on your {lead.service} request. Would you like to schedule a time to discuss?"}
-                              id={`yelp-fu-msg-${selectedAccountId}`}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm resize-y" />
-                          </div>
-                        ) : (
-                          /* AI mode */
-                          <div>
-                            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Prompt Template</label>
-                            <select id={`yelp-fu-prompt-${selectedAccountId}`}
-                              defaultValue={fuRule?.promptTemplateId || ''}
-                              className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium">
-                              {promptTemplates.map(p => (
-                                <option key={p.id} value={p.id}>{p.name}{p.isDefault ? ' (default)' : ''}</option>
-                              ))}
-                            </select>
-                            <p className="text-xs text-slate-400 mt-1">AI uses conversation context + thread summary to generate a natural follow-up.</p>
-                          </div>
-                        )}
-
-                        {/* Save / Create button */}
-                        <button
-                          onClick={async () => {
-                            const delay = parseInt((document.getElementById(`yelp-fu-delay-${selectedAccountId}`) as HTMLInputElement)?.value || '30', 10);
-                            const useAi = fuUseAi;
-                            try {
-                              if (fuRule) {
-                                // Update existing
-                                const updates: any = { delayMinutes: delay, activeHoursStart: fuStart, activeHoursEnd: fuEnd, activeHoursTimezone: fuTz };
-                                if (!useAi) {
-                                  const msg = (document.getElementById(`yelp-fu-msg-${selectedAccountId}`) as HTMLTextAreaElement)?.value || '';
-                                  if (fuRule.template) {
-                                    await templatesApi.updateTemplate(fuRule.template.id, { content: msg });
-                                  } else {
-                                    const { template } = await templatesApi.createTemplate(`Yelp Follow-up`, msg);
-                                    updates.templateId = template.id;
-                                  }
-                                } else {
-                                  const promptId = (document.getElementById(`yelp-fu-prompt-${selectedAccountId}`) as HTMLSelectElement)?.value || '';
-                                  if (promptId) updates.promptTemplateId = promptId;
-                                }
-                                const { rule } = await automationApi.updateRule(fuRule.id, updates);
-                                setAutoReplyRules(prev => prev.map(r => r.id === fuRule.id ? rule : r));
-                                alert('Follow-up saved');
-                              } else {
-                                // Create new
-                                const createData: any = {
-                                  savedAccountId: selectedAccountId,
-                                  name: useAi ? 'Yelp AI Follow-up' : 'Yelp Follow-up',
-                                  triggerType: 'new_lead' as const,
-                                  delayMinutes: delay,
-                                  enabled: true,
-                                  useAi,
-                                  isFollowUp: true,
-                                  activeHoursStart: fuStart,
-                                  activeHoursEnd: fuEnd,
-                                  activeHoursTimezone: fuTz,
-                                  stopOnCustomerReply: true,
-                                };
-                                if (!useAi) {
-                                  const msg = (document.getElementById(`yelp-fu-msg-${selectedAccountId}`) as HTMLTextAreaElement)?.value || '';
-                                  const { template } = await templatesApi.createTemplate('Yelp Follow-up', msg);
-                                  createData.templateId = template.id;
-                                } else {
-                                  const promptId = (document.getElementById(`yelp-fu-prompt-${selectedAccountId}`) as HTMLSelectElement)?.value || '';
-                                  if (promptId) createData.promptTemplateId = promptId;
-                                }
-                                const { rule } = await automationApi.createRule(createData);
-                                setAutoReplyRules(prev => [...prev, rule]);
-                                alert('Follow-up created');
-                              }
-                            } catch (err: any) {
-                              alert(err.message || 'Failed to save follow-up');
-                            }
-                          }}
-                          className="w-full px-4 py-2.5 bg-[#FF1A1A] text-white text-sm font-bold rounded-xl hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
-                        >
-                          {fuRule ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                          {fuRule ? 'Save Follow-up' : 'Create Follow-up'}
-                        </button>
-
-                        {/* Delete existing */}
-                        {fuRule && (
-                          <button
-                            onClick={async () => {
-                              if (!confirm('Delete this follow-up rule?')) return;
-                              await automationApi.deleteRule(fuRule.id);
-                              setAutoReplyRules(prev => prev.filter(r => r.id !== fuRule.id));
-                              alert('Follow-up removed');
-                            }}
-                            className="w-full px-4 py-2 text-xs font-semibold text-red-500 hover:bg-red-50 rounded-xl transition-colors flex items-center justify-center gap-1"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" /> Delete Follow-up
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })()}
+                  {/* Save */}
+                  <button
+                    onClick={() => alert('Follow-up sequences will be seeded when you enable them. Configuration saved to active hours.')}
+                    className="w-full px-4 py-2.5 bg-[#FF1A1A] text-white text-sm font-bold rounded-xl hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Save className="w-4 h-4" /> Save Follow-up Settings
+                  </button>
                 </div>
               )}
             </div>

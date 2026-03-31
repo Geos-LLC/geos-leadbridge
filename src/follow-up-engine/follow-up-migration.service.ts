@@ -1,9 +1,9 @@
 /**
  * Follow-Up Migration Service
  *
- * Maps existing AutomationRule follow-ups (isFollowUp=true) into new model.
+ * Maps existing AutomationRule follow-ups (isFollowUp=true) into new SequenceTemplate model.
  * Non-destructive: old rules are disabled, not deleted.
- * Phase 1: stub. Phase 4: full migration.
+ * Preserves: active hours, timezone, delay, AI/template mode, prompt template.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -17,28 +17,78 @@ export class FollowUpMigrationService {
 
   /**
    * Migrate existing AutomationRule follow-ups to SequenceTemplate model.
-   * Phase 1: stub — logs what would be migrated.
-   * Phase 4: full migration with backward compatibility.
+   * Each old rule becomes a single-step sequence template.
+   * Old rules are disabled but NOT deleted (backward compat).
    */
   async migrateExistingFollowUps(): Promise<{ migrated: number; skipped: number }> {
     const existingRules = await this.prisma.automationRule.findMany({
-      where: { isFollowUp: true },
+      where: { isFollowUp: true, enabled: true },
       include: {
-        savedAccount: { select: { platform: true } },
-        template: { select: { content: true } },
+        savedAccount: { select: { platform: true, userId: true } },
+        template: { select: { id: true, content: true } },
+        promptTemplate: { select: { id: true } },
       },
     });
 
-    this.logger.log(`[Migration] Found ${existingRules.length} existing follow-up rules to migrate`);
+    this.logger.log(`[Migration] Found ${existingRules.length} active follow-up rules to migrate`);
 
-    // Phase 1: log only, don't mutate
+    let migrated = 0;
+    let skipped = 0;
+
     for (const rule of existingRules) {
-      this.logger.log(
-        `[Migration] Would migrate: "${rule.name}" (${rule.savedAccount?.platform || 'unknown'}) ` +
-        `delay=${rule.delayMinutes}m useAi=${rule.useAi} enabled=${rule.enabled}`
-      );
+      const platform = rule.savedAccount?.platform || 'yelp';
+      const userId = rule.savedAccount?.userId || rule.userId;
+
+      // Check if already migrated (template with same name exists)
+      const existing = await this.prisma.followUpSequenceTemplate.findFirst({
+        where: { userId, name: { startsWith: `Migrated: ${rule.name}` } },
+      });
+      if (existing) {
+        this.logger.log(`[Migration] Skipping "${rule.name}" — already migrated`);
+        skipped++;
+        continue;
+      }
+
+      // Create single-step sequence template preserving all settings
+      await this.prisma.followUpSequenceTemplate.create({
+        data: {
+          userId,
+          platform,
+          name: `Migrated: ${rule.name}`,
+          triggerState: 'no_reply_after_initial',
+          mode: 'auto_send', // Existing behavior was auto-send
+          generationMode: rule.useAi ? 'ai' : 'template',
+          promptTemplateId: rule.promptTemplateId,
+          preset: null,
+          isDefault: false,
+          activeHoursStart: rule.activeHoursStart,
+          activeHoursEnd: rule.activeHoursEnd,
+          activeHoursTimezone: rule.activeHoursTimezone || 'America/New_York',
+          stepsJson: {
+            schemaVersion: 1,
+            steps: [{
+              stepOrder: 0,
+              delayMinutes: rule.delayMinutes || 30,
+              objective: 'follow_up',
+              messageTemplate: rule.template?.content || null,
+            }],
+          },
+          schemaVersion: 1,
+          enabled: true,
+        },
+      });
+
+      // Disable old rule (preserve, don't delete)
+      await this.prisma.automationRule.update({
+        where: { id: rule.id },
+        data: { enabled: false },
+      });
+
+      this.logger.log(`[Migration] Migrated "${rule.name}" → SequenceTemplate (${platform}, ${rule.delayMinutes}m, ${rule.useAi ? 'AI' : 'template'})`);
+      migrated++;
     }
 
-    return { migrated: 0, skipped: existingRules.length };
+    this.logger.log(`[Migration] Complete: ${migrated} migrated, ${skipped} skipped`);
+    return { migrated, skipped };
   }
 }
