@@ -458,6 +458,11 @@ export interface CreateAutomationRuleDto {
   enabled?: boolean;
   useAi?: boolean;
   aiSystemPrompt?: string;
+  isFollowUp?: boolean;
+  activeHoursStart?: string;
+  activeHoursEnd?: string;
+  activeHoursTimezone?: string;
+  stopOnCustomerReply?: boolean;
 }
 
 export interface UpdateAutomationRuleDto {
@@ -470,6 +475,11 @@ export interface UpdateAutomationRuleDto {
   enabled?: boolean;
   useAi?: boolean;
   aiSystemPrompt?: string;
+  isFollowUp?: boolean;
+  activeHoursStart?: string;
+  activeHoursEnd?: string;
+  activeHoursTimezone?: string;
+  stopOnCustomerReply?: boolean;
 }
 
 export const aiApi = {

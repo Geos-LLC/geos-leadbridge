@@ -10,6 +10,7 @@ import { TemplatesModule } from '../templates/templates.module';
 import { LeadsModule } from '../leads/leads.module';
 import { PlatformsModule } from '../platforms/platforms.module';
 import { AiModule } from '../ai/ai.module';
+import { ConversationContextModule } from '../conversation-context/conversation-context.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { AiModule } from '../ai/ai.module';
     forwardRef(() => LeadsModule),
     forwardRef(() => PlatformsModule),
     AiModule,
+    ConversationContextModule,
   ],
   controllers: [AutomationController],
   providers: [AutomationService],

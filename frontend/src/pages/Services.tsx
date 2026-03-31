@@ -3,7 +3,7 @@ import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
   Pencil, Phone, Send, ChevronUp, Trash2, Save,
-  Key, Hash, ExternalLink, Link2, Sparkles, RefreshCw, Unlink,
+  Key, Hash, ExternalLink, Link2, Sparkles, RefreshCw, Unlink, Clock, Plus,
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -216,6 +216,10 @@ export function Services() {
     return '';
   });
   const [ccTesting, setCcTesting] = useState(false);
+  // Yelp follow-up active hours
+  const [fuStart, setFuStart] = useState('09:00');
+  const [fuEnd, setFuEnd] = useState('21:00');
+  const [fuTz, setFuTz] = useState('America/New_York');
   // Track which saved template is currently loaded in each CC message field (for edit button)
   const [ccWhisperTemplateId, setCcWhisperTemplateId] = useState<string | null>(sc?.ccWhisperTemplateId ?? null);
   const [ccGreetingTemplateId, setCcGreetingTemplateId] = useState<string | null>(sc?.ccGreetingTemplateId ?? null);
@@ -2119,23 +2123,199 @@ export function Services() {
             </div>
           </ServiceCard>
 
-          {/* 4. Yelp Automation — Active */}
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-            <div className="p-6 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-red-50 rounded-2xl flex items-center justify-center">
-                  <MessageSquare className="w-7 h-7 text-red-600" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-lg font-bold text-slate-900">Yelp Automation</h3>
-                    <span className="px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-600 rounded-full">Active</span>
+          {/* 4. Yelp Follow-ups — only for Yelp accounts */}
+          {accounts.find(a => a.id === selectedAccountId)?.platform === 'yelp' && (
+            <div className="bg-white rounded-3xl border border-[#FF1A1A]/20 shadow-sm overflow-hidden">
+              <div
+                className="p-6 flex items-center justify-between cursor-pointer hover:bg-red-50/30 transition-colors"
+                onClick={() => setExpandedCard(expandedCard === 'yelp-followups' ? null : 'yelp-followups')}
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-red-50 rounded-2xl flex items-center justify-center">
+                    <Clock className="w-7 h-7 text-red-600" />
                   </div>
-                  <p className="text-sm text-slate-500 mt-0.5">Auto-reply and follow-ups for Yelp leads. Connect your Yelp business to get started.</p>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-lg font-bold text-slate-900">Yelp Follow-ups</h3>
+                      <span className="px-2 py-0.5 text-[10px] font-bold bg-[#FF1A1A] text-white rounded-md">Yelp</span>
+                    </div>
+                    <p className="text-sm text-slate-500 mt-0.5">Manual and AI-powered follow-ups sent during active hours via Yelp chat.</p>
+                  </div>
                 </div>
+                {expandedCard === 'yelp-followups' ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
               </div>
+
+              {expandedCard === 'yelp-followups' && (
+                <div className="px-6 pb-6 border-t border-slate-100 pt-5 space-y-5">
+
+                  {/* Active Hours */}
+                  <div>
+                    <h4 className="text-xs font-semibold text-red-600 uppercase tracking-wider mb-3">Active Hours</h4>
+                    <p className="text-xs text-slate-500 mb-3">Follow-ups only fire during this window. Outside active hours, they wait until the next active period.</p>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
+                        <input type="time" value={fuStart} onChange={e => setFuStart(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
+                        <input type="time" value={fuEnd} onChange={e => setFuEnd(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Timezone</label>
+                        <select value={fuTz} onChange={e => setFuTz(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm">
+                          <option value="America/New_York">Eastern</option>
+                          <option value="America/Chicago">Central</option>
+                          <option value="America/Denver">Mountain</option>
+                          <option value="America/Los_Angeles">Pacific</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Follow-up Type toggle — same pattern as Auto Reply */}
+                  {(() => {
+                    const fuRule = autoReplyRules.find(r => r.isFollowUp);
+                    const fuUseAi = fuRule?.useAi ?? true;
+                    return (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Type</label>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => fuRule && automationApi.updateRule(fuRule.id, { useAi: false }).then(() => setAutoReplyRules(prev => prev.map(r => r.id === fuRule.id ? { ...r, useAi: false } : r)))}
+                              className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all"
+                              style={{ background: !fuUseAi ? '#1d4ed8' : '#f1f5f9', color: !fuUseAi ? '#fff' : '#64748b', borderColor: !fuUseAi ? '#1d4ed8' : '#e2e8f0' }}
+                            >
+                              📝 Template
+                            </button>
+                            <button
+                              onClick={() => fuRule && automationApi.updateRule(fuRule.id, { useAi: true }).then(() => setAutoReplyRules(prev => prev.map(r => r.id === fuRule.id ? { ...r, useAi: true } : r)))}
+                              className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all"
+                              style={{ background: fuUseAi ? '#1d4ed8' : '#f1f5f9', color: fuUseAi ? '#fff' : '#64748b', borderColor: fuUseAi ? '#1d4ed8' : '#e2e8f0' }}
+                            >
+                              ✨ AI Follow-up
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Delay */}
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Delay after lead (minutes)</label>
+                          <input type="number" min="5" step="5" defaultValue={fuRule?.delayMinutes || 30}
+                            id={`yelp-fu-delay-${selectedAccountId}`}
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm" />
+                        </div>
+
+                        {!fuUseAi ? (
+                          /* Template mode */
+                          <div>
+                            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Message Template</label>
+                            <textarea rows={3}
+                              defaultValue={fuRule?.template?.content || "Hi {lead.name}, just checking in on your {lead.service} request. Would you like to schedule a time to discuss?"}
+                              id={`yelp-fu-msg-${selectedAccountId}`}
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm resize-y" />
+                          </div>
+                        ) : (
+                          /* AI mode */
+                          <div>
+                            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Prompt Template</label>
+                            <select id={`yelp-fu-prompt-${selectedAccountId}`}
+                              defaultValue={fuRule?.promptTemplateId || ''}
+                              className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium">
+                              {promptTemplates.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}{p.isDefault ? ' (default)' : ''}</option>
+                              ))}
+                            </select>
+                            <p className="text-xs text-slate-400 mt-1">AI uses conversation context + thread summary to generate a natural follow-up.</p>
+                          </div>
+                        )}
+
+                        {/* Save / Create button */}
+                        <button
+                          onClick={async () => {
+                            const delay = parseInt((document.getElementById(`yelp-fu-delay-${selectedAccountId}`) as HTMLInputElement)?.value || '30', 10);
+                            const useAi = fuUseAi;
+                            try {
+                              if (fuRule) {
+                                // Update existing
+                                const updates: any = { delayMinutes: delay, activeHoursStart: fuStart, activeHoursEnd: fuEnd, activeHoursTimezone: fuTz };
+                                if (!useAi) {
+                                  const msg = (document.getElementById(`yelp-fu-msg-${selectedAccountId}`) as HTMLTextAreaElement)?.value || '';
+                                  if (fuRule.template) {
+                                    await templatesApi.updateTemplate(fuRule.template.id, { content: msg });
+                                  } else {
+                                    const { template } = await templatesApi.createTemplate(`Yelp Follow-up`, msg);
+                                    updates.templateId = template.id;
+                                  }
+                                } else {
+                                  const promptId = (document.getElementById(`yelp-fu-prompt-${selectedAccountId}`) as HTMLSelectElement)?.value || '';
+                                  if (promptId) updates.promptTemplateId = promptId;
+                                }
+                                const { rule } = await automationApi.updateRule(fuRule.id, updates);
+                                setAutoReplyRules(prev => prev.map(r => r.id === fuRule.id ? rule : r));
+                                alert('Follow-up saved');
+                              } else {
+                                // Create new
+                                const createData: any = {
+                                  savedAccountId: selectedAccountId,
+                                  name: useAi ? 'Yelp AI Follow-up' : 'Yelp Follow-up',
+                                  triggerType: 'new_lead' as const,
+                                  delayMinutes: delay,
+                                  enabled: true,
+                                  useAi,
+                                  isFollowUp: true,
+                                  activeHoursStart: fuStart,
+                                  activeHoursEnd: fuEnd,
+                                  activeHoursTimezone: fuTz,
+                                  stopOnCustomerReply: true,
+                                };
+                                if (!useAi) {
+                                  const msg = (document.getElementById(`yelp-fu-msg-${selectedAccountId}`) as HTMLTextAreaElement)?.value || '';
+                                  const { template } = await templatesApi.createTemplate('Yelp Follow-up', msg);
+                                  createData.templateId = template.id;
+                                } else {
+                                  const promptId = (document.getElementById(`yelp-fu-prompt-${selectedAccountId}`) as HTMLSelectElement)?.value || '';
+                                  if (promptId) createData.promptTemplateId = promptId;
+                                }
+                                const { rule } = await automationApi.createRule(createData);
+                                setAutoReplyRules(prev => [...prev, rule]);
+                                alert('Follow-up created');
+                              }
+                            } catch (err: any) {
+                              alert(err.message || 'Failed to save follow-up');
+                            }
+                          }}
+                          className="w-full px-4 py-2.5 bg-[#FF1A1A] text-white text-sm font-bold rounded-xl hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                        >
+                          {fuRule ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                          {fuRule ? 'Save Follow-up' : 'Create Follow-up'}
+                        </button>
+
+                        {/* Delete existing */}
+                        {fuRule && (
+                          <button
+                            onClick={async () => {
+                              if (!confirm('Delete this follow-up rule?')) return;
+                              await automationApi.deleteRule(fuRule.id);
+                              setAutoReplyRules(prev => prev.filter(r => r.id !== fuRule.id));
+                              alert('Follow-up removed');
+                            }}
+                            className="w-full px-4 py-2 text-xs font-semibold text-red-500 hover:bg-red-50 rounded-xl transition-colors flex items-center justify-center gap-1"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" /> Delete Follow-up
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
-          </div>
+          )}
 
           {/* 5. AI Optimization — disabled */}
           <div className="hidden bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">

@@ -243,7 +243,8 @@ export class YelpAdapter implements IPlatformAdapter {
       // Strip Yelp boilerplate intro
       if (messageText) {
         lead.message = messageText
-          .replace(/^Hi there!.*?regarding my project:\s*/s, '')
+          .replace(/^Hi there[,!].*?(?:regarding my project|questions regarding my project):\s*/s, '')
+          .replace(/^Hi there[,!].*?(?:please respond with a price estimate\.)?\s*(?:Here are my answers to Yelp's questions regarding my project:\s*)?/si, '')
           .trim();
       }
       return lead;
