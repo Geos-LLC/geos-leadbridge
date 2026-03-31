@@ -1492,4 +1492,36 @@ export const conversationSyncApi = {
   },
 };
 
+// Follow-Up Engine
+export const followUpApi = {
+  getSuggestions: async (): Promise<{ success: boolean; count: number; suggestions: any[] }> => {
+    const { data } = await api.get('/v1/follow-ups/suggestions');
+    return data;
+  },
+  approveSuggestion: async (id: string): Promise<{ success: boolean; messageId?: string; error?: string }> => {
+    const { data } = await api.post(`/v1/follow-ups/suggestions/${id}/approve`);
+    return data;
+  },
+  editAndApprove: async (id: string, message: string): Promise<{ success: boolean; messageId?: string; error?: string }> => {
+    const { data } = await api.post(`/v1/follow-ups/suggestions/${id}/edit`, { message });
+    return data;
+  },
+  skipSuggestion: async (id: string): Promise<{ success: boolean; error?: string }> => {
+    const { data } = await api.post(`/v1/follow-ups/suggestions/${id}/skip`);
+    return data;
+  },
+  getEnrollments: async (status?: string): Promise<{ success: boolean; count: number; enrollments: any[] }> => {
+    const { data } = await api.get('/v1/follow-ups/enrollments', { params: status ? { status } : {} });
+    return data;
+  },
+  stopEnrollment: async (id: string, reason?: string): Promise<{ success: boolean }> => {
+    const { data } = await api.post(`/v1/follow-ups/enrollments/${id}/stop`, { reason });
+    return data;
+  },
+  pauseEnrollment: async (id: string): Promise<{ success: boolean }> => {
+    const { data } = await api.post(`/v1/follow-ups/enrollments/${id}/pause`);
+    return data;
+  },
+};
+
 export default api;
