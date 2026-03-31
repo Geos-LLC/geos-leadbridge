@@ -45,8 +45,13 @@ export class AutomationController {
     @CurrentUser() user: any,
     @Param('accountId') accountId: string,
   ) {
-    const rules = await this.automationService.getRulesForAccount(user.id, accountId);
-    return { rules };
+    try {
+      const rules = await this.automationService.getRulesForAccount(user.id, accountId);
+      return { rules };
+    } catch (err: any) {
+      console.error(`[AutomationController] getRulesForAccount failed for ${accountId}: ${err.message}`, err.stack?.split('\n').slice(0, 3).join(' | '));
+      throw err;
+    }
   }
 
   /**
