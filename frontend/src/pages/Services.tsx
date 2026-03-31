@@ -216,6 +216,10 @@ export function Services() {
     return '';
   });
   const [ccTesting, setCcTesting] = useState(false);
+  // Yelp follow-up active hours
+  const [fuStart, setFuStart] = useState('09:00');
+  const [fuEnd, setFuEnd] = useState('21:00');
+  const [fuTz, setFuTz] = useState('America/New_York');
   // Track which saved template is currently loaded in each CC message field (for edit button)
   const [ccWhisperTemplateId, setCcWhisperTemplateId] = useState<string | null>(sc?.ccWhisperTemplateId ?? null);
   const [ccGreetingTemplateId, setCcGreetingTemplateId] = useState<string | null>(sc?.ccGreetingTemplateId ?? null);
@@ -2153,8 +2157,8 @@ export function Services() {
                         <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
                         <input
                           type="time"
-                          value={localStorage.getItem(`yelp_followup_start_${selectedAccountId}`) || '09:00'}
-                          onChange={e => localStorage.setItem(`yelp_followup_start_${selectedAccountId}`, e.target.value)}
+                          value={fuStart}
+                          onChange={e => setFuStart(e.target.value)}
                           className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
                         />
                       </div>
@@ -2162,16 +2166,16 @@ export function Services() {
                         <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
                         <input
                           type="time"
-                          value={localStorage.getItem(`yelp_followup_end_${selectedAccountId}`) || '21:00'}
-                          onChange={e => localStorage.setItem(`yelp_followup_end_${selectedAccountId}`, e.target.value)}
+                          value={fuEnd}
+                          onChange={e => setFuEnd(e.target.value)}
                           className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
                         />
                       </div>
                       <div>
                         <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Timezone</label>
                         <select
-                          value={localStorage.getItem(`yelp_followup_tz_${selectedAccountId}`) || 'America/New_York'}
-                          onChange={e => localStorage.setItem(`yelp_followup_tz_${selectedAccountId}`, e.target.value)}
+                          value={fuTz}
+                          onChange={e => setFuTz(e.target.value)}
                           className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
                         >
                           <option value="America/New_York">Eastern</option>
@@ -2229,9 +2233,9 @@ export function Services() {
                             enabled: true,
                             useAi: false,
                             isFollowUp: true,
-                            activeHoursStart: localStorage.getItem(`yelp_followup_start_${selectedAccountId}`) || '09:00',
-                            activeHoursEnd: localStorage.getItem(`yelp_followup_end_${selectedAccountId}`) || '21:00',
-                            activeHoursTimezone: localStorage.getItem(`yelp_followup_tz_${selectedAccountId}`) || 'America/New_York',
+                            activeHoursStart: fuStart,
+                            activeHoursEnd: fuEnd,
+                            activeHoursTimezone: fuTz,
                             stopOnCustomerReply: true,
                           });
                           alert(`Manual follow-up will fire ${delay} min after new leads`);
@@ -2290,9 +2294,9 @@ export function Services() {
                             useAi: true,
                             promptTemplateId: promptId || undefined,
                             isFollowUp: true,
-                            activeHoursStart: localStorage.getItem(`yelp_followup_start_${selectedAccountId}`) || '09:00',
-                            activeHoursEnd: localStorage.getItem(`yelp_followup_end_${selectedAccountId}`) || '21:00',
-                            activeHoursTimezone: localStorage.getItem(`yelp_followup_tz_${selectedAccountId}`) || 'America/New_York',
+                            activeHoursStart: fuStart,
+                            activeHoursEnd: fuEnd,
+                            activeHoursTimezone: fuTz,
                             stopOnCustomerReply: true,
                           });
                           alert(`AI follow-up will fire ${delay} min after new leads`);
