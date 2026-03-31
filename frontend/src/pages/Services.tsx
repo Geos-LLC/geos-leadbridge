@@ -220,6 +220,9 @@ export function Services() {
   const [fuStart, setFuStart] = useState('09:00');
   const [fuEnd, setFuEnd] = useState('21:00');
   const [fuTz, setFuTz] = useState('America/New_York');
+  const [fuMode, setFuMode] = useState<'off' | 'suggest' | 'auto_send'>('suggest');
+  const [fuPreset, setFuPreset] = useState<'conservative' | 'standard' | 'persistent'>('standard');
+  const [fuReplyType, setFuReplyType] = useState<'template' | 'ai'>('ai');
   // Track which saved template is currently loaded in each CC message field (for edit button)
   const [ccWhisperTemplateId, setCcWhisperTemplateId] = useState<string | null>(sc?.ccWhisperTemplateId ?? null);
   const [ccGreetingTemplateId, setCcGreetingTemplateId] = useState<string | null>(sc?.ccGreetingTemplateId ?? null);
@@ -2142,7 +2145,13 @@ export function Services() {
                     <p className="text-sm text-slate-500 mt-0.5">Manual and AI-powered follow-ups sent during active hours via Yelp chat.</p>
                   </div>
                 </div>
-                {expandedCard === 'yelp-followups' ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                <div className="flex items-center gap-3">
+                  <label className="inline-flex items-center cursor-pointer" onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={fuMode !== 'off'} onChange={e => setFuMode(e.target.checked ? 'suggest' : 'off')} className="sr-only peer" />
+                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#FF1A1A]" />
+                  </label>
+                  {expandedCard === 'yelp-followups' ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                </div>
               </div>
 
               {expandedCard === 'yelp-followups' && (
@@ -2152,15 +2161,15 @@ export function Services() {
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Mode</label>
                     <div className="flex gap-2">
-                      {[
-                        { value: 'off', label: 'Off', desc: 'No follow-ups' },
-                        { value: 'suggest', label: 'Suggest', desc: 'Review before sending' },
-                        { value: 'auto_send', label: 'Auto-send', desc: 'Send automatically' },
-                      ].map(opt => (
+                      {([
+                        { value: 'off' as const, label: 'Off', desc: 'No follow-ups' },
+                        { value: 'suggest' as const, label: 'Suggest', desc: 'Review before sending' },
+                        { value: 'auto_send' as const, label: 'Auto-send', desc: 'Send automatically' },
+                      ]).map(opt => (
                         <button key={opt.value}
-                          onClick={() => setFuStart(prev => prev)} // Mode stored in sequence template
+                          onClick={() => setFuMode(opt.value)}
                           className={`flex-1 py-2 px-2 rounded-xl text-xs font-semibold border-2 transition-all ${
-                            opt.value === 'suggest' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200'
+                            fuMode === opt.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
                           }`}
                         >
                           {opt.label}
@@ -2174,14 +2183,15 @@ export function Services() {
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Pace</label>
                     <div className="flex gap-2">
-                      {[
-                        { value: 'conservative', label: 'Conservative', desc: '3 steps, gentle' },
-                        { value: 'standard', label: 'Standard', desc: '5 steps, balanced' },
-                        { value: 'persistent', label: 'Persistent', desc: '8 steps, aggressive' },
-                      ].map(opt => (
+                      {([
+                        { value: 'conservative' as const, label: 'Conservative', desc: '3 steps, gentle' },
+                        { value: 'standard' as const, label: 'Standard', desc: '5 steps, balanced' },
+                        { value: 'persistent' as const, label: 'Persistent', desc: '8 steps, aggressive' },
+                      ]).map(opt => (
                         <button key={opt.value}
+                          onClick={() => setFuPreset(opt.value)}
                           className={`flex-1 py-2.5 px-2 rounded-xl text-xs font-semibold border-2 transition-all ${
-                            opt.value === 'standard' ? 'bg-[#FF1A1A] text-white border-[#FF1A1A]' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-red-200'
+                            fuPreset === opt.value ? 'bg-[#FF1A1A] text-white border-[#FF1A1A]' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-red-200'
                           }`}
                         >
                           {opt.label}
@@ -2222,10 +2232,12 @@ export function Services() {
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Reply Type</label>
                     <div className="flex gap-2">
-                      <button className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 bg-slate-50 text-slate-500 border-slate-200">
+                      <button onClick={() => setFuReplyType('template')}
+                        className={`flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all ${fuReplyType === 'template' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
                         📝 Template
                       </button>
-                      <button className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 bg-blue-600 text-white border-blue-600">
+                      <button onClick={() => setFuReplyType('ai')}
+                        className={`flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all ${fuReplyType === 'ai' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
                         ✨ AI Follow-up
                       </button>
                     </div>

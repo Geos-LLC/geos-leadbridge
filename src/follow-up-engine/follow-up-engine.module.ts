@@ -8,8 +8,6 @@
 
 import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { ScheduleModule } from '@nestjs/schedule';
-import { EventEmitterModule } from '@nestjs/event-emitter';
 import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextModule } from '../conversation-context/conversation-context.module';
 import { LeadsModule } from '../leads/leads.module';
@@ -23,8 +21,6 @@ import { FollowUpEngineController } from './follow-up-engine.controller';
 @Module({
   imports: [
     ConfigModule,
-    ScheduleModule.forRoot(),
-    EventEmitterModule.forRoot(),
     ConversationContextModule,
     forwardRef(() => LeadsModule),
   ],

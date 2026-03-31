@@ -6,6 +6,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import configuration from './config/configuration';
 import { AuthModule } from './auth/auth.module';
 import { PlatformsModule } from './platforms/platforms.module';
@@ -38,6 +39,7 @@ import { PrismaModule } from './common/utils/prisma.module';
       load: [configuration],
     }),
     EventEmitterModule.forRoot(),
+    ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
     PlatformsModule,
