@@ -1387,29 +1387,27 @@ export class WebhooksService {
       return;
     }
 
-    // Deduplicate by event_id — in-memory (same process) + first-event-wins (cross-instance)
+    // Deduplicate by event_id — in-memory (same process)
     if (eventId && this.isDuplicateWebhook('yelp.NEW_EVENT', eventId)) {
       return;
     }
+    // Cross-instance dedup: check if a webhookEvent for this eventId was already
+    // successfully processed (processed=true, no error) within the last 60 seconds.
+    // The 60s window is enough for the first instance to finish and mark processed.
     if (eventId) {
-      // Cross-instance dedup: both staging and production create webhookEvent records.
-      // The earliest one (by receivedAt) wins. Deterministic — no TOCTOU race.
-      const firstEvent = await this.prisma.webhookEvent.findFirst({
-        where: { platform: 'yelp', payload: { contains: eventId } },
-        orderBy: { receivedAt: 'asc' },
+      const alreadyDone = await this.prisma.webhookEvent.findFirst({
+        where: {
+          platform: 'yelp',
+          processed: true,
+          processingError: null,
+          receivedAt: { gte: new Date(Date.now() - 60_000) },
+          payload: { contains: eventId },
+        },
         select: { id: true },
       });
-      // If another event for this eventId was recorded before ours, skip
-      if (firstEvent) {
-        const myEvent = await this.prisma.webhookEvent.findFirst({
-          where: { platform: 'yelp', payload: { contains: eventId } },
-          orderBy: { receivedAt: 'desc' },
-          select: { id: true },
-        });
-        if (myEvent && firstEvent.id !== myEvent.id) {
-          this.logger.log(`Skipping duplicate Yelp NEW_EVENT ${eventId} (cross-instance: not first)`);
-          return;
-        }
+      if (alreadyDone) {
+        this.logger.log(`Skipping duplicate Yelp NEW_EVENT ${eventId} (cross-instance: already processed)`);
+        return;
       }
     }
 
@@ -1532,7 +1530,11 @@ export class WebhooksService {
       this.logger.warn(`Failed to update Yelp thread context: ${err.message}`);
     }
 
-    if (existingLead) {
+    // Cross-instance dedup: if the lead existed before our upsert OR was created
+    // more than 10s ago (another instance just created it), skip new-lead notifications.
+    const isNewLead = !existingLead && (Date.now() - new Date(lead.createdAt).getTime()) < 10_000;
+
+    if (!isNewLead && existingLead) {
       // Customer replied — conversation.lastMessageAt already updated above
       this.logger.log(`Yelp customer reply on lead ${leadId}`);
       try {
@@ -1550,6 +1552,12 @@ export class WebhooksService {
       } catch (err: any) {
         this.logger.error(`Yelp reply automation failed: ${err.message}`);
       }
+      return;
+    }
+
+    if (!isNewLead) {
+      // Lead upserted (existed or race lost) — skip new-lead notifications
+      this.logger.log(`Yelp lead ${leadId} — skipping notifications (existed=${!!existingLead}, age=${Date.now() - new Date(lead.createdAt).getTime()}ms)`);
       return;
     }
 
