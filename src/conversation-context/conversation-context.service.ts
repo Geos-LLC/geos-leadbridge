@@ -281,6 +281,11 @@ export class ConversationContextService {
     followUpCount: number;
     engagementLevel: string;
     activeStrategy: string | null;
+    priceDiscussed: boolean;
+    lastQuestionAsked: string | null;
+    businessMessages: number;
+    aiMessages: number;
+    customerMessages: number;
   } | null> {
     return this.prisma.threadContext.findUnique({
       where: { conversationId },
@@ -290,6 +295,11 @@ export class ConversationContextService {
         followUpCount: true,
         engagementLevel: true,
         activeStrategy: true,
+        priceDiscussed: true,
+        lastQuestionAsked: true,
+        businessMessages: true,
+        aiMessages: true,
+        customerMessages: true,
       },
     });
   }

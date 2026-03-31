@@ -35,11 +35,11 @@ export class FollowUpEngineService {
       stage: threadState.stage,
       engagementLevel: threadState.engagementLevel,
       awaitingCustomerReply: threadState.awaitingCustomerReply,
-      priceDiscussed: false, // TODO: add to getThreadState in Phase 2
-      lastQuestionAsked: null, // TODO: add to getThreadState in Phase 2
-      businessMessages: 0, // TODO: add to getThreadState in Phase 2
-      aiMessages: 0, // TODO: add to getThreadState in Phase 2
-      customerMessages: 0, // TODO: add to getThreadState in Phase 2
+      priceDiscussed: threadState.priceDiscussed,
+      lastQuestionAsked: threadState.lastQuestionAsked,
+      businessMessages: threadState.businessMessages,
+      aiMessages: threadState.aiMessages,
+      customerMessages: threadState.customerMessages,
     });
 
     if (!followUpState) {

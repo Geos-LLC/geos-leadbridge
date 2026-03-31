@@ -13,6 +13,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CallConnectService } from '../call-connect/call-connect.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
+import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 
 @Injectable()
@@ -38,6 +39,7 @@ export class WebhooksService {
     private callConnectService: CallConnectService,
     private analyticsService: AnalyticsService,
     private conversationContextService: ConversationContextService,
+    private followUpEngine: FollowUpEngineService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -708,6 +710,24 @@ export class WebhooksService {
         }
       } catch (err: any) {
         this.logger.warn(`Failed to backfill pro messages for ${negotiationId}: ${err.message}`);
+      }
+    }
+
+    // Stop follow-up sequences on customer reply (synchronous, idempotent)
+    if (sender === 'customer') {
+      try {
+        await this.followUpEngine.handleCustomerReply(conversation.id);
+      } catch (err: any) {
+        this.logger.warn(`Failed to stop follow-up on customer reply: ${err.message}`);
+      }
+    }
+
+    // Evaluate thread for follow-up enrollment after pro/AI message
+    if (sender === 'pro') {
+      try {
+        await this.followUpEngine.evaluateThread(conversation.id, platform);
+      } catch (err: any) {
+        this.logger.warn(`Failed to evaluate thread for follow-up: ${err.message}`);
       }
     }
 
@@ -1534,6 +1554,15 @@ export class WebhooksService {
     // more than 10s ago (another instance just created it), skip new-lead notifications.
     const isNewLead = !existingLead && (Date.now() - new Date(lead.createdAt).getTime()) < 10_000;
 
+    // Stop follow-up sequences on Yelp customer reply (synchronous, idempotent)
+    if (existingLead && lead.threadId) {
+      try {
+        await this.followUpEngine.handleCustomerReply(lead.threadId);
+      } catch (err: any) {
+        this.logger.warn(`Failed to stop Yelp follow-up on customer reply: ${err.message}`);
+      }
+    }
+
     if (!isNewLead && existingLead) {
       // Customer replied — conversation.lastMessageAt already updated above
       this.logger.log(`Yelp customer reply on lead ${leadId}`);
@@ -1606,6 +1635,15 @@ export class WebhooksService {
     })();
 
     await Promise.all([automationPromise, smsPromise]);
+
+    // Evaluate thread for follow-up enrollment (after auto-reply fires)
+    if (lead.threadId) {
+      try {
+        await this.followUpEngine.evaluateThread(lead.threadId, 'yelp');
+      } catch (err: any) {
+        this.logger.warn(`Failed to evaluate Yelp thread for follow-up: ${err.message}`);
+      }
+    }
   }
 
   /**
