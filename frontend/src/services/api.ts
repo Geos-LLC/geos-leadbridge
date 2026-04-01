@@ -970,6 +970,14 @@ export const usersApi = {
     const { data } = await api.patch('/v1/users/me/ai-prompt', { prompt });
     return data;
   },
+  getServicePricing: async (accountId: string): Promise<{ success: boolean; pricing: any }> => {
+    const { data } = await api.get(`/v1/users/me/pricing/${accountId}`);
+    return data;
+  },
+  updateServicePricing: async (accountId: string, pricing: any): Promise<{ success: boolean }> => {
+    const { data } = await api.patch(`/v1/users/me/pricing/${accountId}`, { pricing });
+    return data;
+  },
 };
 
 // Admin API

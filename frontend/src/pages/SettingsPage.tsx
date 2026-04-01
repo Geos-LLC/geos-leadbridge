@@ -8,6 +8,7 @@ import { useAppStore } from '../store/appStore';
 import type { SubscriptionDetails, SavedAccount } from '../types';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import ConnectionModal from '../components/ConnectionModal';
+import ServicePricingForm from '../components/ServicePricingForm';
 
 const tierNames: Record<string, string> = {
   STARTER: 'Instant Reply',
@@ -1579,6 +1580,37 @@ export default function SettingsPage() {
 
       {/* Section 4: AI Global Prompt */}
       <GlobalAiPromptSection />
+
+      {/* Section 5: Service Pricing */}
+      {accounts.length > 0 && (
+        <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="p-8">
+            <div className="flex items-center gap-3 mb-1">
+              <DollarSign className="w-5 h-5 text-emerald-600" />
+              <h2 className="text-xl font-bold text-slate-900">Service Pricing</h2>
+            </div>
+            <p className="text-sm text-slate-500 mb-6">
+              Configure your pricing table so AI can quote accurate prices in conversations.
+            </p>
+            {accounts.length === 1 ? (
+              <ServicePricingForm accountId={accounts[0].id} accountName={accounts[0].businessName} />
+            ) : (
+              <div className="space-y-4">
+                {accounts.map(acc => (
+                  <details key={acc.id} className="border border-slate-200 rounded-xl overflow-hidden">
+                    <summary className="px-4 py-3 bg-slate-50 cursor-pointer text-sm font-semibold text-slate-700 hover:bg-slate-100">
+                      {acc.businessName} <span className="text-[10px] font-normal text-slate-400 ml-1">({acc.platform})</span>
+                    </summary>
+                    <div className="p-4">
+                      <ServicePricingForm accountId={acc.id} accountName={acc.businessName} />
+                    </div>
+                  </details>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Danger Zone */}
       {user?.role !== 'ADMIN' && (

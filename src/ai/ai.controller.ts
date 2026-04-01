@@ -34,10 +34,17 @@ export class AiController {
 
     const [userRecord, account] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true } }),
-      this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true } }),
+      lead.businessId
+        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true } })
+        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true } }),
     ]);
 
     const details = this.extractLeadDetails(lead.rawJson);
+    const pricingPrompt = this.buildPricingPrompt(account?.servicePricingJson);
+    let systemPrompt = strategyPrompt ?? undefined;
+    if (pricingPrompt) {
+      systemPrompt = systemPrompt ? `${systemPrompt}\n\n${pricingPrompt}` : pricingPrompt;
+    }
 
     const reply = await this.aiService.generateReply({
       customerName: lead.customerName,
@@ -48,7 +55,7 @@ export class AiController {
       budget: lead.budget ? Number(lead.budget) : undefined,
       accountName: account?.businessName ?? undefined,
       globalPrompt: userRecord?.globalAiPrompt ?? undefined,
-      systemPrompt: strategyPrompt ?? undefined,
+      systemPrompt,
       conversationHistory: conversationHistory ?? [],
       leadDetails: details,
     });
@@ -76,7 +83,9 @@ export class AiController {
 
     const [userRecord, account] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true } }),
-      this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true } }),
+      lead.businessId
+        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true } })
+        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true } }),
     ]);
 
     const details = this.extractLeadDetails(lead.rawJson);
@@ -95,12 +104,20 @@ export class AiController {
       }
     }
 
-    // Build the system prompt: strategy + thread context (if full mode)
+    // Build the system prompt: strategy + thread context + pricing
     let systemPrompt = strategyPrompt ?? undefined;
     if (threadContextPrompt) {
       systemPrompt = systemPrompt
         ? `${systemPrompt}\n\n${threadContextPrompt}`
         : threadContextPrompt;
+    }
+
+    // Inject pricing context if configured
+    const pricingPrompt = this.buildPricingPrompt(account?.servicePricingJson);
+    if (pricingPrompt) {
+      systemPrompt = systemPrompt
+        ? `${systemPrompt}\n\n${pricingPrompt}`
+        : pricingPrompt;
     }
 
     const reply = await this.aiService.generateReply({
@@ -118,6 +135,54 @@ export class AiController {
     });
 
     return { reply, contextMode: mode };
+  }
+
+  private buildPricingPrompt(pricingJson: string | null | undefined): string | null {
+    if (!pricingJson) return null;
+    try {
+      const p = JSON.parse(pricingJson);
+      const parts: string[] = ['--- Your Pricing Guide (use these EXACT prices when quoting) ---'];
+
+      // Price table
+      const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
+      if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
+        parts.push('Base prices by property size:');
+        for (const row of p.priceTable) {
+          const prices = enabledTypes.map((t: any) => `${t.label}: $${row[t.key] || '?'}`).join(', ');
+          parts.push(`  ${row.bed}BR/${row.bath}BA — ${prices}`);
+        }
+      }
+
+      // Frequency discounts
+      if (p.frequencyDiscounts?.length > 0) {
+        const discounts = p.frequencyDiscounts
+          .filter((fd: any) => fd.discount > 0)
+          .map((fd: any) => `${fd.label}: ${fd.discount}% off`);
+        if (discounts.length > 0) parts.push(`Recurring discounts: ${discounts.join(', ')}`);
+      }
+
+      // Extras
+      if (p.extras?.length > 0) {
+        const extrasList = p.extras.filter((e: any) => e.label && e.price > 0).map((e: any) => `${e.label}: +$${e.price}`);
+        if (extrasList.length > 0) parts.push(`Add-ons available: ${extrasList.join(', ')}`);
+      }
+
+      // Condition surcharges
+      if (p.conditionSurcharges?.length > 0) {
+        const surcharges = p.conditionSurcharges.filter((c: any) => c.surcharge > 0).map((c: any) => `${c.label}: +$${c.surcharge}`);
+        if (surcharges.length > 0) parts.push(`Condition surcharges: ${surcharges.join(', ')}`);
+      }
+
+      // Pet surcharge
+      if (p.petSurcharge > 0) parts.push(`Pet surcharge: +$${p.petSurcharge}`);
+
+      parts.push('--- End Pricing Guide ---');
+      parts.push('When the strategy requires pricing, use the EXACT prices from the table above. Match bedrooms and bathrooms from the lead details to find the right row. If the exact combination is not in the table, use the closest match.');
+
+      return parts.join('\n');
+    } catch {
+      return null;
+    }
   }
 
   private extractLeadDetails(rawJson: string): Record<string, string> {
