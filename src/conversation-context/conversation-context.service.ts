@@ -424,6 +424,7 @@ export class ConversationContextService {
     suggested: string;
     reason: string;
     confidence: number;
+    scores: Record<string, number>;
     threadState: Record<string, any>;
   } | null> {
     const ctx = await this.getContext(conversationId, 3);
@@ -443,57 +444,65 @@ export class ConversationContextService {
       activeStrategy: ctx.activeStrategy,
     };
 
-    // Rule-based suggestion engine
-    // Priority: hot→Convert, price_shopping+!priceDiscussed→Price, missingFields→Qualify, default→Hybrid
+    // Score each strategy based on thread state
+    const scores: Record<string, number> = { hybrid: 0.5, price: 0.3, qualify: 0.3, convert: 0.2 };
+
+    // Engagement signals
     if (ctx.engagementLevel === 'hot') {
-      return {
-        suggested: 'convert',
-        reason: 'Customer shows strong buying signals — focus on booking or next step.',
-        confidence: 0.85,
-        threadState: state,
-      };
+      scores.convert = 0.85;
+      scores.hybrid = 0.5;
+      scores.price = 0.4;
+      scores.qualify = 0.25;
+    } else if (ctx.engagementLevel === 'cold') {
+      scores.price = 0.6;
+      scores.hybrid = 0.45;
+      scores.convert = 0.15;
+      scores.qualify = 0.3;
     }
 
+    // Price shopping + no price discussed
     if (ctx.customerIntent === 'price_shopping' && !ctx.priceDiscussed) {
-      return {
-        suggested: 'price',
-        reason: 'Customer is comparing prices and no pricing has been shared yet.',
-        confidence: 0.8,
-        threadState: state,
-      };
+      scores.price = Math.max(scores.price, 0.8);
+      scores.hybrid = Math.max(scores.hybrid, 0.55);
     }
 
+    // Missing fields boost qualify
     if (ctx.missingFields.length >= 2) {
-      return {
-        suggested: 'qualify',
-        reason: `${ctx.missingFields.length} key details still missing (${ctx.missingFields.slice(0, 3).join(', ')}). Gather info before quoting.`,
-        confidence: 0.75,
-        threadState: state,
-      };
+      scores.qualify = Math.max(scores.qualify, 0.75);
+      scores.hybrid = Math.max(scores.hybrid, 0.5);
+    } else if (ctx.missingFields.length === 1) {
+      scores.qualify = Math.max(scores.qualify, 0.5);
     }
 
-    if (ctx.engagementLevel === 'cold') {
-      return {
-        suggested: 'price',
-        reason: 'Customer engagement is low — lead with value/pricing to re-engage.',
-        confidence: 0.6,
-        threadState: state,
-      };
-    }
-
+    // Price already discussed → convert
     if (ctx.stage === 'quoting' || ctx.priceDiscussed) {
-      return {
-        suggested: 'convert',
-        reason: 'Pricing already discussed — shift focus toward booking.',
-        confidence: 0.7,
-        threadState: state,
-      };
+      scores.convert = Math.max(scores.convert, 0.7);
+      scores.price = Math.min(scores.price, 0.35);
     }
+
+    // Find the best strategy
+    const suggested = Object.entries(scores).reduce((best, [key, score]) =>
+      score > best.score ? { key, score } : best,
+      { key: 'hybrid', score: 0 },
+    ).key;
+
+    // Generate reason for the top suggestion
+    const reasons: Record<string, string> = {
+      convert: ctx.engagementLevel === 'hot'
+        ? 'Customer shows strong buying signals — focus on booking or next step.'
+        : 'Pricing already discussed — shift focus toward booking.',
+      price: ctx.customerIntent === 'price_shopping'
+        ? 'Customer is comparing prices and no pricing has been shared yet.'
+        : 'Lead with value/pricing to engage the customer.',
+      qualify: `${ctx.missingFields.length} key details still missing (${ctx.missingFields.slice(0, 3).join(', ')}). Gather info before quoting.`,
+      hybrid: 'Balanced approach with pricing and qualification.',
+    };
 
     return {
-      suggested: 'hybrid',
-      reason: 'General conversation — balanced approach with pricing and qualification.',
-      confidence: 0.5,
+      suggested,
+      reason: reasons[suggested] || reasons.hybrid,
+      confidence: scores[suggested],
+      scores,
       threadState: state,
     };
   }

@@ -183,14 +183,13 @@ export function Messages() {
   const [aiPreview, setAiPreview] = useState<Record<string, { loading: boolean; reply: string | null; contextMode?: string }>>({});
   const aiContextMode = 'full' as const;
   const [strategySuggestion, setStrategySuggestion] = useState<{
-    suggested: string; reason: string; confidence: number; threadState: Record<string, any>;
+    suggested: string; reason: string; confidence: number; scores: Record<string, number>; threadState: Record<string, any>;
   } | null>(null);
+  const [activeStrategyKey, setActiveStrategyKey] = useState<string | null>(null);
   const [, setStrategySuggestionLoading] = useState(false);
   const [threadContextData, setThreadContextData] = useState<{
     systemContext: string; threadState: Record<string, any>;
   } | null>(null);
-  const [aiPopoverEventId, setAiPopoverEventId] = useState<string | null>(null);
-  const [aiPopoverSections, setAiPopoverSections] = useState<Record<string, boolean>>({});
   const AI_STRATEGIES = [
     { key: 'hybrid', label: 'Hybrid', emoji: '⚖️', prompt: 'Strategy: Hybrid\n\n- Provide a broad price range early\n- Immediately ask one clarifying question\n- Balance speed and accuracy\n- Adjust responses dynamically as more information is received' },
     { key: 'price', label: 'Price', emoji: '💰', prompt: 'Strategy: Price Anchor\n\n- Provide a realistic price range early in the conversation\n- Reduce uncertainty quickly\n- After giving range, ask 1 clarifying question\n- Avoid exact pricing unless enough details are provided\n- Keep explanation minimal' },
@@ -250,12 +249,12 @@ export function Messages() {
   useEffect(() => {
     setStrategySuggestion(null);
     setThreadContextData(null);
-    setAiPopoverEventId(null);
+    setActiveStrategyKey(null);
     if (!selectedLead?.threadId) return;
     setStrategySuggestionLoading(true);
     conversationContextApi.suggestStrategy(selectedLead.threadId)
       .then(res => {
-        if (res.success) setStrategySuggestion({ suggested: res.suggested, reason: res.reason, confidence: res.confidence, threadState: res.threadState });
+        if (res.success) setStrategySuggestion({ suggested: res.suggested, reason: res.reason, confidence: res.confidence, scores: res.scores || {}, threadState: res.threadState });
       })
       .catch(() => {})
       .finally(() => setStrategySuggestionLoading(false));
@@ -1521,9 +1520,9 @@ export function Messages() {
                       )}
                     </div>
 
-                    {/* AI Reply preview — inbound messages only, 4 strategy buttons */}
+                    {/* AI Reply preview — inbound messages only, 4 strategy buttons with % */}
                     {event.direction === 'inbound' && event.content && (
-                      <div className="mt-1 relative">
+                      <div className="mt-1">
                         {/* Strategy buttons row */}
                         <div className="flex items-center gap-1 flex-wrap">
                           <Sparkles size={10} className="text-violet-400" />
@@ -1531,11 +1530,21 @@ export function Messages() {
                             const previewKey = `${event.id}:${strategy.key}`;
                             const preview = aiPreview[previewKey];
                             const isSuggested = strategySuggestion?.suggested === strategy.key;
+                            const score = strategySuggestion?.scores?.[strategy.key];
                             return (
                               <button
                                 key={strategy.key}
                                 onClick={() => {
-                                  if (preview) return;
+                                  setActiveStrategyKey(strategy.key);
+                                  // Load context data for right panel if not loaded
+                                  if (!threadContextData && selectedLead?.threadId) {
+                                    conversationContextApi.getAiContext(selectedLead.threadId).then(res => {
+                                      if (res.success && res.context) {
+                                        setThreadContextData({ systemContext: res.context.systemContext, threadState: res.context.threadState });
+                                      }
+                                    }).catch(() => {});
+                                  }
+                                  if (preview) return; // already loaded, just show details
                                   setAiPreview(prev => ({ ...prev, [previewKey]: { loading: true, reply: null } }));
                                   if (selectedLead?.threadId) {
                                     aiApi.previewWithContext(selectedLead.id, selectedLead.threadId, event.content!, strategy.prompt, aiContextMode)
@@ -1560,157 +1569,11 @@ export function Messages() {
                                 title={isSuggested ? `AI suggests: ${strategySuggestion?.reason}` : undefined}
                               >
                                 {preview?.loading ? <Loader2 size={9} className="animate-spin inline" /> : strategy.emoji} {strategy.label}
-                                {isSuggested && !preview && ' *'}
+                                {score !== undefined && <span className="text-[8px] ml-0.5 opacity-70">{Math.round(score * 100)}%</span>}
                               </button>
                             );
                           })}
-                          {/* Context popover trigger */}
-                          {selectedLead?.threadId && (
-                            <button
-                              onClick={() => {
-                                const opening = aiPopoverEventId !== event.id;
-                                setAiPopoverEventId(opening ? event.id : null);
-                                if (opening && !threadContextData) {
-                                  conversationContextApi.getAiContext(selectedLead!.threadId!).then(res => {
-                                    if (res.success && res.context) {
-                                      setThreadContextData({ systemContext: res.context.systemContext, threadState: res.context.threadState });
-                                    }
-                                  }).catch(() => {});
-                                }
-                              }}
-                              className={`text-[10px] px-1 py-0.5 rounded-md transition-colors ml-0.5 flex items-center gap-0.5 ${
-                                aiPopoverEventId === event.id ? 'bg-violet-100 text-violet-700' : 'text-slate-400 hover:text-violet-500 hover:bg-violet-50'
-                              }`}
-                              title="AI context & settings"
-                            >
-                              <ChevronDown size={9} className={`transition-transform ${aiPopoverEventId === event.id ? 'rotate-180' : ''}`} />
-                            </button>
-                          )}
                         </div>
-
-                        {/* ===== Context Popover (3 sections, all collapsed) ===== */}
-                        {aiPopoverEventId === event.id && selectedLead?.threadId && (
-                          <div className="absolute left-0 top-full mt-1 z-20 w-72 bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden text-xs">
-
-                            {/* Section 1 — Why this answer */}
-                            <div className="border-b border-slate-100">
-                              <button
-                                onClick={() => setAiPopoverSections(p => ({ ...p, why: !p.why }))}
-                                className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
-                              >
-                                <span>Why this answer</span>
-                                <ChevronRight size={11} className={`transition-transform text-slate-400 ${aiPopoverSections.why ? 'rotate-90' : ''}`} />
-                              </button>
-                              {aiPopoverSections.why && strategySuggestion && (
-                                <div className="px-3 pb-2">
-                                  <div className="flex items-center gap-1.5 mb-1">
-                                    <span className="text-[11px] font-semibold text-slate-800">
-                                      Suggested: {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.emoji}{' '}
-                                      {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.label}
-                                    </span>
-                                    <span className="text-[9px] bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full font-semibold">
-                                      {Math.round(strategySuggestion.confidence * 100)}%
-                                    </span>
-                                  </div>
-                                  <p className="text-[11px] text-slate-500 leading-relaxed">{strategySuggestion.reason}</p>
-                                </div>
-                              )}
-                              {aiPopoverSections.why && !strategySuggestion && (
-                                <div className="px-3 pb-2 text-[11px] text-slate-400">No thread context available yet.</div>
-                              )}
-                            </div>
-
-                            {/* Section 2 — Context */}
-                            <div className="border-b border-slate-100">
-                              <button
-                                onClick={() => setAiPopoverSections(p => ({ ...p, context: !p.context }))}
-                                className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
-                              >
-                                <span>Context</span>
-                                <ChevronRight size={11} className={`transition-transform text-slate-400 ${aiPopoverSections.context ? 'rotate-90' : ''}`} />
-                              </button>
-                              {aiPopoverSections.context && (
-                                <div className="px-3 pb-2 space-y-1.5">
-                                  {threadContextData?.systemContext && (
-                                    <div>
-                                      <div className="text-[10px] font-semibold text-slate-500 mb-0.5">Summary:</div>
-                                      <p className="text-[10px] text-slate-600 italic leading-relaxed">
-                                        {threadContextData.systemContext.split('\n').find(l => l.startsWith('Conversation summary:'))?.replace('Conversation summary: ', '') || 'No summary yet'}
-                                      </p>
-                                    </div>
-                                  )}
-                                  {strategySuggestion?.threadState && (
-                                    <div>
-                                      <div className="text-[10px] font-semibold text-slate-500 mb-0.5">State:</div>
-                                      <ul className="text-[10px] text-slate-600 space-y-0.5 list-none">
-                                        {strategySuggestion.threadState.awaitingCustomerReply !== undefined && (
-                                          <li>- awaiting reply: {strategySuggestion.threadState.awaitingCustomerReply ? 'yes' : 'no'}</li>
-                                        )}
-                                        <li>- price discussed: {strategySuggestion.threadState.priceDiscussed ? (strategySuggestion.threadState.priceRange || 'yes') : 'no'}</li>
-                                        {strategySuggestion.threadState.missingFields?.length > 0 && (
-                                          <li>- missing: {strategySuggestion.threadState.missingFields.join(', ')}</li>
-                                        )}
-                                        {strategySuggestion.threadState.stage && (
-                                          <li>- stage: {strategySuggestion.threadState.stage}</li>
-                                        )}
-                                        {strategySuggestion.threadState.engagementLevel && strategySuggestion.threadState.engagementLevel !== 'unknown' && (
-                                          <li>- engagement: {strategySuggestion.threadState.engagementLevel}</li>
-                                        )}
-                                      </ul>
-                                    </div>
-                                  )}
-                                  {threadContextData?.systemContext && (
-                                    <details className="mt-1">
-                                      <summary className="text-[10px] text-violet-500 cursor-pointer hover:text-violet-700 font-semibold flex items-center gap-1">
-                                        <ArrowRight size={9} /> View full context
-                                      </summary>
-                                      <pre className="mt-1 text-[9px] text-slate-500 whitespace-pre-wrap bg-slate-50 rounded-lg p-2 max-h-40 overflow-y-auto border border-slate-100">{threadContextData.systemContext}</pre>
-                                    </details>
-                                  )}
-                                  {!threadContextData && !strategySuggestion && (
-                                    <div className="text-[11px] text-slate-400">No context data available.</div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Section 3 — Prompt */}
-                            <div>
-                              <button
-                                onClick={() => setAiPopoverSections(p => ({ ...p, prompt: !p.prompt }))}
-                                className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
-                              >
-                                <span>Prompt</span>
-                                <ChevronRight size={11} className={`transition-transform text-slate-400 ${aiPopoverSections.prompt ? 'rotate-90' : ''}`} />
-                              </button>
-                              {aiPopoverSections.prompt && (
-                                <div className="px-3 pb-2 space-y-1">
-                                  <div className="text-[10px] text-slate-600">
-                                    <span className="font-semibold text-slate-500">Strategy:</span>{' '}
-                                    {strategySuggestion ? (AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.label || 'Hybrid') : 'Hybrid'}
-                                  </div>
-                                  <div className="text-[10px] text-slate-600">
-                                    <span className="font-semibold text-slate-500">Objective:</span>{' '}
-                                    {strategySuggestion?.suggested === 'price' ? 'initial pricing + re-engagement' :
-                                     strategySuggestion?.suggested === 'qualify' ? 'gather missing details before quoting' :
-                                     strategySuggestion?.suggested === 'convert' ? 'move toward booking or next step' :
-                                     'initial pricing + qualification'}
-                                  </div>
-                                  {strategySuggestion && (
-                                    <details className="mt-1">
-                                      <summary className="text-[10px] text-violet-500 cursor-pointer hover:text-violet-700 font-semibold flex items-center gap-1">
-                                        <ArrowRight size={9} /> View full prompt
-                                      </summary>
-                                      <pre className="mt-1 text-[9px] text-slate-500 whitespace-pre-wrap bg-slate-50 rounded-lg p-2 max-h-32 overflow-y-auto border border-slate-100">
-                                        {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.prompt || 'No prompt available'}
-                                      </pre>
-                                    </details>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
 
                         {/* Show loaded previews */}
                         {AI_STRATEGIES.map(strategy => {
@@ -1969,6 +1832,86 @@ export function Messages() {
                 <span className="flex items-center gap-1"><Smartphone size={11} /> {commSummary.smsSent} sms</span>
                 {commSummary.smsFailed > 0 && <span className="text-red-500">{commSummary.smsFailed} failed</span>}
                 <span className="flex items-center gap-1"><Phone size={11} /> {commSummary.calls} calls</span>
+              </div>
+            )}
+
+            {/* AI Strategy Details — shown when a strategy button is clicked */}
+            {activeStrategyKey && strategySuggestion && (
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">AI Strategy</h4>
+                <div className="bg-violet-50 border border-violet-100 rounded-xl p-3 space-y-2">
+                  {/* Active strategy header */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-slate-800">
+                      {AI_STRATEGIES.find(s => s.key === activeStrategyKey)?.emoji}{' '}
+                      {AI_STRATEGIES.find(s => s.key === activeStrategyKey)?.label}
+                    </span>
+                    {strategySuggestion.scores?.[activeStrategyKey] !== undefined && (
+                      <span className="text-[9px] bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full font-semibold">
+                        {Math.round(strategySuggestion.scores[activeStrategyKey] * 100)}%
+                      </span>
+                    )}
+                    {strategySuggestion.suggested === activeStrategyKey && (
+                      <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-semibold">recommended</span>
+                    )}
+                  </div>
+
+                  {/* Why this answer */}
+                  {strategySuggestion.suggested === activeStrategyKey && (
+                    <p className="text-[11px] text-slate-600 leading-relaxed">{strategySuggestion.reason}</p>
+                  )}
+
+                  {/* Context — collapsible */}
+                  <details>
+                    <summary className="text-[10px] text-violet-500 cursor-pointer hover:text-violet-700 font-semibold flex items-center gap-1">
+                      <ChevronRight size={9} /> Context
+                    </summary>
+                    <div className="mt-1.5 space-y-1.5">
+                      {threadContextData?.systemContext && (
+                        <div>
+                          <div className="text-[10px] font-semibold text-slate-500 mb-0.5">Summary:</div>
+                          <p className="text-[10px] text-slate-600 italic leading-relaxed">
+                            {threadContextData.systemContext.split('\n').find(l => l.startsWith('Conversation summary:'))?.replace('Conversation summary: ', '') || 'No summary yet'}
+                          </p>
+                        </div>
+                      )}
+                      <div>
+                        <div className="text-[10px] font-semibold text-slate-500 mb-0.5">State:</div>
+                        <ul className="text-[10px] text-slate-600 space-y-0.5 list-none">
+                          {strategySuggestion.threadState.awaitingCustomerReply !== undefined && (
+                            <li>- awaiting reply: {strategySuggestion.threadState.awaitingCustomerReply ? 'yes' : 'no'}</li>
+                          )}
+                          <li>- price discussed: {strategySuggestion.threadState.priceDiscussed ? (strategySuggestion.threadState.priceRange || 'yes') : 'no'}</li>
+                          {strategySuggestion.threadState.missingFields?.length > 0 && (
+                            <li>- missing: {strategySuggestion.threadState.missingFields.join(', ')}</li>
+                          )}
+                          {strategySuggestion.threadState.stage && (
+                            <li>- stage: {strategySuggestion.threadState.stage}</li>
+                          )}
+                          {strategySuggestion.threadState.engagementLevel && strategySuggestion.threadState.engagementLevel !== 'unknown' && (
+                            <li>- engagement: {strategySuggestion.threadState.engagementLevel}</li>
+                          )}
+                        </ul>
+                      </div>
+                      {threadContextData?.systemContext && (
+                        <details className="mt-1">
+                          <summary className="text-[9px] text-violet-400 cursor-pointer hover:text-violet-600 font-semibold">View full context</summary>
+                          <pre className="mt-1 text-[9px] text-slate-500 whitespace-pre-wrap bg-white rounded-lg p-2 max-h-32 overflow-y-auto border border-slate-100">{threadContextData.systemContext}</pre>
+                        </details>
+                      )}
+                    </div>
+                  </details>
+
+                  {/* Prompt — collapsible */}
+                  <details>
+                    <summary className="text-[10px] text-violet-500 cursor-pointer hover:text-violet-700 font-semibold flex items-center gap-1">
+                      <ChevronRight size={9} /> Prompt
+                    </summary>
+                    <pre className="mt-1 text-[9px] text-slate-500 whitespace-pre-wrap bg-white rounded-lg p-2 max-h-32 overflow-y-auto border border-slate-100">
+                      {AI_STRATEGIES.find(s => s.key === activeStrategyKey)?.prompt || ''}
+                    </pre>
+                  </details>
+                </div>
               </div>
             )}
 

@@ -510,6 +510,7 @@ export const conversationContextApi = {
     suggested: string;
     reason: string;
     confidence: number;
+    scores: Record<string, number>;
     threadState: Record<string, any>;
   }> => {
     const { data } = await api.get(`/v1/conversation-context/${conversationId}/suggest-strategy`);
