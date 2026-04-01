@@ -229,6 +229,7 @@ export function Services() {
   const [fuStart, setFuStart] = useState('18:00');
   const [fuEnd, setFuEnd] = useState('09:00');
   const [fuTz, setFuTz] = useState('America/New_York');
+  const [fuStrategyMode, setFuStrategyMode] = useState<'auto' | 'manual'>('auto');
   const [fuScenarios, setFuScenarios] = useState({
     hybrid: true,
     price: true,
@@ -363,6 +364,7 @@ export function Services() {
         if (s.followUpTiming) setFuTiming(s.followUpTiming);
         if (s.followUpCustomSteps) setFuCustomSteps(s.followUpCustomSteps);
         if (s.followUpAvailability) setFuAvailability(s.followUpAvailability);
+        if (s.followUpStrategyMode) setFuStrategyMode(s.followUpStrategyMode);
         if (s.followUpScenarios) setFuScenarios(s.followUpScenarios);
         if (s.followUpStopOnReply !== undefined) setFuStopOnReply(s.followUpStopOnReply);
         if (s.followUpStopOnOptOut !== undefined) setFuStopOnOptOut(s.followUpStopOnOptOut);
@@ -2340,27 +2342,64 @@ export function Services() {
                     </button>
                     {fuShowStrategies && (
                       <div className="px-4 py-3 space-y-2 border-t border-slate-100">
-                        {([
-                          { key: 'hybrid' as const, emoji: '⚖️', label: 'Hybrid', desc: 'Price range + one scheduling question' },
-                          { key: 'price' as const, emoji: '💰', label: 'Price', desc: 'Lead with pricing to reduce uncertainty' },
-                          { key: 'qualify' as const, emoji: '🧠', label: 'Qualify', desc: 'Ask for missing details before quoting' },
-                          { key: 'convert' as const, emoji: '📞', label: 'Convert', desc: 'Push toward booking with specific times' },
-                          { key: 'phone' as const, emoji: '📱', label: 'Phone', desc: 'Escalate to phone call for complex jobs' },
-                        ]).map(scenario => (
-                          <label key={scenario.key} className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors">
-                            <div className="flex items-center gap-2 flex-1 min-w-0">
-                              <span className="text-base">{scenario.emoji}</span>
-                              <div>
-                                <p className="text-sm font-semibold text-slate-800">{scenario.label}</p>
-                                <p className="text-[10px] text-slate-400">{scenario.desc}</p>
-                              </div>
+                        {/* Auto mode — default */}
+                        <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-colors ${
+                          fuStrategyMode === 'auto' ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-100 hover:bg-slate-50'
+                        }`}>
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <span className="text-base">🤖</span>
+                            <div>
+                              <p className="text-sm font-semibold text-slate-800">Auto <span className="text-[9px] font-normal text-blue-500 ml-1">default</span></p>
+                              <p className="text-[10px] text-slate-400">Best strategy based on conversation evaluation</p>
                             </div>
-                            <input type="checkbox"
-                              checked={fuScenarios[scenario.key]}
-                              onChange={e => setFuScenarios(prev => ({ ...prev, [scenario.key]: e.target.checked }))}
-                              className="accent-emerald-600 w-4 h-4 shrink-0 ml-3" />
-                          </label>
-                        ))}
+                          </div>
+                          <input type="radio" name="fuStrategyMode" checked={fuStrategyMode === 'auto'}
+                            onChange={() => setFuStrategyMode('auto')}
+                            className="accent-blue-600 w-4 h-4 shrink-0 ml-3" />
+                        </label>
+
+                        {/* Manual selection */}
+                        <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-colors ${
+                          fuStrategyMode === 'manual' ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-100 hover:bg-slate-50'
+                        }`}>
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <span className="text-base">🎯</span>
+                            <div>
+                              <p className="text-sm font-semibold text-slate-800">Pick strategies</p>
+                              <p className="text-[10px] text-slate-400">Choose which strategies can be used</p>
+                            </div>
+                          </div>
+                          <input type="radio" name="fuStrategyMode" checked={fuStrategyMode === 'manual'}
+                            onChange={() => setFuStrategyMode('manual')}
+                            className="accent-blue-600 w-4 h-4 shrink-0 ml-3" />
+                        </label>
+
+                        {/* Individual strategy toggles — only when manual */}
+                        {fuStrategyMode === 'manual' && (
+                          <div className="space-y-1.5 pl-4 border-l-2 border-blue-100 ml-2">
+                            {([
+                              { key: 'hybrid' as const, emoji: '⚖️', label: 'Hybrid', desc: 'Price range + one scheduling question' },
+                              { key: 'price' as const, emoji: '💰', label: 'Price', desc: 'Lead with pricing to reduce uncertainty' },
+                              { key: 'qualify' as const, emoji: '🧠', label: 'Qualify', desc: 'Ask for missing details before quoting' },
+                              { key: 'convert' as const, emoji: '📞', label: 'Convert', desc: 'Push toward booking with specific times' },
+                              { key: 'phone' as const, emoji: '📱', label: 'Phone', desc: 'Escalate to phone call for complex jobs' },
+                            ]).map(scenario => (
+                              <label key={scenario.key} className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors">
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                  <span className="text-sm">{scenario.emoji}</span>
+                                  <div>
+                                    <p className="text-xs font-semibold text-slate-800">{scenario.label}</p>
+                                    <p className="text-[9px] text-slate-400">{scenario.desc}</p>
+                                  </div>
+                                </div>
+                                <input type="checkbox"
+                                  checked={fuScenarios[scenario.key]}
+                                  onChange={e => setFuScenarios(prev => ({ ...prev, [scenario.key]: e.target.checked }))}
+                                  className="accent-emerald-600 w-3.5 h-3.5 shrink-0 ml-2" />
+                              </label>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -2450,7 +2489,8 @@ export function Services() {
                           timing: fuTiming,
                           customSteps: fuTiming === 'custom' ? fuCustomSteps : undefined,
                           availability: fuAvailability,
-                          scenarios: fuScenarios,
+                          strategyMode: fuStrategyMode,
+                          scenarios: fuStrategyMode === 'auto' ? { hybrid: true, price: true, qualify: true, convert: true, phone: true } : fuScenarios,
                           stopOnReply: fuStopOnReply,
                           stopOnOptOut: fuStopOnOptOut,
                           stopOnBooked: fuStopOnBooked,

@@ -273,6 +273,8 @@ export class FollowUpGeneratorService {
       if (!account?.followUpSettingsJson) return null;
 
       const settings = JSON.parse(account.followUpSettingsJson);
+      // Auto mode = all strategies enabled (no filtering)
+      if (settings.followUpStrategyMode === 'auto') return null;
       const scenarios = settings.followUpScenarios;
       if (!scenarios) return null;
 
