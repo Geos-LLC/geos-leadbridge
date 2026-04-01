@@ -230,10 +230,11 @@ export function Services() {
   const [fuEnd, setFuEnd] = useState('21:00');
   const [fuTz, setFuTz] = useState('America/New_York');
   const [fuScenarios, setFuScenarios] = useState({
-    no_reply_after_initial: true,
-    no_reply_after_question: true,
-    no_reply_after_price: true,
-    no_reply_after_conversion: true,
+    hybrid: true,
+    price: true,
+    qualify: true,
+    convert: true,
+    phone: true,
   });
   const [fuStopOnReply, setFuStopOnReply] = useState(true);
   const [fuStopOnOptOut, setFuStopOnOptOut] = useState(true);
@@ -2307,20 +2308,25 @@ export function Services() {
                     )}
                   </div>
 
-                  {/* 5. Scenarios */}
+                  {/* 4. Follow-up Strategies */}
                   <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">4. Scenarios</label>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">4. Follow-up Strategies</label>
+                    <p className="text-[11px] text-slate-400 mb-3">Choose which strategies the AI can use for follow-ups.</p>
                     <div className="space-y-2">
                       {([
-                        { key: 'no_reply_after_initial' as const, label: 'After first reply', desc: 'Customer received your message but didn\'t respond' },
-                        { key: 'no_reply_after_question' as const, label: 'After question asked', desc: 'You asked a clarifying question, no answer' },
-                        { key: 'no_reply_after_price' as const, label: 'After price shared', desc: 'Price was discussed, customer went silent' },
-                        { key: 'no_reply_after_conversion' as const, label: 'After booking step', desc: 'Offered to book or schedule, no confirmation' },
+                        { key: 'hybrid' as const, emoji: '⚖️', label: 'Hybrid', desc: 'Price range + one scheduling question' },
+                        { key: 'price' as const, emoji: '💰', label: 'Price', desc: 'Lead with pricing to reduce uncertainty' },
+                        { key: 'qualify' as const, emoji: '🧠', label: 'Qualify', desc: 'Ask for missing details before quoting' },
+                        { key: 'convert' as const, emoji: '📞', label: 'Convert', desc: 'Push toward booking with specific times' },
+                        { key: 'phone' as const, emoji: '📱', label: 'Phone', desc: 'Escalate to phone call for complex jobs' },
                       ]).map(scenario => (
                         <label key={scenario.key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-100/50 transition-colors">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-slate-800">{scenario.label}</p>
-                            <p className="text-[10px] text-slate-400">{scenario.desc}</p>
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <span className="text-base">{scenario.emoji}</span>
+                            <div>
+                              <p className="text-sm font-semibold text-slate-800">{scenario.label}</p>
+                              <p className="text-[10px] text-slate-400">{scenario.desc}</p>
+                            </div>
                           </div>
                           <input type="checkbox"
                             checked={fuScenarios[scenario.key]}
