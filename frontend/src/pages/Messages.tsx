@@ -218,6 +218,21 @@ export function Messages() {
   const [, setSmsLogs] = useState<NotificationLog[]>([]);
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [channelFilter, setChannelFilter] = useState<'all' | TimelineChannel>('all');
+  // Follow-up suggestions
+  const [fuSuggestions, setFuSuggestions] = useState<any[]>([]);
+  const [fuEditMsg, setFuEditMsg] = useState('');
+  const [fuEditId, setFuEditId] = useState<string | null>(null);
+  const [fuActionLoading, setFuActionLoading] = useState(false);
+
+  // Load follow-up suggestions when selected lead changes
+  useEffect(() => {
+    if (!selectedLead) { setFuSuggestions([]); return; }
+    followUpApi.getSuggestions().then(res => {
+      setFuSuggestions((res.suggestions || []).filter(
+        (s: any) => s.enrollment?.conversationId === selectedLead.threadId
+      ));
+    }).catch(() => setFuSuggestions([]));
+  }, [selectedLead?.id]);
   const [sendChannel, setSendChannel] = useState<'platform' | 'sms'>('platform');
 
   // Mobile panel state: 'list' (leads), 'chat' (conversation), 'details' (lead details)
@@ -1607,90 +1622,60 @@ export function Messages() {
           </div>
 
           {/* Follow-up suggestion card */}
-          {(() => {
-            const [suggestions, setSuggestions] = useState<any[]>([]);
-            const [editMsg, setEditMsg] = useState('');
-            const [editId, setEditId] = useState<string | null>(null);
-            const [actionLoading, setActionLoading] = useState(false);
-
-            useEffect(() => {
-              if (!selectedLead) return;
-              followUpApi.getSuggestions().then(res => {
-                const matching = (res.suggestions || []).filter(
-                  (s: any) => s.enrollment?.conversationId === selectedLead.threadId
-                );
-                setSuggestions(matching);
-              }).catch(() => {});
-            }, [selectedLead?.id]);
-
-            if (suggestions.length === 0) return null;
-
-            return (
-              <div className="p-3 border-b border-slate-100 space-y-2">
-                {suggestions.map((s: any) => (
-                  <div key={s.id} className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Sparkles size={14} className="text-amber-600" />
-                      <span className="text-xs font-bold text-amber-800">Follow-up Suggestion</span>
-                      <span className="text-[10px] text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">{s.objective}</span>
-                    </div>
-                    {editId === s.id ? (
-                      <textarea
-                        value={editMsg}
-                        onChange={e => setEditMsg(e.target.value)}
-                        rows={3}
-                        className="w-full px-2 py-1.5 text-sm border border-amber-300 rounded-lg bg-white resize-none"
-                      />
-                    ) : (
-                      <p className="text-sm text-slate-700 leading-relaxed">{s.generatedMessage}</p>
-                    )}
-                    <div className="flex gap-1.5">
-                      {editId === s.id ? (
-                        <button
-                          disabled={actionLoading}
-                          onClick={async () => {
-                            setActionLoading(true);
-                            await followUpApi.editAndApprove(s.id, editMsg);
-                            setSuggestions(prev => prev.filter(x => x.id !== s.id));
-                            setEditId(null);
-                            setActionLoading(false);
-                          }}
-                          className="px-2 py-1 text-[10px] font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                        >Send Edited</button>
-                      ) : (
-                        <>
-                          <button
-                            disabled={actionLoading}
-                            onClick={async () => {
-                              setActionLoading(true);
-                              await followUpApi.approveSuggestion(s.id);
-                              setSuggestions(prev => prev.filter(x => x.id !== s.id));
-                              setActionLoading(false);
-                            }}
-                            className="px-2 py-1 text-[10px] font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
-                          >Approve & Send</button>
-                          <button
-                            onClick={() => { setEditId(s.id); setEditMsg(s.generatedMessage || ''); }}
-                            className="px-2 py-1 text-[10px] font-bold bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
-                          >Edit</button>
-                          <button
-                            disabled={actionLoading}
-                            onClick={async () => {
-                              setActionLoading(true);
-                              await followUpApi.skipSuggestion(s.id);
-                              setSuggestions(prev => prev.filter(x => x.id !== s.id));
-                              setActionLoading(false);
-                            }}
-                            className="px-2 py-1 text-[10px] font-bold text-slate-400 hover:text-red-500"
-                          >Skip</button>
-                        </>
-                      )}
-                    </div>
+          {fuSuggestions.length > 0 && (
+            <div className="p-3 border-b border-slate-100 space-y-2">
+              {fuSuggestions.map((s: any) => (
+                <div key={s.id} className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={14} className="text-amber-600" />
+                    <span className="text-xs font-bold text-amber-800">Follow-up Suggestion</span>
+                    <span className="text-[10px] text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">{s.objective}</span>
                   </div>
-                ))}
-              </div>
-            );
-          })()}
+                  {fuEditId === s.id ? (
+                    <textarea value={fuEditMsg} onChange={e => setFuEditMsg(e.target.value)} rows={3}
+                      className="w-full px-2 py-1.5 text-sm border border-amber-300 rounded-lg bg-white resize-none" />
+                  ) : (
+                    <p className="text-sm text-slate-700 leading-relaxed">{s.generatedMessage}</p>
+                  )}
+                  <div className="flex gap-1.5">
+                    {fuEditId === s.id ? (
+                      <button disabled={fuActionLoading} onClick={async () => {
+                        setFuActionLoading(true);
+                        await followUpApi.editAndApprove(s.id, fuEditMsg);
+                        setFuSuggestions(prev => prev.filter(x => x.id !== s.id));
+                        setFuEditId(null); setFuActionLoading(false);
+                      }} className="px-2 py-1 text-[10px] font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                        Send Edited
+                      </button>
+                    ) : (
+                      <>
+                        <button disabled={fuActionLoading} onClick={async () => {
+                          setFuActionLoading(true);
+                          await followUpApi.approveSuggestion(s.id);
+                          setFuSuggestions(prev => prev.filter(x => x.id !== s.id));
+                          setFuActionLoading(false);
+                        }} className="px-2 py-1 text-[10px] font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+                          Approve & Send
+                        </button>
+                        <button onClick={() => { setFuEditId(s.id); setFuEditMsg(s.generatedMessage || ''); }}
+                          className="px-2 py-1 text-[10px] font-bold bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
+                          Edit
+                        </button>
+                        <button disabled={fuActionLoading} onClick={async () => {
+                          setFuActionLoading(true);
+                          await followUpApi.skipSuggestion(s.id);
+                          setFuSuggestions(prev => prev.filter(x => x.id !== s.id));
+                          setFuActionLoading(false);
+                        }} className="px-2 py-1 text-[10px] font-bold text-slate-400 hover:text-red-500">
+                          Skip
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Mobile-only: contact info (hidden in chat header on mobile) */}
           <div className="p-4 border-b border-slate-100 space-y-2 xl:hidden">
