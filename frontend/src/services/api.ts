@@ -1522,6 +1522,10 @@ export const followUpApi = {
     const { data } = await api.post(`/v1/follow-ups/enrollments/${id}/pause`);
     return data;
   },
+  seed: async (params: { platform?: string; activeHoursStart?: string; activeHoursEnd?: string; activeHoursTimezone?: string }): Promise<{ success: boolean; seeded: number }> => {
+    const { data } = await api.post('/v1/follow-ups/seed', params);
+    return data;
+  },
 };
 
 export default api;

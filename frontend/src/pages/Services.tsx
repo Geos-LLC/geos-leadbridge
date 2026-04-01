@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi, conversationSyncApi,
+  automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi, conversationSyncApi, followUpApi,
 } from '../services/api';
 import type { TenantPhoneNumber } from '../services/api';
 import type {
@@ -2267,8 +2267,26 @@ export function Services() {
 
                   {/* Save */}
                   <button
-                    onClick={() => alert('Follow-up sequences will be seeded when you enable them. Configuration saved to active hours.')}
-                    className="w-full px-4 py-2.5 bg-[#FF1A1A] text-white text-sm font-bold rounded-xl hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                    onClick={async () => {
+                      try {
+                        if (fuMode === 'off') {
+                          alert('Follow-ups disabled');
+                          return;
+                        }
+                        // Seed preset templates for this user via API
+                        const res = await followUpApi.seed({
+                          platform: 'yelp',
+                          activeHoursStart: fuStart,
+                          activeHoursEnd: fuEnd,
+                          activeHoursTimezone: fuTz,
+                        });
+                        alert(`Follow-up settings saved. ${res.seeded > 0 ? `${res.seeded} sequence templates created.` : 'Templates already exist.'}`);
+                      } catch (err: any) {
+                        alert(err.message || 'Failed to save follow-up settings');
+                      }
+                    }}
+                    disabled={fuMode === 'off'}
+                    className="w-full px-4 py-2.5 bg-[#FF1A1A] text-white text-sm font-bold rounded-xl hover:bg-red-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                   >
                     <Save className="w-4 h-4" /> Save Follow-up Settings
                   </button>
