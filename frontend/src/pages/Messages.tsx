@@ -1259,112 +1259,62 @@ export function Messages() {
       <main className={`flex-1 min-w-0 flex flex-col bg-white ${mobilePanel !== 'chat' ? 'hidden md:flex' : 'flex'}`}>
         {selectedLead ? (
           <>
-            {/* Lead Info Header */}
-            <div className="p-3 sm:p-4 border-b border-slate-100 bg-white">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-                  {/* Mobile back button */}
+            {/* Compact chat header — name + channel filter */}
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 bg-white shrink-0">
+              {/* Mobile back button */}
+              <button
+                className="p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors md:hidden shrink-0"
+                onClick={() => setMobilePanel('list')}
+              >
+                <ArrowLeft size={18} />
+              </button>
+              <span className="font-semibold text-slate-900 text-sm truncate">{selectedLead.customerName}</span>
+              <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded text-white shrink-0 ${selectedLead.platform === 'yelp' ? 'bg-[#FF1A1A]' : 'bg-[#41B1E1]'}`}>
+                {selectedLead.platform === 'yelp' ? 'Yelp' : 'TT'}
+              </span>
+              <span className="text-xs text-slate-400 truncate hidden sm:inline">{selectedLead.category || ''}</span>
+              <div className="flex items-center gap-1 ml-auto shrink-0">
+                {(['all', 'platform', 'sms'] as const).map((filter) => (
                   <button
-                    className="p-1.5 sm:p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors md:hidden shrink-0"
-                    onClick={() => setMobilePanel('list')}
+                    key={filter}
+                    className={`px-2 py-1 rounded text-[10px] font-semibold transition-colors ${
+                      channelFilter === filter
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'
+                    }`}
+                    onClick={() => setChannelFilter(filter)}
                   >
-                    <ArrowLeft size={20} />
+                    {filter === 'all' ? 'All' : filter === 'platform' ? 'Platform' : 'SMS'}
                   </button>
-                  <div className="w-10 h-10 sm:w-12 sm:h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 shrink-0">
-                    <User size={20} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-bold text-slate-900 truncate">{selectedLead.customerName}</h3>
-                      <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded text-white ${selectedLead.platform === 'yelp' ? 'bg-[#FF1A1A]' : 'bg-[#41B1E1]'}`}>
-                        {selectedLead.platform === 'yelp' ? 'Yelp' : 'TT'}
-                      </span>
-                      <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase ${
-                        selectedLead.status?.toLowerCase() === 'new' ? 'bg-blue-100 text-blue-700' :
-                        selectedLead.status?.toLowerCase() === 'contacted' ? 'bg-green-100 text-green-700' :
-                        'bg-slate-100 text-slate-600'
-                      }`}>
-                        {selectedLead.status}
-                      </span>
-                    </div>
-                    <p className="text-sm text-slate-500 truncate">{selectedLead.category || 'Service Request'}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 sm:gap-3 shrink-0">
-                  {/* Desktop-only meta details */}
-                  <div className="hidden md:flex items-center gap-3 flex-wrap">
-                    {selectedLead.customerPhone && (
-                      <a href={`tel:${selectedLead.customerPhone}`} className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-blue-600">
-                        <Phone size={14} />
-                        {formatPhoneNumber(selectedLead.customerPhone)}
-                      </a>
-                    )}
-                    {selectedLead.city && (
-                      <span className="flex items-center gap-1.5 text-xs text-slate-600">
-                        <MapPin size={14} />
-                        {selectedLead.city}, {selectedLead.state}
-                      </span>
-                    )}
-                    <span className="flex items-center gap-1.5 text-xs text-slate-600">
-                      <Calendar size={14} />
-                      {formatDate(selectedLead.createdAt)}
-                    </span>
-                    {selectedLead.raw?.estimate?.total && (
-                      <span className="flex items-center gap-1.5 text-xs text-slate-600">
-                        <DollarSign size={14} />
-                        {selectedLead.raw.estimate.total}
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors disabled:opacity-50"
-                    onClick={handleResyncMessages}
-                    disabled={resyncingMessages}
-                    title="Resync messages from Thumbtack"
-                  >
-                    {resyncingMessages ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
-                  </button>
-                  {/* Mobile details arrow */}
-                  <button
-                    className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors md:hidden"
-                    onClick={() => setMobilePanel('details')}
-                    title="Lead details"
-                  >
-                    <ChevronRight size={20} />
-                  </button>
-                </div>
+                ))}
+                <button
+                  className="p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded transition-colors disabled:opacity-50 ml-1"
+                  onClick={handleResyncMessages}
+                  disabled={resyncingMessages}
+                  title="Resync messages"
+                >
+                  {resyncingMessages ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />}
+                </button>
+                {/* Mobile details arrow */}
+                <button
+                  className="p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded transition-colors md:hidden"
+                  onClick={() => setMobilePanel('details')}
+                >
+                  <ChevronRight size={18} />
+                </button>
               </div>
             </div>
 
             {/* Resync Error Message */}
             {resyncError && (
-              <div className="mx-3 sm:mx-4 mt-3 sm:mt-4 p-3 bg-red-50 border border-red-100 rounded-xl flex items-center gap-2 text-red-600 text-xs sm:text-sm">
-                <AlertCircle size={16} />
+              <div className="mx-3 mt-2 p-2 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-red-600 text-xs shrink-0">
+                <AlertCircle size={14} />
                 <span className="flex-1">{resyncError}</span>
-                <button className="p-1 hover:bg-red-100 rounded transition-colors" onClick={() => setResyncError(null)}>
-                  <X size={14} />
+                <button className="p-0.5 hover:bg-red-100 rounded transition-colors" onClick={() => setResyncError(null)}>
+                  <X size={12} />
                 </button>
               </div>
             )}
-
-            {/* Channel Filter Bar */}
-            <div className="flex gap-2 p-3 sm:p-4 border-b border-slate-100">
-              {(['all', 'platform', 'sms'] as const).map((filter) => (
-                <button
-                  key={filter}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-                    channelFilter === filter
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-                  }`}
-                  onClick={() => setChannelFilter(filter)}
-                >
-                  {filter === 'all' && 'All'}
-                  {filter === 'platform' && <><MessageCircle size={14} /> Platform</>}
-                  {filter === 'sms' && <><Smartphone size={14} /> SMS</>}
-                </button>
-              ))}
-            </div>
 
             {/* Activity Timeline */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
