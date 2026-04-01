@@ -242,6 +242,7 @@ export function Services() {
   const [fuOnNo, setFuOnNo] = useState<'stop' | 'retry'>('retry');
   const [fuRetryDays, setFuRetryDays] = useState(7);
   const [fuUrgentFaster, setFuUrgentFaster] = useState(true);
+  const [fuShowStrategies, setFuShowStrategies] = useState(false);
   const [fuShowRules, setFuShowRules] = useState(false);
   // Legacy compat
   const fuPreset = 'standard' as const;
@@ -2176,34 +2177,17 @@ export function Services() {
 
           {/* 4. Yelp Follow-ups — only for Yelp accounts */}
           {accounts.find(a => a.id === selectedAccountId)?.platform === 'yelp' && (
-            <div className="bg-white rounded-3xl border border-[#FF1A1A]/20 shadow-sm overflow-hidden">
-              <div
-                className="p-6 flex items-center justify-between cursor-pointer hover:bg-red-50/30 transition-colors"
-                onClick={() => setExpandedCard(expandedCard === 'yelp-followups' ? null : 'yelp-followups')}
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-red-50 rounded-2xl flex items-center justify-center">
-                    <Clock className="w-7 h-7 text-red-600" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-bold text-slate-900">Yelp Follow-ups</h3>
-                      <span className="px-2 py-0.5 text-[10px] font-bold bg-[#FF1A1A] text-white rounded-md">Yelp</span>
-                    </div>
-                    <p className="text-sm text-slate-500 mt-0.5">Automated follow-ups for leads who don't respond.</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <label className="inline-flex items-center cursor-pointer" onClick={e => e.stopPropagation()}>
-                    <input type="checkbox" checked={fuMode !== 'off'} onChange={e => setFuMode(e.target.checked ? 'suggest' : 'off')} className="sr-only peer" />
-                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#FF1A1A]" />
-                  </label>
-                  {expandedCard === 'yelp-followups' ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-                </div>
-              </div>
-
-              {expandedCard === 'yelp-followups' && (
-                <div className="px-6 pb-6 border-t border-slate-100 pt-5 space-y-6">
+            <ServiceCard
+              icon={<Clock className="w-7 h-7" />}
+              title="Yelp Follow-ups"
+              description="Automated follow-ups for leads who don't respond."
+              enabled={fuMode !== 'off'}
+              onToggle={(on) => setFuMode(on ? 'suggest' : 'off')}
+              expanded={expandedCard === 'yelp-followups'}
+              onExpand={() => setExpandedCard(expandedCard === 'yelp-followups' ? null : 'yelp-followups')}
+              iconBgColor="bg-red-50"
+              iconTextColor="text-red-600"
+            >
 
                   {/* 1. Follow-up Mode */}
                   <div>
@@ -2308,33 +2292,43 @@ export function Services() {
                     )}
                   </div>
 
-                  {/* 4. Follow-up Strategies */}
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">4. Follow-up Strategies</label>
-                    <p className="text-[11px] text-slate-400 mb-3">Choose which strategies the AI can use for follow-ups.</p>
-                    <div className="space-y-2">
-                      {([
-                        { key: 'hybrid' as const, emoji: '⚖️', label: 'Hybrid', desc: 'Price range + one scheduling question' },
-                        { key: 'price' as const, emoji: '💰', label: 'Price', desc: 'Lead with pricing to reduce uncertainty' },
-                        { key: 'qualify' as const, emoji: '🧠', label: 'Qualify', desc: 'Ask for missing details before quoting' },
-                        { key: 'convert' as const, emoji: '📞', label: 'Convert', desc: 'Push toward booking with specific times' },
-                        { key: 'phone' as const, emoji: '📱', label: 'Phone', desc: 'Escalate to phone call for complex jobs' },
-                      ]).map(scenario => (
-                        <label key={scenario.key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-100/50 transition-colors">
-                          <div className="flex items-center gap-2 flex-1 min-w-0">
-                            <span className="text-base">{scenario.emoji}</span>
-                            <div>
-                              <p className="text-sm font-semibold text-slate-800">{scenario.label}</p>
-                              <p className="text-[10px] text-slate-400">{scenario.desc}</p>
+                  {/* 4. Follow-up Strategies (collapsed) */}
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <button
+                      onClick={() => setFuShowStrategies(!fuShowStrategies)}
+                      className="w-full px-4 py-3 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors"
+                    >
+                      <div>
+                        <span className="text-[11px] font-bold text-slate-600 uppercase tracking-widest">Follow-up Strategies</span>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Choose which strategies the AI can use for follow-ups.</p>
+                      </div>
+                      {fuShowStrategies ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                    </button>
+                    {fuShowStrategies && (
+                      <div className="px-4 py-3 space-y-2 border-t border-slate-100">
+                        {([
+                          { key: 'hybrid' as const, emoji: '⚖️', label: 'Hybrid', desc: 'Price range + one scheduling question' },
+                          { key: 'price' as const, emoji: '💰', label: 'Price', desc: 'Lead with pricing to reduce uncertainty' },
+                          { key: 'qualify' as const, emoji: '🧠', label: 'Qualify', desc: 'Ask for missing details before quoting' },
+                          { key: 'convert' as const, emoji: '📞', label: 'Convert', desc: 'Push toward booking with specific times' },
+                          { key: 'phone' as const, emoji: '📱', label: 'Phone', desc: 'Escalate to phone call for complex jobs' },
+                        ]).map(scenario => (
+                          <label key={scenario.key} className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className="text-base">{scenario.emoji}</span>
+                              <div>
+                                <p className="text-sm font-semibold text-slate-800">{scenario.label}</p>
+                                <p className="text-[10px] text-slate-400">{scenario.desc}</p>
+                              </div>
                             </div>
-                          </div>
-                          <input type="checkbox"
-                            checked={fuScenarios[scenario.key]}
-                            onChange={e => setFuScenarios(prev => ({ ...prev, [scenario.key]: e.target.checked }))}
-                            className="accent-emerald-600 w-4 h-4 shrink-0 ml-3" />
-                        </label>
-                      ))}
-                    </div>
+                            <input type="checkbox"
+                              checked={fuScenarios[scenario.key]}
+                              onChange={e => setFuScenarios(prev => ({ ...prev, [scenario.key]: e.target.checked }))}
+                              className="accent-emerald-600 w-4 h-4 shrink-0 ml-3" />
+                          </label>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* 6. Smart Follow-up Rules (collapsed) */}
@@ -2441,9 +2435,7 @@ export function Services() {
                   >
                     <Save className="w-4 h-4" /> Save Follow-up Settings
                   </button>
-                </div>
-              )}
-            </div>
+            </ServiceCard>
           )}
 
           {/* 5. AI Optimization — disabled */}
