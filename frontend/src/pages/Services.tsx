@@ -219,7 +219,7 @@ export function Services() {
   // Yelp follow-up settings
   const [fuMode, setFuMode] = useState<'off' | 'suggest' | 'auto_send'>('suggest');
   const [fuReplyType, setFuReplyType] = useState<'template' | 'ai'>('ai');
-  const [fuTiming, setFuTiming] = useState<'smart' | 'custom'>('smart');
+  const [fuTiming, setFuTiming] = useState<'smart' | 'custom'>('custom');
   const [fuCustomSteps, setFuCustomSteps] = useState([
     { label: '1st follow-up', delay: '2 minutes' },
     { label: '2nd follow-up', delay: '1 hour' },
@@ -2194,11 +2194,11 @@ export function Services() {
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">1. Follow-up Mode</label>
                     <div className="flex gap-2">
                       {([
-                        { value: 'suggest' as const, label: 'Suggest', desc: 'Template-based, review in Lead Activity before sending', replyType: 'template' as const },
-                        { value: 'auto_send' as const, label: 'Auto-send', desc: 'AI generates and sends follow-ups automatically', replyType: 'ai' as const },
+                        { value: 'suggest' as const, label: 'Manual', desc: 'Review each follow-up in Lead Activity before sending', replyType: 'template' as const, timing: 'custom' as const, availability: 'always' as const },
+                        { value: 'auto_send' as const, label: 'Auto-send', desc: 'AI generates and sends follow-ups automatically', replyType: 'ai' as const, timing: 'smart' as const, availability: 'active_hours' as const },
                       ]).map(opt => (
                         <button key={opt.value}
-                          onClick={() => { setFuMode(opt.value); setFuReplyType(opt.replyType); }}
+                          onClick={() => { setFuMode(opt.value); setFuReplyType(opt.replyType); setFuTiming(opt.timing); setFuAvailability(opt.availability); }}
                           className={`flex-1 py-2.5 px-2 rounded-xl text-xs font-semibold border-2 transition-all ${
                             fuMode === opt.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
                           }`}
@@ -2215,15 +2215,15 @@ export function Services() {
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">2. Follow-up Timing</label>
                     <p className="text-[11px] text-slate-400 mb-2">Choose when the next follow-up is sent if the customer doesn't reply.</p>
                     <div className="flex gap-2 mb-3">
-                      <button onClick={() => setFuTiming('smart')}
-                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuTiming === 'smart' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
-                        Smart timing
-                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">Recommended</span>
-                      </button>
                       <button onClick={() => setFuTiming('custom')}
                         className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuTiming === 'custom' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
                         Custom timing
-                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">Set your own delays</span>
+                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">{fuMode === 'suggest' ? 'Default' : 'Set your own delays'}</span>
+                      </button>
+                      <button onClick={() => setFuTiming('smart')}
+                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuTiming === 'smart' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                        Smart timing
+                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">{fuMode === 'auto_send' ? 'Recommended' : 'AI decides timing'}</span>
                       </button>
                     </div>
                     {fuTiming === 'custom' && (
@@ -2252,20 +2252,26 @@ export function Services() {
                     )}
                   </div>
 
-                  {/* 4. Auto Reply Availability */}
+                  {/* 3. Auto Reply Availability */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">3. Auto Reply Availability</label>
-                    <p className="text-[11px] text-slate-400 mb-2">Choose when follow-ups can be sent automatically.</p>
-                    <div className="flex gap-2 mb-3">
-                      <button onClick={() => setFuAvailability('always')}
-                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'always' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
-                        Always (24/7)
-                      </button>
-                      <button onClick={() => setFuAvailability('active_hours')}
-                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'active_hours' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
-                        Only during active hours
-                      </button>
-                    </div>
+                    {fuMode === 'suggest' ? (
+                      <p className="text-[11px] text-slate-400 mb-2">Manual mode — suggestions appear anytime, you decide when to send.</p>
+                    ) : (
+                      <>
+                        <p className="text-[11px] text-slate-400 mb-2">Choose when follow-ups can be sent automatically.</p>
+                        <div className="flex gap-2 mb-3">
+                          <button onClick={() => setFuAvailability('always')}
+                            className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'always' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                            Always (24/7)
+                          </button>
+                          <button onClick={() => setFuAvailability('active_hours')}
+                            className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'active_hours' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                            Only during active hours
+                          </button>
+                        </div>
+                      </>
+                    )}
                     {fuAvailability === 'active_hours' && (
                       <div className="grid grid-cols-3 gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
                         <div>
