@@ -668,7 +668,26 @@ export function Messages() {
         console.warn('[Messages] Failed to load SMS logs for lead:', err);
       }
 
-      const timeline = mergeTimeline(convertedMessages, leadSmsLogs, lead.customerPhone);
+      let timeline = mergeTimeline(convertedMessages, leadSmsLogs, lead.customerPhone);
+
+      // Inject lead's initial request as the first message if not already in the timeline
+      if (lead.message) {
+        const firstMsgContent = lead.message.trim();
+        const alreadyInTimeline = timeline.some(e =>
+          e.direction === 'inbound' && e.content?.trim() === firstMsgContent,
+        );
+        if (!alreadyInTimeline && firstMsgContent.length > 0) {
+          const initialEvent: TimelineEvent = {
+            id: 'initial-request',
+            channel: 'platform',
+            direction: 'inbound',
+            content: firstMsgContent,
+            timestamp: new Date(lead.createdAt),
+            sender: 'customer',
+          };
+          timeline = [initialEvent, ...timeline];
+        }
+      }
       setTimelineEvents(timeline);
 
       const customerSmslogs = leadSmsLogs.filter(log => {
@@ -1272,7 +1291,13 @@ export function Messages() {
               <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded text-white shrink-0 ${selectedLead.platform === 'yelp' ? 'bg-[#FF1A1A]' : 'bg-[#41B1E1]'}`}>
                 {selectedLead.platform === 'yelp' ? 'Yelp' : 'TT'}
               </span>
-              <span className="text-xs text-slate-400 truncate hidden sm:inline">{selectedLead.category || ''}</span>
+              {selectedLead.customerPhone && (
+                <a href={`tel:${selectedLead.customerPhone}`} className="flex items-center gap-1 text-xs text-slate-500 hover:text-blue-600 shrink-0 hidden sm:flex">
+                  <Phone size={11} />
+                  {formatPhoneNumber(selectedLead.customerPhone)}
+                </a>
+              )}
+              <span className="text-xs text-slate-400 truncate hidden lg:inline">{selectedLead.category || ''}</span>
               <div className="flex items-center gap-1 ml-auto shrink-0">
                 {(['all', 'platform', 'sms'] as const).map((filter) => (
                   <button
@@ -1998,13 +2023,6 @@ export function Messages() {
               </div>
             )}
 
-            {/* Original Message */}
-            {selectedLead.message && (
-              <div>
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Customer Message</h4>
-                <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-3 rounded-xl whitespace-pre-wrap">{selectedLead.message}</p>
-              </div>
-            )}
           </div>
         </aside>
       )}
