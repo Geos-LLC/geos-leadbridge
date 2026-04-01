@@ -669,22 +669,30 @@ export function Messages() {
 
       let timeline = mergeTimeline(convertedMessages, leadSmsLogs, lead.customerPhone);
 
-      // Inject lead's initial request as the first message if not already in the timeline
+      // Inject lead's initial request as the first message if not already in the timeline.
+      // Use overlap check: if any existing inbound message contains the lead message
+      // content (or vice versa), skip — Yelp raw messages include boilerplate that
+      // gets stripped from lead.message, so exact match fails.
       if (lead.message) {
         const firstMsgContent = lead.message.trim();
-        const alreadyInTimeline = timeline.some(e =>
-          e.direction === 'inbound' && e.content?.trim() === firstMsgContent,
-        );
-        if (!alreadyInTimeline && firstMsgContent.length > 0) {
-          const initialEvent: TimelineEvent = {
-            id: 'initial-request',
-            channel: 'platform',
-            direction: 'inbound',
-            content: firstMsgContent,
-            timestamp: new Date(lead.createdAt),
-            sender: 'customer',
-          };
-          timeline = [initialEvent, ...timeline];
+        if (firstMsgContent.length > 0) {
+          const firstMsgWords = firstMsgContent.substring(0, 80);
+          const alreadyInTimeline = timeline.some(e =>
+            e.direction === 'inbound' && e.content && (
+              e.content.includes(firstMsgWords) || firstMsgContent.includes(e.content.trim().substring(0, 80))
+            ),
+          );
+          if (!alreadyInTimeline) {
+            const initialEvent: TimelineEvent = {
+              id: 'initial-request',
+              channel: 'platform',
+              direction: 'inbound',
+              content: firstMsgContent,
+              timestamp: new Date(lead.createdAt),
+              sender: 'customer',
+            };
+            timeline = [initialEvent, ...timeline];
+          }
         }
       }
       setTimelineEvents(timeline);
