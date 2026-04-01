@@ -208,6 +208,8 @@ export function Messages() {
   // Get date filter from URL params, default to 'all' (no filter)
   const dateFilter = searchParams.get('date') || 'all';
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Message cache: stores loaded timeline + summary per lead ID to avoid re-fetching
+  const messageCache = useRef<Record<string, { timeline: TimelineEvent[]; summary: CommunicationSummary; cachedAt: number }>>({});
 
   // Multi-select state
   const [multiSelectMode, setMultiSelectMode] = useState(false);
@@ -376,11 +378,25 @@ export function Messages() {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'lead.created') {
-          console.log('[Messages] New lead received via SSE:', data.lead);
-          // Add the new lead to the beginning of the list
-          setLeads([data.lead as Lead, ...leads]);
+          console.log('[Messages] Lead update via SSE:', data.lead?.id);
+          // Invalidate message cache for this lead (new message arrived)
+          if (data.lead?.id) delete messageCache.current[data.lead.id];
+          // Merge silently: update existing lead in-place, or append new one at top
+          // NEVER change the currently selected lead
+          const incoming = data.lead as Lead;
+          const currentLeads = useAppStore.getState().leads;
+          const idx = currentLeads.findIndex(l => l.id === incoming.id);
+          if (idx >= 0) {
+            const updated = [...currentLeads];
+            updated[idx] = { ...updated[idx], ...incoming };
+            setLeads(updated);
+          } else {
+            setLeads([incoming, ...currentLeads]);
+          }
         } else if (data.type === 'sms.inbound') {
           console.log('[Messages] Inbound SMS received via SSE:', data);
+          // Invalidate cache for this lead so next view is fresh
+          if (data.leadId) delete messageCache.current[data.leadId];
           // If viewing this lead, add inbound message to timeline in real-time
           if (selectedLead?.id === data.leadId) {
             const newEvent: TimelineEvent = {
@@ -480,21 +496,15 @@ export function Messages() {
   };
 
   // When account filter or savedAccounts change, ensure selected lead is valid
+  // Auto-select: only when filter/account changes or no lead is selected
+  // Do NOT re-run when leads array updates (SSE) — that would steal focus
   useEffect(() => {
     if (leads.length === 0 || savedAccounts.length === 0) return;
 
-    // Get saved account businessIds for filtering
     const savedAccountIds = new Set(savedAccounts.map(a => a.businessId));
-
-    // Only consider leads from saved accounts
-    const leadsFromSavedAccounts = leads.filter(lead =>
-      lead.businessId && savedAccountIds.has(lead.businessId)
-    );
-
-    // Apply account filter
-    const visibleLeads = leadsFromSavedAccounts.filter(lead =>
-      accountFilter === 'all' || lead.businessId === accountFilter
-    );
+    const visibleLeads = leads
+      .filter(lead => lead.businessId && savedAccountIds.has(lead.businessId))
+      .filter(lead => accountFilter === 'all' || lead.businessId === accountFilter);
 
     if (visibleLeads.length > 0) {
       const currentSelectionVisible = selectedLead && visibleLeads.some(l => l.id === selectedLead.id);
@@ -504,7 +514,8 @@ export function Messages() {
     } else {
       setSelectedLead(null);
     }
-  }, [accountFilter, savedAccounts, leads]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountFilter, savedAccounts]);
 
   const loadSavedAccounts = async () => {
     try {
@@ -568,7 +579,14 @@ export function Messages() {
       });
       setLeads(sortedLeads);
       _messagesLoaded = true;
-      // Selection will be handled by the savedAccounts effect
+      // Auto-select first visible lead if nothing is selected
+      if (!selectedLead && sortedLeads.length > 0 && savedAccounts.length > 0) {
+        const savedAccountIds = new Set(savedAccounts.map(a => a.businessId));
+        const visible = sortedLeads
+          .filter(l => l.businessId && savedAccountIds.has(l.businessId))
+          .filter(l => accountFilter === 'all' || l.businessId === accountFilter);
+        if (visible.length > 0) setSelectedLead(visible[0]);
+      }
     } catch (err) {
       console.error('[Messages] Failed to load leads:', err);
     } finally {
@@ -598,18 +616,26 @@ export function Messages() {
     setLastSeenTimestamps(prev => ({ ...prev, [lead.id]: timestamp }));
   };
 
-  const loadMessagesForLead = async (lead: Lead) => {
+  const loadMessagesForLead = async (lead: Lead, forceRefresh = false) => {
+    // Serve from cache if available and fresh (< 2 min old)
+    const cached = messageCache.current[lead.id];
+    const CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+    if (!forceRefresh && cached && (Date.now() - cached.cachedAt) < CACHE_TTL) {
+      setTimelineEvents(cached.timeline);
+      setCommSummary(cached.summary);
+      setLoadingMessages(false);
+      markLeadAsSeen(lead);
+      return;
+    }
+
     setLoadingMessages(true);
     setMessages([]);
     setSmsLogs([]);
     setTimelineEvents([]);
-    // Mark this lead as seen when we load its messages
     markLeadAsSeen(lead);
     try {
-      // Messages come from local database (stored via webhooks)
       let { messages: apiMessages } = await leadsApi.getMessages(lead.id);
 
-      // Auto-sync if no messages found in database
       if (apiMessages.length === 0) {
         console.log('[Messages] No messages found, auto-syncing from Thumbtack...');
         await leadsApi.resyncMessages(lead.id);
@@ -618,7 +644,6 @@ export function Messages() {
       }
 
       const convertedMessages: LocalMessage[] = apiMessages.map((msg) => {
-        // Normalize sender to lowercase for consistent comparison
         const sender = (msg.sender || '').toLowerCase() as 'pro' | 'customer';
         return {
           id: msg.id || msg.externalMessageId,
@@ -634,7 +659,6 @@ export function Messages() {
       });
       setMessages(convertedMessages);
 
-      // Load SMS logs for this lead
       let leadSmsLogs: NotificationLog[] = [];
       try {
         const { logs } = await notificationsApi.getLogsByLead(lead.id);
@@ -644,18 +668,20 @@ export function Messages() {
         console.warn('[Messages] Failed to load SMS logs for lead:', err);
       }
 
-      // Merge into unified timeline (filter SMS to only show customer-facing messages)
       const timeline = mergeTimeline(convertedMessages, leadSmsLogs, lead.customerPhone);
       setTimelineEvents(timeline);
 
-      // Compute summary with filtered SMS logs (only customer-facing)
       const customerSmslogs = leadSmsLogs.filter(log => {
         if (!lead.customerPhone || !log.toPhone) return false;
         const normalizedCustomerPhone = lead.customerPhone.replace(/\D/g, '');
         const normalizedToPhone = log.toPhone.replace(/\D/g, '');
         return normalizedToPhone === normalizedCustomerPhone;
       });
-      setCommSummary(computeSummary(convertedMessages, customerSmslogs));
+      const summary = computeSummary(convertedMessages, customerSmslogs);
+      setCommSummary(summary);
+
+      // Store in cache
+      messageCache.current[lead.id] = { timeline, summary, cachedAt: Date.now() };
     } catch (err) {
       console.error('[Messages] Failed to load messages:', err);
     } finally {
@@ -673,8 +699,9 @@ export function Messages() {
     setResyncError(null);
     try {
       await leadsApi.resyncMessages(selectedLead.id);
-      // Reload messages after resync
-      await loadMessagesForLead(selectedLead);
+      // Invalidate cache + reload messages after resync
+      delete messageCache.current[selectedLead.id];
+      await loadMessagesForLead(selectedLead, true);
     } catch (err: any) {
       console.error('[Messages] Failed to resync messages:', err);
       const errorMessage = err.response?.data?.message || 'Failed to resync messages';
@@ -718,8 +745,9 @@ export function Messages() {
 
       try {
         await notificationsApi.sendAdHocSms(account.id, selectedLead.id, text);
-        // Reload to get actual log entry
-        await loadMessagesForLead(selectedLead);
+        // Invalidate cache + reload to get actual log entry
+        delete messageCache.current[selectedLead.id];
+        await loadMessagesForLead(selectedLead, true);
       } catch (err) {
         console.error('Failed to send SMS:', err);
         setTimelineEvents(prev => prev.filter(e => e.id !== optimisticEvent.id));
@@ -751,6 +779,8 @@ export function Messages() {
 
       try {
         await leadsApi.sendMessage(selectedLead.id, text);
+        // Invalidate cache — next load will pick up the sent message from DB
+        delete messageCache.current[selectedLead.id];
       } catch (err) {
         console.error('Failed to send message:', err);
         setMessages((prev) => prev.filter((m) => m.id !== optimisticMessage.id));
