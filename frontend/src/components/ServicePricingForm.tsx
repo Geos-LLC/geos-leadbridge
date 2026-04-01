@@ -62,9 +62,10 @@ const DEFAULT_CLEANING_PRICING = {
 interface ServicePricingFormProps {
   accountId: string;
   accountName: string;
+  saveToAll?: string[]; // array of account IDs to save to (shared pricing mode)
 }
 
-export default function ServicePricingForm({ accountId, accountName }: ServicePricingFormProps) {
+export default function ServicePricingForm({ accountId, accountName, saveToAll }: ServicePricingFormProps) {
   const [pricing, setPricing] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -73,11 +74,13 @@ export default function ServicePricingForm({ accountId, accountName }: ServicePr
 
   useEffect(() => {
     setLoading(true);
-    usersApi.getServicePricing(accountId)
+    // In shared mode, load from the first account
+    const loadId = saveToAll ? saveToAll[0] : accountId;
+    usersApi.getServicePricing(loadId)
       .then(res => setPricing(res.pricing || DEFAULT_CLEANING_PRICING))
       .catch(() => setPricing(DEFAULT_CLEANING_PRICING))
       .finally(() => setLoading(false));
-  }, [accountId]);
+  }, [accountId, saveToAll]);
 
   const toggleSection = (key: string) => setExpandedSections(p => ({ ...p, [key]: !p[key] }));
 
@@ -138,7 +141,12 @@ export default function ServicePricingForm({ accountId, accountName }: ServicePr
   const handleSave = async () => {
     setSaving(true);
     try {
-      await usersApi.updateServicePricing(accountId, pricing);
+      if (saveToAll && saveToAll.length > 0) {
+        // Save to all accounts in parallel
+        await Promise.all(saveToAll.map(id => usersApi.updateServicePricing(id, pricing)));
+      } else {
+        await usersApi.updateServicePricing(accountId, pricing);
+      }
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch {
