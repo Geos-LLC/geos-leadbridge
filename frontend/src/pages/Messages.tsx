@@ -1937,49 +1937,6 @@ export function Messages() {
             )}
           </div>
           <div className="p-4 space-y-6">
-            {/* Communication Summary */}
-            {(commSummary.platformMessages > 0 || commSummary.smsSent > 0) && (
-              <div>
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Communication Summary</h4>
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center p-2 bg-slate-50 rounded-lg">
-                    <span className="text-xs text-slate-600 flex items-center gap-1.5">
-                      <MessageCircle size={14} /> Platform Messages
-                    </span>
-                    <span className="text-xs font-bold text-slate-900">{commSummary.platformMessages}</span>
-                  </div>
-                  <div className="flex justify-between items-center p-2 bg-slate-50 rounded-lg">
-                    <span className="text-xs text-slate-600 flex items-center gap-1.5">
-                      <Smartphone size={14} /> SMS Sent
-                    </span>
-                    <span className="text-xs font-bold text-slate-900">{commSummary.smsSent}</span>
-                  </div>
-                  {commSummary.smsDelivered > 0 && (
-                    <div className="flex justify-between items-center p-2 bg-green-50 rounded-lg">
-                      <span className="text-xs text-green-700 flex items-center gap-1.5">
-                        {'\u2713\u2713'} SMS Delivered
-                      </span>
-                      <span className="text-xs font-bold text-green-900">{commSummary.smsDelivered}</span>
-                    </div>
-                  )}
-                  {commSummary.smsFailed > 0 && (
-                    <div className="flex justify-between items-center p-2 bg-red-50 rounded-lg">
-                      <span className="text-xs text-red-700 flex items-center gap-1.5">
-                        {'\u2717'} SMS Failed
-                      </span>
-                      <span className="text-xs font-bold text-red-900">{commSummary.smsFailed}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between items-center p-2 bg-slate-50 rounded-lg">
-                    <span className="text-xs text-slate-600 flex items-center gap-1.5">
-                      <Phone size={14} /> Calls
-                    </span>
-                    <span className="text-xs font-bold text-slate-400">{commSummary.calls}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* Lead Cost */}
             {selectedLead.raw?.leadPrice && (
               <div>
@@ -2003,6 +1960,16 @@ export function Messages() {
                     </div>
                   ))}
                 </dl>
+              </div>
+            )}
+
+            {/* Communication Summary — one-line */}
+            {(commSummary.platformMessages > 0 || commSummary.smsSent > 0 || commSummary.calls > 0) && (
+              <div className="flex items-center gap-3 text-[11px] text-slate-500 bg-slate-50 rounded-lg px-3 py-1.5 flex-wrap">
+                <span className="flex items-center gap-1"><MessageCircle size={11} /> {commSummary.platformMessages} msgs</span>
+                <span className="flex items-center gap-1"><Smartphone size={11} /> {commSummary.smsSent} sms</span>
+                {commSummary.smsFailed > 0 && <span className="text-red-500">{commSummary.smsFailed} failed</span>}
+                <span className="flex items-center gap-1"><Phone size={11} /> {commSummary.calls} calls</span>
               </div>
             )}
 
