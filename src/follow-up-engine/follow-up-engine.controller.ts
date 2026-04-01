@@ -156,7 +156,7 @@ export class FollowUpEngineController {
   @Post('seed')
   async seedPresets(
     @CurrentUser() user: any,
-    @Body() body: { platform?: string; activeHoursStart?: string; activeHoursEnd?: string; activeHoursTimezone?: string },
+    @Body() body: { savedAccountId?: string; platform?: string; activeHoursStart?: string; activeHoursEnd?: string; activeHoursTimezone?: string },
   ) {
     const { seedPresetsForUser } = await import('./follow-up-seed');
     const seeded = await seedPresetsForUser(
@@ -166,6 +166,7 @@ export class FollowUpEngineController {
       body.activeHoursStart || '09:00',
       body.activeHoursEnd || '21:00',
       body.activeHoursTimezone || 'America/New_York',
+      body.savedAccountId,
     );
     return { success: true, seeded };
   }

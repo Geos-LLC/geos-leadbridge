@@ -343,6 +343,7 @@ model SavedAccount {
   automationRules      AutomationRule[]
   notificationSettings NotificationSettings?
   callConnectSettings  CallConnectSettings?
+  followUpTemplates    FollowUpSequenceTemplate[]
   collectedLeads       ThumbtackLeadId[]
   settingsSnapshots    ThumbtackSettingsSnapshot[]
 
@@ -1039,6 +1040,7 @@ model ThreadContext {
 model FollowUpSequenceTemplate {
   id                String   @id @default(cuid())
   userId            String
+  savedAccountId    String?  // Per-account scoping (same as AutomationRule, NotificationSettings)
   platform          String   // "yelp" | "thumbtack" | "all" — required everywhere
   name              String   // e.g. "Standard — No Reply After Initial"
   triggerState      String   // "no_reply_after_initial" | "no_reply_after_question" | "no_reply_after_price" | "no_reply_after_conversion"
@@ -1056,9 +1058,11 @@ model FollowUpSequenceTemplate {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  enrollments FollowUpEnrollment[]
+  user         User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  savedAccount SavedAccount? @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
+  enrollments  FollowUpEnrollment[]
 
+  @@index([savedAccountId, platform, triggerState])
   @@index([userId, platform, triggerState])
   @@index([isDefault, platform, triggerState])
   @@map("follow_up_sequence_templates")

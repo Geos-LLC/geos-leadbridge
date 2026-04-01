@@ -232,10 +232,13 @@ export async function seedPresetsForUser(
   activeHoursStart: string = '09:00',
   activeHoursEnd: string = '21:00',
   activeHoursTimezone: string = 'America/New_York',
+  savedAccountId?: string,
 ): Promise<number> {
-  // Check if already seeded
+  // Check if already seeded for this account (or user if no account)
   const existing = await prisma.followUpSequenceTemplate.count({
-    where: { userId, platform },
+    where: savedAccountId
+      ? { savedAccountId, platform }
+      : { userId, platform, savedAccountId: null },
   });
   if (existing > 0) return 0;
 
@@ -246,6 +249,7 @@ export async function seedPresetsForUser(
     await prisma.followUpSequenceTemplate.create({
       data: {
         userId,
+        savedAccountId: savedAccountId || null,
         platform: preset.platform,
         name: preset.name,
         triggerState: preset.triggerState,

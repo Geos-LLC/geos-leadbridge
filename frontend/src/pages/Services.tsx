@@ -2275,6 +2275,7 @@ export function Services() {
                         }
                         // Seed preset templates for this user via API
                         const res = await followUpApi.seed({
+                          savedAccountId: selectedAccountId,
                           platform: 'yelp',
                           activeHoursStart: fuStart,
                           activeHoursEnd: fuEnd,
