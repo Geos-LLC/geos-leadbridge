@@ -167,10 +167,13 @@ export class FollowUpEngineController {
         followUpActiveHoursStart: true,
         followUpActiveHoursEnd: true,
         followUpTimezone: true,
+        followUpSettingsJson: true,
       },
     });
     if (!account) return { success: false, error: 'Account not found' };
-    return { success: true, settings: account };
+    // Merge extended settings from JSON into the flat response
+    const extended = account.followUpSettingsJson ? JSON.parse(account.followUpSettingsJson) : {};
+    return { success: true, settings: { ...account, ...extended } };
   }
 
   /**
@@ -180,30 +183,40 @@ export class FollowUpEngineController {
   async saveSettings(
     @CurrentUser() user: any,
     @Param('savedAccountId') savedAccountId: string,
-    @Body() body: {
-      mode: string;
-      preset: string;
-      replyType: string;
-      activeHoursStart: string;
-      activeHoursEnd: string;
-      timezone: string;
-      platform?: string;
-    },
+    @Body() body: any,
   ) {
     const account = await this.prisma.savedAccount.findFirst({
       where: { id: savedAccountId, userId: user.id },
     });
     if (!account) return { success: false, error: 'Account not found' };
 
+    // Extract extended settings into JSON
+    const { mode, preset, replyType, activeHoursStart, activeHoursEnd, timezone, platform,
+      timing, customSteps, availability, scenarios, stopOnReply, stopOnOptOut, stopOnBooked,
+      onNo, retryDays, urgentFaster, ...rest } = body;
+
+    const extendedSettings: Record<string, any> = {};
+    if (timing !== undefined) extendedSettings.followUpTiming = timing;
+    if (customSteps !== undefined) extendedSettings.followUpCustomSteps = customSteps;
+    if (availability !== undefined) extendedSettings.followUpAvailability = availability;
+    if (scenarios !== undefined) extendedSettings.followUpScenarios = scenarios;
+    if (stopOnReply !== undefined) extendedSettings.followUpStopOnReply = stopOnReply;
+    if (stopOnOptOut !== undefined) extendedSettings.followUpStopOnOptOut = stopOnOptOut;
+    if (stopOnBooked !== undefined) extendedSettings.followUpStopOnBooked = stopOnBooked;
+    if (onNo !== undefined) extendedSettings.followUpOnNo = onNo;
+    if (retryDays !== undefined) extendedSettings.followUpRetryDays = retryDays;
+    if (urgentFaster !== undefined) extendedSettings.followUpUrgentFaster = urgentFaster;
+
     await this.prisma.savedAccount.update({
       where: { id: savedAccountId },
       data: {
-        followUpMode: body.mode,
-        followUpPreset: body.preset,
-        followUpReplyType: body.replyType,
-        followUpActiveHoursStart: body.activeHoursStart,
-        followUpActiveHoursEnd: body.activeHoursEnd,
-        followUpTimezone: body.timezone,
+        followUpMode: mode,
+        followUpPreset: preset || 'standard',
+        followUpReplyType: replyType,
+        followUpActiveHoursStart: activeHoursStart,
+        followUpActiveHoursEnd: activeHoursEnd,
+        followUpTimezone: timezone,
+        followUpSettingsJson: Object.keys(extendedSettings).length > 0 ? JSON.stringify(extendedSettings) : undefined,
       },
     });
 

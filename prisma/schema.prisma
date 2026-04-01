@@ -342,6 +342,7 @@ model SavedAccount {
   followUpActiveHoursStart String? // e.g. "09:00"
   followUpActiveHoursEnd   String? // e.g. "21:00"
   followUpTimezone         String? // e.g. "America/New_York"
+  followUpSettingsJson     String? @db.Text // Extended follow-up settings (timing, rules, scenarios)
   // Service pricing configuration (JSON — per-account pricing table)
   servicePricingJson String? @db.Text
   lastUsedAt      DateTime @default(now())

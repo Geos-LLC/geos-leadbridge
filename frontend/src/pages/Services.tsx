@@ -216,13 +216,34 @@ export function Services() {
     return '';
   });
   const [ccTesting, setCcTesting] = useState(false);
-  // Yelp follow-up active hours
+  // Yelp follow-up settings
+  const [fuMode, setFuMode] = useState<'off' | 'suggest' | 'auto_send'>('suggest');
+  const [fuReplyType, setFuReplyType] = useState<'template' | 'ai'>('ai');
+  const [fuTiming, setFuTiming] = useState<'smart' | 'custom'>('smart');
+  const [fuCustomSteps, setFuCustomSteps] = useState([
+    { label: '1st follow-up', delay: '2 minutes' },
+    { label: '2nd follow-up', delay: '1 hour' },
+    { label: '3rd follow-up', delay: '1 day' },
+  ]);
+  const [fuAvailability, setFuAvailability] = useState<'always' | 'active_hours'>('active_hours');
   const [fuStart, setFuStart] = useState('09:00');
   const [fuEnd, setFuEnd] = useState('21:00');
   const [fuTz, setFuTz] = useState('America/New_York');
-  const [fuMode, setFuMode] = useState<'off' | 'suggest' | 'auto_send'>('suggest');
-  const [fuPreset, setFuPreset] = useState<'conservative' | 'standard' | 'persistent'>('standard');
-  const [fuReplyType, setFuReplyType] = useState<'template' | 'ai'>('ai');
+  const [fuScenarios, setFuScenarios] = useState({
+    no_reply_after_initial: true,
+    no_reply_after_question: true,
+    no_reply_after_price: true,
+    no_reply_after_conversion: true,
+  });
+  const [fuStopOnReply, setFuStopOnReply] = useState(true);
+  const [fuStopOnOptOut, setFuStopOnOptOut] = useState(true);
+  const [fuStopOnBooked, setFuStopOnBooked] = useState(true);
+  const [fuOnNo, setFuOnNo] = useState<'stop' | 'retry'>('retry');
+  const [fuRetryDays, setFuRetryDays] = useState(7);
+  const [fuUrgentFaster, setFuUrgentFaster] = useState(true);
+  const [fuShowRules, setFuShowRules] = useState(false);
+  // Legacy compat
+  const fuPreset = 'standard' as const;
   // Track which saved template is currently loaded in each CC message field (for edit button)
   const [ccWhisperTemplateId, setCcWhisperTemplateId] = useState<string | null>(sc?.ccWhisperTemplateId ?? null);
   const [ccGreetingTemplateId, setCcGreetingTemplateId] = useState<string | null>(sc?.ccGreetingTemplateId ?? null);
@@ -330,13 +351,23 @@ export function Services() {
     if (!selectedAccountId) return;
     followUpApi.getSettings(selectedAccountId).then(res => {
       if (res.success && res.settings) {
-        const s = res.settings;
-        if (s.followUpMode) setFuMode(s.followUpMode as 'off' | 'suggest' | 'auto_send');
-        if (s.followUpPreset) setFuPreset(s.followUpPreset as 'conservative' | 'standard' | 'persistent');
-        if (s.followUpReplyType) setFuReplyType(s.followUpReplyType as 'template' | 'ai');
+        const s = res.settings as any;
+        if (s.followUpMode) setFuMode(s.followUpMode);
+        if (s.followUpReplyType) setFuReplyType(s.followUpReplyType);
         if (s.followUpActiveHoursStart) setFuStart(s.followUpActiveHoursStart);
         if (s.followUpActiveHoursEnd) setFuEnd(s.followUpActiveHoursEnd);
         if (s.followUpTimezone) setFuTz(s.followUpTimezone);
+        // New fields (stored in extended settings JSON)
+        if (s.followUpTiming) setFuTiming(s.followUpTiming);
+        if (s.followUpCustomSteps) setFuCustomSteps(s.followUpCustomSteps);
+        if (s.followUpAvailability) setFuAvailability(s.followUpAvailability);
+        if (s.followUpScenarios) setFuScenarios(s.followUpScenarios);
+        if (s.followUpStopOnReply !== undefined) setFuStopOnReply(s.followUpStopOnReply);
+        if (s.followUpStopOnOptOut !== undefined) setFuStopOnOptOut(s.followUpStopOnOptOut);
+        if (s.followUpStopOnBooked !== undefined) setFuStopOnBooked(s.followUpStopOnBooked);
+        if (s.followUpOnNo) setFuOnNo(s.followUpOnNo);
+        if (s.followUpRetryDays) setFuRetryDays(s.followUpRetryDays);
+        if (s.followUpUrgentFaster !== undefined) setFuUrgentFaster(s.followUpUrgentFaster);
       }
     }).catch(() => {});
   }, [selectedAccountId]);
@@ -2158,7 +2189,7 @@ export function Services() {
                       <h3 className="text-lg font-bold text-slate-900">Yelp Follow-ups</h3>
                       <span className="px-2 py-0.5 text-[10px] font-bold bg-[#FF1A1A] text-white rounded-md">Yelp</span>
                     </div>
-                    <p className="text-sm text-slate-500 mt-0.5">Manual and AI-powered follow-ups sent during active hours via Yelp chat.</p>
+                    <p className="text-sm text-slate-500 mt-0.5">Automated follow-ups for leads who don't respond.</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -2171,20 +2202,20 @@ export function Services() {
               </div>
 
               {expandedCard === 'yelp-followups' && (
-                <div className="px-6 pb-6 border-t border-slate-100 pt-5 space-y-5">
+                <div className="px-6 pb-6 border-t border-slate-100 pt-5 space-y-6">
 
-                  {/* Follow-up Mode */}
+                  {/* 1. Follow-up Mode */}
                   <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Mode</label>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">1. Follow-up Mode</label>
                     <div className="flex gap-2">
                       {([
                         { value: 'off' as const, label: 'Off', desc: 'No follow-ups' },
-                        { value: 'suggest' as const, label: 'Suggest', desc: 'Review before sending' },
-                        { value: 'auto_send' as const, label: 'Auto-send', desc: 'Send automatically' },
+                        { value: 'suggest' as const, label: 'Suggest', desc: 'Review each follow-up before sending' },
+                        { value: 'auto_send' as const, label: 'Auto-send', desc: 'Send follow-ups automatically' },
                       ]).map(opt => (
                         <button key={opt.value}
                           onClick={() => setFuMode(opt.value)}
-                          className={`flex-1 py-2 px-2 rounded-xl text-xs font-semibold border-2 transition-all ${
+                          className={`flex-1 py-2.5 px-2 rounded-xl text-xs font-semibold border-2 transition-all ${
                             fuMode === opt.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
                           }`}
                         >
@@ -2195,93 +2226,199 @@ export function Services() {
                     </div>
                   </div>
 
-                  {/* Preset Selector */}
+                  {/* 2. Reply Type */}
                   <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Pace</label>
-                    <div className="flex gap-2">
-                      {([
-                        { value: 'conservative' as const, label: 'Conservative', desc: '3 steps, gentle' },
-                        { value: 'standard' as const, label: 'Standard', desc: '5 steps, balanced' },
-                        { value: 'persistent' as const, label: 'Persistent', desc: '8 steps, aggressive' },
-                      ]).map(opt => (
-                        <button key={opt.value}
-                          onClick={() => setFuPreset(opt.value)}
-                          className={`flex-1 py-2.5 px-2 rounded-xl text-xs font-semibold border-2 transition-all ${
-                            fuPreset === opt.value ? 'bg-[#FF1A1A] text-white border-[#FF1A1A]' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-red-200'
-                          }`}
-                        >
-                          {opt.label}
-                          <span className="block text-[9px] font-normal opacity-70 mt-0.5">{opt.desc}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Active Hours */}
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Active Hours</label>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
-                        <input type="time" value={fuStart} onChange={e => setFuStart(e.target.value)}
-                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
-                        <input type="time" value={fuEnd} onChange={e => setFuEnd(e.target.value)}
-                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Timezone</label>
-                        <select value={fuTz} onChange={e => setFuTz(e.target.value)}
-                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm">
-                          <option value="America/New_York">Eastern</option>
-                          <option value="America/Chicago">Central</option>
-                          <option value="America/Denver">Mountain</option>
-                          <option value="America/Los_Angeles">Pacific</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Reply Type */}
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Reply Type</label>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">2. Reply Type</label>
                     <div className="flex gap-2">
                       <button onClick={() => setFuReplyType('template')}
-                        className={`flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all ${fuReplyType === 'template' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
-                        📝 Template
+                        className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuReplyType === 'template' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                        Template
+                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">Use fixed follow-up messages</span>
                       </button>
                       <button onClick={() => setFuReplyType('ai')}
-                        className={`flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all ${fuReplyType === 'ai' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
-                        ✨ AI Follow-up
+                        className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuReplyType === 'ai' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                        AI Follow-up
+                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">Generate contextual follow-ups based on the conversation</span>
                       </button>
                     </div>
-                    <p className="text-xs text-slate-400 mt-2">AI generates contextual follow-ups using conversation summary, thread state, and your prompt strategy.</p>
                   </div>
 
-                  {/* Scenario Coverage */}
+                  {/* 3. Follow-up Timing */}
                   <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Scenarios</label>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">3. Follow-up Timing</label>
+                    <p className="text-[11px] text-slate-400 mb-2">Choose when the next follow-up is sent if the customer doesn't reply.</p>
+                    <div className="flex gap-2 mb-3">
+                      <button onClick={() => setFuTiming('smart')}
+                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuTiming === 'smart' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                        Smart timing
+                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">Recommended</span>
+                      </button>
+                      <button onClick={() => setFuTiming('custom')}
+                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuTiming === 'custom' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                        Custom timing
+                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">Set your own delays</span>
+                      </button>
+                    </div>
+                    {fuTiming === 'custom' && (
+                      <div className="space-y-2 bg-slate-50 rounded-xl p-3 border border-slate-100">
+                        {fuCustomSteps.map((step, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <span className="text-[11px] text-slate-500 w-24 shrink-0">{step.label}</span>
+                            <span className="text-[11px] text-slate-400">after</span>
+                            <input type="text" value={step.delay}
+                              onChange={e => {
+                                const steps = [...fuCustomSteps];
+                                steps[i] = { ...steps[i], delay: e.target.value };
+                                setFuCustomSteps(steps);
+                              }}
+                              className="flex-1 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs"
+                              placeholder="e.g. 2 minutes, 1 hour, 1 day" />
+                            {fuCustomSteps.length > 1 && (
+                              <button onClick={() => setFuCustomSteps(fuCustomSteps.filter((_, j) => j !== i))}
+                                className="text-slate-300 hover:text-red-500 text-xs">✕</button>
+                            )}
+                          </div>
+                        ))}
+                        <button onClick={() => setFuCustomSteps([...fuCustomSteps, { label: `${fuCustomSteps.length + 1}${fuCustomSteps.length === 0 ? 'st' : fuCustomSteps.length === 1 ? 'nd' : fuCustomSteps.length === 2 ? 'rd' : 'th'} follow-up`, delay: '' }])}
+                          className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold">+ Add step</button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 4. Auto Reply Availability */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">4. Auto Reply Availability</label>
+                    <p className="text-[11px] text-slate-400 mb-2">Choose when follow-ups can be sent automatically.</p>
+                    <div className="flex gap-2 mb-3">
+                      <button onClick={() => setFuAvailability('always')}
+                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'always' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                        Always (24/7)
+                      </button>
+                      <button onClick={() => setFuAvailability('active_hours')}
+                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'active_hours' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                        Only during active hours
+                      </button>
+                    </div>
+                    {fuAvailability === 'active_hours' && (
+                      <div className="grid grid-cols-3 gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
+                          <input type="time" value={fuStart} onChange={e => setFuStart(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
+                          <input type="time" value={fuEnd} onChange={e => setFuEnd(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Timezone</label>
+                          <select value={fuTz} onChange={e => setFuTz(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
+                            <option value="America/New_York">Eastern</option>
+                            <option value="America/Chicago">Central</option>
+                            <option value="America/Denver">Mountain</option>
+                            <option value="America/Los_Angeles">Pacific</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 5. Scenarios */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">5. Scenarios</label>
                     <div className="space-y-2">
-                      {[
-                        { state: 'no_reply_after_initial', label: 'After first reply', desc: 'Customer received your message but didn\'t respond' },
-                        { state: 'no_reply_after_question', label: 'After question asked', desc: 'You asked a clarifying question, no answer' },
-                        { state: 'no_reply_after_price', label: 'After price shared', desc: 'Price was discussed, customer went silent' },
-                        { state: 'no_reply_after_conversion', label: 'After booking step', desc: 'Offered to book or schedule, no confirmation' },
-                      ].map(scenario => (
-                        <div key={scenario.state} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                      {([
+                        { key: 'no_reply_after_initial' as const, label: 'After first reply', desc: 'Customer received your message but didn\'t respond' },
+                        { key: 'no_reply_after_question' as const, label: 'After question asked', desc: 'You asked a clarifying question, no answer' },
+                        { key: 'no_reply_after_price' as const, label: 'After price shared', desc: 'Price was discussed, customer went silent' },
+                        { key: 'no_reply_after_conversion' as const, label: 'After booking step', desc: 'Offered to book or schedule, no confirmation' },
+                      ]).map(scenario => (
+                        <label key={scenario.key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-100/50 transition-colors">
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-slate-800">{scenario.label}</p>
                             <p className="text-[10px] text-slate-400">{scenario.desc}</p>
                           </div>
-                          <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Active</span>
-                        </div>
+                          <input type="checkbox"
+                            checked={fuScenarios[scenario.key]}
+                            onChange={e => setFuScenarios(prev => ({ ...prev, [scenario.key]: e.target.checked }))}
+                            className="accent-emerald-600 w-4 h-4 shrink-0 ml-3" />
+                        </label>
                       ))}
                     </div>
                   </div>
 
-                  {/* Save */}
+                  {/* 6. Smart Follow-up Rules (collapsed) */}
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <button
+                      onClick={() => setFuShowRules(!fuShowRules)}
+                      className="w-full px-4 py-3 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors"
+                    >
+                      <div>
+                        <span className="text-[11px] font-bold text-slate-600 uppercase tracking-widest">Smart Follow-up Rules</span>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Control when follow-ups stop and how special cases are handled.</p>
+                      </div>
+                      {fuShowRules ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                    </button>
+                    {fuShowRules && (
+                      <div className="px-4 py-4 space-y-4 border-t border-slate-100">
+                        {/* Stop rules */}
+                        <div>
+                          <div className="text-[11px] font-semibold text-slate-600 mb-2">Stop automatic follow-ups when</div>
+                          <div className="space-y-1.5">
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={fuStopOnReply} onChange={e => setFuStopOnReply(e.target.checked)} className="accent-blue-600 w-3.5 h-3.5" />
+                              Customer replies
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={fuStopOnOptOut} onChange={e => setFuStopOnOptOut(e.target.checked)} className="accent-blue-600 w-3.5 h-3.5" />
+                              Customer asks to stop
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={fuStopOnBooked} onChange={e => setFuStopOnBooked(e.target.checked)} className="accent-blue-600 w-3.5 h-3.5" />
+                              Job is booked or confirmed
+                            </label>
+                          </div>
+                        </div>
+
+                        {/* If customer says no */}
+                        <div>
+                          <div className="text-[11px] font-semibold text-slate-600 mb-2">If the customer says no</div>
+                          <div className="flex gap-2">
+                            <button onClick={() => setFuOnNo('stop')}
+                              className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold border-2 transition-all ${fuOnNo === 'stop' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+                              Stop follow-ups
+                            </button>
+                            <button onClick={() => setFuOnNo('retry')}
+                              className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold border-2 transition-all ${fuOnNo === 'retry' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+                              Try again later
+                            </button>
+                          </div>
+                          {fuOnNo === 'retry' && (
+                            <div className="flex items-center gap-2 mt-2 text-sm text-slate-600">
+                              <span>Follow up again after</span>
+                              <input type="number" value={fuRetryDays} min={1} max={90}
+                                onChange={e => setFuRetryDays(parseInt(e.target.value) || 7)}
+                                className="w-16 px-2 py-1 border border-slate-200 rounded-lg text-center text-sm" />
+                              <span>days</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Urgent leads */}
+                        <label className="flex items-center justify-between cursor-pointer">
+                          <div>
+                            <div className="text-[11px] font-semibold text-slate-600">Urgent leads</div>
+                            <p className="text-[10px] text-slate-400">Move faster when the customer needs service ASAP</p>
+                          </div>
+                          <input type="checkbox" checked={fuUrgentFaster} onChange={e => setFuUrgentFaster(e.target.checked)} className="accent-blue-600 w-4 h-4" />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 7. Save */}
                   <button
                     onClick={async () => {
                       try {
@@ -2289,11 +2426,22 @@ export function Services() {
                           mode: fuMode,
                           preset: fuPreset,
                           replyType: fuReplyType,
-                          activeHoursStart: fuStart,
-                          activeHoursEnd: fuEnd,
+                          activeHoursStart: fuAvailability === 'active_hours' ? fuStart : null as any,
+                          activeHoursEnd: fuAvailability === 'active_hours' ? fuEnd : null as any,
                           timezone: fuTz,
                           platform: 'yelp',
-                        });
+                          // Extended settings
+                          timing: fuTiming,
+                          customSteps: fuTiming === 'custom' ? fuCustomSteps : undefined,
+                          availability: fuAvailability,
+                          scenarios: fuScenarios,
+                          stopOnReply: fuStopOnReply,
+                          stopOnOptOut: fuStopOnOptOut,
+                          stopOnBooked: fuStopOnBooked,
+                          onNo: fuOnNo,
+                          retryDays: fuRetryDays,
+                          urgentFaster: fuUrgentFaster,
+                        } as any);
                         alert(fuMode === 'off'
                           ? 'Follow-ups disabled and saved.'
                           : `Follow-up settings saved.${res.seeded > 0 ? ` ${res.seeded} sequence templates created.` : ''}`);
