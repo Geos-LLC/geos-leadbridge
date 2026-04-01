@@ -176,25 +176,43 @@ export function Layout() {
       {/* Main Content */}
       <main className="flex-1 lg:ml-72 min-h-screen">
         <ImpersonationBanner />
-        {/* Top Navbar */}
-        <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-100 px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden p-2 text-slate-600">
-                <Menu className="w-6 h-6" />
-              </button>
-              <RouterLink to="/" className="flex items-center gap-2 lg:hidden hover:opacity-80 transition-opacity">
-                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-sm shadow-blue-200">
-                  <Zap className="w-4 h-4" />
-                </div>
-                <span className="text-lg font-bold tracking-tight text-slate-900">LeadBridge</span>
-              </RouterLink>
-              <h1 className="text-xl font-bold text-slate-900 lg:block hidden">{getPageName()}</h1>
+        {/* Top Navbar — hidden on Messages page (has its own lead header) */}
+        {location.pathname !== '/messages' && (
+          <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-100 px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden p-2 text-slate-600">
+                  <Menu className="w-6 h-6" />
+                </button>
+                <RouterLink to="/" className="flex items-center gap-2 lg:hidden hover:opacity-80 transition-opacity">
+                  <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-sm shadow-blue-200">
+                    <Zap className="w-4 h-4" />
+                  </div>
+                  <span className="text-lg font-bold tracking-tight text-slate-900">LeadBridge</span>
+                </RouterLink>
+                <h1 className="text-xl font-bold text-slate-900 lg:block hidden">{getPageName()}</h1>
+              </div>
+              <div className="flex items-center gap-3">
+              </div>
             </div>
-            <div className="flex items-center gap-3">
+          </header>
+        )}
+        {/* Mobile menu button for Messages page (no top navbar) */}
+        {location.pathname === '/messages' && (
+          <div className="lg:hidden sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-100 px-4 py-2">
+            <div className="flex items-center gap-2">
+              <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="p-2 text-slate-600">
+                <Menu className="w-5 h-5" />
+              </button>
+              <RouterLink to="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+                <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-sm shadow-blue-200">
+                  <Zap className="w-3.5 h-3.5" />
+                </div>
+                <span className="text-base font-bold tracking-tight text-slate-900">LeadBridge</span>
+              </RouterLink>
             </div>
           </div>
-        </header>
+        )}
 
         {/* Trial Banner - sits below the header, overlays the top of page content */}
         <TrialBanner />
