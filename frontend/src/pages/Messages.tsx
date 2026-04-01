@@ -204,7 +204,7 @@ export function Messages() {
   const [lastSeenTimestamps, setLastSeenTimestamps] = useState<Record<string, string>>(() => getLastSeenTimestamps());
   const [searchQuery, setSearchQuery] = useState('');
   // Get account filter from URL params, default to 'all'
-  const accountFilter = searchParams.get('account') || 'all';
+  const accountFilter = searchParams.get('account') || localStorage.getItem('lb_last_account_filter') || 'all';
   // Get date filter from URL params, default to 'all' (no filter)
   const dateFilter = searchParams.get('date') || 'all';
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -279,8 +279,10 @@ export function Messages() {
   const setAccountFilter = (value: string) => {
     if (value === 'all') {
       searchParams.delete('account');
+      localStorage.removeItem('lb_last_account_filter');
     } else {
       searchParams.set('account', value);
+      localStorage.setItem('lb_last_account_filter', value);
     }
     setSearchParams(searchParams);
   };

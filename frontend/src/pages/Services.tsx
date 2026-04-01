@@ -132,10 +132,17 @@ export function Services() {
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
   const setAccountDiagnostics = useAppStore(state => state.setAccountDiagnostics);
 
-  // Account state — seed from Zustand store so there's no loading flash
+  // Account state — seed from Zustand store, restore last used account
   const [accounts, setAccounts] = useState<SavedAccount[]>(storedAccounts);
-  const initialAccountId = storedAccounts[0]?.id || '';
-  const [selectedAccountId, setSelectedAccountId] = useState(initialAccountId);
+  const lastUsedAccountId = localStorage.getItem('lb_last_account_id');
+  const initialAccountId = (lastUsedAccountId && storedAccounts.some(a => a.id === lastUsedAccountId) ? lastUsedAccountId : storedAccounts[0]?.id) || '';
+  const [selectedAccountId, _setSelectedAccountId] = useState(initialAccountId);
+  const setSelectedAccountId = (id: string) => {
+    _setSelectedAccountId(id);
+    localStorage.setItem('lb_last_account_id', id);
+    const acc = accounts.find(a => a.id === id) || storedAccounts.find(a => a.id === id);
+    if (acc?.businessId) localStorage.setItem('lb_last_account_filter', acc.businessId);
+  };
   const sc = _svcCache.get(initialAccountId); // cached service data for this account
   const [loading, setLoading] = useState(!sc);
   const [error, setError] = useState<string | null>(null);
