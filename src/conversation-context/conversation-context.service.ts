@@ -694,6 +694,14 @@ Be factual and concise. This summary will be used as context for future AI respo
       }
     }
 
+    // Customer urgency detection (rule-based v1)
+    if (latestMessage.sender === 'customer') {
+      const urgentPatterns = [/\basap\b/i, /\btoday\b/i, /\burgent/i, /as soon as possible/i, /right away/i, /\btonight\b/i, /this morning/i, /this afternoon/i, /\bnow\b/i, /immediately/i];
+      if (urgentPatterns.some(p => p.test(latestMessage.content))) {
+        updates.customerIntent = 'urgent';
+      }
+    }
+
     // Stage progression based on content
     if (ctx.stage === 'qualification' && updates.priceDiscussed) {
       updates.stage = 'quoting';
@@ -706,6 +714,7 @@ Be factual and concise. This summary will be used as context for future AI respo
     if (updates.priceRange) newState.priceRange = updates.priceRange;
     if (updates.lastQuestionAsked) newState.lastQuestionAsked = updates.lastQuestionAsked;
     if (updates.engagementLevel) newState.engagementLevel = updates.engagementLevel;
+    if (updates.customerIntent === 'urgent') newState.customerUrgency = 'high';
     updates.stateJson = JSON.stringify(newState);
 
     if (Object.keys(updates).length > 1) { // > 1 because stateJson is always set

@@ -193,7 +193,7 @@ export class FollowUpEngineController {
     // Extract extended settings into JSON
     const { mode, preset, replyType, activeHoursStart, activeHoursEnd, timezone, platform,
       timing, customSteps, availability, strategyMode, scenarios, stopOnReply, stopOnOptOut, stopOnBooked,
-      onNo, retryDays, urgentFaster, ...rest } = body;
+      onNo, retryDays, urgentCapability, ...rest } = body;
 
     const extendedSettings: Record<string, any> = {};
     if (timing !== undefined) extendedSettings.followUpTiming = timing;
@@ -206,7 +206,7 @@ export class FollowUpEngineController {
     if (stopOnBooked !== undefined) extendedSettings.followUpStopOnBooked = stopOnBooked;
     if (onNo !== undefined) extendedSettings.followUpOnNo = onNo;
     if (retryDays !== undefined) extendedSettings.followUpRetryDays = retryDays;
-    if (urgentFaster !== undefined) extendedSettings.followUpUrgentFaster = urgentFaster;
+    if (urgentCapability !== undefined) extendedSettings.followUpUrgentCapability = urgentCapability;
 
     await this.prisma.savedAccount.update({
       where: { id: savedAccountId },

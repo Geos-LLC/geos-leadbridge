@@ -242,7 +242,7 @@ export function Services() {
   const [fuStopOnBooked, setFuStopOnBooked] = useState(true);
   const [fuOnNo, setFuOnNo] = useState<'stop' | 'retry'>('retry');
   const [fuRetryDays, setFuRetryDays] = useState(7);
-  const [fuUrgentFaster, setFuUrgentFaster] = useState(true);
+  const [fuUrgentCapability, setFuUrgentCapability] = useState<'same_day' | '24h' | '48h' | 'none'>('same_day');
   const [fuShowStrategies, setFuShowStrategies] = useState(false);
   const [fuShowRules, setFuShowRules] = useState(false);
   // Legacy compat
@@ -371,7 +371,7 @@ export function Services() {
         if (s.followUpStopOnBooked !== undefined) setFuStopOnBooked(s.followUpStopOnBooked);
         if (s.followUpOnNo) setFuOnNo(s.followUpOnNo);
         if (s.followUpRetryDays) setFuRetryDays(s.followUpRetryDays);
-        if (s.followUpUrgentFaster !== undefined) setFuUrgentFaster(s.followUpUrgentFaster);
+        if (s.followUpUrgentCapability) setFuUrgentCapability(s.followUpUrgentCapability);
       }
     }).catch(() => {});
   }, [selectedAccountId]);
@@ -2463,14 +2463,29 @@ export function Services() {
                           )}
                         </div>
 
-                        {/* Urgent leads */}
-                        <label className="flex items-center justify-between cursor-pointer">
-                          <div>
-                            <div className="text-[11px] font-semibold text-slate-600">Urgent leads</div>
-                            <p className="text-[10px] text-slate-400">Move faster when the customer needs service ASAP</p>
+                        {/* Urgent availability */}
+                        <div>
+                          <div className="text-[11px] font-semibold text-slate-600 mb-1">Urgent request handling</div>
+                          <p className="text-[10px] text-slate-400 mb-2">How quickly can you serve customers who need service urgently?</p>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {([
+                              { value: 'same_day' as const, label: 'Same day', desc: 'Can serve today' },
+                              { value: '24h' as const, label: 'Within 24h', desc: 'Next business day' },
+                              { value: '48h' as const, label: 'Within 48h', desc: '1-2 days out' },
+                              { value: 'none' as const, label: 'Not available', desc: 'By appointment only' },
+                            ]).map(opt => (
+                              <button key={opt.value}
+                                onClick={() => setFuUrgentCapability(opt.value)}
+                                className={`py-2 px-2 rounded-lg text-[11px] font-semibold border-2 transition-all text-left ${
+                                  fuUrgentCapability === opt.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
+                                }`}
+                              >
+                                {opt.label}
+                                <span className="block text-[9px] font-normal opacity-70">{opt.desc}</span>
+                              </button>
+                            ))}
                           </div>
-                          <input type="checkbox" checked={fuUrgentFaster} onChange={e => setFuUrgentFaster(e.target.checked)} className="accent-blue-600 w-4 h-4" />
-                        </label>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -2498,7 +2513,7 @@ export function Services() {
                           stopOnBooked: fuStopOnBooked,
                           onNo: fuOnNo,
                           retryDays: fuRetryDays,
-                          urgentFaster: fuUrgentFaster,
+                          urgentCapability: fuUrgentCapability,
                         } as any);
                         alert(fuMode === 'off'
                           ? 'Follow-ups disabled and saved.'
