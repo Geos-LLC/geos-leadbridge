@@ -181,7 +181,7 @@ export function Messages() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [aiPreview, setAiPreview] = useState<Record<string, { loading: boolean; reply: string | null; contextMode?: string }>>({});
-  const [aiContextMode, setAiContextMode] = useState<'full' | 'light' | 'none'>('full');
+  const aiContextMode = 'full' as const;
   const [strategySuggestion, setStrategySuggestion] = useState<{
     suggested: string; reason: string; confidence: number; threadState: Record<string, any>;
   } | null>(null);
@@ -1494,7 +1494,7 @@ export function Messages() {
                                 onClick={() => {
                                   if (preview) return;
                                   setAiPreview(prev => ({ ...prev, [previewKey]: { loading: true, reply: null } }));
-                                  if (selectedLead?.threadId && aiContextMode !== 'none') {
+                                  if (selectedLead?.threadId) {
                                     aiApi.previewWithContext(selectedLead.id, selectedLead.threadId, event.content!, strategy.prompt, aiContextMode)
                                       .then(({ reply, contextMode }) => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply, contextMode } })))
                                       .catch(() => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply: 'Failed to generate.' } })));
@@ -1545,56 +1545,39 @@ export function Messages() {
                           )}
                         </div>
 
-                        {/* ===== Context Popover (5 sections) ===== */}
+                        {/* ===== Context Popover (3 sections, all collapsed) ===== */}
                         {aiPopoverEventId === event.id && selectedLead?.threadId && (
                           <div className="absolute left-0 top-full mt-1 z-20 w-72 bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden text-xs">
 
-                            {/* Section 1 — Mode */}
+                            {/* Section 1 — Why this answer */}
                             <div className="border-b border-slate-100">
                               <button
-                                onClick={() => setAiPopoverSections(p => ({ ...p, mode: !p.mode }))}
+                                onClick={() => setAiPopoverSections(p => ({ ...p, why: !p.why }))}
                                 className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
                               >
-                                <span>Mode</span>
-                                <ChevronRight size={11} className={`transition-transform text-slate-400 ${aiPopoverSections.mode ? 'rotate-90' : ''}`} />
+                                <span>Why this answer</span>
+                                <ChevronRight size={11} className={`transition-transform text-slate-400 ${aiPopoverSections.why ? 'rotate-90' : ''}`} />
                               </button>
-                              {aiPopoverSections.mode && (
-                                <div className="px-3 pb-2 space-y-1">
-                                  {(['full', 'light', 'none'] as const).map(mode => (
-                                    <label key={mode} className="flex items-center gap-2 cursor-pointer text-[11px] text-slate-600 hover:text-slate-800">
-                                      <input
-                                        type="radio"
-                                        name="aiContextMode"
-                                        checked={aiContextMode === mode}
-                                        onChange={() => setAiContextMode(mode)}
-                                        className="accent-violet-600 w-3 h-3"
-                                      />
-                                      {mode === 'full' ? 'Full context' : mode === 'light' ? 'Light context' : 'No context'}
-                                      {mode === 'full' && aiContextMode !== 'full' && <span className="text-[9px] text-slate-400">(default)</span>}
-                                    </label>
-                                  ))}
+                              {aiPopoverSections.why && strategySuggestion && (
+                                <div className="px-3 pb-2">
+                                  <div className="flex items-center gap-1.5 mb-1">
+                                    <span className="text-[11px] font-semibold text-slate-800">
+                                      Suggested: {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.emoji}{' '}
+                                      {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.label}
+                                    </span>
+                                    <span className="text-[9px] bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full font-semibold">
+                                      {Math.round(strategySuggestion.confidence * 100)}%
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-500 leading-relaxed">{strategySuggestion.reason}</p>
                                 </div>
+                              )}
+                              {aiPopoverSections.why && !strategySuggestion && (
+                                <div className="px-3 pb-2 text-[11px] text-slate-400">No thread context available yet.</div>
                               )}
                             </div>
 
-                            {/* Section 2 — Why this answer */}
-                            {strategySuggestion && (
-                              <div className="border-b border-slate-100 px-3 py-2">
-                                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Why this answer</div>
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <span className="text-[11px] font-semibold text-slate-800">
-                                    Suggested: {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.emoji}{' '}
-                                    {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.label}
-                                  </span>
-                                  <span className="text-[9px] bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full font-semibold">
-                                    {Math.round(strategySuggestion.confidence * 100)}%
-                                  </span>
-                                </div>
-                                <p className="text-[11px] text-slate-500 leading-relaxed">{strategySuggestion.reason}</p>
-                              </div>
-                            )}
-
-                            {/* Section 3 — Context */}
+                            {/* Section 2 — Context */}
                             <div className="border-b border-slate-100">
                               <button
                                 onClick={() => setAiPopoverSections(p => ({ ...p, context: !p.context }))}
@@ -1605,35 +1588,33 @@ export function Messages() {
                               </button>
                               {aiPopoverSections.context && (
                                 <div className="px-3 pb-2 space-y-1.5">
+                                  {threadContextData?.systemContext && (
+                                    <div>
+                                      <div className="text-[10px] font-semibold text-slate-500 mb-0.5">Summary:</div>
+                                      <p className="text-[10px] text-slate-600 italic leading-relaxed">
+                                        {threadContextData.systemContext.split('\n').find(l => l.startsWith('Conversation summary:'))?.replace('Conversation summary: ', '') || 'No summary yet'}
+                                      </p>
+                                    </div>
+                                  )}
                                   {strategySuggestion?.threadState && (
-                                    <>
-                                      {threadContextData?.systemContext && (
-                                        <div>
-                                          <div className="text-[10px] font-semibold text-slate-500 mb-0.5">Summary:</div>
-                                          <p className="text-[10px] text-slate-600 italic leading-relaxed">
-                                            {threadContextData.systemContext.split('\n').find(l => l.startsWith('Conversation summary:'))?.replace('Conversation summary: ', '') || 'No summary yet'}
-                                          </p>
-                                        </div>
-                                      )}
-                                      <div>
-                                        <div className="text-[10px] font-semibold text-slate-500 mb-0.5">State:</div>
-                                        <ul className="text-[10px] text-slate-600 space-y-0.5 list-none">
-                                          {strategySuggestion.threadState.awaitingCustomerReply !== undefined && (
-                                            <li>- awaiting reply: {strategySuggestion.threadState.awaitingCustomerReply ? 'yes' : 'no'}</li>
-                                          )}
-                                          <li>- price discussed: {strategySuggestion.threadState.priceDiscussed ? (strategySuggestion.threadState.priceRange || 'yes') : 'no'}</li>
-                                          {strategySuggestion.threadState.missingFields?.length > 0 && (
-                                            <li>- missing: {strategySuggestion.threadState.missingFields.join(', ')}</li>
-                                          )}
-                                          {strategySuggestion.threadState.stage && (
-                                            <li>- stage: {strategySuggestion.threadState.stage}</li>
-                                          )}
-                                          {strategySuggestion.threadState.engagementLevel && strategySuggestion.threadState.engagementLevel !== 'unknown' && (
-                                            <li>- engagement: {strategySuggestion.threadState.engagementLevel}</li>
-                                          )}
-                                        </ul>
-                                      </div>
-                                    </>
+                                    <div>
+                                      <div className="text-[10px] font-semibold text-slate-500 mb-0.5">State:</div>
+                                      <ul className="text-[10px] text-slate-600 space-y-0.5 list-none">
+                                        {strategySuggestion.threadState.awaitingCustomerReply !== undefined && (
+                                          <li>- awaiting reply: {strategySuggestion.threadState.awaitingCustomerReply ? 'yes' : 'no'}</li>
+                                        )}
+                                        <li>- price discussed: {strategySuggestion.threadState.priceDiscussed ? (strategySuggestion.threadState.priceRange || 'yes') : 'no'}</li>
+                                        {strategySuggestion.threadState.missingFields?.length > 0 && (
+                                          <li>- missing: {strategySuggestion.threadState.missingFields.join(', ')}</li>
+                                        )}
+                                        {strategySuggestion.threadState.stage && (
+                                          <li>- stage: {strategySuggestion.threadState.stage}</li>
+                                        )}
+                                        {strategySuggestion.threadState.engagementLevel && strategySuggestion.threadState.engagementLevel !== 'unknown' && (
+                                          <li>- engagement: {strategySuggestion.threadState.engagementLevel}</li>
+                                        )}
+                                      </ul>
+                                    </div>
                                   )}
                                   {threadContextData?.systemContext && (
                                     <details className="mt-1">
@@ -1643,12 +1624,15 @@ export function Messages() {
                                       <pre className="mt-1 text-[9px] text-slate-500 whitespace-pre-wrap bg-slate-50 rounded-lg p-2 max-h-40 overflow-y-auto border border-slate-100">{threadContextData.systemContext}</pre>
                                     </details>
                                   )}
+                                  {!threadContextData && !strategySuggestion && (
+                                    <div className="text-[11px] text-slate-400">No context data available.</div>
+                                  )}
                                 </div>
                               )}
                             </div>
 
-                            {/* Section 4 — Prompt */}
-                            <div className="border-b border-slate-100">
+                            {/* Section 3 — Prompt */}
+                            <div>
                               <button
                                 onClick={() => setAiPopoverSections(p => ({ ...p, prompt: !p.prompt }))}
                                 className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
@@ -1682,51 +1666,6 @@ export function Messages() {
                                 </div>
                               )}
                             </div>
-
-                            {/* Section 5 — Regenerate */}
-                            {Object.keys(aiPreview).some(k => k.startsWith(event.id + ':') && aiPreview[k]?.reply) && (
-                              <div className="px-3 py-2">
-                                <div className="text-[10px] font-semibold text-slate-500 mb-1.5">Regenerate with:</div>
-                                <div className="flex items-center gap-1.5">
-                                  {(['full', 'light', 'none'] as const).map(mode => (
-                                    <button
-                                      key={mode}
-                                      onClick={() => {
-                                        setAiContextMode(mode);
-                                        // Regenerate all loaded previews for this event with new mode
-                                        AI_STRATEGIES.forEach(strategy => {
-                                          const pk = `${event.id}:${strategy.key}`;
-                                          if (aiPreview[pk]?.reply) {
-                                            setAiPreview(prev => ({ ...prev, [pk]: { loading: true, reply: null } }));
-                                            if (mode !== 'none') {
-                                              aiApi.previewWithContext(selectedLead!.id, selectedLead!.threadId!, event.content!, strategy.prompt, mode)
-                                                .then(({ reply, contextMode }) => setAiPreview(prev => ({ ...prev, [pk]: { loading: false, reply, contextMode } })))
-                                                .catch(() => setAiPreview(prev => ({ ...prev, [pk]: { loading: false, reply: 'Failed.' } })));
-                                            } else {
-                                              const idx = timelineEvents.indexOf(event);
-                                              const history = timelineEvents.slice(0, idx)
-                                                .filter(e => e.content && (e.direction === 'inbound' || e.direction === 'outbound'))
-                                                .map(e => ({ role: (e.direction === 'inbound' ? 'customer' : 'pro') as 'customer' | 'pro', content: e.content! }));
-                                              aiApi.previewForLead(selectedLead!.id, event.content!, history, strategy.prompt)
-                                                .then(({ reply }) => setAiPreview(prev => ({ ...prev, [pk]: { loading: false, reply } })))
-                                                .catch(() => setAiPreview(prev => ({ ...prev, [pk]: { loading: false, reply: 'Failed.' } })));
-                                            }
-                                          }
-                                        });
-                                        setAiPopoverEventId(null);
-                                      }}
-                                      className={`text-[10px] px-2.5 py-1 rounded-lg font-semibold transition-colors ${
-                                        aiContextMode === mode
-                                          ? 'bg-violet-100 text-violet-700'
-                                          : 'bg-slate-100 text-slate-500 hover:bg-violet-50 hover:text-violet-600'
-                                      }`}
-                                    >
-                                      {mode === 'full' ? 'Full' : mode === 'light' ? 'Light' : 'None'}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
                           </div>
                         )}
 
