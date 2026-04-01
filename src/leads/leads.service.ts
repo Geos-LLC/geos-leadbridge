@@ -12,6 +12,7 @@ import { EncryptionUtil } from '../common/utils/encryption.util';
 import { NormalizedLead } from '../common/dto/normalized.dto';
 import { TemplatesService } from '../templates/templates.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { ConversationContextService } from '../conversation-context/conversation-context.service';
 
 @Injectable()
 export class LeadsService {
@@ -22,6 +23,7 @@ export class LeadsService {
     private configService: ConfigService,
     private templatesService: TemplatesService,
     private analyticsService: AnalyticsService,
+    private conversationContext: ConversationContextService,
   ) {}
 
   /**
@@ -196,21 +198,70 @@ export class LeadsService {
 
       // Convert Yelp events to message format expected by frontend.
       // Skip RAQ_SUBMIT (initial lead request) — it duplicates the lead data shown above.
-      return events
-        .filter((e: any) => e.event_type === 'TEXT')
-        .map((e: any) => ({
-          id: e.id,
-          conversationId: lead.externalRequestId,
-          platform: 'yelp',
-          externalMessageId: e.id,
-          sender: e.user_type === 'CONSUMER' ? 'customer' : 'pro',
-          content: e.event_content?.text || e.event_content?.fallback_text || e.text || '',
-          isRead: true,
-          sentAt: e.time_created,
-        }));
+      const textEvents = events.filter((e: any) => e.event_type === 'TEXT');
+      const messages = textEvents.map((e: any) => ({
+        id: e.id,
+        conversationId: lead.externalRequestId,
+        platform: 'yelp',
+        externalMessageId: e.id,
+        sender: e.user_type === 'CONSUMER' ? 'customer' : 'pro',
+        content: e.event_content?.text || e.event_content?.fallback_text || e.text || '',
+        isRead: true,
+        sentAt: e.time_created,
+      }));
+
+      // Sync Yelp messages to local Message table (non-blocking)
+      // This enables buildContext() to find conversation history for AI previews
+      if (messages.length > 0 && lead.threadId) {
+        this.syncYelpMessagesToLocal(userId, lead, messages).catch(err =>
+          console.error(`[LeadsService] Yelp message sync failed: ${err.message}`),
+        );
+      }
+
+      return messages;
     } catch (err: any) {
       console.error(`[LeadsService] Failed to fetch Yelp messages: ${err.message}`);
       return [];
+    }
+  }
+
+  /**
+   * Sync Yelp API messages to local Message table + ThreadContext.
+   * Idempotent: skips messages that already exist (by externalMessageId).
+   */
+  private async syncYelpMessagesToLocal(userId: string, lead: any, messages: any[]): Promise<void> {
+    const conversationId = lead.threadId;
+    if (!conversationId) return;
+
+    for (const msg of messages) {
+      const exists = await this.prisma.message.findFirst({
+        where: { platform: 'yelp', externalMessageId: msg.externalMessageId },
+      });
+      if (exists) continue;
+
+      await this.prisma.message.create({
+        data: {
+          conversationId,
+          userId,
+          platform: 'yelp',
+          externalMessageId: msg.externalMessageId,
+          sender: msg.sender,
+          content: msg.content,
+          isRead: true,
+          sentAt: new Date(msg.sentAt),
+          rawJson: JSON.stringify(msg),
+        },
+      });
+
+      // Update thread context
+      await this.conversationContext.recordMessage({
+        conversationId,
+        leadId: lead.id,
+        platform: 'yelp',
+        sender: msg.sender === 'customer' ? 'customer' : 'pro',
+        content: msg.content,
+        timestamp: new Date(msg.sentAt),
+      }).catch(() => {});
     }
   }
 
@@ -365,6 +416,16 @@ export class LeadsService {
           },
         });
         console.log(`[LeadsService] Stored sent message locally: ${sentMessage.externalMessageId}`);
+
+        // Update thread context so AI previews have conversation history
+        this.conversationContext.recordMessage({
+          conversationId: conversation.id,
+          leadId: leadId,
+          platform: lead.platform,
+          sender: 'pro',
+          senderType: 'user',
+          content: message,
+        }).catch(err => console.error(`[LeadsService] recordMessage failed: ${err.message}`));
       }
 
       // Update conversation's lastMessageAt
