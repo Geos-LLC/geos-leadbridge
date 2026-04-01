@@ -445,7 +445,7 @@ export class ConversationContextService {
     };
 
     // Score each strategy based on thread state
-    const scores: Record<string, number> = { hybrid: 0.5, price: 0.3, qualify: 0.3, convert: 0.2 };
+    const scores: Record<string, number> = { hybrid: 0.5, price: 0.3, qualify: 0.3, convert: 0.2, phone: 0.15 };
 
     // Engagement signals
     if (ctx.engagementLevel === 'hot') {
@@ -480,6 +480,14 @@ export class ConversationContextService {
       scores.price = Math.min(scores.price, 0.35);
     }
 
+    // Phone escalation: high intent + many messages or complex conversation
+    if (ctx.engagementLevel === 'hot' && ctx.totalMessages >= 6) {
+      scores.phone = Math.max(scores.phone, 0.65);
+    }
+    if (ctx.missingFields.length >= 3) {
+      scores.phone = Math.max(scores.phone, 0.55);
+    }
+
     // Find the best strategy
     const suggested = Object.entries(scores).reduce((best, [key, score]) =>
       score > best.score ? { key, score } : best,
@@ -496,6 +504,7 @@ export class ConversationContextService {
         : 'Lead with value/pricing to engage the customer.',
       qualify: `${ctx.missingFields.length} key details still missing (${ctx.missingFields.slice(0, 3).join(', ')}). Gather info before quoting.`,
       hybrid: 'Balanced approach with pricing and qualification.',
+      phone: 'Complex job or high-intent lead — escalate to phone for accurate quoting.',
     };
 
     return {
