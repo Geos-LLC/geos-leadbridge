@@ -108,7 +108,7 @@ export class AiService {
     }
 
     parts.push('--- End Context ---');
-    parts.push('Use the context above to craft a personalized reply. Reference specific details (service type, frequency, add-ons, location, etc.) naturally — don\'t list them all back, but show you understand the request. If the customer wrote a detailed message, respond to what THEY said, not just the form data.');
+    parts.push('IMPORTANT: The Job details above are FACTS from the customer\'s original request. Do NOT ask about information already provided (e.g., if they said "Regular cleaning", do not ask if they want deep vs regular). Use these details as established facts and build your response on top of them. Reference specific details naturally. If the customer wrote a message, respond to what THEY said.');
 
     return parts.join('\n');
   }

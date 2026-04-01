@@ -123,14 +123,28 @@ export class AiController {
   private extractLeadDetails(rawJson: string): Record<string, string> {
     try {
       const raw = JSON.parse(rawJson);
-      const details: any[] = raw.request?.details || raw.details || [];
       const result: Record<string, string> = {};
 
+      // Thumbtack format: request.details[].question / .answer
+      const details: any[] = raw.request?.details || raw.details || [];
       for (const item of details) {
         if (item.question && item.answer) {
           result[String(item.question)] = String(item.answer);
         }
       }
+
+      // Yelp format: project.survey_answers[].question_text / .answer_text
+      const surveyAnswers: any[] = raw.project?.survey_answers || [];
+      for (const q of surveyAnswers) {
+        if (q.question_text && q.answer_text) {
+          const answer = Array.isArray(q.answer_text) ? q.answer_text.join(', ') : String(q.answer_text);
+          result[String(q.question_text)] = answer;
+        }
+      }
+
+      // Yelp: availability and additional info
+      if (raw.project?.availability?.status) result['Availability'] = raw.project.availability.status;
+      if (raw.project?.additional_info) result['Additional details'] = raw.project.additional_info;
 
       // Also pull top-level fields if present
       if (raw.request?.description) result['Description'] = raw.request.description;
