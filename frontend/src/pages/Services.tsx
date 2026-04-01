@@ -226,8 +226,8 @@ export function Services() {
     { label: '3rd follow-up', delay: '1 day' },
   ]);
   const [fuAvailability, setFuAvailability] = useState<'always' | 'active_hours'>('active_hours');
-  const [fuStart, setFuStart] = useState('09:00');
-  const [fuEnd, setFuEnd] = useState('21:00');
+  const [fuStart, setFuStart] = useState('18:00');
+  const [fuEnd, setFuEnd] = useState('09:00');
   const [fuTz, setFuTz] = useState('America/New_York');
   const [fuScenarios, setFuScenarios] = useState({
     hybrid: true,
@@ -2267,7 +2267,7 @@ export function Services() {
                           </button>
                           <button onClick={() => setFuAvailability('active_hours')}
                             className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'active_hours' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
-                            Only during active hours
+                            Set up active time
                           </button>
                         </div>
                       </>
@@ -2288,10 +2288,38 @@ export function Services() {
                           <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Timezone</label>
                           <select value={fuTz} onChange={e => setFuTz(e.target.value)}
                             className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
-                            <option value="America/New_York">Eastern</option>
-                            <option value="America/Chicago">Central</option>
-                            <option value="America/Denver">Mountain</option>
-                            <option value="America/Los_Angeles">Pacific</option>
+                            <optgroup label="US">
+                              <option value="America/New_York">Eastern (GMT-5)</option>
+                              <option value="America/Chicago">Central (GMT-6)</option>
+                              <option value="America/Denver">Mountain (GMT-7)</option>
+                              <option value="America/Los_Angeles">Pacific (GMT-8)</option>
+                            </optgroup>
+                            <optgroup label="GMT">
+                              <option value="Etc/GMT+0">GMT+0</option>
+                              <option value="Etc/GMT-1">GMT+1</option>
+                              <option value="Etc/GMT-2">GMT+2</option>
+                              <option value="Etc/GMT-3">GMT+3</option>
+                              <option value="Etc/GMT-4">GMT+4</option>
+                              <option value="Etc/GMT-5">GMT+5</option>
+                              <option value="Etc/GMT-6">GMT+6</option>
+                              <option value="Etc/GMT-7">GMT+7</option>
+                              <option value="Etc/GMT-8">GMT+8</option>
+                              <option value="Etc/GMT-9">GMT+9</option>
+                              <option value="Etc/GMT-10">GMT+10</option>
+                              <option value="Etc/GMT-11">GMT+11</option>
+                              <option value="Etc/GMT-12">GMT+12</option>
+                              <option value="Etc/GMT+1">GMT-1</option>
+                              <option value="Etc/GMT+2">GMT-2</option>
+                              <option value="Etc/GMT+3">GMT-3</option>
+                              <option value="Etc/GMT+4">GMT-4</option>
+                              <option value="Etc/GMT+5">GMT-5</option>
+                              <option value="Etc/GMT+6">GMT-6</option>
+                              <option value="Etc/GMT+7">GMT-7</option>
+                              <option value="Etc/GMT+8">GMT-8</option>
+                              <option value="Etc/GMT+9">GMT-9</option>
+                              <option value="Etc/GMT+10">GMT-10</option>
+                              <option value="Etc/GMT+11">GMT-11</option>
+                            </optgroup>
                           </select>
                         </div>
                       </div>
