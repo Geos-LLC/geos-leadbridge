@@ -26,7 +26,7 @@ import {
   MessageCircle,
   Sparkles,
 } from 'lucide-react';
-import { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, followUpApi, type MessageAttachment } from '../services/api';
+import { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, followUpApi, type MessageAttachment } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
@@ -180,7 +180,16 @@ export function Messages() {
   const [loading, setLoading] = useState(!_messagesLoaded && leads.length === 0);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
-  const [aiPreview, setAiPreview] = useState<Record<string, { loading: boolean; reply: string | null }>>({});
+  const [aiPreview, setAiPreview] = useState<Record<string, { loading: boolean; reply: string | null; contextMode?: string }>>({});
+  const [aiContextMode, setAiContextMode] = useState<'full' | 'light' | 'none'>('full');
+  const [strategySuggestion, setStrategySuggestion] = useState<{
+    suggested: string; reason: string; confidence: number; threadState: Record<string, any>;
+  } | null>(null);
+  const [strategySuggestionLoading, setStrategySuggestionLoading] = useState(false);
+  const [showContextPanel, setShowContextPanel] = useState(false);
+  const [threadContextData, setThreadContextData] = useState<{
+    systemContext: string; threadState: Record<string, any>;
+  } | null>(null);
   const AI_STRATEGIES = [
     { key: 'hybrid', label: 'Hybrid', emoji: '⚖️', prompt: 'Strategy: Hybrid\n\n- Provide a broad price range early\n- Immediately ask one clarifying question\n- Balance speed and accuracy\n- Adjust responses dynamically as more information is received' },
     { key: 'price', label: 'Price', emoji: '💰', prompt: 'Strategy: Price Anchor\n\n- Provide a realistic price range early in the conversation\n- Reduce uncertainty quickly\n- After giving range, ask 1 clarifying question\n- Avoid exact pricing unless enough details are provided\n- Keep explanation minimal' },
@@ -233,6 +242,22 @@ export function Messages() {
       ));
     }).catch(() => setFuSuggestions([]));
   }, [selectedLead?.id]);
+
+  // Load strategy suggestion when selected lead changes
+  useEffect(() => {
+    setStrategySuggestion(null);
+    setThreadContextData(null);
+    setShowContextPanel(false);
+    if (!selectedLead?.threadId) return;
+    setStrategySuggestionLoading(true);
+    conversationContextApi.suggestStrategy(selectedLead.threadId)
+      .then(res => {
+        if (res.success) setStrategySuggestion({ suggested: res.suggested, reason: res.reason, confidence: res.confidence, threadState: res.threadState });
+      })
+      .catch(() => {})
+      .finally(() => setStrategySuggestionLoading(false));
+  }, [selectedLead?.id]);
+
   const [sendChannel, setSendChannel] = useState<'platform' | 'sms'>('platform');
 
   // Mobile panel state: 'list' (leads), 'chat' (conversation), 'details' (lead details)
@@ -1450,36 +1475,72 @@ export function Messages() {
                     {/* AI Reply preview — inbound messages only, 4 strategy buttons */}
                     {event.direction === 'inbound' && event.content && (
                       <div className="mt-1">
-                        {/* Strategy buttons row */}
+                        {/* AI Suggestion badge (if this is the latest inbound) */}
+                        {strategySuggestion && event === filteredTimeline.filter(e => e.direction === 'inbound').at(-1) && (
+                          <div className="flex items-center gap-1.5 mb-1.5 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1 max-w-sm">
+                            <Sparkles size={10} className="text-amber-500" />
+                            <span className="text-[10px] text-amber-700">
+                              <strong>Suggested: {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.label || strategySuggestion.suggested}</strong>
+                              {' '}&mdash; {strategySuggestion.reason}
+                            </span>
+                            <span className="text-[9px] text-amber-400 ml-auto whitespace-nowrap">{Math.round(strategySuggestion.confidence * 100)}%</span>
+                          </div>
+                        )}
+
+                        {/* Context mode selector + strategy buttons row */}
                         <div className="flex items-center gap-1 flex-wrap">
                           <Sparkles size={10} className="text-violet-400" />
                           {AI_STRATEGIES.map(strategy => {
                             const previewKey = `${event.id}:${strategy.key}`;
                             const preview = aiPreview[previewKey];
+                            const isSuggested = strategySuggestion?.suggested === strategy.key;
                             return (
                               <button
                                 key={strategy.key}
                                 onClick={() => {
-                                  if (preview) return; // already loaded
-                                  const idx = timelineEvents.indexOf(event);
-                                  const history = timelineEvents.slice(0, idx)
-                                    .filter(e => e.content && (e.direction === 'inbound' || e.direction === 'outbound'))
-                                    .map(e => ({ role: (e.direction === 'inbound' ? 'customer' : 'pro') as 'customer' | 'pro', content: e.content! }));
+                                  if (preview) return;
                                   setAiPreview(prev => ({ ...prev, [previewKey]: { loading: true, reply: null } }));
-                                  aiApi.previewForLead(selectedLead!.id, event.content!, history, strategy.prompt)
-                                    .then(({ reply }) => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply } })))
-                                    .catch(() => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply: 'Failed to generate.' } })));
+                                  // Use context-aware endpoint if thread exists, otherwise fallback
+                                  if (selectedLead?.threadId && aiContextMode !== 'none') {
+                                    aiApi.previewWithContext(selectedLead.id, selectedLead.threadId, event.content!, strategy.prompt, aiContextMode)
+                                      .then(({ reply, contextMode }) => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply, contextMode } })))
+                                      .catch(() => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply: 'Failed to generate.' } })));
+                                  } else {
+                                    const idx = timelineEvents.indexOf(event);
+                                    const history = timelineEvents.slice(0, idx)
+                                      .filter(e => e.content && (e.direction === 'inbound' || e.direction === 'outbound'))
+                                      .map(e => ({ role: (e.direction === 'inbound' ? 'customer' : 'pro') as 'customer' | 'pro', content: e.content! }));
+                                    aiApi.previewForLead(selectedLead!.id, event.content!, history, strategy.prompt)
+                                      .then(({ reply }) => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply } })))
+                                      .catch(() => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply: 'Failed to generate.' } })));
+                                  }
                                 }}
                                 className={`text-[10px] px-1.5 py-0.5 rounded-md transition-colors ${
                                   preview?.reply ? 'bg-violet-100 text-violet-700 font-semibold' :
                                   preview?.loading ? 'bg-violet-50 text-violet-400' :
+                                  isSuggested ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50 ring-1 ring-amber-200' :
                                   'text-violet-400 hover:text-violet-600 hover:bg-violet-50'
                                 }`}
+                                title={isSuggested ? `AI suggests: ${strategySuggestion?.reason}` : undefined}
                               >
                                 {preview?.loading ? <Loader2 size={9} className="animate-spin inline" /> : strategy.emoji} {strategy.label}
+                                {isSuggested && !preview && ' *'}
                               </button>
                             );
                           })}
+                          {/* Context mode toggle */}
+                          {selectedLead?.threadId && (
+                            <select
+                              value={aiContextMode}
+                              onChange={e => setAiContextMode(e.target.value as 'full' | 'light' | 'none')}
+                              className="text-[9px] px-1 py-0.5 rounded border border-slate-200 text-slate-400 bg-white ml-1"
+                              title="Context mode for AI preview"
+                            >
+                              <option value="full">Full context</option>
+                              <option value="light">Light</option>
+                              <option value="none">No context</option>
+                            </select>
+                          )}
                         </div>
 
                         {/* Show loaded previews */}
@@ -1492,23 +1553,42 @@ export function Messages() {
                               <div className="flex items-center justify-between gap-2 mb-1">
                                 <span className="text-[10px] font-bold text-violet-500 uppercase tracking-widest">
                                   {strategy.emoji} {strategy.label}
+                                  {preview.contextMode && <span className="ml-1 text-slate-400 normal-case font-normal">({preview.contextMode})</span>}
                                 </span>
                                 <button onClick={() => setAiPreview(prev => { const n = { ...prev }; delete n[previewKey]; return n; })} className="text-violet-300 hover:text-violet-500">
                                   <X size={11} />
                                 </button>
                               </div>
                               <p className="text-xs text-slate-700 leading-relaxed">{preview.reply}</p>
-                              <button
-                                onClick={() => {
-                                  setMessageText(preview.reply || '');
-                                  const input = document.querySelector<HTMLTextAreaElement>('textarea[placeholder*="message"]');
-                                  if (input) { input.focus(); input.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
-                                }}
-                                className="mt-1.5 flex items-center gap-1 text-[10px] font-semibold text-violet-600 hover:text-violet-800 bg-violet-100 hover:bg-violet-200 px-2 py-1 rounded-lg transition-colors"
-                              >
-                                <ArrowRight size={10} />
-                                Use this reply
-                              </button>
+                              <div className="flex items-center gap-2 mt-1.5">
+                                <button
+                                  onClick={() => {
+                                    setMessageText(preview.reply || '');
+                                    const input = document.querySelector<HTMLInputElement>('input[placeholder*="message"]');
+                                    if (input) { input.focus(); input.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+                                  }}
+                                  className="flex items-center gap-1 text-[10px] font-semibold text-violet-600 hover:text-violet-800 bg-violet-100 hover:bg-violet-200 px-2 py-1 rounded-lg transition-colors"
+                                >
+                                  <ArrowRight size={10} />
+                                  Use this reply
+                                </button>
+                                {/* Regenerate with different context mode */}
+                                {selectedLead?.threadId && (
+                                  <button
+                                    onClick={() => {
+                                      setAiPreview(prev => ({ ...prev, [previewKey]: { loading: true, reply: null } }));
+                                      const nextMode = aiContextMode === 'full' ? 'light' : aiContextMode === 'light' ? 'none' : 'full';
+                                      aiApi.previewWithContext(selectedLead!.id, selectedLead!.threadId!, event.content!, strategy.prompt, nextMode)
+                                        .then(({ reply, contextMode }) => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply, contextMode } })))
+                                        .catch(() => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply: 'Failed to regenerate.' } })));
+                                    }}
+                                    className="text-[9px] text-slate-400 hover:text-violet-500 transition-colors"
+                                    title="Regenerate with different context"
+                                  >
+                                    <RefreshCw size={9} />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           );
                         })}
@@ -1620,6 +1700,81 @@ export function Messages() {
             </button>
             <h3 className="font-bold text-slate-900">Lead Details</h3>
           </div>
+
+          {/* AI Strategy Suggestion panel */}
+          {(strategySuggestion || strategySuggestionLoading) && (
+            <div className="p-3 border-b border-slate-100">
+              <div className="bg-gradient-to-r from-violet-50 to-amber-50 border border-violet-100 rounded-xl p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={14} className="text-violet-500" />
+                  <span className="text-xs font-bold text-violet-700 uppercase tracking-wider">AI Strategy</span>
+                </div>
+                {strategySuggestionLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <Loader2 size={12} className="animate-spin" /> Analyzing conversation...
+                  </div>
+                ) : strategySuggestion && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-slate-800">
+                        {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.emoji}{' '}
+                        {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.label || strategySuggestion.suggested}
+                      </span>
+                      <span className="text-[9px] bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full font-semibold">
+                        {Math.round(strategySuggestion.confidence * 100)}% match
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-relaxed">{strategySuggestion.reason}</p>
+                    {/* Thread state quick view */}
+                    <button
+                      onClick={() => {
+                        setShowContextPanel(!showContextPanel);
+                        if (!showContextPanel && !threadContextData && selectedLead?.threadId) {
+                          conversationContextApi.getAiContext(selectedLead.threadId).then(res => {
+                            if (res.success && res.context) {
+                              setThreadContextData({ systemContext: res.context.systemContext, threadState: res.context.threadState });
+                            }
+                          }).catch(() => {});
+                        }
+                      }}
+                      className="text-[10px] text-violet-500 hover:text-violet-700 font-semibold flex items-center gap-1"
+                    >
+                      {showContextPanel ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                      {showContextPanel ? 'Hide' : 'View'} thread context
+                    </button>
+                    {showContextPanel && (
+                      <div className="bg-white/70 rounded-lg p-2 space-y-1.5 text-[10px] text-slate-600 border border-violet-100/50">
+                        {strategySuggestion.threadState.stage && (
+                          <div><span className="font-semibold text-slate-500">Stage:</span> {strategySuggestion.threadState.stage}</div>
+                        )}
+                        {strategySuggestion.threadState.engagementLevel && strategySuggestion.threadState.engagementLevel !== 'unknown' && (
+                          <div><span className="font-semibold text-slate-500">Engagement:</span> {strategySuggestion.threadState.engagementLevel}</div>
+                        )}
+                        {strategySuggestion.threadState.priceDiscussed && (
+                          <div><span className="font-semibold text-slate-500">Price:</span> {strategySuggestion.threadState.priceRange || 'discussed'}</div>
+                        )}
+                        {strategySuggestion.threadState.missingFields?.length > 0 && (
+                          <div><span className="font-semibold text-slate-500">Missing:</span> {strategySuggestion.threadState.missingFields.join(', ')}</div>
+                        )}
+                        {strategySuggestion.threadState.lastQuestionAsked && (
+                          <div><span className="font-semibold text-slate-500">Last Q:</span> {strategySuggestion.threadState.lastQuestionAsked}</div>
+                        )}
+                        {strategySuggestion.threadState.totalMessages > 0 && (
+                          <div><span className="font-semibold text-slate-500">Messages:</span> {strategySuggestion.threadState.totalMessages}</div>
+                        )}
+                        {threadContextData?.systemContext && (
+                          <details className="mt-1">
+                            <summary className="text-[9px] text-violet-400 cursor-pointer hover:text-violet-600">Full AI context</summary>
+                            <pre className="mt-1 text-[9px] text-slate-500 whitespace-pre-wrap bg-slate-50 rounded p-1.5 max-h-32 overflow-y-auto">{threadContextData.systemContext}</pre>
+                          </details>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Follow-up suggestion card */}
           {fuSuggestions.length > 0 && (

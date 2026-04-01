@@ -492,6 +492,40 @@ export const aiApi = {
     const { data } = await api.post('/v1/ai/preview-for-lead', { leadId, customerMessage, conversationHistory, strategyPrompt });
     return data;
   },
+  previewWithContext: async (
+    leadId: string,
+    conversationId: string,
+    customerMessage: string,
+    strategyPrompt?: string,
+    contextMode?: 'full' | 'light' | 'none',
+  ): Promise<{ reply: string; contextMode: string }> => {
+    const { data } = await api.post('/v1/ai/preview-with-context', { leadId, conversationId, customerMessage, strategyPrompt, contextMode });
+    return data;
+  },
+};
+
+export const conversationContextApi = {
+  suggestStrategy: async (conversationId: string): Promise<{
+    success: boolean;
+    suggested: string;
+    reason: string;
+    confidence: number;
+    threadState: Record<string, any>;
+  }> => {
+    const { data } = await api.get(`/v1/conversation-context/${conversationId}/suggest-strategy`);
+    return data;
+  },
+  getAiContext: async (conversationId: string): Promise<{
+    success: boolean;
+    context: {
+      systemContext: string;
+      recentMessages: Array<{ role: 'customer' | 'pro'; content: string }>;
+      threadState: Record<string, any>;
+    } | null;
+  }> => {
+    const { data } = await api.get(`/v1/conversation-context/${conversationId}/ai-context`);
+    return data;
+  },
 };
 
 export const automationApi = {

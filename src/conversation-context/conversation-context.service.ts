@@ -417,6 +417,88 @@ export class ConversationContextService {
   }
 
   /**
+   * Suggest the best strategy based on thread state (rule-based v1).
+   * Returns suggested strategy key, reason, and confidence.
+   */
+  async suggestStrategy(conversationId: string): Promise<{
+    suggested: string;
+    reason: string;
+    confidence: number;
+    threadState: Record<string, any>;
+  } | null> {
+    const ctx = await this.getContext(conversationId, 3);
+    if (!ctx) return null;
+
+    const state = {
+      stage: ctx.stage,
+      customerIntent: ctx.customerIntent,
+      engagementLevel: ctx.engagementLevel,
+      priceDiscussed: ctx.priceDiscussed,
+      priceRange: ctx.priceRange,
+      missingFields: ctx.missingFields,
+      lastQuestionAsked: ctx.lastQuestionAsked,
+      awaitingCustomerReply: ctx.awaitingCustomerReply,
+      followUpCount: ctx.followUpCount,
+      totalMessages: ctx.totalMessages,
+      activeStrategy: ctx.activeStrategy,
+    };
+
+    // Rule-based suggestion engine
+    // Priority: hot→Convert, price_shopping+!priceDiscussed→Price, missingFields→Qualify, default→Hybrid
+    if (ctx.engagementLevel === 'hot') {
+      return {
+        suggested: 'convert',
+        reason: 'Customer shows strong buying signals — focus on booking or next step.',
+        confidence: 0.85,
+        threadState: state,
+      };
+    }
+
+    if (ctx.customerIntent === 'price_shopping' && !ctx.priceDiscussed) {
+      return {
+        suggested: 'price',
+        reason: 'Customer is comparing prices and no pricing has been shared yet.',
+        confidence: 0.8,
+        threadState: state,
+      };
+    }
+
+    if (ctx.missingFields.length >= 2) {
+      return {
+        suggested: 'qualify',
+        reason: `${ctx.missingFields.length} key details still missing (${ctx.missingFields.slice(0, 3).join(', ')}). Gather info before quoting.`,
+        confidence: 0.75,
+        threadState: state,
+      };
+    }
+
+    if (ctx.engagementLevel === 'cold') {
+      return {
+        suggested: 'price',
+        reason: 'Customer engagement is low — lead with value/pricing to re-engage.',
+        confidence: 0.6,
+        threadState: state,
+      };
+    }
+
+    if (ctx.stage === 'quoting' || ctx.priceDiscussed) {
+      return {
+        suggested: 'convert',
+        reason: 'Pricing already discussed — shift focus toward booking.',
+        confidence: 0.7,
+        threadState: state,
+      };
+    }
+
+    return {
+      suggested: 'hybrid',
+      reason: 'General conversation — balanced approach with pricing and qualification.',
+      confidence: 0.5,
+      threadState: state,
+    };
+  }
+
+  /**
    * Force summary regeneration (bypasses throttle). Used by admin/debug endpoint.
    */
   async forceSummaryUpdate(conversationId: string): Promise<void> {

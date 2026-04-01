@@ -86,6 +86,16 @@ export class ConversationContextController {
   }
 
   /**
+   * Suggest best strategy for a conversation based on thread state.
+   */
+  @Get(':conversationId/suggest-strategy')
+  async suggestStrategy(@Param('conversationId') conversationId: string) {
+    const suggestion = await this.contextService.suggestStrategy(conversationId);
+    if (!suggestion) return { success: false, error: 'No thread context found' };
+    return { success: true, ...suggestion };
+  }
+
+  /**
    * Force summary regeneration for a thread.
    */
   @Post(':conversationId/regenerate-summary')
