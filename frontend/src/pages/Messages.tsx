@@ -185,11 +185,12 @@ export function Messages() {
   const [strategySuggestion, setStrategySuggestion] = useState<{
     suggested: string; reason: string; confidence: number; threadState: Record<string, any>;
   } | null>(null);
-  const [strategySuggestionLoading, setStrategySuggestionLoading] = useState(false);
-  const [showContextPanel, setShowContextPanel] = useState(false);
+  const [, setStrategySuggestionLoading] = useState(false);
   const [threadContextData, setThreadContextData] = useState<{
     systemContext: string; threadState: Record<string, any>;
   } | null>(null);
+  const [aiPopoverEventId, setAiPopoverEventId] = useState<string | null>(null);
+  const [aiPopoverSections, setAiPopoverSections] = useState<Record<string, boolean>>({});
   const AI_STRATEGIES = [
     { key: 'hybrid', label: 'Hybrid', emoji: '⚖️', prompt: 'Strategy: Hybrid\n\n- Provide a broad price range early\n- Immediately ask one clarifying question\n- Balance speed and accuracy\n- Adjust responses dynamically as more information is received' },
     { key: 'price', label: 'Price', emoji: '💰', prompt: 'Strategy: Price Anchor\n\n- Provide a realistic price range early in the conversation\n- Reduce uncertainty quickly\n- After giving range, ask 1 clarifying question\n- Avoid exact pricing unless enough details are provided\n- Keep explanation minimal' },
@@ -247,7 +248,7 @@ export function Messages() {
   useEffect(() => {
     setStrategySuggestion(null);
     setThreadContextData(null);
-    setShowContextPanel(false);
+    setAiPopoverEventId(null);
     if (!selectedLead?.threadId) return;
     setStrategySuggestionLoading(true);
     conversationContextApi.suggestStrategy(selectedLead.threadId)
@@ -1474,20 +1475,8 @@ export function Messages() {
 
                     {/* AI Reply preview — inbound messages only, 4 strategy buttons */}
                     {event.direction === 'inbound' && event.content && (
-                      <div className="mt-1">
-                        {/* AI Suggestion badge (if this is the latest inbound) */}
-                        {strategySuggestion && event === filteredTimeline.filter(e => e.direction === 'inbound').at(-1) && (
-                          <div className="flex items-center gap-1.5 mb-1.5 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1 max-w-sm">
-                            <Sparkles size={10} className="text-amber-500" />
-                            <span className="text-[10px] text-amber-700">
-                              <strong>Suggested: {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.label || strategySuggestion.suggested}</strong>
-                              {' '}&mdash; {strategySuggestion.reason}
-                            </span>
-                            <span className="text-[9px] text-amber-400 ml-auto whitespace-nowrap">{Math.round(strategySuggestion.confidence * 100)}%</span>
-                          </div>
-                        )}
-
-                        {/* Context mode selector + strategy buttons row */}
+                      <div className="mt-1 relative">
+                        {/* Strategy buttons row */}
                         <div className="flex items-center gap-1 flex-wrap">
                           <Sparkles size={10} className="text-violet-400" />
                           {AI_STRATEGIES.map(strategy => {
@@ -1500,7 +1489,6 @@ export function Messages() {
                                 onClick={() => {
                                   if (preview) return;
                                   setAiPreview(prev => ({ ...prev, [previewKey]: { loading: true, reply: null } }));
-                                  // Use context-aware endpoint if thread exists, otherwise fallback
                                   if (selectedLead?.threadId && aiContextMode !== 'none') {
                                     aiApi.previewWithContext(selectedLead.id, selectedLead.threadId, event.content!, strategy.prompt, aiContextMode)
                                       .then(({ reply, contextMode }) => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply, contextMode } })))
@@ -1528,20 +1516,214 @@ export function Messages() {
                               </button>
                             );
                           })}
-                          {/* Context mode toggle */}
+                          {/* Context popover trigger */}
                           {selectedLead?.threadId && (
-                            <select
-                              value={aiContextMode}
-                              onChange={e => setAiContextMode(e.target.value as 'full' | 'light' | 'none')}
-                              className="text-[9px] px-1 py-0.5 rounded border border-slate-200 text-slate-400 bg-white ml-1"
-                              title="Context mode for AI preview"
+                            <button
+                              onClick={() => {
+                                const opening = aiPopoverEventId !== event.id;
+                                setAiPopoverEventId(opening ? event.id : null);
+                                if (opening && !threadContextData) {
+                                  conversationContextApi.getAiContext(selectedLead!.threadId!).then(res => {
+                                    if (res.success && res.context) {
+                                      setThreadContextData({ systemContext: res.context.systemContext, threadState: res.context.threadState });
+                                    }
+                                  }).catch(() => {});
+                                }
+                              }}
+                              className={`text-[10px] px-1 py-0.5 rounded-md transition-colors ml-0.5 flex items-center gap-0.5 ${
+                                aiPopoverEventId === event.id ? 'bg-violet-100 text-violet-700' : 'text-slate-400 hover:text-violet-500 hover:bg-violet-50'
+                              }`}
+                              title="AI context & settings"
                             >
-                              <option value="full">Full context</option>
-                              <option value="light">Light</option>
-                              <option value="none">No context</option>
-                            </select>
+                              <ChevronDown size={9} className={`transition-transform ${aiPopoverEventId === event.id ? 'rotate-180' : ''}`} />
+                            </button>
                           )}
                         </div>
+
+                        {/* ===== Context Popover (5 sections) ===== */}
+                        {aiPopoverEventId === event.id && selectedLead?.threadId && (
+                          <div className="absolute left-0 top-full mt-1 z-20 w-72 bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden text-xs">
+
+                            {/* Section 1 — Mode */}
+                            <div className="border-b border-slate-100">
+                              <button
+                                onClick={() => setAiPopoverSections(p => ({ ...p, mode: !p.mode }))}
+                                className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                              >
+                                <span>Mode</span>
+                                <ChevronRight size={11} className={`transition-transform text-slate-400 ${aiPopoverSections.mode ? 'rotate-90' : ''}`} />
+                              </button>
+                              {aiPopoverSections.mode && (
+                                <div className="px-3 pb-2 space-y-1">
+                                  {(['full', 'light', 'none'] as const).map(mode => (
+                                    <label key={mode} className="flex items-center gap-2 cursor-pointer text-[11px] text-slate-600 hover:text-slate-800">
+                                      <input
+                                        type="radio"
+                                        name="aiContextMode"
+                                        checked={aiContextMode === mode}
+                                        onChange={() => setAiContextMode(mode)}
+                                        className="accent-violet-600 w-3 h-3"
+                                      />
+                                      {mode === 'full' ? 'Full context' : mode === 'light' ? 'Light context' : 'No context'}
+                                      {mode === 'full' && aiContextMode !== 'full' && <span className="text-[9px] text-slate-400">(default)</span>}
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Section 2 — Why this answer */}
+                            {strategySuggestion && (
+                              <div className="border-b border-slate-100 px-3 py-2">
+                                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Why this answer</div>
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <span className="text-[11px] font-semibold text-slate-800">
+                                    Suggested: {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.emoji}{' '}
+                                    {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.label}
+                                  </span>
+                                  <span className="text-[9px] bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full font-semibold">
+                                    {Math.round(strategySuggestion.confidence * 100)}%
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 leading-relaxed">{strategySuggestion.reason}</p>
+                              </div>
+                            )}
+
+                            {/* Section 3 — Context */}
+                            <div className="border-b border-slate-100">
+                              <button
+                                onClick={() => setAiPopoverSections(p => ({ ...p, context: !p.context }))}
+                                className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                              >
+                                <span>Context</span>
+                                <ChevronRight size={11} className={`transition-transform text-slate-400 ${aiPopoverSections.context ? 'rotate-90' : ''}`} />
+                              </button>
+                              {aiPopoverSections.context && (
+                                <div className="px-3 pb-2 space-y-1.5">
+                                  {strategySuggestion?.threadState && (
+                                    <>
+                                      {threadContextData?.systemContext && (
+                                        <div>
+                                          <div className="text-[10px] font-semibold text-slate-500 mb-0.5">Summary:</div>
+                                          <p className="text-[10px] text-slate-600 italic leading-relaxed">
+                                            {threadContextData.systemContext.split('\n').find(l => l.startsWith('Conversation summary:'))?.replace('Conversation summary: ', '') || 'No summary yet'}
+                                          </p>
+                                        </div>
+                                      )}
+                                      <div>
+                                        <div className="text-[10px] font-semibold text-slate-500 mb-0.5">State:</div>
+                                        <ul className="text-[10px] text-slate-600 space-y-0.5 list-none">
+                                          {strategySuggestion.threadState.awaitingCustomerReply !== undefined && (
+                                            <li>- awaiting reply: {strategySuggestion.threadState.awaitingCustomerReply ? 'yes' : 'no'}</li>
+                                          )}
+                                          <li>- price discussed: {strategySuggestion.threadState.priceDiscussed ? (strategySuggestion.threadState.priceRange || 'yes') : 'no'}</li>
+                                          {strategySuggestion.threadState.missingFields?.length > 0 && (
+                                            <li>- missing: {strategySuggestion.threadState.missingFields.join(', ')}</li>
+                                          )}
+                                          {strategySuggestion.threadState.stage && (
+                                            <li>- stage: {strategySuggestion.threadState.stage}</li>
+                                          )}
+                                          {strategySuggestion.threadState.engagementLevel && strategySuggestion.threadState.engagementLevel !== 'unknown' && (
+                                            <li>- engagement: {strategySuggestion.threadState.engagementLevel}</li>
+                                          )}
+                                        </ul>
+                                      </div>
+                                    </>
+                                  )}
+                                  {threadContextData?.systemContext && (
+                                    <details className="mt-1">
+                                      <summary className="text-[10px] text-violet-500 cursor-pointer hover:text-violet-700 font-semibold flex items-center gap-1">
+                                        <ArrowRight size={9} /> View full context
+                                      </summary>
+                                      <pre className="mt-1 text-[9px] text-slate-500 whitespace-pre-wrap bg-slate-50 rounded-lg p-2 max-h-40 overflow-y-auto border border-slate-100">{threadContextData.systemContext}</pre>
+                                    </details>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Section 4 — Prompt */}
+                            <div className="border-b border-slate-100">
+                              <button
+                                onClick={() => setAiPopoverSections(p => ({ ...p, prompt: !p.prompt }))}
+                                className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                              >
+                                <span>Prompt</span>
+                                <ChevronRight size={11} className={`transition-transform text-slate-400 ${aiPopoverSections.prompt ? 'rotate-90' : ''}`} />
+                              </button>
+                              {aiPopoverSections.prompt && (
+                                <div className="px-3 pb-2 space-y-1">
+                                  <div className="text-[10px] text-slate-600">
+                                    <span className="font-semibold text-slate-500">Strategy:</span>{' '}
+                                    {strategySuggestion ? (AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.label || 'Hybrid') : 'Hybrid'}
+                                  </div>
+                                  <div className="text-[10px] text-slate-600">
+                                    <span className="font-semibold text-slate-500">Objective:</span>{' '}
+                                    {strategySuggestion?.suggested === 'price' ? 'initial pricing + re-engagement' :
+                                     strategySuggestion?.suggested === 'qualify' ? 'gather missing details before quoting' :
+                                     strategySuggestion?.suggested === 'convert' ? 'move toward booking or next step' :
+                                     'initial pricing + qualification'}
+                                  </div>
+                                  {strategySuggestion && (
+                                    <details className="mt-1">
+                                      <summary className="text-[10px] text-violet-500 cursor-pointer hover:text-violet-700 font-semibold flex items-center gap-1">
+                                        <ArrowRight size={9} /> View full prompt
+                                      </summary>
+                                      <pre className="mt-1 text-[9px] text-slate-500 whitespace-pre-wrap bg-slate-50 rounded-lg p-2 max-h-32 overflow-y-auto border border-slate-100">
+                                        {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.prompt || 'No prompt available'}
+                                      </pre>
+                                    </details>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Section 5 — Regenerate */}
+                            {Object.keys(aiPreview).some(k => k.startsWith(event.id + ':') && aiPreview[k]?.reply) && (
+                              <div className="px-3 py-2">
+                                <div className="text-[10px] font-semibold text-slate-500 mb-1.5">Regenerate with:</div>
+                                <div className="flex items-center gap-1.5">
+                                  {(['full', 'light', 'none'] as const).map(mode => (
+                                    <button
+                                      key={mode}
+                                      onClick={() => {
+                                        setAiContextMode(mode);
+                                        // Regenerate all loaded previews for this event with new mode
+                                        AI_STRATEGIES.forEach(strategy => {
+                                          const pk = `${event.id}:${strategy.key}`;
+                                          if (aiPreview[pk]?.reply) {
+                                            setAiPreview(prev => ({ ...prev, [pk]: { loading: true, reply: null } }));
+                                            if (mode !== 'none') {
+                                              aiApi.previewWithContext(selectedLead!.id, selectedLead!.threadId!, event.content!, strategy.prompt, mode)
+                                                .then(({ reply, contextMode }) => setAiPreview(prev => ({ ...prev, [pk]: { loading: false, reply, contextMode } })))
+                                                .catch(() => setAiPreview(prev => ({ ...prev, [pk]: { loading: false, reply: 'Failed.' } })));
+                                            } else {
+                                              const idx = timelineEvents.indexOf(event);
+                                              const history = timelineEvents.slice(0, idx)
+                                                .filter(e => e.content && (e.direction === 'inbound' || e.direction === 'outbound'))
+                                                .map(e => ({ role: (e.direction === 'inbound' ? 'customer' : 'pro') as 'customer' | 'pro', content: e.content! }));
+                                              aiApi.previewForLead(selectedLead!.id, event.content!, history, strategy.prompt)
+                                                .then(({ reply }) => setAiPreview(prev => ({ ...prev, [pk]: { loading: false, reply } })))
+                                                .catch(() => setAiPreview(prev => ({ ...prev, [pk]: { loading: false, reply: 'Failed.' } })));
+                                            }
+                                          }
+                                        });
+                                        setAiPopoverEventId(null);
+                                      }}
+                                      className={`text-[10px] px-2.5 py-1 rounded-lg font-semibold transition-colors ${
+                                        aiContextMode === mode
+                                          ? 'bg-violet-100 text-violet-700'
+                                          : 'bg-slate-100 text-slate-500 hover:bg-violet-50 hover:text-violet-600'
+                                      }`}
+                                    >
+                                      {mode === 'full' ? 'Full' : mode === 'light' ? 'Light' : 'None'}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         {/* Show loaded previews */}
                         {AI_STRATEGIES.map(strategy => {
@@ -1572,22 +1754,6 @@ export function Messages() {
                                   <ArrowRight size={10} />
                                   Use this reply
                                 </button>
-                                {/* Regenerate with different context mode */}
-                                {selectedLead?.threadId && (
-                                  <button
-                                    onClick={() => {
-                                      setAiPreview(prev => ({ ...prev, [previewKey]: { loading: true, reply: null } }));
-                                      const nextMode = aiContextMode === 'full' ? 'light' : aiContextMode === 'light' ? 'none' : 'full';
-                                      aiApi.previewWithContext(selectedLead!.id, selectedLead!.threadId!, event.content!, strategy.prompt, nextMode)
-                                        .then(({ reply, contextMode }) => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply, contextMode } })))
-                                        .catch(() => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply: 'Failed to regenerate.' } })));
-                                    }}
-                                    className="text-[9px] text-slate-400 hover:text-violet-500 transition-colors"
-                                    title="Regenerate with different context"
-                                  >
-                                    <RefreshCw size={9} />
-                                  </button>
-                                )}
                               </div>
                             </div>
                           );
@@ -1700,81 +1866,6 @@ export function Messages() {
             </button>
             <h3 className="font-bold text-slate-900">Lead Details</h3>
           </div>
-
-          {/* AI Strategy Suggestion panel */}
-          {(strategySuggestion || strategySuggestionLoading) && (
-            <div className="p-3 border-b border-slate-100">
-              <div className="bg-gradient-to-r from-violet-50 to-amber-50 border border-violet-100 rounded-xl p-3 space-y-2">
-                <div className="flex items-center gap-2">
-                  <Sparkles size={14} className="text-violet-500" />
-                  <span className="text-xs font-bold text-violet-700 uppercase tracking-wider">AI Strategy</span>
-                </div>
-                {strategySuggestionLoading ? (
-                  <div className="flex items-center gap-2 text-xs text-slate-400">
-                    <Loader2 size={12} className="animate-spin" /> Analyzing conversation...
-                  </div>
-                ) : strategySuggestion && (
-                  <>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-slate-800">
-                        {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.emoji}{' '}
-                        {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.label || strategySuggestion.suggested}
-                      </span>
-                      <span className="text-[9px] bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full font-semibold">
-                        {Math.round(strategySuggestion.confidence * 100)}% match
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-600 leading-relaxed">{strategySuggestion.reason}</p>
-                    {/* Thread state quick view */}
-                    <button
-                      onClick={() => {
-                        setShowContextPanel(!showContextPanel);
-                        if (!showContextPanel && !threadContextData && selectedLead?.threadId) {
-                          conversationContextApi.getAiContext(selectedLead.threadId).then(res => {
-                            if (res.success && res.context) {
-                              setThreadContextData({ systemContext: res.context.systemContext, threadState: res.context.threadState });
-                            }
-                          }).catch(() => {});
-                        }
-                      }}
-                      className="text-[10px] text-violet-500 hover:text-violet-700 font-semibold flex items-center gap-1"
-                    >
-                      {showContextPanel ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-                      {showContextPanel ? 'Hide' : 'View'} thread context
-                    </button>
-                    {showContextPanel && (
-                      <div className="bg-white/70 rounded-lg p-2 space-y-1.5 text-[10px] text-slate-600 border border-violet-100/50">
-                        {strategySuggestion.threadState.stage && (
-                          <div><span className="font-semibold text-slate-500">Stage:</span> {strategySuggestion.threadState.stage}</div>
-                        )}
-                        {strategySuggestion.threadState.engagementLevel && strategySuggestion.threadState.engagementLevel !== 'unknown' && (
-                          <div><span className="font-semibold text-slate-500">Engagement:</span> {strategySuggestion.threadState.engagementLevel}</div>
-                        )}
-                        {strategySuggestion.threadState.priceDiscussed && (
-                          <div><span className="font-semibold text-slate-500">Price:</span> {strategySuggestion.threadState.priceRange || 'discussed'}</div>
-                        )}
-                        {strategySuggestion.threadState.missingFields?.length > 0 && (
-                          <div><span className="font-semibold text-slate-500">Missing:</span> {strategySuggestion.threadState.missingFields.join(', ')}</div>
-                        )}
-                        {strategySuggestion.threadState.lastQuestionAsked && (
-                          <div><span className="font-semibold text-slate-500">Last Q:</span> {strategySuggestion.threadState.lastQuestionAsked}</div>
-                        )}
-                        {strategySuggestion.threadState.totalMessages > 0 && (
-                          <div><span className="font-semibold text-slate-500">Messages:</span> {strategySuggestion.threadState.totalMessages}</div>
-                        )}
-                        {threadContextData?.systemContext && (
-                          <details className="mt-1">
-                            <summary className="text-[9px] text-violet-400 cursor-pointer hover:text-violet-600">Full AI context</summary>
-                            <pre className="mt-1 text-[9px] text-slate-500 whitespace-pre-wrap bg-slate-50 rounded p-1.5 max-h-32 overflow-y-auto">{threadContextData.systemContext}</pre>
-                          </details>
-                        )}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Follow-up suggestion card */}
           {fuSuggestions.length > 0 && (
