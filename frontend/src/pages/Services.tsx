@@ -237,7 +237,7 @@ export function Services() {
     convert: true,
     phone: true,
   });
-  const [fuStopOnReply, setFuStopOnReply] = useState(true);
+  const fuStopOnReply = true; // always on — internal rule, not user-configurable
   const [fuStopOnOptOut, setFuStopOnOptOut] = useState(true);
   const [fuStopOnBooked, setFuStopOnBooked] = useState(true);
   const [fuOnNo, setFuOnNo] = useState<'stop' | 'retry'>('retry');
@@ -366,7 +366,7 @@ export function Services() {
         if (s.followUpAvailability) setFuAvailability(s.followUpAvailability);
         if (s.followUpStrategyMode) setFuStrategyMode(s.followUpStrategyMode);
         if (s.followUpScenarios) setFuScenarios(s.followUpScenarios);
-        if (s.followUpStopOnReply !== undefined) setFuStopOnReply(s.followUpStopOnReply);
+        // fuStopOnReply is always true (internal rule)
         if (s.followUpStopOnOptOut !== undefined) setFuStopOnOptOut(s.followUpStopOnOptOut);
         if (s.followUpStopOnBooked !== undefined) setFuStopOnBooked(s.followUpStopOnBooked);
         if (s.followUpOnNo) setFuOnNo(s.followUpOnNo);
@@ -2418,14 +2418,16 @@ export function Services() {
                     </button>
                     {fuShowRules && (
                       <div className="px-4 py-4 space-y-4 border-t border-slate-100">
-                        {/* Stop rules */}
+                        {/* Stop on reply — informational, always on */}
+                        <div className="flex items-center gap-2 text-sm text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+                          <span className="text-emerald-500">&#10003;</span>
+                          Follow-ups stop automatically when the customer replies
+                        </div>
+
+                        {/* Configurable stop rules */}
                         <div>
-                          <div className="text-[11px] font-semibold text-slate-600 mb-2">Stop automatic follow-ups when</div>
+                          <div className="text-[11px] font-semibold text-slate-600 mb-2">Also stop when</div>
                           <div className="space-y-1.5">
-                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                              <input type="checkbox" checked={fuStopOnReply} onChange={e => setFuStopOnReply(e.target.checked)} className="accent-blue-600 w-3.5 h-3.5" />
-                              Customer replies
-                            </label>
                             <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
                               <input type="checkbox" checked={fuStopOnOptOut} onChange={e => setFuStopOnOptOut(e.target.checked)} className="accent-blue-600 w-3.5 h-3.5" />
                               Customer asks to stop
