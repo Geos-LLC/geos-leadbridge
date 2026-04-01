@@ -310,6 +310,34 @@ export class UsersService {
   }
 
   /**
+   * Get service pricing config for a saved account
+   */
+  async getServicePricing(userId: string, accountId: string) {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: accountId, userId },
+      select: { servicePricingJson: true },
+    });
+    if (!account) throw new NotFoundException('Account not found');
+    const pricing = account.servicePricingJson ? JSON.parse(account.servicePricingJson) : null;
+    return { success: true, pricing };
+  }
+
+  /**
+   * Save service pricing config for a saved account
+   */
+  async updateServicePricing(userId: string, accountId: string, pricing: any) {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: accountId, userId },
+    });
+    if (!account) throw new NotFoundException('Account not found');
+    await this.prisma.savedAccount.update({
+      where: { id: accountId },
+      data: { servicePricingJson: JSON.stringify(pricing) },
+    });
+    return { success: true };
+  }
+
+  /**
    * Delete the current user's own account
    */
   async deleteOwnAccount(userId: string) {

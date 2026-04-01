@@ -1,0 +1,286 @@
+/**
+ * Follow-Up Generator Service
+ *
+ * Generation flow:
+ *   thread context → suggestStrategy() → strategy prompt → step objective flavor → final message
+ *
+ * Uses the same strategy prompts as Lead Activity preview buttons.
+ * Step objectives (quick_check_in, value_add, etc.) act as flavor modifiers
+ * on top of the selected strategy, not as a separate prompt system.
+ *
+ * Respects:
+ *   - Manual strategy override (activeStrategy on ThreadContext wins over suggestion)
+ *   - Enabled strategies from account settings (fuScenarios)
+ *   - Platform-agnostic (Yelp, Thumbtack, future platforms)
+ */
+
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../common/utils/prisma.service';
+import { ConversationContextService } from '../conversation-context/conversation-context.service';
+import { STRATEGY_PROMPTS, OBJECTIVE_FLAVORS } from '../ai/strategy-prompts';
+import OpenAI from 'openai';
+
+export interface SequenceStep {
+  stepOrder: number;
+  delayMinutes: number;
+  objective: string;
+  messageTemplate?: string | null;
+}
+
+export interface GeneratedFollowUp {
+  message: string;
+  objective: string;
+  strategyUsed: string | null;
+}
+
+@Injectable()
+export class FollowUpGeneratorService {
+  private readonly logger = new Logger(FollowUpGeneratorService.name);
+  private _openai: OpenAI | null = null;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+    private readonly conversationContext: ConversationContextService,
+  ) {}
+
+  private get openai(): OpenAI | null {
+    if (!this._openai) {
+      const apiKey = this.configService.get<string>('OPENAI_API_KEY');
+      if (!apiKey) return null;
+      this._openai = new OpenAI({ apiKey });
+    }
+    return this._openai;
+  }
+
+  /**
+   * Generate a follow-up message for a step.
+   *
+   * Flow: thread context → suggestStrategy() → strategy prompt → objective flavor → message
+   */
+  async generateMessage(
+    step: SequenceStep,
+    conversationId: string,
+    generationMode: string,
+    promptTemplateId?: string | null,
+  ): Promise<GeneratedFollowUp> {
+    if (generationMode === 'template' && step.messageTemplate) {
+      return this.generateFromTemplate(step);
+    }
+
+    return this.generateFromAI(step, conversationId, promptTemplateId);
+  }
+
+  private async generateFromTemplate(step: SequenceStep): Promise<GeneratedFollowUp> {
+    const message = step.messageTemplate || `Following up on your request.`;
+    return { message, objective: step.objective, strategyUsed: null };
+  }
+
+  private async generateFromAI(
+    step: SequenceStep,
+    conversationId: string,
+    promptTemplateId?: string | null,
+  ): Promise<GeneratedFollowUp> {
+    if (!this.openai) {
+      this.logger.warn('OpenAI not configured — using fallback template');
+      return this.generateFromTemplate(step);
+    }
+
+    // Step 1: Load thread context
+    const context = await this.conversationContext.buildContext(conversationId, { recentMessageLimit: 5 });
+    const threadState = await this.conversationContext.getThreadState(conversationId);
+
+    // Step 2: Determine strategy
+    //   Priority: manual override (activeStrategy) > suggestStrategy() > fallback 'hybrid'
+    let strategyKey = 'hybrid';
+    let strategyReason = '';
+
+    if (threadState?.activeStrategy && STRATEGY_PROMPTS[threadState.activeStrategy]) {
+      // Manual override from user — respect it
+      strategyKey = threadState.activeStrategy;
+      strategyReason = 'manual override';
+    } else {
+      // Use suggestStrategy() to pick the best strategy from thread context
+      const suggestion = await this.conversationContext.suggestStrategy(conversationId);
+      if (suggestion) {
+        // Filter by enabled strategies in account settings
+        const enabledStrategies = await this.getEnabledStrategies(conversationId);
+        if (enabledStrategies && enabledStrategies.includes(suggestion.suggested)) {
+          strategyKey = suggestion.suggested;
+          strategyReason = suggestion.reason;
+        } else if (enabledStrategies) {
+          // Suggested strategy is disabled — pick the highest-scoring enabled one
+          const bestEnabled = Object.entries(suggestion.scores)
+            .filter(([key]) => enabledStrategies.includes(key))
+            .sort(([, a], [, b]) => b - a)[0];
+          if (bestEnabled) {
+            strategyKey = bestEnabled[0];
+            strategyReason = `fallback (${suggestion.suggested} disabled)`;
+          }
+        } else {
+          strategyKey = suggestion.suggested;
+          strategyReason = suggestion.reason;
+        }
+      }
+    }
+
+    const strategyPrompt = STRATEGY_PROMPTS[strategyKey] || STRATEGY_PROMPTS.hybrid;
+    const objectiveFlavor = OBJECTIVE_FLAVORS[step.objective] || '';
+
+    this.logger.log(`[FollowUpGenerator] Strategy: ${strategyKey} (${strategyReason}), objective: ${step.objective}`);
+
+    // Step 3: Load pricing context if available
+    let pricingContext = '';
+    const lead = await this.prisma.lead.findFirst({
+      where: { threadId: conversationId },
+      select: { customerName: true, category: true, city: true, state: true, businessId: true, userId: true },
+    });
+    if (lead?.businessId) {
+      const account = await this.prisma.savedAccount.findFirst({
+        where: { userId: lead.userId, businessId: lead.businessId },
+        select: { servicePricingJson: true },
+      });
+      if (account?.servicePricingJson) {
+        try {
+          const p = JSON.parse(account.servicePricingJson);
+          const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
+          if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
+            const priceParts = ['Pricing: '];
+            for (const row of p.priceTable.slice(0, 8)) {
+              const prices = enabledTypes.map((t: any) => `${t.label}: $${row[t.key] || '?'}`).join(', ');
+              priceParts.push(`  ${row.bed}BR/${row.bath}BA — ${prices}`);
+            }
+            pricingContext = priceParts.join('\n');
+          }
+        } catch { /* invalid JSON */ }
+      }
+    }
+
+    // Step 4: Load custom prompt template if specified
+    let customPrompt = '';
+    if (promptTemplateId) {
+      const template = await this.prisma.messageTemplate.findUnique({ where: { id: promptTemplateId } });
+      if (template?.content) customPrompt = template.content;
+    }
+
+    // Step 5: Load global AI prompt
+    let globalPrompt = '';
+    if (lead?.userId) {
+      const user = await this.prisma.user.findUnique({ where: { id: lead.userId }, select: { globalAiPrompt: true } });
+      if (user?.globalAiPrompt) globalPrompt = user.globalAiPrompt;
+    }
+    if (!globalPrompt) {
+      const { TemplatesService } = require('../templates/templates.service');
+      globalPrompt = TemplatesService.DEFAULT_GLOBAL_AI_PROMPT;
+    }
+
+    // Step 6: Build the final prompt
+    const systemParts = [
+      globalPrompt,
+      '',
+      '--- FOLLOW-UP CONTEXT ---',
+      'The customer has NOT replied. You are writing a follow-up message.',
+      'Write as the business owner, not as an AI. Be natural, brief, and professional.',
+      'Do NOT use subject lines, greetings like "Dear", or sign-offs. Just the message body.',
+      'Keep it under 3 sentences unless the objective requires more detail.',
+      '',
+      strategyPrompt,
+    ];
+
+    if (objectiveFlavor) {
+      systemParts.push('', `STEP FLAVOR: ${objectiveFlavor}`);
+    }
+
+    if (customPrompt) {
+      systemParts.push('', 'CUSTOM INSTRUCTIONS:', customPrompt);
+    }
+
+    if (pricingContext) {
+      systemParts.push('', pricingContext);
+    }
+
+    if (context?.systemContext) {
+      systemParts.push('', context.systemContext);
+    }
+
+    if (lead) {
+      systemParts.push('', '--- Lead ---');
+      if (lead.customerName) systemParts.push(`Customer: ${lead.customerName}`);
+      if (lead.category) systemParts.push(`Service: ${lead.category}`);
+      if (lead.city || lead.state) systemParts.push(`Location: ${[lead.city, lead.state].filter(Boolean).join(', ')}`);
+    }
+
+    // Build messages with conversation history
+    const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+      { role: 'system', content: systemParts.join('\n') },
+    ];
+
+    if (context?.recentMessages) {
+      for (const msg of context.recentMessages) {
+        messages.push({
+          role: msg.role === 'customer' ? 'user' : 'assistant',
+          content: msg.content,
+        });
+      }
+    }
+
+    messages.push({
+      role: 'user',
+      content: `Write the follow-up message now. The customer has not replied. Strategy: ${strategyKey}. Step: ${step.objective}.`,
+    });
+
+    try {
+      const completion = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages,
+        max_tokens: 200,
+        temperature: 0.4,
+      });
+
+      const reply = completion.choices[0]?.message?.content?.trim();
+      if (!reply) throw new Error('Empty AI response');
+
+      this.logger.log(`[FollowUpGenerator] Generated ${reply.length} chars — strategy=${strategyKey}, objective=${step.objective}`);
+
+      return {
+        message: reply,
+        objective: step.objective,
+        strategyUsed: strategyKey,
+      };
+    } catch (err: any) {
+      this.logger.error(`[FollowUpGenerator] AI generation failed: ${err.message}`);
+      return this.generateFromTemplate(step);
+    }
+  }
+
+  /**
+   * Get enabled strategies from account follow-up settings.
+   * Returns null if no restrictions (all enabled).
+   */
+  private async getEnabledStrategies(conversationId: string): Promise<string[] | null> {
+    try {
+      const lead = await this.prisma.lead.findFirst({
+        where: { threadId: conversationId },
+        select: { businessId: true, userId: true },
+      });
+      if (!lead?.businessId) return null;
+
+      const account = await this.prisma.savedAccount.findFirst({
+        where: { userId: lead.userId, businessId: lead.businessId },
+        select: { followUpSettingsJson: true },
+      });
+      if (!account?.followUpSettingsJson) return null;
+
+      const settings = JSON.parse(account.followUpSettingsJson);
+      const scenarios = settings.followUpScenarios;
+      if (!scenarios) return null;
+
+      return Object.entries(scenarios)
+        .filter(([, enabled]) => enabled)
+        .map(([key]) => key);
+    } catch {
+      return null;
+    }
+  }
+}

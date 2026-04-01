@@ -223,14 +223,13 @@ export class YelpAdapter implements IPlatformAdapter {
       });
       this.logger.log(`Yelp getLead raw response: ${JSON.stringify(response.data).substring(0, 1000)}`);
 
-      // Also fetch lead events to get the actual message text
-      // (Yelp's getLead doesn't include message content — only events do)
+      // Fetch lead events for message text + phone number
       let messageText = '';
+      let allEvents: any[] = [];
       try {
-        const events = await this.getLeadEvents(credentials, leadId);
-        this.logger.log(`Yelp lead events: ${events.length} events — ${JSON.stringify(events).substring(0, 1000)}`);
-        // Find the first consumer message (Yelp uses event_type=TEXT, user_type=CONSUMER)
-        const firstMessage = events.find((e: any) =>
+        allEvents = await this.getLeadEvents(credentials, leadId);
+        this.logger.log(`Yelp lead events: ${allEvents.length} events — ${JSON.stringify(allEvents).substring(0, 1000)}`);
+        const firstMessage = allEvents.find((e: any) =>
           e.user_type === 'CONSUMER' && (e.event_type === 'TEXT' || e.event_type === 'RAQ_SUBMIT'),
         );
         messageText = firstMessage?.event_content?.text || firstMessage?.event_content?.fallback_text || firstMessage?.text || '';
@@ -239,6 +238,14 @@ export class YelpAdapter implements IPlatformAdapter {
       }
 
       const lead = this.normalizeLead(response.data);
+
+      // Extract phone from CONSUMER_PHONE_NUMBER_OPT_IN_EVENT if not in lead data
+      if (!lead.customerPhone) {
+        const phoneEvent = allEvents.find((e: any) => e.event_type === 'CONSUMER_PHONE_NUMBER_OPT_IN_EVENT');
+        const phone = phoneEvent?.event_content?.phone_number || phoneEvent?.phone_number;
+        if (phone) lead.customerPhone = phone;
+      }
+
       // Always prefer the full event message — it contains all survey Q&A
       // Strip Yelp boilerplate intro
       if (messageText) {
@@ -390,8 +397,8 @@ export class YelpAdapter implements IPlatformAdapter {
     // Customer info — Yelp uses "user.display_name" not "consumer.name"
     lead.customerName = data.user?.display_name || data.consumer?.name || 'Unknown';
     lead.customerEmail = data.temporary_email_address || data.consumer?.email;
-    // Phone only available after CONSUMER_PHONE_NUMBER_OPT_IN_EVENT
-    lead.customerPhone = data.user?.phone || data.consumer?.phone;
+    // Phone — can come from multiple places depending on opt-in status
+    lead.customerPhone = data.user?.phone || data.consumer?.phone || data.phone_number || data.consumer_phone_number;
 
     // Message — combine survey answers + additional info for a complete picture
     const surveyParts: string[] = [];

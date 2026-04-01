@@ -492,6 +492,41 @@ export const aiApi = {
     const { data } = await api.post('/v1/ai/preview-for-lead', { leadId, customerMessage, conversationHistory, strategyPrompt });
     return data;
   },
+  previewWithContext: async (
+    leadId: string,
+    conversationId: string,
+    customerMessage: string,
+    strategyPrompt?: string,
+    contextMode?: 'full' | 'light' | 'none',
+  ): Promise<{ reply: string; contextMode: string }> => {
+    const { data } = await api.post('/v1/ai/preview-with-context', { leadId, conversationId, customerMessage, strategyPrompt, contextMode });
+    return data;
+  },
+};
+
+export const conversationContextApi = {
+  suggestStrategy: async (conversationId: string): Promise<{
+    success: boolean;
+    suggested: string;
+    reason: string;
+    confidence: number;
+    scores: Record<string, number>;
+    threadState: Record<string, any>;
+  }> => {
+    const { data } = await api.get(`/v1/conversation-context/${conversationId}/suggest-strategy`);
+    return data;
+  },
+  getAiContext: async (conversationId: string): Promise<{
+    success: boolean;
+    context: {
+      systemContext: string;
+      recentMessages: Array<{ role: 'customer' | 'pro'; content: string }>;
+      threadState: Record<string, any>;
+    } | null;
+  }> => {
+    const { data } = await api.get(`/v1/conversation-context/${conversationId}/ai-context`);
+    return data;
+  },
 };
 
 export const automationApi = {
@@ -933,6 +968,14 @@ export const usersApi = {
   },
   updateGlobalAiPrompt: async (prompt: string): Promise<{ success: boolean }> => {
     const { data } = await api.patch('/v1/users/me/ai-prompt', { prompt });
+    return data;
+  },
+  getServicePricing: async (accountId: string): Promise<{ success: boolean; pricing: any }> => {
+    const { data } = await api.get(`/v1/users/me/pricing/${accountId}`);
+    return data;
+  },
+  updateServicePricing: async (accountId: string, pricing: any): Promise<{ success: boolean }> => {
+    const { data } = await api.patch(`/v1/users/me/pricing/${accountId}`, { pricing });
     return data;
   },
 };
@@ -1488,6 +1531,68 @@ export const conversationSyncApi = {
 
   getLeadActivity: async (leadId: string): Promise<{ data: any[] }> => {
     const { data } = await api.get(`/v1/conversation-sync/lead/${leadId}/activity`);
+    return data;
+  },
+};
+
+// Follow-Up Engine
+export const followUpApi = {
+  getSuggestions: async (): Promise<{ success: boolean; count: number; suggestions: any[] }> => {
+    const { data } = await api.get('/v1/follow-ups/suggestions');
+    return data;
+  },
+  approveSuggestion: async (id: string): Promise<{ success: boolean; messageId?: string; error?: string }> => {
+    const { data } = await api.post(`/v1/follow-ups/suggestions/${id}/approve`);
+    return data;
+  },
+  editAndApprove: async (id: string, message: string): Promise<{ success: boolean; messageId?: string; error?: string }> => {
+    const { data } = await api.post(`/v1/follow-ups/suggestions/${id}/edit`, { message });
+    return data;
+  },
+  skipSuggestion: async (id: string): Promise<{ success: boolean; error?: string }> => {
+    const { data } = await api.post(`/v1/follow-ups/suggestions/${id}/skip`);
+    return data;
+  },
+  getEnrollments: async (status?: string): Promise<{ success: boolean; count: number; enrollments: any[] }> => {
+    const { data } = await api.get('/v1/follow-ups/enrollments', { params: status ? { status } : {} });
+    return data;
+  },
+  stopEnrollment: async (id: string, reason?: string): Promise<{ success: boolean }> => {
+    const { data } = await api.post(`/v1/follow-ups/enrollments/${id}/stop`, { reason });
+    return data;
+  },
+  pauseEnrollment: async (id: string): Promise<{ success: boolean }> => {
+    const { data } = await api.post(`/v1/follow-ups/enrollments/${id}/pause`);
+    return data;
+  },
+  seed: async (params: { savedAccountId?: string; platform?: string; activeHoursStart?: string; activeHoursEnd?: string; activeHoursTimezone?: string }): Promise<{ success: boolean; seeded: number }> => {
+    const { data } = await api.post('/v1/follow-ups/seed', params);
+    return data;
+  },
+  getSettings: async (savedAccountId: string): Promise<{
+    success: boolean;
+    settings?: {
+      followUpMode: string | null;
+      followUpPreset: string | null;
+      followUpReplyType: string | null;
+      followUpActiveHoursStart: string | null;
+      followUpActiveHoursEnd: string | null;
+      followUpTimezone: string | null;
+    };
+  }> => {
+    const { data } = await api.get(`/v1/follow-ups/settings/${savedAccountId}`);
+    return data;
+  },
+  saveSettings: async (savedAccountId: string, settings: {
+    mode: string;
+    preset: string;
+    replyType: string;
+    activeHoursStart: string;
+    activeHoursEnd: string;
+    timezone: string;
+    platform?: string;
+  }): Promise<{ success: boolean; seeded: number }> => {
+    const { data } = await api.post(`/v1/follow-ups/settings/${savedAccountId}`, settings);
     return data;
   },
 };

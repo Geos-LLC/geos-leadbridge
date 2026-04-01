@@ -26,7 +26,7 @@ import {
   MessageCircle,
   Sparkles,
 } from 'lucide-react';
-import { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, type MessageAttachment } from '../services/api';
+import { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, followUpApi, type MessageAttachment } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
@@ -180,12 +180,22 @@ export function Messages() {
   const [loading, setLoading] = useState(!_messagesLoaded && leads.length === 0);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
-  const [aiPreview, setAiPreview] = useState<Record<string, { loading: boolean; reply: string | null }>>({});
+  const [aiPreview, setAiPreview] = useState<Record<string, { loading: boolean; reply: string | null; contextMode?: string }>>({});
+  const aiContextMode = 'full' as const;
+  const [strategySuggestion, setStrategySuggestion] = useState<{
+    suggested: string; reason: string; confidence: number; scores: Record<string, number>; threadState: Record<string, any>;
+  } | null>(null);
+  const [activeStrategyKey, setActiveStrategyKey] = useState<string | null>(null);
+  const [, setStrategySuggestionLoading] = useState(false);
+  const [threadContextData, setThreadContextData] = useState<{
+    systemContext: string; threadState: Record<string, any>;
+  } | null>(null);
   const AI_STRATEGIES = [
-    { key: 'hybrid', label: 'Hybrid', emoji: '⚖️', prompt: 'Strategy: Hybrid\n\n- Provide a broad price range early\n- Immediately ask one clarifying question\n- Balance speed and accuracy\n- Adjust responses dynamically as more information is received' },
-    { key: 'price', label: 'Price', emoji: '💰', prompt: 'Strategy: Price Anchor\n\n- Provide a realistic price range early in the conversation\n- Reduce uncertainty quickly\n- After giving range, ask 1 clarifying question\n- Avoid exact pricing unless enough details are provided\n- Keep explanation minimal' },
-    { key: 'qualify', label: 'Qualify', emoji: '🧠', prompt: 'Strategy: Qualification First\n\n- Ask 1-2 high-impact questions before giving pricing\n- Focus on understanding scope and details\n- Delay pricing until enough context is gathered\n- Keep questions natural and helpful, not interrogative' },
-    { key: 'convert', label: 'Convert', emoji: '📞', prompt: 'Strategy: Conversion\n\n- Focus on moving toward booking or next step\n- Suggest phone call or scheduling only when appropriate\n- Present next step as convenience, not pressure\n- Continue answering questions if user prefers chat' },
+    { key: 'hybrid', label: 'Hybrid', emoji: '⚖️', prompt: 'STRATEGY: HYBRID\n\nUse when:\n- You have enough information to estimate price\n- But still need one key detail OR want to move toward scheduling\n\nYou MUST:\n- Provide a price range based on pricing settings\n- Ask EXACTLY ONE question\n\nThe question MUST:\n- Move toward booking (timing or confirmation)\n- Be simple and direct\n\nDO NOT:\n- Ask more than one question\n- Ask vague questions (e.g. "does that work?")\n\nGoal: Reduce uncertainty and move the lead forward.\nExample style: Price + scheduling-oriented question' },
+    { key: 'price', label: 'Price', emoji: '💰', prompt: 'STRATEGY: PRICE ANCHOR\n\nUse when:\n- Customer asks about price directly\n- Or pricing is the main concern\n\nYou MUST:\n- Lead with a price range based on pricing settings\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Be vague or hesitant\n\nTone:\n- Confident and clear\n\nGoal: Give the customer a number to react to.\nExample style: "For a 1-bedroom home, pricing typically runs around $120-150 depending on condition. This includes kitchen, bathroom, and full surface cleaning."' },
+    { key: 'qualify', label: 'Qualify', emoji: '🧠', prompt: 'STRATEGY: QUALIFICATION\n\nUse when:\n- Critical details are missing (home size, timing, condition)\n\nYou MUST:\n- Ask 2-3 specific questions\n- Briefly explain why you need the info\n\nDO NOT:\n- Give pricing\n- Use if enough info is already provided\n\nGoal: Collect only the minimum info needed to move to pricing or booking.\nExample style: "To give you an accurate quote, I just need a couple quick details — how many bedrooms and bathrooms, and what condition is the home in?"' },
+    { key: 'convert', label: 'Convert', emoji: '📞', prompt: 'STRATEGY: CONVERSION\n\nUse when:\n- You have enough information\n- Lead shows intent or urgency\n- Ready to move to booking\n\nYou MUST:\n- Include pricing based on settings\n- Offer a SPECIFIC time or 2 options\n- Push toward scheduling\n\nDO NOT:\n- Ask open-ended questions\n- Delay with unnecessary details\n\nGoal: Get the lead to commit to a time.\nExample style: "For your 1-bedroom home, pricing is typically around $120-150. I have availability tomorrow at 2pm or Thursday morning — which works better?"' },
+    { key: 'phone', label: 'Phone', emoji: '📱', prompt: 'STRATEGY: PHONE / ESCALATION\n\nUse when:\n- Job is complex\n- Customer asks for exact quote\n- You need confirmation\n- High-intent lead\n\nFlow:\nStep 1 — explain why call is needed:\n- "Every home is a bit different..."\n- "We\'ll prepare an accurate estimate..."\n\nStep 2 — ask for phone naturally:\n- "What\'s the best number to reach you?"\n\nIf hesitation:\n- Offer texting option\n\nStep 3 — confirm next step:\n- "We\'ll call you shortly"\n- OR send booking link if requested\n\nDO NOT:\n- Push phone too early\n- Sound forceful\n\nTone:\n- Helpful, process-driven, professional\n\nExample style: "Every home is a little different — size and condition affect pricing. We can prepare an accurate estimate for you. What\'s the best number to reach you?"\n\nIf they resist: "No problem, we can text — just need your number to send the estimate and coordinate everything."\n\nIf they want booking: "Absolutely — you can book online here: [link]. We\'ll follow up to confirm details."' },
   ];
   const [resyncingMessages, setResyncingMessages] = useState(false);
   const [resyncError, setResyncError] = useState<string | null>(null);
@@ -198,6 +208,8 @@ export function Messages() {
   // Get date filter from URL params, default to 'all' (no filter)
   const dateFilter = searchParams.get('date') || 'all';
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Message cache: stores loaded timeline + summary per lead ID to avoid re-fetching
+  const messageCache = useRef<Record<string, { timeline: TimelineEvent[]; summary: CommunicationSummary; cachedAt: number }>>({});
 
   // Multi-select state
   const [multiSelectMode, setMultiSelectMode] = useState(false);
@@ -218,6 +230,37 @@ export function Messages() {
   const [, setSmsLogs] = useState<NotificationLog[]>([]);
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [channelFilter, setChannelFilter] = useState<'all' | TimelineChannel>('all');
+  // Follow-up suggestions
+  const [fuSuggestions, setFuSuggestions] = useState<any[]>([]);
+  const [fuEditMsg, setFuEditMsg] = useState('');
+  const [fuEditId, setFuEditId] = useState<string | null>(null);
+  const [fuActionLoading, setFuActionLoading] = useState(false);
+
+  // Load follow-up suggestions when selected lead changes
+  useEffect(() => {
+    if (!selectedLead) { setFuSuggestions([]); return; }
+    followUpApi.getSuggestions().then(res => {
+      setFuSuggestions((res.suggestions || []).filter(
+        (s: any) => s.enrollment?.conversationId === selectedLead.threadId
+      ));
+    }).catch(() => setFuSuggestions([]));
+  }, [selectedLead?.id]);
+
+  // Load strategy suggestion when selected lead changes
+  useEffect(() => {
+    setStrategySuggestion(null);
+    setThreadContextData(null);
+    setActiveStrategyKey(null);
+    if (!selectedLead?.threadId) return;
+    setStrategySuggestionLoading(true);
+    conversationContextApi.suggestStrategy(selectedLead.threadId)
+      .then(res => {
+        if (res.success) setStrategySuggestion({ suggested: res.suggested, reason: res.reason, confidence: res.confidence, scores: res.scores || {}, threadState: res.threadState });
+      })
+      .catch(() => {})
+      .finally(() => setStrategySuggestionLoading(false));
+  }, [selectedLead?.id]);
+
   const [sendChannel, setSendChannel] = useState<'platform' | 'sms'>('platform');
 
   // Mobile panel state: 'list' (leads), 'chat' (conversation), 'details' (lead details)
@@ -335,11 +378,25 @@ export function Messages() {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'lead.created') {
-          console.log('[Messages] New lead received via SSE:', data.lead);
-          // Add the new lead to the beginning of the list
-          setLeads([data.lead as Lead, ...leads]);
+          console.log('[Messages] Lead update via SSE:', data.lead?.id);
+          // Invalidate message cache for this lead (new message arrived)
+          if (data.lead?.id) delete messageCache.current[data.lead.id];
+          // Merge silently: update existing lead in-place, or append new one at top
+          // NEVER change the currently selected lead
+          const incoming = data.lead as Lead;
+          const currentLeads = useAppStore.getState().leads;
+          const idx = currentLeads.findIndex(l => l.id === incoming.id);
+          if (idx >= 0) {
+            const updated = [...currentLeads];
+            updated[idx] = { ...updated[idx], ...incoming };
+            setLeads(updated);
+          } else {
+            setLeads([incoming, ...currentLeads]);
+          }
         } else if (data.type === 'sms.inbound') {
           console.log('[Messages] Inbound SMS received via SSE:', data);
+          // Invalidate cache for this lead so next view is fresh
+          if (data.leadId) delete messageCache.current[data.leadId];
           // If viewing this lead, add inbound message to timeline in real-time
           if (selectedLead?.id === data.leadId) {
             const newEvent: TimelineEvent = {
@@ -439,21 +496,15 @@ export function Messages() {
   };
 
   // When account filter or savedAccounts change, ensure selected lead is valid
+  // Auto-select: only when filter/account changes or no lead is selected
+  // Do NOT re-run when leads array updates (SSE) — that would steal focus
   useEffect(() => {
     if (leads.length === 0 || savedAccounts.length === 0) return;
 
-    // Get saved account businessIds for filtering
     const savedAccountIds = new Set(savedAccounts.map(a => a.businessId));
-
-    // Only consider leads from saved accounts
-    const leadsFromSavedAccounts = leads.filter(lead =>
-      lead.businessId && savedAccountIds.has(lead.businessId)
-    );
-
-    // Apply account filter
-    const visibleLeads = leadsFromSavedAccounts.filter(lead =>
-      accountFilter === 'all' || lead.businessId === accountFilter
-    );
+    const visibleLeads = leads
+      .filter(lead => lead.businessId && savedAccountIds.has(lead.businessId))
+      .filter(lead => accountFilter === 'all' || lead.businessId === accountFilter);
 
     if (visibleLeads.length > 0) {
       const currentSelectionVisible = selectedLead && visibleLeads.some(l => l.id === selectedLead.id);
@@ -463,7 +514,8 @@ export function Messages() {
     } else {
       setSelectedLead(null);
     }
-  }, [accountFilter, savedAccounts, leads]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountFilter, savedAccounts]);
 
   const loadSavedAccounts = async () => {
     try {
@@ -527,7 +579,14 @@ export function Messages() {
       });
       setLeads(sortedLeads);
       _messagesLoaded = true;
-      // Selection will be handled by the savedAccounts effect
+      // Auto-select first visible lead if nothing is selected
+      if (!selectedLead && sortedLeads.length > 0 && savedAccounts.length > 0) {
+        const savedAccountIds = new Set(savedAccounts.map(a => a.businessId));
+        const visible = sortedLeads
+          .filter(l => l.businessId && savedAccountIds.has(l.businessId))
+          .filter(l => accountFilter === 'all' || l.businessId === accountFilter);
+        if (visible.length > 0) setSelectedLead(visible[0]);
+      }
     } catch (err) {
       console.error('[Messages] Failed to load leads:', err);
     } finally {
@@ -557,18 +616,26 @@ export function Messages() {
     setLastSeenTimestamps(prev => ({ ...prev, [lead.id]: timestamp }));
   };
 
-  const loadMessagesForLead = async (lead: Lead) => {
+  const loadMessagesForLead = async (lead: Lead, forceRefresh = false) => {
+    // Serve from cache if available and fresh (< 2 min old)
+    const cached = messageCache.current[lead.id];
+    const CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+    if (!forceRefresh && cached && (Date.now() - cached.cachedAt) < CACHE_TTL) {
+      setTimelineEvents(cached.timeline);
+      setCommSummary(cached.summary);
+      setLoadingMessages(false);
+      markLeadAsSeen(lead);
+      return;
+    }
+
     setLoadingMessages(true);
     setMessages([]);
     setSmsLogs([]);
     setTimelineEvents([]);
-    // Mark this lead as seen when we load its messages
     markLeadAsSeen(lead);
     try {
-      // Messages come from local database (stored via webhooks)
       let { messages: apiMessages } = await leadsApi.getMessages(lead.id);
 
-      // Auto-sync if no messages found in database
       if (apiMessages.length === 0) {
         console.log('[Messages] No messages found, auto-syncing from Thumbtack...');
         await leadsApi.resyncMessages(lead.id);
@@ -577,7 +644,6 @@ export function Messages() {
       }
 
       const convertedMessages: LocalMessage[] = apiMessages.map((msg) => {
-        // Normalize sender to lowercase for consistent comparison
         const sender = (msg.sender || '').toLowerCase() as 'pro' | 'customer';
         return {
           id: msg.id || msg.externalMessageId,
@@ -593,7 +659,6 @@ export function Messages() {
       });
       setMessages(convertedMessages);
 
-      // Load SMS logs for this lead
       let leadSmsLogs: NotificationLog[] = [];
       try {
         const { logs } = await notificationsApi.getLogsByLead(lead.id);
@@ -603,18 +668,47 @@ export function Messages() {
         console.warn('[Messages] Failed to load SMS logs for lead:', err);
       }
 
-      // Merge into unified timeline (filter SMS to only show customer-facing messages)
-      const timeline = mergeTimeline(convertedMessages, leadSmsLogs, lead.customerPhone);
+      let timeline = mergeTimeline(convertedMessages, leadSmsLogs, lead.customerPhone);
+
+      // Inject lead's initial request as the first message if not already in the timeline.
+      // Use overlap check: if any existing inbound message contains the lead message
+      // content (or vice versa), skip — Yelp raw messages include boilerplate that
+      // gets stripped from lead.message, so exact match fails.
+      if (lead.message) {
+        const firstMsgContent = lead.message.trim();
+        if (firstMsgContent.length > 0) {
+          const firstMsgWords = firstMsgContent.substring(0, 80);
+          const alreadyInTimeline = timeline.some(e =>
+            e.direction === 'inbound' && e.content && (
+              e.content.includes(firstMsgWords) || firstMsgContent.includes(e.content.trim().substring(0, 80))
+            ),
+          );
+          if (!alreadyInTimeline) {
+            const initialEvent: TimelineEvent = {
+              id: 'initial-request',
+              channel: 'platform',
+              direction: 'inbound',
+              content: firstMsgContent,
+              timestamp: new Date(lead.createdAt),
+              sender: 'customer',
+            };
+            timeline = [initialEvent, ...timeline];
+          }
+        }
+      }
       setTimelineEvents(timeline);
 
-      // Compute summary with filtered SMS logs (only customer-facing)
       const customerSmslogs = leadSmsLogs.filter(log => {
         if (!lead.customerPhone || !log.toPhone) return false;
         const normalizedCustomerPhone = lead.customerPhone.replace(/\D/g, '');
         const normalizedToPhone = log.toPhone.replace(/\D/g, '');
         return normalizedToPhone === normalizedCustomerPhone;
       });
-      setCommSummary(computeSummary(convertedMessages, customerSmslogs));
+      const summary = computeSummary(convertedMessages, customerSmslogs);
+      setCommSummary(summary);
+
+      // Store in cache
+      messageCache.current[lead.id] = { timeline, summary, cachedAt: Date.now() };
     } catch (err) {
       console.error('[Messages] Failed to load messages:', err);
     } finally {
@@ -632,8 +726,9 @@ export function Messages() {
     setResyncError(null);
     try {
       await leadsApi.resyncMessages(selectedLead.id);
-      // Reload messages after resync
-      await loadMessagesForLead(selectedLead);
+      // Invalidate cache + reload messages after resync
+      delete messageCache.current[selectedLead.id];
+      await loadMessagesForLead(selectedLead, true);
     } catch (err: any) {
       console.error('[Messages] Failed to resync messages:', err);
       const errorMessage = err.response?.data?.message || 'Failed to resync messages';
@@ -677,8 +772,9 @@ export function Messages() {
 
       try {
         await notificationsApi.sendAdHocSms(account.id, selectedLead.id, text);
-        // Reload to get actual log entry
-        await loadMessagesForLead(selectedLead);
+        // Invalidate cache + reload to get actual log entry
+        delete messageCache.current[selectedLead.id];
+        await loadMessagesForLead(selectedLead, true);
       } catch (err) {
         console.error('Failed to send SMS:', err);
         setTimelineEvents(prev => prev.filter(e => e.id !== optimisticEvent.id));
@@ -710,6 +806,8 @@ export function Messages() {
 
       try {
         await leadsApi.sendMessage(selectedLead.id, text);
+        // Invalidate cache — next load will pick up the sent message from DB
+        delete messageCache.current[selectedLead.id];
       } catch (err) {
         console.error('Failed to send message:', err);
         setMessages((prev) => prev.filter((m) => m.id !== optimisticMessage.id));
@@ -1188,8 +1286,8 @@ export function Messages() {
       <main className={`flex-1 min-w-0 flex flex-col bg-white ${mobilePanel !== 'chat' ? 'hidden md:flex' : 'flex'}`}>
         {selectedLead ? (
           <>
-            {/* Lead Info Header */}
-            <div className="p-3 sm:p-4 border-b border-slate-100 bg-white">
+            {/* Lead Info Header — fixed, never scrolls */}
+            <div className="p-3 sm:p-4 border-b border-slate-100 bg-white shrink-0">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                   {/* Mobile back button */}
@@ -1220,18 +1318,17 @@ export function Messages() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 sm:gap-3 shrink-0">
-                  {/* Desktop-only meta details */}
+                  {/* Desktop-only meta details — same format for TT and Yelp */}
                   <div className="hidden md:flex items-center gap-3 flex-wrap">
-                    {selectedLead.customerPhone && (
+                    {selectedLead.customerPhone ? (
                       <a href={`tel:${selectedLead.customerPhone}`} className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-blue-600">
                         <Phone size={14} />
                         {formatPhoneNumber(selectedLead.customerPhone)}
                       </a>
-                    )}
-                    {selectedLead.city && (
-                      <span className="flex items-center gap-1.5 text-xs text-slate-600">
-                        <MapPin size={14} />
-                        {selectedLead.city}, {selectedLead.state}
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-xs text-slate-400">
+                        <Phone size={14} />
+                        No phone available
                       </span>
                     )}
                     <span className="flex items-center gap-1.5 text-xs text-slate-600">
@@ -1249,7 +1346,7 @@ export function Messages() {
                     className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors disabled:opacity-50"
                     onClick={handleResyncMessages}
                     disabled={resyncingMessages}
-                    title="Resync messages from Thumbtack"
+                    title="Resync messages"
                   >
                     {resyncingMessages ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
                   </button>
@@ -1267,7 +1364,7 @@ export function Messages() {
 
             {/* Resync Error Message */}
             {resyncError && (
-              <div className="mx-3 sm:mx-4 mt-3 sm:mt-4 p-3 bg-red-50 border border-red-100 rounded-xl flex items-center gap-2 text-red-600 text-xs sm:text-sm">
+              <div className="mx-3 sm:mx-4 mt-3 sm:mt-4 p-3 bg-red-50 border border-red-100 rounded-xl flex items-center gap-2 text-red-600 text-xs sm:text-sm shrink-0">
                 <AlertCircle size={16} />
                 <span className="flex-1">{resyncError}</span>
                 <button className="p-1 hover:bg-red-100 rounded transition-colors" onClick={() => setResyncError(null)}>
@@ -1277,7 +1374,7 @@ export function Messages() {
             )}
 
             {/* Channel Filter Bar */}
-            <div className="flex gap-2 p-3 sm:p-4 border-b border-slate-100">
+            <div className="flex gap-2 p-3 sm:p-4 border-b border-slate-100 shrink-0">
               {(['all', 'platform', 'sms'] as const).map((filter) => (
                 <button
                   key={filter}
@@ -1432,7 +1529,7 @@ export function Messages() {
                       )}
                     </div>
 
-                    {/* AI Reply preview — inbound messages only, 4 strategy buttons */}
+                    {/* AI Reply preview — inbound messages only, 4 strategy buttons with % */}
                     {event.direction === 'inbound' && event.content && (
                       <div className="mt-1">
                         {/* Strategy buttons row */}
@@ -1441,27 +1538,47 @@ export function Messages() {
                           {AI_STRATEGIES.map(strategy => {
                             const previewKey = `${event.id}:${strategy.key}`;
                             const preview = aiPreview[previewKey];
+                            const isSuggested = strategySuggestion?.suggested === strategy.key;
+                            const score = strategySuggestion?.scores?.[strategy.key];
                             return (
                               <button
                                 key={strategy.key}
                                 onClick={() => {
-                                  if (preview) return; // already loaded
-                                  const idx = timelineEvents.indexOf(event);
-                                  const history = timelineEvents.slice(0, idx)
-                                    .filter(e => e.content && (e.direction === 'inbound' || e.direction === 'outbound'))
-                                    .map(e => ({ role: (e.direction === 'inbound' ? 'customer' : 'pro') as 'customer' | 'pro', content: e.content! }));
+                                  setActiveStrategyKey(strategy.key);
+                                  // Load context data for right panel if not loaded
+                                  if (!threadContextData && selectedLead?.threadId) {
+                                    conversationContextApi.getAiContext(selectedLead.threadId).then(res => {
+                                      if (res.success && res.context) {
+                                        setThreadContextData({ systemContext: res.context.systemContext, threadState: res.context.threadState });
+                                      }
+                                    }).catch(() => {});
+                                  }
+                                  if (preview) return; // already loaded, just show details
                                   setAiPreview(prev => ({ ...prev, [previewKey]: { loading: true, reply: null } }));
-                                  aiApi.previewForLead(selectedLead!.id, event.content!, history, strategy.prompt)
-                                    .then(({ reply }) => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply } })))
-                                    .catch(() => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply: 'Failed to generate.' } })));
+                                  if (selectedLead?.threadId) {
+                                    aiApi.previewWithContext(selectedLead.id, selectedLead.threadId, event.content!, strategy.prompt, aiContextMode)
+                                      .then(({ reply, contextMode }) => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply, contextMode } })))
+                                      .catch(() => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply: 'Failed to generate.' } })));
+                                  } else {
+                                    const idx = timelineEvents.indexOf(event);
+                                    const history = timelineEvents.slice(0, idx)
+                                      .filter(e => e.content && (e.direction === 'inbound' || e.direction === 'outbound'))
+                                      .map(e => ({ role: (e.direction === 'inbound' ? 'customer' : 'pro') as 'customer' | 'pro', content: e.content! }));
+                                    aiApi.previewForLead(selectedLead!.id, event.content!, history, strategy.prompt)
+                                      .then(({ reply }) => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply } })))
+                                      .catch(() => setAiPreview(prev => ({ ...prev, [previewKey]: { loading: false, reply: 'Failed to generate.' } })));
+                                  }
                                 }}
                                 className={`text-[10px] px-1.5 py-0.5 rounded-md transition-colors ${
                                   preview?.reply ? 'bg-violet-100 text-violet-700 font-semibold' :
                                   preview?.loading ? 'bg-violet-50 text-violet-400' :
+                                  isSuggested ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50 ring-1 ring-amber-200' :
                                   'text-violet-400 hover:text-violet-600 hover:bg-violet-50'
                                 }`}
+                                title={isSuggested ? `AI suggests: ${strategySuggestion?.reason}` : undefined}
                               >
                                 {preview?.loading ? <Loader2 size={9} className="animate-spin inline" /> : strategy.emoji} {strategy.label}
+                                {score !== undefined && <span className="text-[8px] ml-0.5 opacity-70">{Math.round(score * 100)}%</span>}
                               </button>
                             );
                           })}
@@ -1477,23 +1594,26 @@ export function Messages() {
                               <div className="flex items-center justify-between gap-2 mb-1">
                                 <span className="text-[10px] font-bold text-violet-500 uppercase tracking-widest">
                                   {strategy.emoji} {strategy.label}
+                                  {preview.contextMode && <span className="ml-1 text-slate-400 normal-case font-normal">({preview.contextMode})</span>}
                                 </span>
                                 <button onClick={() => setAiPreview(prev => { const n = { ...prev }; delete n[previewKey]; return n; })} className="text-violet-300 hover:text-violet-500">
                                   <X size={11} />
                                 </button>
                               </div>
                               <p className="text-xs text-slate-700 leading-relaxed">{preview.reply}</p>
-                              <button
-                                onClick={() => {
-                                  setMessageText(preview.reply || '');
-                                  const input = document.querySelector<HTMLTextAreaElement>('textarea[placeholder*="message"]');
-                                  if (input) { input.focus(); input.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
-                                }}
-                                className="mt-1.5 flex items-center gap-1 text-[10px] font-semibold text-violet-600 hover:text-violet-800 bg-violet-100 hover:bg-violet-200 px-2 py-1 rounded-lg transition-colors"
-                              >
-                                <ArrowRight size={10} />
-                                Use this reply
-                              </button>
+                              <div className="flex items-center gap-2 mt-1.5">
+                                <button
+                                  onClick={() => {
+                                    setMessageText(preview.reply || '');
+                                    const input = document.querySelector<HTMLInputElement>('input[placeholder*="message"]');
+                                    if (input) { input.focus(); input.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+                                  }}
+                                  className="flex items-center gap-1 text-[10px] font-semibold text-violet-600 hover:text-violet-800 bg-violet-100 hover:bg-violet-200 px-2 py-1 rounded-lg transition-colors"
+                                >
+                                  <ArrowRight size={10} />
+                                  Use this reply
+                                </button>
+                              </div>
                             </div>
                           );
                         })}
@@ -1605,6 +1725,63 @@ export function Messages() {
             </button>
             <h3 className="font-bold text-slate-900">Lead Details</h3>
           </div>
+
+          {/* Follow-up suggestion card */}
+          {fuSuggestions.length > 0 && (
+            <div className="p-3 border-b border-slate-100 space-y-2">
+              {fuSuggestions.map((s: any) => (
+                <div key={s.id} className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={14} className="text-amber-600" />
+                    <span className="text-xs font-bold text-amber-800">Follow-up Suggestion</span>
+                    <span className="text-[10px] text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">{s.objective}</span>
+                  </div>
+                  {fuEditId === s.id ? (
+                    <textarea value={fuEditMsg} onChange={e => setFuEditMsg(e.target.value)} rows={3}
+                      className="w-full px-2 py-1.5 text-sm border border-amber-300 rounded-lg bg-white resize-none" />
+                  ) : (
+                    <p className="text-sm text-slate-700 leading-relaxed">{s.generatedMessage}</p>
+                  )}
+                  <div className="flex gap-1.5">
+                    {fuEditId === s.id ? (
+                      <button disabled={fuActionLoading} onClick={async () => {
+                        setFuActionLoading(true);
+                        await followUpApi.editAndApprove(s.id, fuEditMsg);
+                        setFuSuggestions(prev => prev.filter(x => x.id !== s.id));
+                        setFuEditId(null); setFuActionLoading(false);
+                      }} className="px-2 py-1 text-[10px] font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                        Send Edited
+                      </button>
+                    ) : (
+                      <>
+                        <button disabled={fuActionLoading} onClick={async () => {
+                          setFuActionLoading(true);
+                          await followUpApi.approveSuggestion(s.id);
+                          setFuSuggestions(prev => prev.filter(x => x.id !== s.id));
+                          setFuActionLoading(false);
+                        }} className="px-2 py-1 text-[10px] font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+                          Approve & Send
+                        </button>
+                        <button onClick={() => { setFuEditId(s.id); setFuEditMsg(s.generatedMessage || ''); }}
+                          className="px-2 py-1 text-[10px] font-bold bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
+                          Edit
+                        </button>
+                        <button disabled={fuActionLoading} onClick={async () => {
+                          setFuActionLoading(true);
+                          await followUpApi.skipSuggestion(s.id);
+                          setFuSuggestions(prev => prev.filter(x => x.id !== s.id));
+                          setFuActionLoading(false);
+                        }} className="px-2 py-1 text-[10px] font-bold text-slate-400 hover:text-red-500">
+                          Skip
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Mobile-only: contact info (hidden in chat header on mobile) */}
           <div className="p-4 border-b border-slate-100 space-y-2 xl:hidden">
             {selectedLead.customerPhone && (
@@ -1631,49 +1808,6 @@ export function Messages() {
             )}
           </div>
           <div className="p-4 space-y-6">
-            {/* Communication Summary */}
-            {(commSummary.platformMessages > 0 || commSummary.smsSent > 0) && (
-              <div>
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Communication Summary</h4>
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center p-2 bg-slate-50 rounded-lg">
-                    <span className="text-xs text-slate-600 flex items-center gap-1.5">
-                      <MessageCircle size={14} /> Platform Messages
-                    </span>
-                    <span className="text-xs font-bold text-slate-900">{commSummary.platformMessages}</span>
-                  </div>
-                  <div className="flex justify-between items-center p-2 bg-slate-50 rounded-lg">
-                    <span className="text-xs text-slate-600 flex items-center gap-1.5">
-                      <Smartphone size={14} /> SMS Sent
-                    </span>
-                    <span className="text-xs font-bold text-slate-900">{commSummary.smsSent}</span>
-                  </div>
-                  {commSummary.smsDelivered > 0 && (
-                    <div className="flex justify-between items-center p-2 bg-green-50 rounded-lg">
-                      <span className="text-xs text-green-700 flex items-center gap-1.5">
-                        {'\u2713\u2713'} SMS Delivered
-                      </span>
-                      <span className="text-xs font-bold text-green-900">{commSummary.smsDelivered}</span>
-                    </div>
-                  )}
-                  {commSummary.smsFailed > 0 && (
-                    <div className="flex justify-between items-center p-2 bg-red-50 rounded-lg">
-                      <span className="text-xs text-red-700 flex items-center gap-1.5">
-                        {'\u2717'} SMS Failed
-                      </span>
-                      <span className="text-xs font-bold text-red-900">{commSummary.smsFailed}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between items-center p-2 bg-slate-50 rounded-lg">
-                    <span className="text-xs text-slate-600 flex items-center gap-1.5">
-                      <Phone size={14} /> Calls
-                    </span>
-                    <span className="text-xs font-bold text-slate-400">{commSummary.calls}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* Lead Cost */}
             {selectedLead.raw?.leadPrice && (
               <div>
@@ -1700,13 +1834,96 @@ export function Messages() {
               </div>
             )}
 
-            {/* Original Message */}
-            {selectedLead.message && (
-              <div>
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Customer Message</h4>
-                <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-3 rounded-xl whitespace-pre-wrap">{selectedLead.message}</p>
+            {/* Communication Summary — one-line */}
+            {(commSummary.platformMessages > 0 || commSummary.smsSent > 0 || commSummary.calls > 0) && (
+              <div className="flex items-center gap-3 text-[11px] text-slate-500 bg-slate-50 rounded-lg px-3 py-1.5 flex-wrap">
+                <span className="flex items-center gap-1"><MessageCircle size={11} /> {commSummary.platformMessages} msgs</span>
+                <span className="flex items-center gap-1"><Smartphone size={11} /> {commSummary.smsSent} sms</span>
+                {commSummary.smsFailed > 0 && <span className="text-red-500">{commSummary.smsFailed} failed</span>}
+                <span className="flex items-center gap-1"><Phone size={11} /> {commSummary.calls} calls</span>
               </div>
             )}
+
+            {/* AI Strategy Details — shown when a strategy button is clicked */}
+            {activeStrategyKey && strategySuggestion && (
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">AI Strategy</h4>
+                <div className="bg-violet-50 border border-violet-100 rounded-xl p-3 space-y-2">
+                  {/* Active strategy header */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-slate-800">
+                      {AI_STRATEGIES.find(s => s.key === activeStrategyKey)?.emoji}{' '}
+                      {AI_STRATEGIES.find(s => s.key === activeStrategyKey)?.label}
+                    </span>
+                    {strategySuggestion.scores?.[activeStrategyKey] !== undefined && (
+                      <span className="text-[9px] bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full font-semibold">
+                        {Math.round(strategySuggestion.scores[activeStrategyKey] * 100)}%
+                      </span>
+                    )}
+                    {strategySuggestion.suggested === activeStrategyKey && (
+                      <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-semibold">recommended</span>
+                    )}
+                  </div>
+
+                  {/* Why this answer */}
+                  {strategySuggestion.suggested === activeStrategyKey && (
+                    <p className="text-[11px] text-slate-600 leading-relaxed">{strategySuggestion.reason}</p>
+                  )}
+
+                  {/* Context — collapsible */}
+                  <details>
+                    <summary className="text-[10px] text-violet-500 cursor-pointer hover:text-violet-700 font-semibold flex items-center gap-1">
+                      <ChevronRight size={9} /> Context
+                    </summary>
+                    <div className="mt-1.5 space-y-1.5">
+                      {threadContextData?.systemContext && (
+                        <div>
+                          <div className="text-[10px] font-semibold text-slate-500 mb-0.5">Summary:</div>
+                          <p className="text-[10px] text-slate-600 italic leading-relaxed">
+                            {threadContextData.systemContext.split('\n').find(l => l.startsWith('Conversation summary:'))?.replace('Conversation summary: ', '') || 'No summary yet'}
+                          </p>
+                        </div>
+                      )}
+                      <div>
+                        <div className="text-[10px] font-semibold text-slate-500 mb-0.5">State:</div>
+                        <ul className="text-[10px] text-slate-600 space-y-0.5 list-none">
+                          {strategySuggestion.threadState.awaitingCustomerReply !== undefined && (
+                            <li>- awaiting reply: {strategySuggestion.threadState.awaitingCustomerReply ? 'yes' : 'no'}</li>
+                          )}
+                          <li>- price discussed: {strategySuggestion.threadState.priceDiscussed ? (strategySuggestion.threadState.priceRange || 'yes') : 'no'}</li>
+                          {strategySuggestion.threadState.missingFields?.length > 0 && (
+                            <li>- missing: {strategySuggestion.threadState.missingFields.join(', ')}</li>
+                          )}
+                          {strategySuggestion.threadState.stage && (
+                            <li>- stage: {strategySuggestion.threadState.stage}</li>
+                          )}
+                          {strategySuggestion.threadState.engagementLevel && strategySuggestion.threadState.engagementLevel !== 'unknown' && (
+                            <li>- engagement: {strategySuggestion.threadState.engagementLevel}</li>
+                          )}
+                        </ul>
+                      </div>
+                      {threadContextData?.systemContext && (
+                        <details className="mt-1">
+                          <summary className="text-[9px] text-violet-400 cursor-pointer hover:text-violet-600 font-semibold">View full context</summary>
+                          <pre className="mt-1 text-[9px] text-slate-500 whitespace-pre-wrap bg-white rounded-lg p-2 max-h-32 overflow-y-auto border border-slate-100">{threadContextData.systemContext}</pre>
+                        </details>
+                      )}
+                    </div>
+                  </details>
+
+                  {/* Prompt — collapsible */}
+                  <details>
+                    <summary className="text-[10px] text-violet-500 cursor-pointer hover:text-violet-700 font-semibold flex items-center gap-1">
+                      <ChevronRight size={9} /> Prompt
+                    </summary>
+                    <pre className="mt-1 text-[9px] text-slate-500 whitespace-pre-wrap bg-white rounded-lg p-2 max-h-32 overflow-y-auto border border-slate-100">
+                      {AI_STRATEGIES.find(s => s.key === activeStrategyKey)?.prompt || ''}
+                    </pre>
+                  </details>
+                </div>
+              </div>
+            )}
+
           </div>
         </aside>
       )}

@@ -281,6 +281,11 @@ export class ConversationContextService {
     followUpCount: number;
     engagementLevel: string;
     activeStrategy: string | null;
+    priceDiscussed: boolean;
+    lastQuestionAsked: string | null;
+    businessMessages: number;
+    aiMessages: number;
+    customerMessages: number;
   } | null> {
     return this.prisma.threadContext.findUnique({
       where: { conversationId },
@@ -290,6 +295,11 @@ export class ConversationContextService {
         followUpCount: true,
         engagementLevel: true,
         activeStrategy: true,
+        priceDiscussed: true,
+        lastQuestionAsked: true,
+        businessMessages: true,
+        aiMessages: true,
+        customerMessages: true,
       },
     });
   }
@@ -403,6 +413,106 @@ export class ConversationContextService {
       systemContext: parts.join('\n'),
       recentMessages,
       threadState,
+    };
+  }
+
+  /**
+   * Suggest the best strategy based on thread state (rule-based v1).
+   * Returns suggested strategy key, reason, and confidence.
+   */
+  async suggestStrategy(conversationId: string): Promise<{
+    suggested: string;
+    reason: string;
+    confidence: number;
+    scores: Record<string, number>;
+    threadState: Record<string, any>;
+  } | null> {
+    const ctx = await this.getContext(conversationId, 3);
+    if (!ctx) return null;
+
+    const state = {
+      stage: ctx.stage,
+      customerIntent: ctx.customerIntent,
+      engagementLevel: ctx.engagementLevel,
+      priceDiscussed: ctx.priceDiscussed,
+      priceRange: ctx.priceRange,
+      missingFields: ctx.missingFields,
+      lastQuestionAsked: ctx.lastQuestionAsked,
+      awaitingCustomerReply: ctx.awaitingCustomerReply,
+      followUpCount: ctx.followUpCount,
+      totalMessages: ctx.totalMessages,
+      activeStrategy: ctx.activeStrategy,
+    };
+
+    // Score each strategy based on thread state
+    const scores: Record<string, number> = { hybrid: 0.5, price: 0.3, qualify: 0.3, convert: 0.2, phone: 0.15 };
+
+    // Engagement signals
+    if (ctx.engagementLevel === 'hot') {
+      scores.convert = 0.85;
+      scores.hybrid = 0.5;
+      scores.price = 0.4;
+      scores.qualify = 0.25;
+    } else if (ctx.engagementLevel === 'cold') {
+      scores.price = 0.6;
+      scores.hybrid = 0.45;
+      scores.convert = 0.15;
+      scores.qualify = 0.3;
+    }
+
+    // Price shopping + no price discussed
+    if (ctx.customerIntent === 'price_shopping' && !ctx.priceDiscussed) {
+      scores.price = Math.max(scores.price, 0.8);
+      scores.hybrid = Math.max(scores.hybrid, 0.55);
+    }
+
+    // Missing fields boost qualify
+    if (ctx.missingFields.length >= 2) {
+      scores.qualify = Math.max(scores.qualify, 0.75);
+      scores.hybrid = Math.max(scores.hybrid, 0.5);
+    } else if (ctx.missingFields.length === 1) {
+      scores.qualify = Math.max(scores.qualify, 0.5);
+    }
+
+    // Price already discussed → convert
+    if (ctx.stage === 'quoting' || ctx.priceDiscussed) {
+      scores.convert = Math.max(scores.convert, 0.7);
+      scores.price = Math.min(scores.price, 0.35);
+    }
+
+    // Phone escalation: high intent + many messages or complex conversation
+    if (ctx.engagementLevel === 'hot' && ctx.totalMessages >= 6) {
+      scores.phone = Math.max(scores.phone, 0.65);
+    }
+    if (ctx.missingFields.length >= 3) {
+      scores.phone = Math.max(scores.phone, 0.55);
+    }
+
+    // Find the best strategy
+    const suggested = Object.entries(scores).reduce((best, [key, score]) =>
+      score > best.score ? { key, score } : best,
+      { key: 'hybrid', score: 0 },
+    ).key;
+
+    // Generate reason for the top suggestion
+    const reasons: Record<string, string> = {
+      convert: ctx.engagementLevel === 'hot'
+        ? 'Customer shows strong buying signals — focus on booking or next step.'
+        : 'Pricing already discussed — shift focus toward booking.',
+      price: ctx.customerIntent === 'price_shopping'
+        ? 'Customer is comparing prices and no pricing has been shared yet.'
+        : 'Lead with value/pricing to engage the customer.',
+      qualify: `${ctx.missingFields.length} key details still missing (${ctx.missingFields.slice(0, 3).join(', ')}). Gather info before quoting.`,
+      hybrid: 'Balanced approach with pricing and qualification.',
+      phone: 'Complex job or high-intent lead — escalate to phone for accurate quoting.',
+    };
+
+    return {
+      suggested,
+      reason: reasons[suggested] || reasons.hybrid,
+      confidence: scores[suggested],
+      scores,
+      threadState: state,
     };
   }
 

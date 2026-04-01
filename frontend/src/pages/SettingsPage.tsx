@@ -8,6 +8,7 @@ import { useAppStore } from '../store/appStore';
 import type { SubscriptionDetails, SavedAccount } from '../types';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import ConnectionModal from '../components/ConnectionModal';
+import ServicePricingForm from '../components/ServicePricingForm';
 
 const tierNames: Record<string, string> = {
   STARTER: 'Instant Reply',
@@ -1580,6 +1581,11 @@ export default function SettingsPage() {
       {/* Section 4: AI Global Prompt */}
       <GlobalAiPromptSection />
 
+      {/* Section 5: Service Pricing */}
+      {accounts.length > 0 && (
+        <ServicePricingSection accounts={accounts} />
+      )}
+
       {/* Danger Zone */}
       {user?.role !== 'ADMIN' && (
         <div className="bg-white rounded-3xl shadow-sm border border-red-100 overflow-hidden">
@@ -2066,6 +2072,60 @@ export default function SettingsPage() {
         savedAccounts={accounts}
         onSuccess={handleConnectionSuccess}
       />
+    </div>
+  );
+}
+
+/**
+ * Service Pricing section — per-account or shared pricing config.
+ */
+function ServicePricingSection({ accounts }: { accounts: SavedAccount[] }) {
+  const [sharedPricing, setSharedPricing] = useState(true);
+
+  return (
+    <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+      <div className="p-8">
+        <div className="flex items-center gap-3 mb-1">
+          <DollarSign className="w-5 h-5 text-emerald-600" />
+          <h2 className="text-xl font-bold text-slate-900">Service Pricing</h2>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">
+          Configure your pricing table so AI can quote accurate prices in conversations.
+        </p>
+
+        {accounts.length > 1 && (
+          <label className="flex items-center gap-2 mb-6 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={sharedPricing}
+              onChange={e => setSharedPricing(e.target.checked)}
+              className="accent-blue-600 w-4 h-4 rounded"
+            />
+            <span className="text-sm text-slate-700 font-medium">Same pricing for all businesses</span>
+          </label>
+        )}
+
+        {accounts.length === 1 || sharedPricing ? (
+          <ServicePricingForm
+            accountId={sharedPricing ? accounts.map(a => a.id).join(',') : accounts[0].id}
+            accountName={sharedPricing && accounts.length > 1 ? 'All Businesses' : accounts[0].businessName}
+            saveToAll={sharedPricing && accounts.length > 1 ? accounts.map(a => a.id) : undefined}
+          />
+        ) : (
+          <div className="space-y-4">
+            {accounts.map(acc => (
+              <details key={acc.id} className="border border-slate-200 rounded-xl overflow-hidden">
+                <summary className="px-4 py-3 bg-slate-50 cursor-pointer text-sm font-semibold text-slate-700 hover:bg-slate-100">
+                  {acc.businessName} <span className="text-[10px] font-normal text-slate-400 ml-1">({acc.platform})</span>
+                </summary>
+                <div className="p-4">
+                  <ServicePricingForm accountId={acc.id} accountName={acc.businessName} />
+                </div>
+              </details>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

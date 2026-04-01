@@ -13,6 +13,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CallConnectService } from '../call-connect/call-connect.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
+import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 
 @Injectable()
@@ -38,6 +39,7 @@ export class WebhooksService {
     private callConnectService: CallConnectService,
     private analyticsService: AnalyticsService,
     private conversationContextService: ConversationContextService,
+    private followUpEngine: FollowUpEngineService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -711,6 +713,24 @@ export class WebhooksService {
       }
     }
 
+    // Stop follow-up sequences on customer reply (synchronous, idempotent)
+    if (sender === 'customer') {
+      try {
+        await this.followUpEngine.handleCustomerReply(conversation.id);
+      } catch (err: any) {
+        this.logger.warn(`Failed to stop follow-up on customer reply: ${err.message}`);
+      }
+    }
+
+    // Evaluate thread for follow-up enrollment after pro/AI message
+    if (sender === 'pro') {
+      try {
+        await this.followUpEngine.evaluateThread(conversation.id, platform);
+      } catch (err: any) {
+        this.logger.warn(`Failed to evaluate thread for follow-up: ${err.message}`);
+      }
+    }
+
     // Trigger automation rules and SMS notifications for customer replies (excludes first message)
     if (sender === 'customer') {
       // Count customer messages to determine reply position
@@ -1367,7 +1387,18 @@ export class WebhooksService {
         await this.handleYelpNewEvent(businessId, data);
         break;
       case 'CONSUMER_PHONE_NUMBER_OPT_IN_EVENT':
-        this.logger.log(`Yelp consumer phone opt-in: business=${businessId} lead=${data?.lead_id}`);
+        this.logger.log(`Yelp consumer phone opt-in: business=${businessId} lead=${data?.lead_id} data=${JSON.stringify(data).substring(0, 500)}`);
+        // Store phone number on the lead
+        if (data?.lead_id) {
+          const phoneNumber = data?.phone_number || data?.consumer_phone_number || data?.event_content?.phone_number;
+          if (phoneNumber) {
+            await this.prisma.lead.updateMany({
+              where: { externalRequestId: data.lead_id, platform: 'yelp' },
+              data: { customerPhone: phoneNumber },
+            });
+            this.logger.log(`Yelp phone stored for lead ${data.lead_id}: ${phoneNumber}`);
+          }
+        }
         break;
       case 'CONSUMER_PHONE_NUMBER_OPT_OUT_EVENT':
         this.logger.log(`Yelp consumer phone opt-out: business=${businessId} lead=${data?.lead_id}`);
@@ -1505,10 +1536,11 @@ export class WebhooksService {
       },
       update: {
         customerName: leadData.customerName,
+        customerPhone: leadData.customerPhone || undefined,
+        customerEmail: leadData.customerEmail || undefined,
         message: leadData.message || undefined,
         status: leadData.status || undefined,
         rawJson: JSON.stringify(leadData.raw || data),
-        // Link to conversation if not already linked
         threadId: conversation.id,
       },
     });
@@ -1533,6 +1565,15 @@ export class WebhooksService {
     // Cross-instance dedup: if the lead existed before our upsert OR was created
     // more than 10s ago (another instance just created it), skip new-lead notifications.
     const isNewLead = !existingLead && (Date.now() - new Date(lead.createdAt).getTime()) < 10_000;
+
+    // Stop follow-up sequences on Yelp customer reply (synchronous, idempotent)
+    if (existingLead && lead.threadId) {
+      try {
+        await this.followUpEngine.handleCustomerReply(lead.threadId);
+      } catch (err: any) {
+        this.logger.warn(`Failed to stop Yelp follow-up on customer reply: ${err.message}`);
+      }
+    }
 
     if (!isNewLead && existingLead) {
       // Customer replied — conversation.lastMessageAt already updated above
@@ -1606,6 +1647,15 @@ export class WebhooksService {
     })();
 
     await Promise.all([automationPromise, smsPromise]);
+
+    // Evaluate thread for follow-up enrollment (after auto-reply fires)
+    if (lead.threadId) {
+      try {
+        await this.followUpEngine.evaluateThread(lead.threadId, 'yelp');
+      } catch (err: any) {
+        this.logger.warn(`Failed to evaluate Yelp thread for follow-up: ${err.message}`);
+      }
+    }
   }
 
   /**

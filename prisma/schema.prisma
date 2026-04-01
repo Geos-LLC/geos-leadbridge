@@ -127,6 +127,7 @@ model User {
   callConnectSettings      CallConnectSettings[]
   tenantPhoneNumbers       TenantPhoneNumber[]
   conversationSyncConnections ConversationSyncConnection[]
+  followUpSequenceTemplates FollowUpSequenceTemplate[]
 
   @@map("users")
 }
@@ -195,6 +196,7 @@ model Lead {
   callConnectSessions     LeadCallConnect[]
   leadConversations       LeadConversation[]
   threadContexts          ThreadContext[]       // Intelligence layer (multiple if lead has multiple threads)
+  followUpEnrollments     FollowUpEnrollment[]  // Follow-up sequences for this lead
 
   @@unique([platform, externalRequestId])
   @@index([userId])
@@ -226,7 +228,8 @@ model Conversation {
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages      Message[]
   leads         Lead[]
-  threadContext ThreadContext?  // Intelligence layer (1:1, owned by conversation-context module)
+  threadContext    ThreadContext?       // Intelligence layer (1:1, owned by conversation-context module)
+  followUpEnrollments FollowUpEnrollment[] // Follow-up sequences attached to this conversation
 
   @@unique([platform, externalThreadId])
   @@index([userId])
@@ -332,6 +335,16 @@ model SavedAccount {
   webhookId       String?  // Webhook subscription ID for this business
   credentialsJson String?  // Encrypted: access_token, refresh_token for THIS account
   agentPhoneOverride String?  // Per-business agent phone; when null, inherits User.businessPhone
+  // Follow-up settings (per-account)
+  followUpMode     String?  // 'off' | 'suggest' | 'auto_send'
+  followUpPreset   String?  // 'conservative' | 'standard' | 'persistent'
+  followUpReplyType String? // 'template' | 'ai'
+  followUpActiveHoursStart String? // e.g. "09:00"
+  followUpActiveHoursEnd   String? // e.g. "21:00"
+  followUpTimezone         String? // e.g. "America/New_York"
+  followUpSettingsJson     String? @db.Text // Extended follow-up settings (timing, rules, scenarios)
+  // Service pricing configuration (JSON — per-account pricing table)
+  servicePricingJson String? @db.Text
   lastUsedAt      DateTime @default(now())
   createdAt       DateTime @default(now())
 
@@ -340,6 +353,7 @@ model SavedAccount {
   automationRules      AutomationRule[]
   notificationSettings NotificationSettings?
   callConnectSettings  CallConnectSettings?
+  followUpTemplates    FollowUpSequenceTemplate[]
   collectedLeads       ThumbtackLeadId[]
   settingsSnapshots    ThumbtackSettingsSnapshot[]
 
@@ -991,10 +1005,14 @@ model ThreadContext {
   missingFields     Json?    // Array of field names still needed
   awaitingCustomerReply Boolean @default(false)
 
-  // Follow-up tracking
+  // Follow-up tracking (cached from FollowUpEnrollment — derived, not source of truth)
   followUpCount     Int      @default(0)
   lastFollowUpAt    DateTime?
-  followUpStatus    String?  // none, scheduled, sent, overdue
+  followUpStatus    String?  // none, active, suggested, paused, completed, stopped
+  activeEnrollmentId String? // FK FollowUpEnrollment (cached, nullable)
+  nextFollowUpAt    DateTime? // Denormalized from enrollment.nextStepDueAt
+  waitingSince      DateTime? // When business last spoke, customer hasn't replied
+  followUpState     String?  // Derived: no_reply_after_initial, no_reply_after_question, etc.
 
   // Per-sender-type timestamps
   lastCustomerMessageAt  DateTime?
@@ -1020,4 +1038,92 @@ model ThreadContext {
   @@index([awaitingCustomerReply])
   @@index([updatedAt])
   @@map("thread_contexts")
+}
+
+// ==========================================
+// Follow-Up Engine — Sequence-based follow-ups
+// Owned by follow-up-engine module.
+// Reads from ThreadContext (source of truth); writes here.
+// Designed for Yelp v1, extensible to Thumbtack.
+// ==========================================
+
+model FollowUpSequenceTemplate {
+  id                String   @id @default(cuid())
+  userId            String
+  savedAccountId    String?  // Per-account scoping (same as AutomationRule, NotificationSettings)
+  platform          String   // "yelp" | "thumbtack" | "all" — required everywhere
+  name              String   // e.g. "Standard — No Reply After Initial"
+  triggerState      String   // "no_reply_after_initial" | "no_reply_after_question" | "no_reply_after_price" | "no_reply_after_conversion"
+  mode              String   @default("suggest") // "suggest" | "auto_send"
+  generationMode    String   @default("ai") // "ai" | "template"
+  promptTemplateId  String?  // FK MessageTemplate (AI mode prompt)
+  preset            String?  // "conservative" | "standard" | "persistent"
+  isDefault         Boolean  @default(false)
+  activeHoursStart  String?  @map("active_hours_start") // "09:00"
+  activeHoursEnd    String?  @map("active_hours_end")   // "21:00"
+  activeHoursTimezone String? @map("active_hours_tz") @default("America/New_York")
+  stepsJson         Json     // Versioned: { schemaVersion: 1, steps: [...] }
+  schemaVersion     Int      @default(1) @map("schema_version")
+  enabled           Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user         User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  savedAccount SavedAccount? @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
+  enrollments  FollowUpEnrollment[]
+
+  @@index([savedAccountId, platform, triggerState])
+  @@index([userId, platform, triggerState])
+  @@index([isDefault, platform, triggerState])
+  @@map("follow_up_sequence_templates")
+}
+
+model FollowUpEnrollment {
+  id                  String    @id @default(cuid())
+  sequenceTemplateId  String
+  conversationId      String    // FK Conversation
+  leadId              String?   // FK Lead (nullable)
+  platform            String    // "yelp" | "thumbtack"
+  status              String    @default("active") // "active" | "paused" | "completed" | "stopped"
+  stoppedReason       String?   // "customer_replied" | "manual" | "switched" | "thread_closed"
+  currentStepIndex    Int       @default(0) // 0-based pointer into stepsJson
+  nextStepDueAt       DateTime? // CRITICAL: scheduler queries this
+  mode                String    @default("suggest") // can override template default
+  startedAt           DateTime  @default(now())
+  lastExecutedAt      DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  sequenceTemplate FollowUpSequenceTemplate @relation(fields: [sequenceTemplateId], references: [id], onDelete: Cascade)
+  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  lead             Lead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  stepExecutions   FollowUpStepExecution[]
+
+  @@index([status, nextStepDueAt]) // Scheduler query: find due active enrollments
+  @@index([conversationId, status]) // Active enrollment lookup per thread
+  @@index([leadId])
+  @@map("follow_up_enrollments")
+}
+
+model FollowUpStepExecution {
+  id                String    @id @default(cuid())
+  enrollmentId      String
+  stepIndex         Int       // Which step in stepsJson
+  objective         String    // "quick_check_in" | "value_add" | "soft_nudge" | "re_engagement" | "last_chance" | ...
+  status            String    @default("scheduled") // "scheduled" | "suggested" | "approved" | "sent" | "skipped" | "cancelled" | "failed" | "expired"
+  scheduledAt       DateTime  // When it was supposed to fire
+  executedAt        DateTime? // When it actually fired
+  generatedMessage  String?   @db.Text // AI/template output (what was generated)
+  finalMessage      String?   @db.Text // What was actually sent (may differ if user edited)
+  messageId         String?   // FK to Message table (if sent to platform)
+  strategyUsed      String?   // Active AI strategy at generation time
+  metadataJson      String?   @db.Text // Delivery status, error info, context snapshot
+  createdAt         DateTime  @default(now())
+
+  enrollment FollowUpEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@index([enrollmentId, stepIndex])
+  @@index([status])
+  @@map("follow_up_step_executions")
 }

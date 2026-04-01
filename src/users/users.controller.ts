@@ -102,6 +102,24 @@ export class UsersController {
   }
 
   /**
+   * Get pricing config for an account
+   * GET /v1/users/me/pricing/:accountId
+   */
+  @Get('me/pricing/:accountId')
+  async getPricing(@Request() req: any, @Param('accountId') accountId: string) {
+    return this.usersService.getServicePricing(req.user.id, accountId);
+  }
+
+  /**
+   * Save pricing config for an account
+   * PATCH /v1/users/me/pricing/:accountId
+   */
+  @Patch('me/pricing/:accountId')
+  async updatePricing(@Request() req: any, @Param('accountId') accountId: string, @Body() body: { pricing: any }) {
+    return this.usersService.updateServicePricing(req.user.id, accountId, body.pricing);
+  }
+
+  /**
    * Delete the current user's own account
    * DELETE /v1/users/me
    */

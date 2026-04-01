@@ -3,11 +3,11 @@ import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
   Pencil, Phone, Send, ChevronUp, Trash2, Save,
-  Key, Hash, ExternalLink, Link2, Sparkles, RefreshCw, Unlink, Clock, Plus,
+  Key, Hash, ExternalLink, Link2, Sparkles, RefreshCw, Unlink, Clock,
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi, conversationSyncApi,
+  automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi, conversationSyncApi, followUpApi,
 } from '../services/api';
 import type { TenantPhoneNumber } from '../services/api';
 import type {
@@ -216,10 +216,36 @@ export function Services() {
     return '';
   });
   const [ccTesting, setCcTesting] = useState(false);
-  // Yelp follow-up active hours
+  // Yelp follow-up settings
+  const [fuMode, setFuMode] = useState<'off' | 'suggest' | 'auto_send'>('suggest');
+  const [fuReplyType, setFuReplyType] = useState<'template' | 'ai'>('ai');
+  const [fuTiming, setFuTiming] = useState<'smart' | 'custom'>('custom');
+  const [fuCustomSteps, setFuCustomSteps] = useState([
+    { label: '1st follow-up', delay: '2 minutes' },
+    { label: '2nd follow-up', delay: '1 hour' },
+    { label: '3rd follow-up', delay: '1 day' },
+  ]);
+  const [fuAvailability, setFuAvailability] = useState<'always' | 'active_hours'>('active_hours');
   const [fuStart, setFuStart] = useState('09:00');
   const [fuEnd, setFuEnd] = useState('21:00');
   const [fuTz, setFuTz] = useState('America/New_York');
+  const [fuScenarios, setFuScenarios] = useState({
+    hybrid: true,
+    price: true,
+    qualify: true,
+    convert: true,
+    phone: true,
+  });
+  const [fuStopOnReply, setFuStopOnReply] = useState(true);
+  const [fuStopOnOptOut, setFuStopOnOptOut] = useState(true);
+  const [fuStopOnBooked, setFuStopOnBooked] = useState(true);
+  const [fuOnNo, setFuOnNo] = useState<'stop' | 'retry'>('retry');
+  const [fuRetryDays, setFuRetryDays] = useState(7);
+  const [fuUrgentFaster, setFuUrgentFaster] = useState(true);
+  const [fuShowStrategies, setFuShowStrategies] = useState(false);
+  const [fuShowRules, setFuShowRules] = useState(false);
+  // Legacy compat
+  const fuPreset = 'standard' as const;
   // Track which saved template is currently loaded in each CC message field (for edit button)
   const [ccWhisperTemplateId, setCcWhisperTemplateId] = useState<string | null>(sc?.ccWhisperTemplateId ?? null);
   const [ccGreetingTemplateId, setCcGreetingTemplateId] = useState<string | null>(sc?.ccGreetingTemplateId ?? null);
@@ -320,6 +346,32 @@ export function Services() {
     if (selectedAccountId) {
       loadServiceData(selectedAccountId);
     }
+  }, [selectedAccountId]);
+
+  // Load follow-up settings when account changes
+  useEffect(() => {
+    if (!selectedAccountId) return;
+    followUpApi.getSettings(selectedAccountId).then(res => {
+      if (res.success && res.settings) {
+        const s = res.settings as any;
+        if (s.followUpMode) setFuMode(s.followUpMode);
+        if (s.followUpReplyType) setFuReplyType(s.followUpReplyType);
+        if (s.followUpActiveHoursStart) setFuStart(s.followUpActiveHoursStart);
+        if (s.followUpActiveHoursEnd) setFuEnd(s.followUpActiveHoursEnd);
+        if (s.followUpTimezone) setFuTz(s.followUpTimezone);
+        // New fields (stored in extended settings JSON)
+        if (s.followUpTiming) setFuTiming(s.followUpTiming);
+        if (s.followUpCustomSteps) setFuCustomSteps(s.followUpCustomSteps);
+        if (s.followUpAvailability) setFuAvailability(s.followUpAvailability);
+        if (s.followUpScenarios) setFuScenarios(s.followUpScenarios);
+        if (s.followUpStopOnReply !== undefined) setFuStopOnReply(s.followUpStopOnReply);
+        if (s.followUpStopOnOptOut !== undefined) setFuStopOnOptOut(s.followUpStopOnOptOut);
+        if (s.followUpStopOnBooked !== undefined) setFuStopOnBooked(s.followUpStopOnBooked);
+        if (s.followUpOnNo) setFuOnNo(s.followUpOnNo);
+        if (s.followUpRetryDays) setFuRetryDays(s.followUpRetryDays);
+        if (s.followUpUrgentFaster !== undefined) setFuUrgentFaster(s.followUpUrgentFaster);
+      }
+    }).catch(() => {});
   }, [selectedAccountId]);
 
   async function loadAccounts() {
@@ -2125,196 +2177,271 @@ export function Services() {
 
           {/* 4. Yelp Follow-ups — only for Yelp accounts */}
           {accounts.find(a => a.id === selectedAccountId)?.platform === 'yelp' && (
-            <div className="bg-white rounded-3xl border border-[#FF1A1A]/20 shadow-sm overflow-hidden">
-              <div
-                className="p-6 flex items-center justify-between cursor-pointer hover:bg-red-50/30 transition-colors"
-                onClick={() => setExpandedCard(expandedCard === 'yelp-followups' ? null : 'yelp-followups')}
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-red-50 rounded-2xl flex items-center justify-center">
-                    <Clock className="w-7 h-7 text-red-600" />
-                  </div>
+            <ServiceCard
+              icon={<Clock className="w-7 h-7" />}
+              title="Yelp Follow-ups"
+              description="Automated follow-ups for leads who don't respond."
+              enabled={fuMode !== 'off'}
+              onToggle={(on) => setFuMode(on ? 'suggest' : 'off')}
+              expanded={expandedCard === 'yelp-followups'}
+              onExpand={() => setExpandedCard(expandedCard === 'yelp-followups' ? null : 'yelp-followups')}
+              iconBgColor="bg-red-50"
+              iconTextColor="text-red-600"
+            >
+
+                  {/* 1. Follow-up Mode */}
                   <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-bold text-slate-900">Yelp Follow-ups</h3>
-                      <span className="px-2 py-0.5 text-[10px] font-bold bg-[#FF1A1A] text-white rounded-md">Yelp</span>
-                    </div>
-                    <p className="text-sm text-slate-500 mt-0.5">Manual and AI-powered follow-ups sent during active hours via Yelp chat.</p>
-                  </div>
-                </div>
-                {expandedCard === 'yelp-followups' ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-              </div>
-
-              {expandedCard === 'yelp-followups' && (
-                <div className="px-6 pb-6 border-t border-slate-100 pt-5 space-y-5">
-
-                  {/* Active Hours */}
-                  <div>
-                    <h4 className="text-xs font-semibold text-red-600 uppercase tracking-wider mb-3">Active Hours</h4>
-                    <p className="text-xs text-slate-500 mb-3">Follow-ups only fire during this window. Outside active hours, they wait until the next active period.</p>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
-                        <input type="time" value={fuStart} onChange={e => setFuStart(e.target.value)}
-                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
-                        <input type="time" value={fuEnd} onChange={e => setFuEnd(e.target.value)}
-                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Timezone</label>
-                        <select value={fuTz} onChange={e => setFuTz(e.target.value)}
-                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm">
-                          <option value="America/New_York">Eastern</option>
-                          <option value="America/Chicago">Central</option>
-                          <option value="America/Denver">Mountain</option>
-                          <option value="America/Los_Angeles">Pacific</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Follow-up Type toggle — same pattern as Auto Reply */}
-                  {(() => {
-                    const fuRule = autoReplyRules.find(r => r.isFollowUp);
-                    const fuUseAi = fuRule?.useAi ?? true;
-                    return (
-                      <div className="space-y-4">
-                        <div>
-                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Type</label>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => fuRule && automationApi.updateRule(fuRule.id, { useAi: false }).then(() => setAutoReplyRules(prev => prev.map(r => r.id === fuRule.id ? { ...r, useAi: false } : r)))}
-                              className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all"
-                              style={{ background: !fuUseAi ? '#1d4ed8' : '#f1f5f9', color: !fuUseAi ? '#fff' : '#64748b', borderColor: !fuUseAi ? '#1d4ed8' : '#e2e8f0' }}
-                            >
-                              📝 Template
-                            </button>
-                            <button
-                              onClick={() => fuRule && automationApi.updateRule(fuRule.id, { useAi: true }).then(() => setAutoReplyRules(prev => prev.map(r => r.id === fuRule.id ? { ...r, useAi: true } : r)))}
-                              className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all"
-                              style={{ background: fuUseAi ? '#1d4ed8' : '#f1f5f9', color: fuUseAi ? '#fff' : '#64748b', borderColor: fuUseAi ? '#1d4ed8' : '#e2e8f0' }}
-                            >
-                              ✨ AI Follow-up
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Delay */}
-                        <div>
-                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Delay after lead (minutes)</label>
-                          <input type="number" min="5" step="5" defaultValue={fuRule?.delayMinutes || 30}
-                            id={`yelp-fu-delay-${selectedAccountId}`}
-                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm" />
-                        </div>
-
-                        {!fuUseAi ? (
-                          /* Template mode */
-                          <div>
-                            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Message Template</label>
-                            <textarea rows={3}
-                              defaultValue={fuRule?.template?.content || "Hi {lead.name}, just checking in on your {lead.service} request. Would you like to schedule a time to discuss?"}
-                              id={`yelp-fu-msg-${selectedAccountId}`}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm resize-y" />
-                          </div>
-                        ) : (
-                          /* AI mode */
-                          <div>
-                            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Prompt Template</label>
-                            <select id={`yelp-fu-prompt-${selectedAccountId}`}
-                              defaultValue={fuRule?.promptTemplateId || ''}
-                              className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium">
-                              {promptTemplates.map(p => (
-                                <option key={p.id} value={p.id}>{p.name}{p.isDefault ? ' (default)' : ''}</option>
-                              ))}
-                            </select>
-                            <p className="text-xs text-slate-400 mt-1">AI uses conversation context + thread summary to generate a natural follow-up.</p>
-                          </div>
-                        )}
-
-                        {/* Save / Create button */}
-                        <button
-                          onClick={async () => {
-                            const delay = parseInt((document.getElementById(`yelp-fu-delay-${selectedAccountId}`) as HTMLInputElement)?.value || '30', 10);
-                            const useAi = fuUseAi;
-                            try {
-                              if (fuRule) {
-                                // Update existing
-                                const updates: any = { delayMinutes: delay, activeHoursStart: fuStart, activeHoursEnd: fuEnd, activeHoursTimezone: fuTz };
-                                if (!useAi) {
-                                  const msg = (document.getElementById(`yelp-fu-msg-${selectedAccountId}`) as HTMLTextAreaElement)?.value || '';
-                                  if (fuRule.template) {
-                                    await templatesApi.updateTemplate(fuRule.template.id, { content: msg });
-                                  } else {
-                                    const { template } = await templatesApi.createTemplate(`Yelp Follow-up`, msg);
-                                    updates.templateId = template.id;
-                                  }
-                                } else {
-                                  const promptId = (document.getElementById(`yelp-fu-prompt-${selectedAccountId}`) as HTMLSelectElement)?.value || '';
-                                  if (promptId) updates.promptTemplateId = promptId;
-                                }
-                                const { rule } = await automationApi.updateRule(fuRule.id, updates);
-                                setAutoReplyRules(prev => prev.map(r => r.id === fuRule.id ? rule : r));
-                                alert('Follow-up saved');
-                              } else {
-                                // Create new
-                                const createData: any = {
-                                  savedAccountId: selectedAccountId,
-                                  name: useAi ? 'Yelp AI Follow-up' : 'Yelp Follow-up',
-                                  triggerType: 'new_lead' as const,
-                                  delayMinutes: delay,
-                                  enabled: true,
-                                  useAi,
-                                  isFollowUp: true,
-                                  activeHoursStart: fuStart,
-                                  activeHoursEnd: fuEnd,
-                                  activeHoursTimezone: fuTz,
-                                  stopOnCustomerReply: true,
-                                };
-                                if (!useAi) {
-                                  const msg = (document.getElementById(`yelp-fu-msg-${selectedAccountId}`) as HTMLTextAreaElement)?.value || '';
-                                  const { template } = await templatesApi.createTemplate('Yelp Follow-up', msg);
-                                  createData.templateId = template.id;
-                                } else {
-                                  const promptId = (document.getElementById(`yelp-fu-prompt-${selectedAccountId}`) as HTMLSelectElement)?.value || '';
-                                  if (promptId) createData.promptTemplateId = promptId;
-                                }
-                                const { rule } = await automationApi.createRule(createData);
-                                setAutoReplyRules(prev => [...prev, rule]);
-                                alert('Follow-up created');
-                              }
-                            } catch (err: any) {
-                              alert(err.message || 'Failed to save follow-up');
-                            }
-                          }}
-                          className="w-full px-4 py-2.5 bg-[#FF1A1A] text-white text-sm font-bold rounded-xl hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">1. Follow-up Mode</label>
+                    <div className="flex gap-2">
+                      {([
+                        { value: 'suggest' as const, label: 'Manual', desc: 'Review each follow-up in Lead Activity before sending', replyType: 'template' as const, timing: 'custom' as const, availability: 'always' as const },
+                        { value: 'auto_send' as const, label: 'Auto-send', desc: 'AI generates and sends follow-ups automatically', replyType: 'ai' as const, timing: 'smart' as const, availability: 'active_hours' as const },
+                      ]).map(opt => (
+                        <button key={opt.value}
+                          onClick={() => { setFuMode(opt.value); setFuReplyType(opt.replyType); setFuTiming(opt.timing); setFuAvailability(opt.availability); }}
+                          className={`flex-1 py-2.5 px-2 rounded-xl text-xs font-semibold border-2 transition-all ${
+                            fuMode === opt.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
+                          }`}
                         >
-                          {fuRule ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                          {fuRule ? 'Save Follow-up' : 'Create Follow-up'}
+                          {opt.label}
+                          <span className="block text-[9px] font-normal opacity-70 mt-0.5">{opt.desc}</span>
                         </button>
+                      ))}
+                    </div>
+                  </div>
 
-                        {/* Delete existing */}
-                        {fuRule && (
-                          <button
-                            onClick={async () => {
-                              if (!confirm('Delete this follow-up rule?')) return;
-                              await automationApi.deleteRule(fuRule.id);
-                              setAutoReplyRules(prev => prev.filter(r => r.id !== fuRule.id));
-                              alert('Follow-up removed');
-                            }}
-                            className="w-full px-4 py-2 text-xs font-semibold text-red-500 hover:bg-red-50 rounded-xl transition-colors flex items-center justify-center gap-1"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" /> Delete Follow-up
-                          </button>
-                        )}
+                  {/* 2. Follow-up Timing */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">2. Follow-up Timing</label>
+                    <p className="text-[11px] text-slate-400 mb-2">Choose when the next follow-up is sent if the customer doesn't reply.</p>
+                    <div className="flex gap-2 mb-3">
+                      <button onClick={() => setFuTiming('custom')}
+                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuTiming === 'custom' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                        Custom timing
+                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">{fuMode === 'suggest' ? 'Default' : 'Set your own delays'}</span>
+                      </button>
+                      <button onClick={() => setFuTiming('smart')}
+                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuTiming === 'smart' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                        Smart timing
+                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">{fuMode === 'auto_send' ? 'Recommended' : 'AI decides timing'}</span>
+                      </button>
+                    </div>
+                    {fuTiming === 'custom' && (
+                      <div className="space-y-2 bg-slate-50 rounded-xl p-3 border border-slate-100">
+                        {fuCustomSteps.map((step, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <span className="text-[11px] text-slate-500 w-24 shrink-0">{step.label}</span>
+                            <span className="text-[11px] text-slate-400">after</span>
+                            <input type="text" value={step.delay}
+                              onChange={e => {
+                                const steps = [...fuCustomSteps];
+                                steps[i] = { ...steps[i], delay: e.target.value };
+                                setFuCustomSteps(steps);
+                              }}
+                              className="flex-1 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs"
+                              placeholder="e.g. 2 minutes, 1 hour, 1 day" />
+                            {fuCustomSteps.length > 1 && (
+                              <button onClick={() => setFuCustomSteps(fuCustomSteps.filter((_, j) => j !== i))}
+                                className="text-slate-300 hover:text-red-500 text-xs">✕</button>
+                            )}
+                          </div>
+                        ))}
+                        <button onClick={() => setFuCustomSteps([...fuCustomSteps, { label: `${fuCustomSteps.length + 1}${fuCustomSteps.length === 0 ? 'st' : fuCustomSteps.length === 1 ? 'nd' : fuCustomSteps.length === 2 ? 'rd' : 'th'} follow-up`, delay: '' }])}
+                          className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold">+ Add step</button>
                       </div>
-                    );
-                  })()}
-                </div>
-              )}
-            </div>
+                    )}
+                  </div>
+
+                  {/* 3. Auto Reply Availability */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">3. Auto Reply Availability</label>
+                    {fuMode === 'suggest' ? (
+                      <p className="text-[11px] text-slate-400 mb-2">Manual mode — suggestions appear anytime, you decide when to send.</p>
+                    ) : (
+                      <>
+                        <p className="text-[11px] text-slate-400 mb-2">Choose when follow-ups can be sent automatically.</p>
+                        <div className="flex gap-2 mb-3">
+                          <button onClick={() => setFuAvailability('always')}
+                            className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'always' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                            Always (24/7)
+                          </button>
+                          <button onClick={() => setFuAvailability('active_hours')}
+                            className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'active_hours' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                            Only during active hours
+                          </button>
+                        </div>
+                      </>
+                    )}
+                    {fuAvailability === 'active_hours' && (
+                      <div className="grid grid-cols-3 gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
+                          <input type="time" value={fuStart} onChange={e => setFuStart(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
+                          <input type="time" value={fuEnd} onChange={e => setFuEnd(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Timezone</label>
+                          <select value={fuTz} onChange={e => setFuTz(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
+                            <option value="America/New_York">Eastern</option>
+                            <option value="America/Chicago">Central</option>
+                            <option value="America/Denver">Mountain</option>
+                            <option value="America/Los_Angeles">Pacific</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 4. Follow-up Strategies (collapsed) */}
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <button
+                      onClick={() => setFuShowStrategies(!fuShowStrategies)}
+                      className="w-full px-4 py-3 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors"
+                    >
+                      <div>
+                        <span className="text-[11px] font-bold text-slate-600 uppercase tracking-widest">Follow-up Strategies</span>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Choose which strategies the AI can use for follow-ups.</p>
+                      </div>
+                      {fuShowStrategies ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                    </button>
+                    {fuShowStrategies && (
+                      <div className="px-4 py-3 space-y-2 border-t border-slate-100">
+                        {([
+                          { key: 'hybrid' as const, emoji: '⚖️', label: 'Hybrid', desc: 'Price range + one scheduling question' },
+                          { key: 'price' as const, emoji: '💰', label: 'Price', desc: 'Lead with pricing to reduce uncertainty' },
+                          { key: 'qualify' as const, emoji: '🧠', label: 'Qualify', desc: 'Ask for missing details before quoting' },
+                          { key: 'convert' as const, emoji: '📞', label: 'Convert', desc: 'Push toward booking with specific times' },
+                          { key: 'phone' as const, emoji: '📱', label: 'Phone', desc: 'Escalate to phone call for complex jobs' },
+                        ]).map(scenario => (
+                          <label key={scenario.key} className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className="text-base">{scenario.emoji}</span>
+                              <div>
+                                <p className="text-sm font-semibold text-slate-800">{scenario.label}</p>
+                                <p className="text-[10px] text-slate-400">{scenario.desc}</p>
+                              </div>
+                            </div>
+                            <input type="checkbox"
+                              checked={fuScenarios[scenario.key]}
+                              onChange={e => setFuScenarios(prev => ({ ...prev, [scenario.key]: e.target.checked }))}
+                              className="accent-emerald-600 w-4 h-4 shrink-0 ml-3" />
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 6. Smart Follow-up Rules (collapsed) */}
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <button
+                      onClick={() => setFuShowRules(!fuShowRules)}
+                      className="w-full px-4 py-3 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors"
+                    >
+                      <div>
+                        <span className="text-[11px] font-bold text-slate-600 uppercase tracking-widest">Smart Follow-up Rules</span>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Control when follow-ups stop and how special cases are handled.</p>
+                      </div>
+                      {fuShowRules ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                    </button>
+                    {fuShowRules && (
+                      <div className="px-4 py-4 space-y-4 border-t border-slate-100">
+                        {/* Stop rules */}
+                        <div>
+                          <div className="text-[11px] font-semibold text-slate-600 mb-2">Stop automatic follow-ups when</div>
+                          <div className="space-y-1.5">
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={fuStopOnReply} onChange={e => setFuStopOnReply(e.target.checked)} className="accent-blue-600 w-3.5 h-3.5" />
+                              Customer replies
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={fuStopOnOptOut} onChange={e => setFuStopOnOptOut(e.target.checked)} className="accent-blue-600 w-3.5 h-3.5" />
+                              Customer asks to stop
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={fuStopOnBooked} onChange={e => setFuStopOnBooked(e.target.checked)} className="accent-blue-600 w-3.5 h-3.5" />
+                              Job is booked or confirmed
+                            </label>
+                          </div>
+                        </div>
+
+                        {/* If customer says no */}
+                        <div>
+                          <div className="text-[11px] font-semibold text-slate-600 mb-2">If the customer says no</div>
+                          <div className="flex gap-2">
+                            <button onClick={() => setFuOnNo('stop')}
+                              className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold border-2 transition-all ${fuOnNo === 'stop' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+                              Stop follow-ups
+                            </button>
+                            <button onClick={() => setFuOnNo('retry')}
+                              className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold border-2 transition-all ${fuOnNo === 'retry' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+                              Try again later
+                            </button>
+                          </div>
+                          {fuOnNo === 'retry' && (
+                            <div className="flex items-center gap-2 mt-2 text-sm text-slate-600">
+                              <span>Follow up again after</span>
+                              <input type="number" value={fuRetryDays} min={1} max={90}
+                                onChange={e => setFuRetryDays(parseInt(e.target.value) || 7)}
+                                className="w-16 px-2 py-1 border border-slate-200 rounded-lg text-center text-sm" />
+                              <span>days</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Urgent leads */}
+                        <label className="flex items-center justify-between cursor-pointer">
+                          <div>
+                            <div className="text-[11px] font-semibold text-slate-600">Urgent leads</div>
+                            <p className="text-[10px] text-slate-400">Move faster when the customer needs service ASAP</p>
+                          </div>
+                          <input type="checkbox" checked={fuUrgentFaster} onChange={e => setFuUrgentFaster(e.target.checked)} className="accent-blue-600 w-4 h-4" />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 7. Save */}
+                  <button
+                    onClick={async () => {
+                      try {
+                        const res = await followUpApi.saveSettings(selectedAccountId, {
+                          mode: fuMode,
+                          preset: fuPreset,
+                          replyType: fuReplyType,
+                          activeHoursStart: fuAvailability === 'active_hours' ? fuStart : null as any,
+                          activeHoursEnd: fuAvailability === 'active_hours' ? fuEnd : null as any,
+                          timezone: fuTz,
+                          platform: 'yelp',
+                          // Extended settings
+                          timing: fuTiming,
+                          customSteps: fuTiming === 'custom' ? fuCustomSteps : undefined,
+                          availability: fuAvailability,
+                          scenarios: fuScenarios,
+                          stopOnReply: fuStopOnReply,
+                          stopOnOptOut: fuStopOnOptOut,
+                          stopOnBooked: fuStopOnBooked,
+                          onNo: fuOnNo,
+                          retryDays: fuRetryDays,
+                          urgentFaster: fuUrgentFaster,
+                        } as any);
+                        alert(fuMode === 'off'
+                          ? 'Follow-ups disabled and saved.'
+                          : `Follow-up settings saved.${res.seeded > 0 ? ` ${res.seeded} sequence templates created.` : ''}`);
+                      } catch (err: any) {
+                        alert(err.message || 'Failed to save follow-up settings');
+                      }
+                    }}
+                    className="w-full px-4 py-2.5 bg-[#FF1A1A] text-white text-sm font-bold rounded-xl hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Save className="w-4 h-4" /> Save Follow-up Settings
+                  </button>
+            </ServiceCard>
           )}
 
           {/* 5. AI Optimization — disabled */}

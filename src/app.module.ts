@@ -6,6 +6,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import configuration from './config/configuration';
 import { AuthModule } from './auth/auth.module';
 import { PlatformsModule } from './platforms/platforms.module';
@@ -24,6 +25,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
 import { CallConnectModule } from './call-connect/call-connect.module';
 import { ConversationSyncModule } from './conversation-sync/conversation-sync.module';
 import { ConversationContextModule } from './conversation-context/conversation-context.module';
+import { FollowUpEngineModule } from './follow-up-engine/follow-up-engine.module';
 import { HealthModule } from './health/health.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -37,6 +39,7 @@ import { PrismaModule } from './common/utils/prisma.module';
       load: [configuration],
     }),
     EventEmitterModule.forRoot(),
+    ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
     PlatformsModule,
@@ -55,6 +58,7 @@ import { PrismaModule } from './common/utils/prisma.module';
     CallConnectModule,
     ConversationSyncModule,
     ConversationContextModule,
+    FollowUpEngineModule,
     HealthModule,
     MonitoringModule,
   ],
