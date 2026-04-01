@@ -157,6 +157,31 @@ export class FollowUpGeneratorService {
       }
     }
 
+    // Step 3b: Load urgency context
+    let urgencyContext = '';
+    if (lead?.businessId) {
+      const account = await this.prisma.savedAccount.findFirst({
+        where: { userId: lead.userId, businessId: lead.businessId },
+        select: { followUpSettingsJson: true },
+      });
+      const threadCtx = context?.threadState;
+      const customerUrgency = threadCtx?.customerUrgency || 'low';
+      let urgentCapability = 'same_day';
+      if (account?.followUpSettingsJson) {
+        try {
+          const s = JSON.parse(account.followUpSettingsJson);
+          if (s.followUpUrgentCapability) urgentCapability = s.followUpUrgentCapability;
+        } catch {}
+      }
+      if (customerUrgency === 'high') {
+        urgencyContext = `Customer urgency: HIGH. Business capability: ${urgentCapability}.`;
+        if (urgentCapability === 'same_day') urgencyContext += ' You CAN offer same-day.';
+        else if (urgentCapability === '24h') urgencyContext += ' Shift to tomorrow, NOT same-day.';
+        else if (urgentCapability === '48h') urgencyContext += ' Offer 1-2 days out, NOT same-day.';
+        else urgencyContext += ' Do NOT imply urgent availability. Offer next available slot.';
+      }
+    }
+
     // Step 4: Load custom prompt template if specified
     let customPrompt = '';
     if (promptTemplateId) {
@@ -198,6 +223,10 @@ export class FollowUpGeneratorService {
 
     if (pricingContext) {
       systemParts.push('', pricingContext);
+    }
+
+    if (urgencyContext) {
+      systemParts.push('', urgencyContext);
     }
 
     if (context?.systemContext) {
@@ -273,6 +302,8 @@ export class FollowUpGeneratorService {
       if (!account?.followUpSettingsJson) return null;
 
       const settings = JSON.parse(account.followUpSettingsJson);
+      // Auto mode = all strategies enabled (no filtering)
+      if (settings.followUpStrategyMode === 'auto') return null;
       const scenarios = settings.followUpScenarios;
       if (!scenarios) return null;
 

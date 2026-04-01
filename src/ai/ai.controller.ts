@@ -84,8 +84,8 @@ export class AiController {
     const [userRecord, account] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true } }),
       lead.businessId
-        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true } })
-        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true } }),
+        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true, followUpSettingsJson: true } })
+        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true, followUpSettingsJson: true } }),
     ]);
 
     const details = this.extractLeadDetails(lead.rawJson);
@@ -120,6 +120,14 @@ export class AiController {
         : pricingPrompt;
     }
 
+    // Inject urgency context
+    const urgencyPrompt = await this.buildUrgencyPrompt(conversationId, account?.followUpSettingsJson);
+    if (urgencyPrompt) {
+      systemPrompt = systemPrompt
+        ? `${systemPrompt}\n\n${urgencyPrompt}`
+        : urgencyPrompt;
+    }
+
     const reply = await this.aiService.generateReply({
       customerName: lead.customerName,
       customerMessage: customerMessage || lead.message || '',
@@ -135,6 +143,56 @@ export class AiController {
     });
 
     return { reply, contextMode: mode };
+  }
+
+  private async buildUrgencyPrompt(conversationId: string | undefined, settingsJson: string | null | undefined): Promise<string | null> {
+    if (!conversationId) return null;
+
+    // Get customer urgency from thread state
+    const threadState = await this.contextService.getThreadState(conversationId).catch(() => null);
+    const stateJson = await this.prisma.threadContext.findUnique({
+      where: { conversationId },
+      select: { stateJson: true, customerIntent: true },
+    }).catch(() => null);
+
+    let customerUrgency = 'low';
+    if (stateJson?.customerIntent === 'urgent') {
+      customerUrgency = 'high';
+    } else if (stateJson?.stateJson) {
+      try {
+        const state = JSON.parse(stateJson.stateJson);
+        if (state.customerUrgency) customerUrgency = state.customerUrgency;
+      } catch {}
+    }
+
+    // Get business urgentCapability from settings
+    let urgentCapability = 'same_day';
+    if (settingsJson) {
+      try {
+        const settings = JSON.parse(settingsJson);
+        if (settings.followUpUrgentCapability) urgentCapability = settings.followUpUrgentCapability;
+      } catch {}
+    }
+
+    if (customerUrgency === 'low') return null;
+
+    const parts = ['--- Urgency Context ---'];
+    parts.push(`Customer urgency: ${customerUrgency}`);
+    parts.push(`Business capability: ${urgentCapability}`);
+
+    if (urgentCapability === 'same_day') {
+      parts.push('You CAN offer same-day service. Be fast and direct, move to conversion quickly.');
+    } else if (urgentCapability === '24h') {
+      parts.push('You can serve within 24 hours but NOT same-day. Acknowledge urgency, shift expectation to tomorrow.');
+    } else if (urgentCapability === '48h') {
+      parts.push('You can serve within 48 hours. Offer near-term availability without implying same-day.');
+    } else {
+      parts.push('You CANNOT serve urgently. Acknowledge the urgency but offer the next available slot. Do NOT imply same-day or rush availability.');
+    }
+    parts.push('STRICT RULE: Never imply same-day or urgent availability unless business capability is same_day.');
+    parts.push('--- End Urgency Context ---');
+
+    return parts.join('\n');
   }
 
   private buildPricingPrompt(pricingJson: string | null | undefined): string | null {
