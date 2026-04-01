@@ -191,7 +191,7 @@ export function Services() {
     templateId?: string;
     templateName?: string;
     content: string;
-    type: 'autoReply' | 'alert' | 'cc-whisper' | 'cc-greeting' | 'cc-voicemail' | 'ct';
+    type: 'autoReply' | 'alert' | 'cc-whisper' | 'cc-greeting' | 'cc-voicemail' | 'ct' | string;
   } | null>(null);
 
   // Instant Call Connect state
