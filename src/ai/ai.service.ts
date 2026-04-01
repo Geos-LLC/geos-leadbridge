@@ -77,8 +77,8 @@ export class AiService {
     const completion = await this.client.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: openAiMessages,
-      max_tokens: 200,
-      temperature: 0.7,
+      max_tokens: 250,
+      temperature: 0.4,
     });
 
     const reply = completion.choices[0]?.message?.content?.trim();
