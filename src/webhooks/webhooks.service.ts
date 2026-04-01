@@ -1387,7 +1387,18 @@ export class WebhooksService {
         await this.handleYelpNewEvent(businessId, data);
         break;
       case 'CONSUMER_PHONE_NUMBER_OPT_IN_EVENT':
-        this.logger.log(`Yelp consumer phone opt-in: business=${businessId} lead=${data?.lead_id}`);
+        this.logger.log(`Yelp consumer phone opt-in: business=${businessId} lead=${data?.lead_id} data=${JSON.stringify(data).substring(0, 500)}`);
+        // Store phone number on the lead
+        if (data?.lead_id) {
+          const phoneNumber = data?.phone_number || data?.consumer_phone_number || data?.event_content?.phone_number;
+          if (phoneNumber) {
+            await this.prisma.lead.updateMany({
+              where: { externalRequestId: data.lead_id, platform: 'yelp' },
+              data: { customerPhone: phoneNumber },
+            });
+            this.logger.log(`Yelp phone stored for lead ${data.lead_id}: ${phoneNumber}`);
+          }
+        }
         break;
       case 'CONSUMER_PHONE_NUMBER_OPT_OUT_EVENT':
         this.logger.log(`Yelp consumer phone opt-out: business=${businessId} lead=${data?.lead_id}`);
@@ -1525,10 +1536,11 @@ export class WebhooksService {
       },
       update: {
         customerName: leadData.customerName,
+        customerPhone: leadData.customerPhone || undefined,
+        customerEmail: leadData.customerEmail || undefined,
         message: leadData.message || undefined,
         status: leadData.status || undefined,
         rawJson: JSON.stringify(leadData.raw || data),
-        // Link to conversation if not already linked
         threadId: conversation.id,
       },
     });
