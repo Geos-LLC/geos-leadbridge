@@ -36,11 +36,13 @@ const DEFAULT_CLEANING_PRICING = {
     { key: 'once', label: 'One Time', discount: 0 },
   ],
   extras: [
-    { key: 'cabinet', label: 'Kitchen Cabinets', price: 30 },
+    { key: 'cabinet', label: 'Inside Kitchen Cabinets', price: 30 },
     { key: 'fridge', label: 'Inside Fridge', price: 40 },
     { key: 'oven', label: 'Inside Oven', price: 40 },
     { key: 'laundry', label: 'Laundry (1 load)', price: 20 },
-    { key: 'windows', label: 'Windows (4 included)', price: 20 },
+    { key: 'windows', label: 'Inside Windows (per window)', price: 10 },
+    { key: 'blinds', label: 'Blinds (per window)', price: 10 },
+    { key: 'baseboard', label: 'Baseboard Cleaning (per room)', price: 15 },
     { key: 'dishes', label: 'Dishes', price: 20 },
     { key: 'garage', label: 'Garage', price: 50 },
   ],
@@ -50,6 +52,11 @@ const DEFAULT_CLEANING_PRICING = {
     { key: 'needs_attention', label: 'Needs Attention', surcharge: 100 },
   ],
   petSurcharge: 20,
+  orderDiscounts: [
+    { minAmount: 200, discount: 10 },
+    { minAmount: 300, discount: 15 },
+  ],
+  recurringDiscount: 10,
 };
 
 interface ServicePricingFormProps {
@@ -342,6 +349,78 @@ export default function ServicePricingForm({ accountId, accountName }: ServicePr
                 <input type="number" value={pricing.petSurcharge || 0} min={0}
                   onChange={e => setPricing((p: any) => ({ ...p, petSurcharge: parseInt(e.target.value) || 0 }))}
                   className="w-14 px-1 py-0.5 border border-slate-200 rounded text-[10px] text-center" />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Discounts */}
+      <div className="border border-slate-200 rounded-xl overflow-hidden">
+        <button
+          onClick={() => toggleSection('discounts')}
+          className="w-full px-3 py-2 flex items-center justify-between bg-slate-50 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
+        >
+          <span>Discounts</span>
+          {expandedSections.discounts ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        </button>
+        {expandedSections.discounts && (
+          <div className="px-3 py-2 space-y-3">
+            {/* Recurring cleaning discount */}
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 mb-1">Recurring Cleaning Discount</div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-slate-600">Discount for recurring customers</span>
+                <div className="flex items-center gap-1">
+                  <input type="number" value={pricing.recurringDiscount || 0} min={0} max={50}
+                    onChange={e => setPricing((p: any) => ({ ...p, recurringDiscount: parseInt(e.target.value) || 0 }))}
+                    className="w-12 px-1 py-0.5 border border-slate-200 rounded text-[10px] text-center" />
+                  <span className="text-[10px] text-slate-400">%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Order amount discounts */}
+            <div className="border-t border-slate-100 pt-2">
+              <div className="text-[10px] font-semibold text-slate-500 mb-1.5">Order Amount Discounts</div>
+              <div className="space-y-1.5">
+                {(pricing.orderDiscounts || []).map((od: any, i: number) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-500">Over</span>
+                    <div className="flex items-center gap-0.5">
+                      <span className="text-[9px] text-slate-400">$</span>
+                      <input type="number" value={od.minAmount} min={0}
+                        onChange={e => {
+                          const ods = [...(pricing.orderDiscounts || [])];
+                          ods[i] = { ...ods[i], minAmount: parseInt(e.target.value) || 0 };
+                          setPricing((p: any) => ({ ...p, orderDiscounts: ods }));
+                        }}
+                        className="w-16 px-1 py-0.5 border border-slate-200 rounded text-[10px] text-center" />
+                    </div>
+                    <span className="text-[10px] text-slate-500">→</span>
+                    <div className="flex items-center gap-0.5">
+                      <input type="number" value={od.discount} min={0} max={50}
+                        onChange={e => {
+                          const ods = [...(pricing.orderDiscounts || [])];
+                          ods[i] = { ...ods[i], discount: parseInt(e.target.value) || 0 };
+                          setPricing((p: any) => ({ ...p, orderDiscounts: ods }));
+                        }}
+                        className="w-12 px-1 py-0.5 border border-slate-200 rounded text-[10px] text-center" />
+                      <span className="text-[10px] text-slate-400">% off</span>
+                    </div>
+                    <button onClick={() => {
+                      setPricing((p: any) => ({ ...p, orderDiscounts: (p.orderDiscounts || []).filter((_: any, j: number) => j !== i) }));
+                    }} className="text-slate-300 hover:text-red-500">
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
+                ))}
+                <button onClick={() => {
+                  setPricing((p: any) => ({ ...p, orderDiscounts: [...(p.orderDiscounts || []), { minAmount: 0, discount: 0 }] }));
+                }}
+                  className="w-full py-1 text-[10px] text-blue-600 hover:bg-blue-50 flex items-center justify-center gap-1 rounded">
+                  <Plus size={10} /> Add discount tier
+                </button>
               </div>
             </div>
           </div>

@@ -176,8 +176,20 @@ export class AiController {
       // Pet surcharge
       if (p.petSurcharge > 0) parts.push(`Pet surcharge: +$${p.petSurcharge}`);
 
+      // Recurring cleaning discount
+      if (p.recurringDiscount > 0) parts.push(`Recurring cleaning discount: ${p.recurringDiscount}% off for customers who book regular recurring service`);
+
+      // Order amount discounts
+      if (p.orderDiscounts?.length > 0) {
+        const tiers = p.orderDiscounts
+          .filter((od: any) => od.minAmount > 0 && od.discount > 0)
+          .sort((a: any, b: any) => a.minAmount - b.minAmount)
+          .map((od: any) => `orders over $${od.minAmount}: ${od.discount}% off`);
+        if (tiers.length > 0) parts.push(`Order discounts: ${tiers.join(', ')}`);
+      }
+
       parts.push('--- End Pricing Guide ---');
-      parts.push('When the strategy requires pricing, use the EXACT prices from the table above. Match bedrooms and bathrooms from the lead details to find the right row. If the exact combination is not in the table, use the closest match.');
+      parts.push('When the strategy requires pricing, use the EXACT prices from the table above. Match bedrooms and bathrooms from the lead details to find the right row. If the exact combination is not in the table, use the closest match. Mention applicable discounts (recurring, order amount) when relevant.');
 
       return parts.join('\n');
     } catch {
