@@ -3,7 +3,7 @@ import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
   Pencil, Phone, Send, ChevronUp, Trash2, Save,
-  Key, Hash, ExternalLink, Link2, Sparkles, RefreshCw, Unlink, Clock,
+  Key, Hash, ExternalLink, Link2, Sparkles, RefreshCw, Unlink, Clock, FileText,
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -234,11 +234,7 @@ export function Services() {
     { label: '10th', delay: '6 months', message: '' }, { label: '11th', delay: '1 year', message: '' },
   ];
   const [fuSmartSteps, setFuSmartSteps] = useState(SMART_DEFAULTS.map(s => ({ ...s })));
-  const [fuCustomSteps, setFuCustomSteps] = useState([
-    { label: '1st', delay: '2 minutes', message: '' },
-    { label: '2nd', delay: '1 hour', message: '' },
-    { label: '3rd', delay: '1 day', message: '' },
-  ]);
+  const [fuCustomSteps, setFuCustomSteps] = useState(SMART_DEFAULTS.map(s => ({ ...s })));
   const [fuAvailability, setFuAvailability] = useState<'always' | 'active_hours'>('active_hours');
   const [fuStart, setFuStart] = useState('18:00');
   const [fuEnd, setFuEnd] = useState('09:00');
@@ -247,6 +243,7 @@ export function Services() {
   const [fuStopOnOptOut, setFuStopOnOptOut] = useState(true);
   const [fuStopOnBooked, setFuStopOnBooked] = useState(true);
   const [fuUrgentCapability, setFuUrgentCapability] = useState<'same_day' | '24h' | '48h' | 'none'>('24h');
+  const [fuTimingEditing, setFuTimingEditing] = useState(false);
   const [fuShowRules, setFuShowRules] = useState(false);
   // Legacy compat
   const fuPreset = 'standard' as const;
@@ -2243,77 +2240,85 @@ export function Services() {
                         <span className="block text-[9px] font-normal opacity-70 mt-0.5">{fuMode === 'auto_send' ? 'Recommended' : 'AI decides timing'}</span>
                       </button>
                     </div>
-                    {fuTiming === 'smart' && (
-                      <div className="space-y-1.5 bg-slate-50 rounded-xl p-3 border border-slate-100">
-                        {fuSmartSteps.map((step, i) => (
-                          <div key={i} className="flex items-center gap-2">
-                            <span className="text-[11px] text-slate-500 w-8 shrink-0 text-right">{step.label}</span>
-                            <span className="text-[11px] text-slate-400">after</span>
-                            <input type="text" value={step.delay}
-                              onChange={e => {
-                                const steps = [...fuSmartSteps];
-                                steps[i] = { ...steps[i], delay: e.target.value };
-                                setFuSmartSteps(steps);
-                              }}
-                              className="flex-1 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs" />
+                    {/* Timing sequence display — compact chip row + edit/template buttons */}
+                    {(() => {
+                      const steps = fuTiming === 'smart' ? fuSmartSteps : fuCustomSteps;
+                      const setSteps = fuTiming === 'smart' ? setFuSmartSteps : setFuCustomSteps;
+                      const prefix = fuTiming === 'smart' ? 'fu-smart' : 'fu-custom';
+                      return (
+                        <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-2">
+                          {/* Chip row */}
+                          <div className="flex flex-wrap gap-1.5">
+                            {steps.map((step, i) => (
+                              <span key={i} className={`text-[10px] px-2 py-0.5 rounded border ${
+                                step.message ? 'bg-violet-50 text-violet-600 border-violet-200' : 'bg-white text-slate-500 border-slate-100'
+                              }`}>
+                                {i + 1}. {step.delay || '—'}
+                                {step.message && ' 📝'}
+                              </span>
+                            ))}
+                          </div>
+                          {/* Action buttons */}
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setFuTimingEditing(!fuTimingEditing)}
+                              className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-1"
+                            >
+                              <Pencil className="w-3 h-3" /> Edit sequence
+                            </button>
                             {fuMode === 'suggest' && (
                               <button
-                                onClick={() => setTemplateEditor({ mode: step.message ? 'service-edit' : 'create', ruleId: '', templateId: undefined, templateName: `Follow-up ${step.label}`, content: step.message || '', type: `fu-smart-${i}` as any })}
-                                className="text-slate-400 hover:text-violet-600 transition-colors shrink-0"
-                                title="Edit template"
+                                onClick={() => {
+                                  const idx = steps.findIndex(s => !s.message);
+                                  const i = idx >= 0 ? idx : 0;
+                                  setTemplateEditor({ mode: 'create', ruleId: '', templateId: undefined, templateName: `Follow-up step ${i + 1}`, content: steps[i]?.message || '', type: `${prefix}-${i}` });
+                                }}
+                                className="text-[10px] text-violet-500 hover:text-violet-700 font-semibold flex items-center gap-1"
                               >
-                                <Pencil className="w-3 h-3" />
+                                <FileText className="w-3 h-3" /> Assign templates
                               </button>
                             )}
-                            {fuSmartSteps.length > 1 && (
-                              <button onClick={() => setFuSmartSteps(fuSmartSteps.filter((_, j) => j !== i))}
-                                className="text-slate-300 hover:text-red-500 text-xs shrink-0">✕</button>
+                            {fuTiming === 'smart' && (
+                              <button onClick={() => { setFuSmartSteps(SMART_DEFAULTS.map(s => ({ ...s }))); setFuTimingEditing(false); }}
+                                className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold ml-auto">Reset</button>
                             )}
                           </div>
-                        ))}
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => setFuSmartSteps([...fuSmartSteps, { label: `${fuSmartSteps.length + 1}th`, delay: '', message: '' }])}
-                            className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold">+ Add step</button>
-                          <button onClick={() => setFuSmartSteps(SMART_DEFAULTS.map(s => ({ ...s })))}
-                            className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold ml-auto">Reset to defaults</button>
+                          {/* Inline editor — shown when Edit is clicked */}
+                          {fuTimingEditing && (
+                            <div className="space-y-1.5 pt-2 border-t border-slate-200">
+                              {steps.map((step, i) => (
+                                <div key={i} className="flex items-center gap-2">
+                                  <span className="text-[10px] text-slate-400 w-5 text-right shrink-0">{i + 1}.</span>
+                                  <input type="text" value={step.delay}
+                                    onChange={e => {
+                                      const updated = [...steps];
+                                      updated[i] = { ...updated[i], delay: e.target.value };
+                                      setSteps(updated);
+                                    }}
+                                    className="flex-1 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs"
+                                    placeholder="e.g. 2 min, 1 hour, 1 day" />
+                                  {fuMode === 'suggest' && (
+                                    <button
+                                      onClick={() => setTemplateEditor({ mode: step.message ? 'service-edit' : 'create', ruleId: '', templateId: undefined, templateName: `Follow-up step ${i + 1}`, content: step.message || '', type: `${prefix}-${i}` })}
+                                      className={`shrink-0 transition-colors ${step.message ? 'text-violet-500 hover:text-violet-700' : 'text-slate-300 hover:text-violet-500'}`}
+                                      title={step.message ? 'Edit template' : 'Assign template'}
+                                    >
+                                      <FileText className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                  {steps.length > 1 && (
+                                    <button onClick={() => setSteps(steps.filter((_, j) => j !== i))}
+                                      className="text-slate-300 hover:text-red-500 text-xs shrink-0">✕</button>
+                                  )}
+                                </div>
+                              ))}
+                              <button onClick={() => setSteps([...steps, { label: `${steps.length + 1}th`, delay: '', message: '' }])}
+                                className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold">+ Add step</button>
+                            </div>
+                          )}
                         </div>
-                        {fuMode === 'suggest' && <p className="text-[9px] text-slate-400">Click the pencil icon to assign a template message to any step.</p>}
-                      </div>
-                    )}
-                    {fuTiming === 'custom' && (
-                      <div className="space-y-1.5 bg-slate-50 rounded-xl p-3 border border-slate-100">
-                        {fuCustomSteps.map((step, i) => (
-                          <div key={i} className="flex items-center gap-2">
-                            <span className="text-[11px] text-slate-500 w-8 shrink-0 text-right">{step.label}</span>
-                            <span className="text-[11px] text-slate-400">after</span>
-                            <input type="text" value={step.delay}
-                              onChange={e => {
-                                const steps = [...fuCustomSteps];
-                                steps[i] = { ...steps[i], delay: e.target.value };
-                                setFuCustomSteps(steps);
-                              }}
-                              className="flex-1 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs"
-                              placeholder="e.g. 2 min, 1 hour" />
-                            {fuMode === 'suggest' && (
-                              <button
-                                onClick={() => setTemplateEditor({ mode: (step as any).message ? 'service-edit' : 'create', ruleId: '', templateId: undefined, templateName: `Follow-up ${step.label}`, content: (step as any).message || '', type: `fu-custom-${i}` as any })}
-                                className="text-slate-400 hover:text-violet-600 transition-colors shrink-0"
-                                title="Edit template"
-                              >
-                                <Pencil className="w-3 h-3" />
-                              </button>
-                            )}
-                            {fuCustomSteps.length > 1 && (
-                              <button onClick={() => setFuCustomSteps(fuCustomSteps.filter((_, j) => j !== i))}
-                                className="text-slate-300 hover:text-red-500 text-xs shrink-0">✕</button>
-                            )}
-                          </div>
-                        ))}
-                        <button onClick={() => setFuCustomSteps([...fuCustomSteps, { label: `${fuCustomSteps.length + 1}th`, delay: '', message: '' }])}
-                          className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold">+ Add step</button>
-                        {fuMode === 'suggest' && <p className="text-[9px] text-slate-400">Click the pencil icon to assign a template message to any step.</p>}
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
 
                   {/* 3. Auto Reply Availability */}
