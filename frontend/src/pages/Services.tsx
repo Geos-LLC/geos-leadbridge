@@ -325,6 +325,22 @@ export function Services() {
     }
   }, [selectedAccountId]);
 
+  // Load follow-up settings when account changes
+  useEffect(() => {
+    if (!selectedAccountId) return;
+    followUpApi.getSettings(selectedAccountId).then(res => {
+      if (res.success && res.settings) {
+        const s = res.settings;
+        if (s.followUpMode) setFuMode(s.followUpMode as 'off' | 'suggest' | 'auto_send');
+        if (s.followUpPreset) setFuPreset(s.followUpPreset as 'conservative' | 'standard' | 'persistent');
+        if (s.followUpReplyType) setFuReplyType(s.followUpReplyType as 'template' | 'ai');
+        if (s.followUpActiveHoursStart) setFuStart(s.followUpActiveHoursStart);
+        if (s.followUpActiveHoursEnd) setFuEnd(s.followUpActiveHoursEnd);
+        if (s.followUpTimezone) setFuTz(s.followUpTimezone);
+      }
+    }).catch(() => {});
+  }, [selectedAccountId]);
+
   async function loadAccounts() {
     try {
       const { accounts: accs } = await thumbtackApi.getSavedAccounts();
@@ -2269,25 +2285,23 @@ export function Services() {
                   <button
                     onClick={async () => {
                       try {
-                        if (fuMode === 'off') {
-                          alert('Follow-ups disabled');
-                          return;
-                        }
-                        // Seed preset templates for this user via API
-                        const res = await followUpApi.seed({
-                          savedAccountId: selectedAccountId,
-                          platform: 'yelp',
+                        const res = await followUpApi.saveSettings(selectedAccountId, {
+                          mode: fuMode,
+                          preset: fuPreset,
+                          replyType: fuReplyType,
                           activeHoursStart: fuStart,
                           activeHoursEnd: fuEnd,
-                          activeHoursTimezone: fuTz,
+                          timezone: fuTz,
+                          platform: 'yelp',
                         });
-                        alert(`Follow-up settings saved. ${res.seeded > 0 ? `${res.seeded} sequence templates created.` : 'Templates already exist.'}`);
+                        alert(fuMode === 'off'
+                          ? 'Follow-ups disabled and saved.'
+                          : `Follow-up settings saved.${res.seeded > 0 ? ` ${res.seeded} sequence templates created.` : ''}`);
                       } catch (err: any) {
                         alert(err.message || 'Failed to save follow-up settings');
                       }
                     }}
-                    disabled={fuMode === 'off'}
-                    className="w-full px-4 py-2.5 bg-[#FF1A1A] text-white text-sm font-bold rounded-xl hover:bg-red-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                    className="w-full px-4 py-2.5 bg-[#FF1A1A] text-white text-sm font-bold rounded-xl hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
                   >
                     <Save className="w-4 h-4" /> Save Follow-up Settings
                   </button>

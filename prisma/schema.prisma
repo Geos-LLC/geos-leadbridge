@@ -335,6 +335,13 @@ model SavedAccount {
   webhookId       String?  // Webhook subscription ID for this business
   credentialsJson String?  // Encrypted: access_token, refresh_token for THIS account
   agentPhoneOverride String?  // Per-business agent phone; when null, inherits User.businessPhone
+  // Follow-up settings (per-account)
+  followUpMode     String?  // 'off' | 'suggest' | 'auto_send'
+  followUpPreset   String?  // 'conservative' | 'standard' | 'persistent'
+  followUpReplyType String? // 'template' | 'ai'
+  followUpActiveHoursStart String? // e.g. "09:00"
+  followUpActiveHoursEnd   String? // e.g. "21:00"
+  followUpTimezone         String? // e.g. "America/New_York"
   lastUsedAt      DateTime @default(now())
   createdAt       DateTime @default(now())
 

@@ -151,6 +151,81 @@ export class FollowUpEngineController {
   }
 
   /**
+   * Get follow-up settings for a saved account.
+   */
+  @Get('settings/:savedAccountId')
+  async getSettings(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+  ) {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId: user.id },
+      select: {
+        followUpMode: true,
+        followUpPreset: true,
+        followUpReplyType: true,
+        followUpActiveHoursStart: true,
+        followUpActiveHoursEnd: true,
+        followUpTimezone: true,
+      },
+    });
+    if (!account) return { success: false, error: 'Account not found' };
+    return { success: true, settings: account };
+  }
+
+  /**
+   * Save follow-up settings for a saved account + seed templates if needed.
+   */
+  @Post('settings/:savedAccountId')
+  async saveSettings(
+    @CurrentUser() user: any,
+    @Param('savedAccountId') savedAccountId: string,
+    @Body() body: {
+      mode: string;
+      preset: string;
+      replyType: string;
+      activeHoursStart: string;
+      activeHoursEnd: string;
+      timezone: string;
+      platform?: string;
+    },
+  ) {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId: user.id },
+    });
+    if (!account) return { success: false, error: 'Account not found' };
+
+    await this.prisma.savedAccount.update({
+      where: { id: savedAccountId },
+      data: {
+        followUpMode: body.mode,
+        followUpPreset: body.preset,
+        followUpReplyType: body.replyType,
+        followUpActiveHoursStart: body.activeHoursStart,
+        followUpActiveHoursEnd: body.activeHoursEnd,
+        followUpTimezone: body.timezone,
+      },
+    });
+
+    // Seed templates if mode is not 'off' (idempotent — skips if already exist)
+    let seeded = 0;
+    if (body.mode !== 'off') {
+      const { seedPresetsForUser } = await import('./follow-up-seed');
+      seeded = await seedPresetsForUser(
+        this.prisma,
+        user.id,
+        body.platform || account.platform || 'yelp',
+        body.activeHoursStart || '09:00',
+        body.activeHoursEnd || '21:00',
+        body.timezone || 'America/New_York',
+        savedAccountId,
+      );
+    }
+
+    return { success: true, seeded };
+  }
+
+  /**
    * Seed preset sequence templates for the current user.
    */
   @Post('seed')

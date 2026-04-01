@@ -1560,6 +1560,32 @@ export const followUpApi = {
     const { data } = await api.post('/v1/follow-ups/seed', params);
     return data;
   },
+  getSettings: async (savedAccountId: string): Promise<{
+    success: boolean;
+    settings?: {
+      followUpMode: string | null;
+      followUpPreset: string | null;
+      followUpReplyType: string | null;
+      followUpActiveHoursStart: string | null;
+      followUpActiveHoursEnd: string | null;
+      followUpTimezone: string | null;
+    };
+  }> => {
+    const { data } = await api.get(`/v1/follow-ups/settings/${savedAccountId}`);
+    return data;
+  },
+  saveSettings: async (savedAccountId: string, settings: {
+    mode: string;
+    preset: string;
+    replyType: string;
+    activeHoursStart: string;
+    activeHoursEnd: string;
+    timezone: string;
+    platform?: string;
+  }): Promise<{ success: boolean; seeded: number }> => {
+    const { data } = await api.post(`/v1/follow-ups/settings/${savedAccountId}`, settings);
+    return data;
+  },
 };
 
 export default api;
