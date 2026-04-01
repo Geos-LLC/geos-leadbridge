@@ -242,7 +242,7 @@ export function Services() {
   const [fuStopOnBooked, setFuStopOnBooked] = useState(true);
   const [fuOnNo, setFuOnNo] = useState<'stop' | 'retry'>('retry');
   const [fuRetryDays, setFuRetryDays] = useState(7);
-  const [fuUrgentCapability, setFuUrgentCapability] = useState<'same_day' | '24h' | '48h' | 'none'>('same_day');
+  const [fuUrgentCapability, setFuUrgentCapability] = useState<'same_day' | '24h' | '48h' | 'none'>('24h');
   const [fuShowStrategies, setFuShowStrategies] = useState(false);
   const [fuShowRules, setFuShowRules] = useState(false);
   // Legacy compat
