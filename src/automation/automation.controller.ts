@@ -49,8 +49,13 @@ export class AutomationController {
       const rules = await this.automationService.getRulesForAccount(user.id, accountId);
       return { rules };
     } catch (err: any) {
-      console.error(`[AutomationController] getRulesForAccount failed for ${accountId}: ${err.message}`, err.stack?.split('\n').slice(0, 3).join(' | '));
-      throw err;
+      // Log with NestJS logger (reaches Loki) and return empty rules instead of 500
+      const Logger = require('@nestjs/common').Logger;
+      new Logger('AutomationController').error(
+        `getRulesForAccount failed for ${accountId}: ${err.message}`,
+        err.stack?.split('\n').slice(0, 5).join(' | '),
+      );
+      return { rules: [] };
     }
   }
 
