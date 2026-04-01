@@ -1310,18 +1310,17 @@ export function Messages() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 sm:gap-3 shrink-0">
-                  {/* Desktop-only meta details */}
+                  {/* Desktop-only meta details — same format for TT and Yelp */}
                   <div className="hidden md:flex items-center gap-3 flex-wrap">
-                    {selectedLead.customerPhone && (
+                    {selectedLead.customerPhone ? (
                       <a href={`tel:${selectedLead.customerPhone}`} className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-blue-600">
                         <Phone size={14} />
                         {formatPhoneNumber(selectedLead.customerPhone)}
                       </a>
-                    )}
-                    {selectedLead.city && (
-                      <span className="flex items-center gap-1.5 text-xs text-slate-600">
-                        <MapPin size={14} />
-                        {selectedLead.city}, {selectedLead.state}
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-xs text-slate-400">
+                        <Phone size={14} />
+                        No phone available
                       </span>
                     )}
                     <span className="flex items-center gap-1.5 text-xs text-slate-600">
