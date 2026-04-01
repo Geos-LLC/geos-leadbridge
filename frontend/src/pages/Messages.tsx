@@ -1924,6 +1924,35 @@ export function Messages() {
               </div>
             )}
 
+            {/* Follow-up Status — compact thread status */}
+            {strategySuggestion && (
+              <div className="space-y-1">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Follow-up Status</h4>
+                <div className="bg-slate-50 rounded-xl p-2.5 space-y-1 text-[11px] text-slate-600">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Suggested</span>
+                    <span className="font-semibold">
+                      {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.emoji}{' '}
+                      {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.label}
+                    </span>
+                  </div>
+                  {strategySuggestion.threadState.stage && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Stage</span>
+                      <span className="font-medium capitalize">{strategySuggestion.threadState.stage}</span>
+                    </div>
+                  )}
+                  {strategySuggestion.threadState.awaitingCustomerReply && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">State</span>
+                      <span className="text-amber-600 font-medium">Waiting for reply</span>
+                    </div>
+                  )}
+                  <p className="text-[9px] text-slate-400 pt-0.5">{strategySuggestion.reason}</p>
+                </div>
+              </div>
+            )}
+
           </div>
         </aside>
       )}

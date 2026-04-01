@@ -229,21 +229,10 @@ export function Services() {
   const [fuStart, setFuStart] = useState('18:00');
   const [fuEnd, setFuEnd] = useState('09:00');
   const [fuTz, setFuTz] = useState('America/New_York');
-  const [fuStrategyMode, setFuStrategyMode] = useState<'auto' | 'manual'>('auto');
-  const [fuScenarios, setFuScenarios] = useState({
-    hybrid: true,
-    price: true,
-    qualify: true,
-    convert: true,
-    phone: true,
-  });
   const fuStopOnReply = true; // always on — internal rule, not user-configurable
   const [fuStopOnOptOut, setFuStopOnOptOut] = useState(true);
   const [fuStopOnBooked, setFuStopOnBooked] = useState(true);
-  const [fuOnNo, setFuOnNo] = useState<'stop' | 'retry'>('retry');
-  const [fuRetryDays, setFuRetryDays] = useState(7);
   const [fuUrgentCapability, setFuUrgentCapability] = useState<'same_day' | '24h' | '48h' | 'none'>('24h');
-  const [fuShowStrategies, setFuShowStrategies] = useState(false);
   const [fuShowRules, setFuShowRules] = useState(false);
   // Legacy compat
   const fuPreset = 'standard' as const;
@@ -364,13 +353,11 @@ export function Services() {
         if (s.followUpTiming) setFuTiming(s.followUpTiming);
         if (s.followUpCustomSteps) setFuCustomSteps(s.followUpCustomSteps);
         if (s.followUpAvailability) setFuAvailability(s.followUpAvailability);
-        if (s.followUpStrategyMode) setFuStrategyMode(s.followUpStrategyMode);
-        if (s.followUpScenarios) setFuScenarios(s.followUpScenarios);
+        // Strategy mode is always 'auto', scenarios always all-enabled
         // fuStopOnReply is always true (internal rule)
         if (s.followUpStopOnOptOut !== undefined) setFuStopOnOptOut(s.followUpStopOnOptOut);
         if (s.followUpStopOnBooked !== undefined) setFuStopOnBooked(s.followUpStopOnBooked);
-        if (s.followUpOnNo) setFuOnNo(s.followUpOnNo);
-        if (s.followUpRetryDays) setFuRetryDays(s.followUpRetryDays);
+        // "If customer says no" removed — handled internally
         if (s.followUpUrgentCapability) setFuUrgentCapability(s.followUpUrgentCapability);
       }
     }).catch(() => {});
@@ -2212,10 +2199,10 @@ export function Services() {
                     </div>
                   </div>
 
-                  {/* 2. Follow-up Timing */}
+                  {/* 2. Follow-up Plan */}
                   <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">2. Follow-up Timing</label>
-                    <p className="text-[11px] text-slate-400 mb-2">Choose when the next follow-up is sent if the customer doesn't reply.</p>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">2. Follow-up Plan</label>
+                    <p className="text-[11px] text-slate-400 mb-2">Follow-up sequence if the customer doesn't reply.</p>
                     <div className="flex gap-2 mb-3">
                       <button onClick={() => setFuTiming('custom')}
                         className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuTiming === 'custom' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
@@ -2228,6 +2215,19 @@ export function Services() {
                         <span className="block text-[9px] font-normal opacity-70 mt-0.5">{fuMode === 'auto_send' ? 'Recommended' : 'AI decides timing'}</span>
                       </button>
                     </div>
+                    {fuTiming === 'smart' && (
+                      <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-1">
+                        <div className="text-[10px] font-semibold text-slate-500 mb-1">Smart timing sequence:</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {['2 min', '10 min', '1 hour', '1 day', '3 days', '7 days'].map((t, i) => (
+                            <span key={i} className="text-[10px] text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-100">
+                              {i + 1}. {t}
+                            </span>
+                          ))}
+                        </div>
+                        <p className="text-[9px] text-slate-400 mt-1">Timing and messaging adapt automatically based on the conversation stage.</p>
+                      </div>
+                    )}
                     {fuTiming === 'custom' && (
                       <div className="space-y-2 bg-slate-50 rounded-xl p-3 border border-slate-100">
                         {fuCustomSteps.map((step, i) => (
@@ -2328,80 +2328,12 @@ export function Services() {
                     )}
                   </div>
 
-                  {/* 4. Follow-up Strategies (collapsed) */}
-                  <div className="border border-slate-200 rounded-xl overflow-hidden">
-                    <button
-                      onClick={() => setFuShowStrategies(!fuShowStrategies)}
-                      className="w-full px-4 py-3 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors"
-                    >
-                      <div>
-                        <span className="text-[11px] font-bold text-slate-600 uppercase tracking-widest">Follow-up Strategies</span>
-                        <p className="text-[10px] text-slate-400 mt-0.5">Choose which strategies the AI can use for follow-ups.</p>
-                      </div>
-                      {fuShowStrategies ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
-                    </button>
-                    {fuShowStrategies && (
-                      <div className="px-4 py-3 space-y-2 border-t border-slate-100">
-                        {/* Auto mode — default */}
-                        <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-colors ${
-                          fuStrategyMode === 'auto' ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-100 hover:bg-slate-50'
-                        }`}>
-                          <div className="flex items-center gap-2 flex-1 min-w-0">
-                            <span className="text-base">🤖</span>
-                            <div>
-                              <p className="text-sm font-semibold text-slate-800">Auto <span className="text-[9px] font-normal text-blue-500 ml-1">default</span></p>
-                              <p className="text-[10px] text-slate-400">Best strategy based on conversation evaluation</p>
-                            </div>
-                          </div>
-                          <input type="radio" name="fuStrategyMode" checked={fuStrategyMode === 'auto'}
-                            onChange={() => setFuStrategyMode('auto')}
-                            className="accent-blue-600 w-4 h-4 shrink-0 ml-3" />
-                        </label>
-
-                        {/* Manual selection */}
-                        <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-colors ${
-                          fuStrategyMode === 'manual' ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-100 hover:bg-slate-50'
-                        }`}>
-                          <div className="flex items-center gap-2 flex-1 min-w-0">
-                            <span className="text-base">🎯</span>
-                            <div>
-                              <p className="text-sm font-semibold text-slate-800">Pick strategies</p>
-                              <p className="text-[10px] text-slate-400">Choose which strategies can be used</p>
-                            </div>
-                          </div>
-                          <input type="radio" name="fuStrategyMode" checked={fuStrategyMode === 'manual'}
-                            onChange={() => setFuStrategyMode('manual')}
-                            className="accent-blue-600 w-4 h-4 shrink-0 ml-3" />
-                        </label>
-
-                        {/* Individual strategy toggles — only when manual */}
-                        {fuStrategyMode === 'manual' && (
-                          <div className="space-y-1.5 pl-4 border-l-2 border-blue-100 ml-2">
-                            {([
-                              { key: 'hybrid' as const, emoji: '⚖️', label: 'Hybrid', desc: 'Price range + one scheduling question' },
-                              { key: 'price' as const, emoji: '💰', label: 'Price', desc: 'Lead with pricing to reduce uncertainty' },
-                              { key: 'qualify' as const, emoji: '🧠', label: 'Qualify', desc: 'Ask for missing details before quoting' },
-                              { key: 'convert' as const, emoji: '📞', label: 'Convert', desc: 'Push toward booking with specific times' },
-                              { key: 'phone' as const, emoji: '📱', label: 'Phone', desc: 'Escalate to phone call for complex jobs' },
-                            ]).map(scenario => (
-                              <label key={scenario.key} className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors">
-                                <div className="flex items-center gap-2 flex-1 min-w-0">
-                                  <span className="text-sm">{scenario.emoji}</span>
-                                  <div>
-                                    <p className="text-xs font-semibold text-slate-800">{scenario.label}</p>
-                                    <p className="text-[9px] text-slate-400">{scenario.desc}</p>
-                                  </div>
-                                </div>
-                                <input type="checkbox"
-                                  checked={fuScenarios[scenario.key]}
-                                  onChange={e => setFuScenarios(prev => ({ ...prev, [scenario.key]: e.target.checked }))}
-                                  className="accent-emerald-600 w-3.5 h-3.5 shrink-0 ml-2" />
-                              </label>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
+                  {/* 4. How it works */}
+                  <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      Follow-ups automatically adapt to the conversation stage — after no reply, after questions, after pricing, or after booking steps.
+                      The AI selects the best strategy (Hybrid, Price, Qualify, Convert, or Phone) based on the conversation context.
+                    </p>
                   </div>
 
                   {/* 6. Smart Follow-up Rules (collapsed) */}
@@ -2418,50 +2350,35 @@ export function Services() {
                     </button>
                     {fuShowRules && (
                       <div className="px-4 py-4 space-y-4 border-t border-slate-100">
-                        {/* Stop on reply — informational, always on */}
-                        <div className="flex items-center gap-2 text-sm text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
-                          <span className="text-emerald-500">&#10003;</span>
-                          Follow-ups stop automatically when the customer replies
-                        </div>
-
-                        {/* Configurable stop rules */}
+                        {/* Hard stop conditions */}
                         <div>
-                          <div className="text-[11px] font-semibold text-slate-600 mb-2">Also stop when</div>
+                          <div className="text-[11px] font-semibold text-slate-600 mb-2">Follow-ups stop when:</div>
                           <div className="space-y-1.5">
                             <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
                               <input type="checkbox" checked={fuStopOnOptOut} onChange={e => setFuStopOnOptOut(e.target.checked)} className="accent-blue-600 w-3.5 h-3.5" />
-                              Customer asks to stop
+                              Customer asks not to be contacted
                             </label>
                             <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
                               <input type="checkbox" checked={fuStopOnBooked} onChange={e => setFuStopOnBooked(e.target.checked)} className="accent-blue-600 w-3.5 h-3.5" />
                               Job is booked or confirmed
                             </label>
+                            <div className="flex items-center gap-2 text-sm text-slate-500">
+                              <span className="text-emerald-500 text-xs">&#10003;</span>
+                              Conversation is archived
+                            </div>
                           </div>
                         </div>
 
-                        {/* If customer says no */}
+                        {/* Sequence stop */}
                         <div>
-                          <div className="text-[11px] font-semibold text-slate-600 mb-2">If the customer says no</div>
-                          <div className="flex gap-2">
-                            <button onClick={() => setFuOnNo('stop')}
-                              className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold border-2 transition-all ${fuOnNo === 'stop' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-                              Stop follow-ups
-                            </button>
-                            <button onClick={() => setFuOnNo('retry')}
-                              className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold border-2 transition-all ${fuOnNo === 'retry' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-                              Try again later
-                            </button>
+                          <div className="text-[11px] font-semibold text-slate-600 mb-1">Current sequence stops when:</div>
+                          <div className="flex items-center gap-2 text-sm text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+                            <span className="text-emerald-500 text-xs">&#10003;</span>
+                            Customer replies — a new sequence may begin after the next unanswered message
                           </div>
-                          {fuOnNo === 'retry' && (
-                            <div className="flex items-center gap-2 mt-2 text-sm text-slate-600">
-                              <span>Follow up again after</span>
-                              <input type="number" value={fuRetryDays} min={1} max={90}
-                                onChange={e => setFuRetryDays(parseInt(e.target.value) || 7)}
-                                className="w-16 px-2 py-1 border border-slate-200 rounded-lg text-center text-sm" />
-                              <span>days</span>
-                            </div>
-                          )}
                         </div>
+
+                        <p className="text-[9px] text-slate-400">Repeat-job reminders and reactivation will be available as a separate module in the future.</p>
 
                         {/* Urgent availability */}
                         <div>
@@ -2506,13 +2423,11 @@ export function Services() {
                           timing: fuTiming,
                           customSteps: fuTiming === 'custom' ? fuCustomSteps : undefined,
                           availability: fuAvailability,
-                          strategyMode: fuStrategyMode,
-                          scenarios: fuStrategyMode === 'auto' ? { hybrid: true, price: true, qualify: true, convert: true, phone: true } : fuScenarios,
+                          strategyMode: 'auto',
+                          scenarios: { hybrid: true, price: true, qualify: true, convert: true, phone: true },
                           stopOnReply: fuStopOnReply,
                           stopOnOptOut: fuStopOnOptOut,
                           stopOnBooked: fuStopOnBooked,
-                          onNo: fuOnNo,
-                          retryDays: fuRetryDays,
                           urgentCapability: fuUrgentCapability,
                         } as any);
                         alert(fuMode === 'off'
