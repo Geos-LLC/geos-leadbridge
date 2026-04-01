@@ -192,12 +192,13 @@ export class FollowUpEngineController {
 
     // Extract extended settings into JSON
     const { mode, preset, replyType, activeHoursStart, activeHoursEnd, timezone, platform,
-      timing, customSteps, availability, strategyMode, scenarios, stopOnReply, stopOnOptOut, stopOnBooked,
+      timing, customSteps, smartSteps, availability, strategyMode, scenarios, stopOnReply, stopOnOptOut, stopOnBooked,
       onNo, retryDays, urgentCapability, ...rest } = body;
 
     const extendedSettings: Record<string, any> = {};
     if (timing !== undefined) extendedSettings.followUpTiming = timing;
     if (customSteps !== undefined) extendedSettings.followUpCustomSteps = customSteps;
+    if (smartSteps !== undefined) extendedSettings.followUpSmartSteps = smartSteps;
     if (availability !== undefined) extendedSettings.followUpAvailability = availability;
     if (strategyMode !== undefined) extendedSettings.followUpStrategyMode = strategyMode;
     if (scenarios !== undefined) extendedSettings.followUpScenarios = scenarios;

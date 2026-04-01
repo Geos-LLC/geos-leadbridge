@@ -220,10 +220,17 @@ export function Services() {
   const [fuMode, setFuMode] = useState<'off' | 'suggest' | 'auto_send'>('suggest');
   const [fuReplyType, setFuReplyType] = useState<'template' | 'ai'>('ai');
   const [fuTiming, setFuTiming] = useState<'smart' | 'custom'>('custom');
+  const SMART_DEFAULTS = [
+    { label: '1st', delay: '2 min', message: '' }, { label: '2nd', delay: '10 min', message: '' }, { label: '3rd', delay: '1 hour', message: '' },
+    { label: '4th', delay: '1 day', message: '' }, { label: '5th', delay: '3 days', message: '' }, { label: '6th', delay: '7 days', message: '' },
+    { label: '7th', delay: '2 weeks', message: '' }, { label: '8th', delay: '1 month', message: '' }, { label: '9th', delay: '3 months', message: '' },
+    { label: '10th', delay: '6 months', message: '' }, { label: '11th', delay: '1 year', message: '' },
+  ];
+  const [fuSmartSteps, setFuSmartSteps] = useState(SMART_DEFAULTS.map(s => ({ ...s })));
   const [fuCustomSteps, setFuCustomSteps] = useState([
-    { label: '1st follow-up', delay: '2 minutes' },
-    { label: '2nd follow-up', delay: '1 hour' },
-    { label: '3rd follow-up', delay: '1 day' },
+    { label: '1st', delay: '2 minutes', message: '' },
+    { label: '2nd', delay: '1 hour', message: '' },
+    { label: '3rd', delay: '1 day', message: '' },
   ]);
   const [fuAvailability, setFuAvailability] = useState<'always' | 'active_hours'>('active_hours');
   const [fuStart, setFuStart] = useState('18:00');
@@ -352,6 +359,7 @@ export function Services() {
         // New fields (stored in extended settings JSON)
         if (s.followUpTiming) setFuTiming(s.followUpTiming);
         if (s.followUpCustomSteps) setFuCustomSteps(s.followUpCustomSteps);
+        if (s.followUpSmartSteps) setFuSmartSteps(s.followUpSmartSteps);
         if (s.followUpAvailability) setFuAvailability(s.followUpAvailability);
         // Strategy mode is always 'auto', scenarios always all-enabled
         // fuStopOnReply is always true (internal rule)
@@ -2216,39 +2224,77 @@ export function Services() {
                       </button>
                     </div>
                     {fuTiming === 'smart' && (
-                      <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-1">
-                        <div className="text-[10px] font-semibold text-slate-500 mb-1">Smart timing sequence:</div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {['2 min', '10 min', '1 hour', '1 day', '3 days', '7 days', '2 weeks', '1 month', '3 months', '6 months', '1 year'].map((t, i) => (
-                            <span key={i} className="text-[10px] text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-100">
-                              {i + 1}. {t}
-                            </span>
-                          ))}
+                      <div className="space-y-2 bg-slate-50 rounded-xl p-3 border border-slate-100">
+                        {fuSmartSteps.map((step, i) => (
+                          <div key={i} className="space-y-1 pb-2 border-b border-slate-100 last:border-b-0 last:pb-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-slate-500 w-8 shrink-0 text-right">{step.label}</span>
+                              <span className="text-[11px] text-slate-400">after</span>
+                              <input type="text" value={step.delay}
+                                onChange={e => {
+                                  const steps = [...fuSmartSteps];
+                                  steps[i] = { ...steps[i], delay: e.target.value };
+                                  setFuSmartSteps(steps);
+                                }}
+                                className="w-24 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs" />
+                              {fuSmartSteps.length > 1 && (
+                                <button onClick={() => setFuSmartSteps(fuSmartSteps.filter((_, j) => j !== i))}
+                                  className="text-slate-300 hover:text-red-500 text-xs ml-auto">✕</button>
+                              )}
+                            </div>
+                            <div className="ml-10">
+                              <input type="text" value={step.message || ''}
+                                onChange={e => {
+                                  const steps = [...fuSmartSteps];
+                                  steps[i] = { ...steps[i], message: e.target.value };
+                                  setFuSmartSteps(steps);
+                                }}
+                                className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-[10px] text-slate-600"
+                                placeholder="Leave empty for AI-generated message" />
+                            </div>
+                          </div>
+                        ))}
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => setFuSmartSteps([...fuSmartSteps, { label: `${fuSmartSteps.length + 1}th`, delay: '', message: '' }])}
+                            className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold">+ Add step</button>
+                          <button onClick={() => setFuSmartSteps(SMART_DEFAULTS.map(s => ({ ...s })))}
+                            className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold ml-auto">Reset to defaults</button>
                         </div>
-                        <p className="text-[9px] text-slate-400 mt-1">Timing and messaging adapt automatically based on the conversation stage.</p>
                       </div>
                     )}
                     {fuTiming === 'custom' && (
                       <div className="space-y-2 bg-slate-50 rounded-xl p-3 border border-slate-100">
                         {fuCustomSteps.map((step, i) => (
-                          <div key={i} className="flex items-center gap-2">
-                            <span className="text-[11px] text-slate-500 w-24 shrink-0">{step.label}</span>
-                            <span className="text-[11px] text-slate-400">after</span>
-                            <input type="text" value={step.delay}
-                              onChange={e => {
-                                const steps = [...fuCustomSteps];
-                                steps[i] = { ...steps[i], delay: e.target.value };
-                                setFuCustomSteps(steps);
-                              }}
-                              className="flex-1 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs"
-                              placeholder="e.g. 2 minutes, 1 hour, 1 day" />
-                            {fuCustomSteps.length > 1 && (
-                              <button onClick={() => setFuCustomSteps(fuCustomSteps.filter((_, j) => j !== i))}
-                                className="text-slate-300 hover:text-red-500 text-xs">✕</button>
-                            )}
+                          <div key={i} className="space-y-1 pb-2 border-b border-slate-100 last:border-b-0 last:pb-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-slate-500 w-8 shrink-0 text-right">{step.label}</span>
+                              <span className="text-[11px] text-slate-400">after</span>
+                              <input type="text" value={step.delay}
+                                onChange={e => {
+                                  const steps = [...fuCustomSteps];
+                                  steps[i] = { ...steps[i], delay: e.target.value };
+                                  setFuCustomSteps(steps);
+                                }}
+                                className="w-24 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs"
+                                placeholder="e.g. 2 min, 1 hour" />
+                              {fuCustomSteps.length > 1 && (
+                                <button onClick={() => setFuCustomSteps(fuCustomSteps.filter((_, j) => j !== i))}
+                                  className="text-slate-300 hover:text-red-500 text-xs ml-auto">✕</button>
+                              )}
+                            </div>
+                            <div className="ml-10">
+                              <input type="text" value={(step as any).message || ''}
+                                onChange={e => {
+                                  const steps = [...fuCustomSteps];
+                                  (steps[i] as any).message = e.target.value;
+                                  setFuCustomSteps(steps);
+                                }}
+                                className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-[10px] text-slate-600"
+                                placeholder="Message text (leave empty for AI-generated)" />
+                            </div>
                           </div>
                         ))}
-                        <button onClick={() => setFuCustomSteps([...fuCustomSteps, { label: `${fuCustomSteps.length + 1}${fuCustomSteps.length === 0 ? 'st' : fuCustomSteps.length === 1 ? 'nd' : fuCustomSteps.length === 2 ? 'rd' : 'th'} follow-up`, delay: '' }])}
+                        <button onClick={() => setFuCustomSteps([...fuCustomSteps, { label: `${fuCustomSteps.length + 1}th`, delay: '', message: '' }])}
                           className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold">+ Add step</button>
                       </div>
                     )}
@@ -2422,6 +2468,7 @@ export function Services() {
                           // Extended settings
                           timing: fuTiming,
                           customSteps: fuTiming === 'custom' ? fuCustomSteps : undefined,
+                          smartSteps: fuTiming === 'smart' ? fuSmartSteps : undefined,
                           availability: fuAvailability,
                           strategyMode: 'auto',
                           scenarios: { hybrid: true, price: true, qualify: true, convert: true, phone: true },
