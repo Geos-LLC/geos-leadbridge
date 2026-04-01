@@ -2219,7 +2219,7 @@ export function Services() {
                       <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-1">
                         <div className="text-[10px] font-semibold text-slate-500 mb-1">Smart timing sequence:</div>
                         <div className="flex flex-wrap gap-1.5">
-                          {['2 min', '10 min', '1 hour', '1 day', '3 days', '7 days'].map((t, i) => (
+                          {['2 min', '10 min', '1 hour', '1 day', '3 days', '7 days', '2 weeks', '1 month', '3 months', '6 months', '1 year'].map((t, i) => (
                             <span key={i} className="text-[10px] text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-100">
                               {i + 1}. {t}
                             </span>
