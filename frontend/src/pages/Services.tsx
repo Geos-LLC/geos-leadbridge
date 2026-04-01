@@ -228,10 +228,17 @@ export function Services() {
   const [fuReplyType, setFuReplyType] = useState<'template' | 'ai'>('ai');
   const [fuTiming, setFuTiming] = useState<'smart' | 'custom'>('custom');
   const SMART_DEFAULTS = [
-    { label: '1st', delay: '2 min', message: '' }, { label: '2nd', delay: '10 min', message: '' }, { label: '3rd', delay: '1 hour', message: '' },
-    { label: '4th', delay: '1 day', message: '' }, { label: '5th', delay: '3 days', message: '' }, { label: '6th', delay: '7 days', message: '' },
-    { label: '7th', delay: '2 weeks', message: '' }, { label: '8th', delay: '1 month', message: '' }, { label: '9th', delay: '3 months', message: '' },
-    { label: '10th', delay: '6 months', message: '' }, { label: '11th', delay: '1 year', message: '' },
+    { label: '1st', delay: '2 min', message: 'Hi {{lead.name}}, just wanted to make sure you saw my message. Happy to answer any questions!' },
+    { label: '2nd', delay: '10 min', message: 'Quick follow-up — I have availability this week if you\'d like to get on the schedule. Let me know what works for you!' },
+    { label: '3rd', delay: '1 hour', message: 'Hi {{lead.name}}, still here if you need anything. Would you like a price estimate based on your home details?' },
+    { label: '4th', delay: '1 day', message: 'Hey {{lead.name}}, just checking in. I\'d love to help with your {{lead.category}} — want me to put together a quote?' },
+    { label: '5th', delay: '3 days', message: 'Hi {{lead.name}}, I know things get busy! I still have openings this week for {{lead.category}}. Let me know if you\'re still interested.' },
+    { label: '6th', delay: '7 days', message: 'Hi {{lead.name}}, following up one more time. If you\'re still looking for {{lead.category}}, I\'d be happy to help. No pressure either way!' },
+    { label: '7th', delay: '2 weeks', message: 'Hey {{lead.name}}, it\'s been a couple weeks — just wanted to check if you still need {{lead.category}}. We\'re here if you do!' },
+    { label: '8th', delay: '1 month', message: 'Hi {{lead.name}}, hope you\'re doing well! If you\'re still thinking about {{lead.category}}, we have some availability coming up. Just let me know.' },
+    { label: '9th', delay: '3 months', message: 'Hi {{lead.name}}, it\'s been a while! If you ever need {{lead.category}} in the future, don\'t hesitate to reach out. We\'d love to help.' },
+    { label: '10th', delay: '6 months', message: 'Hey {{lead.name}}, just a friendly check-in. If you need {{lead.category}} or know someone who does, we\'re always here!' },
+    { label: '11th', delay: '1 year', message: 'Hi {{lead.name}}, it\'s been a year since you reached out about {{lead.category}}. If you ever need us again, we\'d love to hear from you!' },
   ];
   const [fuSmartSteps, setFuSmartSteps] = useState(SMART_DEFAULTS.map(s => ({ ...s })));
   const [fuCustomSteps, setFuCustomSteps] = useState(SMART_DEFAULTS.map(s => ({ ...s })));
