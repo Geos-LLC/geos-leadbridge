@@ -226,7 +226,7 @@ export function Services() {
   // Yelp follow-up settings
   const [fuMode, setFuMode] = useState<'off' | 'suggest' | 'auto_send'>('suggest');
   const [fuReplyType, setFuReplyType] = useState<'template' | 'ai'>('ai');
-  const [fuTiming, setFuTiming] = useState<'smart' | 'custom'>('custom');
+  // Timing mode removed — one editable sequence for both Manual and Auto-send
   const SMART_DEFAULTS = [
     { label: '1st', delay: '2 min', message: 'Hi {{lead.name}}, just wanted to make sure you saw my message. Happy to answer any questions!' },
     { label: '2nd', delay: '10 min', message: 'Quick follow-up — I have availability this week if you\'d like to get on the schedule. Let me know what works for you!' },
@@ -241,7 +241,6 @@ export function Services() {
     { label: '11th', delay: '1 year', message: 'Hi {{lead.name}}, it\'s been a year since you reached out about {{lead.category}}. If you ever need us again, we\'d love to hear from you!' },
   ];
   const [fuSmartSteps, setFuSmartSteps] = useState(SMART_DEFAULTS.map(s => ({ ...s })));
-  const [fuCustomSteps, setFuCustomSteps] = useState(SMART_DEFAULTS.map(s => ({ ...s })));
   const [fuAvailability, setFuAvailability] = useState<'always' | 'active_hours'>('active_hours');
   const [fuStart, setFuStart] = useState('18:00');
   const [fuEnd, setFuEnd] = useState('09:00');
@@ -368,8 +367,10 @@ export function Services() {
         if (s.followUpActiveHoursEnd) setFuEnd(s.followUpActiveHoursEnd);
         if (s.followUpTimezone) setFuTz(s.followUpTimezone);
         // New fields (stored in extended settings JSON)
-        if (s.followUpTiming) setFuTiming(s.followUpTiming);
-        if (s.followUpCustomSteps) setFuCustomSteps(s.followUpCustomSteps);
+        // timing mode removed — single sequence
+        if (s.followUpSteps) setFuSmartSteps(s.followUpSteps);
+        else if (s.followUpSmartSteps) setFuSmartSteps(s.followUpSmartSteps);
+        else if (s.followUpCustomSteps) setFuSmartSteps(s.followUpCustomSteps);
         if (s.followUpSmartSteps) setFuSmartSteps(s.followUpSmartSteps);
         if (s.followUpAvailability) setFuAvailability(s.followUpAvailability);
         // Strategy mode is always 'auto', scenarios always all-enabled
@@ -1255,9 +1256,9 @@ export function Services() {
       } else if (typeof templateEditor.type === 'string' && templateEditor.type.startsWith('fu-smart-')) {
         const idx = parseInt(templateEditor.type.replace('fu-smart-', ''));
         setFuSmartSteps(prev => prev.map((s, i) => i === idx ? { ...s, message: template.content } : s));
-      } else if (typeof templateEditor.type === 'string' && templateEditor.type.startsWith('fu-custom-')) {
-        const idx = parseInt(templateEditor.type.replace('fu-custom-', ''));
-        setFuCustomSteps(prev => prev.map((s, i) => i === idx ? { ...s, message: template.content } : s));
+      } else if (typeof templateEditor.type === 'string' && (templateEditor.type.startsWith('fu-custom-') || templateEditor.type.startsWith('fu-step-'))) {
+        const idx = parseInt(templateEditor.type.replace(/fu-(custom|step)-/, ''));
+        setFuSmartSteps(prev => prev.map((s, i) => i === idx ? { ...s, message: template.content } : s));
       }
       setTemplateEditor(null);
       showSuccess('Template created');
@@ -1290,9 +1291,9 @@ export function Services() {
       else if (typeof type === 'string' && type.startsWith('fu-smart-')) {
         const idx = parseInt(type.replace('fu-smart-', ''));
         setFuSmartSteps(prev => prev.map((s, i) => i === idx ? { ...s, message: template.content } : s));
-      } else if (typeof type === 'string' && type.startsWith('fu-custom-')) {
-        const idx = parseInt(type.replace('fu-custom-', ''));
-        setFuCustomSteps(prev => prev.map((s, i) => i === idx ? { ...s, message: template.content } : s));
+      } else if (typeof type === 'string' && (type.startsWith('fu-custom-') || type.startsWith('fu-step-'))) {
+        const idx = parseInt(type.replace(/fu-(custom|step)-/, ''));
+        setFuSmartSteps(prev => prev.map((s, i) => i === idx ? { ...s, message: template.content } : s));
       }
       setTemplateEditor(null);
       showSuccess('Template saved');
@@ -2215,11 +2216,11 @@ export function Services() {
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">1. Follow-up Mode</label>
                     <div className="flex gap-2">
                       {([
-                        { value: 'suggest' as const, label: 'Manual', desc: 'Review each follow-up in Lead Activity before sending', replyType: 'template' as const, timing: 'custom' as const, availability: 'always' as const },
-                        { value: 'auto_send' as const, label: 'Auto-send', desc: 'AI generates and sends follow-ups automatically', replyType: 'ai' as const, timing: 'smart' as const, availability: 'active_hours' as const },
+                        { value: 'suggest' as const, label: 'Manual', desc: 'Use templates — review each follow-up before sending', replyType: 'template' as const, availability: 'always' as const },
+                        { value: 'auto_send' as const, label: 'AI Reply', desc: 'AI generates contextual follow-ups automatically', replyType: 'ai' as const, availability: 'active_hours' as const },
                       ]).map(opt => (
                         <button key={opt.value}
-                          onClick={() => { setFuMode(opt.value); setFuReplyType(opt.replyType); setFuTiming(opt.timing); setFuAvailability(opt.availability); }}
+                          onClick={() => { setFuMode(opt.value); setFuReplyType(opt.replyType); setFuAvailability(opt.availability); }}
                           className={`flex-1 py-2.5 px-2 rounded-xl text-xs font-semibold border-2 transition-all ${
                             fuMode === opt.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
                           }`}
@@ -2234,24 +2235,12 @@ export function Services() {
                   {/* 2. Follow-up Plan */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">2. Follow-up Plan</label>
-                    <p className="text-[11px] text-slate-400 mb-2">Follow-up sequence if the customer doesn't reply.</p>
-                    <div className="flex gap-2 mb-3">
-                      <button onClick={() => setFuTiming('custom')}
-                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuTiming === 'custom' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
-                        Custom timing
-                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">{fuMode === 'suggest' ? 'Default' : 'Set your own delays'}</span>
-                      </button>
-                      <button onClick={() => setFuTiming('smart')}
-                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuTiming === 'smart' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
-                        Smart timing
-                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">{fuMode === 'auto_send' ? 'Recommended' : 'AI decides timing'}</span>
-                      </button>
-                    </div>
+                    <p className="text-[11px] text-slate-400 mb-2">Follow-up sequence if the customer doesn't reply. Edit timing and templates below.</p>
                     {/* Timing sequence display — compact chip row + edit/template buttons */}
                     {(() => {
-                      const steps = fuTiming === 'smart' ? fuSmartSteps : fuCustomSteps;
-                      const setSteps = fuTiming === 'smart' ? setFuSmartSteps : setFuCustomSteps;
-                      const prefix = fuTiming === 'smart' ? 'fu-smart' : 'fu-custom';
+                      const steps = fuSmartSteps;
+                      const setSteps = setFuSmartSteps;
+                      const prefix = 'fu-step';
                       return (
                         <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-2">
                           {/* Chip row */}
@@ -2285,10 +2274,8 @@ export function Services() {
                                 <FileText className="w-3 h-3" /> Assign templates
                               </button>
                             )}
-                            {fuTiming === 'smart' && (
-                              <button onClick={() => { setFuSmartSteps(SMART_DEFAULTS.map(s => ({ ...s }))); setFuTimingEditing(false); }}
-                                className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold ml-auto">Reset</button>
-                            )}
+                            <button onClick={() => { setFuSmartSteps(SMART_DEFAULTS.map(s => ({ ...s }))); setFuTimingEditing(false); }}
+                              className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold ml-auto">Reset to defaults</button>
                           </div>
                           {/* Inline editor — shown when Edit is clicked */}
                           {fuTimingEditing && (
@@ -2494,9 +2481,7 @@ export function Services() {
                           timezone: fuTz,
                           platform: 'yelp',
                           // Extended settings
-                          timing: fuTiming,
-                          customSteps: fuTiming === 'custom' ? fuCustomSteps : undefined,
-                          smartSteps: fuTiming === 'smart' ? fuSmartSteps : undefined,
+                          steps: fuSmartSteps,
                           availability: fuAvailability,
                           strategyMode: 'auto',
                           scenarios: { hybrid: true, price: true, qualify: true, convert: true, phone: true },

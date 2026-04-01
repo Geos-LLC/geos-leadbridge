@@ -83,9 +83,15 @@ export class FollowUpSchedulerService {
       return;
     }
 
-    // Get current step from stepsJson
-    const stepsData = enrollment.sequenceTemplate.stepsJson as any;
-    const steps: SequenceStep[] = stepsData?.steps || [];
+    // Get steps: prefer user-configured steps from account settings, fall back to seed template
+    let steps: SequenceStep[] = [];
+    const userSteps = await this.getUserConfiguredSteps(enrollment.conversationId);
+    if (userSteps && userSteps.length > 0) {
+      steps = userSteps;
+    } else {
+      const stepsData = enrollment.sequenceTemplate.stepsJson as any;
+      steps = stepsData?.steps || [];
+    }
     const step = steps[enrollment.currentStepIndex];
 
     if (!step) {
@@ -236,5 +242,53 @@ export class FollowUpSchedulerService {
 
       this.logger.log(`[FollowUpScheduler] Enrollment ${enrollment.id} completed after final step`);
     }
+  }
+
+  /**
+   * Load user-configured follow-up steps from account settings.
+   * Converts UI format { label, delay, message } to SequenceStep { stepOrder, delayMinutes, objective, messageTemplate }.
+   */
+  private async getUserConfiguredSteps(conversationId: string): Promise<SequenceStep[] | null> {
+    try {
+      const lead = await this.prisma.lead.findFirst({
+        where: { threadId: conversationId },
+        select: { businessId: true, userId: true },
+      });
+      if (!lead?.businessId) return null;
+
+      const account = await this.prisma.savedAccount.findFirst({
+        where: { userId: lead.userId, businessId: lead.businessId },
+        select: { followUpSettingsJson: true },
+      });
+      if (!account?.followUpSettingsJson) return null;
+
+      const settings = JSON.parse(account.followUpSettingsJson);
+      const uiSteps = settings.followUpSteps || settings.followUpSmartSteps || settings.followUpCustomSteps;
+      if (!uiSteps || !Array.isArray(uiSteps) || uiSteps.length === 0) return null;
+
+      return uiSteps.map((s: any, i: number) => ({
+        stepOrder: i,
+        delayMinutes: this.parseDelay(s.delay),
+        objective: 'follow_up',
+        messageTemplate: s.message || null,
+      }));
+    } catch {
+      return null;
+    }
+  }
+
+  /** Parse human-readable delay string to minutes */
+  private parseDelay(delay: string): number {
+    if (!delay) return 60;
+    const d = delay.toLowerCase().trim();
+    const num = parseFloat(d) || 1;
+    if (d.includes('min')) return Math.round(num);
+    if (d.includes('hour') || d.includes('hr')) return Math.round(num * 60);
+    if (d.includes('day')) return Math.round(num * 1440);
+    if (d.includes('week') || d.includes('wk')) return Math.round(num * 10080);
+    if (d.includes('month') || d.includes('mo')) return Math.round(num * 43200);
+    if (d.includes('year') || d.includes('yr')) return Math.round(num * 525600);
+    // Default: treat as minutes
+    return Math.round(num);
   }
 }
