@@ -2209,12 +2209,11 @@ export function Services() {
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">1. Follow-up Mode</label>
                     <div className="flex gap-2">
                       {([
-                        { value: 'off' as const, label: 'Off', desc: 'No follow-ups' },
-                        { value: 'suggest' as const, label: 'Suggest', desc: 'Review each follow-up before sending' },
-                        { value: 'auto_send' as const, label: 'Auto-send', desc: 'Send follow-ups automatically' },
+                        { value: 'suggest' as const, label: 'Suggest', desc: 'Template-based, review in Lead Activity before sending', replyType: 'template' as const },
+                        { value: 'auto_send' as const, label: 'Auto-send', desc: 'AI generates and sends follow-ups automatically', replyType: 'ai' as const },
                       ]).map(opt => (
                         <button key={opt.value}
-                          onClick={() => setFuMode(opt.value)}
+                          onClick={() => { setFuMode(opt.value); setFuReplyType(opt.replyType); }}
                           className={`flex-1 py-2.5 px-2 rounded-xl text-xs font-semibold border-2 transition-all ${
                             fuMode === opt.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
                           }`}
@@ -2226,26 +2225,9 @@ export function Services() {
                     </div>
                   </div>
 
-                  {/* 2. Reply Type */}
+                  {/* 2. Follow-up Timing */}
                   <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">2. Reply Type</label>
-                    <div className="flex gap-2">
-                      <button onClick={() => setFuReplyType('template')}
-                        className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuReplyType === 'template' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
-                        Template
-                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">Use fixed follow-up messages</span>
-                      </button>
-                      <button onClick={() => setFuReplyType('ai')}
-                        className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuReplyType === 'ai' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
-                        AI Follow-up
-                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">Generate contextual follow-ups based on the conversation</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 3. Follow-up Timing */}
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">3. Follow-up Timing</label>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">2. Follow-up Timing</label>
                     <p className="text-[11px] text-slate-400 mb-2">Choose when the next follow-up is sent if the customer doesn't reply.</p>
                     <div className="flex gap-2 mb-3">
                       <button onClick={() => setFuTiming('smart')}
@@ -2287,7 +2269,7 @@ export function Services() {
 
                   {/* 4. Auto Reply Availability */}
                   <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">4. Auto Reply Availability</label>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">3. Auto Reply Availability</label>
                     <p className="text-[11px] text-slate-400 mb-2">Choose when follow-ups can be sent automatically.</p>
                     <div className="flex gap-2 mb-3">
                       <button onClick={() => setFuAvailability('always')}
@@ -2327,7 +2309,7 @@ export function Services() {
 
                   {/* 5. Scenarios */}
                   <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">5. Scenarios</label>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">4. Scenarios</label>
                     <div className="space-y-2">
                       {([
                         { key: 'no_reply_after_initial' as const, label: 'After first reply', desc: 'Customer received your message but didn\'t respond' },
