@@ -980,6 +980,50 @@ export const usersApi = {
   },
 };
 
+// Teams API
+export const teamsApi = {
+  getMyOrg: async (): Promise<{ success: boolean; organization: any; myRole: string | null }> => {
+    const { data } = await api.get('/v1/teams/my-org');
+    return data;
+  },
+  createOrg: async (name: string): Promise<{ success: boolean; organization: any }> => {
+    const { data } = await api.post('/v1/teams', { name });
+    return data;
+  },
+  invite: async (email: string, role: 'ADMIN' | 'MEMBER' = 'MEMBER'): Promise<{ success: boolean; invitation: any; inviteLink: string }> => {
+    const { data } = await api.post('/v1/teams/invite', { email, role });
+    return data;
+  },
+  acceptInvite: async (token: string): Promise<{ success: boolean; organizationId: string; role: string }> => {
+    const { data } = await api.post('/v1/teams/invite/accept', { token });
+    return data;
+  },
+  removeMember: async (userId: string): Promise<{ success: boolean }> => {
+    const { data } = await api.delete(`/v1/teams/members/${userId}`);
+    return data;
+  },
+  updateRole: async (userId: string, role: 'ADMIN' | 'MEMBER'): Promise<{ success: boolean }> => {
+    const { data } = await api.patch(`/v1/teams/members/${userId}/role`, { role });
+    return data;
+  },
+  getInvitations: async (): Promise<{ success: boolean; invitations: any[] }> => {
+    const { data } = await api.get('/v1/teams/invitations');
+    return data;
+  },
+  revokeInvitation: async (id: string): Promise<{ success: boolean }> => {
+    const { data } = await api.delete(`/v1/teams/invitations/${id}`);
+    return data;
+  },
+  leaveOrg: async (): Promise<{ success: boolean }> => {
+    const { data } = await api.post('/v1/teams/leave');
+    return data;
+  },
+  deleteOrg: async (): Promise<{ success: boolean }> => {
+    const { data } = await api.delete('/v1/teams');
+    return data;
+  },
+};
+
 // Admin API
 export const adminApi = {
   listUsers: async (params: { search?: string; tier?: string; offset?: number; limit?: number }): Promise<{ users: AdminUser[]; total: number; offset: number; limit: number }> => {
