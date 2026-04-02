@@ -3,7 +3,7 @@ import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
   Pencil, Phone, Send, ChevronUp, Trash2, Save,
-  Key, Hash, ExternalLink, Link2, Sparkles, RefreshCw, Unlink, Clock,
+  Key, Hash, ExternalLink, Link2, Sparkles, RefreshCw, Unlink, Clock, FileText,
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -132,10 +132,17 @@ export function Services() {
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
   const setAccountDiagnostics = useAppStore(state => state.setAccountDiagnostics);
 
-  // Account state — seed from Zustand store so there's no loading flash
+  // Account state — seed from Zustand store, restore last used account
   const [accounts, setAccounts] = useState<SavedAccount[]>(storedAccounts);
-  const initialAccountId = storedAccounts[0]?.id || '';
-  const [selectedAccountId, setSelectedAccountId] = useState(initialAccountId);
+  const lastUsedAccountId = localStorage.getItem('lb_last_account_id');
+  const initialAccountId = (lastUsedAccountId && storedAccounts.some(a => a.id === lastUsedAccountId) ? lastUsedAccountId : storedAccounts[0]?.id) || '';
+  const [selectedAccountId, _setSelectedAccountId] = useState(initialAccountId);
+  const setSelectedAccountId = (id: string) => {
+    _setSelectedAccountId(id);
+    localStorage.setItem('lb_last_account_id', id);
+    const acc = accounts.find(a => a.id === id) || storedAccounts.find(a => a.id === id);
+    if (acc?.businessId) localStorage.setItem('lb_last_account_filter', acc.businessId);
+  };
   const sc = _svcCache.get(initialAccountId); // cached service data for this account
   const [loading, setLoading] = useState(!sc);
   const [error, setError] = useState<string | null>(null);
@@ -191,7 +198,7 @@ export function Services() {
     templateId?: string;
     templateName?: string;
     content: string;
-    type: 'autoReply' | 'alert' | 'cc-whisper' | 'cc-greeting' | 'cc-voicemail' | 'ct';
+    type: 'autoReply' | 'alert' | 'cc-whisper' | 'cc-greeting' | 'cc-voicemail' | 'ct' | string;
   } | null>(null);
 
   // Instant Call Connect state
@@ -219,12 +226,21 @@ export function Services() {
   // Yelp follow-up settings
   const [fuMode, setFuMode] = useState<'off' | 'suggest' | 'auto_send'>('suggest');
   const [fuReplyType, setFuReplyType] = useState<'template' | 'ai'>('ai');
-  const [fuTiming, setFuTiming] = useState<'smart' | 'custom'>('custom');
-  const [fuCustomSteps, setFuCustomSteps] = useState([
-    { label: '1st follow-up', delay: '2 minutes' },
-    { label: '2nd follow-up', delay: '1 hour' },
-    { label: '3rd follow-up', delay: '1 day' },
-  ]);
+  // Timing mode removed — one editable sequence for both Manual and Auto-send
+  const SMART_DEFAULTS = [
+    { label: '1st', delay: '2 min', message: 'Hi {{lead.name}}, just wanted to make sure you saw my message. Happy to answer any questions!' },
+    { label: '2nd', delay: '10 min', message: 'Quick follow-up — I have availability this week if you\'d like to get on the schedule. Let me know what works for you!' },
+    { label: '3rd', delay: '1 hour', message: 'Hi {{lead.name}}, still here if you need anything. Would you like a price estimate based on your home details?' },
+    { label: '4th', delay: '1 day', message: 'Hey {{lead.name}}, just checking in. I\'d love to help with your {{lead.category}} — want me to put together a quote?' },
+    { label: '5th', delay: '3 days', message: 'Hi {{lead.name}}, I know things get busy! I still have openings this week for {{lead.category}}. Let me know if you\'re still interested.' },
+    { label: '6th', delay: '7 days', message: 'Hi {{lead.name}}, following up one more time. If you\'re still looking for {{lead.category}}, I\'d be happy to help. No pressure either way!' },
+    { label: '7th', delay: '2 weeks', message: 'Hey {{lead.name}}, it\'s been a couple weeks — just wanted to check if you still need {{lead.category}}. We\'re here if you do!' },
+    { label: '8th', delay: '1 month', message: 'Hi {{lead.name}}, hope you\'re doing well! If you\'re still thinking about {{lead.category}}, we have some availability coming up. Just let me know.' },
+    { label: '9th', delay: '3 months', message: 'Hi {{lead.name}}, it\'s been a while! If you ever need {{lead.category}} in the future, don\'t hesitate to reach out. We\'d love to help.' },
+    { label: '10th', delay: '6 months', message: 'Hey {{lead.name}}, just a friendly check-in. If you need {{lead.category}} or know someone who does, we\'re always here!' },
+    { label: '11th', delay: '1 year', message: 'Hi {{lead.name}}, it\'s been a year since you reached out about {{lead.category}}. If you ever need us again, we\'d love to hear from you!' },
+  ];
+  const [fuSmartSteps, setFuSmartSteps] = useState(SMART_DEFAULTS.map(s => ({ ...s })));
   const [fuAvailability, setFuAvailability] = useState<'always' | 'active_hours'>('active_hours');
   const [fuStart, setFuStart] = useState('18:00');
   const [fuEnd, setFuEnd] = useState('09:00');
@@ -233,6 +249,7 @@ export function Services() {
   const [fuStopOnOptOut, setFuStopOnOptOut] = useState(true);
   const [fuStopOnBooked, setFuStopOnBooked] = useState(true);
   const [fuUrgentCapability, setFuUrgentCapability] = useState<'same_day' | '24h' | '48h' | 'none'>('24h');
+  const [fuTimingEditing, setFuTimingEditing] = useState(false);
   const [fuShowRules, setFuShowRules] = useState(false);
   // Legacy compat
   const fuPreset = 'standard' as const;
@@ -350,8 +367,11 @@ export function Services() {
         if (s.followUpActiveHoursEnd) setFuEnd(s.followUpActiveHoursEnd);
         if (s.followUpTimezone) setFuTz(s.followUpTimezone);
         // New fields (stored in extended settings JSON)
-        if (s.followUpTiming) setFuTiming(s.followUpTiming);
-        if (s.followUpCustomSteps) setFuCustomSteps(s.followUpCustomSteps);
+        // timing mode removed — single sequence
+        if (s.followUpSteps) setFuSmartSteps(s.followUpSteps);
+        else if (s.followUpSmartSteps) setFuSmartSteps(s.followUpSmartSteps);
+        else if (s.followUpCustomSteps) setFuSmartSteps(s.followUpCustomSteps);
+        if (s.followUpSmartSteps) setFuSmartSteps(s.followUpSmartSteps);
         if (s.followUpAvailability) setFuAvailability(s.followUpAvailability);
         // Strategy mode is always 'auto', scenarios always all-enabled
         // fuStopOnReply is always true (internal rule)
@@ -1233,6 +1253,12 @@ export function Services() {
         setCcVoicemailMessage(template.content); setCcVoicemailTemplateId(template.id);
       } else if (templateEditor.type === 'ct') {
         setCtAutoReplyTemplate(template.content); setCtSelectedTemplateId(template.id);
+      } else if (typeof templateEditor.type === 'string' && templateEditor.type.startsWith('fu-smart-')) {
+        const idx = parseInt(templateEditor.type.replace('fu-smart-', ''));
+        setFuSmartSteps(prev => prev.map((s, i) => i === idx ? { ...s, message: template.content } : s));
+      } else if (typeof templateEditor.type === 'string' && (templateEditor.type.startsWith('fu-custom-') || templateEditor.type.startsWith('fu-step-'))) {
+        const idx = parseInt(templateEditor.type.replace(/fu-(custom|step)-/, ''));
+        setFuSmartSteps(prev => prev.map((s, i) => i === idx ? { ...s, message: template.content } : s));
       }
       setTemplateEditor(null);
       showSuccess('Template created');
@@ -1262,6 +1288,13 @@ export function Services() {
       else if (type === 'cc-greeting') setCcLeadGreetingMessage(template.content);
       else if (type === 'cc-voicemail') setCcVoicemailMessage(template.content);
       else if (type === 'ct') setCtAutoReplyTemplate(template.content);
+      else if (typeof type === 'string' && type.startsWith('fu-smart-')) {
+        const idx = parseInt(type.replace('fu-smart-', ''));
+        setFuSmartSteps(prev => prev.map((s, i) => i === idx ? { ...s, message: template.content } : s));
+      } else if (typeof type === 'string' && (type.startsWith('fu-custom-') || type.startsWith('fu-step-'))) {
+        const idx = parseInt(type.replace(/fu-(custom|step)-/, ''));
+        setFuSmartSteps(prev => prev.map((s, i) => i === idx ? { ...s, message: template.content } : s));
+      }
       setTemplateEditor(null);
       showSuccess('Template saved');
     } catch (err: any) {
@@ -2183,11 +2216,11 @@ export function Services() {
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">1. Follow-up Mode</label>
                     <div className="flex gap-2">
                       {([
-                        { value: 'suggest' as const, label: 'Manual', desc: 'Review each follow-up in Lead Activity before sending', replyType: 'template' as const, timing: 'custom' as const, availability: 'always' as const },
-                        { value: 'auto_send' as const, label: 'Auto-send', desc: 'AI generates and sends follow-ups automatically', replyType: 'ai' as const, timing: 'smart' as const, availability: 'active_hours' as const },
+                        { value: 'suggest' as const, label: 'Manual', desc: 'Use templates — review each follow-up before sending', replyType: 'template' as const, availability: 'always' as const },
+                        { value: 'auto_send' as const, label: 'AI Reply', desc: 'AI generates contextual follow-ups automatically', replyType: 'ai' as const, availability: 'active_hours' as const },
                       ]).map(opt => (
                         <button key={opt.value}
-                          onClick={() => { setFuMode(opt.value); setFuReplyType(opt.replyType); setFuTiming(opt.timing); setFuAvailability(opt.availability); }}
+                          onClick={() => { setFuMode(opt.value); setFuReplyType(opt.replyType); setFuAvailability(opt.availability); }}
                           className={`flex-1 py-2.5 px-2 rounded-xl text-xs font-semibold border-2 transition-all ${
                             fuMode === opt.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
                           }`}
@@ -2202,56 +2235,84 @@ export function Services() {
                   {/* 2. Follow-up Plan */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">2. Follow-up Plan</label>
-                    <p className="text-[11px] text-slate-400 mb-2">Follow-up sequence if the customer doesn't reply.</p>
-                    <div className="flex gap-2 mb-3">
-                      <button onClick={() => setFuTiming('custom')}
-                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuTiming === 'custom' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
-                        Custom timing
-                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">{fuMode === 'suggest' ? 'Default' : 'Set your own delays'}</span>
-                      </button>
-                      <button onClick={() => setFuTiming('smart')}
-                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuTiming === 'smart' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
-                        Smart timing
-                        <span className="block text-[9px] font-normal opacity-70 mt-0.5">{fuMode === 'auto_send' ? 'Recommended' : 'AI decides timing'}</span>
-                      </button>
-                    </div>
-                    {fuTiming === 'smart' && (
-                      <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-1">
-                        <div className="text-[10px] font-semibold text-slate-500 mb-1">Smart timing sequence:</div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {['2 min', '10 min', '1 hour', '1 day', '3 days', '7 days', '2 weeks', '1 month', '3 months', '6 months', '1 year'].map((t, i) => (
-                            <span key={i} className="text-[10px] text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-100">
-                              {i + 1}. {t}
-                            </span>
-                          ))}
-                        </div>
-                        <p className="text-[9px] text-slate-400 mt-1">Timing and messaging adapt automatically based on the conversation stage.</p>
-                      </div>
-                    )}
-                    {fuTiming === 'custom' && (
-                      <div className="space-y-2 bg-slate-50 rounded-xl p-3 border border-slate-100">
-                        {fuCustomSteps.map((step, i) => (
-                          <div key={i} className="flex items-center gap-2">
-                            <span className="text-[11px] text-slate-500 w-24 shrink-0">{step.label}</span>
-                            <span className="text-[11px] text-slate-400">after</span>
-                            <input type="text" value={step.delay}
-                              onChange={e => {
-                                const steps = [...fuCustomSteps];
-                                steps[i] = { ...steps[i], delay: e.target.value };
-                                setFuCustomSteps(steps);
-                              }}
-                              className="flex-1 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs"
-                              placeholder="e.g. 2 minutes, 1 hour, 1 day" />
-                            {fuCustomSteps.length > 1 && (
-                              <button onClick={() => setFuCustomSteps(fuCustomSteps.filter((_, j) => j !== i))}
-                                className="text-slate-300 hover:text-red-500 text-xs">✕</button>
-                            )}
+                    <p className="text-[11px] text-slate-400 mb-2">Follow-up sequence if the customer doesn't reply. Edit timing and templates below.</p>
+                    {/* Timing sequence display — compact chip row + edit/template buttons */}
+                    {(() => {
+                      const steps = fuSmartSteps;
+                      const setSteps = setFuSmartSteps;
+                      const prefix = 'fu-step';
+                      return (
+                        <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-2">
+                          {/* Chip row */}
+                          <div className="flex flex-wrap gap-1.5">
+                            {steps.map((step, i) => (
+                              <span key={i} className={`text-[10px] px-2 py-0.5 rounded border ${
+                                step.message ? 'bg-violet-50 text-violet-600 border-violet-200' : 'bg-white text-slate-500 border-slate-100'
+                              }`}>
+                                {i + 1}. {step.delay || '—'}
+                                {step.message && ' 📝'}
+                              </span>
+                            ))}
                           </div>
-                        ))}
-                        <button onClick={() => setFuCustomSteps([...fuCustomSteps, { label: `${fuCustomSteps.length + 1}${fuCustomSteps.length === 0 ? 'st' : fuCustomSteps.length === 1 ? 'nd' : fuCustomSteps.length === 2 ? 'rd' : 'th'} follow-up`, delay: '' }])}
-                          className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold">+ Add step</button>
-                      </div>
-                    )}
+                          {/* Action buttons */}
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setFuTimingEditing(!fuTimingEditing)}
+                              className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-1"
+                            >
+                              <Pencil className="w-3 h-3" /> Edit sequence
+                            </button>
+                            {fuMode === 'suggest' && (
+                              <button
+                                onClick={() => {
+                                  const idx = steps.findIndex(s => !s.message);
+                                  const i = idx >= 0 ? idx : 0;
+                                  setTemplateEditor({ mode: 'create', ruleId: '', templateId: undefined, templateName: `Follow-up step ${i + 1}`, content: steps[i]?.message || '', type: `${prefix}-${i}` });
+                                }}
+                                className="text-[10px] text-violet-500 hover:text-violet-700 font-semibold flex items-center gap-1"
+                              >
+                                <FileText className="w-3 h-3" /> Assign templates
+                              </button>
+                            )}
+                            <button onClick={() => { setFuSmartSteps(SMART_DEFAULTS.map(s => ({ ...s }))); setFuTimingEditing(false); }}
+                              className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold ml-auto">Reset to defaults</button>
+                          </div>
+                          {/* Inline editor — shown when Edit is clicked */}
+                          {fuTimingEditing && (
+                            <div className="space-y-1.5 pt-2 border-t border-slate-200">
+                              {steps.map((step, i) => (
+                                <div key={i} className="flex items-center gap-2">
+                                  <span className="text-[10px] text-slate-400 w-5 text-right shrink-0">{i + 1}.</span>
+                                  <input type="text" value={step.delay}
+                                    onChange={e => {
+                                      const updated = [...steps];
+                                      updated[i] = { ...updated[i], delay: e.target.value };
+                                      setSteps(updated);
+                                    }}
+                                    className="flex-1 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs"
+                                    placeholder="e.g. 2 min, 1 hour, 1 day" />
+                                  {fuMode === 'suggest' && (
+                                    <button
+                                      onClick={() => setTemplateEditor({ mode: step.message ? 'service-edit' : 'create', ruleId: '', templateId: undefined, templateName: `Follow-up step ${i + 1}`, content: step.message || '', type: `${prefix}-${i}` })}
+                                      className={`shrink-0 transition-colors ${step.message ? 'text-violet-500 hover:text-violet-700' : 'text-slate-300 hover:text-violet-500'}`}
+                                      title={step.message ? 'Edit template' : 'Assign template'}
+                                    >
+                                      <FileText className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                  {steps.length > 1 && (
+                                    <button onClick={() => setSteps(steps.filter((_, j) => j !== i))}
+                                      className="text-slate-300 hover:text-red-500 text-xs shrink-0">✕</button>
+                                  )}
+                                </div>
+                              ))}
+                              <button onClick={() => setSteps([...steps, { label: `${steps.length + 1}th`, delay: '', message: '' }])}
+                                className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold">+ Add step</button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* 3. Auto Reply Availability */}
@@ -2420,8 +2481,7 @@ export function Services() {
                           timezone: fuTz,
                           platform: 'yelp',
                           // Extended settings
-                          timing: fuTiming,
-                          customSteps: fuTiming === 'custom' ? fuCustomSteps : undefined,
+                          steps: fuSmartSteps,
                           availability: fuAvailability,
                           strategyMode: 'auto',
                           scenarios: { hybrid: true, price: true, qualify: true, convert: true, phone: true },

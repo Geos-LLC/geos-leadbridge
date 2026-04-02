@@ -65,16 +65,36 @@ export class FollowUpGeneratorService {
     generationMode: string,
     promptTemplateId?: string | null,
   ): Promise<GeneratedFollowUp> {
-    if (generationMode === 'template' && step.messageTemplate) {
-      return this.generateFromTemplate(step);
+    // If step has a user-assigned template message, always use it (regardless of mode)
+    if (step.messageTemplate) {
+      return this.generateFromTemplate(step, conversationId);
     }
 
+    // AI mode: generate contextual message
     return this.generateFromAI(step, conversationId, promptTemplateId);
   }
 
-  private async generateFromTemplate(step: SequenceStep): Promise<GeneratedFollowUp> {
-    const message = step.messageTemplate || `Following up on your request.`;
-    return { message, objective: step.objective, strategyUsed: null };
+  private async generateFromTemplate(step: SequenceStep, conversationId?: string): Promise<GeneratedFollowUp> {
+    let message = step.messageTemplate || 'Following up on your request.';
+
+    // Variable substitution
+    if (conversationId && message.includes('{{')) {
+      try {
+        const lead = await this.prisma.lead.findFirst({
+          where: { threadId: conversationId },
+          select: { customerName: true, category: true, city: true, state: true },
+        });
+        if (lead) {
+          message = message
+            .replace(/\{\{lead\.name\}\}/g, lead.customerName || 'there')
+            .replace(/\{\{lead\.category\}\}/g, lead.category || 'your service request')
+            .replace(/\{\{lead\.city\}\}/g, lead.city || '')
+            .replace(/\{\{lead\.state\}\}/g, lead.state || '');
+        }
+      } catch { /* non-critical */ }
+    }
+
+    return { message, objective: step.objective, strategyUsed: 'template' };
   }
 
   private async generateFromAI(
