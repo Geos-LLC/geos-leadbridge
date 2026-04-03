@@ -2234,10 +2234,70 @@ export function Services() {
                     </div>
                   </div>
 
+                  {/* AI Strategy — only when AI Reply mode */}
+                  {fuMode === 'auto_send' && (
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Strategy</label>
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {([
+                          { key: 'auto' as const, emoji: '🤖', label: 'Auto', desc: 'AI picks best strategy per conversation' },
+                          { key: 'hybrid' as const, emoji: '⚖️', label: 'Hybrid', desc: 'Price + one question' },
+                          { key: 'price' as const, emoji: '💰', label: 'Price', desc: 'Lead with pricing' },
+                          { key: 'qualify' as const, emoji: '🧠', label: 'Qualify', desc: 'Ask for details' },
+                          { key: 'convert' as const, emoji: '📞', label: 'Convert', desc: 'Push to booking' },
+                          { key: 'phone' as const, emoji: '📱', label: 'Phone', desc: 'Escalate to call' },
+                        ]).map(s => (
+                          <button key={s.key}
+                            onClick={() => {
+                              setFuStrategy(s.key);
+                              if (s.key !== 'auto') {
+                                const prompts: Record<string, string> = {
+                                  hybrid: 'STRATEGY: HYBRID\n\nYou MUST:\n- Provide a price range based on pricing settings\n- Ask EXACTLY ONE question that moves toward booking\n\nDO NOT:\n- Ask more than one question\n- Ask vague questions',
+                                  price: 'STRATEGY: PRICE ANCHOR\n\nYou MUST:\n- Lead with a price range based on pricing settings\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Be vague or hesitant',
+                                  qualify: 'STRATEGY: QUALIFICATION\n\nYou MUST:\n- Ask 2-3 specific questions about missing details\n- Explain why you need the info\n\nDO NOT:\n- Give pricing\n- Ask generic questions',
+                                  convert: 'STRATEGY: CONVERSION\n\nYou MUST:\n- Include pricing based on settings\n- Offer a SPECIFIC time or 2 options\n- Push toward scheduling\n\nDO NOT:\n- Ask open-ended questions',
+                                  phone: 'STRATEGY: PHONE / ESCALATION\n\nYou MUST:\n- Explain why a call is needed\n- Ask for phone naturally\n\nDO NOT:\n- Push phone too early\n- Sound forceful',
+                                };
+                                setFuStrategyPrompt(prompts[s.key] || '');
+                              }
+                            }}
+                            className={`text-[11px] px-2.5 py-1.5 rounded-lg font-semibold border-2 transition-all ${
+                              fuStrategy === s.key ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
+                            }`}
+                            title={s.desc}
+                          >
+                            {s.emoji} {s.label}
+                          </button>
+                        ))}
+                      </div>
+                      {fuStrategy === 'auto' ? (
+                        <p className="text-[11px] text-slate-400">AI picks the best strategy based on conversation context.</p>
+                      ) : (
+                        <div className="bg-white p-3 rounded-xl border border-dashed border-slate-200 text-slate-600 text-xs leading-relaxed max-h-28 overflow-y-auto whitespace-pre-wrap relative group">
+                          {fuStrategyPrompt || 'No prompt set'}
+                          <button
+                            onClick={() => setTemplateEditor({
+                              mode: 'create', ruleId: '', templateId: undefined,
+                              templateName: `Follow-up — ${fuStrategy.charAt(0).toUpperCase() + fuStrategy.slice(1)}`,
+                              content: fuStrategyPrompt || '', type: `fu-strategy-${fuStrategy}`,
+                            })}
+                            className="absolute top-2 right-2 p-1.5 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* 2. Follow-up Plan */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">2. Follow-up Plan</label>
-                    <p className="text-[11px] text-slate-400 mb-2">Follow-up sequence if the customer doesn't reply. Edit timing and templates below.</p>
+                    <p className="text-[11px] text-slate-400 mb-2">
+                      {fuMode === 'suggest'
+                        ? 'Timing sequence with message templates. Click a step to edit its template.'
+                        : 'Timing sequence — AI generates messages based on conversation context.'}
+                    </p>
                     {/* Timing sequence display — compact chip row + edit/template buttons */}
                     {(() => {
                       const steps = fuSmartSteps;
@@ -2391,64 +2451,7 @@ export function Services() {
                     )}
                   </div>
 
-                  {/* 4. Follow-up Strategy */}
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">4. Follow-up Strategy</label>
-                    <div className="flex flex-wrap gap-1.5 mb-2">
-                      {([
-                        { key: 'auto' as const, emoji: '🤖', label: 'Auto', desc: 'AI picks best strategy per conversation' },
-                        { key: 'hybrid' as const, emoji: '⚖️', label: 'Hybrid', desc: 'Price + one question' },
-                        { key: 'price' as const, emoji: '💰', label: 'Price', desc: 'Lead with pricing' },
-                        { key: 'qualify' as const, emoji: '🧠', label: 'Qualify', desc: 'Ask for details' },
-                        { key: 'convert' as const, emoji: '📞', label: 'Convert', desc: 'Push to booking' },
-                        { key: 'phone' as const, emoji: '📱', label: 'Phone', desc: 'Escalate to call' },
-                      ]).map(s => (
-                        <button key={s.key}
-                          onClick={() => {
-                            setFuStrategy(s.key);
-                            if (s.key !== 'auto') {
-                              const prompts: Record<string, string> = {
-                                hybrid: 'STRATEGY: HYBRID\n\nYou MUST:\n- Provide a price range based on pricing settings\n- Ask EXACTLY ONE question that moves toward booking\n\nDO NOT:\n- Ask more than one question\n- Ask vague questions',
-                                price: 'STRATEGY: PRICE ANCHOR\n\nYou MUST:\n- Lead with a price range based on pricing settings\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Be vague or hesitant',
-                                qualify: 'STRATEGY: QUALIFICATION\n\nYou MUST:\n- Ask 2-3 specific questions about missing details\n- Explain why you need the info\n\nDO NOT:\n- Give pricing\n- Ask generic questions',
-                                convert: 'STRATEGY: CONVERSION\n\nYou MUST:\n- Include pricing based on settings\n- Offer a SPECIFIC time or 2 options\n- Push toward scheduling\n\nDO NOT:\n- Ask open-ended questions',
-                                phone: 'STRATEGY: PHONE / ESCALATION\n\nYou MUST:\n- Explain why a call is needed\n- Ask for phone naturally\n\nDO NOT:\n- Push phone too early\n- Sound forceful',
-                              };
-                              setFuStrategyPrompt(prompts[s.key] || '');
-                            }
-                          }}
-                          className={`text-[11px] px-2.5 py-1.5 rounded-lg font-semibold border-2 transition-all ${
-                            fuStrategy === s.key ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
-                          }`}
-                          title={s.desc}
-                        >
-                          {s.emoji} {s.label}
-                        </button>
-                      ))}
-                    </div>
-                    {fuStrategy === 'auto' ? (
-                      <p className="text-[11px] text-slate-400">AI automatically picks the best strategy based on conversation context (stage, pricing discussed, missing fields, engagement level).</p>
-                    ) : (
-                      <div className="bg-white p-3 rounded-xl border border-dashed border-slate-200 text-slate-600 text-xs leading-relaxed max-h-28 overflow-y-auto whitespace-pre-wrap relative group">
-                        {fuStrategyPrompt || 'No prompt set'}
-                        <button
-                          onClick={() => setTemplateEditor({
-                            mode: 'create',
-                            ruleId: '',
-                            templateId: undefined,
-                            templateName: `Follow-up — ${fuStrategy.charAt(0).toUpperCase() + fuStrategy.slice(1)}`,
-                            content: fuStrategyPrompt || '',
-                            type: `fu-strategy-${fuStrategy}`,
-                          })}
-                          className="absolute top-2 right-2 p-1.5 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* 6. Smart Follow-up Rules (collapsed) */}
+                  {/* Smart Follow-up Rules (collapsed) */}
                   <div className="border border-slate-200 rounded-xl overflow-hidden">
                     <button
                       onClick={() => setFuShowRules(!fuShowRules)}
