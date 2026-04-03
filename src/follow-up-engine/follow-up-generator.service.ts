@@ -112,12 +112,21 @@ export class FollowUpGeneratorService {
     const threadState = await this.conversationContext.getThreadState(conversationId);
 
     // Step 2: Determine strategy
-    //   Priority: manual override (activeStrategy) > suggestStrategy() > fallback 'hybrid'
+    //   Priority: thread override > account default > suggestStrategy() > fallback 'hybrid'
     let strategyKey = 'hybrid';
     let strategyReason = '';
+    let customStrategyPrompt: string | null = null;
 
-    if (threadState?.activeStrategy && STRATEGY_PROMPTS[threadState.activeStrategy]) {
-      // Manual override from user — respect it
+    // Check account-level strategy setting (user configured in follow-up settings)
+    const accountSettings = await this.getAccountFollowUpSettings(conversationId);
+    if (accountSettings?.followUpStrategy && accountSettings.followUpStrategy !== 'auto') {
+      strategyKey = accountSettings.followUpStrategy;
+      strategyReason = 'account default';
+      if (accountSettings.followUpStrategyPrompt) {
+        customStrategyPrompt = accountSettings.followUpStrategyPrompt;
+      }
+    } else if (threadState?.activeStrategy && STRATEGY_PROMPTS[threadState.activeStrategy]) {
+      // Manual override from thread — respect it
       strategyKey = threadState.activeStrategy;
       strategyReason = 'manual override';
     } else {
@@ -145,7 +154,7 @@ export class FollowUpGeneratorService {
       }
     }
 
-    const strategyPrompt = STRATEGY_PROMPTS[strategyKey] || STRATEGY_PROMPTS.hybrid;
+    const strategyPrompt = customStrategyPrompt || STRATEGY_PROMPTS[strategyKey] || STRATEGY_PROMPTS.hybrid;
     const objectiveFlavor = OBJECTIVE_FLAVORS[step.objective] || '';
 
     this.logger.log(`[FollowUpGenerator] Strategy: ${strategyKey} (${strategyReason}), objective: ${step.objective}`);
@@ -330,6 +339,29 @@ export class FollowUpGeneratorService {
       return Object.entries(scenarios)
         .filter(([, enabled]) => enabled)
         .map(([key]) => key);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Load account follow-up settings (strategy, custom prompt, etc.).
+   */
+  private async getAccountFollowUpSettings(conversationId: string): Promise<any | null> {
+    try {
+      const lead = await this.prisma.lead.findFirst({
+        where: { threadId: conversationId },
+        select: { businessId: true, userId: true },
+      });
+      if (!lead?.businessId) return null;
+
+      const account = await this.prisma.savedAccount.findFirst({
+        where: { userId: lead.userId, businessId: lead.businessId },
+        select: { followUpSettingsJson: true },
+      });
+      if (!account?.followUpSettingsJson) return null;
+
+      return JSON.parse(account.followUpSettingsJson);
     } catch {
       return null;
     }

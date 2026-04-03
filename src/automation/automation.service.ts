@@ -672,11 +672,42 @@ export class AutomationService implements OnModuleInit {
           select: { globalAiPrompt: true },
         });
 
-        // Build strategy prompt — inject thread context if available
-        const strategyPrompt = rule.promptTemplate?.content || rule.aiSystemPrompt || undefined;
-        const systemPrompt = threadContextPrompt
-          ? `${strategyPrompt || ''}\n\n${threadContextPrompt}`.trim()
+        // Build strategy prompt — use rule template, or default to Hybrid strategy
+        let strategyPrompt = rule.promptTemplate?.content || rule.aiSystemPrompt || undefined;
+        if (!strategyPrompt) {
+          // Default: use Hybrid strategy prompt
+          const { STRATEGY_PROMPTS } = require('../ai/strategy-prompts');
+          strategyPrompt = STRATEGY_PROMPTS.hybrid;
+        }
+
+        // Inject thread context
+        let systemPrompt = threadContextPrompt
+          ? `${strategyPrompt}\n\n${threadContextPrompt}`.trim()
           : strategyPrompt;
+
+        // Inject pricing context from account settings
+        const account = context.businessId
+          ? await this.prisma.savedAccount.findFirst({
+              where: { userId: context.userId, businessId: context.businessId },
+              select: { servicePricingJson: true, followUpSettingsJson: true },
+            })
+          : null;
+
+        if (account?.servicePricingJson) {
+          try {
+            const p = JSON.parse(account.servicePricingJson);
+            const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
+            if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
+              const priceParts = ['--- Pricing ---'];
+              for (const row of p.priceTable.slice(0, 10)) {
+                const prices = enabledTypes.map((t: any) => `${t.label}: $${row[t.key] || '?'}`).join(', ');
+                priceParts.push(`  ${row.bed}BR/${row.bath}BA — ${prices}`);
+              }
+              priceParts.push('--- End Pricing ---');
+              systemPrompt = `${systemPrompt}\n\n${priceParts.join('\n')}`;
+            }
+          } catch { /* invalid JSON */ }
+        }
 
         // Generate reply via OpenAI
         messageToSend = await this.aiService.generateReply({

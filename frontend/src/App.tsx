@@ -18,6 +18,7 @@ import { Analytics } from './pages/Analytics';
 import { SmsHistory } from './pages/SmsHistory';
 import Pricing from './pages/Pricing';
 import SettingsPage from './pages/SettingsPage';
+import AcceptInvite from './pages/AcceptInvite';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminUserDetails from './pages/admin/AdminUserDetails';
 import AdminTenantNumbers from './pages/admin/AdminTenantNumbers';
@@ -80,6 +81,7 @@ function App() {
             <Route path="/api-test" element={<ApiTest />} />
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/invite/accept" element={<AcceptInvite />} />
             <Route path="/billing" element={<Navigate to="/settings" />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/users/:userId" element={<AdminUserDetails />} />

@@ -9,6 +9,7 @@ import type { SubscriptionDetails, SavedAccount } from '../types';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import ConnectionModal from '../components/ConnectionModal';
 import ServicePricingForm from '../components/ServicePricingForm';
+import TeamSection from '../components/TeamSection';
 
 const tierNames: Record<string, string> = {
   STARTER: 'Instant Reply',
@@ -1585,6 +1586,9 @@ export default function SettingsPage() {
       {accounts.length > 0 && (
         <ServicePricingSection accounts={accounts} />
       )}
+
+      {/* Section 6: Team */}
+      <TeamSection />
 
       {/* Danger Zone */}
       {user?.role !== 'ADMIN' && (

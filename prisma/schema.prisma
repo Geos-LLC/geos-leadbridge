@@ -128,6 +128,7 @@ model User {
   tenantPhoneNumbers       TenantPhoneNumber[]
   conversationSyncConnections ConversationSyncConnection[]
   followUpSequenceTemplates FollowUpSequenceTemplate[]
+  orgMemberships           OrgMembership[]
 
   @@map("users")
 }
@@ -345,11 +346,14 @@ model SavedAccount {
   followUpSettingsJson     String? @db.Text // Extended follow-up settings (timing, rules, scenarios)
   // Service pricing configuration (JSON — per-account pricing table)
   servicePricingJson String? @db.Text
+  // Team — when set, org members can access this account
+  organizationId   String?
   lastUsedAt      DateTime @default(now())
   createdAt       DateTime @default(now())
 
   // Relationships
   user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization         Organization?         @relation("OrgAccounts", fields: [organizationId], references: [id], onDelete: SetNull)
   automationRules      AutomationRule[]
   notificationSettings NotificationSettings?
   callConnectSettings  CallConnectSettings?
@@ -359,6 +363,7 @@ model SavedAccount {
 
   @@unique([userId, platform, businessId])
   @@index([userId])
+  @@index([organizationId])
   @@map("saved_accounts")
 }
 
@@ -1126,4 +1131,62 @@ model FollowUpStepExecution {
   @@index([enrollmentId, stepIndex])
   @@index([status])
   @@map("follow_up_step_executions")
+}
+
+// ==========================================
+// Team / Organization
+// ==========================================
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members       OrgMembership[]
+  invitations   OrgInvitation[]
+  savedAccounts SavedAccount[]  @relation("OrgAccounts")
+
+  @@map("organizations")
+}
+
+model OrgMembership {
+  id             String   @id @default(uuid())
+  organizationId String
+  userId         String
+  role           OrgRole  @default(MEMBER)
+  joinedAt       DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([organizationId])
+  @@map("org_memberships")
+}
+
+model OrgInvitation {
+  id             String    @id @default(uuid())
+  organizationId String
+  email          String
+  role           OrgRole   @default(MEMBER)
+  token          String    @unique @default(uuid())
+  invitedBy      String?
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+  @@index([token])
+  @@index([email])
+  @@map("org_invitations")
 }
