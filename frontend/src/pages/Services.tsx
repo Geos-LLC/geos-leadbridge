@@ -1747,9 +1747,9 @@ export function Services() {
                       ) : (
                         /* AI mode: prompt template selector + editable content */
                         <div>
-                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Prompt</label>
-                          <div className="bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
-                            {autoReplyAiPrompt || 'Using default global AI prompt'}
+                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">First Reply Prompt</label>
+                          <div className="bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-xs leading-relaxed relative group whitespace-pre-wrap max-h-40 overflow-y-auto">
+                            {autoReplyAiPrompt || 'Using default Hybrid strategy: provide a price range + ask one question.'}
                             <button
                               onClick={() => setTemplateEditor({
                                 mode: autoReplyPromptTemplateId ? 'service-edit' : 'create',

@@ -66,46 +66,88 @@ export class TemplatesService {
   private static readonly DEFAULT_PROMPTS: { name: string; content: string; type: string; isDefault: boolean }[] = [
     {
       name: 'Hybrid Strategy',
-      content: `Strategy: Hybrid
+      content: `STRATEGY: HYBRID
 
-- Provide a broad price range early
-- Immediately ask one clarifying question
-- Balance speed and accuracy
-- Adjust responses dynamically as more information is received`,
+Use when:
+- You have enough information to estimate price
+- But still need one key detail OR want to move toward scheduling
+
+You MUST:
+- Provide a price range based on pricing settings
+- Ask EXACTLY ONE question
+
+The question MUST:
+- Move toward booking (timing or confirmation)
+- Be simple and direct
+
+DO NOT:
+- Ask more than one question
+- Ask vague questions (e.g. "does that work?")
+
+Goal: Reduce uncertainty and move the lead forward.`,
       type: 'prompt',
       isDefault: true,
     },
     {
       name: 'Price-Anchor Strategy',
-      content: `Strategy: Price Anchor
+      content: `STRATEGY: PRICE ANCHOR
 
-- Provide a realistic price range early in the conversation
-- Reduce uncertainty quickly
-- After giving range, ask 1 clarifying question
-- Avoid exact pricing unless enough details are provided
-- Keep explanation minimal`,
+Use when:
+- Customer asks about price directly
+- Or pricing is the main concern
+
+You MUST:
+- Lead with a price range based on pricing settings
+- Briefly explain what is included
+
+DO NOT:
+- Ask questions
+- Be vague or hesitant
+
+Tone: Confident and clear
+
+Goal: Give the customer a number to react to.`,
       type: 'prompt',
       isDefault: false,
     },
     {
       name: 'Qualification Strategy',
-      content: `Strategy: Qualification First
+      content: `STRATEGY: QUALIFICATION
 
-- Ask 1-2 high-impact questions before giving pricing
-- Focus on understanding scope and details
-- Delay pricing until enough context is gathered
-- Keep questions natural and helpful, not interrogative`,
+Use when:
+- Critical details are missing (home size, timing, condition)
+
+You MUST:
+- Ask 2-3 specific questions
+- Briefly explain why you need the info
+
+DO NOT:
+- Give pricing
+- Use if enough info is already provided
+
+Goal: Collect only the minimum info needed to move to pricing or booking.`,
       type: 'prompt',
       isDefault: false,
     },
     {
       name: 'Conversion Strategy',
-      content: `Strategy: Conversion
+      content: `STRATEGY: CONVERSION
 
-- Focus on moving toward booking or next step
-- Suggest phone call or scheduling only when appropriate
-- Present next step as convenience, not pressure
-- Continue answering questions if user prefers chat`,
+Use when:
+- You have enough information
+- Lead shows intent or urgency
+- Ready to move to booking
+
+You MUST:
+- Include pricing based on settings
+- Offer a SPECIFIC time or 2 options
+- Push toward scheduling
+
+DO NOT:
+- Ask open-ended questions
+- Delay with unnecessary details
+
+Goal: Get the lead to commit to a time.`,
       type: 'prompt',
       isDefault: false,
     },
