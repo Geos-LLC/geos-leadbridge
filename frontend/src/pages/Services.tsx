@@ -159,7 +159,7 @@ export function Services() {
   const [autoReplyUseAi, setAutoReplyUseAi] = useState<boolean>(firstReplyRule?.useAi ?? false);
   const [autoReplyAiPrompt, setAutoReplyAiPrompt] = useState<string>(firstReplyRule?.aiSystemPrompt ?? '');
   const [autoReplyPromptTemplateId, setAutoReplyPromptTemplateId] = useState<string>(firstReplyRule?.promptTemplateId || '');
-  const [, setPromptTemplates] = useState<MessageTemplate[]>([]);
+  const [/* promptTemplates */, setPromptTemplates] = useState<MessageTemplate[]>([]);
   const [, setPromptTemplatesLoaded] = useState(false);
 
   // Other service rules
@@ -248,6 +248,8 @@ export function Services() {
   const fuStopOnReply = true; // always on — internal rule, not user-configurable
   const [fuStopOnOptOut, setFuStopOnOptOut] = useState(true);
   const [fuStopOnBooked, setFuStopOnBooked] = useState(true);
+  const [fuStrategy, setFuStrategy] = useState<'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone'>('auto');
+  const [fuStrategyPrompt, setFuStrategyPrompt] = useState('');
   const [fuUrgentCapability, setFuUrgentCapability] = useState<'same_day' | '24h' | '48h' | 'none'>('24h');
   const [fuTimingEditing, setFuTimingEditing] = useState(false);
   const [fuShowRules, setFuShowRules] = useState(false);
@@ -379,6 +381,8 @@ export function Services() {
         if (s.followUpStopOnBooked !== undefined) setFuStopOnBooked(s.followUpStopOnBooked);
         // "If customer says no" removed — handled internally
         if (s.followUpUrgentCapability) setFuUrgentCapability(s.followUpUrgentCapability);
+        if (s.followUpStrategy) setFuStrategy(s.followUpStrategy);
+        if (s.followUpStrategyPrompt) setFuStrategyPrompt(s.followUpStrategyPrompt);
       }
     }).catch(() => {});
   }, [selectedAccountId]);
@@ -1259,6 +1263,8 @@ export function Services() {
       } else if (typeof templateEditor.type === 'string' && (templateEditor.type.startsWith('fu-custom-') || templateEditor.type.startsWith('fu-step-'))) {
         const idx = parseInt(templateEditor.type.replace(/fu-(custom|step)-/, ''));
         setFuSmartSteps(prev => prev.map((s, i) => i === idx ? { ...s, message: template.content } : s));
+      } else if (typeof templateEditor.type === 'string' && templateEditor.type.startsWith('fu-strategy-')) {
+        setFuStrategyPrompt(template.content);
       }
       setTemplateEditor(null);
       showSuccess('Template created');
@@ -1294,6 +1300,8 @@ export function Services() {
       } else if (typeof type === 'string' && (type.startsWith('fu-custom-') || type.startsWith('fu-step-'))) {
         const idx = parseInt(type.replace(/fu-(custom|step)-/, ''));
         setFuSmartSteps(prev => prev.map((s, i) => i === idx ? { ...s, message: template.content } : s));
+      } else if (typeof type === 'string' && type.startsWith('fu-strategy-')) {
+        setFuStrategyPrompt(template.content);
       }
       setTemplateEditor(null);
       showSuccess('Template saved');
@@ -1737,67 +1745,26 @@ export function Services() {
                           )}
                         </div>
                       ) : (
-                        /* AI mode: strategy selector + editable prompt */
-                        <div className="space-y-3">
-                          <div>
-                            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Strategy</label>
-                            <div className="flex flex-wrap gap-1.5">
-                              {[
-                                { key: 'hybrid', emoji: '⚖️', label: 'Hybrid' },
-                                { key: 'price', emoji: '💰', label: 'Price' },
-                                { key: 'qualify', emoji: '🧠', label: 'Qualify' },
-                                { key: 'convert', emoji: '📞', label: 'Convert' },
-                                { key: 'phone', emoji: '📱', label: 'Phone' },
-                              ].map(s => {
-                                const isSelected = autoReplyAiPrompt?.includes(`STRATEGY: ${s.label.toUpperCase()}`) || autoReplyAiPrompt?.includes(`STRATEGY: ${s.key.toUpperCase()}`) || autoReplyAiPrompt?.includes(`STRATEGY: PHONE`);
-                                return (
-                                  <button key={s.key}
-                                    onClick={() => {
-                                      // Load strategy prompt from shared constants via API or hardcoded
-                                      const prompts: Record<string, string> = {
-                                        hybrid: 'STRATEGY: HYBRID\n\nUse when:\n- You have enough information to estimate price\n- But still need one key detail OR want to move toward scheduling\n\nYou MUST:\n- Provide a price range based on pricing settings\n- Ask EXACTLY ONE question\n\nThe question MUST:\n- Move toward booking (timing or confirmation)\n- Be simple and direct\n\nDO NOT:\n- Ask more than one question\n- Ask vague questions (e.g. "does that work?")\n\nGoal: Reduce uncertainty and move the lead forward.',
-                                        price: 'STRATEGY: PRICE ANCHOR\n\nUse when:\n- Customer asks about price directly\n- Or pricing is the main concern\n\nYou MUST:\n- Lead with a price range based on pricing settings\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Be vague or hesitant\n\nGoal: Give the customer a number to react to.',
-                                        qualify: 'STRATEGY: QUALIFICATION\n\nUse when:\n- Critical details are missing (home size, timing, condition)\n\nYou MUST:\n- Ask 2-3 specific questions\n- Briefly explain why you need the info\n\nDO NOT:\n- Give pricing\n- Use if enough info is already provided\n\nGoal: Collect only the minimum info needed to move to pricing or booking.',
-                                        convert: 'STRATEGY: CONVERSION\n\nUse when:\n- You have enough information\n- Lead shows intent or urgency\n- Ready to move to booking\n\nYou MUST:\n- Include pricing based on settings\n- Offer a SPECIFIC time or 2 options\n- Push toward scheduling\n\nDO NOT:\n- Ask open-ended questions\n- Delay with unnecessary details\n\nGoal: Get the lead to commit to a time.',
-                                        phone: 'STRATEGY: PHONE / ESCALATION\n\nUse when:\n- Job is complex\n- Customer asks for exact quote\n- You need confirmation\n\nYou MUST:\n- Explain why a call is needed\n- Ask for phone naturally\n\nDO NOT:\n- Push phone too early\n- Sound forceful\n\nGoal: Move to phone conversation for complex jobs.',
-                                      };
-                                      setAutoReplyAiPrompt(prompts[s.key] || prompts.hybrid);
-                                      setAutoReplyPromptTemplateId('');
-                                      // Auto-save after a short delay
-                                      setTimeout(() => firstReplyRule && changeRuleAiMode(firstReplyRule.id, true, prompts[s.key] || prompts.hybrid), 300);
-                                    }}
-                                    className={`text-[11px] px-2.5 py-1.5 rounded-lg font-semibold border-2 transition-all ${
-                                      isSelected ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
-                                    }`}
-                                  >
-                                    {s.emoji} {s.label}
-                                  </button>
-                                );
+                        /* AI mode: prompt template selector + editable content */
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Prompt</label>
+                          <div className="bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                            {autoReplyAiPrompt || 'Using default global AI prompt'}
+                            <button
+                              onClick={() => setTemplateEditor({
+                                mode: autoReplyPromptTemplateId ? 'service-edit' : 'create',
+                                ruleId: firstReplyRule?.id || '',
+                                templateId: autoReplyPromptTemplateId || undefined,
+                                templateName: 'Auto Reply Prompt',
+                                content: autoReplyAiPrompt || '',
+                                type: 'autoReply',
                               })}
-                            </div>
+                              className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
                           </div>
-                          <div>
-                            <div className="flex items-center justify-between mb-1">
-                              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Prompt</label>
-                              <button
-                                onClick={() => setTemplateEditor({
-                                  mode: autoReplyPromptTemplateId ? 'service-edit' : 'create',
-                                  ruleId: firstReplyRule?.id || '',
-                                  templateId: autoReplyPromptTemplateId || undefined,
-                                  templateName: 'Auto Reply Strategy',
-                                  content: autoReplyAiPrompt || '',
-                                  type: 'autoReply',
-                                })}
-                                className="text-[10px] text-violet-500 hover:text-violet-700 font-semibold flex items-center gap-1"
-                              >
-                                <Pencil className="w-3 h-3" /> Edit & save as template
-                              </button>
-                            </div>
-                            <div className="bg-white p-3 rounded-xl border border-dashed border-slate-200 text-slate-600 text-xs leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap">
-                              {autoReplyAiPrompt || 'Select a strategy above'}
-                            </div>
-                            <p className="text-[10px] text-slate-400 mt-1">Click a strategy to set the prompt. Edit & save to create a custom version.</p>
-                          </div>
+                          <p className="text-xs text-slate-400 mt-1">Hover to edit. This prompt guides the first AI reply to new leads.</p>
                         </div>
                       )}
                     </div>
@@ -2424,12 +2391,61 @@ export function Services() {
                     )}
                   </div>
 
-                  {/* 4. How it works */}
-                  <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
-                    <p className="text-[11px] text-slate-500 leading-relaxed">
-                      Follow-ups automatically adapt to the conversation stage — after no reply, after questions, after pricing, or after booking steps.
-                      The AI selects the best strategy (Hybrid, Price, Qualify, Convert, or Phone) based on the conversation context.
-                    </p>
+                  {/* 4. Follow-up Strategy */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">4. Follow-up Strategy</label>
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {([
+                        { key: 'auto' as const, emoji: '🤖', label: 'Auto', desc: 'AI picks best strategy per conversation' },
+                        { key: 'hybrid' as const, emoji: '⚖️', label: 'Hybrid', desc: 'Price + one question' },
+                        { key: 'price' as const, emoji: '💰', label: 'Price', desc: 'Lead with pricing' },
+                        { key: 'qualify' as const, emoji: '🧠', label: 'Qualify', desc: 'Ask for details' },
+                        { key: 'convert' as const, emoji: '📞', label: 'Convert', desc: 'Push to booking' },
+                        { key: 'phone' as const, emoji: '📱', label: 'Phone', desc: 'Escalate to call' },
+                      ]).map(s => (
+                        <button key={s.key}
+                          onClick={() => {
+                            setFuStrategy(s.key);
+                            if (s.key !== 'auto') {
+                              const prompts: Record<string, string> = {
+                                hybrid: 'STRATEGY: HYBRID\n\nYou MUST:\n- Provide a price range based on pricing settings\n- Ask EXACTLY ONE question that moves toward booking\n\nDO NOT:\n- Ask more than one question\n- Ask vague questions',
+                                price: 'STRATEGY: PRICE ANCHOR\n\nYou MUST:\n- Lead with a price range based on pricing settings\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Be vague or hesitant',
+                                qualify: 'STRATEGY: QUALIFICATION\n\nYou MUST:\n- Ask 2-3 specific questions about missing details\n- Explain why you need the info\n\nDO NOT:\n- Give pricing\n- Ask generic questions',
+                                convert: 'STRATEGY: CONVERSION\n\nYou MUST:\n- Include pricing based on settings\n- Offer a SPECIFIC time or 2 options\n- Push toward scheduling\n\nDO NOT:\n- Ask open-ended questions',
+                                phone: 'STRATEGY: PHONE / ESCALATION\n\nYou MUST:\n- Explain why a call is needed\n- Ask for phone naturally\n\nDO NOT:\n- Push phone too early\n- Sound forceful',
+                              };
+                              setFuStrategyPrompt(prompts[s.key] || '');
+                            }
+                          }}
+                          className={`text-[11px] px-2.5 py-1.5 rounded-lg font-semibold border-2 transition-all ${
+                            fuStrategy === s.key ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
+                          }`}
+                          title={s.desc}
+                        >
+                          {s.emoji} {s.label}
+                        </button>
+                      ))}
+                    </div>
+                    {fuStrategy === 'auto' ? (
+                      <p className="text-[11px] text-slate-400">AI automatically picks the best strategy based on conversation context (stage, pricing discussed, missing fields, engagement level).</p>
+                    ) : (
+                      <div className="bg-white p-3 rounded-xl border border-dashed border-slate-200 text-slate-600 text-xs leading-relaxed max-h-28 overflow-y-auto whitespace-pre-wrap relative group">
+                        {fuStrategyPrompt || 'No prompt set'}
+                        <button
+                          onClick={() => setTemplateEditor({
+                            mode: 'create',
+                            ruleId: '',
+                            templateId: undefined,
+                            templateName: `Follow-up — ${fuStrategy.charAt(0).toUpperCase() + fuStrategy.slice(1)}`,
+                            content: fuStrategyPrompt || '',
+                            type: `fu-strategy-${fuStrategy}`,
+                          })}
+                          className="absolute top-2 right-2 p-1.5 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* 6. Smart Follow-up Rules (collapsed) */}
@@ -2524,6 +2540,8 @@ export function Services() {
                           stopOnOptOut: fuStopOnOptOut,
                           stopOnBooked: fuStopOnBooked,
                           urgentCapability: fuUrgentCapability,
+                          followUpStrategy: fuStrategy,
+                          followUpStrategyPrompt: fuStrategy !== 'auto' ? fuStrategyPrompt : undefined,
                         } as any);
                         alert(fuMode === 'off'
                           ? 'Follow-ups disabled and saved.'
