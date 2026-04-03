@@ -1784,10 +1784,10 @@ export function Services() {
                             {autoReplyAiPrompt || 'Select a prompt above'}
                             <button
                               onClick={() => setTemplateEditor({
-                                mode: autoReplyPromptTemplateId ? 'service-edit' : 'create',
+                                mode: 'create',
                                 ruleId: firstReplyRule?.id || '',
-                                templateId: autoReplyPromptTemplateId || undefined,
-                                templateName: 'First Reply Prompt',
+                                templateId: undefined,
+                                templateName: undefined,
                                 content: autoReplyAiPrompt || '',
                                 type: 'autoReplyPrompt',
                               })}
