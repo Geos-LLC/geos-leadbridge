@@ -159,7 +159,7 @@ export function Services() {
   const [autoReplyUseAi, setAutoReplyUseAi] = useState<boolean>(firstReplyRule?.useAi ?? false);
   const [autoReplyAiPrompt, setAutoReplyAiPrompt] = useState<string>(firstReplyRule?.aiSystemPrompt ?? '');
   const [autoReplyPromptTemplateId, setAutoReplyPromptTemplateId] = useState<string>(firstReplyRule?.promptTemplateId || '');
-  const [promptTemplates, setPromptTemplates] = useState<MessageTemplate[]>([]);
+  const [, setPromptTemplates] = useState<MessageTemplate[]>([]);
   const [, setPromptTemplatesLoaded] = useState(false);
 
   // Other service rules
@@ -1737,32 +1737,67 @@ export function Services() {
                           )}
                         </div>
                       ) : (
-                        /* AI mode: prompt template selector + editable content */
-                        <div>
-                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Prompt Template</label>
-                          <select
-                            value={autoReplyPromptTemplateId}
-                            onChange={e => {
-                              setAutoReplyPromptTemplateId(e.target.value);
-                              const selected = promptTemplates.find(p => p.id === e.target.value);
-                              if (selected) setAutoReplyAiPrompt(selected.content);
-                            }}
-                            className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium mb-2"
-                          >
-                            {promptTemplates.map(p => (
-                              <option key={p.id} value={p.id}>{p.name}{p.isDefault ? ' (default)' : ''}</option>
-                            ))}
-                            <option value="">Custom prompt...</option>
-                          </select>
-                          <textarea
-                            value={autoReplyAiPrompt}
-                            onChange={e => { setAutoReplyAiPrompt(e.target.value); setAutoReplyPromptTemplateId(''); }}
-                            onBlur={() => firstReplyRule && changeRuleAiMode(firstReplyRule.id, true, autoReplyAiPrompt)}
-                            placeholder="e.g. Keep responses under 3 sentences. Always mention we offer free estimates."
-                            rows={5}
-                            className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-200"
-                          />
-                          <p className="text-xs text-slate-400 mt-1">Select a preset or edit directly. AI always knows the lead details.</p>
+                        /* AI mode: strategy selector + editable prompt */
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Strategy</label>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[
+                                { key: 'hybrid', emoji: '⚖️', label: 'Hybrid' },
+                                { key: 'price', emoji: '💰', label: 'Price' },
+                                { key: 'qualify', emoji: '🧠', label: 'Qualify' },
+                                { key: 'convert', emoji: '📞', label: 'Convert' },
+                                { key: 'phone', emoji: '📱', label: 'Phone' },
+                              ].map(s => {
+                                const isSelected = autoReplyAiPrompt?.includes(`STRATEGY: ${s.label.toUpperCase()}`) || autoReplyAiPrompt?.includes(`STRATEGY: ${s.key.toUpperCase()}`) || autoReplyAiPrompt?.includes(`STRATEGY: PHONE`);
+                                return (
+                                  <button key={s.key}
+                                    onClick={() => {
+                                      // Load strategy prompt from shared constants via API or hardcoded
+                                      const prompts: Record<string, string> = {
+                                        hybrid: 'STRATEGY: HYBRID\n\nUse when:\n- You have enough information to estimate price\n- But still need one key detail OR want to move toward scheduling\n\nYou MUST:\n- Provide a price range based on pricing settings\n- Ask EXACTLY ONE question\n\nThe question MUST:\n- Move toward booking (timing or confirmation)\n- Be simple and direct\n\nDO NOT:\n- Ask more than one question\n- Ask vague questions (e.g. "does that work?")\n\nGoal: Reduce uncertainty and move the lead forward.',
+                                        price: 'STRATEGY: PRICE ANCHOR\n\nUse when:\n- Customer asks about price directly\n- Or pricing is the main concern\n\nYou MUST:\n- Lead with a price range based on pricing settings\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Be vague or hesitant\n\nGoal: Give the customer a number to react to.',
+                                        qualify: 'STRATEGY: QUALIFICATION\n\nUse when:\n- Critical details are missing (home size, timing, condition)\n\nYou MUST:\n- Ask 2-3 specific questions\n- Briefly explain why you need the info\n\nDO NOT:\n- Give pricing\n- Use if enough info is already provided\n\nGoal: Collect only the minimum info needed to move to pricing or booking.',
+                                        convert: 'STRATEGY: CONVERSION\n\nUse when:\n- You have enough information\n- Lead shows intent or urgency\n- Ready to move to booking\n\nYou MUST:\n- Include pricing based on settings\n- Offer a SPECIFIC time or 2 options\n- Push toward scheduling\n\nDO NOT:\n- Ask open-ended questions\n- Delay with unnecessary details\n\nGoal: Get the lead to commit to a time.',
+                                        phone: 'STRATEGY: PHONE / ESCALATION\n\nUse when:\n- Job is complex\n- Customer asks for exact quote\n- You need confirmation\n\nYou MUST:\n- Explain why a call is needed\n- Ask for phone naturally\n\nDO NOT:\n- Push phone too early\n- Sound forceful\n\nGoal: Move to phone conversation for complex jobs.',
+                                      };
+                                      setAutoReplyAiPrompt(prompts[s.key] || prompts.hybrid);
+                                      setAutoReplyPromptTemplateId('');
+                                      // Auto-save after a short delay
+                                      setTimeout(() => firstReplyRule && changeRuleAiMode(firstReplyRule.id, true, prompts[s.key] || prompts.hybrid), 300);
+                                    }}
+                                    className={`text-[11px] px-2.5 py-1.5 rounded-lg font-semibold border-2 transition-all ${
+                                      isSelected ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
+                                    }`}
+                                  >
+                                    {s.emoji} {s.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Prompt</label>
+                              <button
+                                onClick={() => setTemplateEditor({
+                                  mode: autoReplyPromptTemplateId ? 'service-edit' : 'create',
+                                  ruleId: firstReplyRule?.id || '',
+                                  templateId: autoReplyPromptTemplateId || undefined,
+                                  templateName: 'Auto Reply Strategy',
+                                  content: autoReplyAiPrompt || '',
+                                  type: 'autoReply',
+                                })}
+                                className="text-[10px] text-violet-500 hover:text-violet-700 font-semibold flex items-center gap-1"
+                              >
+                                <Pencil className="w-3 h-3" /> Edit & save as template
+                              </button>
+                            </div>
+                            <div className="bg-white p-3 rounded-xl border border-dashed border-slate-200 text-slate-600 text-xs leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap">
+                              {autoReplyAiPrompt || 'Select a strategy above'}
+                            </div>
+                            <p className="text-[10px] text-slate-400 mt-1">Click a strategy to set the prompt. Edit & save to create a custom version.</p>
+                          </div>
                         </div>
                       )}
                     </div>
