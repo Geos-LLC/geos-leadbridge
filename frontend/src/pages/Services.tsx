@@ -1243,7 +1243,8 @@ export function Services() {
     if (!templateEditor) return;
     setSaving(true);
     try {
-      const { template } = await templatesApi.createTemplate(name, content || 'Hi {{lead.name}}, ');
+      const isPromptType = templateEditor.type === 'autoReplyPrompt' || (typeof templateEditor.type === 'string' && templateEditor.type.startsWith('fu-strategy-'));
+      const { template } = await templatesApi.createTemplate(name, content || 'Hi {{lead.name}}, ', undefined, isPromptType ? 'prompt' : undefined);
       setTemplates(prev => [template, ...prev]);
       if (templateEditor.type === 'autoReplyPrompt') {
         setPromptTemplates(prev => [template, ...prev]);
@@ -1324,7 +1325,8 @@ export function Services() {
     if (!templateEditor) return;
     setSaving(true);
     try {
-      const { template } = await templatesApi.createTemplate(name, content);
+      const isPrompt = templateEditor.type === 'autoReplyPrompt' || (typeof templateEditor.type === 'string' && templateEditor.type.startsWith('fu-strategy-'));
+      const { template } = await templatesApi.createTemplate(name, content, undefined, isPrompt ? 'prompt' : undefined);
       setTemplates(prev => [template, ...prev]);
       if (templateEditor.type === 'autoReplyPrompt') {
         setPromptTemplates(prev => [template, ...prev]);

@@ -420,8 +420,8 @@ export const templatesApi = {
     const { data } = await api.get(`/v1/templates/${id}`);
     return data;
   },
-  createTemplate: async (name: string, content: string, isDefault?: boolean): Promise<{ success: boolean; template: MessageTemplate }> => {
-    const { data } = await api.post('/v1/templates', { name, content, isDefault });
+  createTemplate: async (name: string, content: string, isDefault?: boolean, type?: 'message' | 'prompt'): Promise<{ success: boolean; template: MessageTemplate }> => {
+    const { data } = await api.post('/v1/templates', { name, content, isDefault, type });
     return data;
   },
   updateTemplate: async (id: string, updates: { name?: string; content?: string; isDefault?: boolean }): Promise<{ success: boolean; template: MessageTemplate }> => {
