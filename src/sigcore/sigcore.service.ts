@@ -530,4 +530,86 @@ export class SigcoreService {
       return { success: false, error: msg };
     }
   }
+
+  // ═══ Business Identity Registration ═══
+
+  /**
+   * Register a LeadBridge user as a business + product workspace in Sigcore.
+   * Creates shared assets for their phone number and email.
+   * Transitional: stored on User model, will move to workspace+membership later.
+   */
+  async registerBusinessIdentity(userId: string): Promise<{ businessId?: string; workspaceId?: string }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return {};
+
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_URL');
+    const sigcoreKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (!sigcoreUrl || !sigcoreKey) {
+      this.logger.warn('[BusinessIdentity] Sigcore not configured');
+      return {};
+    }
+
+    const headers = { 'x-api-key': sigcoreKey, 'Content-Type': 'application/json' };
+
+    try {
+      // 1. Create/resolve business
+      const bizRes = await firstValueFrom(
+        this.httpService.post(`${sigcoreUrl}/v1/businesses`, {
+          name: user.name || `LB User ${userId}`,
+          external_id: `lb-${userId}`,
+          main_email: user.email,
+          main_phone: user.businessPhone || user.phoneNumber || undefined,
+        }, { headers }),
+      );
+      const business = bizRes.data?.data;
+      if (!business?.id) return {};
+
+      // 2. Register product workspace
+      const wsRes = await firstValueFrom(
+        this.httpService.post(`${sigcoreUrl}/v1/businesses/${business.id}/workspaces`, {
+          product_type: 'leadbridge',
+          workspace_name: user.name || 'LeadBridge',
+          external_workspace_id: userId,
+        }, { headers }),
+      );
+      const workspace = wsRes.data?.data;
+
+      // 3. Update user record
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          sigcoreBusinessId: business.id,
+          sigcoreWorkspaceId: workspace?.id || null,
+        },
+      });
+
+      // 4. Register phone number as shared asset
+      if (user.phoneNumber) {
+        try {
+          const assetRes = await firstValueFrom(
+            this.httpService.post(`${sigcoreUrl}/v1/assets`, {
+              asset_type: 'phone', value: user.phoneNumber, provider: 'twilio',
+            }, { headers }),
+          );
+          const asset = assetRes.data?.data;
+          if (asset?.id && workspace?.id) {
+            await firstValueFrom(
+              this.httpService.post(`${sigcoreUrl}/v1/assets/${asset.id}/links`, {
+                workspace_id: workspace.id,
+                role: 'leadbridge_assigned_number',
+                purpose: 'lead_capture',
+                is_primary: true,
+              }, { headers }),
+            );
+          }
+        } catch (e) { this.logger.warn(`[BusinessIdentity] Phone asset: ${e.message}`); }
+      }
+
+      this.logger.log(`[BusinessIdentity] Registered LB user ${userId} as business ${business.id}`);
+      return { businessId: business.id, workspaceId: workspace?.id };
+    } catch (error: any) {
+      this.logger.error(`[BusinessIdentity] Registration failed: ${error.response?.data?.message || error.message}`);
+      return {};
+    }
+  }
 }

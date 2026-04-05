@@ -102,6 +102,10 @@ model User {
   phoneNumber           String?  // User's dedicated Sigcore/Twilio number
   sigcoreAllocationId   String?  @map("callioAllocationId") // Sigcore's allocation ID for this number
 
+  // Cross-app business identity (Sigcore registry references — transitional on User, will move to workspace+membership)
+  sigcoreWorkspaceId    String?  @map("sigcore_workspace_id")  // product_workspaces.id in Sigcore
+  sigcoreBusinessId     String?  @map("sigcore_business_id")   // businesses.id in Sigcore
+
   // AI settings
   globalAiPrompt        String?   @db.Text @map("global_ai_prompt") // Global AI system prompt — applied to all AI replies
 
