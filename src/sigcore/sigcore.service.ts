@@ -588,7 +588,7 @@ export class SigcoreService {
         try {
           const assetRes = await firstValueFrom(
             this.httpService.post(`${sigcoreUrl}/v1/assets`, {
-              asset_type: 'phone', value: user.phoneNumber, provider: 'twilio',
+              asset_type: 'phone', value: user.phoneNumber,
             }, { headers }),
           );
           const asset = assetRes.data?.data;
@@ -596,7 +596,7 @@ export class SigcoreService {
             await firstValueFrom(
               this.httpService.post(`${sigcoreUrl}/v1/assets/${asset.id}/links`, {
                 workspace_id: workspace.id,
-                role: 'leadbridge_assigned_number',
+                role: 'lead_capture',
                 purpose: 'lead_capture',
                 is_primary: true,
               }, { headers }),
