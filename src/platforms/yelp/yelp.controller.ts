@@ -291,12 +291,15 @@ export class YelpController {
         const creds = EncryptionUtil.decryptObject<any>(account.credentialsJson, this.encryptionKey);
         if (!creds.accessToken) {
           connectionIssues.push('No Yelp OAuth token — reconnect Yelp account');
-        } else if (creds.expiresAt) {
-          const expiresAt = new Date(creds.expiresAt);
-          const now = new Date();
-          if (now > expiresAt) {
-            // Token expired — try auto-refresh
-            if (creds.refreshToken) {
+        } else {
+          // Actually test the token against Yelp API
+          try {
+            await this.yelpAdapter.getClaimedBusinesses(creds.accessToken);
+            // Token works — good
+          } catch (apiErr: any) {
+            const is401 = apiErr.response?.status === 401 || apiErr.message?.includes('401');
+            if (is401 && creds.refreshToken) {
+              // Token invalid — try refresh
               try {
                 const refreshed = await this.yelpAdapter.refreshAccessToken(creds.refreshToken);
                 const updatedCreds = { ...creds, accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken || creds.refreshToken, expiresAt: refreshed.expiresAt };
@@ -304,12 +307,12 @@ export class YelpController {
                   where: { id: account.id },
                   data: { credentialsJson: EncryptionUtil.encryptObject(updatedCreds, this.encryptionKey) },
                 });
-                this.logger.log(`[Yelp Health] Token auto-refreshed for ${account.businessId}`);
+                this.logger.log(`[Yelp Health] Token refreshed for ${account.businessId}`);
               } catch (refreshErr: any) {
-                connectionIssues.push(`Yelp token expired and refresh failed — reconnect Yelp account (${refreshErr.message})`);
+                connectionIssues.push(`Yelp token invalid and refresh failed — reconnect Yelp account`);
               }
-            } else {
-              connectionIssues.push('Yelp token expired and no refresh token — reconnect Yelp account');
+            } else if (is401) {
+              connectionIssues.push('Yelp token invalid — reconnect Yelp account');
             }
           }
         }
