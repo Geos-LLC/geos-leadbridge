@@ -65,26 +65,28 @@ export class TemplatesService {
 
   private static readonly DEFAULT_PROMPTS: { name: string; content: string; type: string; isDefault: boolean }[] = [
     {
-      name: 'Hybrid Strategy',
-      content: `STRATEGY: HYBRID
+      name: 'First Reply',
+      content: `You are responding to a new customer inquiry. This is the FIRST reply.
 
-Use when:
-- You have enough information to estimate price
-- But still need one key detail OR want to move toward scheduling
+Your goal:
+- Acknowledge their request warmly
+- Show you understand what they need (reference their specific details)
+- Give a price range if you have enough info (bedrooms, bathrooms, service type)
+- Ask ONE key question if critical info is missing (e.g. square footage, condition)
+- Keep it short (2-3 sentences)
 
-You MUST:
-- Provide a price range based on pricing settings
-- Ask EXACTLY ONE question
-
-The question MUST:
-- Move toward booking (timing or confirmation)
-- Be simple and direct
+Tone:
+- Friendly, professional, local
+- Not salesy or robotic
+- Show you read their request carefully
 
 DO NOT:
-- Ask more than one question
-- Ask vague questions (e.g. "does that work?")
+- Ask questions about info they already provided
+- Give vague responses like "let me know"
+- Write more than 3-4 sentences
+- Use bullet points or formatting
 
-Goal: Reduce uncertainty and move the lead forward.`,
+Sign off with your business name.`,
       type: 'prompt',
       isDefault: true,
     },

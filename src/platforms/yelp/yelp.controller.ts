@@ -291,6 +291,27 @@ export class YelpController {
         const creds = EncryptionUtil.decryptObject<any>(account.credentialsJson, this.encryptionKey);
         if (!creds.accessToken) {
           connectionIssues.push('No Yelp OAuth token — reconnect Yelp account');
+        } else if (creds.expiresAt) {
+          const expiresAt = new Date(creds.expiresAt);
+          const now = new Date();
+          if (now > expiresAt) {
+            // Token expired — try auto-refresh
+            if (creds.refreshToken) {
+              try {
+                const refreshed = await this.yelpAdapter.refreshAccessToken(creds.refreshToken);
+                const updatedCreds = { ...creds, accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken || creds.refreshToken, expiresAt: refreshed.expiresAt };
+                await this.prisma.savedAccount.update({
+                  where: { id: account.id },
+                  data: { credentialsJson: EncryptionUtil.encryptObject(updatedCreds, this.encryptionKey) },
+                });
+                this.logger.log(`[Yelp Health] Token auto-refreshed for ${account.businessId}`);
+              } catch (refreshErr: any) {
+                connectionIssues.push(`Yelp token expired and refresh failed — reconnect Yelp account (${refreshErr.message})`);
+              }
+            } else {
+              connectionIssues.push('Yelp token expired and no refresh token — reconnect Yelp account');
+            }
+          }
         }
       } catch {
         connectionIssues.push('Failed to decrypt Yelp credentials — reconnect Yelp account');

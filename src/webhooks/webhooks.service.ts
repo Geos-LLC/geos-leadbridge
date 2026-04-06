@@ -1458,10 +1458,11 @@ export class WebhooksService {
 
     // Use per-business OAuth token if available, fallback to API key
     let accessToken = this.configService.get<string>('yelp.apiKey') || '';
+    const encryptionKey = this.configService.get<string>('encryption.key') || '';
+    let creds: any = null;
     if (savedAccount.credentialsJson) {
       try {
-        const encryptionKey = this.configService.get<string>('encryption.key') || '';
-        const creds = EncryptionUtil.decryptObject<any>(savedAccount.credentialsJson, encryptionKey);
+        creds = EncryptionUtil.decryptObject<any>(savedAccount.credentialsJson, encryptionKey);
         if (creds.accessToken) {
           accessToken = creds.accessToken;
           this.logger.log(`[Yelp] Using OAuth token (${accessToken.substring(0, 10)}...)`);
@@ -1475,8 +1476,28 @@ export class WebhooksService {
     const yelpAdapter = this.platformFactory.getAdapter('yelp') as any;
     let leadData: any;
     try {
-      leadData = await yelpAdapter.getLead({ accessToken }, leadId);
-      this.logger.log(`[Yelp] Lead fetched: customer=${leadData.customerName}, category=${leadData.category}`);
+      try {
+        leadData = await yelpAdapter.getLead({ accessToken }, leadId);
+        this.logger.log(`[Yelp] Lead fetched: customer=${leadData.customerName}, category=${leadData.category}`);
+      } catch (fetchErr: any) {
+        // Auto-refresh token on 401 and retry
+        const is401 = fetchErr.message?.includes('401') || fetchErr.response?.status === 401;
+        if (is401 && creds?.refreshToken) {
+          this.logger.log(`[Yelp] Token expired for ${businessId}, attempting refresh...`);
+          const refreshed = await yelpAdapter.refreshAccessToken(creds.refreshToken);
+          accessToken = refreshed.accessToken;
+          const updatedCreds = { ...creds, accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken || creds.refreshToken, expiresAt: refreshed.expiresAt };
+          await this.prisma.savedAccount.update({
+            where: { id: savedAccount.id },
+            data: { credentialsJson: EncryptionUtil.encryptObject(updatedCreds, encryptionKey) },
+          });
+          this.logger.log(`[Yelp] Token refreshed successfully for ${businessId}`);
+          leadData = await yelpAdapter.getLead({ accessToken }, leadId);
+          this.logger.log(`[Yelp] Lead fetched after refresh: customer=${leadData.customerName}`);
+        } else {
+          throw fetchErr;
+        }
+      }
     } catch (err: any) {
       this.logger.error(`Failed to fetch Yelp lead ${leadId}: ${err.message} status=${err.response?.status}`);
       // Still upsert a minimal lead so we don't lose it

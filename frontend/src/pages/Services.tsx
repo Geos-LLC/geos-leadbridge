@@ -159,7 +159,7 @@ export function Services() {
   const [autoReplyUseAi, setAutoReplyUseAi] = useState<boolean>(firstReplyRule?.useAi ?? false);
   const [autoReplyAiPrompt, setAutoReplyAiPrompt] = useState<string>(firstReplyRule?.aiSystemPrompt ?? '');
   const [autoReplyPromptTemplateId, setAutoReplyPromptTemplateId] = useState<string>(firstReplyRule?.promptTemplateId || '');
-  const [/* promptTemplates */, setPromptTemplates] = useState<MessageTemplate[]>([]);
+  const [promptTemplates, setPromptTemplates] = useState<MessageTemplate[]>([]);
   const [, setPromptTemplatesLoaded] = useState(false);
 
   // Other service rules
@@ -1243,9 +1243,15 @@ export function Services() {
     if (!templateEditor) return;
     setSaving(true);
     try {
-      const { template } = await templatesApi.createTemplate(name, content || 'Hi {{lead.name}}, ');
+      const isPromptType = templateEditor.type === 'autoReplyPrompt' || (typeof templateEditor.type === 'string' && templateEditor.type.startsWith('fu-strategy-'));
+      const { template } = await templatesApi.createTemplate(name, content || 'Hi {{lead.name}}, ', undefined, isPromptType ? 'prompt' : undefined);
       setTemplates(prev => [template, ...prev]);
-      if (templateEditor.type === 'autoReply') {
+      if (templateEditor.type === 'autoReplyPrompt') {
+        setPromptTemplates(prev => [template, ...prev]);
+        setAutoReplyPromptTemplateId(template.id);
+        setAutoReplyAiPrompt(template.content);
+        if (firstReplyRule) await changeRuleAiMode(firstReplyRule.id, true, template.content);
+      } else if (templateEditor.type === 'autoReply') {
         await changeRuleTemplate(templateEditor.ruleId, template.id);
       } else if (templateEditor.type === 'alert') {
         await changeAlertRuleTemplate(templateEditor.ruleId, template.id);
@@ -1290,7 +1296,10 @@ export function Services() {
       if (leadAlertRule?.id === ruleId && leadAlertRule?.messageTemplate?.id === templateId) {
         setLeadAlertRule({ ...leadAlertRule, messageTemplate: { ...leadAlertRule.messageTemplate!, content: template.content } });
       }
-      if (type === 'cc-whisper') setCcAgentWhisperMessage(template.content);
+      if (type === 'autoReplyPrompt') {
+        setAutoReplyAiPrompt(template.content);
+        if (firstReplyRule) await changeRuleAiMode(firstReplyRule.id, true, template.content);
+      } else if (type === 'cc-whisper') setCcAgentWhisperMessage(template.content);
       else if (type === 'cc-greeting') setCcLeadGreetingMessage(template.content);
       else if (type === 'cc-voicemail') setCcVoicemailMessage(template.content);
       else if (type === 'ct') setCtAutoReplyTemplate(template.content);
@@ -1316,9 +1325,15 @@ export function Services() {
     if (!templateEditor) return;
     setSaving(true);
     try {
-      const { template } = await templatesApi.createTemplate(name, content);
+      const isPrompt = templateEditor.type === 'autoReplyPrompt' || (typeof templateEditor.type === 'string' && templateEditor.type.startsWith('fu-strategy-'));
+      const { template } = await templatesApi.createTemplate(name, content, undefined, isPrompt ? 'prompt' : undefined);
       setTemplates(prev => [template, ...prev]);
-      if (templateEditor.type === 'autoReply') {
+      if (templateEditor.type === 'autoReplyPrompt') {
+        setPromptTemplates(prev => [template, ...prev]);
+        setAutoReplyPromptTemplateId(template.id);
+        setAutoReplyAiPrompt(template.content);
+        if (firstReplyRule) await changeRuleAiMode(firstReplyRule.id, true, template.content);
+      } else if (templateEditor.type === 'autoReply') {
         await changeRuleTemplate(templateEditor.ruleId, template.id);
       } else if (templateEditor.type === 'alert') {
         await changeAlertRuleTemplate(templateEditor.ruleId, template.id);
@@ -1745,26 +1760,44 @@ export function Services() {
                           )}
                         </div>
                       ) : (
-                        /* AI mode: prompt template selector + editable content */
+                        /* AI mode: prompt selector + editable content */
                         <div>
                           <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">First Reply Prompt</label>
-                          <div className="bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-xs leading-relaxed relative group whitespace-pre-wrap max-h-40 overflow-y-auto">
-                            {autoReplyAiPrompt || 'Using default Hybrid strategy: provide a price range + ask one question.'}
+                          <select
+                            value={autoReplyPromptTemplateId}
+                            onChange={e => {
+                              const id = e.target.value;
+                              setAutoReplyPromptTemplateId(id);
+                              if (id) {
+                                const selected = promptTemplates.find(p => p.id === id);
+                                if (selected) {
+                                  setAutoReplyAiPrompt(selected.content);
+                                  if (firstReplyRule) changeRuleAiMode(firstReplyRule.id, true, selected.content);
+                                }
+                              }
+                            }}
+                            className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-sm font-medium mb-2"
+                          >
+                            {promptTemplates.map(p => (
+                              <option key={p.id} value={p.id}>{p.name}{p.isDefault ? ' (default)' : ''}</option>
+                            ))}
+                          </select>
+                          <div className="bg-white p-3 rounded-xl border border-dashed border-slate-200 text-slate-600 text-xs leading-relaxed relative group whitespace-pre-wrap max-h-36 overflow-y-auto">
+                            {autoReplyAiPrompt || 'Select a prompt above'}
                             <button
                               onClick={() => setTemplateEditor({
-                                mode: autoReplyPromptTemplateId ? 'service-edit' : 'create',
+                                mode: 'create',
                                 ruleId: firstReplyRule?.id || '',
-                                templateId: autoReplyPromptTemplateId || undefined,
-                                templateName: 'Auto Reply Prompt',
+                                templateId: undefined,
+                                templateName: undefined,
                                 content: autoReplyAiPrompt || '',
-                                type: 'autoReply',
+                                type: 'autoReplyPrompt',
                               })}
-                              className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
+                              className="absolute top-2 right-2 p-1.5 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
                             >
-                              <Pencil className="w-4 h-4" />
+                              <Pencil className="w-3.5 h-3.5" />
                             </button>
                           </div>
-                          <p className="text-xs text-slate-400 mt-1">Hover to edit. This prompt guides the first AI reply to new leads.</p>
                         </div>
                       )}
                     </div>
