@@ -1772,7 +1772,16 @@ export function Services() {
                                 const selected = promptTemplates.find(p => p.id === id);
                                 if (selected) {
                                   setAutoReplyAiPrompt(selected.content);
-                                  if (firstReplyRule) changeRuleAiMode(firstReplyRule.id, true, selected.content);
+                                  if (firstReplyRule) {
+                                    // Save both the prompt content AND the template ID
+                                    automationApi.updateRule(firstReplyRule.id, {
+                                      useAi: true,
+                                      aiSystemPrompt: selected.content,
+                                      promptTemplateId: id,
+                                    } as any).then(({ rule }) => {
+                                      setAutoReplyRules(prev => prev.map(r => r.id === firstReplyRule.id ? rule : r));
+                                    }).catch(() => {});
+                                  }
                                 }
                               }
                             }}
