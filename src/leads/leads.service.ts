@@ -167,9 +167,19 @@ export class LeadsService {
 
     const negotiationId = lead.externalRequestId;
 
-    // For Yelp leads, fetch messages from Yelp API (events endpoint)
+    // For Yelp leads, fetch from Yelp API first, fallback to local DB
     if (lead.platform === 'yelp') {
-      return this.getYelpMessages(userId, lead);
+      const yelpMessages = await this.getYelpMessages(userId, lead);
+      if (yelpMessages.length > 0) return yelpMessages;
+      // Fallback: if API returned nothing (token error), use locally synced messages
+      if (lead.threadId) {
+        const localMsgs = await this.getLocalMessages(userId, 'yelp', lead.externalRequestId);
+        if (localMsgs.length > 0) {
+          console.log(`[LeadsService] Yelp API returned 0 messages, using ${localMsgs.length} from local DB`);
+          return localMsgs;
+        }
+      }
+      return [];
     }
 
     // Get messages from database (stored via webhooks)
