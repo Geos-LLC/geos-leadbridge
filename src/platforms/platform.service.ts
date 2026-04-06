@@ -5,6 +5,7 @@
 
 import { Injectable, NotFoundException, BadRequestException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../common/utils/prisma.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { PlatformFactory } from './platform.factory';
@@ -29,6 +30,50 @@ export class PlatformService {
     private monitoring: MonitoringService,
   ) {
     this.encryptionKey = this.configService.get<string>('encryption.key') || 'default-32-char-encryption-key';
+  }
+
+  /**
+   * Proactive token refresh — runs every hour.
+   * Checks all saved accounts and refreshes tokens expiring within 1 hour.
+   * Prevents tokens from going stale between leads.
+   */
+  @Cron('0 */1 * * *') // every hour at :00
+  async proactiveTokenRefresh(): Promise<void> {
+    const accounts = await this.prisma.savedAccount.findMany({
+      where: { credentialsJson: { not: null } },
+      select: { id: true, platform: true, businessId: true, businessName: true, userId: true, credentialsJson: true },
+    });
+
+    const now = Date.now();
+    const bufferMs = 60 * 60 * 1000; // 1 hour buffer
+    let refreshed = 0;
+    let failed = 0;
+
+    for (const account of accounts) {
+      if (!account.credentialsJson) continue;
+      try {
+        const creds = EncryptionUtil.decryptObject<any>(account.credentialsJson, this.encryptionKey);
+        if (!creds.expiresAt || !creds.refreshToken) continue;
+
+        const expiresAt = new Date(creds.expiresAt).getTime();
+        if (now > (expiresAt - bufferMs)) {
+          // Token expires within 1 hour or already expired — refresh
+          const lockKey = `${account.platform}:${account.businessId}`;
+          try {
+            await this.serializedAccountRefresh(lockKey, account.id, account.platform, creds.refreshToken, creds.email);
+            refreshed++;
+            this.logger.log(`[ProactiveRefresh] Refreshed ${account.platform} token for ${account.businessName}`);
+          } catch (err: any) {
+            failed++;
+            this.logger.warn(`[ProactiveRefresh] Failed to refresh ${account.businessName}: ${err.message}`);
+          }
+        }
+      } catch { /* decrypt failed */ }
+    }
+
+    if (refreshed > 0 || failed > 0) {
+      this.logger.log(`[ProactiveRefresh] Done: ${refreshed} refreshed, ${failed} failed, ${accounts.length} total accounts`);
+    }
   }
 
   /**
