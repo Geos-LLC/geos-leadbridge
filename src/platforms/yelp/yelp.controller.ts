@@ -294,8 +294,13 @@ export class YelpController {
         } else {
           // Actually test the token against Yelp API
           try {
-            await this.yelpAdapter.getClaimedBusinesses(creds.accessToken);
-            // Token works — good
+            // Test against Yelp leads API (not just partner API — different scopes)
+            const axios = require('axios');
+            await axios.get(`https://api.yelp.com/v3/businesses/${account.businessId}`, {
+              headers: { Authorization: `Bearer ${creds.accessToken}` },
+              timeout: 10000,
+            });
+            // Token works for this business — good
           } catch (apiErr: any) {
             const is401 = apiErr.response?.status === 401 || apiErr.message?.includes('401');
             if (is401 && creds.refreshToken) {
