@@ -104,6 +104,21 @@ export class FollowUpEngineService {
       template.activeHoursTimezone || 'America/New_York',
     );
 
+    // Determine mode from account settings (auto_send or suggest), fallback to template mode
+    let enrollMode = template.mode;
+    if (leadId) {
+      const lead = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { businessId: true, userId: true } });
+      if (lead?.businessId) {
+        const account = await this.prisma.savedAccount.findFirst({
+          where: { userId: lead.userId, businessId: lead.businessId },
+          select: { followUpMode: true },
+        });
+        if (account?.followUpMode && account.followUpMode !== 'off') {
+          enrollMode = account.followUpMode;
+        }
+      }
+    }
+
     const enrollment = await this.prisma.followUpEnrollment.create({
       data: {
         sequenceTemplateId: templateId,
@@ -113,7 +128,7 @@ export class FollowUpEngineService {
         status: 'active',
         currentStepIndex: 0,
         nextStepDueAt: nextDue,
-        mode: template.mode,
+        mode: enrollMode,
       },
     });
 
