@@ -1623,6 +1623,12 @@ export class WebhooksService {
       return;
     }
 
+    // Skip notifications if lead data is garbage (token failure)
+    if (leadData.customerName === 'Unknown' && !leadData.message && !leadData.category) {
+      this.logger.warn(`Yelp lead ${leadId} has no data (token failure?) — skipping notifications`);
+      return;
+    }
+
     // New lead — trigger new_lead automation + SMS notification
     this.logger.log(`Yelp new lead: ${leadId} customer=${leadData.customerName} business=${savedAccount.businessName}`);
 
