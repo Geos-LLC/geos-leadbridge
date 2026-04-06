@@ -51,7 +51,13 @@ export class FollowUpSchedulerService {
         },
       });
 
-      if (dueEnrollments.length === 0) return;
+      if (dueEnrollments.length === 0) {
+        // Log every 10 minutes to confirm cron is alive
+        if (now.getMinutes() % 10 === 0 && now.getSeconds() < 60) {
+          this.logger.debug('[FollowUpScheduler] Cron alive — no due enrollments');
+        }
+        return;
+      }
 
       this.logger.log(`[FollowUpScheduler] Processing ${dueEnrollments.length} due enrollments`);
 
@@ -76,9 +82,18 @@ export class FollowUpSchedulerService {
     });
     if (!fresh || fresh.status !== 'active') return;
 
-    // Verify thread still eligible (customer hasn't replied)
-    const threadState = await this.conversationContext.getThreadState(enrollment.conversationId);
-    if (!threadState || !threadState.awaitingCustomerReply) {
+    // Check if customer has replied SINCE the enrollment was created
+    // Don't use awaitingCustomerReply — it may be false if the business hasn't
+    // sent the first message yet. Instead, check if there's a customer message
+    // after the enrollment was created.
+    const customerRepliedSinceEnrollment = await this.prisma.message.findFirst({
+      where: {
+        conversationId: enrollment.conversationId,
+        sender: 'customer',
+        sentAt: { gt: enrollment.createdAt },
+      },
+    });
+    if (customerRepliedSinceEnrollment) {
       await this.engineService.stopEnrollment(enrollment.id, 'customer_replied');
       return;
     }
