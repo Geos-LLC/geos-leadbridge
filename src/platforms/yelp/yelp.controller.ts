@@ -292,32 +292,46 @@ export class YelpController {
         if (!creds.accessToken) {
           connectionIssues.push('No Yelp OAuth token — reconnect Yelp account');
         } else {
-          // Actually test the token against Yelp API
-          try {
-            // Test against Yelp leads API (not just partner API — different scopes)
-            const axios = require('axios');
-            await axios.get(`https://api.yelp.com/v3/businesses/${account.businessId}`, {
-              headers: { Authorization: `Bearer ${creds.accessToken}` },
-              timeout: 10000,
-            });
-            // Token works for this business — good
-          } catch (apiErr: any) {
-            const is401 = apiErr.response?.status === 401 || apiErr.message?.includes('401');
-            if (is401 && creds.refreshToken) {
-              // Token invalid — try refresh
-              try {
-                const refreshed = await this.yelpAdapter.refreshAccessToken(creds.refreshToken);
-                const updatedCreds = { ...creds, accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken || creds.refreshToken, expiresAt: refreshed.expiresAt };
-                await this.prisma.savedAccount.update({
-                  where: { id: account.id },
-                  data: { credentialsJson: EncryptionUtil.encryptObject(updatedCreds, this.encryptionKey) },
-                });
-                this.logger.log(`[Yelp Health] Token refreshed for ${account.businessId}`);
-              } catch (refreshErr: any) {
-                connectionIssues.push(`Yelp token invalid and refresh failed — reconnect Yelp account`);
+          // Check for unresolved token errors in SystemErrorLog (same as Thumbtack tokenDead)
+          const tokenError = await this.prisma.systemErrorLog.findFirst({
+            where: {
+              resolved: false,
+              OR: [
+                { accountId: account.id, category: 'token_refresh' },
+                { accountId: account.id, category: 'yelp' },
+                { accountId: account.id, category: 'automation', message: { contains: '401' } },
+              ],
+            },
+            orderBy: { createdAt: 'desc' },
+          });
+          if (tokenError) {
+            connectionIssues.push('Yelp token failed — reconnect Yelp account');
+          } else {
+            // No logged errors — actively test the token against the leads-scoped API
+            try {
+              const axios = require('axios');
+              // Use the same API endpoint as lead operations
+              await axios.get(`https://api.yelp.com/v3/businesses/${account.businessId}`, {
+                headers: { Authorization: `Bearer ${creds.accessToken}` },
+                timeout: 10000,
+              });
+            } catch (apiErr: any) {
+              const is401 = apiErr.response?.status === 401 || apiErr.message?.includes('401');
+              if (is401 && creds.refreshToken) {
+                try {
+                  const refreshed = await this.yelpAdapter.refreshAccessToken(creds.refreshToken);
+                  const updatedCreds = { ...creds, accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken || creds.refreshToken, expiresAt: refreshed.expiresAt };
+                  await this.prisma.savedAccount.update({
+                    where: { id: account.id },
+                    data: { credentialsJson: EncryptionUtil.encryptObject(updatedCreds, this.encryptionKey) },
+                  });
+                  this.logger.log(`[Yelp Health] Token refreshed for ${account.businessId}`);
+                } catch {
+                  connectionIssues.push('Yelp token invalid and refresh failed — reconnect Yelp account');
+                }
+              } else if (is401) {
+                connectionIssues.push('Yelp token invalid — reconnect Yelp account');
               }
-            } else if (is401) {
-              connectionIssues.push('Yelp token invalid — reconnect Yelp account');
             }
           }
         }

@@ -1500,6 +1500,20 @@ export class WebhooksService {
       }
     } catch (err: any) {
       this.logger.error(`Failed to fetch Yelp lead ${leadId}: ${err.message} status=${err.response?.status}`);
+      // Log to SystemErrorLog so health check detects dead token
+      const is401 = err.message?.includes('401') || err.response?.status === 401;
+      if (is401) {
+        await this.prisma.systemErrorLog.create({
+          data: {
+            category: 'token_refresh',
+            message: `yelp token failed for business ${businessId} — ${err.message}`,
+            userId,
+            accountId: savedAccount.id,
+            accountName: savedAccount.businessName,
+            context: JSON.stringify({ platform: 'yelp', businessId, leadId }),
+          },
+        }).catch(() => {});
+      }
       // Still upsert a minimal lead so we don't lose it
       leadData = {
         platform: 'yelp',
