@@ -192,9 +192,27 @@ export class LeadsService {
       }
 
       const encryptionKey = this.configService.get<string>('encryption.key') || '';
-      const creds = EncryptionUtil.decryptObject<any>(savedAccount.credentialsJson, encryptionKey);
+      let creds = EncryptionUtil.decryptObject<any>(savedAccount.credentialsJson, encryptionKey);
       const yelpAdapter = this.platformFactory.getAdapter('yelp') as any;
-      const events = await yelpAdapter.getLeadEvents({ accessToken: creds.accessToken }, lead.externalRequestId);
+      let events: any[];
+      try {
+        events = await yelpAdapter.getLeadEvents({ accessToken: creds.accessToken }, lead.externalRequestId);
+      } catch (fetchErr: any) {
+        const is401 = fetchErr.message?.includes('401') || fetchErr.response?.status === 401;
+        if (is401 && creds.refreshToken) {
+          console.log(`[LeadsService] Yelp token expired for ${lead.businessId}, refreshing...`);
+          const refreshed = await yelpAdapter.refreshAccessToken(creds.refreshToken);
+          creds = { ...creds, accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken || creds.refreshToken, expiresAt: refreshed.expiresAt };
+          await this.prisma.savedAccount.update({
+            where: { id: savedAccount.id },
+            data: { credentialsJson: EncryptionUtil.encryptObject(creds, encryptionKey) },
+          });
+          console.log(`[LeadsService] Yelp token refreshed for ${lead.businessId}`);
+          events = await yelpAdapter.getLeadEvents({ accessToken: creds.accessToken }, lead.externalRequestId);
+        } else {
+          throw fetchErr;
+        }
+      }
 
       // Convert Yelp events to message format expected by frontend.
       // Skip RAQ_SUBMIT (initial lead request) — it duplicates the lead data shown above.
