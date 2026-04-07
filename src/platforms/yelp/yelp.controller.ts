@@ -136,9 +136,16 @@ export class YelpController {
             data: { businessName, credentialsJson: encryptedCreds },
           });
 
-          // Auto-resolve any stale automation/yelp errors for this account — token is fresh now
+          // Auto-resolve any stale errors — match by accountId, accountName, or businessId in context
           const resolved = await this.prisma.systemErrorLog.updateMany({
-            where: { accountId: existing.id, resolved: false },
+            where: {
+              resolved: false,
+              OR: [
+                { accountId: existing.id },
+                { accountName: businessName },
+                { context: { contains: businessId } },
+              ],
+            },
             data: { resolved: true },
           });
           if (resolved.count > 0) {

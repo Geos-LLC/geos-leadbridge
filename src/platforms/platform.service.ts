@@ -95,6 +95,18 @@ export class PlatformService {
           } catch (err: any) {
             failed++;
             this.logger.warn(`[ProactiveRefresh] Failed to refresh yelp for user ${userId}: ${err.message}`);
+            for (const acc of yelpAccounts) {
+              await this.prisma.systemErrorLog.create({
+                data: {
+                  category: 'token_refresh',
+                  message: `yelp token refresh failed for business ${acc.businessId} — ${err.message}`,
+                  userId,
+                  accountId: acc.id,
+                  accountName: acc.businessName,
+                  context: JSON.stringify({ platform: 'yelp', businessId: acc.businessId, source: 'proactive_cron' }),
+                },
+              }).catch(() => {});
+            }
           }
         }
       } catch { /* decrypt failed */ }
@@ -116,6 +128,17 @@ export class PlatformService {
           } catch (err: any) {
             failed++;
             this.logger.warn(`[ProactiveRefresh] Failed to refresh ${account.businessName}: ${err.message}`);
+            // Log to SystemErrorLog with proper accountId so tokenDead detection works
+            await this.prisma.systemErrorLog.create({
+              data: {
+                category: 'token_refresh',
+                message: `${account.platform} token refresh failed for business ${account.businessId} — ${err.message}`,
+                userId: account.userId,
+                accountId: account.id,
+                accountName: account.businessName,
+                context: JSON.stringify({ platform: account.platform, businessId: account.businessId, source: 'proactive_cron' }),
+              },
+            }).catch(() => {});
           }
         }
       } catch { /* decrypt failed */ }
@@ -347,11 +370,12 @@ export class PlatformService {
         try {
           const account = await this.prisma.savedAccount.findUnique({
             where: { id: accountId },
-            select: { userId: true, businessName: true },
+            select: { userId: true, businessName: true, platform: true, businessId: true },
           });
           if (account) {
             await this.storeCredentials(account.userId, platform, newCredentials);
             // Auto-resolve stale token_refresh errors — token is working now
+            // Match by accountId, accountName, null-accountName (legacy), or businessId in context
             await this.prisma.systemErrorLog.updateMany({
               where: {
                 category: 'token_refresh',
@@ -359,6 +383,8 @@ export class PlatformService {
                 OR: [
                   { accountId },
                   { accountName: account.businessName, userId: account.userId },
+                  { accountName: null, userId: account.userId, message: { contains: account.platform, mode: 'insensitive' } },
+                  { context: { contains: account.businessId } },
                 ],
               },
               data: { resolved: true },
