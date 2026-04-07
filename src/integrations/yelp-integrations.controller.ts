@@ -42,10 +42,12 @@ export class YelpIntegrationsController {
       leadNames?: Record<string, string>;
       leadDates?: Record<string, string>;
       leadCategories?: Record<string, string>;
+      leadLocations?: Record<string, string>;
+      leadStatuses?: Record<string, string>;
       source?: string;
     },
   ) {
-    const { savedAccountId, businessId, leadIds, leadNames, leadDates, leadCategories } = body;
+    const { savedAccountId, businessId, leadIds, leadNames, leadDates, leadCategories, leadLocations, leadStatuses } = body;
     this.logger.log(`[Yelp Import] Received ${leadIds.length} lead IDs for business ${businessId}`);
 
     // Get credentials for this account
@@ -70,7 +72,23 @@ export class YelpIntegrationsController {
         where: { platform_externalRequestId: { platform: 'yelp', externalRequestId: leadId } },
       });
       if (existing) {
-        skipped++;
+        // Update if currently Unknown and we have scraped data
+        if (existing.customerName === 'Unknown' && leadNames?.[leadId]) {
+          await this.prisma.lead.update({
+            where: { id: existing.id },
+            data: {
+              customerName: leadNames[leadId],
+              category: leadCategories?.[leadId] || existing.category || undefined,
+              city: leadLocations?.[leadId]?.split(',')[0]?.trim() || existing.city || undefined,
+              state: leadLocations?.[leadId]?.split(',')[1]?.trim()?.split(' ')[0] || existing.state || undefined,
+              postcode: leadLocations?.[leadId]?.match(/\d{5}/)?.[0] || existing.postcode || undefined,
+            },
+          });
+          imported++;
+          this.logger.log(`[Yelp Import] Updated Unknown lead ${leadId} → ${leadNames[leadId]}`);
+        } else {
+          skipped++;
+        }
         continue;
       }
 
@@ -125,17 +143,18 @@ export class YelpIntegrationsController {
         }
 
         try {
+          const scrapedName = leadNames?.[leadId] || 'Unknown';
           const conversation = await this.prisma.conversation.upsert({
             where: { platform_externalThreadId: { platform: 'yelp', externalThreadId: leadId } },
             create: {
               userId: user.id,
               platform: 'yelp',
               externalThreadId: leadId,
-              customerName: leadNames?.[leadId] || 'Unknown',
+              customerName: scrapedName,
               lastMessageAt: new Date(),
               status: 'active',
             },
-            update: {},
+            update: { customerName: scrapedName !== 'Unknown' ? scrapedName : undefined },
           });
 
           await this.prisma.lead.create({
@@ -148,8 +167,11 @@ export class YelpIntegrationsController {
               customerName: leadNames?.[leadId] || 'Unknown',
               message: '',
               category: leadCategories?.[leadId],
-              status: 'new',
-              rawJson: JSON.stringify({ scraped: true, source: 'extension' }),
+              city: leadLocations?.[leadId]?.split(',')[0]?.trim(),
+              state: leadLocations?.[leadId]?.split(',')[1]?.trim()?.split(' ')[0],
+              postcode: leadLocations?.[leadId]?.match(/\d{5}/)?.[0],
+              status: leadStatuses?.[leadId]?.toLowerCase() || 'new',
+              rawJson: JSON.stringify({ scraped: true, source: 'extension', location: leadLocations?.[leadId], date: leadDates?.[leadId] }),
             },
           });
           imported++;
