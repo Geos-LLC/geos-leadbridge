@@ -412,18 +412,34 @@ export class LeadsService {
     }
     const adapter = this.platformFactory.getAdapter(lead.platform);
 
-    // Send message via platform adapter
+    // Send message via platform adapter (with 401 retry for Yelp token refresh)
     let sentMessage;
     try {
       sentMessage = await adapter.sendMessage(credentials, lead.externalRequestId, message);
     } catch (err: any) {
-      // Surface platform errors as 403 (auth/access) or 502 (upstream failure)
       const is403 = err.message?.includes('403') || err.message?.includes('NO_BUSINESS_ACCESS') || err.message?.includes('no_business_access');
-      const is401 = err.message?.includes('401') || err.message?.includes('expired');
-      if (is403 || is401) {
+      const is401 = err.message?.includes('401') || err.message?.includes('expired') || err.message?.includes('TOKEN_INVALID');
+
+      // On 401: try refreshing token and retry once (Yelp tokens can be invalidated by sibling refreshes)
+      if (is401 && lead.businessId) {
+        this.logger.log(`[sendMessage] 401 on ${lead.platform} send, attempting token refresh & retry...`);
+        try {
+          const freshCreds = await this.platformService.getAccountCredentialsByBusinessId(userId, lead.platform, lead.businessId, true);
+          if (freshCreds) {
+            sentMessage = await adapter.sendMessage(freshCreds, lead.externalRequestId, message);
+            this.logger.log(`[sendMessage] Retry succeeded after token refresh`);
+          } else {
+            throw new BadRequestException(`${lead.platform} access denied — reconnect your account to re-authorize (${err.message})`);
+          }
+        } catch (retryErr: any) {
+          if (retryErr instanceof BadRequestException) throw retryErr;
+          throw new BadRequestException(`${lead.platform} access denied — reconnect your account to re-authorize (${retryErr.message})`);
+        }
+      } else if (is403 || is401) {
         throw new BadRequestException(`${lead.platform} access denied — reconnect your account to re-authorize (${err.message})`);
+      } else {
+        throw new BadRequestException(`Failed to send message: ${err.message}`);
       }
-      throw new BadRequestException(`Failed to send message: ${err.message}`);
     }
 
     // Store the sent message locally

@@ -986,7 +986,7 @@ export class PlatformService {
    * Get decrypted credentials for a saved account by businessId
    * Automatically refreshes expired tokens
    */
-  async getAccountCredentialsByBusinessId(userId: string, platform: string, businessId: string): Promise<{ accessToken: string; refreshToken?: string; email?: string } | null> {
+  async getAccountCredentialsByBusinessId(userId: string, platform: string, businessId: string, forceRefresh = false): Promise<{ accessToken: string; refreshToken?: string; email?: string } | null> {
     const account = await this.prisma.savedAccount.findFirst({
       where: { userId, platform, businessId },
     });
@@ -1002,12 +1002,12 @@ export class PlatformService {
       );
 
       // Check if token is expired and refresh if needed
-      if (credentials.expiresAt && credentials.refreshToken) {
-        const expiresAt = new Date(credentials.expiresAt);
+      if (credentials.refreshToken && (forceRefresh || credentials.expiresAt)) {
+        const expiresAt = credentials.expiresAt ? new Date(credentials.expiresAt) : new Date(0);
         const bufferMs = 5 * 60 * 1000; // 5 minutes buffer
         const now = new Date();
 
-        if (now.getTime() > (expiresAt.getTime() - bufferMs)) {
+        if (forceRefresh || now.getTime() > (expiresAt.getTime() - bufferMs)) {
           this.logger.log(`[Credentials] Token expired for ${platform}/${businessId}, refreshing...`);
 
           // Yelp: one token per user — lock by user to prevent chain revocation
