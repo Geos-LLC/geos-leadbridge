@@ -1191,6 +1191,16 @@ export class LeadsService {
       throw new NotFoundException('Lead not found');
     }
 
+    // Re-fetch lead data if it's broken (Unknown name or missing data)
+    if (lead.customerName === 'Unknown' || !lead.message || !lead.category) {
+      try {
+        await this.refetchLeadFromPlatform(userId, leadId);
+        console.log(`[LeadsService] Lead data re-fetched during resync`);
+      } catch (err: any) {
+        console.log(`[LeadsService] Lead refetch failed during resync: ${err.message}`);
+      }
+    }
+
     console.log(`[LeadsService] Found lead: ${lead.externalRequestId}, platform: ${lead.platform}, businessId: ${lead.businessId}`);
 
     // Get or create conversation
