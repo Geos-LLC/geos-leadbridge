@@ -1145,7 +1145,7 @@ export class LeadsService {
    * Re-fetch lead data from platform API (fixes "Unknown" leads from token failures)
    */
   async refetchLeadFromPlatform(userId: string, leadId: string): Promise<{ updated: boolean; customerName?: string }> {
-    const lead = await this.getLead(userId, leadId);
+    const lead = await this.prisma.lead.findFirst({ where: { id: leadId, userId } });
     if (!lead) throw new Error('Lead not found');
 
     const credentials = lead.businessId
@@ -1194,10 +1194,10 @@ export class LeadsService {
     // Re-fetch lead data if it's broken (Unknown name or missing data)
     if (lead.customerName === 'Unknown' || !lead.message || !lead.category) {
       try {
-        await this.refetchLeadFromPlatform(userId, leadId);
-        console.log(`[LeadsService] Lead data re-fetched during resync`);
+        const result = await this.refetchLeadFromPlatform(userId, leadId);
+        console.log(`[LeadsService] Lead refetched during resync: updated=${result.updated}, name=${result.customerName}`);
       } catch (err: any) {
-        console.log(`[LeadsService] Lead refetch failed during resync: ${err.message}`);
+        console.error(`[LeadsService] Lead refetch FAILED during resync: ${err.message}`);
       }
     }
 
