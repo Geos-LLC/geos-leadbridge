@@ -226,18 +226,46 @@ export class LeadsService {
       }
 
       // Convert Yelp events to message format expected by frontend.
-      // Skip RAQ_SUBMIT (initial lead request) — it duplicates the lead data shown above.
-      const textEvents = events.filter((e: any) => e.event_type === 'TEXT');
-      const messages = textEvents.map((e: any) => ({
-        id: e.id,
-        conversationId: lead.externalRequestId,
-        platform: 'yelp',
-        externalMessageId: e.id,
-        sender: e.user_type === 'CONSUMER' ? 'customer' : 'pro',
-        content: e.event_content?.text || e.event_content?.fallback_text || e.text || '',
-        isRead: true,
-        sentAt: e.time_created,
-      }));
+      // Include TEXT + structured events (quotes, estimates). Skip RAQ_SUBMIT (duplicates lead data).
+      const displayEvents = events.filter((e: any) => e.event_type !== 'RAQ_SUBMIT' && e.event_type !== 'CONSUMER_PHONE_NUMBER_OPT_IN_EVENT' && e.event_type !== 'CONSUMER_PHONE_NUMBER_OPT_OUT_EVENT');
+      const messages = displayEvents.map((e: any) => {
+        let content = e.event_content?.text || e.event_content?.fallback_text || e.text || '';
+
+        // Format structured events (price estimates, quotes, invoices)
+        if (!content && e.event_content) {
+          const ec = e.event_content;
+          const parts: string[] = [];
+          if (ec.price_estimate || ec.price_range) {
+            parts.push(`Price Estimate: ${ec.price_estimate || ec.price_range}`);
+          }
+          if (ec.low_estimate || ec.high_estimate) {
+            parts.push(`$${ec.low_estimate} - $${ec.high_estimate}`);
+          }
+          if (ec.availability) {
+            parts.push(`Availability: ${ec.availability}`);
+          }
+          if (ec.message) {
+            parts.push(ec.message);
+          }
+          if (parts.length > 0) content = parts.join('\n');
+        }
+
+        // Fallback: show event type if no content extracted
+        if (!content && e.event_type !== 'TEXT') {
+          content = `[${e.event_type}]`;
+        }
+
+        return {
+          id: e.id,
+          conversationId: lead.externalRequestId,
+          platform: 'yelp',
+          externalMessageId: e.id,
+          sender: e.user_type === 'CONSUMER' ? 'customer' : 'pro',
+          content,
+          isRead: true,
+          sentAt: e.time_created,
+        };
+      }).filter((m: any) => m.content);
 
       // Sync Yelp messages to local Message table (non-blocking)
       // This enables buildContext() to find conversation history for AI previews
