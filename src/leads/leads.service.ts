@@ -225,6 +225,14 @@ export class LeadsService {
         }
       }
 
+      // Log event types for debugging
+      const eventTypes = events.map((e: any) => `${e.event_type}(${e.user_type})`).join(', ');
+      this.logger.log(`[Yelp] Events for ${lead.externalRequestId}: ${events.length} events — ${eventTypes}`);
+      // Log non-TEXT events in detail
+      events.filter((e: any) => e.event_type !== 'TEXT' && e.event_type !== 'RAQ_SUBMIT').forEach((e: any) => {
+        this.logger.log(`[Yelp] Non-text event: type=${e.event_type} content=${JSON.stringify(e.event_content || {}).substring(0, 500)}`);
+      });
+
       // Convert Yelp events to message format expected by frontend.
       // Include TEXT + structured events (quotes, estimates). Skip RAQ_SUBMIT (duplicates lead data).
       const displayEvents = events.filter((e: any) => e.event_type !== 'RAQ_SUBMIT' && e.event_type !== 'CONSUMER_PHONE_NUMBER_OPT_IN_EVENT' && e.event_type !== 'CONSUMER_PHONE_NUMBER_OPT_OUT_EVENT');
