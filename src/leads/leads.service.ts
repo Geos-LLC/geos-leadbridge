@@ -356,7 +356,10 @@ export class LeadsService {
     leadId: string,
     message: string,
   ): Promise<any> {
-    const lead = await this.getLead(userId, leadId);
+    // Read lead from DB directly — do NOT call getLead() which triggers
+    // getYelpMessages() → API calls → token refresh → chain revocation
+    const lead = await this.prisma.lead.findFirst({ where: { id: leadId, userId } });
+    if (!lead) throw new NotFoundException('Lead not found');
 
     // Get account-specific credentials first, then fall back to platform credentials
     let credentials: { accessToken: string; refreshToken?: string };
