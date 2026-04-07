@@ -161,6 +161,15 @@ export class YelpController {
         // Subscribe this business to webhooks (uses API key, not OAuth)
         try {
           await this.yelpAdapter.subscribeToBusinesses([businessId]);
+          // Mark as subscribed — Yelp doesn't return a webhook ID, use a marker
+          const acct = existing || await this.prisma.savedAccount.findFirst({ where: { userId, platform: PlatformName.YELP, businessId } });
+          if (acct) {
+            await this.prisma.savedAccount.update({
+              where: { id: acct.id },
+              data: { webhookId: `yelp-webhook-${businessId}` },
+            });
+          }
+          this.logger.log(`[Yelp OAuth] Subscribed ${businessName} to webhooks`);
         } catch (err: any) {
           this.logger.error(`Failed to subscribe Yelp business ${businessId}: ${err.message}`);
         }
@@ -260,6 +269,14 @@ export class YelpController {
 
     const businessIds = accounts.map((a: any) => a.businessId);
     await this.yelpAdapter.subscribeToBusinesses(businessIds);
+
+    // Mark all as subscribed
+    for (const account of accounts) {
+      await this.prisma.savedAccount.update({
+        where: { id: account.id },
+        data: { webhookId: `yelp-webhook-${account.businessId}` },
+      });
+    }
 
     return { success: true, subscribed: accounts.length };
   }
