@@ -1054,6 +1054,7 @@ export function Services() {
   }
 
   async function changeRuleAiMode(ruleId: string, useAi: boolean, aiSystemPrompt?: string) {
+    if (!ruleId || ruleId === '_pending') return;
     // Optimistic update — switch UI instantly
     setAutoReplyUseAi(useAi);
     setAutoReplyRules(prev => prev.map(r => r.id === ruleId ? { ...r, useAi, aiSystemPrompt: aiSystemPrompt ?? r.aiSystemPrompt ?? null } : r));
