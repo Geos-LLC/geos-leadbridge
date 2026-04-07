@@ -72,7 +72,12 @@ export class FollowUpEngineService {
       return;
     }
 
-    await this.enrollInSequence(conversationId, template.id, platform);
+    // Find lead for this conversation
+    const lead = await this.prisma.lead.findFirst({
+      where: { threadId: conversationId },
+      select: { id: true },
+    });
+    await this.enrollInSequence(conversationId, template.id, platform, lead?.id);
   }
 
   /**
