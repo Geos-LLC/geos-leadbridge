@@ -77,7 +77,9 @@ export class YelpAdapter implements IPlatformAdapter {
 
     const rawOAuthPath = `/oauth2/authorize?${params.toString()}`;
     const encodedOAuthPath = `/oauth2/authorize?${params.toString().replace(/&/g, '%26')}`;
-    const finalUrl = `https://biz.yelp.com/logout?return_url=${encodedOAuthPath}`;
+    // Use login page (not logout) — logout doesn't reliably clear Yelp sessions.
+    // Login page forces the user to pick which business to log into.
+    const finalUrl = `https://biz.yelp.com/login?return_url=${encodedOAuthPath}`;
 
     this.logger.log(`[Yelp OAuth] getAuthUrl built:`);
     this.logger.log(`[Yelp OAuth]   client_id=${this.clientId}`);
