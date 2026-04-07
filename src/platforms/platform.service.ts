@@ -49,15 +49,65 @@ export class PlatformService {
     let refreshed = 0;
     let failed = 0;
 
+    // Group Yelp accounts by userId — one token per user, refreshing one invalidates others
+    const yelpByUser = new Map<string, typeof accounts>();
+    const nonYelp: typeof accounts = [];
+
     for (const account of accounts) {
+      if (account.platform === 'yelp') {
+        const group = yelpByUser.get(account.userId) || [];
+        group.push(account);
+        yelpByUser.set(account.userId, group);
+      } else {
+        nonYelp.push(account);
+      }
+    }
+
+    // Refresh Yelp: one refresh per user, update ALL their accounts with the same token
+    for (const [userId, yelpAccounts] of yelpByUser) {
+      const first = yelpAccounts[0];
+      if (!first.credentialsJson) continue;
+      try {
+        const creds = EncryptionUtil.decryptObject<any>(first.credentialsJson, this.encryptionKey);
+        if (!creds.expiresAt || !creds.refreshToken) continue;
+        const expiresAt = new Date(creds.expiresAt).getTime();
+        if (now > (expiresAt - bufferMs)) {
+          const lockKey = `yelp:${userId}`;
+          try {
+            const result = await this.serializedAccountRefresh(lockKey, first.id, 'yelp', creds.refreshToken, creds.email);
+            // Update ALL Yelp accounts for this user with the same fresh token
+            const freshCreds = EncryptionUtil.encryptObject({
+              ...creds,
+              accessToken: result.accessToken,
+              refreshToken: result.refreshToken || creds.refreshToken,
+              expiresAt: result.expiresAt,
+            }, this.encryptionKey);
+            for (const acc of yelpAccounts) {
+              if (acc.id !== first.id) {
+                await this.prisma.savedAccount.update({
+                  where: { id: acc.id },
+                  data: { credentialsJson: freshCreds },
+                });
+              }
+            }
+            refreshed++;
+            this.logger.log(`[ProactiveRefresh] Refreshed yelp token for ${yelpAccounts.length} accounts (user ${userId})`);
+          } catch (err: any) {
+            failed++;
+            this.logger.warn(`[ProactiveRefresh] Failed to refresh yelp for user ${userId}: ${err.message}`);
+          }
+        }
+      } catch { /* decrypt failed */ }
+    }
+
+    // Refresh non-Yelp (Thumbtack) — each account independently
+    for (const account of nonYelp) {
       if (!account.credentialsJson) continue;
       try {
         const creds = EncryptionUtil.decryptObject<any>(account.credentialsJson, this.encryptionKey);
         if (!creds.expiresAt || !creds.refreshToken) continue;
-
         const expiresAt = new Date(creds.expiresAt).getTime();
         if (now > (expiresAt - bufferMs)) {
-          // Token expires within 1 hour or already expired — refresh
           const lockKey = `${account.platform}:${account.businessId}`;
           try {
             await this.serializedAccountRefresh(lockKey, account.id, account.platform, creds.refreshToken, creds.email);
@@ -883,13 +933,27 @@ export class PlatformService {
   ): Promise<void> {
     const encryptedCredentials = EncryptionUtil.encryptObject(credentials, this.encryptionKey);
 
-    await this.prisma.savedAccount.update({
+    const account = await this.prisma.savedAccount.update({
       where: { id: accountId },
       data: {
         credentialsJson: encryptedCredentials,
         lastUsedAt: new Date(),
       },
     });
+
+    // For Yelp: one user has one OAuth token shared across all businesses.
+    // When one account's token is refreshed, update ALL sibling Yelp accounts
+    // to prevent token chain revocation (refreshing account B invalidates A's token).
+    if (account.platform === 'yelp') {
+      await this.prisma.savedAccount.updateMany({
+        where: {
+          userId: account.userId,
+          platform: 'yelp',
+          id: { not: accountId },
+        },
+        data: { credentialsJson: encryptedCredentials },
+      });
+    }
   }
 
   /**
