@@ -1342,18 +1342,14 @@ export default function SettingsPage() {
                                 onClick={() => {
                                   const acc = accounts.find(a => a.id === importAccountId);
                                   if (!acc) return;
-                                  // Open Yelp inbox for this business directly
                                   const yelpUrl = `https://biz.yelp.com/leads_center/${acc.businessId}/leads`;
                                   window.open(yelpUrl, '_blank');
-                                  // Also dispatch event for extension to pick up
-                                  document.dispatchEvent(new CustomEvent('leadbridge-launch', {
-                                    detail: { action: 'collect-leads', accountId: acc.id, accountName: acc.businessName },
-                                  }));
                                 }}
                                 className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700 inline-flex items-center gap-1.5"
                               >
                                 <Download size={13} /> Get IDs
                               </button>
+                              <p className="text-[10px] text-slate-400 mt-1">Opens Yelp inbox for this location. Click the extension icon to start syncing.</p>
                             </>
                           ) : (
                             <div className="flex items-center justify-between gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
