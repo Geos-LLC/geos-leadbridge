@@ -2574,7 +2574,7 @@ export function Services() {
                   <button
                     onClick={async () => {
                       try {
-                        const res = await followUpApi.saveSettings(selectedAccountId, {
+                        await followUpApi.saveSettings(selectedAccountId, {
                           mode: fuMode,
                           preset: fuPreset,
                           replyType: fuReplyType,
@@ -2594,11 +2594,11 @@ export function Services() {
                           followUpStrategy: fuStrategy,
                           followUpStrategyPrompt: fuStrategy !== 'auto' ? fuStrategyPrompt : undefined,
                         } as any);
-                        alert(fuMode === 'off'
-                          ? 'Follow-ups disabled and saved.'
-                          : `Follow-up settings saved.${res.seeded > 0 ? ` ${res.seeded} sequence templates created.` : ''}`);
+                        showSuccess(fuMode === 'off'
+                          ? 'Follow-ups disabled and saved'
+                          : 'Follow-up settings saved');
                       } catch (err: any) {
-                        alert(err.message || 'Failed to save follow-up settings');
+                        setError(err.message || 'Failed to save follow-up settings');
                       }
                     }}
                     className="w-full px-4 py-2.5 bg-[#FF1A1A] text-white text-sm font-bold rounded-xl hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
