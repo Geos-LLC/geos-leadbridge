@@ -72,20 +72,40 @@ export class YelpIntegrationsController {
         where: { platform_externalRequestId: { platform: 'yelp', externalRequestId: leadId } },
       });
       if (existing) {
-        // Update if currently Unknown and we have scraped data
-        if (existing.customerName === 'Unknown' && leadNames?.[leadId]) {
-          await this.prisma.lead.update({
-            where: { id: existing.id },
-            data: {
-              customerName: leadNames[leadId],
-              category: leadCategories?.[leadId] || existing.category || undefined,
-              city: leadLocations?.[leadId]?.split(',')[0]?.trim() || existing.city || undefined,
-              state: leadLocations?.[leadId]?.split(',')[1]?.trim()?.split(' ')[0] || existing.state || undefined,
-              postcode: leadLocations?.[leadId]?.match(/\d{5}/)?.[0] || existing.postcode || undefined,
-            },
-          });
+        // Check if anything changed
+        const newName = leadNames?.[leadId];
+        const newCategory = leadCategories?.[leadId];
+        const newStatus = leadStatuses?.[leadId]?.toLowerCase();
+        const newLocation = leadLocations?.[leadId];
+
+        const nameChanged = newName && existing.customerName !== newName && (existing.customerName === 'Unknown' || newName !== 'Unknown');
+        const statusChanged = newStatus && existing.status !== newStatus;
+        const categoryChanged = newCategory && existing.category !== newCategory && !existing.category;
+        const locationChanged = newLocation && !existing.city;
+
+        if (nameChanged || statusChanged || categoryChanged || locationChanged) {
+          const updates: any = {};
+          if (nameChanged) updates.customerName = newName;
+          if (statusChanged) updates.status = newStatus;
+          if (categoryChanged) updates.category = newCategory;
+          if (locationChanged) {
+            updates.city = newLocation.split(',')[0]?.trim();
+            updates.state = newLocation.split(',')[1]?.trim()?.split(' ')[0];
+            updates.postcode = newLocation.match(/\d{5}/)?.[0];
+          }
+
+          await this.prisma.lead.update({ where: { id: existing.id }, data: updates });
+
+          // Also update conversation name if changed
+          if (nameChanged && existing.threadId) {
+            await this.prisma.conversation.update({
+              where: { id: existing.threadId },
+              data: { customerName: newName },
+            }).catch(() => {});
+          }
+
           imported++;
-          this.logger.log(`[Yelp Import] Updated Unknown lead ${leadId} → ${leadNames[leadId]}`);
+          this.logger.log(`[Yelp Import] Updated lead ${leadId}: ${Object.keys(updates).join(', ')}`);
         } else {
           skipped++;
         }
