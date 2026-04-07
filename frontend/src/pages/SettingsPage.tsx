@@ -1342,6 +1342,9 @@ export default function SettingsPage() {
                                 onClick={() => {
                                   const acc = accounts.find(a => a.id === importAccountId);
                                   if (!acc) return;
+                                  // Store selected account for the extension to pick up
+                                  localStorage.setItem('lb_yelp_launch_accountId', acc.id);
+                                  localStorage.setItem('lb_yelp_launch_accountName', acc.businessName);
                                   const yelpUrl = `https://biz.yelp.com/leads_center/${acc.businessId}/leads`;
                                   window.open(yelpUrl, '_blank');
                                 }}
