@@ -1293,21 +1293,83 @@ export default function SettingsPage() {
                 <p className="text-xs text-slate-400 mb-3">No Yelp businesses connected</p>
               </div>
             )}
-            {/* Import Negotiations — placeholder for future Yelp extension */}
-            {accounts.filter(a => a.platform === 'yelp').length > 0 && (
-              <div className="bg-red-50/50 rounded-2xl border border-red-100 overflow-hidden">
-                <div className="flex items-center justify-between p-3">
-                  <div className="flex items-center gap-2">
-                    <Download size={14} className="text-red-400" />
-                    <h4 className="text-sm font-bold text-slate-900">Import Negotiations</h4>
+            {/* Import Negotiations — Yelp Chrome Extension */}
+            {accounts.filter(a => a.platform === 'yelp').length > 0 && (() => {
+              const yelpAccounts = accounts.filter(a => a.platform === 'yelp');
+              const yelpExtInstalled = document.documentElement.getAttribute('data-leadbridge-ext-type') === 'yelp' || extensionInstalled;
+              return (
+                <div className="bg-red-50/50 rounded-2xl border border-red-100 overflow-hidden">
+                  <div
+                    className="flex items-center justify-between p-3 cursor-pointer hover:bg-red-50 transition-colors"
+                    onClick={() => setImportCollapsed(!importCollapsed)}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Download className="w-4 h-4 text-red-600" />
+                      <h4 className="text-sm font-bold text-slate-900">Import Yelp Leads</h4>
+                    </div>
+                    {importCollapsed ? <ChevronDown className="w-5 h-5 text-slate-400" /> : <ChevronUp className="w-5 h-5 text-slate-400" />}
                   </div>
-                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Coming soon</span>
+
+                  {!importCollapsed && (
+                    <div className="p-4 pt-0 space-y-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-2">Select Yelp Account</label>
+                        <select
+                          value={importAccountId || ''}
+                          onChange={(e) => {
+                            const val = e.target.value || null;
+                            setImportAccountId(val);
+                            if (val) localStorage.setItem('lb_importAccountId', val);
+                          }}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-red-100 focus:border-red-300"
+                        >
+                          <option value="">Choose account...</option>
+                          {yelpAccounts.map(a => (
+                            <option key={a.id} value={a.id}>{a.businessName}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {importAccountId && (
+                        <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                          {yelpExtInstalled ? (
+                            <>
+                              <div className="flex items-center gap-2 mb-2">
+                                <CheckCircle size={14} className="text-green-600" />
+                                <span className="text-xs font-semibold text-green-700">Yelp Sync extension detected</span>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  const acc = accounts.find(a => a.id === importAccountId);
+                                  if (!acc) return;
+                                  // Open Yelp inbox for this business directly
+                                  const yelpUrl = `https://biz.yelp.com/leads_center/${acc.businessId}/leads`;
+                                  window.open(yelpUrl, '_blank');
+                                  // Also dispatch event for extension to pick up
+                                  document.dispatchEvent(new CustomEvent('leadbridge-launch', {
+                                    detail: { action: 'collect-leads', accountId: acc.id, accountName: acc.businessName },
+                                  }));
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700 inline-flex items-center gap-1.5"
+                              >
+                                <Download size={13} /> Get IDs
+                              </button>
+                            </>
+                          ) : (
+                            <div className="flex items-center justify-between gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                              <div>
+                                <p className="text-sm font-semibold text-amber-900">Extension not detected</p>
+                                <p className="text-xs text-amber-700 mt-0.5">Install the LeadBridge Sync - Yelp extension to import leads.</p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="px-3 pb-3">
-                  <p className="text-xs text-slate-500">Yelp doesn't provide a lead listing API. A Chrome extension (like the Thumbtack one) will scrape historical leads from biz.yelp.com.</p>
-                </div>
-              </div>
-            )}
+              );
+            })()}
 
             {accounts.filter(a => a.platform === 'yelp').length === 0 && (
               <button
