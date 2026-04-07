@@ -211,15 +211,15 @@ export class LeadsService {
       } catch (fetchErr: any) {
         const is401 = fetchErr.message?.includes('401') || fetchErr.response?.status === 401;
         if (is401 && creds.refreshToken) {
-          console.log(`[LeadsService] Yelp token expired for ${lead.businessId}, refreshing...`);
-          const refreshed = await yelpAdapter.refreshAccessToken(creds.refreshToken);
-          creds = { ...creds, accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken || creds.refreshToken, expiresAt: refreshed.expiresAt };
-          await this.prisma.savedAccount.update({
-            where: { id: savedAccount.id },
-            data: { credentialsJson: EncryptionUtil.encryptObject(creds, encryptionKey) },
-          });
-          console.log(`[LeadsService] Yelp token refreshed for ${lead.businessId}`);
-          events = await yelpAdapter.getLeadEvents({ accessToken: creds.accessToken }, lead.externalRequestId);
+          this.logger.log(`[Yelp Messages] Token 401 for ${lead.businessId}, refreshing via platformService...`);
+          // Use platformService which syncs refreshed token to all sibling Yelp accounts
+          const freshCreds = await this.platformService.getAccountCredentialsByBusinessId(userId, 'yelp', lead.businessId);
+          if (freshCreds) {
+            creds = { ...creds, accessToken: freshCreds.accessToken, refreshToken: freshCreds.refreshToken || creds.refreshToken };
+            events = await yelpAdapter.getLeadEvents({ accessToken: freshCreds.accessToken }, lead.externalRequestId);
+          } else {
+            throw fetchErr;
+          }
         } else {
           throw fetchErr;
         }

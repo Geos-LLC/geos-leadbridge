@@ -1008,9 +1008,11 @@ export class PlatformService {
         const now = new Date();
 
         if (now.getTime() > (expiresAt.getTime() - bufferMs)) {
-          console.log(`[PlatformService] Account token expired for business ${businessId}, refreshing...`);
+          this.logger.log(`[Credentials] Token expired for ${platform}/${businessId}, refreshing...`);
 
-          const lockKey = `${platform}:${businessId}`;
+          // Yelp: one token per user — lock by user to prevent chain revocation
+          // Thumbtack: one token per business — lock by business
+          const lockKey = platform === 'yelp' ? `yelp:user:${userId}` : `${platform}:${businessId}`;
           try {
             const refreshed = await this.serializedAccountRefresh(
               lockKey,
@@ -1020,14 +1022,14 @@ export class PlatformService {
               credentials.email,
             );
 
-            console.log(`[PlatformService] Account token refreshed successfully for business ${businessId}`);
+            this.logger.log(`[Credentials] Token refreshed for ${platform}/${businessId}`);
             return {
               accessToken: refreshed.accessToken,
               refreshToken: refreshed.refreshToken,
               email: credentials.email,
             };
           } catch (refreshError: any) {
-            console.error(`[PlatformService] Failed to refresh account token for business ${businessId}: ${refreshError.message}`);
+            this.logger.error(`[Credentials] Failed to refresh ${platform}/${businessId}: ${refreshError.message}`);
 
             const savedAcct = await this.prisma.savedAccount.findFirst({ where: { userId, platform, businessId }, select: { id: true, businessName: true } }).catch(() => null);
             this.monitoring.captureError({
