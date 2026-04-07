@@ -3,7 +3,7 @@
  * Manages lead retrieval and synchronization across platforms
  */
 
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { PlatformService } from '../platforms/platform.service';
@@ -16,6 +16,7 @@ import { ConversationContextService } from '../conversation-context/conversation
 
 @Injectable()
 export class LeadsService {
+  private readonly logger = new Logger(LeadsService.name);
   constructor(
     private prisma: PrismaService,
     private platformService: PlatformService,
@@ -1157,7 +1158,9 @@ export class LeadsService {
     const adapter = this.platformFactory.getAdapter(lead.platform) as any;
     if (typeof adapter.getLead !== 'function') return { updated: false };
 
+    this.logger.log(`Refetching lead ${leadId} (${lead.platform}/${lead.externalRequestId}) from API...`);
     const freshLead = await adapter.getLead(credentials, lead.externalRequestId);
+    this.logger.log(`Refetch result: name=${freshLead.customerName}, category=${freshLead.category}, msg=${(freshLead.message || '').substring(0, 50)}`);
 
     await this.prisma.lead.update({
       where: { id: leadId },
@@ -1175,7 +1178,7 @@ export class LeadsService {
       },
     });
 
-    console.log(`[LeadsService] Refetched lead ${leadId}: ${lead.customerName} → ${freshLead.customerName}`);
+    this.logger.log(`Refetched lead ${leadId}: ${lead.customerName} → ${freshLead.customerName}`);
     return { updated: true, customerName: freshLead.customerName };
   }
 
@@ -1195,9 +1198,9 @@ export class LeadsService {
     if (lead.customerName === 'Unknown' || !lead.message || !lead.category) {
       try {
         const result = await this.refetchLeadFromPlatform(userId, leadId);
-        console.log(`[LeadsService] Lead refetched during resync: updated=${result.updated}, name=${result.customerName}`);
+        this.logger.log(`Lead refetched during resync: updated=${result.updated}, name=${result.customerName}`);
       } catch (err: any) {
-        console.error(`[LeadsService] Lead refetch FAILED during resync: ${err.message}`);
+        this.logger.error(`Lead refetch FAILED during resync: ${err.message}`, err.stack);
       }
     }
 
