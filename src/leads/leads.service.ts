@@ -1140,6 +1140,45 @@ export class LeadsService {
    * If connected to the correct account, imports messages from Thumbtack API.
    * Also cleans up old synthetic messages.
    */
+
+  /**
+   * Re-fetch lead data from platform API (fixes "Unknown" leads from token failures)
+   */
+  async refetchLeadFromPlatform(userId: string, leadId: string): Promise<{ updated: boolean; customerName?: string }> {
+    const lead = await this.getLead(userId, leadId);
+    if (!lead) throw new Error('Lead not found');
+
+    const credentials = lead.businessId
+      ? await this.platformService.getAccountCredentialsByBusinessId(userId, lead.platform, lead.businessId)
+      : await this.platformService.getCredentials(userId, lead.platform);
+
+    if (!credentials) return { updated: false, customerName: lead.customerName };
+
+    const adapter = this.platformFactory.getAdapter(lead.platform) as any;
+    if (typeof adapter.getLead !== 'function') return { updated: false };
+
+    const freshLead = await adapter.getLead(credentials, lead.externalRequestId);
+
+    await this.prisma.lead.update({
+      where: { id: leadId },
+      data: {
+        customerName: freshLead.customerName || lead.customerName,
+        customerPhone: freshLead.customerPhone || lead.customerPhone || undefined,
+        customerEmail: freshLead.customerEmail || lead.customerEmail || undefined,
+        message: freshLead.message || lead.message || undefined,
+        category: freshLead.category || lead.category || undefined,
+        city: freshLead.city || lead.city || undefined,
+        state: freshLead.state || lead.state || undefined,
+        postcode: freshLead.postcode || lead.postcode || undefined,
+        status: freshLead.status || lead.status || undefined,
+        rawJson: JSON.stringify(freshLead.raw || {}),
+      },
+    });
+
+    console.log(`[LeadsService] Refetched lead ${leadId}: ${lead.customerName} → ${freshLead.customerName}`);
+    return { updated: true, customerName: freshLead.customerName };
+  }
+
   async resyncMessages(userId: string, leadId: string): Promise<{ cleaned: number; imported: number; statusUpdated: boolean }> {
     console.log(`[LeadsService] resyncMessages called - leadId: ${leadId}, userId: ${userId}`);
 

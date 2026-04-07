@@ -15,6 +15,7 @@ import {
   Sse,
   MessageEvent,
 } from '@nestjs/common';
+import { PrismaService } from '../common/utils/prisma.service';
 import { JwtSseAuthGuard } from '../common/guards/jwt-sse-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
@@ -29,6 +30,7 @@ export class LeadsController {
   constructor(
     private leadsService: LeadsService,
     private eventEmitter: EventEmitter2,
+    private prisma: PrismaService,
   ) {}
 
   /**
@@ -169,6 +171,36 @@ export class LeadsController {
    * Re-sync messages for a lead
    * Cleans up duplicates and imports any missing messages from the API
    */
+  /**
+   * Re-fetch lead data from the platform API (fixes "Unknown" leads from token failures)
+   */
+  @Post(':id/refetch')
+  async refetchLead(@CurrentUser() user: any, @Param('id') id: string) {
+    const result = await this.leadsService.refetchLeadFromPlatform(user.id, id);
+    return { success: true, ...result };
+  }
+
+  /**
+   * Re-fetch ALL broken leads (customerName = 'Unknown') for the current user
+   */
+  @Post('refetch-broken')
+  async refetchBrokenLeads(@CurrentUser() user: any) {
+    const broken = await this.prisma.lead.findMany({
+      where: { userId: user.id, customerName: 'Unknown' },
+      select: { id: true },
+    });
+    const results = [];
+    for (const lead of broken) {
+      try {
+        const r = await this.leadsService.refetchLeadFromPlatform(user.id, lead.id);
+        results.push({ id: lead.id, ...r });
+      } catch (err: any) {
+        results.push({ id: lead.id, error: err.message });
+      }
+    }
+    return { success: true, total: broken.length, results };
+  }
+
   @Post(':id/resync-messages')
   async resyncMessages(@CurrentUser() user: any, @Param('id') id: string) {
     console.log(`[LeadsController] POST /resync-messages called - leadId: ${id}, userId: ${user.id}`);
