@@ -6,7 +6,7 @@
  * Auto-send mode supported but gated by enrollment.mode.
  */
 
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../common/utils/prisma.service';
@@ -16,7 +16,7 @@ import { FollowUpEngineService } from './follow-up-engine.service';
 import { FollowUpGeneratorService, SequenceStep } from './follow-up-generator.service';
 
 @Injectable()
-export class FollowUpSchedulerService {
+export class FollowUpSchedulerService implements OnModuleInit {
   private readonly logger = new Logger(FollowUpSchedulerService.name);
   private processing = false;
 
@@ -29,6 +29,83 @@ export class FollowUpSchedulerService {
     private readonly generatorService: FollowUpGeneratorService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * On startup: reset any enrollments stuck far in the future (e.g., nextStepDueAt = 2099).
+   * These are from failed sends that got parked. Reset to now with staggered timing.
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      const farFutureCutoff = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+      const stuckEnrollments = await this.prisma.followUpEnrollment.findMany({
+        where: {
+          status: 'active',
+          nextStepDueAt: { gt: farFutureCutoff },
+        },
+      });
+
+      if (stuckEnrollments.length === 0) return;
+
+      this.logger.log(`[FollowUpScheduler] Found ${stuckEnrollments.length} stuck enrollments — resetting to now`);
+
+      const now = new Date();
+      for (let i = 0; i < stuckEnrollments.length; i++) {
+        const enrollment = stuckEnrollments[i];
+        // Stagger by 60 seconds each to avoid blast
+        const staggeredDue = new Date(now.getTime() + i * 60_000);
+        await this.prisma.followUpEnrollment.update({
+          where: { id: enrollment.id },
+          data: { nextStepDueAt: staggeredDue, currentStepIndex: 0 },
+        });
+        // Clear failed step executions so they can be retried
+        await this.prisma.followUpStepExecution.deleteMany({
+          where: { enrollmentId: enrollment.id, status: 'failed' },
+        });
+        await this.prisma.threadContext.updateMany({
+          where: { conversationId: enrollment.conversationId },
+          data: { nextFollowUpAt: staggeredDue, followUpStatus: 'active' },
+        });
+      }
+
+      this.logger.log(`[FollowUpScheduler] Reset ${stuckEnrollments.length} stuck enrollments — will process over next ${Math.ceil(stuckEnrollments.length)} minutes`);
+
+      // Also re-activate enrollments that completed with ALL steps failed (token was dead)
+      const allFailedEnrollments = await this.prisma.followUpEnrollment.findMany({
+        where: {
+          status: { in: ['completed', 'stopped'] },
+          stepExecutions: { every: { status: 'failed' } },
+        },
+        include: { stepExecutions: { select: { id: true, status: true } } },
+      });
+
+      const trulyAllFailed = allFailedEnrollments.filter(
+        e => e.stepExecutions.length > 0 && e.stepExecutions.every((s: any) => s.status === 'failed'),
+      );
+
+      if (trulyAllFailed.length > 0) {
+        this.logger.log(`[FollowUpScheduler] Found ${trulyAllFailed.length} enrollments with all steps failed — re-activating`);
+        const baseOffset = stuckEnrollments.length;
+        for (let i = 0; i < trulyAllFailed.length; i++) {
+          const enrollment = trulyAllFailed[i];
+          const staggeredDue = new Date(now.getTime() + (baseOffset + i) * 60_000);
+          await this.prisma.followUpEnrollment.update({
+            where: { id: enrollment.id },
+            data: { status: 'active', currentStepIndex: 0, nextStepDueAt: staggeredDue, completedAt: null },
+          });
+          await this.prisma.followUpStepExecution.deleteMany({
+            where: { enrollmentId: enrollment.id, status: 'failed' },
+          });
+          await this.prisma.threadContext.updateMany({
+            where: { conversationId: enrollment.conversationId },
+            data: { activeEnrollmentId: enrollment.id, nextFollowUpAt: staggeredDue, followUpStatus: 'active' },
+          });
+        }
+        this.logger.log(`[FollowUpScheduler] Re-activated ${trulyAllFailed.length} all-failed enrollments`);
+      }
+    } catch (err: any) {
+      this.logger.error(`[FollowUpScheduler] Failed to reset stuck enrollments: ${err.message}`);
+    }
+  }
 
   /**
    * Cron: every 60 seconds, find and process due follow-up enrollments.
@@ -211,9 +288,20 @@ export class FollowUpSchedulerService {
       });
 
       this.logger.log(`[FollowUpScheduler] Auto-${sendStatus} step ${enrollment.currentStepIndex} for enrollment ${enrollment.id}: "${step.objective}"`);
+
+      // On failed send: retry the same step in 15 minutes instead of advancing
+      if (sendStatus === 'failed') {
+        const retryAt = new Date(now.getTime() + 15 * 60_000);
+        await this.prisma.followUpEnrollment.update({
+          where: { id: enrollment.id },
+          data: { nextStepDueAt: retryAt, lastExecutedAt: now },
+        });
+        this.logger.log(`[FollowUpScheduler] Will retry step ${enrollment.currentStepIndex} at ${retryAt.toISOString()}`);
+        return;
+      }
     }
 
-    // Advance to next step
+    // Advance to next step (only on success or suggest)
     const nextStep = steps[enrollment.currentStepIndex + 1];
     if (nextStep) {
       const nextDue = this.engineService.computeNextDueAt(
