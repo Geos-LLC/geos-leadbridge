@@ -250,6 +250,7 @@ export class FollowUpEngineController {
 
     // Seed templates if mode is not 'off' (idempotent — skips if already exist)
     let seeded = 0;
+    let enrolled = 0;
     if (mode !== 'off') {
       const { seedPresetsForUser } = await import('./follow-up-seed');
       seeded = await seedPresetsForUser(
@@ -261,9 +262,46 @@ export class FollowUpEngineController {
         body.timezone || 'America/New_York',
         savedAccountId,
       );
+
+      // Auto-enroll all existing leads that don't have an active enrollment
+      const acctPlatform = body.platform || account.platform || 'yelp';
+      const template = await this.prisma.followUpSequenceTemplate.findFirst({
+        where: { userId: user.id, platform: acctPlatform, enabled: true },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+      });
+
+      if (template) {
+        const leads = await this.prisma.lead.findMany({
+          where: { userId: user.id, businessId: account.businessId },
+          select: { id: true, threadId: true, platform: true },
+        });
+
+        for (const lead of leads) {
+          if (!lead.threadId) continue;
+
+          // Skip if already has active enrollment
+          const existing = await this.prisma.followUpEnrollment.findFirst({
+            where: { conversationId: lead.threadId, status: 'active' },
+          });
+          if (existing) continue;
+
+          // Skip if customer already replied
+          const customerReply = await this.prisma.message.findFirst({
+            where: { conversationId: lead.threadId, sender: 'customer' },
+          });
+          if (customerReply) continue;
+
+          try {
+            await this.engineService.enrollInSequence(lead.threadId, template.id, lead.platform, lead.id);
+            enrolled++;
+          } catch {
+            // Skip failures silently
+          }
+        }
+      }
     }
 
-    return { success: true, seeded };
+    return { success: true, seeded, enrolled };
   }
 
   /**
