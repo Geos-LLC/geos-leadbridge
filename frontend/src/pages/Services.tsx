@@ -2610,10 +2610,13 @@ export function Services() {
                           followUpStrategyPrompt: fuStrategy !== 'auto' ? fuStrategyPrompt : undefined,
                           includeHistorical: fuIncludeHistorical,
                         } as any);
+                        const wasHistorical = fuIncludeHistorical;
                         setFuIncludeHistorical(false); // Reset after save
                         showSuccess(fuMode === 'off'
                           ? 'Follow-ups disabled and saved'
-                          : 'Follow-up settings saved');
+                          : wasHistorical
+                            ? 'Settings saved — enrolling existing leads in background'
+                            : 'Follow-up settings saved');
                       } catch (err: any) {
                         setError(err.message || 'Failed to save follow-up settings');
                       }
