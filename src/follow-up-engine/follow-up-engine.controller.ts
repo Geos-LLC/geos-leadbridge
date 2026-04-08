@@ -6,7 +6,7 @@
  * Phase 3: approve/skip/pause suggestions.
  */
 
-import { Controller, Get, Post, Param, Body, Query, UseGuards, Inject, forwardRef } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Query, UseGuards, Inject, forwardRef, Logger } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PrismaService } from '../common/utils/prisma.service';
@@ -17,6 +17,8 @@ import { FollowUpEngineService } from './follow-up-engine.service';
 @Controller('v1/follow-ups')
 @UseGuards(JwtAuthGuard)
 export class FollowUpEngineController {
+  private readonly logger = new Logger(FollowUpEngineController.name);
+
   constructor(
     private readonly engineService: FollowUpEngineService,
     private readonly prisma: PrismaService,
@@ -307,9 +309,9 @@ export class FollowUpEngineController {
               // Skip failures
             }
           }
-          console.log(`[FollowUp] Background enrollment complete: ${count} leads enrolled for business ${businessId}`);
+          this.logger.log(`[FollowUp] Background enrollment complete: ${count} leads enrolled for business ${businessId}`);
         } catch (err: any) {
-          console.error(`[FollowUp] Background enrollment error: ${err.message}`);
+          this.logger.error(`[FollowUp] Background enrollment error: ${err.message}`);
         }
       });
     }
