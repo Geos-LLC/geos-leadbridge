@@ -14,6 +14,7 @@ import { TemplatesService } from '../templates/templates.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
+import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 
 @Injectable()
 export class LeadsService {
@@ -27,6 +28,7 @@ export class LeadsService {
     private analyticsService: AnalyticsService,
     private conversationContext: ConversationContextService,
     @Optional() @Inject(FollowUpEngineService) private followUpEngine: FollowUpEngineService | null,
+    @Optional() @Inject(CrmWebhookService) private crmWebhookService: CrmWebhookService | null,
   ) {}
 
   /**
@@ -559,6 +561,14 @@ export class LeadsService {
       if (conversation?.id) {
         this.followUpEngine?.evaluateThread(conversation.id, lead.platform).catch(() => {});
       }
+
+      // Emit CRM webhook for outbound message
+      this.crmWebhookService?.emit(userId, 'message.sent', {
+        userId, platform: lead.platform, businessId: lead.businessId,
+        leadId, conversationId: conversation?.id,
+        messageDirection: 'outbound', messageBody: message,
+        messageSentAt: new Date(), messageSenderType: senderType,
+      }).catch(() => {});
     } catch (err) {
       // Log but don't fail - message was sent successfully
       console.error('[LeadsService] Failed to store sent message locally:', err.message);
