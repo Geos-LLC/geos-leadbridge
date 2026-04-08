@@ -663,6 +663,28 @@ export function Messages() {
       });
       setMessages(convertedMessages);
 
+      // Auto-detect phone from customer messages and save to lead if missing
+      if (!lead.customerPhone) {
+        const phoneRegex = /(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/;
+        for (const msg of convertedMessages) {
+          if (msg.sender === 'customer' && msg.content) {
+            // Strip HTML tags first
+            const text = msg.content.replace(/<[^>]+>/g, '');
+            const match = text.match(phoneRegex);
+            if (match) {
+              const digits = match[1].replace(/\D/g, '');
+              const normalized = digits.length === 11 && digits.startsWith('1') ? `+${digits}` : digits.length === 10 ? `+1${digits}` : null;
+              if (normalized) {
+                api.patch(`/v1/leads/${lead.id}`, { customerPhone: normalized }).then(() => {
+                  setLeads(leads.map(l => l.id === lead.id ? { ...l, customerPhone: normalized } : l));
+                }).catch(() => {});
+                break; // Only save first found phone
+              }
+            }
+          }
+        }
+      }
+
       let leadSmsLogs: NotificationLog[] = [];
       try {
         const { logs } = await notificationsApi.getLogsByLead(lead.id);
@@ -860,7 +882,7 @@ export function Messages() {
   };
 
   /** Render message content with clickable phone numbers and stripped HTML tel tags */
-  const renderMessageContent = (content: string, leadId?: string) => {
+  const renderMessageContent = (content: string) => {
     // Strip HTML tel links: <a href="tel:xxx">yyy</a> → just the visible text
     let text = content.replace(/<a[^>]*href=["']tel:([^"']*)["'][^>]*>(.*?)<\/a>/gi, '$2');
     // Also strip any other HTML tags
@@ -885,20 +907,6 @@ export function Messages() {
                   key={i}
                   href={`tel:${digits}`}
                   className="underline font-semibold hover:opacity-80"
-                  onClick={(e) => {
-                    // If the lead has no phone, save this number
-                    if (leadId && selectedLead && !selectedLead.customerPhone) {
-                      e.preventDefault();
-                      const formatted = `+1${digits}`;
-                      api.patch(`/v1/leads/${leadId}`, { customerPhone: formatted })
-                        .then(() => {
-                          // Update local state
-                          setLeads(leads.map(l => l.id === leadId ? { ...l, customerPhone: formatted } : l));
-                          window.location.href = `tel:${digits}`;
-                        })
-                        .catch(() => { window.location.href = `tel:${digits}`; });
-                    }
-                  }}
                 >
                   {formatPhoneNumber(part)}
                 </a>
@@ -1519,7 +1527,7 @@ export function Messages() {
                       </div>
 
                       {/* Message Content */}
-                      {event.content && <div className="text-sm leading-relaxed">{renderMessageContent(event.content, selectedLead?.id)}</div>}
+                      {event.content && <div className="text-sm leading-relaxed">{renderMessageContent(event.content)}</div>}
 
                       {/* Attachments (platform only) */}
                       {event.attachments && event.attachments.length > 0 && (
