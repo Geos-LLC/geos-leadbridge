@@ -3,7 +3,7 @@
  * Manages lead retrieval and synchronization across platforms
  */
 
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, Inject, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { PlatformService } from '../platforms/platform.service';
@@ -13,6 +13,7 @@ import { NormalizedLead } from '../common/dto/normalized.dto';
 import { TemplatesService } from '../templates/templates.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
+import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 
 @Injectable()
 export class LeadsService {
@@ -25,6 +26,7 @@ export class LeadsService {
     private templatesService: TemplatesService,
     private analyticsService: AnalyticsService,
     private conversationContext: ConversationContextService,
+    @Optional() @Inject(FollowUpEngineService) private followUpEngine: FollowUpEngineService | null,
   ) {}
 
   /**
@@ -548,6 +550,11 @@ export class LeadsService {
           });
           console.log(`[LeadsService] Trial lead tracked: ${user.trialLeadsHandled + 1} leads handled`);
         }
+      }
+      // After sending a business message, evaluate for follow-up enrollment.
+      // If the customer doesn't reply, this triggers a new follow-up sequence.
+      if (conversation?.id) {
+        this.followUpEngine?.evaluateThread(conversation.id, lead.platform).catch(() => {});
       }
     } catch (err) {
       // Log but don't fail - message was sent successfully
