@@ -227,9 +227,30 @@ export class FollowUpEngineController {
       },
     });
 
+    // When mode is turned off, stop all active enrollments for this account's leads
+    if (mode === 'off') {
+      const accountLeads = await this.prisma.lead.findMany({
+        where: { userId: user.id, businessId: account.businessId },
+        select: { threadId: true },
+      });
+      const threadIds = accountLeads.map(l => l.threadId).filter(Boolean) as string[];
+      if (threadIds.length > 0) {
+        const stopped = await this.prisma.followUpEnrollment.updateMany({
+          where: { conversationId: { in: threadIds }, status: 'active' },
+          data: { status: 'stopped', stoppedReason: 'user_disabled', completedAt: new Date() },
+        });
+        if (stopped.count > 0) {
+          await this.prisma.threadContext.updateMany({
+            where: { conversationId: { in: threadIds } },
+            data: { activeEnrollmentId: null, nextFollowUpAt: null, followUpStatus: 'stopped' },
+          });
+        }
+      }
+    }
+
     // Seed templates if mode is not 'off' (idempotent — skips if already exist)
     let seeded = 0;
-    if (body.mode !== 'off') {
+    if (mode !== 'off') {
       const { seedPresetsForUser } = await import('./follow-up-seed');
       seeded = await seedPresetsForUser(
         this.prisma,
