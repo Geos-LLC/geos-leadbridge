@@ -417,11 +417,11 @@ export class LeadsService {
     try {
       sentMessage = await adapter.sendMessage(credentials, lead.externalRequestId, message);
     } catch (err: any) {
-      const is403 = err.message?.includes('403') || err.message?.includes('NO_BUSINESS_ACCESS') || err.message?.includes('no_business_access');
+      const is403 = err.message?.includes('403') || err.message?.includes('NO_BUSINESS_ACCESS') || err.message?.includes('no_business_access') || err.message?.includes('NOT_AUTHORIZED');
       const is401 = err.message?.includes('401') || err.message?.includes('expired') || err.message?.includes('TOKEN_INVALID');
 
-      // On 401: try refreshing token and retry once (Yelp tokens can be invalidated by sibling refreshes)
-      if (is401 && lead.businessId) {
+      // On 401/403: try refreshing token and retry once (Yelp tokens can be invalidated by sibling refreshes)
+      if ((is401 || is403) && lead.businessId) {
         this.logger.log(`[sendMessage] 401 on ${lead.platform} send, attempting token refresh & retry...`);
         try {
           const freshCreds = await this.platformService.getAccountCredentialsByBusinessId(userId, lead.platform, lead.businessId, true);
