@@ -75,6 +75,11 @@ export class AuthService {
       // Don't fail registration - user can connect manually later
     }
 
+    // Register in Sigcore business identity model (non-blocking)
+    this.sigcoreService.registerBusinessIdentity(user.id).catch(e => {
+      this.logger.warn(`[BusinessIdentity] Registration deferred for user ${user.id}: ${e.message}`);
+    });
+
     // Generate JWT token
     const token = this.generateToken(user.id, user.email);
 

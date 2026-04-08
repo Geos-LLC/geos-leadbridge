@@ -204,7 +204,7 @@ export class FollowUpSchedulerService implements OnModuleInit {
           select: { followUpMode: true },
         });
         if (!account || account.followUpMode === 'off' || !account.followUpMode) {
-          this.logger.debug(`[FollowUpScheduler] Follow-ups disabled for account (business ${lead.businessId}) — skipping enrollment ${enrollment.id}`);
+          this.logger.log(`[FollowUpScheduler] Follow-ups disabled for account (business ${lead.businessId}, followUpMode=${account?.followUpMode ?? 'null'}) — skipping enrollment ${enrollment.id}`);
           return;
         }
       }
