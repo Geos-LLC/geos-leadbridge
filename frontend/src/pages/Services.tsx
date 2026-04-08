@@ -2581,7 +2581,7 @@ export function Services() {
                       className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                     />
                     <div>
-                      <span className="text-xs font-semibold text-slate-700">Follow up past leads</span>
+                      <span className="text-xs font-semibold text-slate-700">Follow up historical leads</span>
                       <span className="block text-[10px] text-slate-400">Enroll all previous conversations that haven't replied yet</span>
                     </div>
                   </label>
