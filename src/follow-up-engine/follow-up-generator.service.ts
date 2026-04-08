@@ -195,14 +195,14 @@ export class FollowUpGeneratorService {
           const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
           if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
             const priceParts = [
-              '--- PRICING TABLE (use EXACT prices, do NOT invent or estimate) ---',
+              '--- PRICING TABLE (reference for accurate quoting) ---',
             ];
             for (const row of p.priceTable.slice(0, 10)) {
               const prices = enabledTypes.map((t: any) => `${t.label}: $${row[t.key] || '?'}`).join(', ');
               priceParts.push(`  ${row.bed}BR/${row.bath}BA — ${prices}`);
             }
             priceParts.push('--- END PRICING ---');
-            priceParts.push('IMPORTANT: Quote the EXACT price from this table matching the customer\'s bedrooms/bathrooms and service type. Do NOT make up price ranges.');
+            priceParts.push('Use these prices as your reference. Match the customer\'s bedrooms/bathrooms to the correct row. You may quote a range around the table price but it MUST be based on the actual table values — do NOT invent prices unrelated to the table.');
             pricingContext = priceParts.join('\n');
           }
         } catch { /* invalid JSON */ }
