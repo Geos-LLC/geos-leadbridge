@@ -14,6 +14,7 @@ import { CallConnectService } from '../call-connect/call-connect.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
+import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 
 @Injectable()
@@ -40,6 +41,7 @@ export class WebhooksService {
     private analyticsService: AnalyticsService,
     private conversationContextService: ConversationContextService,
     private followUpEngine: FollowUpEngineService,
+    private crmWebhookService: CrmWebhookService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -346,6 +348,11 @@ export class WebhooksService {
 
     // Emit SSE event for real-time frontend updates (sync, instant)
     this.eventEmitter.emit(`lead.created.${userId}`, lead);
+
+    // Emit CRM webhook (non-blocking)
+    this.crmWebhookService.emit(userId, 'lead.created', {
+      userId, platform: 'thumbtack', businessId: lead.businessId, leadId: lead.id,
+    }).catch(() => {});
 
     // STRICT: only use savedAccounts belonging to the resolved userId — never cross-account
     const userAccounts = savedAccounts.filter((a: any) => a.userId === userId);
@@ -1585,6 +1592,11 @@ export class WebhooksService {
     // Emit SSE for real-time frontend update
     this.eventEmitter.emit(`lead.created.${userId}`, lead);
 
+    // Emit CRM webhook (non-blocking)
+    this.crmWebhookService.emit(userId, 'lead.created', {
+      userId, platform: 'yelp', businessId, leadId: lead.id,
+    }).catch(() => {});
+
     // Update thread context (conversation intelligence layer)
     try {
       await this.conversationContextService.recordMessage({
@@ -1628,6 +1640,13 @@ export class WebhooksService {
     if (!isNewLead && existingLead) {
       // Customer replied — conversation.lastMessageAt already updated above
       this.logger.log(`Yelp customer reply on lead ${leadId}`);
+      // Emit CRM webhook for customer message
+      this.crmWebhookService.emit(userId, 'message.received', {
+        userId, platform: 'yelp', businessId, leadId: lead.id,
+        conversationId: lead.threadId || undefined,
+        messageDirection: 'inbound', messageBody: leadData.message,
+        messageSentAt: new Date(), messageSenderType: 'customer',
+      }).catch(() => {});
       try {
         await this.automationService.handleCustomerReply({
           userId,

@@ -16,6 +16,7 @@ import {
   MessageEvent,
 } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
+import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { JwtSseAuthGuard } from '../common/guards/jwt-sse-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
@@ -31,6 +32,7 @@ export class LeadsController {
     private leadsService: LeadsService,
     private eventEmitter: EventEmitter2,
     private prisma: PrismaService,
+    private crmWebhookService: CrmWebhookService,
   ) {}
 
   /**
@@ -151,6 +153,15 @@ export class LeadsController {
     if (body.status) data.status = body.status;
 
     await this.prisma.lead.update({ where: { id }, data });
+
+    // Emit CRM webhook on status change
+    if (body.status && body.status !== lead.status) {
+      this.crmWebhookService.emit(user.id, 'lead.status_changed', {
+        userId: user.id, platform: lead.platform, businessId: lead.businessId,
+        leadId: id, previousStatus: lead.status,
+      }).catch(() => {});
+    }
+
     return { success: true };
   }
 
