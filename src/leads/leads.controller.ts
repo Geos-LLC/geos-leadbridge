@@ -135,6 +135,26 @@ export class LeadsController {
   }
 
   /**
+   * Update lead fields (e.g., customerPhone from message detection)
+   */
+  @Patch(':id')
+  async updateLead(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body() body: { customerPhone?: string; status?: string },
+  ) {
+    const lead = await this.prisma.lead.findFirst({ where: { id, userId: user.id } });
+    if (!lead) return { success: false, error: 'Lead not found' };
+
+    const data: any = {};
+    if (body.customerPhone) data.customerPhone = body.customerPhone;
+    if (body.status) data.status = body.status;
+
+    await this.prisma.lead.update({ where: { id }, data });
+    return { success: true };
+  }
+
+  /**
    * Send a quote to a lead
    */
   @Post(':id/quote')
