@@ -51,15 +51,25 @@ export class FollowUpSchedulerService implements OnModuleInit {
       const now = new Date();
       for (let i = 0; i < stuckEnrollments.length; i++) {
         const enrollment = stuckEnrollments[i];
+
+        // Find the highest step that was already sent successfully — resume from next step
+        const lastSentStep = await this.prisma.followUpStepExecution.findFirst({
+          where: { enrollmentId: enrollment.id, status: 'sent' },
+          orderBy: { stepIndex: 'desc' },
+          select: { stepIndex: true },
+        });
+        const resumeIndex = lastSentStep ? lastSentStep.stepIndex + 1 : enrollment.currentStepIndex;
+
+        // Clear only failed step executions (keep sent ones to prevent re-sends)
+        await this.prisma.followUpStepExecution.deleteMany({
+          where: { enrollmentId: enrollment.id, status: 'failed' },
+        });
+
         // Stagger by 60 seconds each to avoid blast
         const staggeredDue = new Date(now.getTime() + i * 60_000);
         await this.prisma.followUpEnrollment.update({
           where: { id: enrollment.id },
-          data: { nextStepDueAt: staggeredDue, currentStepIndex: 0 },
-        });
-        // Clear failed step executions so they can be retried
-        await this.prisma.followUpStepExecution.deleteMany({
-          where: { enrollmentId: enrollment.id, status: 'failed' },
+          data: { nextStepDueAt: staggeredDue, currentStepIndex: resumeIndex },
         });
         await this.prisma.threadContext.updateMany({
           where: { conversationId: enrollment.conversationId },
@@ -88,12 +98,13 @@ export class FollowUpSchedulerService implements OnModuleInit {
         for (let i = 0; i < trulyAllFailed.length; i++) {
           const enrollment = trulyAllFailed[i];
           const staggeredDue = new Date(now.getTime() + (baseOffset + i) * 60_000);
+          // Delete all failed executions and restart from step 0
+          await this.prisma.followUpStepExecution.deleteMany({
+            where: { enrollmentId: enrollment.id, status: 'failed' },
+          });
           await this.prisma.followUpEnrollment.update({
             where: { id: enrollment.id },
             data: { status: 'active', currentStepIndex: 0, nextStepDueAt: staggeredDue, completedAt: null },
-          });
-          await this.prisma.followUpStepExecution.deleteMany({
-            where: { enrollmentId: enrollment.id, status: 'failed' },
           });
           await this.prisma.threadContext.updateMany({
             where: { conversationId: enrollment.conversationId },
@@ -116,6 +127,15 @@ export class FollowUpSchedulerService implements OnModuleInit {
     this.processing = true;
 
     try {
+      // Use Postgres advisory lock to prevent staging + production from processing simultaneously
+      // Lock ID 7001 = follow-up scheduler
+      const lockResult = await this.prisma.$queryRawUnsafe<any[]>('SELECT pg_try_advisory_lock(7001) AS locked');
+      const gotLock = lockResult?.[0]?.locked === true;
+      if (!gotLock) {
+        this.logger.debug('[FollowUpScheduler] Another instance holds the lock — skipping this cycle');
+        return;
+      }
+
       const now = new Date();
       const dueEnrollments = await this.prisma.followUpEnrollment.findMany({
         where: {
@@ -129,10 +149,11 @@ export class FollowUpSchedulerService implements OnModuleInit {
       });
 
       if (dueEnrollments.length === 0) {
-        // Log every 10 minutes to confirm cron is alive
         if (now.getMinutes() % 10 === 0 && now.getSeconds() < 60) {
           this.logger.debug('[FollowUpScheduler] Cron alive — no due enrollments');
         }
+        // Release lock before returning
+        await this.prisma.$queryRawUnsafe('SELECT pg_advisory_unlock(7001)').catch(() => {});
         return;
       }
 
@@ -148,6 +169,8 @@ export class FollowUpSchedulerService implements OnModuleInit {
     } catch (err: any) {
       this.logger.error(`[FollowUpScheduler] Cron error: ${err.message}`);
     } finally {
+      // Always release advisory lock and processing flag
+      await this.prisma.$queryRawUnsafe('SELECT pg_advisory_unlock(7001)').catch(() => {});
       this.processing = false;
     }
   }
@@ -185,6 +208,34 @@ export class FollowUpSchedulerService implements OnModuleInit {
       steps = stepsData?.steps || [];
     }
     const step = steps[enrollment.currentStepIndex];
+
+    // Duplicate guard: skip if this step was already sent successfully
+    const alreadySent = await this.prisma.followUpStepExecution.findFirst({
+      where: { enrollmentId: enrollment.id, stepIndex: enrollment.currentStepIndex, status: 'sent' },
+    });
+    if (alreadySent) {
+      this.logger.log(`[FollowUpScheduler] Step ${enrollment.currentStepIndex} already sent for enrollment ${enrollment.id} — skipping to next`);
+      // Advance past this step
+      const nextIdx = enrollment.currentStepIndex + 1;
+      const nextS = steps[nextIdx];
+      if (nextS) {
+        const nextDue = this.engineService.computeNextDueAt(
+          now, nextS.delayMinutes,
+          enrollment.sequenceTemplate.activeHoursStart, enrollment.sequenceTemplate.activeHoursEnd,
+          enrollment.sequenceTemplate.activeHoursTimezone || 'America/New_York',
+        );
+        await this.prisma.followUpEnrollment.update({
+          where: { id: enrollment.id },
+          data: { currentStepIndex: nextIdx, nextStepDueAt: nextDue },
+        });
+      } else {
+        await this.prisma.followUpEnrollment.update({
+          where: { id: enrollment.id },
+          data: { status: 'completed', completedAt: now, currentStepIndex: nextIdx },
+        });
+      }
+      return;
+    }
 
     if (!step) {
       // No more steps — complete
