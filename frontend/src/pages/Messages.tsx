@@ -26,7 +26,7 @@ import {
   MessageCircle,
   Sparkles,
 } from 'lucide-react';
-import { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, followUpApi, type MessageAttachment } from '../services/api';
+import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, followUpApi, type MessageAttachment } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
@@ -859,6 +859,58 @@ export function Messages() {
     return phone;
   };
 
+  /** Render message content with clickable phone numbers and stripped HTML tel tags */
+  const renderMessageContent = (content: string, leadId?: string) => {
+    // Strip HTML tel links: <a href="tel:xxx">yyy</a> → just the visible text
+    let text = content.replace(/<a[^>]*href=["']tel:([^"']*)["'][^>]*>(.*?)<\/a>/gi, '$2');
+    // Also strip any other HTML tags
+    text = text.replace(/<[^>]+>/g, '');
+
+    // Split by phone number pattern and render parts
+    const phoneRegex = /(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/g;
+    const parts = text.split(phoneRegex);
+
+    if (parts.length === 1) return <span>{text}</span>;
+
+    return (
+      <span>
+        {parts.map((part, i) => {
+          if (phoneRegex.test(part)) {
+            phoneRegex.lastIndex = 0; // Reset regex
+            const cleaned = part.replace(/\D/g, '');
+            const digits = cleaned.length === 11 && cleaned.startsWith('1') ? cleaned.slice(1) : cleaned;
+            if (digits.length === 10) {
+              return (
+                <a
+                  key={i}
+                  href={`tel:${digits}`}
+                  className="underline font-semibold hover:opacity-80"
+                  onClick={(e) => {
+                    // If the lead has no phone, save this number
+                    if (leadId && selectedLead && !selectedLead.customerPhone) {
+                      e.preventDefault();
+                      const formatted = `+1${digits}`;
+                      api.patch(`/v1/leads/${leadId}`, { customerPhone: formatted })
+                        .then(() => {
+                          // Update local state
+                          setLeads(leads.map(l => l.id === leadId ? { ...l, customerPhone: formatted } : l));
+                          window.location.href = `tel:${digits}`;
+                        })
+                        .catch(() => { window.location.href = `tel:${digits}`; });
+                    }
+                  }}
+                >
+                  {formatPhoneNumber(part)}
+                </a>
+              );
+            }
+          }
+          return <span key={i}>{part}</span>;
+        })}
+      </span>
+    );
+  };
+
   const getLeadDetails = (lead: Lead) => {
     // Thumbtack format
     if (lead.raw?.request?.details) {
@@ -1467,7 +1519,7 @@ export function Messages() {
                       </div>
 
                       {/* Message Content */}
-                      {event.content && <div className="text-sm leading-relaxed">{event.content}</div>}
+                      {event.content && <div className="text-sm leading-relaxed">{renderMessageContent(event.content, selectedLead?.id)}</div>}
 
                       {/* Attachments (platform only) */}
                       {event.attachments && event.attachments.length > 0 && (
