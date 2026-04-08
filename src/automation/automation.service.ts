@@ -698,12 +698,13 @@ export class AutomationService implements OnModuleInit {
             const p = JSON.parse(account.servicePricingJson);
             const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
             if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
-              const priceParts = ['--- Pricing ---'];
+              const priceParts = ['--- PRICING TABLE (use EXACT prices, do NOT invent or estimate) ---'];
               for (const row of p.priceTable.slice(0, 10)) {
                 const prices = enabledTypes.map((t: any) => `${t.label}: $${row[t.key] || '?'}`).join(', ');
                 priceParts.push(`  ${row.bed}BR/${row.bath}BA — ${prices}`);
               }
-              priceParts.push('--- End Pricing ---');
+              priceParts.push('--- END PRICING ---');
+              priceParts.push('IMPORTANT: Quote the EXACT price from this table matching the customer\'s bedrooms/bathrooms and service type. Do NOT make up price ranges.');
               systemPrompt = `${systemPrompt}\n\n${priceParts.join('\n')}`;
             }
           } catch { /* invalid JSON */ }
