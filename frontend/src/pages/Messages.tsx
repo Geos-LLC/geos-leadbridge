@@ -1309,11 +1309,22 @@ export function Messages() {
                         {selectedLead.platform === 'yelp' ? 'Yelp' : 'TT'}
                       </span>
                       <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase ${
-                        selectedLead.status?.toLowerCase() === 'new' ? 'bg-blue-100 text-blue-700' :
-                        selectedLead.status?.toLowerCase() === 'contacted' ? 'bg-green-100 text-green-700' :
-                        'bg-slate-100 text-slate-600'
+                        (() => {
+                          const s = (selectedLead.status || '').toLowerCase();
+                          const ts = (selectedLead.thumbtackStatus || '').toLowerCase();
+                          const display = ts || s;
+                          if (['done', 'completed', 'job done'].includes(display)) return 'bg-emerald-100 text-emerald-700';
+                          if (['scheduled', 'job scheduled'].includes(display)) return 'bg-purple-100 text-purple-700';
+                          if (['in_progress', 'in progress', 'hired'].includes(display)) return 'bg-amber-100 text-amber-700';
+                          if (['booked'].includes(s)) return 'bg-purple-100 text-purple-700';
+                          if (s === 'quoted') return 'bg-orange-100 text-orange-700';
+                          if (s === 'contacted') return 'bg-green-100 text-green-700';
+                          if (s === 'new') return 'bg-blue-100 text-blue-700';
+                          if (s === 'lost') return 'bg-red-100 text-red-700';
+                          return 'bg-slate-100 text-slate-600';
+                        })()
                       }`}>
-                        {selectedLead.status}
+                        {selectedLead.thumbtackStatus || selectedLead.status}
                       </span>
                     </div>
                     <p className="text-sm text-slate-500 truncate">{selectedLead.category || 'Service Request'}</p>

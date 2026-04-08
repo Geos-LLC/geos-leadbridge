@@ -74,6 +74,10 @@ export class NormalizedLead {
 
   @IsOptional()
   @IsString()
+  thumbtackStatus?: string; // Platform job status (Hired, Scheduled, Done, etc.)
+
+  @IsOptional()
+  @IsString()
   threadId?: string; // Universal conversation ID
 
   @IsDate()

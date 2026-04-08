@@ -34,6 +34,7 @@ export interface Lead {
   state?: string;
   category?: string;
   status: string;
+  thumbtackStatus?: string;
   threadId: string | null;
   createdAt: string;
   updatedAt: string;

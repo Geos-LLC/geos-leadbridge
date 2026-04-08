@@ -1152,6 +1152,7 @@ export class LeadsService {
       state: lead.state,
       category: lead.category,
       status: lead.status as any,
+      thumbtackStatus: lead.thumbtackStatus,
       threadId: lead.threadId,
       createdAt: lead.createdAt,
       updatedAt: lead.updatedAt,

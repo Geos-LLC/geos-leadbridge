@@ -28,6 +28,18 @@ export class FollowUpEngineService {
    * Called after recordMessage() when awaitingCustomerReply becomes true.
    */
   async evaluateThread(conversationId: string, platform: string): Promise<void> {
+    // Skip leads with terminal/archived status — no follow-up needed
+    const statusCheck = await this.prisma.lead.findFirst({
+      where: { threadId: conversationId },
+      select: { status: true, thumbtackStatus: true },
+    });
+    if (statusCheck) {
+      const s = (statusCheck.status || '').toLowerCase();
+      const ts = (statusCheck.thumbtackStatus || '').toLowerCase();
+      const terminal = ['done', 'scheduled', 'in_progress', 'in progress', 'booked', 'hired', 'job done', 'job scheduled', 'completed', 'archived', 'lost'];
+      if (terminal.includes(s) || terminal.includes(ts)) return;
+    }
+
     const threadState = await this.conversationContext.getThreadState(conversationId);
     if (!threadState) return;
 
