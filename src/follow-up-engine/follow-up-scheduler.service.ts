@@ -7,6 +7,7 @@
  */
 
 import { Injectable, Logger, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../common/utils/prisma.service';
@@ -19,6 +20,7 @@ import { FollowUpGeneratorService, SequenceStep } from './follow-up-generator.se
 export class FollowUpSchedulerService implements OnModuleInit {
   private readonly logger = new Logger(FollowUpSchedulerService.name);
   private processing = false;
+  private readonly schedulerEnabled: boolean;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -28,13 +30,23 @@ export class FollowUpSchedulerService implements OnModuleInit {
     private readonly engineService: FollowUpEngineService,
     private readonly generatorService: FollowUpGeneratorService,
     private readonly eventEmitter: EventEmitter2,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    // FOLLOWUP_SCHEDULER=true to enable, defaults to true if not set
+    // Set FOLLOWUP_SCHEDULER=false on staging to let production handle it
+    const envVal = this.configService.get<string>('FOLLOWUP_SCHEDULER');
+    this.schedulerEnabled = envVal !== 'false';
+  }
 
   /**
    * On startup: reset any enrollments stuck far in the future (e.g., nextStepDueAt = 2099).
    * These are from failed sends that got parked. Reset to now with staggered timing.
    */
   async onModuleInit(): Promise<void> {
+    if (!this.schedulerEnabled) {
+      this.logger.log('[FollowUpScheduler] Scheduler disabled (FOLLOWUP_SCHEDULER=false)');
+      return;
+    }
     try {
       const farFutureCutoff = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
       const stuckEnrollments = await this.prisma.followUpEnrollment.findMany({
@@ -123,7 +135,7 @@ export class FollowUpSchedulerService implements OnModuleInit {
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async processFollowUps(): Promise<void> {
-    if (this.processing) return;
+    if (!this.schedulerEnabled || this.processing) return;
     this.processing = true;
 
     try {
