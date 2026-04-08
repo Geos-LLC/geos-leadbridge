@@ -192,24 +192,6 @@ export class FollowUpSchedulerService implements OnModuleInit {
     });
     if (!fresh || fresh.status !== 'active') return;
 
-    // Check if the account's follow-ups are enabled — respect user's UI toggle
-    if (enrollment.leadId) {
-      const lead = await this.prisma.lead.findUnique({
-        where: { id: enrollment.leadId },
-        select: { businessId: true, userId: true },
-      });
-      if (lead?.businessId) {
-        const account = await this.prisma.savedAccount.findFirst({
-          where: { userId: lead.userId, businessId: lead.businessId },
-          select: { followUpMode: true },
-        });
-        if (!account || account.followUpMode === 'off' || !account.followUpMode) {
-          this.logger.log(`[FollowUpScheduler] Follow-ups disabled for account (business ${lead.businessId}, followUpMode=${account?.followUpMode ?? 'null'}) — skipping enrollment ${enrollment.id}`);
-          return;
-        }
-      }
-    }
-
     // Check if customer has replied SINCE the enrollment was created
     // Don't use awaitingCustomerReply — it may be false if the business hasn't
     // sent the first message yet. Instead, check if there's a customer message
