@@ -213,6 +213,7 @@ export class FollowUpEngineController {
     if (onNo !== undefined) extendedSettings.followUpOnNo = onNo;
     if (retryDays !== undefined) extendedSettings.followUpRetryDays = retryDays;
     if (urgentCapability !== undefined) extendedSettings.followUpUrgentCapability = urgentCapability;
+    if (body.applyToExisting !== undefined) extendedSettings.followUpApplyToExisting = body.applyToExisting;
     if (body.followUpStrategy !== undefined) extendedSettings.followUpStrategy = body.followUpStrategy;
     if (body.followUpStrategyPrompt !== undefined) extendedSettings.followUpStrategyPrompt = body.followUpStrategyPrompt;
 

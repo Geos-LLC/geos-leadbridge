@@ -382,6 +382,7 @@ export function Services() {
         if (s.followUpStopOnBooked !== undefined) setFuStopOnBooked(s.followUpStopOnBooked);
         // "If customer says no" removed — handled internally
         if (s.followUpUrgentCapability) setFuUrgentCapability(s.followUpUrgentCapability);
+        if (s.followUpApplyToExisting !== undefined) setFuIncludeHistorical(s.followUpApplyToExisting);
         if (s.followUpStrategy) setFuStrategy(s.followUpStrategy);
         if (s.followUpStrategyPrompt) setFuStrategyPrompt(s.followUpStrategyPrompt);
       }
@@ -2580,7 +2581,7 @@ export function Services() {
                       className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                     />
                     <div>
-                      <span className="text-xs font-semibold text-slate-700">Apply to existing leads</span>
+                      <span className="text-xs font-semibold text-slate-700">Follow up past leads</span>
                       <span className="block text-[10px] text-slate-400">Enroll all previous conversations that haven't replied yet</span>
                     </div>
                   </label>
@@ -2609,9 +2610,9 @@ export function Services() {
                           followUpStrategy: fuStrategy,
                           followUpStrategyPrompt: fuStrategy !== 'auto' ? fuStrategyPrompt : undefined,
                           includeHistorical: fuIncludeHistorical,
+                          applyToExisting: fuIncludeHistorical,
                         } as any);
                         const wasHistorical = fuIncludeHistorical;
-                        setFuIncludeHistorical(false); // Reset after save
                         showSuccess(fuMode === 'off'
                           ? 'Follow-ups disabled and saved'
                           : wasHistorical
