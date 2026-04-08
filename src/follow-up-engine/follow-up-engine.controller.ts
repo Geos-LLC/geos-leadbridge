@@ -266,44 +266,55 @@ export class FollowUpEngineController {
       // Auto-enroll existing leads only when user explicitly opts in
       if (!includeHistorical) return { success: true, seeded, enrolled: 0 };
 
+      // Run enrollment in background so save returns immediately
+      const userId = user.id;
+      const businessId = account.businessId;
       const acctPlatform = body.platform || account.platform || 'yelp';
-      const template = await this.prisma.followUpSequenceTemplate.findFirst({
-        where: { userId: user.id, platform: acctPlatform, enabled: true },
-        orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
-      });
 
-      if (template) {
-        const leads = await this.prisma.lead.findMany({
-          where: { userId: user.id, businessId: account.businessId },
-          select: { id: true, threadId: true, platform: true },
-        });
-
-        for (const lead of leads) {
-          if (!lead.threadId) continue;
-
-          // Skip if already has active enrollment
-          const existing = await this.prisma.followUpEnrollment.findFirst({
-            where: { conversationId: lead.threadId, status: 'active' },
+      setImmediate(async () => {
+        try {
+          const template = await this.prisma.followUpSequenceTemplate.findFirst({
+            where: { userId, platform: acctPlatform, enabled: true },
+            orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
           });
-          if (existing) continue;
+          if (!template) return;
 
-          // Skip if customer already replied
-          const customerReply = await this.prisma.message.findFirst({
-            where: { conversationId: lead.threadId, sender: 'customer' },
+          const leads = await this.prisma.lead.findMany({
+            where: { userId, businessId },
+            select: { id: true, threadId: true, platform: true },
           });
-          if (customerReply) continue;
 
-          try {
-            await this.engineService.enrollInSequence(lead.threadId, template.id, lead.platform, lead.id);
-            enrolled++;
-          } catch {
-            // Skip failures silently
+          let count = 0;
+          for (const lead of leads) {
+            if (!lead.threadId) continue;
+
+            // Skip if already has ANY enrollment (active, completed, stopped)
+            const existing = await this.prisma.followUpEnrollment.findFirst({
+              where: { conversationId: lead.threadId },
+            });
+            if (existing) continue;
+
+            // Skip if customer already replied
+            const customerReply = await this.prisma.message.findFirst({
+              where: { conversationId: lead.threadId, sender: 'customer' },
+            });
+            if (customerReply) continue;
+
+            try {
+              await this.engineService.enrollInSequence(lead.threadId, template.id, lead.platform, lead.id);
+              count++;
+            } catch {
+              // Skip failures
+            }
           }
+          console.log(`[FollowUp] Background enrollment complete: ${count} leads enrolled for business ${businessId}`);
+        } catch (err: any) {
+          console.error(`[FollowUp] Background enrollment error: ${err.message}`);
         }
-      }
+      });
     }
 
-    return { success: true, seeded, enrolled };
+    return { success: true, seeded, enrolled: -1 }; // -1 = running in background
   }
 
   /**
