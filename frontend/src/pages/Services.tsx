@@ -251,6 +251,7 @@ export function Services() {
   const [fuStrategy, setFuStrategy] = useState<'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone'>('auto');
   const [fuStrategyPrompt, setFuStrategyPrompt] = useState('');
   const [fuUrgentCapability, setFuUrgentCapability] = useState<'same_day' | '24h' | '48h' | 'none'>('24h');
+  const [fuIncludeHistorical, setFuIncludeHistorical] = useState(false);
   const [fuTimingEditing, setFuTimingEditing] = useState(false);
   const [fuShowRules, setFuShowRules] = useState(false);
   // Legacy compat
@@ -2570,7 +2571,21 @@ export function Services() {
                     )}
                   </div>
 
-                  {/* 7. Save */}
+                  {/* 7. Include Historical */}
+                  <label className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer hover:border-blue-200 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={fuIncludeHistorical}
+                      onChange={(e) => setFuIncludeHistorical(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <span className="text-xs font-semibold text-slate-700">Apply to existing leads</span>
+                      <span className="block text-[10px] text-slate-400">Enroll all previous conversations that haven't replied yet</span>
+                    </div>
+                  </label>
+
+                  {/* 8. Save */}
                   <button
                     onClick={async () => {
                       try {
@@ -2593,7 +2608,9 @@ export function Services() {
                           urgentCapability: fuUrgentCapability,
                           followUpStrategy: fuStrategy,
                           followUpStrategyPrompt: fuStrategy !== 'auto' ? fuStrategyPrompt : undefined,
+                          includeHistorical: fuIncludeHistorical,
                         } as any);
+                        setFuIncludeHistorical(false); // Reset after save
                         showSuccess(fuMode === 'off'
                           ? 'Follow-ups disabled and saved'
                           : 'Follow-up settings saved');

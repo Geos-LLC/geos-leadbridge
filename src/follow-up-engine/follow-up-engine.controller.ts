@@ -193,7 +193,7 @@ export class FollowUpEngineController {
     // Extract extended settings into JSON
     const { mode, preset, replyType, activeHoursStart, activeHoursEnd, timezone, platform,
       steps, timing, customSteps, smartSteps, availability, strategyMode, scenarios, stopOnReply, stopOnOptOut, stopOnBooked,
-      onNo, retryDays, urgentCapability, ...rest } = body;
+      onNo, retryDays, urgentCapability, includeHistorical, ...rest } = body;
 
     const extendedSettings: Record<string, any> = {};
     // Unified steps array (replaces smart/custom split)
@@ -263,7 +263,9 @@ export class FollowUpEngineController {
         savedAccountId,
       );
 
-      // Auto-enroll all existing leads that don't have an active enrollment
+      // Auto-enroll existing leads only when user explicitly opts in
+      if (!includeHistorical) return { success: true, seeded, enrolled: 0 };
+
       const acctPlatform = body.platform || account.platform || 'yelp';
       const template = await this.prisma.followUpSequenceTemplate.findFirst({
         where: { userId: user.id, platform: acctPlatform, enabled: true },
