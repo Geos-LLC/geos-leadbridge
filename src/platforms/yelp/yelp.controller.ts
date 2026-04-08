@@ -345,11 +345,14 @@ export class YelpController {
                 try {
                   const refreshed = await this.yelpAdapter.refreshAccessToken(creds.refreshToken);
                   const updatedCreds = { ...creds, accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken || creds.refreshToken, expiresAt: refreshed.expiresAt };
-                  await this.prisma.savedAccount.update({
-                    where: { id: account.id },
-                    data: { credentialsJson: EncryptionUtil.encryptObject(updatedCreds, this.encryptionKey) },
+                  const encryptedFresh = EncryptionUtil.encryptObject(updatedCreds, this.encryptionKey);
+                  // Sync to ALL Yelp accounts for this user — one token per user,
+                  // refreshing one invalidates siblings (chain revocation)
+                  await this.prisma.savedAccount.updateMany({
+                    where: { userId: account.userId, platform: PlatformName.YELP },
+                    data: { credentialsJson: encryptedFresh },
                   });
-                  this.logger.log(`[Yelp Health] Token refreshed for ${account.businessId}`);
+                  this.logger.log(`[Yelp Health] Token refreshed for ${account.businessId} — synced to all Yelp accounts`);
                 } catch {
                   connectionIssues.push('Yelp token invalid and refresh failed — reconnect Yelp account');
                 }

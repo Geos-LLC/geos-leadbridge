@@ -986,7 +986,7 @@ export class PlatformService {
    * Get decrypted credentials for a saved account by businessId
    * Automatically refreshes expired tokens
    */
-  async getAccountCredentialsByBusinessId(userId: string, platform: string, businessId: string): Promise<{ accessToken: string; refreshToken?: string; email?: string } | null> {
+  async getAccountCredentialsByBusinessId(userId: string, platform: string, businessId: string, forceRefresh = false): Promise<{ accessToken: string; refreshToken?: string; email?: string } | null> {
     const account = await this.prisma.savedAccount.findFirst({
       where: { userId, platform, businessId },
     });
@@ -1002,15 +1002,17 @@ export class PlatformService {
       );
 
       // Check if token is expired and refresh if needed
-      if (credentials.expiresAt && credentials.refreshToken) {
-        const expiresAt = new Date(credentials.expiresAt);
+      if (credentials.refreshToken && (forceRefresh || credentials.expiresAt)) {
+        const expiresAt = credentials.expiresAt ? new Date(credentials.expiresAt) : new Date(0);
         const bufferMs = 5 * 60 * 1000; // 5 minutes buffer
         const now = new Date();
 
-        if (now.getTime() > (expiresAt.getTime() - bufferMs)) {
-          console.log(`[PlatformService] Account token expired for business ${businessId}, refreshing...`);
+        if (forceRefresh || now.getTime() > (expiresAt.getTime() - bufferMs)) {
+          this.logger.log(`[Credentials] Token expired for ${platform}/${businessId}, refreshing...`);
 
-          const lockKey = `${platform}:${businessId}`;
+          // Yelp: one token per user — lock by user to prevent chain revocation
+          // Thumbtack: one token per business — lock by business
+          const lockKey = platform === 'yelp' ? `yelp:user:${userId}` : `${platform}:${businessId}`;
           try {
             const refreshed = await this.serializedAccountRefresh(
               lockKey,
@@ -1020,14 +1022,14 @@ export class PlatformService {
               credentials.email,
             );
 
-            console.log(`[PlatformService] Account token refreshed successfully for business ${businessId}`);
+            this.logger.log(`[Credentials] Token refreshed for ${platform}/${businessId}`);
             return {
               accessToken: refreshed.accessToken,
               refreshToken: refreshed.refreshToken,
               email: credentials.email,
             };
           } catch (refreshError: any) {
-            console.error(`[PlatformService] Failed to refresh account token for business ${businessId}: ${refreshError.message}`);
+            this.logger.error(`[Credentials] Failed to refresh ${platform}/${businessId}: ${refreshError.message}`);
 
             const savedAcct = await this.prisma.savedAccount.findFirst({ where: { userId, platform, businessId }, select: { id: true, businessName: true } }).catch(() => null);
             this.monitoring.captureError({

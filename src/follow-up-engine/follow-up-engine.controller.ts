@@ -278,6 +278,121 @@ export class FollowUpEngineController {
   }
 
   /**
+   * Bulk-activate follow-ups for leads that don't have active enrollments.
+   * Finds or creates enrollments, sets nextStepDueAt to now (staggered).
+   */
+  @Post('bulk-activate')
+  async bulkActivate(
+    @CurrentUser() user: any,
+    @Body() body: { platform?: string; businessId?: string; leadIds?: string[] },
+  ) {
+    const { platform, businessId, leadIds } = body;
+
+    // Find eligible leads: user's leads with no active enrollment
+    const whereClause: any = { userId: user.id };
+    if (platform) whereClause.platform = platform;
+    if (businessId) whereClause.businessId = businessId;
+    if (leadIds?.length) whereClause.id = { in: leadIds };
+
+    const leads = await this.prisma.lead.findMany({
+      where: whereClause,
+      select: { id: true, threadId: true, platform: true, businessId: true },
+    });
+
+    if (leads.length === 0) return { success: true, activated: 0, message: 'No leads found' };
+
+    // Get existing active/stuck enrollments
+    const conversationIds = leads.map(l => l.threadId).filter(Boolean) as string[];
+    const existingEnrollments = await this.prisma.followUpEnrollment.findMany({
+      where: {
+        conversationId: { in: conversationIds },
+        status: 'active',
+      },
+    });
+
+    const activeByConvo = new Map(existingEnrollments.map(e => [e.conversationId, e]));
+
+    // Find a suitable template for this user/platform
+    const templatePlatform = platform || leads[0]?.platform || 'yelp';
+    const template = await this.prisma.followUpSequenceTemplate.findFirst({
+      where: { userId: user.id, platform: templatePlatform, enabled: true },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    if (!template) {
+      return { success: false, error: `No follow-up template found for platform ${templatePlatform}. Save follow-up settings first.` };
+    }
+
+    let activated = 0;
+    let reset = 0;
+    const now = new Date();
+
+    for (let i = 0; i < leads.length; i++) {
+      const lead = leads[i];
+      if (!lead.threadId) continue;
+
+      // Check if customer already replied — skip those
+      const conversation = await this.prisma.conversation.findUnique({ where: { id: lead.threadId } });
+      if (!conversation) continue;
+
+      const existing = activeByConvo.get(lead.threadId);
+
+      if (existing) {
+        // Reset stuck enrollment (nextStepDueAt = 2099 or far future)
+        const isFarFuture = existing.nextStepDueAt && existing.nextStepDueAt.getTime() > Date.now() + 365 * 24 * 60 * 60 * 1000;
+        if (isFarFuture) {
+          // Stagger by 30 seconds to avoid blast
+          const staggeredDue = new Date(now.getTime() + i * 30_000);
+          await this.prisma.followUpEnrollment.update({
+            where: { id: existing.id },
+            data: { nextStepDueAt: staggeredDue, currentStepIndex: 0 },
+          });
+          // Clear any failed step executions so steps can be retried
+          await this.prisma.followUpStepExecution.deleteMany({
+            where: { enrollmentId: existing.id, status: 'failed' },
+          });
+          await this.prisma.threadContext.updateMany({
+            where: { conversationId: lead.threadId },
+            data: { nextFollowUpAt: staggeredDue, followUpStatus: 'active' },
+          });
+          reset++;
+        }
+      } else {
+        // No active enrollment — check if there's a completed/stopped/failed one
+        // Only enroll if no customer reply exists
+        const customerReply = await this.prisma.message.findFirst({
+          where: { conversationId: lead.threadId, sender: 'customer' },
+        });
+        if (customerReply) continue; // Customer already replied, skip
+
+        try {
+          const staggeredDelay = i * 30; // seconds between enrollments
+          await this.engineService.enrollInSequence(lead.threadId, template.id, lead.platform, lead.id);
+          // Stagger the first step
+          if (staggeredDelay > 0) {
+            const enrollment = await this.prisma.followUpEnrollment.findFirst({
+              where: { conversationId: lead.threadId, status: 'active' },
+              orderBy: { createdAt: 'desc' },
+            });
+            if (enrollment) {
+              const staggeredDue = new Date(now.getTime() + staggeredDelay * 1000);
+              await this.prisma.followUpEnrollment.update({
+                where: { id: enrollment.id },
+                data: { nextStepDueAt: staggeredDue },
+              });
+            }
+          }
+          activated++;
+        } catch {
+          // Skip failures silently
+        }
+      }
+    }
+
+    return { success: true, activated, reset, total: leads.length, template: template.name };
+  }
+
+  /**
    * Approve a suggestion — send the generated message.
    */
   @Post('suggestions/:id/approve')

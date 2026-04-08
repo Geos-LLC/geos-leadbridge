@@ -1483,15 +1483,17 @@ export class WebhooksService {
         // Auto-refresh token on 401 and retry
         const is401 = fetchErr.message?.includes('401') || fetchErr.response?.status === 401;
         if (is401 && creds?.refreshToken) {
-          this.logger.log(`[Yelp] Token expired for ${businessId}, attempting refresh...`);
+          this.logger.log(`[Yelp] Token 401 for ${businessId}, refreshing...`);
           const refreshed = await yelpAdapter.refreshAccessToken(creds.refreshToken);
           accessToken = refreshed.accessToken;
           const updatedCreds = { ...creds, accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken || creds.refreshToken, expiresAt: refreshed.expiresAt };
-          await this.prisma.savedAccount.update({
-            where: { id: savedAccount.id },
-            data: { credentialsJson: EncryptionUtil.encryptObject(updatedCreds, encryptionKey) },
+          const freshEncrypted = EncryptionUtil.encryptObject(updatedCreds, encryptionKey);
+          // Update THIS account + ALL sibling Yelp accounts for the same user
+          await this.prisma.savedAccount.updateMany({
+            where: { userId, platform: 'yelp' },
+            data: { credentialsJson: freshEncrypted },
           });
-          this.logger.log(`[Yelp] Token refreshed successfully for ${businessId}`);
+          this.logger.log(`[Yelp] Token refreshed and synced to all Yelp accounts for user ${userId}`);
           leadData = await yelpAdapter.getLead({ accessToken }, leadId);
           this.logger.log(`[Yelp] Lead fetched after refresh: customer=${leadData.customerName}`);
         } else {

@@ -211,33 +211,69 @@ export class LeadsService {
       } catch (fetchErr: any) {
         const is401 = fetchErr.message?.includes('401') || fetchErr.response?.status === 401;
         if (is401 && creds.refreshToken) {
-          console.log(`[LeadsService] Yelp token expired for ${lead.businessId}, refreshing...`);
-          const refreshed = await yelpAdapter.refreshAccessToken(creds.refreshToken);
-          creds = { ...creds, accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken || creds.refreshToken, expiresAt: refreshed.expiresAt };
-          await this.prisma.savedAccount.update({
-            where: { id: savedAccount.id },
-            data: { credentialsJson: EncryptionUtil.encryptObject(creds, encryptionKey) },
-          });
-          console.log(`[LeadsService] Yelp token refreshed for ${lead.businessId}`);
-          events = await yelpAdapter.getLeadEvents({ accessToken: creds.accessToken }, lead.externalRequestId);
+          this.logger.log(`[Yelp Messages] Token 401 for ${lead.businessId}, refreshing via platformService...`);
+          // Use platformService which syncs refreshed token to all sibling Yelp accounts
+          const freshCreds = await this.platformService.getAccountCredentialsByBusinessId(userId, 'yelp', lead.businessId);
+          if (freshCreds) {
+            creds = { ...creds, accessToken: freshCreds.accessToken, refreshToken: freshCreds.refreshToken || creds.refreshToken };
+            events = await yelpAdapter.getLeadEvents({ accessToken: freshCreds.accessToken }, lead.externalRequestId);
+          } else {
+            throw fetchErr;
+          }
         } else {
           throw fetchErr;
         }
       }
 
+      // Log event types for debugging
+      const eventTypes = events.map((e: any) => `${e.event_type}(${e.user_type})`).join(', ');
+      this.logger.log(`[Yelp] Events for ${lead.externalRequestId}: ${events.length} events — ${eventTypes}`);
+      // Log non-TEXT events in detail
+      events.filter((e: any) => e.event_type !== 'TEXT' && e.event_type !== 'RAQ_SUBMIT').forEach((e: any) => {
+        this.logger.log(`[Yelp] Non-text event: type=${e.event_type} content=${JSON.stringify(e.event_content || {}).substring(0, 500)}`);
+      });
+
       // Convert Yelp events to message format expected by frontend.
-      // Skip RAQ_SUBMIT (initial lead request) — it duplicates the lead data shown above.
-      const textEvents = events.filter((e: any) => e.event_type === 'TEXT');
-      const messages = textEvents.map((e: any) => ({
-        id: e.id,
-        conversationId: lead.externalRequestId,
-        platform: 'yelp',
-        externalMessageId: e.id,
-        sender: e.user_type === 'CONSUMER' ? 'customer' : 'pro',
-        content: e.event_content?.text || e.event_content?.fallback_text || e.text || '',
-        isRead: true,
-        sentAt: e.time_created,
-      }));
+      // Include TEXT + structured events (quotes, estimates). Skip RAQ_SUBMIT (duplicates lead data).
+      const displayEvents = events.filter((e: any) => e.event_type !== 'RAQ_SUBMIT' && e.event_type !== 'CONSUMER_PHONE_NUMBER_OPT_IN_EVENT' && e.event_type !== 'CONSUMER_PHONE_NUMBER_OPT_OUT_EVENT');
+      const messages = displayEvents.map((e: any) => {
+        let content = e.event_content?.text || e.event_content?.fallback_text || e.text || '';
+
+        // Format structured events (price estimates, quotes, invoices)
+        if (!content && e.event_content) {
+          const ec = e.event_content;
+          const parts: string[] = [];
+          if (ec.price_estimate || ec.price_range) {
+            parts.push(`Price Estimate: ${ec.price_estimate || ec.price_range}`);
+          }
+          if (ec.low_estimate || ec.high_estimate) {
+            parts.push(`$${ec.low_estimate} - $${ec.high_estimate}`);
+          }
+          if (ec.availability) {
+            parts.push(`Availability: ${ec.availability}`);
+          }
+          if (ec.message) {
+            parts.push(ec.message);
+          }
+          if (parts.length > 0) content = parts.join('\n');
+        }
+
+        // Fallback: show event type if no content extracted
+        if (!content && e.event_type !== 'TEXT') {
+          content = `[${e.event_type}]`;
+        }
+
+        return {
+          id: e.id,
+          conversationId: lead.externalRequestId,
+          platform: 'yelp',
+          externalMessageId: e.id,
+          sender: e.user_type === 'CONSUMER' ? 'customer' : 'pro',
+          content,
+          isRead: true,
+          sentAt: e.time_created,
+        };
+      }).filter((m: any) => m.content);
 
       // Sync Yelp messages to local Message table (non-blocking)
       // This enables buildContext() to find conversation history for AI previews
@@ -376,18 +412,34 @@ export class LeadsService {
     }
     const adapter = this.platformFactory.getAdapter(lead.platform);
 
-    // Send message via platform adapter
+    // Send message via platform adapter (with 401 retry for Yelp token refresh)
     let sentMessage;
     try {
       sentMessage = await adapter.sendMessage(credentials, lead.externalRequestId, message);
     } catch (err: any) {
-      // Surface platform errors as 403 (auth/access) or 502 (upstream failure)
       const is403 = err.message?.includes('403') || err.message?.includes('NO_BUSINESS_ACCESS') || err.message?.includes('no_business_access');
-      const is401 = err.message?.includes('401') || err.message?.includes('expired');
-      if (is403 || is401) {
+      const is401 = err.message?.includes('401') || err.message?.includes('expired') || err.message?.includes('TOKEN_INVALID');
+
+      // On 401: try refreshing token and retry once (Yelp tokens can be invalidated by sibling refreshes)
+      if (is401 && lead.businessId) {
+        this.logger.log(`[sendMessage] 401 on ${lead.platform} send, attempting token refresh & retry...`);
+        try {
+          const freshCreds = await this.platformService.getAccountCredentialsByBusinessId(userId, lead.platform, lead.businessId, true);
+          if (freshCreds) {
+            sentMessage = await adapter.sendMessage(freshCreds, lead.externalRequestId, message);
+            this.logger.log(`[sendMessage] Retry succeeded after token refresh`);
+          } else {
+            throw new BadRequestException(`${lead.platform} access denied — reconnect your account to re-authorize (${err.message})`);
+          }
+        } catch (retryErr: any) {
+          if (retryErr instanceof BadRequestException) throw retryErr;
+          throw new BadRequestException(`${lead.platform} access denied — reconnect your account to re-authorize (${retryErr.message})`);
+        }
+      } else if (is403 || is401) {
         throw new BadRequestException(`${lead.platform} access denied — reconnect your account to re-authorize (${err.message})`);
+      } else {
+        throw new BadRequestException(`Failed to send message: ${err.message}`);
       }
-      throw new BadRequestException(`Failed to send message: ${err.message}`);
     }
 
     // Store the sent message locally
