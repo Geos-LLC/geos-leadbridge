@@ -373,6 +373,7 @@ export class LeadsService {
         platform: msg.platform,
         externalMessageId: msg.externalMessageId,
         sender: msg.sender,
+        senderType: (msg as any).senderType || null,
         content: msg.content,
         isRead: msg.isRead,
         sentAt: msg.sentAt.toISOString(),
@@ -393,6 +394,7 @@ export class LeadsService {
     userId: string,
     leadId: string,
     message: string,
+    senderType: 'user' | 'ai' = 'user',
   ): Promise<any> {
     // Read lead from DB directly — do NOT call getLead() which triggers
     // getYelpMessages() → API calls → token refresh → chain revocation
@@ -495,6 +497,7 @@ export class LeadsService {
             platform: lead.platform,
             externalMessageId: sentMessage.externalMessageId,
             sender: 'pro',
+            senderType,
             content: message,
             isRead: true,
             sentAt: new Date(sentMessage.sentAt),

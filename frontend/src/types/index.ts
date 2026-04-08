@@ -414,6 +414,7 @@ export interface TimelineEvent {
   content: string;
   timestamp: Date;
   sender?: 'pro' | 'customer' | 'system';
+  senderType?: 'user' | 'ai' | null;
   externalId?: string;
   attachments?: { url: string; mimeType?: string; fileName?: string }[];
   smsStatus?: 'pending' | 'queued' | 'sent' | 'delivered' | 'failed';

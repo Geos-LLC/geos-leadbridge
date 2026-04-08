@@ -250,6 +250,7 @@ model Message {
   platform        String   // "thumbtack" | "yelp" | etc.
   externalMessageId String? // Platform's message ID
   sender          String   // "pro" | "customer" | "system"
+  senderType      String?  // "user" | "ai" — distinguishes human vs AI-sent messages (for sender="pro")
   content         String   @db.Text
   isRead          Boolean  @default(false)
   sentAt          DateTime @default(now())

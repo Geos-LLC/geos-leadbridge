@@ -329,7 +329,7 @@ export class FollowUpSchedulerService implements OnModuleInit {
             select: { userId: true, id: true },
           });
           if (lead) {
-            const sentMsg = await this.leadsService.sendMessage(lead.userId, lead.id, generated.message);
+            const sentMsg = await this.leadsService.sendMessage(lead.userId, lead.id, generated.message, 'ai');
             messageId = sentMsg?.id || null;
 
             // Record in thread context
