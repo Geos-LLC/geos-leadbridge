@@ -37,6 +37,7 @@ interface LocalMessage {
   id: string;
   content: string;
   sender: 'pro' | 'customer';
+  senderType?: 'user' | 'ai' | null;
   sentAt: Date;
   externalId?: string;
   attachments?: MessageAttachment[];
@@ -119,6 +120,7 @@ function mergeTimeline(
       content: msg.content,
       timestamp: msg.sentAt,
       sender: msg.sender,
+      senderType: msg.senderType || null,
       externalId: msg.externalId,
       attachments: msg.attachments,
     });
@@ -1454,7 +1456,7 @@ export function Messages() {
                             ? 'text-blue-100'
                             : 'text-blue-600'
                         }`}>
-                          {event.channel === 'platform' && 'Platform'}
+                          {event.channel === 'platform' && (event.direction === 'outbound' && event.senderType === 'ai' ? 'AI' : 'Platform')}
                           {event.channel === 'sms' && 'SMS'}
                           {event.channel === 'call' && 'Call'}
                           {event.channel === 'automation' && 'Auto'}

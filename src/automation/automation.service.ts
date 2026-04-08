@@ -740,7 +740,7 @@ export class AutomationService implements OnModuleInit {
       }
 
       // Send the message
-      await this.leadsService.sendMessage(context.userId, context.leadId, messageToSend);
+      await this.leadsService.sendMessage(context.userId, context.leadId, messageToSend, rule.useAi ? 'ai' : 'user');
 
       // Record outbound message in thread context
       if (lead.threadId) {
