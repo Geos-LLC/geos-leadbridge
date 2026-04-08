@@ -163,7 +163,7 @@ export class FollowUpGeneratorService {
     let pricingContext = '';
     const lead = await this.prisma.lead.findFirst({
       where: { threadId: conversationId },
-      select: { customerName: true, category: true, city: true, state: true, businessId: true, userId: true, description: true, rawJson: true },
+      select: { customerName: true, category: true, city: true, state: true, businessId: true, userId: true, message: true, rawJson: true },
     });
 
     // Extract request details (bedrooms, bathrooms, service type) from lead
@@ -180,8 +180,8 @@ export class FollowUpGeneratorService {
         if (details.length > 0) requestDetails = `Customer request details: ${details.join(', ')}`;
       } catch {}
     }
-    if (!requestDetails && lead?.description) {
-      requestDetails = `Customer request: ${lead.description.substring(0, 200)}`;
+    if (!requestDetails && lead?.message) {
+      requestDetails = `Customer request: ${lead.message.substring(0, 200)}`;
     }
 
     if (lead?.businessId) {
