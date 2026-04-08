@@ -159,12 +159,31 @@ export class FollowUpGeneratorService {
 
     this.logger.log(`[FollowUpGenerator] Strategy: ${strategyKey} (${strategyReason}), objective: ${step.objective}`);
 
-    // Step 3: Load pricing context if available
+    // Step 3: Load pricing context and lead details
     let pricingContext = '';
     const lead = await this.prisma.lead.findFirst({
       where: { threadId: conversationId },
-      select: { customerName: true, category: true, city: true, state: true, businessId: true, userId: true },
+      select: { customerName: true, category: true, city: true, state: true, businessId: true, userId: true, description: true, rawJson: true },
     });
+
+    // Extract request details (bedrooms, bathrooms, service type) from lead
+    let requestDetails = '';
+    if (lead?.rawJson) {
+      try {
+        const raw = JSON.parse(lead.rawJson);
+        const details: string[] = [];
+        if (raw.bedrooms) details.push(`${raw.bedrooms} bedrooms`);
+        if (raw.bathrooms) details.push(`${raw.bathrooms} bathrooms`);
+        if (raw.squareFeet || raw.square_feet) details.push(`${raw.squareFeet || raw.square_feet} sq ft`);
+        if (raw.frequency) details.push(`frequency: ${raw.frequency}`);
+        if (raw.serviceType || raw.service_type) details.push(`service: ${raw.serviceType || raw.service_type}`);
+        if (details.length > 0) requestDetails = `Customer request details: ${details.join(', ')}`;
+      } catch {}
+    }
+    if (!requestDetails && lead?.description) {
+      requestDetails = `Customer request: ${lead.description.substring(0, 200)}`;
+    }
+
     if (lead?.businessId) {
       const account = await this.prisma.savedAccount.findFirst({
         where: { userId: lead.userId, businessId: lead.businessId },
@@ -175,11 +194,15 @@ export class FollowUpGeneratorService {
           const p = JSON.parse(account.servicePricingJson);
           const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
           if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
-            const priceParts = ['Pricing: '];
-            for (const row of p.priceTable.slice(0, 8)) {
+            const priceParts = [
+              '--- PRICING TABLE (use EXACT prices, do NOT invent or estimate) ---',
+            ];
+            for (const row of p.priceTable.slice(0, 10)) {
               const prices = enabledTypes.map((t: any) => `${t.label}: $${row[t.key] || '?'}`).join(', ');
               priceParts.push(`  ${row.bed}BR/${row.bath}BA — ${prices}`);
             }
+            priceParts.push('--- END PRICING ---');
+            priceParts.push('IMPORTANT: Quote the EXACT price from this table matching the customer\'s bedrooms/bathrooms and service type. Do NOT make up price ranges.');
             pricingContext = priceParts.join('\n');
           }
         } catch { /* invalid JSON */ }
@@ -267,6 +290,7 @@ export class FollowUpGeneratorService {
       if (lead.customerName) systemParts.push(`Customer: ${lead.customerName}`);
       if (lead.category) systemParts.push(`Service: ${lead.category}`);
       if (lead.city || lead.state) systemParts.push(`Location: ${[lead.city, lead.state].filter(Boolean).join(', ')}`);
+      if (requestDetails) systemParts.push(requestDetails);
     }
 
     // Build messages with conversation history
