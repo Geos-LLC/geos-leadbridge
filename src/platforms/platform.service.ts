@@ -929,6 +929,103 @@ export class PlatformService {
     });
 
     this.logger.log(`[autoProvisionSigcore] Provisioned tenant ${data.tenantId} for account ${savedAccountId}`);
+
+    // Register in Sigcore business identity model (non-blocking, idempotent)
+    // This creates a business + product_workspace + links phone assets
+    this.registerBusinessIdentityForAccount(savedAccountId, platformKey, sigcoreUrl).catch(e => {
+      this.logger.warn(`[autoProvisionSigcore] Business identity registration deferred: ${e.message}`);
+    });
+  }
+
+  /**
+   * Register a saved account in Sigcore's business identity model.
+   * Creates/resolves: business → product_workspace → phone assets → asset links.
+   * Idempotent — safe to call multiple times.
+   */
+  private async registerBusinessIdentityForAccount(
+    savedAccountId: string,
+    sigcoreApiKey: string,
+    sigcoreUrl: string,
+  ): Promise<void> {
+    const account = await this.prisma.savedAccount.findUnique({
+      where: { id: savedAccountId },
+      include: { user: true },
+    });
+    if (!account?.user) return;
+
+    const headers = { 'Content-Type': 'application/json', 'x-api-key': sigcoreApiKey };
+    const user = account.user;
+
+    // 1. Create/resolve business (idempotent by external_id)
+    const bizResp = await fetch(`${sigcoreUrl}/v1/businesses`, {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        name: user.name || account.businessName || `LB User ${user.id}`,
+        external_id: `lb-${user.id}`,
+        main_email: user.email,
+        main_phone: user.businessPhone || user.phoneNumber || undefined,
+      }),
+    });
+    if (!bizResp.ok) return;
+    const business = (await bizResp.json())?.data;
+    if (!business?.id) return;
+
+    // 2. Register product workspace (idempotent by product_type + external_workspace_id)
+    const wsResp = await fetch(`${sigcoreUrl}/v1/businesses/${business.id}/workspaces`, {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        product_type: 'leadbridge',
+        workspace_name: account.businessName || 'LeadBridge',
+        external_workspace_id: user.id,
+      }),
+    });
+    const workspace = wsResp.ok ? (await wsResp.json())?.data : null;
+
+    // 3. Update user record if not already set
+    if (business.id && (!user.sigcoreBusinessId || !user.sigcoreWorkspaceId)) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          sigcoreBusinessId: user.sigcoreBusinessId || business.id,
+          sigcoreWorkspaceId: user.sigcoreWorkspaceId || workspace?.id || null,
+        },
+      });
+    }
+
+    // 4. Register assigned phone numbers as shared assets
+    const phoneNumbers = await this.prisma.tenantPhoneNumber.findMany({
+      where: { savedAccountId, status: 'ACTIVE' },
+    });
+
+    for (const pn of phoneNumbers) {
+      try {
+        const assetResp = await fetch(`${sigcoreUrl}/v1/assets`, {
+          method: 'POST', headers,
+          body: JSON.stringify({
+            asset_type: 'phone',
+            normalized_value: pn.phoneNumber,
+            provider: 'twilio',
+          }),
+        });
+        if (!assetResp.ok) continue;
+        const asset = (await assetResp.json())?.data;
+        if (!asset?.id || !workspace?.id) continue;
+
+        await fetch(`${sigcoreUrl}/v1/assets/${asset.id}/links`, {
+          method: 'POST', headers,
+          body: JSON.stringify({
+            workspace_id: workspace.id,
+            role: 'leadbridge_assigned_number',
+            purpose: 'lead_capture',
+            is_primary: false,
+          }),
+        });
+      } catch (e) {
+        this.logger.warn(`[BusinessIdentity] Phone asset link failed for ${pn.phoneNumber}: ${e.message}`);
+      }
+    }
+
+    this.logger.log(`[BusinessIdentity] Registered account ${savedAccountId} (business=${business.id}, workspace=${workspace?.id}, phones=${phoneNumbers.length})`);
   }
 
   /**
