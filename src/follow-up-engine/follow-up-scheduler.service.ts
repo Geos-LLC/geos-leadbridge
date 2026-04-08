@@ -192,6 +192,24 @@ export class FollowUpSchedulerService implements OnModuleInit {
     });
     if (!fresh || fresh.status !== 'active') return;
 
+    // Check if lead has a terminal status (booked, done, scheduled, in progress) — no follow-up needed
+    if (enrollment.leadId) {
+      const lead = await this.prisma.lead.findUnique({
+        where: { id: enrollment.leadId },
+        select: { status: true, thumbtackStatus: true },
+      });
+      if (lead) {
+        const s = (lead.status || '').toLowerCase();
+        const ts = (lead.thumbtackStatus || '').toLowerCase();
+        const terminalStatuses = ['done', 'scheduled', 'in_progress', 'in progress', 'booked', 'hired', 'job done', 'job scheduled', 'completed', 'archived', 'lost'];
+        if (terminalStatuses.includes(s) || terminalStatuses.includes(ts)) {
+          await this.engineService.stopEnrollment(enrollment.id, `lead_status_${s || ts}`);
+          this.logger.log(`[FollowUpScheduler] Lead status is "${s || ts}" — stopping enrollment ${enrollment.id}`);
+          return;
+        }
+      }
+    }
+
     // Check if customer has replied SINCE the enrollment was created
     // Don't use awaitingCustomerReply — it may be false if the business hasn't
     // sent the first message yet. Instead, check if there's a customer message
