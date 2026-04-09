@@ -273,11 +273,25 @@ export class LeadsService {
           platform: 'yelp',
           externalMessageId: e.id,
           sender: e.user_type === 'CONSUMER' ? 'customer' : 'pro',
+          senderType: null as string | null, // Will be enriched from local DB below
           content,
           isRead: true,
           sentAt: e.time_created,
         };
       }).filter((m: any) => m.content);
+
+      // Enrich with senderType from local Message records (AI vs user distinction)
+      if (lead.threadId) {
+        const localMessages = await this.prisma.message.findMany({
+          where: { conversationId: lead.threadId },
+          select: { externalMessageId: true, senderType: true },
+        });
+        const senderTypeMap = new Map(localMessages.filter(m => m.externalMessageId).map(m => [m.externalMessageId, m.senderType]));
+        for (const msg of messages) {
+          const st = senderTypeMap.get(msg.externalMessageId);
+          if (st) msg.senderType = st;
+        }
+      }
 
       // Sync Yelp messages to local Message table (non-blocking)
       // This enables buildContext() to find conversation history for AI previews

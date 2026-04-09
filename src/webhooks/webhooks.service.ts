@@ -1639,20 +1639,32 @@ export class WebhooksService {
 
     if (!isNewLead && existingLead) {
       // Yelp sends NEW_EVENT for BOTH customer messages AND our own outbound messages.
-      // Check if we recently sent a message to this lead — if so, this is our echo, not a customer reply.
-      const recentProMessage = lead.threadId ? await this.prisma.message.findFirst({
-        where: {
-          conversationId: lead.threadId,
-          sender: 'pro',
-          sentAt: { gt: new Date(Date.now() - 90_000) }, // within 90 seconds
-        },
-        orderBy: { sentAt: 'desc' },
-      }) : null;
-
-      if (recentProMessage) {
-        this.logger.log(`Yelp NEW_EVENT for ${leadId} — likely echo of our own message (sent ${Math.round((Date.now() - recentProMessage.sentAt.getTime()) / 1000)}s ago), skipping customer reply handling`);
-        return;
+      // Verify by fetching the latest event from Yelp API — check user_type.
+      let isCustomerMessage = true;
+      try {
+        const yelpAdapter = this.platformFactory.getAdapter('yelp') as any;
+        const events = await yelpAdapter.getLeadEvents({ accessToken }, leadId);
+        if (events.length > 0) {
+          // Sort by time, get the latest event
+          const latest = events.sort((a: any, b: any) => new Date(b.time_created).getTime() - new Date(a.time_created).getTime())[0];
+          if (latest.user_type === 'BIZ') {
+            isCustomerMessage = false;
+            this.logger.log(`Yelp NEW_EVENT for ${leadId} — latest event is BIZ (our own message), skipping customer reply handling`);
+          }
+        }
+      } catch {
+        // Fallback: check if we recently sent a message (within 90s)
+        const recentProMessage = lead.threadId ? await this.prisma.message.findFirst({
+          where: { conversationId: lead.threadId, sender: 'pro', sentAt: { gt: new Date(Date.now() - 90_000) } },
+          orderBy: { sentAt: 'desc' },
+        }) : null;
+        if (recentProMessage) {
+          isCustomerMessage = false;
+          this.logger.log(`Yelp NEW_EVENT for ${leadId} — likely echo (pro message ${Math.round((Date.now() - recentProMessage.sentAt.getTime()) / 1000)}s ago), skipping`);
+        }
       }
+
+      if (!isCustomerMessage) return;
 
       // Confirmed customer reply
       this.logger.log(`Yelp customer reply on lead ${leadId}`);
