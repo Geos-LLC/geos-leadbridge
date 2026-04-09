@@ -1638,7 +1638,23 @@ export class WebhooksService {
     }
 
     if (!isNewLead && existingLead) {
-      // Customer replied — conversation.lastMessageAt already updated above
+      // Yelp sends NEW_EVENT for BOTH customer messages AND our own outbound messages.
+      // Check if we recently sent a message to this lead — if so, this is our echo, not a customer reply.
+      const recentProMessage = lead.threadId ? await this.prisma.message.findFirst({
+        where: {
+          conversationId: lead.threadId,
+          sender: 'pro',
+          sentAt: { gt: new Date(Date.now() - 90_000) }, // within 90 seconds
+        },
+        orderBy: { sentAt: 'desc' },
+      }) : null;
+
+      if (recentProMessage) {
+        this.logger.log(`Yelp NEW_EVENT for ${leadId} — likely echo of our own message (sent ${Math.round((Date.now() - recentProMessage.sentAt.getTime()) / 1000)}s ago), skipping customer reply handling`);
+        return;
+      }
+
+      // Confirmed customer reply
       this.logger.log(`Yelp customer reply on lead ${leadId}`);
       // Emit CRM webhook for customer message
       this.crmWebhookService.emit(userId, 'message.received', {
