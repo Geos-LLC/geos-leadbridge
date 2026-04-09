@@ -556,10 +556,33 @@ export class LeadsService {
           console.log(`[LeadsService] Trial lead tracked: ${user.trialLeadsHandled + 1} leads handled`);
         }
       }
-      // After sending a business message, evaluate for follow-up enrollment.
-      // If the customer doesn't reply, this triggers a new follow-up sequence.
-      if (conversation?.id) {
-        this.followUpEngine?.evaluateThread(conversation.id, lead.platform).catch(() => {});
+      // After sending a business message, ensure a follow-up enrollment exists.
+      // If the customer doesn't reply, the scheduler will send follow-ups.
+      if (conversation?.id && this.followUpEngine) {
+        // Direct enrollment: find a template, check no active enrollment, enroll.
+        // This is more reliable than evaluateThread (which needs ThreadContext).
+        (async () => {
+          try {
+            const activeEnrollment = await this.prisma.followUpEnrollment.findFirst({
+              where: { conversationId: conversation!.id, status: 'active' },
+            });
+            if (activeEnrollment) return; // Already enrolled
+
+            // Check terminal lead status
+            const s = (lead.status || '').toLowerCase();
+            const ts = ((lead as any).thumbtackStatus || '').toLowerCase();
+            const terminal = ['done', 'scheduled', 'in_progress', 'in progress', 'booked', 'hired', 'completed', 'archived', 'lost'];
+            if (terminal.includes(s) || terminal.includes(ts)) return;
+
+            const template = await this.prisma.followUpSequenceTemplate.findFirst({
+              where: { userId, platform: lead.platform, enabled: true },
+              orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+            });
+            if (!template) return;
+
+            await this.followUpEngine!.enrollInSequence(conversation!.id, template.id, lead.platform, leadId);
+          } catch {}
+        })();
       }
 
       // Emit CRM webhook for outbound message
