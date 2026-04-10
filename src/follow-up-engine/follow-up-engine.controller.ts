@@ -297,11 +297,18 @@ export class FollowUpEngineController {
             });
             if (existing) continue;
 
-            // Skip if customer already replied
-            const customerReply = await this.prisma.message.findFirst({
-              where: { conversationId: lead.threadId, sender: 'customer' },
+            // Skip if customer replied AFTER our last message (active conversation — customer engaged)
+            const lastProMessage = await this.prisma.message.findFirst({
+              where: { conversationId: lead.threadId, sender: 'pro' },
+              orderBy: { sentAt: 'desc' },
+              select: { sentAt: true },
             });
-            if (customerReply) continue;
+            if (lastProMessage) {
+              const customerReplyAfterUs = await this.prisma.message.findFirst({
+                where: { conversationId: lead.threadId, sender: 'customer', sentAt: { gt: lastProMessage.sentAt } },
+              });
+              if (customerReplyAfterUs) continue; // Customer responded to us — don't follow up
+            }
 
             try {
               await this.engineService.enrollInSequence(lead.threadId, template.id, lead.platform, lead.id);
