@@ -268,17 +268,18 @@ export function Messages() {
       // Query enrollment directly by conversationId instead of fetching all
       const acct = savedAccounts.find(a => a.businessId === selectedLead.businessId);
       Promise.all([
-        api.get(`/v1/follow-ups/enrollments?status=active`).then(r => r.data).catch(() => ({ enrollments: [] })),
+        api.get(`/v1/follow-ups/enrollments?status=active`).then(r => r.data).catch((err: any) => { console.warn('[FollowUp] enrollments fetch failed:', err.message); return { enrollments: [] }; }),
         acct?.id ? api.get(`/v1/follow-ups/settings/${acct.id}`).then(r => r.data).catch(() => ({ settings: {} })) : Promise.resolve({ settings: {} }),
       ]).then(([enrollRes, settingsRes]) => {
         const enrollment = enrollRes.enrollments?.find((e: any) => e.conversationId === selectedLead.threadId);
         const settings = settingsRes.settings || {};
+        console.log('[FollowUp] enrollments:', enrollRes.enrollments?.length, 'match:', !!enrollment, 'threadId:', selectedLead.threadId, 'nextDue:', enrollment?.nextStepDueAt);
         setLeadFollowUpInfo({
           nextFollowUpAt: enrollment?.nextStepDueAt || null,
           followUpStatus: enrollment?.status || null,
-          aiConversationOn: (settings as any).aiConversationEnabled ?? (settings as any).followUpMode === 'auto_send',
+          aiConversationOn: (settings as any).aiConversationEnabled ?? false,
         });
-      }).catch(() => {});
+      }).catch((err: any) => { console.error('[FollowUp] load failed:', err); });
     }
   }, [selectedLead?.id]);
 
