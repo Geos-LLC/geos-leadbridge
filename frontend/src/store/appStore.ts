@@ -163,13 +163,18 @@ export const useAppStore = create<AppState>()(
       loadSystemHealth: async (force = false) => {
         const { systemHealth, systemHealthLoading } = get();
         if (systemHealthLoading) return;
-        if (!force && systemHealth) return; // Use cache unless forced
+        if (!force && systemHealth) return;
         set({ systemHealthLoading: true });
         try {
-          const data = await monitoringApi.getSystemHealth();
+          // Trigger a fresh server-side check, then read results
+          const data = await monitoringApi.runHealthCheck();
           set({ systemHealth: data });
         } catch {
-          // Silently fail — health is non-critical for page load
+          // Fall back to cached read if run fails
+          try {
+            const data = await monitoringApi.getSystemHealth();
+            set({ systemHealth: data });
+          } catch {}
         } finally {
           set({ systemHealthLoading: false });
         }
