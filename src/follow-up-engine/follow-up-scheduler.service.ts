@@ -32,8 +32,10 @@ export class FollowUpSchedulerService implements OnModuleInit {
     private readonly eventEmitter: EventEmitter2,
     private readonly configService: ConfigService,
   ) {
-    // Scheduler always runs — user controls follow-ups via per-account settings (followUpMode)
-    this.schedulerEnabled = true;
+    // FOLLOWUP_SCHEDULER env var: set to 'false' on staging to let production handle it.
+    // Defaults to true (enabled). User controls follow-ups via per-account settings.
+    const envVal = this.configService.get<string>('FOLLOWUP_SCHEDULER');
+    this.schedulerEnabled = envVal !== 'false';
   }
 
   /**
