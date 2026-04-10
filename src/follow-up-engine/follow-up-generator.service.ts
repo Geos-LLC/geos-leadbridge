@@ -293,6 +293,24 @@ export class FollowUpGeneratorService {
       if (requestDetails) systemParts.push(requestDetails);
     }
 
+    // Load previous follow-up messages so AI doesn't repeat itself
+    const previousFollowUps = await this.prisma.followUpStepExecution.findMany({
+      where: {
+        enrollment: { conversationId },
+        status: 'sent',
+        generatedMessage: { not: null },
+      },
+      orderBy: { stepIndex: 'asc' },
+      select: { generatedMessage: true, stepIndex: true },
+    });
+    if (previousFollowUps.length > 0) {
+      systemParts.push('', '--- PREVIOUS FOLLOW-UPS ALREADY SENT (do NOT repeat these) ---');
+      for (const prev of previousFollowUps) {
+        systemParts.push(`Step ${prev.stepIndex}: "${prev.generatedMessage}"`);
+      }
+      systemParts.push('Write a DIFFERENT message. Vary tone, angle, and approach. Do NOT reuse the same wording.');
+    }
+
     // Build messages with conversation history
     const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
       { role: 'system', content: systemParts.join('\n') },
