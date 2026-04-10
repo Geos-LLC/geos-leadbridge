@@ -107,6 +107,15 @@ export class FollowUpEngineService {
 
     if (!template) throw new Error(`Sequence template ${templateId} not found`);
 
+    // Prevent duplicate enrollments — only one active enrollment per conversation
+    const existing = await this.prisma.followUpEnrollment.findFirst({
+      where: { conversationId, status: 'active' },
+    });
+    if (existing) {
+      this.logger.debug(`Conversation ${conversationId} already has active enrollment ${existing.id} — skipping`);
+      return existing.id;
+    }
+
     const stepsData = template.stepsJson as any;
     const steps = stepsData?.steps || [];
     if (steps.length === 0) throw new Error('Sequence template has no steps');
