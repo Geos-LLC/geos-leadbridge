@@ -216,6 +216,11 @@ export class FollowUpEngineController {
     if (body.applyToExisting !== undefined) extendedSettings.followUpApplyToExisting = body.applyToExisting;
     if (body.followUpStrategy !== undefined) extendedSettings.followUpStrategy = body.followUpStrategy;
     if (body.followUpStrategyPrompt !== undefined) extendedSettings.followUpStrategyPrompt = body.followUpStrategyPrompt;
+    // Follow-up plan settings
+    if (body.fuReEnrollOnSilence !== undefined) extendedSettings.fuReEnrollOnSilence = body.fuReEnrollOnSilence;
+    if (body.fuQuietHoursEnabled !== undefined) extendedSettings.fuQuietHoursEnabled = body.fuQuietHoursEnabled;
+    if (body.fuQuietHoursStart !== undefined) extendedSettings.fuQuietHoursStart = body.fuQuietHoursStart;
+    if (body.fuQuietHoursEnd !== undefined) extendedSettings.fuQuietHoursEnd = body.fuQuietHoursEnd;
     // AI Conversation rules
     if (body.aiStopOnOptOut !== undefined) extendedSettings.aiStopOnOptOut = body.aiStopOnOptOut;
     if (body.aiStopOnBooked !== undefined) extendedSettings.aiStopOnBooked = body.aiStopOnBooked;

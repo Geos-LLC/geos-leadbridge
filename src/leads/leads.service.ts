@@ -573,14 +573,26 @@ export class LeadsService {
       // After sending a business message, ensure a follow-up enrollment exists.
       // If the customer doesn't reply, the scheduler will send follow-ups.
       if (conversation?.id && this.followUpEngine) {
-        // Direct enrollment: find a template, check no active enrollment, enroll.
-        // This is more reliable than evaluateThread (which needs ThreadContext).
         (async () => {
           try {
             const activeEnrollment = await this.prisma.followUpEnrollment.findFirst({
               where: { conversationId: conversation!.id, status: 'active' },
             });
             if (activeEnrollment) return; // Already enrolled
+
+            // Check if re-enroll on silence is enabled for this account
+            if (lead.businessId) {
+              const acct = await this.prisma.savedAccount.findFirst({
+                where: { userId, businessId: lead.businessId },
+                select: { followUpSettingsJson: true },
+              });
+              if (acct?.followUpSettingsJson) {
+                try {
+                  const s = JSON.parse(acct.followUpSettingsJson);
+                  if (s.fuReEnrollOnSilence === false) return; // User disabled re-enrollment
+                } catch {}
+              }
+            }
 
             // Check terminal lead status
             const s = (lead.status || '').toLowerCase();
