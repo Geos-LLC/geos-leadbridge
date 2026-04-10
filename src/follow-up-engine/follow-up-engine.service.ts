@@ -111,20 +111,29 @@ export class FollowUpEngineService {
     const steps = stepsData?.steps || [];
     if (steps.length === 0) throw new Error('Sequence template has no steps');
 
-    // If the lead had a prior conversation (customer replied before going silent),
+    // If the lead had a real back-and-forth (customer replied AFTER a business message),
     // skip the early short-delay steps and start from a step with ≥ 24h delay.
-    // This avoids sending a "checking in" 2min after an ongoing conversation goes quiet.
+    // The initial customer request doesn't count — only replies after we responded.
     let startStepIndex = 0;
     if (leadId) {
-      const customerMsgCount = await this.prisma.message.count({
-        where: { conversation: { leads: { some: { id: leadId } } }, sender: 'customer' },
-      }).catch(() => 0);
-      if (customerMsgCount > 0) {
-        // Find the first step with delay ≥ 1440 minutes (24 hours)
-        const laterStep = steps.findIndex((s: any) => (s.delayMinutes || 0) >= 1440);
-        if (laterStep > 0) {
-          startStepIndex = laterStep;
-          this.logger.log(`[FollowUp] Lead had ${customerMsgCount} customer messages — skipping to step ${startStepIndex} (delay ≥ 24h)`);
+      const lead = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { threadId: true } });
+      if (lead?.threadId) {
+        const firstProMsg = await this.prisma.message.findFirst({
+          where: { conversationId: lead.threadId, sender: 'pro' },
+          orderBy: { sentAt: 'asc' },
+          select: { sentAt: true },
+        });
+        if (firstProMsg) {
+          const customerReplyCount = await this.prisma.message.count({
+            where: { conversationId: lead.threadId, sender: 'customer', sentAt: { gt: firstProMsg.sentAt } },
+          });
+          if (customerReplyCount > 0) {
+            const laterStep = steps.findIndex((s: any) => (s.delayMinutes || 0) >= 1440);
+            if (laterStep > 0) {
+              startStepIndex = laterStep;
+              this.logger.log(`[FollowUp] Lead had ${customerReplyCount} customer replies after business — skipping to step ${startStepIndex} (delay ≥ 24h)`);
+            }
+          }
         }
       }
     }
