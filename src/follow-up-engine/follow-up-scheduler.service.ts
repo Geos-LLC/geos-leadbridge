@@ -202,9 +202,10 @@ export class FollowUpSchedulerService implements OnModuleInit {
         const s = (lead.status || '').toLowerCase();
         const ts = (lead.thumbtackStatus || '').toLowerCase();
         const terminalStatuses = ['done', 'scheduled', 'in_progress', 'in progress', 'booked', 'hired', 'job done', 'job scheduled', 'completed', 'archived', 'lost'];
-        if (terminalStatuses.includes(s) || terminalStatuses.includes(ts)) {
-          await this.engineService.stopEnrollment(enrollment.id, `lead_status_${s || ts}`);
-          this.logger.log(`[FollowUpScheduler] Lead status is "${s || ts}" — stopping enrollment ${enrollment.id}`);
+        const terminalMatch = terminalStatuses.includes(ts) ? ts : terminalStatuses.includes(s) ? s : null;
+        if (terminalMatch) {
+          await this.engineService.stopEnrollment(enrollment.id, `lead_status_${terminalMatch}`);
+          this.logger.log(`[FollowUpScheduler] Lead status is "${terminalMatch}" — stopping enrollment ${enrollment.id}`);
           return;
         }
       }
