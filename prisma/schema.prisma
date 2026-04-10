@@ -134,6 +134,7 @@ model User {
   followUpSequenceTemplates FollowUpSequenceTemplate[]
   orgMemberships           OrgMembership[]
   crmWebhookSubscriptions  CrmWebhookSubscription[]
+  accountHealthStatuses    AccountHealthStatus[]
 
   @@map("users")
 }
@@ -366,6 +367,7 @@ model SavedAccount {
   followUpTemplates    FollowUpSequenceTemplate[]
   collectedLeads       ThumbtackLeadId[]
   settingsSnapshots    ThumbtackSettingsSnapshot[]
+  healthStatuses       AccountHealthStatus[]
 
   @@unique([userId, platform, businessId])
   @@index([userId])
@@ -965,6 +967,8 @@ model LeadSmsMessage {
 model SystemErrorLog {
   id          String    @id @default(cuid())
   category    String    // 'automation' | 'token_refresh' | 'webhook' | 'notification' | 'yelp' | 'other'
+  code        String?   // Structured issue code: 'token_expired', 'webhook_missing', 'automation_failure'
+  platform    String?   // Platform context for dedup: 'thumbtack' | 'yelp'
   severity    String    @default("error") // 'error' | 'warning'
   message     String    @db.Text
   context     String?   @db.Text // JSON: accountName, leadId, negotiationId, etc.
@@ -974,11 +978,47 @@ model SystemErrorLog {
   resolved    Boolean   @default(false)
   emailedAt   DateTime? // Last time an alert email was sent for this error
   createdAt   DateTime  @default(now())
+  updatedAt   DateTime? @updatedAt
 
   @@index([category, createdAt])
   @@index([resolved, createdAt])
   @@index([userId, createdAt])
+  @@index([category, accountId, platform, code, resolved])
   @@map("system_error_logs")
+}
+
+// ==========================================
+// Account Health Status — Source of truth for system health
+// Written by hourly health cron, read by dashboard/layout/alerts
+// One persistent row per (accountId, issueCode), reopened/resolved over time
+// ==========================================
+
+model AccountHealthStatus {
+  id                String    @id @default(cuid())
+  userId            String
+  accountId         String
+  platform          String
+  status            String    // 'healthy' | 'warning' | 'critical'
+  issueCode         String    // 'token_expired' | 'webhook_missing' | 'notifications_disabled' | 'automation_failures' | 'yelp_connection'
+  issueMessage      String    @db.Text
+  metadata          Json?
+  isActive          Boolean   @default(true)
+  firstDetectedAt   DateTime  @default(now())
+  lastDetectedAt    DateTime  @default(now())
+  lastCheckedAt     DateTime  @default(now())
+  resolvedAt        DateTime?
+  lastNotifiedAt    DateTime?
+  notificationCount Int       @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  savedAccount SavedAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, issueCode])
+  @@index([userId, isActive])
+  @@index([accountId, isActive])
+  @@map("account_health_statuses")
 }
 
 // ==========================================
