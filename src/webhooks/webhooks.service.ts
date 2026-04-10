@@ -723,7 +723,12 @@ export class WebhooksService {
     // Stop follow-up sequences on customer reply (synchronous, idempotent)
     if (sender === 'customer') {
       try {
-        await this.followUpEngine.handleCustomerReply(conversation.id);
+        const fuResult = await this.followUpEngine.handleCustomerReply(conversation.id, messageContent);
+        // Send re-engagement alert if the customer replied after follow-ups
+        if (fuResult.reEngagementAlert && savedAccount) {
+          this.notificationsService.sendReEngagementAlert(userId, savedAccount.id, fuResult.reEngagementAlert)
+            .catch(err => this.logger.warn(`[ReEngagement] Alert send failed: ${err.message}`));
+        }
       } catch (err: any) {
         this.logger.warn(`Failed to stop follow-up on customer reply: ${err.message}`);
       }
@@ -1661,7 +1666,11 @@ export class WebhooksService {
       // Confirmed customer reply — stop follow-up enrollments
       if (lead.threadId) {
         try {
-          await this.followUpEngine.handleCustomerReply(lead.threadId);
+          const fuResult = await this.followUpEngine.handleCustomerReply(lead.threadId, leadData.message || '');
+          if (fuResult.reEngagementAlert && savedAccount) {
+            this.notificationsService.sendReEngagementAlert(userId, savedAccount.id, fuResult.reEngagementAlert)
+              .catch(err => this.logger.warn(`[ReEngagement] Yelp alert failed: ${err.message}`));
+          }
         } catch (err: any) {
           this.logger.warn(`Failed to stop Yelp follow-up on customer reply: ${err.message}`);
         }
