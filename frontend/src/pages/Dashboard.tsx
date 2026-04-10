@@ -17,7 +17,7 @@ export function Dashboard() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, impersonatingUser } = useAuthStore();
-  const { savedAccounts, setSavedAccounts, dashboardStats: cachedStats, setDashboardStats, accountDiagnostics, diagnosticsLoading: loadingDiagnostics, loadDiagnostics } = useAppStore();
+  const { savedAccounts, setSavedAccounts, dashboardStats: cachedStats, setDashboardStats, accountDiagnostics, loadDiagnostics, systemHealth, systemHealthLoading } = useAppStore();
 
   // Start with cached stats (instant) — zeros only if nothing cached yet
   const [stats, setStats] = useState<DashboardStats>(
@@ -669,41 +669,27 @@ export function Dashboard() {
         <div className="contents lg:block lg:space-y-6">
           <div className="order-3 lg:order-none flex flex-col gap-6">
           {(() => {
-            const isCheckingHealth = loadingDiagnostics || (savedAccounts.length > 0 && Object.keys(accountDiagnostics).length === 0);
-            const disconnectedAccounts = savedAccounts.filter(a => {
-              const diag = accountDiagnostics[a.id];
-              if (a.platform === 'yelp') return diag && !diag.healthy;
-              return !a.webhookId || (diag && !diag.healthy);
-            });
-            const configIssueAccounts = savedAccounts.filter(a => {
-              const diag = accountDiagnostics[a.id];
-              if (a.platform === 'yelp') {
-                const issues = diag?.notificationIssues || [];
-                return diag?.healthy && issues.length > 0 && !issues.every((i: string) => i.toLowerCase().includes('disabled'));
-              }
-              const hasConnIssue = !a.webhookId || (diag && !diag.healthy);
-              const issues = diag?.notificationIssues || [];
-              return !hasConnIssue && issues.length > 0 && !issues.every((i: string) => i.toLowerCase().includes('disabled'));
-            });
-            const hasConnectionIssues = disconnectedAccounts.length > 0;
-            const hasConfigIssues = configIssueAccounts.length > 0;
+            const health = systemHealth;
+            const isLoading = systemHealthLoading || !health;
+            const hasCritical = health && health.summary.critical > 0;
+            const hasWarning = health && health.summary.warning > 0 && !hasCritical;
 
             return (
               <>
                 <div className="flex items-center justify-between px-2">
                   <h3 className="text-xl font-bold text-slate-900">System Status</h3>
-                  {isCheckingHealth ? (
+                  {isLoading ? (
                     <span className="bg-slate-100 text-slate-500 text-xs font-bold px-2 py-1 rounded-md flex items-center gap-1.5">
                       <Loader2 className="w-3 h-3 animate-spin" />
                       CHECKING
                     </span>
-                  ) : hasConnectionIssues ? (
+                  ) : hasCritical ? (
                     <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-1 rounded-md">
-                      {disconnectedAccounts.length} URGENT
+                      {health!.summary.critical} URGENT
                     </span>
-                  ) : hasConfigIssues ? (
+                  ) : hasWarning ? (
                     <span className="bg-orange-50 text-orange-600 text-xs font-bold px-2 py-1 rounded-md">
-                      SETUP NEEDED
+                      {health!.summary.warning} WARNING
                     </span>
                   ) : (
                     <span className="bg-emerald-50 text-emerald-600 text-xs font-bold px-2 py-1 rounded-md">
@@ -712,7 +698,7 @@ export function Dashboard() {
                   )}
                 </div>
 
-                {isCheckingHealth ? (
+                {isLoading ? (
                   <div className="bg-slate-50/50 border border-slate-200 rounded-3xl p-5 relative overflow-hidden flex items-center">
                     <div className="flex items-start gap-4 w-full">
                       <div className="w-10 h-10 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center shrink-0">
@@ -726,52 +712,31 @@ export function Dashboard() {
                       </div>
                     </div>
                   </div>
-                ) : hasConnectionIssues ? (
-                  <div className="bg-rose-50/50 border border-rose-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-rose-50 transition-colors cursor-pointer flex items-center"
-                    onClick={() => {
-                      const unhealthy = disconnectedAccounts[0];
-                      if (unhealthy) {
-                        setAccountToReconnect(unhealthy);
-                        setConnectionModalOpen(true);
-                      }
-                    }}
-                  >
+                ) : hasCritical || hasWarning ? (
+                  <div className={`${hasCritical ? 'bg-rose-50/50 border-rose-100' : 'bg-orange-50/50 border-orange-100'} border rounded-3xl p-5 relative overflow-hidden`}>
                     <div className="flex items-start gap-4 w-full">
-                      <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-xl flex items-center justify-center shrink-0">
+                      <div className={`w-10 h-10 ${hasCritical ? 'bg-rose-100 text-rose-600' : 'bg-orange-100 text-orange-600'} rounded-xl flex items-center justify-center shrink-0`}>
                         <AlertCircle className="w-5 h-5" />
                       </div>
                       <div className="flex-1">
-                        <h5 className="font-bold text-slate-900">Action Required</h5>
-                        <p className="text-sm text-slate-600 mt-1 leading-relaxed">
-                          {disconnectedAccounts.length} account{disconnectedAccounts.length !== 1 ? 's need' : ' needs'} attention to resume full automation.
-                        </p>
-                        <div className="mt-4 text-xs font-bold text-rose-600 uppercase tracking-wider flex items-center gap-1 hover:text-rose-700 transition-colors">
-                          Fix Now <ChevronRight className="w-3 h-3" />
+                        <h5 className="font-bold text-slate-900">
+                          {hasCritical ? 'Action Required' : 'Attention Needed'}
+                        </h5>
+                        <div className="mt-2 space-y-1.5">
+                          {health!.issues.map((issue: any, i: number) => (
+                            <div key={i} className="flex items-center gap-2 text-sm text-slate-600">
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${issue.status === 'critical' ? 'bg-red-500' : 'bg-orange-400'}`} />
+                              <span><strong>{issue.accountName}</strong> ({issue.platform}) — {issue.message}</span>
+                            </div>
+                          ))}
                         </div>
+                        <Link to="/services" className={`mt-4 text-xs font-bold uppercase tracking-wider flex items-center gap-1 transition-colors ${hasCritical ? 'text-rose-600 hover:text-rose-700' : 'text-orange-600 hover:text-orange-700'}`}>
+                          Fix Now <ChevronRight className="w-3 h-3" />
+                        </Link>
                       </div>
                     </div>
                   </div>
-                ) : hasConfigIssues ? (
-                  <Link to="/services?expand=lead-alerts" className="bg-orange-50/50 border border-orange-100 rounded-3xl p-5 relative overflow-hidden group hover:bg-orange-50 transition-colors cursor-pointer flex items-center block">
-                    <div className="flex items-start gap-4 w-full">
-                      <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center shrink-0">
-                        <BellOff className="w-5 h-5" />
-                      </div>
-                      <div className="flex-1">
-                        <h5 className="font-bold text-slate-900">Lead Alerts Not Configured</h5>
-                        <p className="text-sm text-slate-600 mt-1 leading-relaxed">
-                          {(() => {
-                            const firstIssue = accountDiagnostics[configIssueAccounts[0]?.id]?.notificationIssues?.[0];
-                            return firstIssue || `${configIssueAccounts.length} account${configIssueAccounts.length !== 1 ? 's are' : ' is'} missing SMS alert setup.`;
-                          })()}
-                        </p>
-                        <div className="mt-4 text-xs font-bold text-orange-600 uppercase tracking-wider flex items-center gap-1 hover:text-orange-700 transition-colors">
-                          Fix in Automation <ChevronRight className="w-3 h-3" />
-                        </div>
-                      </div>
-                    </div>
-                  </Link>
-                ) : savedAccounts.length > 0 ? (
+                ) : health?.healthy ? (
                   <div className="bg-emerald-50/50 border border-emerald-100 rounded-3xl p-5 relative overflow-hidden flex items-center">
                     <div className="flex items-start gap-4 w-full">
                       <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center shrink-0">
