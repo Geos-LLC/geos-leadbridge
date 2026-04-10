@@ -547,14 +547,15 @@ export class FollowUpEngineController {
           });
 
           let count = 0;
+          let skipped = { noThread: 0, active: 0, recentSend: 0, customerTurn: 0, error: 0, terminal: 0 };
           for (const lead of leads) {
-            if (!lead.threadId) continue;
+            if (!lead.threadId) { skipped.noThread++; continue; }
 
             // Skip if already has an ACTIVE enrollment
             const existing = await this.prisma.followUpEnrollment.findFirst({
               where: { conversationId: lead.threadId, status: 'active' },
             });
-            if (existing) continue;
+            if (existing) { skipped.active++; continue; }
 
             // Skip if a follow-up was already sent in the last 24h (prevents re-enrollment spam)
             const recentSend = await this.prisma.followUpStepExecution.findFirst({
@@ -564,25 +565,37 @@ export class FollowUpEngineController {
                 executedAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
               },
             });
-            if (recentSend) continue;
+            if (recentSend) { skipped.recentSend++; continue; }
+
+            // Skip terminal lead statuses
+            const leadStatus = await this.prisma.lead.findUnique({
+              where: { id: lead.id },
+              select: { status: true, thumbtackStatus: true },
+            });
+            if (leadStatus) {
+              const s = (leadStatus.status || '').toLowerCase();
+              const ts = (leadStatus.thumbtackStatus || '').toLowerCase();
+              const terminal = ['done', 'scheduled', 'in_progress', 'in progress', 'booked', 'hired', 'job done', 'job scheduled', 'completed', 'archived', 'lost'];
+              if (terminal.includes(s) || terminal.includes(ts)) { skipped.terminal++; continue; }
+            }
 
             // Skip only if the LAST message is from the customer (active conversation, they're engaged).
-            // If the last message is from us and the customer hasn't replied, that's exactly
-            // when we want follow-ups — even if there was a prior back-and-forth.
             const lastMessage = await this.prisma.message.findFirst({
               where: { conversationId: lead.threadId },
               orderBy: { sentAt: 'desc' },
               select: { sender: true },
             });
-            if (lastMessage?.sender === 'customer') continue; // Customer's turn — don't follow up
+            if (lastMessage?.sender === 'customer') { skipped.customerTurn++; continue; }
 
             try {
               await this.engineService.enrollInSequence(lead.threadId, template.id, lead.platform, lead.id);
               count++;
-            } catch {
-              // Skip failures
+            } catch (err: any) {
+              this.logger.warn(`[FollowUp] Enrollment failed for lead ${lead.id}: ${err.message}`);
+              skipped.error++;
             }
           }
+          this.logger.log(`[FollowUp] Background enrollment for business ${businessId}: ${leads.length} leads, ${count} enrolled, skipped: ${JSON.stringify(skipped)}`);
           this.logger.log(`[FollowUp] Background enrollment complete: ${count} leads enrolled for business ${businessId}`);
         } catch (err: any) {
           this.logger.error(`[FollowUp] Background enrollment error: ${err.message}`);
