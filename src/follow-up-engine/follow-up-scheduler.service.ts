@@ -194,6 +194,21 @@ export class FollowUpSchedulerService implements OnModuleInit {
     });
     if (!fresh || fresh.status !== 'active') return;
 
+    // Minimum 10-minute gap between consecutive sends to the same conversation
+    if (enrollment.lastExecutedAt) {
+      const sinceLastSend = Date.now() - new Date(enrollment.lastExecutedAt).getTime();
+      if (sinceLastSend < 10 * 60_000) {
+        // Reschedule to 10 minutes after last send
+        const nextDue = new Date(new Date(enrollment.lastExecutedAt).getTime() + 10 * 60_000);
+        await this.prisma.followUpEnrollment.update({
+          where: { id: enrollment.id },
+          data: { nextStepDueAt: nextDue },
+        });
+        this.logger.log(`[FollowUpScheduler] Too soon since last send — rescheduled ${enrollment.id} to ${nextDue.toISOString()}`);
+        return;
+      }
+    }
+
     // Check if lead has a terminal status (booked, done, scheduled, in progress) — no follow-up needed
     if (enrollment.leadId) {
       const lead = await this.prisma.lead.findUnique({

@@ -311,12 +311,23 @@ export class FollowUpGeneratorService {
       seenMessages.add(p.generatedMessage!);
       return true;
     });
-    if (uniqueFollowUps.length > 0) {
-      systemParts.push('', '--- PREVIOUS FOLLOW-UPS ALREADY SENT (do NOT repeat these) ---');
-      for (const prev of uniqueFollowUps) {
-        systemParts.push(`"${prev.generatedMessage}"`);
+    // Also load ALL pro messages sent to this conversation (manual + auto)
+    const allProMessages = await this.prisma.message.findMany({
+      where: { conversationId, sender: 'pro' },
+      orderBy: { sentAt: 'asc' },
+      select: { content: true },
+    });
+    const allSentContent = allProMessages.map(m => m.content).filter(Boolean);
+    for (const content of allSentContent) {
+      seenMessages.add(content);
+    }
+
+    if (uniqueFollowUps.length > 0 || allSentContent.length > 0) {
+      systemParts.push('', '--- ALL MESSAGES ALREADY SENT TO THIS CUSTOMER (do NOT repeat ANY of these) ---');
+      for (const content of seenMessages) {
+        systemParts.push(`"${content}"`);
       }
-      systemParts.push('Write a COMPLETELY DIFFERENT message. Use a different angle, tone, and opening. Do NOT reuse any of the wording above.');
+      systemParts.push('', 'CRITICAL: You MUST write a COMPLETELY DIFFERENT message. Do NOT reuse the same opening, angle, or wording from any message above. If you catch yourself starting with a similar phrase, stop and try a completely new approach.');
     }
 
     // Build messages with conversation history
