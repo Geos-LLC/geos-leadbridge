@@ -125,7 +125,7 @@ export class FollowUpEngineService {
     // The initial customer request doesn't count — only replies after we responded.
     let startStepIndex = 0;
     if (leadId) {
-      const lead = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { threadId: true } });
+      const lead = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { threadId: true, userId: true, businessId: true } });
       if (lead?.threadId) {
         const firstProMsg = await this.prisma.message.findFirst({
           where: { conversationId: lead.threadId, sender: 'pro' },
@@ -137,11 +137,29 @@ export class FollowUpEngineService {
             where: { conversationId: lead.threadId, sender: 'customer', sentAt: { gt: firstProMsg.sentAt } },
           });
           if (customerReplyCount > 0) {
-            const laterStep = steps.findIndex((s: any) => (s.delayMinutes || 0) >= 1440);
+            // Load re-enroll delay from account settings
+            const acct = lead.businessId ? await this.prisma.savedAccount.findFirst({
+              where: { userId: lead.userId, businessId: lead.businessId },
+              select: { followUpSettingsJson: true },
+            }).catch(() => null) : null;
+            let reEnrollDelayMinutes = 1440; // default 24h
+            if (acct?.followUpSettingsJson) {
+              try {
+                const s = JSON.parse(acct.followUpSettingsJson);
+                if (s.fuReEnrollDelay) {
+                  const d = s.fuReEnrollDelay;
+                  if (d.endsWith('h')) reEnrollDelayMinutes = parseInt(d) * 60;
+                  else if (d.endsWith('d')) reEnrollDelayMinutes = parseInt(d) * 1440;
+                  else reEnrollDelayMinutes = parseInt(d) || 1440;
+                }
+              } catch {}
+            }
+            // Find first step with delay >= configured re-enroll delay
+            const laterStep = steps.findIndex((s: any) => (s.delayMinutes || 0) >= reEnrollDelayMinutes);
             if (laterStep > 0) {
               startStepIndex = laterStep;
-              this.logger.log(`[FollowUp] Lead had ${customerReplyCount} customer replies after business — skipping to step ${startStepIndex} (delay ≥ 24h)`);
             }
+            this.logger.log(`[FollowUp] Lead had ${customerReplyCount} customer replies — re-enroll delay ${reEnrollDelayMinutes}min, starting at step ${startStepIndex}`);
           }
         }
       }
