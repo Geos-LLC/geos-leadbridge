@@ -210,6 +210,50 @@ export class FollowUpSchedulerService implements OnModuleInit {
       }
     }
 
+    // Check quiet hours — don't send during nighttime
+    if (enrollment.leadId) {
+      const leadForQuiet = await this.prisma.lead.findUnique({
+        where: { id: enrollment.leadId },
+        select: { businessId: true, userId: true },
+      });
+      if (leadForQuiet?.businessId) {
+        const acct = await this.prisma.savedAccount.findFirst({
+          where: { userId: leadForQuiet.userId, businessId: leadForQuiet.businessId },
+          select: { followUpSettingsJson: true, followUpTimezone: true },
+        });
+        if (acct?.followUpSettingsJson) {
+          try {
+            const settings = JSON.parse(acct.followUpSettingsJson);
+            if (settings.fuQuietHoursEnabled && settings.fuQuietHoursStart && settings.fuQuietHoursEnd) {
+              const tz = acct.followUpTimezone || 'America/New_York';
+              const formatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+              const localTime = formatter.format(now);
+              const [h, m] = localTime.split(':').map(Number);
+              const [qsH, qsM] = settings.fuQuietHoursStart.split(':').map(Number);
+              const [qeH, qeM] = settings.fuQuietHoursEnd.split(':').map(Number);
+              const current = h * 60 + m;
+              const quietStart = qsH * 60 + qsM;
+              const quietEnd = qeH * 60 + qeM;
+              // Overnight quiet: e.g. 22:00-08:00
+              const inQuiet = quietStart > quietEnd
+                ? (current >= quietStart || current < quietEnd)
+                : (current >= quietStart && current < quietEnd);
+              if (inQuiet) {
+                // Reschedule to quiet hours end
+                const nextDue = this.engineService.computeNextDueAt(now, 0, settings.fuQuietHoursEnd, '23:59', tz);
+                await this.prisma.followUpEnrollment.update({
+                  where: { id: enrollment.id },
+                  data: { nextStepDueAt: nextDue },
+                });
+                this.logger.log(`[FollowUpScheduler] Quiet hours — rescheduled enrollment ${enrollment.id} to ${nextDue.toISOString()}`);
+                return;
+              }
+            }
+          } catch {}
+        }
+      }
+    }
+
     // Check if customer has replied SINCE the enrollment was created
     // Don't use awaitingCustomerReply — it may be false if the business hasn't
     // sent the first message yet. Instead, check if there's a customer message

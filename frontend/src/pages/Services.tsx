@@ -252,6 +252,10 @@ export function Services() {
   const [fuStrategyPrompt, setFuStrategyPrompt] = useState('');
   const [fuUrgentCapability, setFuUrgentCapability] = useState<'same_day' | '24h' | '48h' | 'none'>('24h');
   const [fuIncludeHistorical, setFuIncludeHistorical] = useState(false);
+  const [fuReEnrollOnSilence, setFuReEnrollOnSilence] = useState(true);
+  const [fuQuietHoursStart, setFuQuietHoursStart] = useState('22:00');
+  const [fuQuietHoursEnd, setFuQuietHoursEnd] = useState('08:00');
+  const [fuQuietHoursEnabled, setFuQuietHoursEnabled] = useState(true);
   const [fuSaving, setFuSaving] = useState(false);
   const [fuTimingEditing, setFuTimingEditing] = useState(false);
   const [fuShowRules, setFuShowRules] = useState(false);
@@ -391,6 +395,11 @@ export function Services() {
         if (s.followUpApplyToExisting !== undefined) setFuIncludeHistorical(s.followUpApplyToExisting);
         if (s.followUpStrategy) setFuStrategy(s.followUpStrategy);
         if (s.followUpStrategyPrompt) setFuStrategyPrompt(s.followUpStrategyPrompt);
+        // Follow-up plan settings
+        if (s.fuReEnrollOnSilence !== undefined) setFuReEnrollOnSilence(s.fuReEnrollOnSilence);
+        if (s.fuQuietHoursEnabled !== undefined) setFuQuietHoursEnabled(s.fuQuietHoursEnabled);
+        if (s.fuQuietHoursStart) setFuQuietHoursStart(s.fuQuietHoursStart);
+        if (s.fuQuietHoursEnd) setFuQuietHoursEnd(s.fuQuietHoursEnd);
         // AI Conversation rules
         if (s.aiStopOnOptOut !== undefined) setAiStopOnOptOut(s.aiStopOnOptOut);
         if (s.aiStopOnBooked !== undefined) setAiStopOnBooked(s.aiStopOnBooked);
@@ -2380,6 +2389,55 @@ export function Services() {
                       )}
                     </div>
 
+                    {/* Re-enroll after customer reply */}
+                    <label className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer hover:border-blue-200 transition-colors">
+                      <input type="checkbox" checked={fuReEnrollOnSilence} onChange={(e) => setFuReEnrollOnSilence(e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                      <div>
+                        <span className="text-xs font-semibold text-slate-700">Resume follow-ups after conversation</span>
+                        <span className="block text-[10px] text-slate-400">When a customer replies and then goes silent again, start a new follow-up sequence</span>
+                      </div>
+                    </label>
+
+                    {/* Quiet hours */}
+                    <div className="rounded-xl border border-slate-200 overflow-hidden">
+                      <label className="flex items-center gap-3 p-3 bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors">
+                        <input type="checkbox" checked={fuQuietHoursEnabled} onChange={(e) => setFuQuietHoursEnabled(e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                        <div>
+                          <span className="text-xs font-semibold text-slate-700">Quiet hours</span>
+                          <span className="block text-[10px] text-slate-400">Don't send follow-ups during nighttime or off-hours</span>
+                        </div>
+                      </label>
+                      {fuQuietHoursEnabled && (
+                        <div className="px-3 py-3 border-t border-slate-100">
+                          <div className="grid grid-cols-3 gap-3">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Don't send after</label>
+                              <input type="time" value={fuQuietHoursStart} onChange={e => setFuQuietHoursStart(e.target.value)}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Resume at</label>
+                              <input type="time" value={fuQuietHoursEnd} onChange={e => setFuQuietHoursEnd(e.target.value)}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Timezone</label>
+                              <select value={fuTz} onChange={e => setFuTz(e.target.value)}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
+                                <option value="America/New_York">Eastern</option>
+                                <option value="America/Chicago">Central</option>
+                                <option value="America/Denver">Mountain</option>
+                                <option value="America/Los_Angeles">Pacific</option>
+                              </select>
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-2">Messages scheduled during quiet hours will be sent when quiet hours end.</p>
+                        </div>
+                      )}
+                    </div>
+
                     {/* Follow up historical leads */}
                     <label className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer hover:border-blue-200 transition-colors">
                       <input type="checkbox" checked={fuIncludeHistorical} onChange={(e) => setFuIncludeHistorical(e.target.checked)}
@@ -2645,6 +2703,10 @@ export function Services() {
                       followUpStrategyPrompt: fuStrategy !== 'auto' ? fuStrategyPrompt : undefined,
                       includeHistorical: fuIncludeHistorical,
                       applyToExisting: fuIncludeHistorical,
+                      fuReEnrollOnSilence,
+                      fuQuietHoursEnabled,
+                      fuQuietHoursStart,
+                      fuQuietHoursEnd,
                       aiStopOnOptOut,
                       aiStopOnBooked,
                       aiStopOnPriceAgreed,
