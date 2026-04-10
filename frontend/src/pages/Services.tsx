@@ -261,6 +261,7 @@ export function Services() {
   const [fuSaving, setFuSaving] = useState(false);
   const [fuTimingEditing, setFuTimingEditing] = useState(false);
   const [fuShowRules, setFuShowRules] = useState(false);
+  const [aiConversationOn, setAiConversationOn] = useState(false);
   const [aiShowRules, setAiShowRules] = useState(false);
   const [aiStopOnOptOut, setAiStopOnOptOut] = useState(true);
   const [aiStopOnBooked, setAiStopOnBooked] = useState(true);
@@ -404,6 +405,8 @@ export function Services() {
         if (s.fuQuietHoursEnabled !== undefined) setFuQuietHoursEnabled(s.fuQuietHoursEnabled);
         if (s.fuQuietHoursStart) setFuQuietHoursStart(s.fuQuietHoursStart);
         if (s.fuQuietHoursEnd) setFuQuietHoursEnd(s.fuQuietHoursEnd);
+        // AI Conversation
+        if ((res.settings as any)?.aiConversationEnabled !== undefined) setAiConversationOn((res.settings as any).aiConversationEnabled);
         // AI Conversation rules
         if (s.aiStopOnOptOut !== undefined) setAiStopOnOptOut(s.aiStopOnOptOut);
         if (s.aiStopOnBooked !== undefined) setAiStopOnBooked(s.aiStopOnBooked);
@@ -2547,11 +2550,11 @@ export function Services() {
                     </div>
                   </div>
                   <label className="inline-flex items-center cursor-pointer">
-                    <input type="checkbox" checked={fuMode === 'auto_send'} onChange={e => { setFuMode(e.target.checked ? 'auto_send' : 'suggest'); setFuReplyType(e.target.checked ? 'ai' : 'template'); }} className="sr-only peer" />
+                    <input type="checkbox" checked={aiConversationOn} onChange={e => setAiConversationOn(e.target.checked)} className="sr-only peer" />
                     <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
                   </label>
                 </div>
-                {fuMode === 'auto_send' && (
+                {aiConversationOn && (
                   <div className="px-5 py-4 space-y-4">
                     {/* AI Strategy */}
                     <div>
@@ -2731,6 +2734,7 @@ export function Services() {
                   try {
                     await followUpApi.saveSettings(selectedAccountId, {
                       mode: fuMode,
+                      aiConversationEnabled: aiConversationOn,
                       preset: fuPreset,
                       replyType: fuReplyType,
                       activeHoursStart: fuAvailability === 'active_hours' ? fuStart : null as any,

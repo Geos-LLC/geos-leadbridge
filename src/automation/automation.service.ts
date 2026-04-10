@@ -471,9 +471,9 @@ export class AutomationService implements OnModuleInit {
       await this.scheduleAutomatedMessage(rule, enrichedContext);
     }
 
-    // AI Conversation: if no customer_reply rules but account has followUpMode=auto_send,
+    // AI Conversation: if no customer_reply rules but account has aiConversationEnabled,
     // auto-reply to customer messages using AI (ongoing conversation handling)
-    if (rules.length === 0 && savedAccount.followUpMode === 'auto_send') {
+    if (rules.length === 0 && savedAccount.aiConversationEnabled) {
       this.logger.log(`[AUTOMATION] AI Conversation enabled for ${savedAccount.businessName} — generating AI reply to customer message`);
 
       // Load AI conversation rules from settings
