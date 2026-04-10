@@ -291,9 +291,9 @@ export class FollowUpEngineController {
           for (const lead of leads) {
             if (!lead.threadId) continue;
 
-            // Skip if already has ANY enrollment (active, completed, stopped)
+            // Skip if already has an ACTIVE enrollment
             const existing = await this.prisma.followUpEnrollment.findFirst({
-              where: { conversationId: lead.threadId },
+              where: { conversationId: lead.threadId, status: 'active' },
             });
             if (existing) continue;
 
