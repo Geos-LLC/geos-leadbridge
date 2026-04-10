@@ -39,6 +39,15 @@ export class PlatformService {
    */
   @Cron('0 */1 * * *') // every hour at :00
   async proactiveTokenRefresh(): Promise<void> {
+    // Advisory lock to prevent staging + production from refreshing simultaneously
+    // Lock ID 7002 = proactive token refresh
+    const lockResult = await this.prisma.$queryRawUnsafe<any[]>('SELECT pg_try_advisory_lock(7002) AS locked').catch(() => [{ locked: false }]);
+    if (!lockResult?.[0]?.locked) {
+      this.logger.debug('[ProactiveRefresh] Another instance holds the lock — skipping');
+      return;
+    }
+
+    try {
     const accounts = await this.prisma.savedAccount.findMany({
       where: { credentialsJson: { not: null } },
       select: { id: true, platform: true, businessId: true, businessName: true, userId: true, credentialsJson: true },
@@ -146,6 +155,9 @@ export class PlatformService {
 
     if (refreshed > 0 || failed > 0) {
       this.logger.log(`[ProactiveRefresh] Done: ${refreshed} refreshed, ${failed} failed, ${accounts.length} total accounts`);
+    }
+    } finally {
+      await this.prisma.$queryRawUnsafe('SELECT pg_advisory_unlock(7002)').catch(() => {});
     }
   }
 
@@ -356,7 +368,29 @@ export class PlatformService {
     const refreshPromise = (async () => {
       try {
         const adapter = this.platformFactory.getAdapter(platform);
-        const newCredentials = await adapter.refreshAccessToken(refreshToken);
+
+        // Re-read credentials from DB — another instance may have already refreshed
+        // (Thumbtack refresh tokens are single-use, using a stale one kills the token)
+        const freshAccount = await this.prisma.savedAccount.findUnique({
+          where: { id: accountId },
+          select: { credentialsJson: true },
+        });
+        let currentRefreshToken = refreshToken;
+        if (freshAccount?.credentialsJson) {
+          try {
+            const freshCreds = EncryptionUtil.decryptObject<any>(freshAccount.credentialsJson, this.encryptionKey);
+            if (freshCreds.refreshToken && freshCreds.refreshToken !== refreshToken) {
+              // Another instance already refreshed — check if the new token is still fresh
+              if (freshCreds.expiresAt && new Date(freshCreds.expiresAt).getTime() > Date.now() + 5 * 60_000) {
+                // Token is still valid, no need to refresh
+                return { accessToken: freshCreds.accessToken, refreshToken: freshCreds.refreshToken, expiresAt: new Date(freshCreds.expiresAt) };
+              }
+              currentRefreshToken = freshCreds.refreshToken;
+            }
+          } catch {}
+        }
+
+        const newCredentials = await adapter.refreshAccessToken(currentRefreshToken);
 
         // Store the new credentials (with new refresh token) immediately
         await this.updateAccountCredentials(accountId, {
