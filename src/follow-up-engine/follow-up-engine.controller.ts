@@ -308,6 +308,47 @@ export class FollowUpEngineController {
   }
 
   /**
+   * Restart follow-ups for a conversation. Creates a new enrollment
+   * using smart step positioning (skips steps based on messages already sent).
+   */
+  @Post('restart/:conversationId')
+  async restartFollowUp(
+    @CurrentUser() user: any,
+    @Param('conversationId') conversationId: string,
+  ) {
+    // Find the lead
+    const lead = await this.prisma.lead.findFirst({
+      where: { threadId: conversationId },
+      select: { id: true, platform: true, businessId: true, userId: true },
+    });
+    if (!lead || lead.userId !== user.id) {
+      return { success: false, error: 'Lead not found' };
+    }
+
+    // Stop any existing active enrollment first
+    await this.prisma.followUpEnrollment.updateMany({
+      where: { conversationId, status: 'active' },
+      data: { status: 'stopped', stoppedReason: 'restart', completedAt: new Date() },
+    });
+
+    // Find a template
+    const template = await this.prisma.followUpSequenceTemplate.findFirst({
+      where: { userId: user.id, platform: lead.platform, enabled: true },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+    });
+    if (!template) {
+      return { success: false, error: 'No follow-up template found. Save follow-up settings first.' };
+    }
+
+    // Enroll with smart step positioning
+    const enrollmentId = await this.engineService.enrollInSequence(
+      conversationId, template.id, lead.platform, lead.id,
+    );
+
+    return { success: true, enrollmentId };
+  }
+
+  /**
    * Load user-configured follow-up steps from account settings.
    */
   private async getUserConfiguredSteps(conversationId: string): Promise<SequenceStep[] | null> {

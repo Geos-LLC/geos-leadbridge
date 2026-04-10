@@ -2082,13 +2082,46 @@ export function Messages() {
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">Follow-ups</span>
                     {!leadFollowUpInfo.enrollmentId ? (
-                      <span className="text-[10px] text-slate-400">
-                        {leadFollowUpInfo.followUpStatus === 'stopped'
-                          ? `Stopped${leadFollowUpInfo.lastStoppedReason === 'customer_replied' ? ' — customer replied' : leadFollowUpInfo.lastStoppedReason === 'manual' ? ' — manual' : leadFollowUpInfo.lastStoppedReason ? ` — ${leadFollowUpInfo.lastStoppedReason.replace(/_/g, ' ')}` : ''}`
-                          : leadFollowUpInfo.followUpStatus === 'completed' ? 'Completed'
-                          : leadFollowUpInfo.mode === 'off' ? 'Disabled'
-                          : 'Not enrolled'}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-slate-400">
+                          {leadFollowUpInfo.followUpStatus === 'stopped'
+                            ? `Stopped${leadFollowUpInfo.lastStoppedReason === 'customer_replied' ? ' — replied' : leadFollowUpInfo.lastStoppedReason === 'manual' ? ' — manual' : leadFollowUpInfo.lastStoppedReason ? ` — ${leadFollowUpInfo.lastStoppedReason.replace(/_/g, ' ')}` : ''}`
+                            : leadFollowUpInfo.followUpStatus === 'completed' ? 'Completed'
+                            : leadFollowUpInfo.mode === 'off' ? 'Disabled'
+                            : 'Not enrolled'}
+                        </span>
+                        {leadFollowUpInfo.mode !== 'off' && (
+                          <button
+                            className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                            onClick={async () => {
+                              if (!selectedLead?.threadId) return;
+                              const res = await followUpApi.restartFollowUp(selectedLead.threadId);
+                              if (res.success) {
+                                const updated = await followUpApi.getEnrollmentInfo(selectedLead.threadId);
+                                if (updated.enrollment) {
+                                  setLeadFollowUpInfo({
+                                    ...leadFollowUpInfo,
+                                    enrollmentId: updated.enrollment.id,
+                                    nextFollowUpAt: updated.enrollment.nextStepDueAt || null,
+                                    followUpStatus: updated.enrollment.status || null,
+                                    currentStepIndex: updated.enrollment.currentStepIndex ?? 0,
+                                    totalSteps: updated.enrollment.totalSteps ?? 0,
+                                    sentCount: updated.enrollment.sentCount ?? 0,
+                                    nextStepObjective: updated.enrollment.nextStepObjective || null,
+                                    nextMessagePreview: updated.enrollment.nextMessagePreview || null,
+                                    nextMessageMode: updated.enrollment.nextMessageMode || 'ai',
+                                    pendingSuggestionId: updated.enrollment.pendingSuggestionId || null,
+                                    mode: updated.enrollment.mode || 'auto_send',
+                                    lastStoppedReason: null,
+                                  });
+                                }
+                              }
+                            }}
+                          >
+                            Restart
+                          </button>
+                        )}
+                      </div>
                     ) : (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-600">Active</span>
                     )}
