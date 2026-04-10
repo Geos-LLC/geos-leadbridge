@@ -9,7 +9,7 @@
  * Error logging is deduped by (category, accountId, platform, code).
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../common/utils/prisma.service';
@@ -38,13 +38,25 @@ export interface SystemHealthIssue {
 }
 
 @Injectable()
-export class MonitoringService {
+export class MonitoringService implements OnModuleInit {
   private readonly logger = new Logger(MonitoringService.name);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {}
+
+  /**
+   * Run health check on startup to populate AccountHealthStatus immediately.
+   */
+  async onModuleInit(): Promise<void> {
+    // Delay slightly to let other modules initialize
+    setTimeout(() => {
+      this.systemHealthCheck().catch(err =>
+        this.logger.error(`[HealthCheck] Startup check failed: ${err.message}`),
+      );
+    }, 15_000);
+  }
 
   // ==========================================
   // Error Capture (with dedup)
