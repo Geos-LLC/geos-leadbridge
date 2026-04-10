@@ -217,6 +217,7 @@ export class FollowUpEngineController {
     if (body.followUpStrategy !== undefined) extendedSettings.followUpStrategy = body.followUpStrategy;
     if (body.followUpStrategyPrompt !== undefined) extendedSettings.followUpStrategyPrompt = body.followUpStrategyPrompt;
     // Follow-up plan settings
+    if (body.fuExtraWindows !== undefined) extendedSettings.fuExtraWindows = body.fuExtraWindows;
     if (body.fuReEnrollOnSilence !== undefined) extendedSettings.fuReEnrollOnSilence = body.fuReEnrollOnSilence;
     if (body.fuReEnrollDelay !== undefined) extendedSettings.fuReEnrollDelay = body.fuReEnrollDelay;
     if (body.fuQuietHoursEnabled !== undefined) extendedSettings.fuQuietHoursEnabled = body.fuQuietHoursEnabled;

@@ -245,6 +245,7 @@ export function Services() {
   const [fuStart, setFuStart] = useState('18:00');
   const [fuEnd, setFuEnd] = useState('09:00');
   const [fuTz, setFuTz] = useState('America/New_York');
+  const [fuExtraWindows, setFuExtraWindows] = useState<{ start: string; end: string }[]>([]);
   const fuStopOnReply = true; // always on — internal rule, not user-configurable
   const [fuStopOnOptOut, setFuStopOnOptOut] = useState(true);
   const [fuStopOnBooked, setFuStopOnBooked] = useState(true);
@@ -397,6 +398,7 @@ export function Services() {
         if (s.followUpStrategy) setFuStrategy(s.followUpStrategy);
         if (s.followUpStrategyPrompt) setFuStrategyPrompt(s.followUpStrategyPrompt);
         // Follow-up plan settings
+        if (s.fuExtraWindows) setFuExtraWindows(s.fuExtraWindows);
         if (s.fuReEnrollOnSilence !== undefined) setFuReEnrollOnSilence(s.fuReEnrollOnSilence);
         if (s.fuReEnrollDelay) setFuReEnrollDelay(s.fuReEnrollDelay);
         if (s.fuQuietHoursEnabled !== undefined) setFuQuietHoursEnabled(s.fuQuietHoursEnabled);
@@ -1707,7 +1709,7 @@ export function Services() {
                       onChange={e => toggleAutoReply(e.target.checked)}
                       className="sr-only peer"
                     />
-                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500" />
+                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
                   </label>
                 </div>
                 <div className="px-5 py-4 space-y-4">
@@ -1857,7 +1859,7 @@ export function Services() {
                       onChange={e => toggleLeadAlerts(e.target.checked)}
                       className="sr-only peer"
                     />
-                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500" />
+                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
                   </label>
                 </div>
                 <div className={`px-5 py-4 space-y-4${!(leadAlertRule?.enabled) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
@@ -1928,13 +1930,13 @@ export function Services() {
                         </span>
                         <div className="flex gap-2">
                           <button onClick={discardAlertChanges} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Discard</button>
-                          <button onClick={saveAlertSettings} disabled={saving || !alertToPhone} className="px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-1">
+                          <button onClick={saveAlertSettings} disabled={saving || !alertToPhone} className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1">
                             {saving && <Loader2 className="w-3 h-3 animate-spin" />} Save
                           </button>
                         </div>
                       </div>
                     ) : (
-                      <button onClick={saveAlertSettings} disabled={saving} className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50">
+                      <button onClick={saveAlertSettings} disabled={saving} className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
                         {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} Save Alerts
                       </button>
                     )}
@@ -2025,7 +2027,7 @@ export function Services() {
                       disabled={ctSaving}
                       className="sr-only peer"
                     />
-                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500" />
+                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
                   </label>
                 </div>
                 <div className={`px-5 py-4 space-y-4${!ctEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
@@ -2098,7 +2100,7 @@ export function Services() {
                       disabled={ccSaving}
                       className="sr-only peer"
                     />
-                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-violet-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500" />
+                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
                   </label>
                 </div>
                 <div className={`px-5 py-4 space-y-4${!ccEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
@@ -2292,7 +2294,7 @@ export function Services() {
                   </div>
                   <label className="inline-flex items-center cursor-pointer">
                     <input type="checkbox" checked={fuMode !== 'off'} onChange={e => setFuMode(e.target.checked ? 'suggest' : 'off')} className="sr-only peer" />
-                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500" />
+                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
                   </label>
                 </div>
                 {fuMode !== 'off' && (
@@ -2546,7 +2548,7 @@ export function Services() {
                   </div>
                   <label className="inline-flex items-center cursor-pointer">
                     <input type="checkbox" checked={fuMode === 'auto_send'} onChange={e => { setFuMode(e.target.checked ? 'auto_send' : 'suggest'); setFuReplyType(e.target.checked ? 'ai' : 'template'); }} className="sr-only peer" />
-                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-violet-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500" />
+                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
                   </label>
                 </div>
                 {fuMode === 'auto_send' && (
@@ -2612,36 +2614,52 @@ export function Services() {
                         </button>
                       </div>
                       {fuAvailability === 'active_hours' && (
-                        <div className="grid grid-cols-3 gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
-                            <input type="time" value={fuStart} onChange={e => setFuStart(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                        <div className="space-y-2">
+                          {/* Primary time window */}
+                          <div className="grid grid-cols-3 gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
+                              <input type="time" value={fuStart} onChange={e => setFuStart(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
+                              <input type="time" value={fuEnd} onChange={e => setFuEnd(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Timezone</label>
+                              <select value={fuTz} onChange={e => setFuTz(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
+                                <option value="America/New_York">Eastern</option>
+                                <option value="America/Chicago">Central</option>
+                                <option value="America/Denver">Mountain</option>
+                                <option value="America/Los_Angeles">Pacific</option>
+                              </select>
+                            </div>
                           </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
-                            <input type="time" value={fuEnd} onChange={e => setFuEnd(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Timezone</label>
-                            <select value={fuTz} onChange={e => setFuTz(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
-                              <optgroup label="US">
-                                <option value="America/New_York">Eastern (GMT-5)</option>
-                                <option value="America/Chicago">Central (GMT-6)</option>
-                                <option value="America/Denver">Mountain (GMT-7)</option>
-                                <option value="America/Los_Angeles">Pacific (GMT-8)</option>
-                              </optgroup>
-                              <optgroup label="GMT">
-                                <option value="Etc/GMT+0">GMT+0</option><option value="Etc/GMT-1">GMT+1</option><option value="Etc/GMT-2">GMT+2</option>
-                                <option value="Etc/GMT-3">GMT+3</option><option value="Etc/GMT-4">GMT+4</option><option value="Etc/GMT-5">GMT+5</option>
-                                <option value="Etc/GMT-6">GMT+6</option><option value="Etc/GMT-7">GMT+7</option><option value="Etc/GMT-8">GMT+8</option>
-                                <option value="Etc/GMT-9">GMT+9</option><option value="Etc/GMT-10">GMT+10</option><option value="Etc/GMT-11">GMT+11</option>
-                                <option value="Etc/GMT-12">GMT+12</option><option value="Etc/GMT+1">GMT-1</option><option value="Etc/GMT+2">GMT-2</option>
-                                <option value="Etc/GMT+3">GMT-3</option><option value="Etc/GMT+4">GMT-4</option><option value="Etc/GMT+5">GMT-5</option>
-                                <option value="Etc/GMT+6">GMT-6</option><option value="Etc/GMT+7">GMT-7</option><option value="Etc/GMT+8">GMT-8</option>
-                                <option value="Etc/GMT+9">GMT-9</option><option value="Etc/GMT+10">GMT-10</option><option value="Etc/GMT+11">GMT-11</option>
-                              </optgroup>
-                            </select>
-                          </div>
+                          {/* Extra time windows */}
+                          {fuExtraWindows.map((w, i) => (
+                            <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
+                                <input type="time" value={w.start} onChange={e => { const u = [...fuExtraWindows]; u[i] = { ...u[i], start: e.target.value }; setFuExtraWindows(u); }}
+                                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
+                                <input type="time" value={w.end} onChange={e => { const u = [...fuExtraWindows]; u[i] = { ...u[i], end: e.target.value }; setFuExtraWindows(u); }}
+                                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                              </div>
+                              <div className="flex items-end pb-1">
+                                <button onClick={() => setFuExtraWindows(fuExtraWindows.filter((_, j) => j !== i))}
+                                  className="p-2 text-slate-400 hover:text-red-500 transition-colors">
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                          <button onClick={() => setFuExtraWindows([...fuExtraWindows, { start: '13:00', end: '17:00' }])}
+                            className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-1">
+                            + Add time window
+                          </button>
                         </div>
                       )}
                     </div>
@@ -2731,6 +2749,7 @@ export function Services() {
                       followUpStrategyPrompt: fuStrategy !== 'auto' ? fuStrategyPrompt : undefined,
                       includeHistorical: fuIncludeHistorical,
                       applyToExisting: fuIncludeHistorical,
+                      fuExtraWindows: fuExtraWindows.length > 0 ? fuExtraWindows : undefined,
                       fuReEnrollOnSilence,
                       fuReEnrollDelay,
                       fuQuietHoursEnabled,
@@ -2754,7 +2773,7 @@ export function Services() {
                   }
                 }}
                 className={`w-full px-4 py-2.5 text-white text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 ${
-                  fuSaving ? 'bg-slate-400 cursor-not-allowed' : 'bg-[#FF1A1A] hover:bg-red-700 hover:shadow-lg hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
+                  fuSaving ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 hover:shadow-lg hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
                 }`}
               >
                 {fuSaving ? (
