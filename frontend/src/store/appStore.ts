@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Lead, Business, Platform, SavedAccount, AccountDiagnostics } from '../types';
-import { thumbtackApi, platformsApi, analyticsApi, type AnalyticsData } from '../services/api';
+import { thumbtackApi, platformsApi, analyticsApi, monitoringApi, type AnalyticsData } from '../services/api';
 
 export interface DashboardStats {
   leadsToday: number;
@@ -49,6 +49,17 @@ interface AppState {
   diagnosticsLoading: boolean;
   setAccountDiagnostics: (diag: Record<string, AccountDiagnostics>) => void;
   loadDiagnostics: (accounts: SavedAccount[], force?: boolean) => Promise<void>;
+
+  // System Health (cached, shared by Layout + Dashboard)
+  systemHealth: {
+    healthy: boolean;
+    status: 'healthy' | 'warning' | 'critical';
+    lastCheckedAt: string | null;
+    summary: { critical: number; warning: number };
+    issues: any[];
+  } | null;
+  systemHealthLoading: boolean;
+  loadSystemHealth: (force?: boolean) => Promise<void>;
 
   // Leads
   leads: Lead[];
@@ -144,6 +155,24 @@ export const useAppStore = create<AppState>()(
           }
         }
         set({ diagnosticsLoading: false });
+      },
+
+      // System Health (cached, shared by Layout + Dashboard)
+      systemHealth: null,
+      systemHealthLoading: false,
+      loadSystemHealth: async (force = false) => {
+        const { systemHealth, systemHealthLoading } = get();
+        if (systemHealthLoading) return;
+        if (!force && systemHealth) return; // Use cache unless forced
+        set({ systemHealthLoading: true });
+        try {
+          const data = await monitoringApi.getSystemHealth();
+          set({ systemHealth: data });
+        } catch {
+          // Silently fail — health is non-critical for page load
+        } finally {
+          set({ systemHealthLoading: false });
+        }
       },
 
       // Leads (not persisted - loaded fresh each session)

@@ -1254,6 +1254,29 @@ export const monitoringApi = {
     const { data } = await api.patch(`/v1/monitoring/errors/resolve-all/${category}`);
     return data as { success: boolean; resolved: number };
   },
+  getSystemHealth: async () => {
+    const { data } = await api.get('/v1/monitoring/system-health');
+    return data as {
+      healthy: boolean;
+      status: 'healthy' | 'warning' | 'critical';
+      lastCheckedAt: string | null;
+      summary: { critical: number; warning: number };
+      issues: {
+        accountId: string;
+        accountName: string;
+        platform: string;
+        issueCode: string;
+        status: 'warning' | 'critical';
+        message: string;
+        firstDetectedAt: string;
+        lastDetectedAt: string;
+      }[];
+    };
+  },
+  runHealthCheck: async () => {
+    const { data } = await api.post('/v1/monitoring/system-health/run');
+    return data;
+  },
 };
 
 // API Test / Webhook Simulation

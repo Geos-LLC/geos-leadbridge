@@ -19,21 +19,22 @@ export function Layout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const loadAnalytics = useAppStore(state => state.loadAnalytics);
-  // Yelp accounts don't use webhookIds — they're connected if they exist (OAuth token stored)
-  const thumbtackAccounts = savedAccounts.filter(a => a.platform === 'thumbtack');
-  const allDisconnected = thumbtackAccounts.length > 0 && thumbtackAccounts.every(a => !a.webhookId);
-  const someDisconnected = thumbtackAccounts.length > 0 && !allDisconnected && thumbtackAccounts.some(a => !a.webhookId);
+  const systemHealth = useAppStore(state => state.systemHealth);
+  const loadSystemHealth = useAppStore(state => state.loadSystemHealth);
 
-  // Preload analytics data on app start — always force-refresh so cache stays current
+  // Preload analytics + system health on app start
   useEffect(() => {
     loadAnalytics(true);
+    loadSystemHealth(true);
   }, []);
 
-  // Track when savedAccounts changes to debug banner visibility
+  const hasCriticalIssues = systemHealth && !systemHealth.healthy && systemHealth.summary.critical > 0;
+  const hasWarningIssues = systemHealth && !systemHealth.healthy && systemHealth.summary.warning > 0 && !hasCriticalIssues;
+
   useEffect(() => {
-    console.log('[Layout] savedAccounts updated:', savedAccounts.map(a => ({ id: a.id, name: a.businessName, webhookId: a.webhookId })));
-    console.log('[Layout] Banner state: allDisconnected=', allDisconnected, 'someDisconnected=', someDisconnected);
-  }, [savedAccounts]);
+    console.log('[Layout] savedAccounts updated:', savedAccounts);
+    console.log('[Layout] Banner state:', systemHealth ? `healthy=${systemHealth.healthy} critical=${systemHealth.summary.critical}` : 'loading');
+  }, [savedAccounts, systemHealth]);
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -217,18 +218,18 @@ export function Layout() {
         {/* Trial Banner - sits below the header, overlays the top of page content */}
         <TrialBanner />
 
-        {/* Banners */}
-        {(allDisconnected || someDisconnected) && (
-          <div className={`px-6 py-3 ${allDisconnected ? 'bg-red-50 border-b border-red-100' : 'bg-amber-50 border-b border-amber-100'}`}>
+        {/* System Health Banner */}
+        {(hasCriticalIssues || hasWarningIssues) && (
+          <div className={`px-6 py-3 ${hasCriticalIssues ? 'bg-red-50 border-b border-red-100' : 'bg-amber-50 border-b border-amber-100'}`}>
             <div className="flex items-center gap-3">
-              <AlertTriangle className={`w-5 h-5 ${allDisconnected ? 'text-red-600' : 'text-amber-600'}`} />
-              <span className={`text-sm font-semibold ${allDisconnected ? 'text-red-900' : 'text-amber-900'}`}>
-                {allDisconnected
-                  ? 'Thumbtack Disconnected – Automation Paused'
-                  : `${savedAccounts.filter(a => !a.webhookId).length} account${savedAccounts.filter(a => !a.webhookId).length > 1 ? 's' : ''} disconnected`}
+              <AlertTriangle className={`w-5 h-5 ${hasCriticalIssues ? 'text-red-600' : 'text-amber-600'}`} />
+              <span className={`text-sm font-semibold ${hasCriticalIssues ? 'text-red-900' : 'text-amber-900'}`}>
+                {systemHealth!.issues.length === 1
+                  ? `${systemHealth!.issues[0].accountName} — ${systemHealth!.issues[0].message}`
+                  : `${systemHealth!.issues.length} account issue${systemHealth!.issues.length > 1 ? 's' : ''} detected`}
               </span>
-              <RouterLink to="/dashboard?reconnect=1" className={`ml-auto text-sm font-bold ${allDisconnected ? 'text-red-600 hover:text-red-700' : 'text-amber-600 hover:text-amber-700'}`}>
-                Reconnect Now →
+              <RouterLink to="/dashboard" className={`ml-auto text-sm font-bold ${hasCriticalIssues ? 'text-red-600 hover:text-red-700' : 'text-amber-600 hover:text-amber-700'}`}>
+                Review in Dashboard →
               </RouterLink>
             </div>
           </div>

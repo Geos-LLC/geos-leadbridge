@@ -105,15 +105,15 @@ export class PlatformService {
             failed++;
             this.logger.warn(`[ProactiveRefresh] Failed to refresh yelp for user ${userId}: ${err.message}`);
             for (const acc of yelpAccounts) {
-              await this.prisma.systemErrorLog.create({
-                data: {
-                  category: 'token_refresh',
-                  message: `yelp token refresh failed for business ${acc.businessId} — ${err.message}`,
-                  userId,
-                  accountId: acc.id,
-                  accountName: acc.businessName,
-                  context: JSON.stringify({ platform: 'yelp', businessId: acc.businessId, source: 'proactive_cron' }),
-                },
+              this.monitoring.captureError({
+                category: 'token_refresh',
+                code: 'token_expired',
+                platform: 'yelp',
+                message: `yelp token refresh failed for business ${acc.businessId} — ${err.message}`,
+                userId,
+                accountId: acc.id,
+                accountName: acc.businessName,
+                context: { platform: 'yelp', businessId: acc.businessId, source: 'proactive_cron' },
               }).catch(() => {});
             }
           }
@@ -137,16 +137,15 @@ export class PlatformService {
           } catch (err: any) {
             failed++;
             this.logger.warn(`[ProactiveRefresh] Failed to refresh ${account.businessName}: ${err.message}`);
-            // Log to SystemErrorLog with proper accountId so tokenDead detection works
-            await this.prisma.systemErrorLog.create({
-              data: {
-                category: 'token_refresh',
-                message: `${account.platform} token refresh failed for business ${account.businessId} — ${err.message}`,
-                userId: account.userId,
-                accountId: account.id,
-                accountName: account.businessName,
-                context: JSON.stringify({ platform: account.platform, businessId: account.businessId, source: 'proactive_cron' }),
-              },
+            this.monitoring.captureError({
+              category: 'token_refresh',
+              code: 'token_expired',
+              platform: account.platform,
+              message: `${account.platform} token refresh failed for business ${account.businessId} — ${err.message}`,
+              userId: account.userId,
+              accountId: account.id,
+              accountName: account.businessName,
+              context: { platform: account.platform, businessId: account.businessId, source: 'proactive_cron' },
             }).catch(() => {});
           }
         }
