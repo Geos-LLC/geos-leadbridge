@@ -101,6 +101,26 @@ export class FollowUpEngineController {
       include: { sequenceTemplate: true },
     });
 
+    // Debug: also check ANY enrollment for this conversation
+    const anyEnrollment = !enrollment ? await this.prisma.followUpEnrollment.findFirst({
+      where: { conversationId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, status: true, stoppedReason: true, currentStepIndex: true, nextStepDueAt: true },
+    }) : null;
+
+    // Check if this lead even has an enrollment via leadId
+    const leadForDebug = await this.prisma.lead.findFirst({
+      where: { threadId: conversationId },
+      select: { id: true, customerName: true },
+    });
+    const enrollmentViaLead = leadForDebug ? await this.prisma.followUpEnrollment.findFirst({
+      where: { leadId: leadForDebug.id },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, status: true, conversationId: true, stoppedReason: true },
+    }) : null;
+
+    this.logger.log(`[enrollment-info] convId=${conversationId}, lead=${leadForDebug?.customerName || 'none'}, activeEnrollment=${!!enrollment}, anyEnrollment=${anyEnrollment ? `${anyEnrollment.status}/${anyEnrollment.stoppedReason}` : 'none'}, viaLead=${enrollmentViaLead ? `${enrollmentViaLead.status} convId=${enrollmentViaLead.conversationId}` : 'none'}`);
+
     if (!enrollment) {
       // Still return AI conversation status + last enrollment info
       const lead = await this.prisma.lead.findFirst({
