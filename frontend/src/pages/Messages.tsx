@@ -2319,7 +2319,32 @@ export function Messages() {
                               className="text-[10px] font-medium py-1 px-2 rounded-lg border border-red-200 text-red-400 hover:bg-red-50"
                               onClick={async () => {
                                 await followUpApi.stopEnrollment(leadFollowUpInfo.enrollmentId, 'manual');
-                                setLeadFollowUpInfo(null);
+                                // Reload to show stopped state with Restart button
+                                if (selectedLead?.threadId) {
+                                  const res = await followUpApi.getEnrollmentInfo(selectedLead.threadId);
+                                  if (res.enrollment) {
+                                    setLeadFollowUpInfo({ ...leadFollowUpInfo, ...res.enrollment });
+                                  } else {
+                                    const extra = res as any;
+                                    setLeadFollowUpInfo({
+                                      ...leadFollowUpInfo,
+                                      enrollmentId: '',
+                                      nextFollowUpAt: null,
+                                      followUpStatus: 'stopped',
+                                      currentStepIndex: 0,
+                                      totalSteps: 0,
+                                      nextMessagePreview: null,
+                                      pendingSuggestionId: null,
+                                      aiConversationOn: extra.aiConversationOn ?? leadFollowUpInfo.aiConversationOn,
+                                      aiAvailability: extra.aiAvailability ?? leadFollowUpInfo.aiAvailability,
+                                      aiActiveHoursStart: extra.aiActiveHoursStart ?? leadFollowUpInfo.aiActiveHoursStart,
+                                      aiActiveHoursEnd: extra.aiActiveHoursEnd ?? leadFollowUpInfo.aiActiveHoursEnd,
+                                      aiTimezone: extra.aiTimezone ?? leadFollowUpInfo.aiTimezone,
+                                      lastStoppedReason: 'manual',
+                                      mode: extra.followUpMode ?? leadFollowUpInfo.mode,
+                                    });
+                                  }
+                                }
                               }}
                             >
                               Stop
