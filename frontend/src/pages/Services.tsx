@@ -252,6 +252,7 @@ export function Services() {
   const [fuStrategyPrompt, setFuStrategyPrompt] = useState('');
   const [fuUrgentCapability, setFuUrgentCapability] = useState<'same_day' | '24h' | '48h' | 'none'>('24h');
   const [fuIncludeHistorical, setFuIncludeHistorical] = useState(false);
+  const [fuSaving, setFuSaving] = useState(false);
   const [fuTimingEditing, setFuTimingEditing] = useState(false);
   const [fuShowRules, setFuShowRules] = useState(false);
   // Legacy compat
@@ -2588,7 +2589,9 @@ export function Services() {
 
                   {/* 8. Save */}
                   <button
+                    disabled={fuSaving}
                     onClick={async () => {
+                      setFuSaving(true);
                       try {
                         await followUpApi.saveSettings(selectedAccountId, {
                           mode: fuMode,
@@ -2620,11 +2623,24 @@ export function Services() {
                             : 'Follow-up settings saved');
                       } catch (err: any) {
                         setError(err.message || 'Failed to save follow-up settings');
+                      } finally {
+                        setFuSaving(false);
                       }
                     }}
-                    className="w-full px-4 py-2.5 bg-[#FF1A1A] text-white text-sm font-bold rounded-xl hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                    className={`w-full px-4 py-2.5 text-white text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 ${
+                      fuSaving
+                        ? 'bg-slate-400 cursor-not-allowed'
+                        : 'bg-[#FF1A1A] hover:bg-red-700 hover:shadow-lg hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
+                    }`}
                   >
-                    <Save className="w-4 h-4" /> Save Follow-up Settings
+                    {fuSaving ? (
+                      <>
+                        <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                        Saving...
+                      </>
+                    ) : (
+                      <><Save className="w-4 h-4" /> Save Follow-up Settings</>
+                    )}
                   </button>
             </ServiceCard>
           )}
