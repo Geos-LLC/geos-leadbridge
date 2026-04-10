@@ -730,9 +730,22 @@ export function Dashboard() {
                             </div>
                           ))}
                         </div>
-                        <Link to="/services" className={`mt-4 text-xs font-bold uppercase tracking-wider flex items-center gap-1 transition-colors ${hasCritical ? 'text-rose-600 hover:text-rose-700' : 'text-orange-600 hover:text-orange-700'}`}>
+                        <button
+                          onClick={() => {
+                            // Find the first critical account and open reconnect modal
+                            const firstIssue = health!.issues.find((i: any) => i.status === 'critical') || health!.issues[0];
+                            if (firstIssue) {
+                              const account = savedAccounts.find(a => a.id === firstIssue.accountId);
+                              if (account) {
+                                setAccountToReconnect(account);
+                                setConnectionModalOpen(true);
+                              }
+                            }
+                          }}
+                          className={`mt-4 text-xs font-bold uppercase tracking-wider flex items-center gap-1 transition-colors ${hasCritical ? 'text-rose-600 hover:text-rose-700' : 'text-orange-600 hover:text-orange-700'}`}
+                        >
                           Fix Now <ChevronRight className="w-3 h-3" />
-                        </Link>
+                        </button>
                       </div>
                     </div>
                   </div>
