@@ -253,6 +253,7 @@ export function Services() {
   const [fuUrgentCapability, setFuUrgentCapability] = useState<'same_day' | '24h' | '48h' | 'none'>('24h');
   const [fuIncludeHistorical, setFuIncludeHistorical] = useState(false);
   const [fuReEnrollOnSilence, setFuReEnrollOnSilence] = useState(true);
+  const [fuReEnrollDelay, setFuReEnrollDelay] = useState('24h');
   const [fuQuietHoursStart, setFuQuietHoursStart] = useState('22:00');
   const [fuQuietHoursEnd, setFuQuietHoursEnd] = useState('08:00');
   const [fuQuietHoursEnabled, setFuQuietHoursEnabled] = useState(true);
@@ -397,6 +398,7 @@ export function Services() {
         if (s.followUpStrategyPrompt) setFuStrategyPrompt(s.followUpStrategyPrompt);
         // Follow-up plan settings
         if (s.fuReEnrollOnSilence !== undefined) setFuReEnrollOnSilence(s.fuReEnrollOnSilence);
+        if (s.fuReEnrollDelay) setFuReEnrollDelay(s.fuReEnrollDelay);
         if (s.fuQuietHoursEnabled !== undefined) setFuQuietHoursEnabled(s.fuQuietHoursEnabled);
         if (s.fuQuietHoursStart) setFuQuietHoursStart(s.fuQuietHoursStart);
         if (s.fuQuietHoursEnd) setFuQuietHoursEnd(s.fuQuietHoursEnd);
@@ -2390,14 +2392,40 @@ export function Services() {
                     </div>
 
                     {/* Re-enroll after customer reply */}
-                    <label className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer hover:border-blue-200 transition-colors">
-                      <input type="checkbox" checked={fuReEnrollOnSilence} onChange={(e) => setFuReEnrollOnSilence(e.target.checked)}
-                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                      <div>
-                        <span className="text-xs font-semibold text-slate-700">Resume follow-ups after conversation</span>
-                        <span className="block text-[10px] text-slate-400">When a customer replies and then goes silent again, start a new follow-up sequence</span>
-                      </div>
-                    </label>
+                    <div className="rounded-xl border border-slate-200 overflow-hidden">
+                      <label className="flex items-center gap-3 p-3 bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors">
+                        <input type="checkbox" checked={fuReEnrollOnSilence} onChange={(e) => setFuReEnrollOnSilence(e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                        <div>
+                          <span className="text-xs font-semibold text-slate-700">Resume follow-ups after conversation</span>
+                          <span className="block text-[10px] text-slate-400">When a customer replies and then goes silent again, start a new follow-up sequence</span>
+                        </div>
+                      </label>
+                      {fuReEnrollOnSilence && (
+                        <div className="px-3 py-3 border-t border-slate-100">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Wait before resuming</label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {([
+                              { value: '1h', label: '1 hour' },
+                              { value: '4h', label: '4 hours' },
+                              { value: '12h', label: '12 hours' },
+                              { value: '24h', label: '24 hours' },
+                              { value: '48h', label: '2 days' },
+                              { value: '72h', label: '3 days' },
+                              { value: '7d', label: '1 week' },
+                            ]).map(opt => (
+                              <button key={opt.value} onClick={() => setFuReEnrollDelay(opt.value)}
+                                className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border-2 transition-all ${
+                                  fuReEnrollDelay === opt.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
+                                }`}>
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-2">How long to wait after your last message before starting follow-ups again.</p>
+                        </div>
+                      )}
+                    </div>
 
                     {/* Quiet hours */}
                     <div className="rounded-xl border border-slate-200 overflow-hidden">
@@ -2704,6 +2732,7 @@ export function Services() {
                       includeHistorical: fuIncludeHistorical,
                       applyToExisting: fuIncludeHistorical,
                       fuReEnrollOnSilence,
+                      fuReEnrollDelay,
                       fuQuietHoursEnabled,
                       fuQuietHoursStart,
                       fuQuietHoursEnd,
