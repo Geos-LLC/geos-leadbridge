@@ -599,13 +599,16 @@ export class FollowUpEngineController {
               if (terminal.includes(s) || terminal.includes(ts)) { skipped.terminal++; continue; }
             }
 
-            // Skip only if the LAST message is from the customer (active conversation, they're engaged).
+            // Skip only if the customer replied RECENTLY (last 48h) — active conversation.
+            // Older customer messages mean the conversation went cold — follow-ups are appropriate.
             const lastMessage = await this.prisma.message.findFirst({
               where: { conversationId: lead.threadId },
               orderBy: { sentAt: 'desc' },
-              select: { sender: true },
+              select: { sender: true, sentAt: true },
             });
-            if (lastMessage?.sender === 'customer') { skipped.customerTurn++; continue; }
+            if (lastMessage?.sender === 'customer' && lastMessage.sentAt > new Date(Date.now() - 48 * 60 * 60 * 1000)) {
+              skipped.customerTurn++; continue;
+            }
 
             try {
               await this.engineService.enrollInSequence(lead.threadId, template.id, lead.platform, lead.id);
