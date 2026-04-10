@@ -234,8 +234,9 @@ export class FollowUpEngineService {
 
   /**
    * Stop enrollment on customer reply. Idempotent — safe for duplicate webhooks.
+   * Returns whether any enrollment was actually stopped (for re-engagement alerts).
    */
-  async handleCustomerReply(conversationId: string): Promise<void> {
+  async handleCustomerReply(conversationId: string, customerMessage?: string): Promise<{ stopped: boolean; reEngagementAlert: string | null }> {
     const result = await this.prisma.followUpEnrollment.updateMany({
       where: { conversationId, status: 'active' },
       data: {
@@ -245,30 +246,59 @@ export class FollowUpEngineService {
       },
     });
 
-    if (result.count > 0) {
-      // Cancel any pending/suggested step executions
-      await this.prisma.followUpStepExecution.updateMany({
-        where: {
-          enrollment: { conversationId },
-          status: { in: ['scheduled', 'suggested'] },
-        },
-        data: { status: 'cancelled' },
-      });
-
-      // Clear ThreadContext cached fields
-      await this.prisma.threadContext.updateMany({
-        where: { conversationId },
-        data: {
-          activeEnrollmentId: null,
-          nextFollowUpAt: null,
-          followUpStatus: 'stopped',
-          followUpState: null,
-        },
-      });
-
-      this.logger.log(`Stopped follow-up for conversation ${conversationId} — customer replied`);
+    if (result.count === 0) {
+      return { stopped: false, reEngagementAlert: null };
     }
-    // result.count === 0 → already stopped or no enrollment → idempotent
+
+    // Cancel any pending/suggested step executions
+    await this.prisma.followUpStepExecution.updateMany({
+      where: {
+        enrollment: { conversationId },
+        status: { in: ['scheduled', 'suggested'] },
+      },
+      data: { status: 'cancelled' },
+    });
+
+    // Clear ThreadContext cached fields
+    await this.prisma.threadContext.updateMany({
+      where: { conversationId },
+      data: {
+        activeEnrollmentId: null,
+        nextFollowUpAt: null,
+        followUpStatus: 'stopped',
+        followUpState: null,
+      },
+    });
+
+    this.logger.log(`Stopped follow-up for conversation ${conversationId} — customer replied`);
+
+    // Build re-engagement alert message if enabled
+    let reEngagementAlert: string | null = null;
+    try {
+      const lead = await this.prisma.lead.findFirst({
+        where: { threadId: conversationId },
+        select: { customerName: true, businessId: true, userId: true },
+      });
+      if (lead?.businessId) {
+        const acct = await this.prisma.savedAccount.findFirst({
+          where: { userId: lead.userId, businessId: lead.businessId },
+          select: { followUpSettingsJson: true },
+        });
+        if (acct?.followUpSettingsJson) {
+          const settings = JSON.parse(acct.followUpSettingsJson);
+          if (settings.reEngagementAlertEnabled !== false) {
+            const template = settings.reEngagementTemplate || 'Lead {{lead.name}} replied: "{{message}}"';
+            reEngagementAlert = template
+              .replace(/\{\{lead\.name\}\}/g, lead.customerName || 'Unknown')
+              .replace(/\{\{message\}\}/g, (customerMessage || '').substring(0, 200));
+          }
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(`[ReEngagement] Failed to build alert: ${err.message}`);
+    }
+
+    return { stopped: true, reEngagementAlert };
   }
 
   /**

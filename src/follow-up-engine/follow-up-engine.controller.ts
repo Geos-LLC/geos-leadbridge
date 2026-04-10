@@ -535,6 +535,9 @@ export class FollowUpEngineController {
     if (body.aiStopOnBooked !== undefined) extendedSettings.aiStopOnBooked = body.aiStopOnBooked;
     if (body.aiStopOnPriceAgreed !== undefined) extendedSettings.aiStopOnPriceAgreed = body.aiStopOnPriceAgreed;
     if (body.aiMaxReplies !== undefined) extendedSettings.aiMaxReplies = body.aiMaxReplies;
+    // Re-engagement alerts
+    if (body.reEngagementAlertEnabled !== undefined) extendedSettings.reEngagementAlertEnabled = body.reEngagementAlertEnabled;
+    if (body.reEngagementTemplate !== undefined) extendedSettings.reEngagementTemplate = body.reEngagementTemplate;
 
     await this.prisma.savedAccount.update({
       where: { id: savedAccountId },

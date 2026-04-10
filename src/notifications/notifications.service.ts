@@ -1098,6 +1098,49 @@ export class NotificationsService {
   }
 
   /**
+   * Send a re-engagement alert SMS to the business owner.
+   * Called when a customer replies after being in a follow-up sequence.
+   */
+  async sendReEngagementAlert(userId: string, savedAccountId: string, alertMessage: string): Promise<void> {
+    try {
+      const settings = await this.prisma.notificationSettings.findUnique({
+        where: { savedAccountId },
+      });
+      if (!settings?.sigcoreApiKey) {
+        this.logger.warn(`[ReEngagement] No Sigcore API key for account ${savedAccountId}`);
+        return;
+      }
+
+      const [agentPhone, fromPhone] = await Promise.all([
+        this.resolveAgentPhone(userId, savedAccountId),
+        this.resolveBotPhone(userId, savedAccountId),
+      ]);
+      if (!agentPhone || !fromPhone) {
+        this.logger.warn(`[ReEngagement] Missing phone — agent: ${!!agentPhone}, from: ${!!fromPhone}`);
+        return;
+      }
+      const nF = fromPhone.replace(/\D/g, '').slice(-10);
+      const nT = agentPhone.replace(/\D/g, '').slice(-10);
+      if (nF === nT) {
+        this.logger.warn(`[ReEngagement] from=${fromPhone} equals to=${agentPhone} — skipping`);
+        return;
+      }
+
+      await this.sendViaSigcore({
+        to: agentPhone,
+        body: alertMessage,
+        fromPhone,
+        apiKey: settings.sigcoreApiKey,
+        sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
+        metadata: { type: 're-engagement', userId, savedAccountId },
+      });
+      this.logger.log(`[ReEngagement] Alert sent to ${agentPhone}: ${alertMessage.substring(0, 60)}...`);
+    } catch (err: any) {
+      this.logger.error(`[ReEngagement] Failed to send alert: ${err.message}`);
+    }
+  }
+
+  /**
    * Send a notification using a specific rule (or legacy template)
    */
   private async sendNotificationWithRule(

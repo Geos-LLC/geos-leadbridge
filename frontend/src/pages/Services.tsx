@@ -267,6 +267,8 @@ export function Services() {
   const [aiStopOnBooked, setAiStopOnBooked] = useState(true);
   const [aiStopOnPriceAgreed, setAiStopOnPriceAgreed] = useState(false);
   const [aiMaxReplies, setAiMaxReplies] = useState(0); // 0 = unlimited
+  const [reEngagementAlertOn, setReEngagementAlertOn] = useState(true);
+  const [reEngagementTemplate, setReEngagementTemplate] = useState('Lead {{lead.name}} replied: "{{message}}"');
   // Legacy compat
   const fuPreset = 'standard' as const;
   // Track which saved template is currently loaded in each CC message field (for edit button)
@@ -412,6 +414,9 @@ export function Services() {
         if (s.aiStopOnBooked !== undefined) setAiStopOnBooked(s.aiStopOnBooked);
         if (s.aiStopOnPriceAgreed !== undefined) setAiStopOnPriceAgreed(s.aiStopOnPriceAgreed);
         if (s.aiMaxReplies !== undefined) setAiMaxReplies(s.aiMaxReplies);
+        // Re-engagement alerts
+        if (s.reEngagementAlertEnabled !== undefined) setReEngagementAlertOn(s.reEngagementAlertEnabled);
+        if (s.reEngagementTemplate) setReEngagementTemplate(s.reEngagementTemplate);
       }
     }).catch(() => {});
   }, [selectedAccountId]);
@@ -2726,6 +2731,43 @@ export function Services() {
                 )}
               </div>
 
+              {/* ── Re-engagement Alerts sub-section ── */}
+              <div className="border border-slate-100 rounded-2xl overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50">
+                  <div className="flex items-center gap-3">
+                    <Bell className="w-5 h-5 text-amber-500" />
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-800">Re-engagement Alerts</h4>
+                      <p className="text-xs text-slate-400">Get notified when a lead replies after being inactive</p>
+                    </div>
+                  </div>
+                  <label className="inline-flex items-center cursor-pointer">
+                    <input type="checkbox" checked={reEngagementAlertOn} onChange={e => setReEngagementAlertOn(e.target.checked)} className="sr-only peer" />
+                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
+                  </label>
+                </div>
+                {reEngagementAlertOn && (
+                  <div className="px-5 py-4 space-y-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Alert Message Template</label>
+                      <p className="text-[10px] text-slate-400 mb-2">
+                        Use {'{{lead.name}}'} for lead name and {'{{message}}'} for their reply text.
+                      </p>
+                      <textarea
+                        value={reEngagementTemplate}
+                        onChange={e => setReEngagementTemplate(e.target.value)}
+                        rows={2}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                        placeholder='Lead {{lead.name}} replied: "{{message}}"'
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      When a customer replies after follow-ups were sent, you'll receive an SMS alert with their message so you can respond quickly.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               {/* Save button */}
               <button
                 disabled={fuSaving}
@@ -2763,6 +2805,8 @@ export function Services() {
                       aiStopOnBooked,
                       aiStopOnPriceAgreed,
                       aiMaxReplies,
+                      reEngagementAlertEnabled: reEngagementAlertOn,
+                      reEngagementTemplate,
                     } as any);
                     const wasHistorical = fuIncludeHistorical;
                     showSuccess(fuMode === 'off'
