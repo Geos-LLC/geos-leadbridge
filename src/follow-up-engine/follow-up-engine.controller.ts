@@ -216,6 +216,11 @@ export class FollowUpEngineController {
     if (body.applyToExisting !== undefined) extendedSettings.followUpApplyToExisting = body.applyToExisting;
     if (body.followUpStrategy !== undefined) extendedSettings.followUpStrategy = body.followUpStrategy;
     if (body.followUpStrategyPrompt !== undefined) extendedSettings.followUpStrategyPrompt = body.followUpStrategyPrompt;
+    // AI Conversation rules
+    if (body.aiStopOnOptOut !== undefined) extendedSettings.aiStopOnOptOut = body.aiStopOnOptOut;
+    if (body.aiStopOnBooked !== undefined) extendedSettings.aiStopOnBooked = body.aiStopOnBooked;
+    if (body.aiStopOnPriceAgreed !== undefined) extendedSettings.aiStopOnPriceAgreed = body.aiStopOnPriceAgreed;
+    if (body.aiMaxReplies !== undefined) extendedSettings.aiMaxReplies = body.aiMaxReplies;
 
     await this.prisma.savedAccount.update({
       where: { id: savedAccountId },
