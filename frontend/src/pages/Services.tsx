@@ -2269,7 +2269,7 @@ export function Services() {
           </ServiceCard>
 
           {/* 4. Ongoing Communication — Follow-ups + AI Conversation */}
-          {accounts.find(a => a.id === selectedAccountId)?.platform === 'yelp' && (
+          {selectedAccountId && (
             <ServiceCard
               icon={<Clock className="w-7 h-7" />}
               title="Ongoing Communication"
@@ -2736,7 +2736,7 @@ export function Services() {
                       activeHoursStart: fuAvailability === 'active_hours' ? fuStart : null as any,
                       activeHoursEnd: fuAvailability === 'active_hours' ? fuEnd : null as any,
                       timezone: fuTz,
-                      platform: 'yelp',
+                      platform: accounts.find(a => a.id === selectedAccountId)?.platform || 'yelp',
                       steps: fuSmartSteps,
                       availability: fuAvailability,
                       strategyMode: 'auto',
