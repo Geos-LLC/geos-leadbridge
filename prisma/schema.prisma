@@ -345,6 +345,7 @@ model SavedAccount {
   agentPhoneOverride String?  // Per-business agent phone; when null, inherits User.businessPhone
   // Follow-up settings (per-account)
   followUpMode     String?  // 'off' | 'suggest' | 'auto_send'
+  aiConversationEnabled Boolean @default(false) // Separate toggle: auto-reply to customer messages
   followUpPreset   String?  // 'conservative' | 'standard' | 'persistent'
   followUpReplyType String? // 'template' | 'ai'
   followUpActiveHoursStart String? // e.g. "09:00"

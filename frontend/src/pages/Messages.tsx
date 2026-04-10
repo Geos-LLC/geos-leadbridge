@@ -274,7 +274,7 @@ export function Messages() {
           setLeadFollowUpInfo({
             nextFollowUpAt: enrollment?.nextStepDueAt || null,
             followUpStatus: enrollment?.status || null,
-            aiConversationOn: settings.followUpMode === 'auto_send',
+            aiConversationOn: settings.aiConversationEnabled ?? settings.followUpMode === 'auto_send',
           });
         }).catch(() => {
           setLeadFollowUpInfo({

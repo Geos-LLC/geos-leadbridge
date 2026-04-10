@@ -170,6 +170,7 @@ export class FollowUpEngineController {
         followUpActiveHoursEnd: true,
         followUpTimezone: true,
         followUpSettingsJson: true,
+        aiConversationEnabled: true,
       },
     });
     if (!account) return { success: false, error: 'Account not found' };
@@ -233,6 +234,7 @@ export class FollowUpEngineController {
       where: { id: savedAccountId },
       data: {
         followUpMode: mode,
+        aiConversationEnabled: body.aiConversationEnabled ?? undefined,
         followUpPreset: preset || 'standard',
         followUpReplyType: replyType,
         followUpActiveHoursStart: activeHoursStart,
