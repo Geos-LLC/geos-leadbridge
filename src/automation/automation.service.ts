@@ -470,6 +470,48 @@ export class AutomationService implements OnModuleInit {
       this.logger.log(`[AUTOMATION] ✓ TRIGGERING rule "${rule.name}" (${rule.id}): mode=${rule.replyTriggerMode || 'every_reply'}`);
       await this.scheduleAutomatedMessage(rule, enrichedContext);
     }
+
+    // AI Conversation: if no customer_reply rules but account has followUpMode=auto_send,
+    // auto-reply to customer messages using AI (ongoing conversation handling)
+    if (rules.length === 0 && savedAccount.followUpMode === 'auto_send') {
+      this.logger.log(`[AUTOMATION] AI Conversation enabled for ${savedAccount.businessName} — generating AI reply to customer message`);
+
+      // Check terminal lead status — don't reply to done/hired/archived leads
+      const lead = context.leadId ? await this.prisma.lead.findUnique({
+        where: { id: context.leadId },
+        select: { status: true, thumbtackStatus: true, threadId: true },
+      }) : null;
+      if (lead) {
+        const s = (lead.status || '').toLowerCase();
+        const ts = (lead.thumbtackStatus || '').toLowerCase();
+        const terminal = ['done', 'scheduled', 'in_progress', 'in progress', 'booked', 'hired', 'completed', 'archived', 'lost'];
+        if (terminal.includes(s) || terminal.includes(ts)) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — lead status is "${s || ts}"`);
+          return;
+        }
+      }
+
+      // Create a synthetic AI rule so we can reuse scheduleAutomatedMessage
+      const syntheticRule = {
+        id: `ai-conversation-${savedAccount.id}`,
+        name: 'AI Conversation',
+        triggerType: 'customer_reply' as const,
+        useAi: true,
+        templateId: null,
+        template: null,
+        promptTemplateId: null,
+        promptTemplate: null,
+        delayMinutes: 0,
+        enabled: true,
+        savedAccountId: savedAccount.id,
+        activeHoursStart: savedAccount.followUpActiveHoursStart,
+        activeHoursEnd: savedAccount.followUpActiveHoursEnd,
+        activeHoursTimezone: savedAccount.followUpTimezone,
+        stopOnCustomerReply: true,
+      };
+
+      await this.scheduleAutomatedMessage(syntheticRule, enrichedContext);
+    }
   }
 
   // ==========================================
