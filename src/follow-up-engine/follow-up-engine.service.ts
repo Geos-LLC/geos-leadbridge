@@ -111,8 +111,26 @@ export class FollowUpEngineService {
     const steps = stepsData?.steps || [];
     if (steps.length === 0) throw new Error('Sequence template has no steps');
 
+    // If the lead had a prior conversation (customer replied before going silent),
+    // skip the early short-delay steps and start from a step with ≥ 24h delay.
+    // This avoids sending a "checking in" 2min after an ongoing conversation goes quiet.
+    let startStepIndex = 0;
+    if (leadId) {
+      const customerMsgCount = await this.prisma.message.count({
+        where: { conversation: { leads: { some: { id: leadId } } }, sender: 'customer' },
+      }).catch(() => 0);
+      if (customerMsgCount > 0) {
+        // Find the first step with delay ≥ 1440 minutes (24 hours)
+        const laterStep = steps.findIndex((s: any) => (s.delayMinutes || 0) >= 1440);
+        if (laterStep > 0) {
+          startStepIndex = laterStep;
+          this.logger.log(`[FollowUp] Lead had ${customerMsgCount} customer messages — skipping to step ${startStepIndex} (delay ≥ 24h)`);
+        }
+      }
+    }
+
     // Compute first step due time (respecting active hours)
-    const firstStep = steps[0];
+    const firstStep = steps[startStepIndex];
     const nextDue = this.computeNextDueAt(
       new Date(),
       firstStep.delayMinutes,
@@ -143,7 +161,7 @@ export class FollowUpEngineService {
         leadId,
         platform,
         status: 'active',
-        currentStepIndex: 0,
+        currentStepIndex: startStepIndex,
         nextStepDueAt: nextDue,
         mode: enrollMode,
       },
