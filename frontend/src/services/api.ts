@@ -1632,6 +1632,10 @@ export const followUpApi = {
     const { data } = await api.post(`/v1/follow-ups/enrollment-info/${conversationId}/preview`);
     return data;
   },
+  restartFollowUp: async (conversationId: string): Promise<{ success: boolean; enrollmentId?: string; error?: string }> => {
+    const { data } = await api.post(`/v1/follow-ups/restart/${conversationId}`);
+    return data;
+  },
   stopEnrollment: async (id: string, reason?: string): Promise<{ success: boolean }> => {
     const { data } = await api.post(`/v1/follow-ups/enrollments/${id}/stop`, { reason });
     return data;
