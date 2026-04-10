@@ -102,7 +102,39 @@ export class FollowUpEngineController {
     });
 
     if (!enrollment) {
-      return { success: true, enrollment: null };
+      // Still return AI conversation status + last enrollment info
+      const lead = await this.prisma.lead.findFirst({
+        where: { threadId: conversationId },
+        select: { businessId: true, userId: true },
+      });
+      let aiConversationOn = false;
+      let followUpMode: string | null = null;
+      if (lead?.businessId) {
+        const acct = await this.prisma.savedAccount.findFirst({
+          where: { userId: lead.userId, businessId: lead.businessId },
+          select: { aiConversationEnabled: true, followUpMode: true },
+        });
+        aiConversationOn = acct?.aiConversationEnabled ?? false;
+        followUpMode = acct?.followUpMode || null;
+      }
+      // Find the most recent non-active enrollment for context
+      const lastEnrollment = await this.prisma.followUpEnrollment.findFirst({
+        where: { conversationId },
+        orderBy: { createdAt: 'desc' },
+        select: { status: true, stoppedReason: true, completedAt: true, currentStepIndex: true },
+      });
+      return {
+        success: true,
+        enrollment: null,
+        aiConversationOn,
+        followUpMode,
+        lastEnrollment: lastEnrollment ? {
+          status: lastEnrollment.status,
+          stoppedReason: lastEnrollment.stoppedReason,
+          completedAt: lastEnrollment.completedAt,
+          stepReached: lastEnrollment.currentStepIndex,
+        } : null,
+      };
     }
 
     // Load steps: prefer user-configured, fall back to template

@@ -267,20 +267,40 @@ export function Messages() {
     if (selectedLead?.id && selectedLead?.threadId) {
       followUpApi.getEnrollmentInfo(selectedLead.threadId)
         .then(res => {
-          setLeadFollowUpInfo(res.enrollment ? {
-            enrollmentId: res.enrollment.id,
-            nextFollowUpAt: res.enrollment.nextStepDueAt || null,
-            followUpStatus: res.enrollment.status || null,
-            currentStepIndex: res.enrollment.currentStepIndex ?? 0,
-            totalSteps: res.enrollment.totalSteps ?? 0,
-            sentCount: res.enrollment.sentCount ?? 0,
-            nextStepObjective: res.enrollment.nextStepObjective || null,
-            nextMessagePreview: res.enrollment.nextMessagePreview || null,
-            nextMessageMode: res.enrollment.nextMessageMode || 'ai',
-            pendingSuggestionId: res.enrollment.pendingSuggestionId || null,
-            aiConversationOn: res.enrollment.aiConversationOn ?? false,
-            mode: res.enrollment.mode || 'auto_send',
-          } : null);
+          if (res.enrollment) {
+            setLeadFollowUpInfo({
+              enrollmentId: res.enrollment.id,
+              nextFollowUpAt: res.enrollment.nextStepDueAt || null,
+              followUpStatus: res.enrollment.status || null,
+              currentStepIndex: res.enrollment.currentStepIndex ?? 0,
+              totalSteps: res.enrollment.totalSteps ?? 0,
+              sentCount: res.enrollment.sentCount ?? 0,
+              nextStepObjective: res.enrollment.nextStepObjective || null,
+              nextMessagePreview: res.enrollment.nextMessagePreview || null,
+              nextMessageMode: res.enrollment.nextMessageMode || 'ai',
+              pendingSuggestionId: res.enrollment.pendingSuggestionId || null,
+              aiConversationOn: res.enrollment.aiConversationOn ?? false,
+              mode: res.enrollment.mode || 'auto_send',
+            });
+          } else {
+            // No active enrollment — still show AI conversation status + last enrollment context
+            const extra = res as any;
+            setLeadFollowUpInfo({
+              enrollmentId: '',
+              nextFollowUpAt: null,
+              followUpStatus: extra.lastEnrollment?.status || null,
+              currentStepIndex: extra.lastEnrollment?.stepReached || 0,
+              totalSteps: 0,
+              sentCount: 0,
+              nextStepObjective: null,
+              nextMessagePreview: null,
+              nextMessageMode: 'ai',
+              pendingSuggestionId: null,
+              aiConversationOn: extra.aiConversationOn ?? false,
+              mode: extra.followUpMode || 'off',
+              lastStoppedReason: extra.lastEnrollment?.stoppedReason || null,
+            });
+          }
         })
         .catch((err: any) => { console.error('[FollowUp] enrollment-info failed:', err); });
     }
@@ -299,6 +319,7 @@ export function Messages() {
     pendingSuggestionId: string | null;
     aiConversationOn: boolean;
     mode: string;
+    lastStoppedReason?: string | null;
   } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [editingPreview, setEditingPreview] = useState(false);
@@ -2045,6 +2066,21 @@ export function Messages() {
               <div className="space-y-1">
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Ongoing Communication</h4>
                 <div className="bg-slate-50 rounded-xl p-2.5 space-y-2 text-[11px]">
+                  {/* Follow-up status */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Follow-ups</span>
+                    {!leadFollowUpInfo.enrollmentId ? (
+                      <span className="text-[10px] text-slate-400">
+                        {leadFollowUpInfo.followUpStatus === 'stopped'
+                          ? `Stopped${leadFollowUpInfo.lastStoppedReason === 'customer_replied' ? ' — customer replied' : leadFollowUpInfo.lastStoppedReason === 'manual' ? ' — manual' : leadFollowUpInfo.lastStoppedReason ? ` — ${leadFollowUpInfo.lastStoppedReason.replace(/_/g, ' ')}` : ''}`
+                          : leadFollowUpInfo.followUpStatus === 'completed' ? 'Completed'
+                          : leadFollowUpInfo.mode === 'off' ? 'Disabled'
+                          : 'Not enrolled'}
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-600">Active</span>
+                    )}
+                  </div>
                   {/* Next follow-up with relative time + step progress */}
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">Next follow-up</span>
