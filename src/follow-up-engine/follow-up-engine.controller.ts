@@ -567,7 +567,7 @@ export class FollowUpEngineController {
           });
 
           let count = 0;
-          let skipped = { noThread: 0, active: 0, error: 0, terminal: 0 };
+          let skipped = { noThread: 0, active: 0, recentSend: 0, customerTurn: 0, error: 0, terminal: 0 };
           for (const lead of leads) {
             if (!lead.threadId) { skipped.noThread++; continue; }
 
@@ -576,6 +576,17 @@ export class FollowUpEngineController {
               where: { conversationId: lead.threadId, status: 'active' },
             });
             if (existing) { skipped.active++; continue; }
+
+            // Skip if a follow-up was sent from an ACTIVE enrollment in the last 24h.
+            // Stopped/completed enrollment sends don't count — user may be re-enrolling intentionally.
+            const recentSend = await this.prisma.followUpStepExecution.findFirst({
+              where: {
+                enrollment: { conversationId: lead.threadId, status: 'active' },
+                status: 'sent',
+                executedAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+              },
+            });
+            if (recentSend) { skipped.recentSend++; continue; }
 
             // Skip terminal lead statuses
             const leadStatus = await this.prisma.lead.findUnique({
@@ -589,8 +600,16 @@ export class FollowUpEngineController {
               if (terminal.includes(s) || terminal.includes(ts)) { skipped.terminal++; continue; }
             }
 
-            // "Include historical" = user explicitly wants ALL leads enrolled.
-            // No customerTurn skip — they asked for it.
+            // Skip if customer replied in the last 4 hours (active conversation — their turn).
+            // Older customer messages = conversation went cold, follow-ups are appropriate.
+            const lastMessage = await this.prisma.message.findFirst({
+              where: { conversationId: lead.threadId },
+              orderBy: { sentAt: 'desc' },
+              select: { sender: true, sentAt: true },
+            });
+            if (lastMessage?.sender === 'customer' && lastMessage.sentAt > new Date(Date.now() - 4 * 60 * 60 * 1000)) {
+              skipped.customerTurn++; continue;
+            }
 
             try {
               await this.engineService.enrollInSequence(lead.threadId, template.id, lead.platform, lead.id);
