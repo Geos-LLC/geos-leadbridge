@@ -745,7 +745,7 @@ export function Services() {
       console.error('[toggleAutoReply] FAILED:', err.response?.data || err.message);
       // Rollback on error
       setAutoReplyRules(prevRules);
-      setError(err.response?.data?.message || err.message || 'Failed to toggle Auto Reply');
+      setError(err.response?.data?.message || err.message || 'Failed to toggle Instant Reply');
     } finally {
       setSaving(false);
     }
@@ -860,7 +860,7 @@ export function Services() {
         leadVoicemailMessage: ccVoicemailEnabled ? ccVoicemailMessage : undefined,
         botNumberE164: ccBotNumber || undefined,
       });
-      showSuccess('Instant Call Connect settings saved');
+      showSuccess('Instant Call settings saved');
       setCcSavedSnapshot({
         mode: ccMode,
         agentPhone: ccAgentPhone,
@@ -891,9 +891,9 @@ export function Services() {
         autoReplyTemplate: ctAutoReplyTemplate,
       });
     } catch (err: any) {
-      console.error('Failed to toggle Customer Texting:', err.response?.data || err.message);
+      console.error('Failed to toggle Instant Text:', err.response?.data || err.message);
       setCtEnabled(!enabled); // rollback
-      setError(err.response?.data?.message || err.message || 'Failed to toggle Customer Texting');
+      setError(err.response?.data?.message || err.message || 'Failed to toggle Instant Text');
     } finally {
       setCtSaving(false);
     }
@@ -907,10 +907,10 @@ export function Services() {
         enabled: ctEnabled,
         autoReplyTemplate: ctAutoReplyTemplate,
       });
-      showSuccess('Customer Texting settings saved');
+      showSuccess('Instant Text settings saved');
       setCtSavedSnapshot({ autoReplyTemplate: ctAutoReplyTemplate });
     } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Failed to save Customer Texting settings');
+      setError(err.response?.data?.message || err.message || 'Failed to save Instant Text settings');
     } finally {
       setCtSaving(false);
     }
@@ -1463,7 +1463,7 @@ export function Services() {
               {/* Row 1: Bot Number + Business Phone */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div data-tour="bot-number">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🤖 Bot Number</label>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🤖 LeadBridge Number</label>
                   <p className="text-[11px] text-slate-400 mb-2">Customers receive texts and calls from this number.</p>
                   <div className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700">
                     {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName && tenantPhones[0].friendlyName !== tenantPhones[0].phoneNumber ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
@@ -1507,7 +1507,7 @@ export function Services() {
                   {ccAgentPhone && tenantPhones.length > 0 && ccAgentPhone === tenantPhones[0].phoneNumber && (
                     <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
                       <AlertCircle className="w-3 h-3 shrink-0" />
-                      This is your Bot Number — enter your business phone instead
+                      This is your LeadBridge Number — enter your business phone instead
                     </p>
                   )}
                 </div>
@@ -1570,7 +1570,7 @@ export function Services() {
                       ctTestStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
                       'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
                     }`}
-                    title={!ctEnabled ? 'Enable Customer Texting first' : commsDirty ? 'Save changes first' : ''}
+                    title={!ctEnabled ? 'Enable Instant Text first' : commsDirty ? 'Save changes first' : ''}
                   >
                     {ctTestStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
                      ctTestStatus === 'delivered' ? <CheckCircle size={14} /> :
@@ -1635,8 +1635,8 @@ export function Services() {
             return (
           <ServiceCard
             icon={<Bell className="w-7 h-7" />}
-            title="Lead Notifications"
-            description="Auto-reply to leads and get SMS alerts for every new inquiry."
+            title="New Lead Handling"
+            description="What happens immediately when a new lead arrives."
             enabled={autoReplyEnabled || (leadAlertRule?.enabled ?? false)}
             onToggle={(on) => {
               if (on && noPhone) { setShowDedicatedModal(true); return; }
@@ -1675,8 +1675,8 @@ export function Services() {
                   <div className="flex items-center gap-3">
                     <Zap className="w-5 h-5 text-blue-600" />
                     <div>
-                      <h4 className="text-sm font-bold text-slate-800">Auto Reply</h4>
-                      <p className="text-xs text-slate-400">Automatically respond to new leads as they arrive</p>
+                      <h4 className="text-sm font-bold text-slate-800">Instant Reply</h4>
+                      <p className="text-xs text-slate-400">Send the first message automatically when a new lead arrives</p>
                     </div>
                   </div>
                   <label className="inline-flex items-center cursor-pointer">
@@ -1692,7 +1692,7 @@ export function Services() {
                 <div className="px-5 py-4 space-y-4">
                   {/* Reply Type toggle — always visible */}
                   <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Reply Type</label>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Instant Reply Mode</label>
                     <div className="flex gap-2">
                       <button
                         onClick={() => { setAutoReplyUseAi(false); if (firstReplyRule) changeRuleAiMode(firstReplyRule.id, false); }}
@@ -1703,7 +1703,7 @@ export function Services() {
                           borderColor: !autoReplyUseAi ? '#1d4ed8' : '#e2e8f0',
                         }}
                       >
-                        📝 Template
+                        📝 Template Reply
                       </button>
                       <button
                         onClick={() => { setAutoReplyUseAi(true); if (firstReplyRule) changeRuleAiMode(firstReplyRule.id, true, autoReplyAiPrompt); }}
@@ -1766,7 +1766,7 @@ export function Services() {
                       ) : (
                         /* AI mode: prompt selector + editable content */
                         <div>
-                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">First Reply Prompt</label>
+                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Reply Instructions</label>
                           <select
                             value={autoReplyPromptTemplateId}
                             onChange={e => {
@@ -1825,8 +1825,8 @@ export function Services() {
                   <div className="flex items-center gap-3">
                     <MessageSquare className="w-5 h-5 text-amber-600" />
                     <div>
-                      <h4 className="text-sm font-bold text-slate-800">Lead Alerts</h4>
-                      <p className="text-xs text-slate-400">Get SMS notifications for every new inquiry</p>
+                      <h4 className="text-sm font-bold text-slate-800">New Lead Alerts</h4>
+                      <p className="text-xs text-slate-400">Get notified as soon as a new lead arrives</p>
                     </div>
                   </div>
                   <label className="inline-flex items-center cursor-pointer">
@@ -1953,7 +1953,7 @@ export function Services() {
           {/* 3. Customer Communications (combined CT + ICC) */}
           <ServiceCard
             icon={<Phone className="w-7 h-7" />}
-            title="Customer Communications"
+            title="Customer Contact"
             description="Text and call customers from your LeadBridge number."
             enabled={ctEnabled || ccEnabled}
             onToggle={(on) => {
@@ -1992,8 +1992,8 @@ export function Services() {
                   <div className="flex items-center gap-3">
                     <MessageSquare className="w-5 h-5 text-emerald-600" />
                     <div>
-                      <h4 className="text-sm font-bold text-slate-800">Customer Texting</h4>
-                      <p className="text-xs text-slate-400">Auto-text customers when new leads arrive</p>
+                      <h4 className="text-sm font-bold text-slate-800">Instant Text</h4>
+                      <p className="text-xs text-slate-400">Automatically text the lead when a new lead arrives</p>
                     </div>
                   </div>
                   <label className="inline-flex items-center cursor-pointer">
@@ -2065,8 +2065,8 @@ export function Services() {
                   <div className="flex items-center gap-3">
                     <PhoneCall className="w-5 h-5 text-violet-600" />
                     <div>
-                      <h4 className="text-sm font-bold text-slate-800">Instant Call Connect</h4>
-                      <p className="text-xs text-slate-400">Bridge you instantly to new leads via phone call</p>
+                      <h4 className="text-sm font-bold text-slate-800">Instant Call</h4>
+                      <p className="text-xs text-slate-400">Call your team and connect to the lead right away</p>
                     </div>
                   </div>
                   <label className="inline-flex items-center cursor-pointer">
@@ -2249,8 +2249,8 @@ export function Services() {
           {accounts.find(a => a.id === selectedAccountId)?.platform === 'yelp' && (
             <ServiceCard
               icon={<Clock className="w-7 h-7" />}
-              title="Yelp Follow-ups"
-              description="Automated follow-ups for leads who don't respond."
+              title="Follow-ups"
+              description="Automated follow-ups for leads who don't respond. Best for chat-based leads like Yelp."
               enabled={fuMode !== 'off'}
               onToggle={(on) => setFuMode(on ? 'suggest' : 'off')}
               expanded={expandedCard === 'yelp-followups'}
@@ -2262,10 +2262,11 @@ export function Services() {
                   {/* 1. Follow-up Mode */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">1. Follow-up Mode</label>
+                    <p className="text-[10px] text-slate-400 mb-2">Choose whether follow-ups use preset templates or AI conversation handling.</p>
                     <div className="flex gap-2">
                       {([
-                        { value: 'suggest' as const, label: 'Templates', desc: 'Send preset messages on schedule', replyType: 'template' as const, availability: 'active_hours' as const },
-                        { value: 'auto_send' as const, label: 'AI Reply', desc: 'AI generates contextual follow-ups automatically', replyType: 'ai' as const, availability: 'active_hours' as const },
+                        { value: 'suggest' as const, label: 'Templates', desc: 'Send preset follow-up messages on schedule', replyType: 'template' as const, availability: 'active_hours' as const },
+                        { value: 'auto_send' as const, label: 'AI Conversation', desc: 'Let AI continue the conversation after the first reply', replyType: 'ai' as const, availability: 'active_hours' as const },
                       ]).map(opt => (
                         <button key={opt.value}
                           onClick={() => { setFuMode(opt.value); setFuReplyType(opt.replyType); setFuAvailability(opt.availability); }}
@@ -2280,10 +2281,11 @@ export function Services() {
                     </div>
                   </div>
 
-                  {/* AI Strategy — only when AI Reply mode */}
+                  {/* AI Strategy — only when AI Conversation mode */}
                   {fuMode === 'auto_send' && (
                     <div>
-                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Strategy</label>
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Conversation Strategy</label>
+                      <p className="text-[10px] text-slate-400 mb-2">Choose how AI should guide the conversation.</p>
                       <div className="flex flex-wrap gap-1.5 mb-2">
                         {([
                           { key: 'auto' as const, emoji: '🤖', label: 'Auto', desc: 'AI picks best strategy per conversation' },
