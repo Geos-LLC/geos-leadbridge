@@ -476,6 +476,12 @@ export class AutomationService implements OnModuleInit {
     if (rules.length === 0 && savedAccount.followUpMode === 'auto_send') {
       this.logger.log(`[AUTOMATION] AI Conversation enabled for ${savedAccount.businessName} — generating AI reply to customer message`);
 
+      // Load AI conversation rules from settings
+      let aiRules: any = {};
+      if (savedAccount.followUpSettingsJson) {
+        try { aiRules = JSON.parse(savedAccount.followUpSettingsJson); } catch {}
+      }
+
       // Check terminal lead status — don't reply to done/hired/archived leads
       const lead = context.leadId ? await this.prisma.lead.findUnique({
         where: { id: context.leadId },
@@ -487,6 +493,48 @@ export class AutomationService implements OnModuleInit {
         const terminal = ['done', 'scheduled', 'in_progress', 'in progress', 'booked', 'hired', 'completed', 'archived', 'lost'];
         if (terminal.includes(s) || terminal.includes(ts)) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — lead status is "${s || ts}"`);
+          return;
+        }
+      }
+
+      // Check AI conversation rules
+      // Rule: stop on opt-out keywords in customer message
+      if (aiRules.aiStopOnOptOut !== false && context.customerMessage) {
+        const optOutPhrases = ['stop', 'unsubscribe', 'don\'t contact', 'do not contact', 'leave me alone', 'not interested', 'remove me'];
+        const msgLower = context.customerMessage.toLowerCase();
+        if (optOutPhrases.some(p => msgLower.includes(p))) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — customer opted out`);
+          return;
+        }
+      }
+
+      // Rule: stop on booked/hired keywords
+      if (aiRules.aiStopOnBooked !== false && context.customerMessage) {
+        const bookedPhrases = ['already hired', 'booked another', 'found someone', 'went with someone', 'already have someone', 'no longer need'];
+        const msgLower = context.customerMessage.toLowerCase();
+        if (bookedPhrases.some(p => msgLower.includes(p))) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — customer booked elsewhere`);
+          return;
+        }
+      }
+
+      // Rule: stop on price agreed — hand off to manager
+      if (aiRules.aiStopOnPriceAgreed && context.customerMessage) {
+        const agreedPhrases = ['sounds good', 'let\'s do it', 'i\'ll take it', 'book it', 'schedule it', 'let\'s go', 'perfect, when', 'great, when', 'yes please', 'i\'m in'];
+        const msgLower = context.customerMessage.toLowerCase();
+        if (agreedPhrases.some(p => msgLower.includes(p))) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation paused — customer agreed on price, handing off to manager`);
+          return;
+        }
+      }
+
+      // Rule: max replies per conversation
+      if (aiRules.aiMaxReplies && aiRules.aiMaxReplies > 0 && lead?.threadId) {
+        const aiReplyCount = await this.prisma.message.count({
+          where: { conversationId: lead.threadId, sender: 'pro', senderType: 'ai' },
+        });
+        if (aiReplyCount >= aiRules.aiMaxReplies) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation stopped — reached max ${aiRules.aiMaxReplies} replies (sent ${aiReplyCount})`);
           return;
         }
       }

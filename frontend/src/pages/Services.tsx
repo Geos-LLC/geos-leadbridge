@@ -255,6 +255,11 @@ export function Services() {
   const [fuSaving, setFuSaving] = useState(false);
   const [fuTimingEditing, setFuTimingEditing] = useState(false);
   const [fuShowRules, setFuShowRules] = useState(false);
+  const [aiShowRules, setAiShowRules] = useState(false);
+  const [aiStopOnOptOut, setAiStopOnOptOut] = useState(true);
+  const [aiStopOnBooked, setAiStopOnBooked] = useState(true);
+  const [aiStopOnPriceAgreed, setAiStopOnPriceAgreed] = useState(false);
+  const [aiMaxReplies, setAiMaxReplies] = useState(0); // 0 = unlimited
   // Legacy compat
   const fuPreset = 'standard' as const;
   // Track which saved template is currently loaded in each CC message field (for edit button)
@@ -386,6 +391,11 @@ export function Services() {
         if (s.followUpApplyToExisting !== undefined) setFuIncludeHistorical(s.followUpApplyToExisting);
         if (s.followUpStrategy) setFuStrategy(s.followUpStrategy);
         if (s.followUpStrategyPrompt) setFuStrategyPrompt(s.followUpStrategyPrompt);
+        // AI Conversation rules
+        if (s.aiStopOnOptOut !== undefined) setAiStopOnOptOut(s.aiStopOnOptOut);
+        if (s.aiStopOnBooked !== undefined) setAiStopOnBooked(s.aiStopOnBooked);
+        if (s.aiStopOnPriceAgreed !== undefined) setAiStopOnPriceAgreed(s.aiStopOnPriceAgreed);
+        if (s.aiMaxReplies !== undefined) setAiMaxReplies(s.aiMaxReplies);
       }
     }).catch(() => {});
   }, [selectedAccountId]);
@@ -2549,6 +2559,62 @@ export function Services() {
                         </div>
                       )}
                     </div>
+
+                    {/* AI Conversation Rules (collapsed) */}
+                    <div className="border border-slate-200 rounded-xl overflow-hidden">
+                      <button onClick={() => setAiShowRules(!aiShowRules)} className="w-full px-4 py-3 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
+                        <div>
+                          <span className="text-[11px] font-bold text-slate-600 uppercase tracking-widest">AI Conversation Rules</span>
+                          <p className="text-[10px] text-slate-400 mt-0.5">Control when AI stops replying and special handling.</p>
+                        </div>
+                        {aiShowRules ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                      </button>
+                      {aiShowRules && (
+                        <div className="px-4 py-4 space-y-4 border-t border-slate-100">
+                          {/* Stop conditions */}
+                          <div>
+                            <div className="text-[11px] font-semibold text-slate-600 mb-2">AI stops replying when:</div>
+                            <div className="space-y-1.5">
+                              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                                <input type="checkbox" checked={aiStopOnOptOut} onChange={e => setAiStopOnOptOut(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
+                                Customer asks not to be contacted
+                              </label>
+                              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                                <input type="checkbox" checked={aiStopOnBooked} onChange={e => setAiStopOnBooked(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
+                                Job is booked or confirmed
+                              </label>
+                              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                                <input type="checkbox" checked={aiStopOnPriceAgreed} onChange={e => setAiStopOnPriceAgreed(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
+                                Customer agrees on price — hand off to manager
+                              </label>
+                              <div className="flex items-center gap-2 text-sm text-slate-500">
+                                <span className="text-emerald-500 text-xs">&#10003;</span> Lead is done, scheduled, or archived
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Max replies */}
+                          <div>
+                            <div className="text-[11px] font-semibold text-slate-600 mb-1">Max AI replies per conversation</div>
+                            <p className="text-[10px] text-slate-400 mb-2">Limit how many times AI replies before handing off to a manager. 0 = unlimited.</p>
+                            <div className="flex gap-1.5">
+                              {[0, 3, 5, 10].map(n => (
+                                <button key={n} onClick={() => setAiMaxReplies(n)}
+                                  className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border-2 transition-all ${aiMaxReplies === n ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-violet-200'}`}>
+                                  {n === 0 ? 'Unlimited' : n}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Always active */}
+                          <div className="flex items-center gap-2 text-sm text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+                            <span className="text-emerald-500 text-xs">&#10003;</span>
+                            Manager can always take over by sending a message manually
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2579,6 +2645,10 @@ export function Services() {
                       followUpStrategyPrompt: fuStrategy !== 'auto' ? fuStrategyPrompt : undefined,
                       includeHistorical: fuIncludeHistorical,
                       applyToExisting: fuIncludeHistorical,
+                      aiStopOnOptOut,
+                      aiStopOnBooked,
+                      aiStopOnPriceAgreed,
+                      aiMaxReplies,
                     } as any);
                     const wasHistorical = fuIncludeHistorical;
                     showSuccess(fuMode === 'off'
