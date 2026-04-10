@@ -567,7 +567,7 @@ export class FollowUpEngineController {
           });
 
           let count = 0;
-          let skipped = { noThread: 0, active: 0, recentSend: 0, error: 0, terminal: 0 };
+          let skipped = { noThread: 0, active: 0, error: 0, terminal: 0 };
           for (const lead of leads) {
             if (!lead.threadId) { skipped.noThread++; continue; }
 
@@ -576,16 +576,6 @@ export class FollowUpEngineController {
               where: { conversationId: lead.threadId, status: 'active' },
             });
             if (existing) { skipped.active++; continue; }
-
-            // Skip if a follow-up was already sent in the last 24h (prevents re-enrollment spam)
-            const recentSend = await this.prisma.followUpStepExecution.findFirst({
-              where: {
-                enrollment: { conversationId: lead.threadId },
-                status: 'sent',
-                executedAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-              },
-            });
-            if (recentSend) { skipped.recentSend++; continue; }
 
             // Skip terminal lead statuses
             const leadStatus = await this.prisma.lead.findUnique({
