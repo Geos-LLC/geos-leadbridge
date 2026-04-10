@@ -109,13 +109,32 @@ export class FollowUpEngineController {
       });
       let aiConversationOn = false;
       let followUpMode: string | null = null;
+      let aiAvailability: string | null = null;
+      let aiActiveHoursStart: string | null = null;
+      let aiActiveHoursEnd: string | null = null;
+      let aiTimezone: string | null = null;
+      let aiExtraWindows: any[] | null = null;
       if (lead?.businessId) {
         const acct = await this.prisma.savedAccount.findFirst({
           where: { userId: lead.userId, businessId: lead.businessId },
-          select: { aiConversationEnabled: true, followUpMode: true },
+          select: { aiConversationEnabled: true, followUpMode: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true, followUpTimezone: true, followUpSettingsJson: true },
         });
         aiConversationOn = acct?.aiConversationEnabled ?? false;
         followUpMode = acct?.followUpMode || null;
+        aiActiveHoursStart = acct?.followUpActiveHoursStart || null;
+        aiActiveHoursEnd = acct?.followUpActiveHoursEnd || null;
+        aiTimezone = acct?.followUpTimezone || null;
+        if (acct?.followUpSettingsJson) {
+          try {
+            const s = JSON.parse(acct.followUpSettingsJson);
+            aiAvailability = s.followUpAvailability || null;
+            if (s.fuExtraWindows) aiExtraWindows = s.fuExtraWindows;
+          } catch {}
+        }
+        // Infer availability from data: if activeHoursStart is set, it's active_hours; otherwise always
+        if (!aiAvailability) {
+          aiAvailability = aiActiveHoursStart ? 'active_hours' : 'always';
+        }
       }
       // Find the most recent non-active enrollment for context
       const lastEnrollment = await this.prisma.followUpEnrollment.findFirst({
@@ -127,6 +146,11 @@ export class FollowUpEngineController {
         success: true,
         enrollment: null,
         aiConversationOn,
+        aiAvailability,
+        aiActiveHoursStart,
+        aiActiveHoursEnd,
+        aiTimezone,
+        aiExtraWindows,
         followUpMode,
         lastEnrollment: lastEnrollment ? {
           status: lastEnrollment.status,
@@ -173,18 +197,33 @@ export class FollowUpEngineController {
       where: { enrollmentId: enrollment.id, status: 'sent' },
     });
 
-    // Get account AI conversation status
+    // Get account AI conversation status + availability
     const lead = await this.prisma.lead.findFirst({
       where: { threadId: conversationId },
       select: { businessId: true, userId: true },
     });
     let aiConversationOn = false;
+    let aiAvailability: string = 'always';
+    let aiActiveHoursStart: string | null = null;
+    let aiActiveHoursEnd: string | null = null;
+    let aiTimezone: string | null = null;
+    let aiExtraWindows: any[] | null = null;
     if (lead?.businessId) {
       const acct = await this.prisma.savedAccount.findFirst({
         where: { userId: lead.userId, businessId: lead.businessId },
-        select: { aiConversationEnabled: true },
+        select: { aiConversationEnabled: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true, followUpTimezone: true, followUpSettingsJson: true },
       });
       aiConversationOn = acct?.aiConversationEnabled ?? false;
+      aiActiveHoursStart = acct?.followUpActiveHoursStart || null;
+      aiActiveHoursEnd = acct?.followUpActiveHoursEnd || null;
+      aiTimezone = acct?.followUpTimezone || null;
+      if (acct?.followUpSettingsJson) {
+        try {
+          const s = JSON.parse(acct.followUpSettingsJson);
+          aiAvailability = s.followUpAvailability || (aiActiveHoursStart ? 'active_hours' : 'always');
+          if (s.fuExtraWindows) aiExtraWindows = s.fuExtraWindows;
+        } catch {}
+      }
     }
 
     return {
@@ -203,6 +242,11 @@ export class FollowUpEngineController {
         nextMessageMode,
         pendingSuggestionId: pendingSuggestion?.id || null,
         aiConversationOn,
+        aiAvailability,
+        aiActiveHoursStart,
+        aiActiveHoursEnd,
+        aiTimezone,
+        aiExtraWindows,
       },
     };
   }
@@ -522,18 +566,15 @@ export class FollowUpEngineController {
             });
             if (recentSend) continue;
 
-            // Skip if customer replied AFTER our last message (active conversation — customer engaged)
-            const lastProMessage = await this.prisma.message.findFirst({
-              where: { conversationId: lead.threadId, sender: 'pro' },
+            // Skip only if the LAST message is from the customer (active conversation, they're engaged).
+            // If the last message is from us and the customer hasn't replied, that's exactly
+            // when we want follow-ups — even if there was a prior back-and-forth.
+            const lastMessage = await this.prisma.message.findFirst({
+              where: { conversationId: lead.threadId },
               orderBy: { sentAt: 'desc' },
-              select: { sentAt: true },
+              select: { sender: true },
             });
-            if (lastProMessage) {
-              const customerReplyAfterUs = await this.prisma.message.findFirst({
-                where: { conversationId: lead.threadId, sender: 'customer', sentAt: { gt: lastProMessage.sentAt } },
-              });
-              if (customerReplyAfterUs) continue; // Customer responded to us — don't follow up
-            }
+            if (lastMessage?.sender === 'customer') continue; // Customer's turn — don't follow up
 
             try {
               await this.engineService.enrollInSequence(lead.threadId, template.id, lead.platform, lead.id);

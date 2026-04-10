@@ -280,6 +280,10 @@ export function Messages() {
               nextMessageMode: res.enrollment.nextMessageMode || 'ai',
               pendingSuggestionId: res.enrollment.pendingSuggestionId || null,
               aiConversationOn: res.enrollment.aiConversationOn ?? false,
+              aiAvailability: res.enrollment.aiAvailability || 'always',
+              aiActiveHoursStart: res.enrollment.aiActiveHoursStart || null,
+              aiActiveHoursEnd: res.enrollment.aiActiveHoursEnd || null,
+              aiTimezone: res.enrollment.aiTimezone || null,
               mode: res.enrollment.mode || 'auto_send',
             });
           } else {
@@ -297,6 +301,10 @@ export function Messages() {
               nextMessageMode: 'ai',
               pendingSuggestionId: null,
               aiConversationOn: extra.aiConversationOn ?? false,
+              aiAvailability: extra.aiAvailability || 'always',
+              aiActiveHoursStart: extra.aiActiveHoursStart || null,
+              aiActiveHoursEnd: extra.aiActiveHoursEnd || null,
+              aiTimezone: extra.aiTimezone || null,
               mode: extra.followUpMode || 'off',
               lastStoppedReason: extra.lastEnrollment?.stoppedReason || null,
             });
@@ -318,6 +326,10 @@ export function Messages() {
     nextMessageMode: 'template' | 'ai';
     pendingSuggestionId: string | null;
     aiConversationOn: boolean;
+    aiAvailability: string;
+    aiActiveHoursStart: string | null;
+    aiActiveHoursEnd: string | null;
+    aiTimezone: string | null;
     mode: string;
     lastStoppedReason?: string | null;
   } | null>(null);
@@ -2128,7 +2140,7 @@ export function Messages() {
                       </span>
                     </div>
                   )}
-                  {/* AI Conversation status */}
+                  {/* AI Conversation status + availability */}
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">AI Conversation</span>
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -2139,6 +2151,18 @@ export function Messages() {
                       {leadFollowUpInfo.aiConversationOn ? 'On' : 'Off'}
                     </span>
                   </div>
+                  {leadFollowUpInfo.aiConversationOn && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 text-[10px]">Availability</span>
+                      <span className="text-[10px] text-slate-500 font-medium">
+                        {leadFollowUpInfo.aiAvailability === 'always'
+                          ? '24/7'
+                          : leadFollowUpInfo.aiActiveHoursStart && leadFollowUpInfo.aiActiveHoursEnd
+                            ? `${leadFollowUpInfo.aiActiveHoursStart} – ${leadFollowUpInfo.aiActiveHoursEnd}${leadFollowUpInfo.aiTimezone ? ` ${({ 'America/New_York': 'ET', 'America/Chicago': 'CT', 'America/Denver': 'MT', 'America/Los_Angeles': 'PT' } as Record<string, string>)[leadFollowUpInfo.aiTimezone] || ''}` : ''}`
+                            : 'Active hours'}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Next message preview */}
