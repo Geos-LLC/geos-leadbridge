@@ -248,11 +248,12 @@ export function Messages() {
     }).catch(() => setFuSuggestions([]));
   }, [selectedLead?.id]);
 
-  // Load strategy suggestion when selected lead changes
+  // Load strategy suggestion + follow-up info when selected lead changes
   useEffect(() => {
     setStrategySuggestion(null);
     setThreadContextData(null);
     setActiveStrategyKey(null);
+    setLeadFollowUpInfo(null);
     if (!selectedLead?.threadId) return;
     setStrategySuggestionLoading(true);
     conversationContextApi.suggestStrategy(selectedLead.threadId)
@@ -261,7 +262,36 @@ export function Messages() {
       })
       .catch(() => {})
       .finally(() => setStrategySuggestionLoading(false));
+
+    // Load follow-up enrollment + AI conversation status
+    if (selectedLead?.id) {
+      followUpApi.getEnrollments?.('active').then((res: any) => {
+        const enrollment = res.enrollments?.find((e: any) => e.conversationId === selectedLead.threadId);
+        // Check AI conversation from saved account settings
+        const acct = savedAccounts.find(a => a.businessId === selectedLead.businessId);
+        api.get(`/v1/follow-ups/settings/${acct?.id || ''}`).then((settingsRes: any) => {
+          const settings = settingsRes.data?.settings || {};
+          setLeadFollowUpInfo({
+            nextFollowUpAt: enrollment?.nextStepDueAt || null,
+            followUpStatus: enrollment?.status || null,
+            aiConversationOn: settings.followUpMode === 'auto_send',
+          });
+        }).catch(() => {
+          setLeadFollowUpInfo({
+            nextFollowUpAt: enrollment?.nextStepDueAt || null,
+            followUpStatus: enrollment?.status || null,
+            aiConversationOn: false,
+          });
+        });
+      }).catch(() => {});
+    }
   }, [selectedLead?.id]);
+
+  const [leadFollowUpInfo, setLeadFollowUpInfo] = useState<{
+    nextFollowUpAt: string | null;
+    followUpStatus: string | null;
+    aiConversationOn: boolean;
+  } | null>(null);
 
   const [sendChannel, setSendChannel] = useState<'platform' | 'sms'>('platform');
 
@@ -1995,6 +2025,34 @@ export function Messages() {
                       {AI_STRATEGIES.find(s => s.key === activeStrategyKey)?.prompt || ''}
                     </pre>
                   </details>
+                </div>
+              </div>
+            )}
+
+            {/* Follow-up & AI status labels */}
+            {leadFollowUpInfo && (
+              <div className="space-y-1">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Ongoing Communication</h4>
+                <div className="bg-slate-50 rounded-xl p-2.5 space-y-1.5 text-[11px]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Next follow-up</span>
+                    <span className="font-semibold text-slate-700">
+                      {leadFollowUpInfo.nextFollowUpAt
+                        ? new Date(leadFollowUpInfo.nextFollowUpAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+                        : <span className="text-slate-400 font-normal">None scheduled</span>
+                      }
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">AI Conversation</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      leadFollowUpInfo.aiConversationOn
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-slate-200 text-slate-500'
+                    }`}>
+                      {leadFollowUpInfo.aiConversationOn ? 'On' : 'Off'}
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
