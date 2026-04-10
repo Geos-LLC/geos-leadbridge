@@ -1628,18 +1628,10 @@ export class WebhooksService {
     // more than 10s ago (another instance just created it), skip new-lead notifications.
     const isNewLead = !existingLead && (Date.now() - new Date(lead.createdAt).getTime()) < 10_000;
 
-    // Stop follow-up sequences on Yelp customer reply (synchronous, idempotent)
-    if (existingLead && lead.threadId) {
-      try {
-        await this.followUpEngine.handleCustomerReply(lead.threadId);
-      } catch (err: any) {
-        this.logger.warn(`Failed to stop Yelp follow-up on customer reply: ${err.message}`);
-      }
-    }
-
     if (!isNewLead && existingLead) {
       // Yelp sends NEW_EVENT for BOTH customer messages AND our own outbound messages.
       // Verify by fetching the latest event from Yelp API — check user_type.
+      // MUST run BEFORE handleCustomerReply — echo would kill follow-up enrollments.
       let isCustomerMessage = true;
       try {
         const yelpAdapter = this.platformFactory.getAdapter('yelp') as any;
@@ -1666,7 +1658,15 @@ export class WebhooksService {
 
       if (!isCustomerMessage) return;
 
-      // Confirmed customer reply
+      // Confirmed customer reply — stop follow-up enrollments
+      if (lead.threadId) {
+        try {
+          await this.followUpEngine.handleCustomerReply(lead.threadId);
+        } catch (err: any) {
+          this.logger.warn(`Failed to stop Yelp follow-up on customer reply: ${err.message}`);
+        }
+      }
+
       this.logger.log(`Yelp customer reply on lead ${leadId}`);
       // Emit CRM webhook for customer message
       this.crmWebhookService.emit(userId, 'message.received', {
