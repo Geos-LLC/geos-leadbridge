@@ -567,7 +567,7 @@ export class FollowUpEngineController {
           });
 
           let count = 0;
-          let skipped = { noThread: 0, active: 0, recentSend: 0, customerTurn: 0, error: 0, terminal: 0 };
+          let skipped = { noThread: 0, active: 0, recentSend: 0, error: 0, terminal: 0 };
           for (const lead of leads) {
             if (!lead.threadId) { skipped.noThread++; continue; }
 
@@ -599,16 +599,8 @@ export class FollowUpEngineController {
               if (terminal.includes(s) || terminal.includes(ts)) { skipped.terminal++; continue; }
             }
 
-            // Skip only if the customer replied RECENTLY (last 48h) — active conversation.
-            // Older customer messages mean the conversation went cold — follow-ups are appropriate.
-            const lastMessage = await this.prisma.message.findFirst({
-              where: { conversationId: lead.threadId },
-              orderBy: { sentAt: 'desc' },
-              select: { sender: true, sentAt: true },
-            });
-            if (lastMessage?.sender === 'customer' && lastMessage.sentAt > new Date(Date.now() - 48 * 60 * 60 * 1000)) {
-              skipped.customerTurn++; continue;
-            }
+            // "Include historical" = user explicitly wants ALL leads enrolled.
+            // No customerTurn skip — they asked for it.
 
             try {
               await this.engineService.enrollInSequence(lead.threadId, template.id, lead.platform, lead.id);
