@@ -101,6 +101,26 @@ export class FollowUpEngineController {
       include: { sequenceTemplate: true },
     });
 
+    // Debug: also check ANY enrollment for this conversation
+    const anyEnrollment = !enrollment ? await this.prisma.followUpEnrollment.findFirst({
+      where: { conversationId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, status: true, stoppedReason: true, currentStepIndex: true, nextStepDueAt: true },
+    }) : null;
+
+    // Check if this lead even has an enrollment via leadId
+    const leadForDebug = await this.prisma.lead.findFirst({
+      where: { threadId: conversationId },
+      select: { id: true, customerName: true },
+    });
+    const enrollmentViaLead = leadForDebug ? await this.prisma.followUpEnrollment.findFirst({
+      where: { leadId: leadForDebug.id },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, status: true, conversationId: true, stoppedReason: true },
+    }) : null;
+
+    this.logger.log(`[enrollment-info] convId=${conversationId}, lead=${leadForDebug?.customerName || 'none'}, activeEnrollment=${!!enrollment}, anyEnrollment=${anyEnrollment ? `${anyEnrollment.status}/${anyEnrollment.stoppedReason}` : 'none'}, viaLead=${enrollmentViaLead ? `${enrollmentViaLead.status} convId=${enrollmentViaLead.conversationId}` : 'none'}`);
+
     if (!enrollment) {
       // Still return AI conversation status + last enrollment info
       const lead = await this.prisma.lead.findFirst({
@@ -579,13 +599,16 @@ export class FollowUpEngineController {
               if (terminal.includes(s) || terminal.includes(ts)) { skipped.terminal++; continue; }
             }
 
-            // Skip only if the LAST message is from the customer (active conversation, they're engaged).
+            // Skip only if the customer replied RECENTLY (last 48h) — active conversation.
+            // Older customer messages mean the conversation went cold — follow-ups are appropriate.
             const lastMessage = await this.prisma.message.findFirst({
               where: { conversationId: lead.threadId },
               orderBy: { sentAt: 'desc' },
-              select: { sender: true },
+              select: { sender: true, sentAt: true },
             });
-            if (lastMessage?.sender === 'customer') { skipped.customerTurn++; continue; }
+            if (lastMessage?.sender === 'customer' && lastMessage.sentAt > new Date(Date.now() - 48 * 60 * 60 * 1000)) {
+              skipped.customerTurn++; continue;
+            }
 
             try {
               await this.engineService.enrollInSequence(lead.threadId, template.id, lead.platform, lead.id);
