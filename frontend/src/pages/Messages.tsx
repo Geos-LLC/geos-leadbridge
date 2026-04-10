@@ -264,24 +264,19 @@ export function Messages() {
       .finally(() => setStrategySuggestionLoading(false));
 
     // Load follow-up enrollment + AI conversation status
-    if (selectedLead?.id) {
-      followUpApi.getEnrollments?.('active').then((res: any) => {
-        const enrollment = res.enrollments?.find((e: any) => e.conversationId === selectedLead.threadId);
-        // Check AI conversation from saved account settings
-        const acct = savedAccounts.find(a => a.businessId === selectedLead.businessId);
-        api.get(`/v1/follow-ups/settings/${acct?.id || ''}`).then((settingsRes: any) => {
-          const settings = settingsRes.data?.settings || {};
-          setLeadFollowUpInfo({
-            nextFollowUpAt: enrollment?.nextStepDueAt || null,
-            followUpStatus: enrollment?.status || null,
-            aiConversationOn: settings.aiConversationEnabled ?? settings.followUpMode === 'auto_send',
-          });
-        }).catch(() => {
-          setLeadFollowUpInfo({
-            nextFollowUpAt: enrollment?.nextStepDueAt || null,
-            followUpStatus: enrollment?.status || null,
-            aiConversationOn: false,
-          });
+    if (selectedLead?.id && selectedLead?.threadId) {
+      // Query enrollment directly by conversationId instead of fetching all
+      const acct = savedAccounts.find(a => a.businessId === selectedLead.businessId);
+      Promise.all([
+        api.get(`/v1/follow-ups/enrollments?status=active`).then(r => r.data).catch(() => ({ enrollments: [] })),
+        acct?.id ? api.get(`/v1/follow-ups/settings/${acct.id}`).then(r => r.data).catch(() => ({ settings: {} })) : Promise.resolve({ settings: {} }),
+      ]).then(([enrollRes, settingsRes]) => {
+        const enrollment = enrollRes.enrollments?.find((e: any) => e.conversationId === selectedLead.threadId);
+        const settings = settingsRes.settings || {};
+        setLeadFollowUpInfo({
+          nextFollowUpAt: enrollment?.nextStepDueAt || null,
+          followUpStatus: enrollment?.status || null,
+          aiConversationOn: (settings as any).aiConversationEnabled ?? (settings as any).followUpMode === 'auto_send',
         });
       }).catch(() => {});
     }
