@@ -302,6 +302,16 @@ export class FollowUpEngineController {
             });
             if (existing) continue;
 
+            // Skip if a follow-up was already sent in the last 24h (prevents re-enrollment spam)
+            const recentSend = await this.prisma.followUpStepExecution.findFirst({
+              where: {
+                enrollment: { conversationId: lead.threadId },
+                status: 'sent',
+                executedAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+              },
+            });
+            if (recentSend) continue;
+
             // Skip if customer replied AFTER our last message (active conversation — customer engaged)
             const lastProMessage = await this.prisma.message.findFirst({
               where: { conversationId: lead.threadId, sender: 'pro' },

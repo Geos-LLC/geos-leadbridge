@@ -293,22 +293,30 @@ export class FollowUpGeneratorService {
       if (requestDetails) systemParts.push(requestDetails);
     }
 
-    // Load previous follow-up messages so AI doesn't repeat itself
+    // Load ALL previous follow-up messages across ALL enrollments for this conversation
+    // so AI doesn't repeat itself even when re-enrolled
     const previousFollowUps = await this.prisma.followUpStepExecution.findMany({
       where: {
         enrollment: { conversationId },
         status: 'sent',
         generatedMessage: { not: null },
       },
-      orderBy: { stepIndex: 'asc' },
+      orderBy: { scheduledAt: 'asc' },
       select: { generatedMessage: true, stepIndex: true },
     });
-    if (previousFollowUps.length > 0) {
+    // Deduplicate by message content
+    const seenMessages = new Set<string>();
+    const uniqueFollowUps = previousFollowUps.filter(p => {
+      if (seenMessages.has(p.generatedMessage!)) return false;
+      seenMessages.add(p.generatedMessage!);
+      return true;
+    });
+    if (uniqueFollowUps.length > 0) {
       systemParts.push('', '--- PREVIOUS FOLLOW-UPS ALREADY SENT (do NOT repeat these) ---');
-      for (const prev of previousFollowUps) {
-        systemParts.push(`Step ${prev.stepIndex}: "${prev.generatedMessage}"`);
+      for (const prev of uniqueFollowUps) {
+        systemParts.push(`"${prev.generatedMessage}"`);
       }
-      systemParts.push('Write a DIFFERENT message. Vary tone, angle, and approach. Do NOT reuse the same wording.');
+      systemParts.push('Write a COMPLETELY DIFFERENT message. Use a different angle, tone, and opening. Do NOT reuse any of the wording above.');
     }
 
     // Build messages with conversation history
