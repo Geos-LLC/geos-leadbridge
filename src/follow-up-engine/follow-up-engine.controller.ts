@@ -600,15 +600,28 @@ export class FollowUpEngineController {
               if (terminal.includes(s) || terminal.includes(ts)) { skipped.terminal++; continue; }
             }
 
-            // Skip if customer replied in the last 4 hours (active conversation — their turn).
-            // Older customer messages = conversation went cold, follow-ups are appropriate.
+            // Skip if the last message is from the customer — it's the manager's turn to reply.
+            // Exception: if AI conversation is enabled, the system handles replies automatically.
             const lastMessage = await this.prisma.message.findFirst({
               where: { conversationId: lead.threadId },
               orderBy: { sentAt: 'desc' },
-              select: { sender: true, sentAt: true },
+              select: { sender: true },
             });
-            if (lastMessage?.sender === 'customer' && lastMessage.sentAt > new Date(Date.now() - 4 * 60 * 60 * 1000)) {
-              skipped.customerTurn++; continue;
+            if (lastMessage?.sender === 'customer') {
+              // Check if AI conversation is on for this account
+              const leadForAi = await this.prisma.lead.findUnique({
+                where: { id: lead.id },
+                select: { businessId: true, userId: true },
+              });
+              let aiOn = false;
+              if (leadForAi?.businessId) {
+                const acct = await this.prisma.savedAccount.findFirst({
+                  where: { userId: leadForAi.userId, businessId: leadForAi.businessId },
+                  select: { aiConversationEnabled: true },
+                });
+                aiOn = acct?.aiConversationEnabled ?? false;
+              }
+              if (!aiOn) { skipped.customerTurn++; continue; }
             }
 
             try {
