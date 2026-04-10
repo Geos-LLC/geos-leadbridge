@@ -263,31 +263,46 @@ export function Messages() {
       .catch(() => {})
       .finally(() => setStrategySuggestionLoading(false));
 
-    // Load follow-up enrollment + AI conversation status
+    // Load follow-up enrollment info (rich data for right panel)
     if (selectedLead?.id && selectedLead?.threadId) {
-      // Query enrollment directly by conversationId instead of fetching all
-      const acct = savedAccounts.find(a => a.businessId === selectedLead.businessId);
-      Promise.all([
-        api.get(`/v1/follow-ups/enrollments?status=active`).then(r => r.data).catch((err: any) => { console.warn('[FollowUp] enrollments fetch failed:', err.message); return { enrollments: [] }; }),
-        acct?.id ? api.get(`/v1/follow-ups/settings/${acct.id}`).then(r => r.data).catch(() => ({ settings: {} })) : Promise.resolve({ settings: {} }),
-      ]).then(([enrollRes, settingsRes]) => {
-        const enrollment = enrollRes.enrollments?.find((e: any) => e.conversationId === selectedLead.threadId);
-        const settings = settingsRes.settings || {};
-        console.log('[FollowUp] enrollments:', enrollRes.enrollments?.length, 'match:', !!enrollment, 'threadId:', selectedLead.threadId, 'nextDue:', enrollment?.nextStepDueAt);
-        setLeadFollowUpInfo({
-          nextFollowUpAt: enrollment?.nextStepDueAt || null,
-          followUpStatus: enrollment?.status || null,
-          aiConversationOn: (settings as any).aiConversationEnabled ?? false,
-        });
-      }).catch((err: any) => { console.error('[FollowUp] load failed:', err); });
+      followUpApi.getEnrollmentInfo(selectedLead.threadId)
+        .then(res => {
+          setLeadFollowUpInfo(res.enrollment ? {
+            enrollmentId: res.enrollment.id,
+            nextFollowUpAt: res.enrollment.nextStepDueAt || null,
+            followUpStatus: res.enrollment.status || null,
+            currentStepIndex: res.enrollment.currentStepIndex ?? 0,
+            totalSteps: res.enrollment.totalSteps ?? 0,
+            sentCount: res.enrollment.sentCount ?? 0,
+            nextStepObjective: res.enrollment.nextStepObjective || null,
+            nextMessagePreview: res.enrollment.nextMessagePreview || null,
+            nextMessageMode: res.enrollment.nextMessageMode || 'ai',
+            pendingSuggestionId: res.enrollment.pendingSuggestionId || null,
+            aiConversationOn: res.enrollment.aiConversationOn ?? false,
+            mode: res.enrollment.mode || 'auto_send',
+          } : null);
+        })
+        .catch((err: any) => { console.error('[FollowUp] enrollment-info failed:', err); });
     }
   }, [selectedLead?.id]);
 
   const [leadFollowUpInfo, setLeadFollowUpInfo] = useState<{
+    enrollmentId: string;
     nextFollowUpAt: string | null;
     followUpStatus: string | null;
+    currentStepIndex: number;
+    totalSteps: number;
+    sentCount: number;
+    nextStepObjective: string | null;
+    nextMessagePreview: string | null;
+    nextMessageMode: 'template' | 'ai';
+    pendingSuggestionId: string | null;
     aiConversationOn: boolean;
+    mode: string;
   } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [editingPreview, setEditingPreview] = useState(false);
+  const [editedMessage, setEditedMessage] = useState('');
 
   const [sendChannel, setSendChannel] = useState<'platform' | 'sms'>('platform');
 
@@ -2025,20 +2040,59 @@ export function Messages() {
               </div>
             )}
 
-            {/* Follow-up & AI status labels */}
+            {/* Follow-up & AI status — rich panel */}
             {leadFollowUpInfo && (
               <div className="space-y-1">
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Ongoing Communication</h4>
-                <div className="bg-slate-50 rounded-xl p-2.5 space-y-1.5 text-[11px]">
+                <div className="bg-slate-50 rounded-xl p-2.5 space-y-2 text-[11px]">
+                  {/* Next follow-up with relative time + step progress */}
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">Next follow-up</span>
                     <span className="font-semibold text-slate-700">
-                      {leadFollowUpInfo.nextFollowUpAt
-                        ? new Date(leadFollowUpInfo.nextFollowUpAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-                        : <span className="text-slate-400 font-normal">None scheduled</span>
-                      }
+                      {leadFollowUpInfo.nextFollowUpAt ? (() => {
+                        const due = new Date(leadFollowUpInfo.nextFollowUpAt);
+                        const now = new Date();
+                        const diffMs = due.getTime() - now.getTime();
+                        const diffMin = Math.round(diffMs / 60_000);
+                        const diffHr = Math.round(diffMs / 3_600_000);
+                        const diffDay = Math.round(diffMs / 86_400_000);
+                        let relative = '';
+                        if (diffMin < 0) relative = 'overdue';
+                        else if (diffMin < 60) relative = `in ${diffMin}m`;
+                        else if (diffHr < 24) relative = `in ${diffHr}h`;
+                        else relative = `in ${diffDay}d`;
+                        return relative;
+                      })() : <span className="text-slate-400 font-normal">None scheduled</span>}
                     </span>
                   </div>
+                  {/* Step progress bar */}
+                  {leadFollowUpInfo.totalSteps > 0 && (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-slate-500">Progress</span>
+                        <span className="text-[10px] text-slate-500">
+                          Step {leadFollowUpInfo.currentStepIndex + 1} of {leadFollowUpInfo.totalSteps}
+                          {leadFollowUpInfo.sentCount > 0 && ` (${leadFollowUpInfo.sentCount} sent)`}
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-200 rounded-full h-1.5">
+                        <div
+                          className="bg-blue-500 h-1.5 rounded-full transition-all"
+                          style={{ width: `${Math.min(100, ((leadFollowUpInfo.currentStepIndex) / leadFollowUpInfo.totalSteps) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {/* Absolute date (smaller) */}
+                  {leadFollowUpInfo.nextFollowUpAt && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 text-[10px]">Scheduled</span>
+                      <span className="text-[10px] text-slate-400">
+                        {new Date(leadFollowUpInfo.nextFollowUpAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  )}
+                  {/* AI Conversation status */}
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">AI Conversation</span>
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -2050,6 +2104,139 @@ export function Messages() {
                     </span>
                   </div>
                 </div>
+
+                {/* Next message preview */}
+                {leadFollowUpInfo.nextFollowUpAt && (
+                  <div className="bg-white border border-slate-200 rounded-xl p-2.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase">Next Message</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${
+                        leadFollowUpInfo.nextMessageMode === 'template'
+                          ? 'bg-slate-100 text-slate-500'
+                          : 'bg-violet-50 text-violet-600'
+                      }`}>
+                        {leadFollowUpInfo.nextMessageMode === 'template' ? 'Template' : 'AI'}
+                      </span>
+                    </div>
+
+                    {editingPreview ? (
+                      <div className="space-y-1.5">
+                        <textarea
+                          className="w-full text-[11px] text-slate-700 border border-blue-200 rounded-lg p-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-400"
+                          rows={4}
+                          value={editedMessage}
+                          onChange={(e) => setEditedMessage(e.target.value)}
+                        />
+                        <div className="flex gap-1">
+                          <button
+                            className="flex-1 text-[10px] font-medium py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                            onClick={async () => {
+                              if (!leadFollowUpInfo.pendingSuggestionId) return;
+                              const res = await followUpApi.editAndApprove(leadFollowUpInfo.pendingSuggestionId, editedMessage);
+                              if (res.success) {
+                                setEditingPreview(false);
+                                // Reload enrollment info
+                                if (selectedLead?.threadId) {
+                                  const updated = await followUpApi.getEnrollmentInfo(selectedLead.threadId);
+                                  setLeadFollowUpInfo(updated.enrollment ? { ...leadFollowUpInfo, ...updated.enrollment } : null);
+                                }
+                              }
+                            }}
+                          >
+                            Send Edited
+                          </button>
+                          <button
+                            className="text-[10px] font-medium py-1 px-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
+                            onClick={() => setEditingPreview(false)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {leadFollowUpInfo.nextMessagePreview ? (
+                          <p className="text-[11px] text-slate-600 leading-relaxed bg-slate-50 rounded-lg p-2 max-h-24 overflow-y-auto">
+                            {leadFollowUpInfo.nextMessagePreview}
+                          </p>
+                        ) : leadFollowUpInfo.nextMessageMode === 'ai' ? (
+                          <button
+                            className="w-full text-[10px] font-medium py-1.5 rounded-lg border border-dashed border-violet-300 text-violet-500 hover:bg-violet-50 flex items-center justify-center gap-1"
+                            disabled={previewLoading}
+                            onClick={async () => {
+                              if (!selectedLead?.threadId) return;
+                              setPreviewLoading(true);
+                              try {
+                                const res = await followUpApi.generatePreview(selectedLead.threadId);
+                                if (res.success && res.message) {
+                                  setLeadFollowUpInfo(prev => prev ? { ...prev, nextMessagePreview: res.message! } : prev);
+                                }
+                              } finally {
+                                setPreviewLoading(false);
+                              }
+                            }}
+                          >
+                            {previewLoading ? <><Loader2 size={10} className="animate-spin" /> Generating...</> : <><Sparkles size={10} /> Generate Preview</>}
+                          </button>
+                        ) : null}
+
+                        {/* Action buttons */}
+                        {leadFollowUpInfo.nextMessagePreview && (
+                          <div className="flex gap-1">
+                            {leadFollowUpInfo.pendingSuggestionId && (
+                              <>
+                                <button
+                                  className="flex-1 text-[10px] font-medium py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                                  onClick={async () => {
+                                    await followUpApi.approveSuggestion(leadFollowUpInfo.pendingSuggestionId!);
+                                    if (selectedLead?.threadId) {
+                                      const updated = await followUpApi.getEnrollmentInfo(selectedLead.threadId);
+                                      setLeadFollowUpInfo(updated.enrollment ? { ...leadFollowUpInfo, ...updated.enrollment } : null);
+                                    }
+                                  }}
+                                >
+                                  Send Now
+                                </button>
+                                <button
+                                  className="text-[10px] font-medium py-1 px-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
+                                  onClick={() => {
+                                    setEditedMessage(leadFollowUpInfo.nextMessagePreview || '');
+                                    setEditingPreview(true);
+                                  }}
+                                >
+                                  Edit
+                                </button>
+                              </>
+                            )}
+                            <button
+                              className="text-[10px] font-medium py-1 px-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
+                              onClick={async () => {
+                                if (leadFollowUpInfo.pendingSuggestionId) {
+                                  await followUpApi.skipSuggestion(leadFollowUpInfo.pendingSuggestionId);
+                                }
+                                if (selectedLead?.threadId) {
+                                  const updated = await followUpApi.getEnrollmentInfo(selectedLead.threadId);
+                                  setLeadFollowUpInfo(updated.enrollment ? { ...leadFollowUpInfo, ...updated.enrollment } : null);
+                                }
+                              }}
+                            >
+                              Skip
+                            </button>
+                            <button
+                              className="text-[10px] font-medium py-1 px-2 rounded-lg border border-red-200 text-red-400 hover:bg-red-50"
+                              onClick={async () => {
+                                await followUpApi.stopEnrollment(leadFollowUpInfo.enrollmentId, 'manual');
+                                setLeadFollowUpInfo(null);
+                              }}
+                            >
+                              Stop
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

@@ -13,6 +13,7 @@ import { PrismaService } from '../common/utils/prisma.service';
 import { LeadsService } from '../leads/leads.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { FollowUpEngineService } from './follow-up-engine.service';
+import { FollowUpGeneratorService, SequenceStep } from './follow-up-generator.service';
 
 @Controller('v1/follow-ups')
 @UseGuards(JwtAuthGuard)
@@ -25,6 +26,7 @@ export class FollowUpEngineController {
     @Inject(forwardRef(() => LeadsService))
     private readonly leadsService: LeadsService,
     private readonly conversationContext: ConversationContextService,
+    private readonly generatorService: FollowUpGeneratorService,
   ) {}
 
   /**
@@ -83,6 +85,173 @@ export class FollowUpEngineController {
       },
     });
     return { success: true, enrollment };
+  }
+
+  /**
+   * Get rich enrollment info for a conversation (used by Messages right panel).
+   * Returns: step progress, next due time, next message preview, enrollment ID.
+   */
+  @Get('enrollment-info/:conversationId')
+  async getEnrollmentInfo(
+    @CurrentUser() user: any,
+    @Param('conversationId') conversationId: string,
+  ) {
+    const enrollment = await this.prisma.followUpEnrollment.findFirst({
+      where: { conversationId, status: 'active' },
+      include: { sequenceTemplate: true },
+    });
+
+    if (!enrollment) {
+      return { success: true, enrollment: null };
+    }
+
+    // Load steps: prefer user-configured, fall back to template
+    let steps: SequenceStep[] = [];
+    const userSteps = await this.getUserConfiguredSteps(conversationId);
+    if (userSteps && userSteps.length > 0) {
+      steps = userSteps;
+    } else {
+      const stepsData = enrollment.sequenceTemplate.stepsJson as any;
+      steps = stepsData?.steps || [];
+    }
+
+    const totalSteps = steps.length;
+    const currentStep = enrollment.currentStepIndex;
+    const nextStep = steps[currentStep];
+
+    // Get the next message preview
+    let nextMessagePreview: string | null = null;
+    let nextMessageMode: 'template' | 'ai' = 'ai';
+    if (nextStep?.messageTemplate) {
+      nextMessagePreview = nextStep.messageTemplate;
+      nextMessageMode = 'template';
+    }
+
+    // Check for an existing suggested execution (already generated)
+    const pendingSuggestion = await this.prisma.followUpStepExecution.findFirst({
+      where: { enrollmentId: enrollment.id, stepIndex: currentStep, status: 'suggested' },
+      select: { id: true, generatedMessage: true, strategyUsed: true },
+    });
+    if (pendingSuggestion?.generatedMessage) {
+      nextMessagePreview = pendingSuggestion.generatedMessage;
+    }
+
+    // Count sent steps
+    const sentCount = await this.prisma.followUpStepExecution.count({
+      where: { enrollmentId: enrollment.id, status: 'sent' },
+    });
+
+    // Get account AI conversation status
+    const lead = await this.prisma.lead.findFirst({
+      where: { threadId: conversationId },
+      select: { businessId: true, userId: true },
+    });
+    let aiConversationOn = false;
+    if (lead?.businessId) {
+      const acct = await this.prisma.savedAccount.findFirst({
+        where: { userId: lead.userId, businessId: lead.businessId },
+        select: { aiConversationEnabled: true },
+      });
+      aiConversationOn = acct?.aiConversationEnabled ?? false;
+    }
+
+    return {
+      success: true,
+      enrollment: {
+        id: enrollment.id,
+        status: enrollment.status,
+        mode: enrollment.mode,
+        currentStepIndex: currentStep,
+        totalSteps,
+        sentCount,
+        nextStepDueAt: enrollment.nextStepDueAt,
+        nextStepObjective: nextStep?.objective || null,
+        nextStepDelayMinutes: nextStep?.delayMinutes || null,
+        nextMessagePreview,
+        nextMessageMode,
+        pendingSuggestionId: pendingSuggestion?.id || null,
+        aiConversationOn,
+      },
+    };
+  }
+
+  /**
+   * Generate a preview of the next follow-up message (on-demand for AI mode).
+   */
+  @Post('enrollment-info/:conversationId/preview')
+  async generatePreview(
+    @CurrentUser() user: any,
+    @Param('conversationId') conversationId: string,
+  ) {
+    const enrollment = await this.prisma.followUpEnrollment.findFirst({
+      where: { conversationId, status: 'active' },
+      include: { sequenceTemplate: true },
+    });
+    if (!enrollment) return { success: false, error: 'No active enrollment' };
+
+    let steps: SequenceStep[] = [];
+    const userSteps = await this.getUserConfiguredSteps(conversationId);
+    if (userSteps && userSteps.length > 0) {
+      steps = userSteps;
+    } else {
+      const stepsData = enrollment.sequenceTemplate.stepsJson as any;
+      steps = stepsData?.steps || [];
+    }
+
+    const step = steps[enrollment.currentStepIndex];
+    if (!step) return { success: false, error: 'No more steps' };
+
+    const generated = await this.generatorService.generateMessage(
+      step,
+      conversationId,
+      enrollment.sequenceTemplate.generationMode,
+      enrollment.sequenceTemplate.promptTemplateId,
+    );
+
+    return { success: true, message: generated.message, strategyUsed: generated.strategyUsed };
+  }
+
+  /**
+   * Load user-configured follow-up steps from account settings.
+   */
+  private async getUserConfiguredSteps(conversationId: string): Promise<SequenceStep[] | null> {
+    try {
+      const lead = await this.prisma.lead.findFirst({
+        where: { threadId: conversationId },
+        select: { businessId: true, userId: true },
+      });
+      if (!lead?.businessId) return null;
+
+      const account = await this.prisma.savedAccount.findFirst({
+        where: { userId: lead.userId, businessId: lead.businessId },
+        select: { followUpSettingsJson: true },
+      });
+      if (!account?.followUpSettingsJson) return null;
+
+      const settings = JSON.parse(account.followUpSettingsJson);
+      const uiSteps = settings.followUpSteps || settings.followUpSmartSteps || settings.followUpCustomSteps;
+      if (!uiSteps || !Array.isArray(uiSteps) || uiSteps.length === 0) return null;
+
+      return uiSteps.map((s: any, i: number) => ({
+        stepOrder: i,
+        delayMinutes: this.parseDelay(s.delay),
+        objective: 'follow_up',
+        messageTemplate: s.message || null,
+      }));
+    } catch {
+      return null;
+    }
+  }
+
+  private parseDelay(delay: string): number {
+    if (!delay) return 60;
+    const d = delay.toLowerCase().trim();
+    const num = parseFloat(d) || 1;
+    if (d.includes('min')) return Math.round(num);
+    if (d.includes('hour') || d.includes('hr')) return Math.round(num * 60);
+    if (d.includes('day')) return Math.round(num * 1440);
+    if (d.includes('week') || d.includes('wk')) return Math.round(num * 10080);
+    return Math.round(num);
   }
 
   /**
