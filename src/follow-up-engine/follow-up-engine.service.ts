@@ -120,60 +120,75 @@ export class FollowUpEngineService {
     const steps = stepsData?.steps || [];
     if (steps.length === 0) throw new Error('Sequence template has no steps');
 
-    // If the lead had a real back-and-forth (customer replied AFTER a business message),
-    // skip the early short-delay steps and start from a step with ≥ 24h delay.
-    // The initial customer request doesn't count — only replies after we responded.
+    // Smart step positioning: count ALL pro messages already sent to this conversation
+    // (manual + auto-reply + follow-ups) and start from the corresponding step index.
+    // This prevents re-enrollment from sending duplicate "checking in" messages.
     let startStepIndex = 0;
+    let lastMessageSentAt: Date | null = null;
     if (leadId) {
       const lead = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { threadId: true, userId: true, businessId: true } });
       if (lead?.threadId) {
-        const firstProMsg = await this.prisma.message.findFirst({
+        // Count all pro messages sent in this conversation
+        const proMessageCount = await this.prisma.message.count({
           where: { conversationId: lead.threadId, sender: 'pro' },
-          orderBy: { sentAt: 'asc' },
+        });
+
+        // Get the last message sent (for computing next due time relative to it)
+        const lastProMsg = await this.prisma.message.findFirst({
+          where: { conversationId: lead.threadId, sender: 'pro' },
+          orderBy: { sentAt: 'desc' },
           select: { sentAt: true },
         });
-        if (firstProMsg) {
-          const customerReplyCount = await this.prisma.message.count({
-            where: { conversationId: lead.threadId, sender: 'customer', sentAt: { gt: firstProMsg.sentAt } },
-          });
-          if (customerReplyCount > 0) {
-            // Load re-enroll delay from account settings
-            const acct = lead.businessId ? await this.prisma.savedAccount.findFirst({
-              where: { userId: lead.userId, businessId: lead.businessId },
-              select: { followUpSettingsJson: true },
-            }).catch(() => null) : null;
-            let reEnrollDelayMinutes = 1440; // default 24h
-            if (acct?.followUpSettingsJson) {
-              try {
-                const s = JSON.parse(acct.followUpSettingsJson);
-                if (s.fuReEnrollDelay) {
-                  const d = s.fuReEnrollDelay;
-                  if (d.endsWith('h')) reEnrollDelayMinutes = parseInt(d) * 60;
-                  else if (d.endsWith('d')) reEnrollDelayMinutes = parseInt(d) * 1440;
-                  else reEnrollDelayMinutes = parseInt(d) || 1440;
-                }
-              } catch {}
-            }
-            // Find first step with delay >= configured re-enroll delay
-            const laterStep = steps.findIndex((s: any) => (s.delayMinutes || 0) >= reEnrollDelayMinutes);
-            if (laterStep > 0) {
-              startStepIndex = laterStep;
-            }
-            this.logger.log(`[FollowUp] Lead had ${customerReplyCount} customer replies — re-enroll delay ${reEnrollDelayMinutes}min, starting at step ${startStepIndex}`);
+        if (lastProMsg) lastMessageSentAt = lastProMsg.sentAt;
+
+        if (proMessageCount > 0) {
+          // Map message count to step index: if 3 messages were sent, start at step 3 (0-indexed)
+          // But cap at steps.length - 1 to leave at least one step to send
+          const messageBasedIndex = Math.min(proMessageCount, steps.length - 1);
+
+          // Also check re-enroll delay from account settings (minimum step delay threshold)
+          const acct = lead.businessId ? await this.prisma.savedAccount.findFirst({
+            where: { userId: lead.userId, businessId: lead.businessId },
+            select: { followUpSettingsJson: true },
+          }).catch(() => null) : null;
+          let reEnrollDelayMinutes = 1440; // default 24h
+          if (acct?.followUpSettingsJson) {
+            try {
+              const s = JSON.parse(acct.followUpSettingsJson);
+              if (s.fuReEnrollDelay) {
+                const d = s.fuReEnrollDelay;
+                if (d.endsWith('h')) reEnrollDelayMinutes = parseInt(d) * 60;
+                else if (d.endsWith('d')) reEnrollDelayMinutes = parseInt(d) * 1440;
+                else reEnrollDelayMinutes = parseInt(d) || 1440;
+              }
+            } catch {}
           }
+          // Find first step with delay >= re-enroll delay
+          const delayBasedIndex = steps.findIndex((s: any) => (s.delayMinutes || 0) >= reEnrollDelayMinutes);
+          const delayIndex = delayBasedIndex > 0 ? delayBasedIndex : 0;
+
+          // Use whichever starts later (more messages sent = further along)
+          startStepIndex = Math.max(messageBasedIndex, delayIndex);
+
+          this.logger.log(`[FollowUp] ${proMessageCount} pro messages sent — messageBasedIndex=${messageBasedIndex}, delayBasedIndex=${delayIndex}, startStepIndex=${startStepIndex}`);
         }
       }
     }
 
-    // Compute first step due time (respecting active hours)
+    // Compute first step due time relative to the last message sent (not now),
+    // so step delays reflect time since last contact, not enrollment time.
     const firstStep = steps[startStepIndex];
+    const fromTime = lastMessageSentAt || new Date();
     const nextDue = this.computeNextDueAt(
-      new Date(),
+      fromTime,
       firstStep.delayMinutes,
       template.activeHoursStart,
       template.activeHoursEnd,
       template.activeHoursTimezone || 'America/New_York',
     );
+    // If the computed due time is in the past (last message was long ago), use now + small buffer
+    const now = new Date();
+    const effectiveNextDue = nextDue < now ? new Date(now.getTime() + 5 * 60_000) : nextDue;
 
     // Determine mode from account settings (auto_send or suggest), fallback to template mode
     let enrollMode = template.mode;
@@ -198,7 +213,7 @@ export class FollowUpEngineService {
         platform,
         status: 'active',
         currentStepIndex: startStepIndex,
-        nextStepDueAt: nextDue,
+        nextStepDueAt: effectiveNextDue,
         mode: enrollMode,
       },
     });
@@ -208,12 +223,12 @@ export class FollowUpEngineService {
       where: { conversationId },
       data: {
         activeEnrollmentId: enrollment.id,
-        nextFollowUpAt: nextDue,
+        nextFollowUpAt: effectiveNextDue,
         followUpStatus: 'active',
       },
     });
 
-    this.logger.log(`Enrolled conversation ${conversationId} in sequence ${template.name} (${enrollment.id}), first step due: ${nextDue.toISOString()}`);
+    this.logger.log(`Enrolled conversation ${conversationId} in sequence ${template.name} (${enrollment.id}), step ${startStepIndex}/${steps.length}, due: ${effectiveNextDue.toISOString()}`);
     return enrollment.id;
   }
 

@@ -327,7 +327,25 @@ export class FollowUpGeneratorService {
       for (const content of seenMessages) {
         systemParts.push(`"${content}"`);
       }
-      systemParts.push('', 'CRITICAL: You MUST write a COMPLETELY DIFFERENT message. Do NOT reuse the same opening, angle, or wording from any message above. If you catch yourself starting with a similar phrase, stop and try a completely new approach.');
+
+      // Extract opening phrases (first 5-6 words) as explicit banned openers
+      const bannedOpeners: string[] = [];
+      for (const content of seenMessages) {
+        const words = content.split(/\s+/).slice(0, 5).join(' ');
+        if (words.length > 5) bannedOpeners.push(words);
+      }
+      if (bannedOpeners.length > 0) {
+        systemParts.push('', '--- BANNED OPENING PHRASES (do NOT start your message with any variation of these) ---');
+        for (const opener of bannedOpeners) {
+          systemParts.push(`- "${opener}..."`);
+        }
+      }
+
+      systemParts.push('', 'CRITICAL: You MUST write a COMPLETELY DIFFERENT message. Rules:');
+      systemParts.push('1. Do NOT start with any of the banned opening phrases above or similar variations.');
+      systemParts.push('2. Do NOT reuse the same angle, structure, or wording from any previous message.');
+      systemParts.push('3. Try a completely new approach — different opening, different value proposition, different tone.');
+      systemParts.push(`4. You have sent ${seenMessages.size} messages already. Be creative and vary your style.`);
     }
 
     // Build messages with conversation history
@@ -350,11 +368,18 @@ export class FollowUpGeneratorService {
     });
 
     try {
+      // Vary temperature by step order and number of previous messages:
+      // Early steps (0-1): 0.4 (consistent), Mid steps (2-4): 0.6, Late steps (5+): 0.8 (creative)
+      // More previous messages = more temperature to force divergence
+      const baseTemp = step.stepOrder <= 1 ? 0.4 : step.stepOrder <= 4 ? 0.6 : 0.8;
+      const prevMsgBoost = Math.min(0.2, seenMessages.size * 0.05);
+      const temperature = Math.min(1.0, baseTemp + prevMsgBoost);
+
       const completion = await this.openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages,
         max_tokens: 200,
-        temperature: 0.4,
+        temperature,
       });
 
       const reply = completion.choices[0]?.message?.content?.trim();

@@ -1624,6 +1624,14 @@ export const followUpApi = {
     const { data } = await api.get('/v1/follow-ups/enrollments', { params: status ? { status } : {} });
     return data;
   },
+  getEnrollmentInfo: async (conversationId: string): Promise<{ success: boolean; enrollment: any }> => {
+    const { data } = await api.get(`/v1/follow-ups/enrollment-info/${conversationId}`);
+    return data;
+  },
+  generatePreview: async (conversationId: string): Promise<{ success: boolean; message?: string; strategyUsed?: string; error?: string }> => {
+    const { data } = await api.post(`/v1/follow-ups/enrollment-info/${conversationId}/preview`);
+    return data;
+  },
   stopEnrollment: async (id: string, reason?: string): Promise<{ success: boolean }> => {
     const { data } = await api.post(`/v1/follow-ups/enrollments/${id}/stop`, { reason });
     return data;

@@ -13,6 +13,7 @@ import { PrismaService } from '../common/utils/prisma.service';
 import { LeadsService } from '../leads/leads.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { FollowUpEngineService } from './follow-up-engine.service';
+import { FollowUpGeneratorService, SequenceStep } from './follow-up-generator.service';
 
 @Controller('v1/follow-ups')
 @UseGuards(JwtAuthGuard)
@@ -25,6 +26,7 @@ export class FollowUpEngineController {
     @Inject(forwardRef(() => LeadsService))
     private readonly leadsService: LeadsService,
     private readonly conversationContext: ConversationContextService,
+    private readonly generatorService: FollowUpGeneratorService,
   ) {}
 
   /**
@@ -83,6 +85,249 @@ export class FollowUpEngineController {
       },
     });
     return { success: true, enrollment };
+  }
+
+  /**
+   * Get rich enrollment info for a conversation (used by Messages right panel).
+   * Returns: step progress, next due time, next message preview, enrollment ID.
+   */
+  @Get('enrollment-info/:conversationId')
+  async getEnrollmentInfo(
+    @CurrentUser() user: any,
+    @Param('conversationId') conversationId: string,
+  ) {
+    const enrollment = await this.prisma.followUpEnrollment.findFirst({
+      where: { conversationId, status: 'active' },
+      include: { sequenceTemplate: true },
+    });
+
+    if (!enrollment) {
+      // Still return AI conversation status + last enrollment info
+      const lead = await this.prisma.lead.findFirst({
+        where: { threadId: conversationId },
+        select: { businessId: true, userId: true },
+      });
+      let aiConversationOn = false;
+      let followUpMode: string | null = null;
+      let aiAvailability: string | null = null;
+      let aiActiveHoursStart: string | null = null;
+      let aiActiveHoursEnd: string | null = null;
+      let aiTimezone: string | null = null;
+      let aiExtraWindows: any[] | null = null;
+      if (lead?.businessId) {
+        const acct = await this.prisma.savedAccount.findFirst({
+          where: { userId: lead.userId, businessId: lead.businessId },
+          select: { aiConversationEnabled: true, followUpMode: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true, followUpTimezone: true, followUpSettingsJson: true },
+        });
+        aiConversationOn = acct?.aiConversationEnabled ?? false;
+        followUpMode = acct?.followUpMode || null;
+        aiActiveHoursStart = acct?.followUpActiveHoursStart || null;
+        aiActiveHoursEnd = acct?.followUpActiveHoursEnd || null;
+        aiTimezone = acct?.followUpTimezone || null;
+        if (acct?.followUpSettingsJson) {
+          try {
+            const s = JSON.parse(acct.followUpSettingsJson);
+            aiAvailability = s.followUpAvailability || null;
+            if (s.fuExtraWindows) aiExtraWindows = s.fuExtraWindows;
+          } catch {}
+        }
+        // Infer availability from data: if activeHoursStart is set, it's active_hours; otherwise always
+        if (!aiAvailability) {
+          aiAvailability = aiActiveHoursStart ? 'active_hours' : 'always';
+        }
+      }
+      // Find the most recent non-active enrollment for context
+      const lastEnrollment = await this.prisma.followUpEnrollment.findFirst({
+        where: { conversationId },
+        orderBy: { createdAt: 'desc' },
+        select: { status: true, stoppedReason: true, completedAt: true, currentStepIndex: true },
+      });
+      return {
+        success: true,
+        enrollment: null,
+        aiConversationOn,
+        aiAvailability,
+        aiActiveHoursStart,
+        aiActiveHoursEnd,
+        aiTimezone,
+        aiExtraWindows,
+        followUpMode,
+        lastEnrollment: lastEnrollment ? {
+          status: lastEnrollment.status,
+          stoppedReason: lastEnrollment.stoppedReason,
+          completedAt: lastEnrollment.completedAt,
+          stepReached: lastEnrollment.currentStepIndex,
+        } : null,
+      };
+    }
+
+    // Load steps: prefer user-configured, fall back to template
+    let steps: SequenceStep[] = [];
+    const userSteps = await this.getUserConfiguredSteps(conversationId);
+    if (userSteps && userSteps.length > 0) {
+      steps = userSteps;
+    } else {
+      const stepsData = enrollment.sequenceTemplate.stepsJson as any;
+      steps = stepsData?.steps || [];
+    }
+
+    const totalSteps = steps.length;
+    const currentStep = enrollment.currentStepIndex;
+    const nextStep = steps[currentStep];
+
+    // Get the next message preview
+    let nextMessagePreview: string | null = null;
+    let nextMessageMode: 'template' | 'ai' = 'ai';
+    if (nextStep?.messageTemplate) {
+      nextMessagePreview = nextStep.messageTemplate;
+      nextMessageMode = 'template';
+    }
+
+    // Check for an existing suggested execution (already generated)
+    const pendingSuggestion = await this.prisma.followUpStepExecution.findFirst({
+      where: { enrollmentId: enrollment.id, stepIndex: currentStep, status: 'suggested' },
+      select: { id: true, generatedMessage: true, strategyUsed: true },
+    });
+    if (pendingSuggestion?.generatedMessage) {
+      nextMessagePreview = pendingSuggestion.generatedMessage;
+    }
+
+    // Count sent steps
+    const sentCount = await this.prisma.followUpStepExecution.count({
+      where: { enrollmentId: enrollment.id, status: 'sent' },
+    });
+
+    // Get account AI conversation status + availability
+    const lead = await this.prisma.lead.findFirst({
+      where: { threadId: conversationId },
+      select: { businessId: true, userId: true },
+    });
+    let aiConversationOn = false;
+    let aiAvailability: string = 'always';
+    let aiActiveHoursStart: string | null = null;
+    let aiActiveHoursEnd: string | null = null;
+    let aiTimezone: string | null = null;
+    let aiExtraWindows: any[] | null = null;
+    if (lead?.businessId) {
+      const acct = await this.prisma.savedAccount.findFirst({
+        where: { userId: lead.userId, businessId: lead.businessId },
+        select: { aiConversationEnabled: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true, followUpTimezone: true, followUpSettingsJson: true },
+      });
+      aiConversationOn = acct?.aiConversationEnabled ?? false;
+      aiActiveHoursStart = acct?.followUpActiveHoursStart || null;
+      aiActiveHoursEnd = acct?.followUpActiveHoursEnd || null;
+      aiTimezone = acct?.followUpTimezone || null;
+      if (acct?.followUpSettingsJson) {
+        try {
+          const s = JSON.parse(acct.followUpSettingsJson);
+          aiAvailability = s.followUpAvailability || (aiActiveHoursStart ? 'active_hours' : 'always');
+          if (s.fuExtraWindows) aiExtraWindows = s.fuExtraWindows;
+        } catch {}
+      }
+    }
+
+    return {
+      success: true,
+      enrollment: {
+        id: enrollment.id,
+        status: enrollment.status,
+        mode: enrollment.mode,
+        currentStepIndex: currentStep,
+        totalSteps,
+        sentCount,
+        nextStepDueAt: enrollment.nextStepDueAt,
+        nextStepObjective: nextStep?.objective || null,
+        nextStepDelayMinutes: nextStep?.delayMinutes || null,
+        nextMessagePreview,
+        nextMessageMode,
+        pendingSuggestionId: pendingSuggestion?.id || null,
+        aiConversationOn,
+        aiAvailability,
+        aiActiveHoursStart,
+        aiActiveHoursEnd,
+        aiTimezone,
+        aiExtraWindows,
+      },
+    };
+  }
+
+  /**
+   * Generate a preview of the next follow-up message (on-demand for AI mode).
+   */
+  @Post('enrollment-info/:conversationId/preview')
+  async generatePreview(
+    @CurrentUser() user: any,
+    @Param('conversationId') conversationId: string,
+  ) {
+    const enrollment = await this.prisma.followUpEnrollment.findFirst({
+      where: { conversationId, status: 'active' },
+      include: { sequenceTemplate: true },
+    });
+    if (!enrollment) return { success: false, error: 'No active enrollment' };
+
+    let steps: SequenceStep[] = [];
+    const userSteps = await this.getUserConfiguredSteps(conversationId);
+    if (userSteps && userSteps.length > 0) {
+      steps = userSteps;
+    } else {
+      const stepsData = enrollment.sequenceTemplate.stepsJson as any;
+      steps = stepsData?.steps || [];
+    }
+
+    const step = steps[enrollment.currentStepIndex];
+    if (!step) return { success: false, error: 'No more steps' };
+
+    const generated = await this.generatorService.generateMessage(
+      step,
+      conversationId,
+      enrollment.sequenceTemplate.generationMode,
+      enrollment.sequenceTemplate.promptTemplateId,
+    );
+
+    return { success: true, message: generated.message, strategyUsed: generated.strategyUsed };
+  }
+
+  /**
+   * Load user-configured follow-up steps from account settings.
+   */
+  private async getUserConfiguredSteps(conversationId: string): Promise<SequenceStep[] | null> {
+    try {
+      const lead = await this.prisma.lead.findFirst({
+        where: { threadId: conversationId },
+        select: { businessId: true, userId: true },
+      });
+      if (!lead?.businessId) return null;
+
+      const account = await this.prisma.savedAccount.findFirst({
+        where: { userId: lead.userId, businessId: lead.businessId },
+        select: { followUpSettingsJson: true },
+      });
+      if (!account?.followUpSettingsJson) return null;
+
+      const settings = JSON.parse(account.followUpSettingsJson);
+      const uiSteps = settings.followUpSteps || settings.followUpSmartSteps || settings.followUpCustomSteps;
+      if (!uiSteps || !Array.isArray(uiSteps) || uiSteps.length === 0) return null;
+
+      return uiSteps.map((s: any, i: number) => ({
+        stepOrder: i,
+        delayMinutes: this.parseDelay(s.delay),
+        objective: 'follow_up',
+        messageTemplate: s.message || null,
+      }));
+    } catch {
+      return null;
+    }
+  }
+
+  private parseDelay(delay: string): number {
+    if (!delay) return 60;
+    const d = delay.toLowerCase().trim();
+    const num = parseFloat(d) || 1;
+    if (d.includes('min')) return Math.round(num);
+    if (d.includes('hour') || d.includes('hr')) return Math.round(num * 60);
+    if (d.includes('day')) return Math.round(num * 1440);
+    if (d.includes('week') || d.includes('wk')) return Math.round(num * 10080);
+    return Math.round(num);
   }
 
   /**
@@ -302,14 +547,15 @@ export class FollowUpEngineController {
           });
 
           let count = 0;
+          let skipped = { noThread: 0, active: 0, recentSend: 0, customerTurn: 0, error: 0, terminal: 0 };
           for (const lead of leads) {
-            if (!lead.threadId) continue;
+            if (!lead.threadId) { skipped.noThread++; continue; }
 
             // Skip if already has an ACTIVE enrollment
             const existing = await this.prisma.followUpEnrollment.findFirst({
               where: { conversationId: lead.threadId, status: 'active' },
             });
-            if (existing) continue;
+            if (existing) { skipped.active++; continue; }
 
             // Skip if a follow-up was already sent in the last 24h (prevents re-enrollment spam)
             const recentSend = await this.prisma.followUpStepExecution.findFirst({
@@ -319,28 +565,37 @@ export class FollowUpEngineController {
                 executedAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
               },
             });
-            if (recentSend) continue;
+            if (recentSend) { skipped.recentSend++; continue; }
 
-            // Skip if customer replied AFTER our last message (active conversation — customer engaged)
-            const lastProMessage = await this.prisma.message.findFirst({
-              where: { conversationId: lead.threadId, sender: 'pro' },
-              orderBy: { sentAt: 'desc' },
-              select: { sentAt: true },
+            // Skip terminal lead statuses
+            const leadStatus = await this.prisma.lead.findUnique({
+              where: { id: lead.id },
+              select: { status: true, thumbtackStatus: true },
             });
-            if (lastProMessage) {
-              const customerReplyAfterUs = await this.prisma.message.findFirst({
-                where: { conversationId: lead.threadId, sender: 'customer', sentAt: { gt: lastProMessage.sentAt } },
-              });
-              if (customerReplyAfterUs) continue; // Customer responded to us — don't follow up
+            if (leadStatus) {
+              const s = (leadStatus.status || '').toLowerCase();
+              const ts = (leadStatus.thumbtackStatus || '').toLowerCase();
+              const terminal = ['done', 'scheduled', 'in_progress', 'in progress', 'booked', 'hired', 'job done', 'job scheduled', 'completed', 'archived', 'lost'];
+              if (terminal.includes(s) || terminal.includes(ts)) { skipped.terminal++; continue; }
             }
+
+            // Skip only if the LAST message is from the customer (active conversation, they're engaged).
+            const lastMessage = await this.prisma.message.findFirst({
+              where: { conversationId: lead.threadId },
+              orderBy: { sentAt: 'desc' },
+              select: { sender: true },
+            });
+            if (lastMessage?.sender === 'customer') { skipped.customerTurn++; continue; }
 
             try {
               await this.engineService.enrollInSequence(lead.threadId, template.id, lead.platform, lead.id);
               count++;
-            } catch {
-              // Skip failures
+            } catch (err: any) {
+              this.logger.warn(`[FollowUp] Enrollment failed for lead ${lead.id}: ${err.message}`);
+              skipped.error++;
             }
           }
+          this.logger.log(`[FollowUp] Background enrollment for business ${businessId}: ${leads.length} leads, ${count} enrolled, skipped: ${JSON.stringify(skipped)}`);
           this.logger.log(`[FollowUp] Background enrollment complete: ${count} leads enrolled for business ${businessId}`);
         } catch (err: any) {
           this.logger.error(`[FollowUp] Background enrollment error: ${err.message}`);
