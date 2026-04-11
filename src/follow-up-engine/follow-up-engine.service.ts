@@ -177,14 +177,15 @@ export class FollowUpEngineService {
 
     // Compute first step due time relative to the last message sent (not now),
     // so step delays reflect time since last contact, not enrollment time.
+    // Follow-ups do NOT use active hours — quiet hours are handled by scheduler.
     const firstStep = steps[startStepIndex];
     const fromTime = lastMessageSentAt || new Date();
     const nextDue = this.computeNextDueAt(
       fromTime,
       firstStep.delayMinutes,
-      template.activeHoursStart,
-      template.activeHoursEnd,
-      template.activeHoursTimezone || 'America/New_York',
+      null,
+      null,
+      'America/New_York',
     );
     // If the computed due time is in the past (last message was long ago), use now + small buffer
     const now = new Date();

@@ -310,9 +310,7 @@ export class FollowUpSchedulerService implements OnModuleInit {
       const nextS = steps[nextIdx];
       if (nextS) {
         const nextDue = this.engineService.computeNextDueAt(
-          now, nextS.delayMinutes,
-          enrollment.sequenceTemplate.activeHoursStart, enrollment.sequenceTemplate.activeHoursEnd,
-          enrollment.sequenceTemplate.activeHoursTimezone || 'America/New_York',
+          now, nextS.delayMinutes, null, null, 'America/New_York',
         );
         await this.prisma.followUpEnrollment.update({
           where: { id: enrollment.id },
@@ -442,15 +440,17 @@ export class FollowUpSchedulerService implements OnModuleInit {
       }
     }
 
-    // Advance to next step (only on success or suggest)
+    // Advance to next step (only on success or suggest).
+    // Follow-ups do NOT use active hours — they use quiet hours (handled
+    // at the top of processEnrollment). Pass null to skip active-hours snap.
     const nextStep = steps[enrollment.currentStepIndex + 1];
     if (nextStep) {
       const nextDue = this.engineService.computeNextDueAt(
         now,
         nextStep.delayMinutes,
-        enrollment.sequenceTemplate.activeHoursStart,
-        enrollment.sequenceTemplate.activeHoursEnd,
-        enrollment.sequenceTemplate.activeHoursTimezone || 'America/New_York',
+        null,
+        null,
+        'America/New_York',
       );
 
       await this.prisma.followUpEnrollment.update({
