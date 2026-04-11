@@ -272,7 +272,8 @@ export class FollowUpEngineService {
 
     this.logger.log(`Stopped follow-up for conversation ${conversationId} — customer replied`);
 
-    // Build re-engagement alert message if enabled
+    // Build re-engagement alert message if enabled.
+    // Skip if the account already has customer_reply notification rules — they cover the same case.
     let reEngagementAlert: string | null = null;
     try {
       const lead = await this.prisma.lead.findFirst({
@@ -282,15 +283,32 @@ export class FollowUpEngineService {
       if (lead?.businessId) {
         const acct = await this.prisma.savedAccount.findFirst({
           where: { userId: lead.userId, businessId: lead.businessId },
-          select: { followUpSettingsJson: true },
+          select: { id: true, followUpSettingsJson: true },
         });
         if (acct?.followUpSettingsJson) {
           const settings = JSON.parse(acct.followUpSettingsJson);
           if (settings.reEngagementAlertEnabled !== false) {
-            const template = settings.reEngagementTemplate || 'Lead {{lead.name}} replied: "{{message}}"';
-            reEngagementAlert = template
-              .replace(/\{\{lead\.name\}\}/g, lead.customerName || 'Unknown')
-              .replace(/\{\{message\}\}/g, (customerMessage || '').substring(0, 200));
+            // Check if customer_reply notification rules exist — if so, skip re-engagement
+            // to avoid double-alerting.
+            const notifSettings = await this.prisma.notificationSettings.findUnique({
+              where: { savedAccountId: acct.id },
+              select: {
+                enabled: true,
+                notificationRules: {
+                  where: { triggerType: 'customer_reply', enabled: true },
+                  select: { id: true },
+                },
+              },
+            });
+            const hasActiveReplyRule = notifSettings?.enabled && (notifSettings?.notificationRules?.length || 0) > 0;
+            if (hasActiveReplyRule) {
+              this.logger.log(`[ReEngagement] Skipped — account has active customer_reply notification rules`);
+            } else {
+              const template = settings.reEngagementTemplate || 'Lead {{lead.name}} replied: "{{message}}"';
+              reEngagementAlert = template
+                .replace(/\{\{lead\.name\}\}/g, lead.customerName || 'Unknown')
+                .replace(/\{\{message\}\}/g, (customerMessage || '').substring(0, 200));
+            }
           }
         }
       }
@@ -402,39 +420,33 @@ export class FollowUpEngineService {
     try {
       const [sh, sm] = activeStart.split(':').map(Number);
 
-      // Get current date in target timezone
-      const dateFormatter = new Intl.DateTimeFormat('en-US', {
+      // Iteratively find the next time within active hours by advancing 15-min increments.
+      // This handles overnight windows, DST, and any timezone correctly.
+      // We search up to 48 hours ahead (2880 minutes / 15 = 192 iterations).
+      let candidate = new Date(time.getTime());
+      // First, try snapping to today's activeStart in the target timezone
+      // by computing the offset between current time's local hour and activeStart.
+      const fmt = new Intl.DateTimeFormat('en-US', {
         timeZone: timezone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
         hour: '2-digit',
         minute: '2-digit',
         hour12: false,
       });
-      const parts = dateFormatter.formatToParts(time);
-      const year = parseInt(parts.find(p => p.type === 'year')?.value || '2026');
-      const month = parseInt(parts.find(p => p.type === 'month')?.value || '1') - 1;
-      const day = parseInt(parts.find(p => p.type === 'day')?.value || '1');
-      const hour = parseInt(parts.find(p => p.type === 'hour')?.value || '0');
+      const [curH, curM] = fmt.format(candidate).split(':').map(Number);
+      const currentMin = curH * 60 + curM;
+      const targetMin = sh * 60 + sm;
+      let diffMin = targetMin - currentMin;
+      if (diffMin <= 0) diffMin += 24 * 60; // next day
+      candidate = new Date(candidate.getTime() + diffMin * 60_000);
 
-      // If current hour is past activeStart, snap to tomorrow
-      const localDate = new Date(time);
-      if (hour >= sh) {
-        localDate.setDate(localDate.getDate() + 1);
+      // Safety: if still not within active hours (e.g., overnight edge case),
+      // iterate forward in 15-min steps up to 48h.
+      let iterations = 0;
+      while (iterations < 192 && candidate.getTime() <= Date.now()) {
+        candidate = new Date(candidate.getTime() + 15 * 60_000);
+        iterations++;
       }
-
-      // Build target date at activeStart in the timezone
-      // Use a simple offset: set hours/minutes to activeStart
-      const target = new Date(year, month, day, sh, sm, 0, 0);
-      if (hour >= sh) {
-        target.setDate(target.getDate() + 1);
-      }
-
-      // Approximate: use the offset between UTC and local to convert back
-      // This handles DST correctly via the formatter
-      const utcTarget = new Date(target.getTime());
-      return utcTarget;
+      return candidate;
     } catch {
       // Fallback: add 1 hour
       return new Date(time.getTime() + 60 * 60_000);

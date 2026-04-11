@@ -721,13 +721,16 @@ export class WebhooksService {
     }
 
     // Stop follow-up sequences on customer reply (synchronous, idempotent)
+    let reEngagementSent = false;
     if (sender === 'customer') {
       try {
         const fuResult = await this.followUpEngine.handleCustomerReply(conversation.id, messageContent);
-        // Send re-engagement alert if the customer replied after follow-ups
+        // Send re-engagement alert if the customer replied after follow-ups.
+        // This replaces the standard customer_reply notification — don't double-alert.
         if (fuResult.reEngagementAlert && savedAccount) {
-          this.notificationsService.sendReEngagementAlert(userId, savedAccount.id, fuResult.reEngagementAlert)
+          await this.notificationsService.sendReEngagementAlert(userId, savedAccount.id, fuResult.reEngagementAlert)
             .catch(err => this.logger.warn(`[ReEngagement] Alert send failed: ${err.message}`));
+          reEngagementSent = true;
         }
       } catch (err: any) {
         this.logger.warn(`Failed to stop follow-up on customer reply: ${err.message}`);
@@ -783,8 +786,9 @@ export class WebhooksService {
         this.logger.error('Automation trigger failed for customer reply', err.message);
       }
 
-      // Trigger SMS notifications for customer replies
-      if (savedAccount) {
+      // Trigger SMS notifications for customer replies.
+      // Skip if re-engagement alert already fired (don't double-alert).
+      if (savedAccount && !reEngagementSent) {
         try {
           await this.notificationsService.handleCustomerReply({
             userId,
@@ -808,6 +812,8 @@ export class WebhooksService {
         } catch (err: any) {
           this.logger.error('SMS notification trigger failed for customer reply', err.message);
         }
+      } else if (reEngagementSent) {
+        this.logger.log(`[ReEngagement] Suppressed customer_reply notification — re-engagement alert already sent`);
       }
     } else {
       // Pro message - no automation triggered
