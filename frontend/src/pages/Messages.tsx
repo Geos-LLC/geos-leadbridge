@@ -2095,26 +2095,41 @@ export function Messages() {
                             className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
                             onClick={async () => {
                               if (!selectedLead?.threadId) return;
-                              const res = await followUpApi.restartFollowUp(selectedLead.threadId);
-                              if (res.success) {
-                                const updated = await followUpApi.getEnrollmentInfo(selectedLead.threadId);
-                                if (updated.enrollment) {
-                                  setLeadFollowUpInfo({
-                                    ...leadFollowUpInfo,
-                                    enrollmentId: updated.enrollment.id,
-                                    nextFollowUpAt: updated.enrollment.nextStepDueAt || null,
-                                    followUpStatus: updated.enrollment.status || null,
-                                    currentStepIndex: updated.enrollment.currentStepIndex ?? 0,
-                                    totalSteps: updated.enrollment.totalSteps ?? 0,
-                                    sentCount: updated.enrollment.sentCount ?? 0,
-                                    nextStepObjective: updated.enrollment.nextStepObjective || null,
-                                    nextMessagePreview: updated.enrollment.nextMessagePreview || null,
-                                    nextMessageMode: updated.enrollment.nextMessageMode || 'ai',
-                                    pendingSuggestionId: updated.enrollment.pendingSuggestionId || null,
-                                    mode: updated.enrollment.mode || 'auto_send',
-                                    lastStoppedReason: null,
-                                  });
+                              // Optimistic update — show active state immediately
+                              const prev = leadFollowUpInfo;
+                              setLeadFollowUpInfo({
+                                ...leadFollowUpInfo,
+                                enrollmentId: 'pending',
+                                followUpStatus: 'active',
+                                lastStoppedReason: null,
+                              });
+                              try {
+                                const res = await followUpApi.restartFollowUp(selectedLead.threadId);
+                                if (res.success) {
+                                  const updated = await followUpApi.getEnrollmentInfo(selectedLead.threadId);
+                                  if (updated.enrollment) {
+                                    setLeadFollowUpInfo({
+                                      ...leadFollowUpInfo,
+                                      enrollmentId: updated.enrollment.id,
+                                      nextFollowUpAt: updated.enrollment.nextStepDueAt || null,
+                                      followUpStatus: updated.enrollment.status || null,
+                                      currentStepIndex: updated.enrollment.currentStepIndex ?? 0,
+                                      totalSteps: updated.enrollment.totalSteps ?? 0,
+                                      sentCount: updated.enrollment.sentCount ?? 0,
+                                      nextStepObjective: updated.enrollment.nextStepObjective || null,
+                                      nextMessagePreview: updated.enrollment.nextMessagePreview || null,
+                                      nextMessageMode: updated.enrollment.nextMessageMode || 'ai',
+                                      pendingSuggestionId: updated.enrollment.pendingSuggestionId || null,
+                                      mode: updated.enrollment.mode || 'auto_send',
+                                      lastStoppedReason: null,
+                                    });
+                                  }
+                                } else {
+                                  // Rollback
+                                  setLeadFollowUpInfo(prev);
                                 }
+                              } catch {
+                                setLeadFollowUpInfo(prev);
                               }
                             }}
                           >
@@ -2318,32 +2333,25 @@ export function Messages() {
                             <button
                               className="text-[10px] font-medium py-1 px-2 rounded-lg border border-red-200 text-red-400 hover:bg-red-50"
                               onClick={async () => {
-                                await followUpApi.stopEnrollment(leadFollowUpInfo.enrollmentId, 'manual');
-                                // Reload to show stopped state with Restart button
-                                if (selectedLead?.threadId) {
-                                  const res = await followUpApi.getEnrollmentInfo(selectedLead.threadId);
-                                  if (res.enrollment) {
-                                    setLeadFollowUpInfo({ ...leadFollowUpInfo, ...res.enrollment });
-                                  } else {
-                                    const extra = res as any;
-                                    setLeadFollowUpInfo({
-                                      ...leadFollowUpInfo,
-                                      enrollmentId: '',
-                                      nextFollowUpAt: null,
-                                      followUpStatus: 'stopped',
-                                      currentStepIndex: 0,
-                                      totalSteps: 0,
-                                      nextMessagePreview: null,
-                                      pendingSuggestionId: null,
-                                      aiConversationOn: extra.aiConversationOn ?? leadFollowUpInfo.aiConversationOn,
-                                      aiAvailability: extra.aiAvailability ?? leadFollowUpInfo.aiAvailability,
-                                      aiActiveHoursStart: extra.aiActiveHoursStart ?? leadFollowUpInfo.aiActiveHoursStart,
-                                      aiActiveHoursEnd: extra.aiActiveHoursEnd ?? leadFollowUpInfo.aiActiveHoursEnd,
-                                      aiTimezone: extra.aiTimezone ?? leadFollowUpInfo.aiTimezone,
-                                      lastStoppedReason: 'manual',
-                                      mode: extra.followUpMode ?? leadFollowUpInfo.mode,
-                                    });
-                                  }
+                                const enrollmentId = leadFollowUpInfo.enrollmentId;
+                                const prev = leadFollowUpInfo;
+                                // Optimistic update — show stopped state immediately
+                                setLeadFollowUpInfo({
+                                  ...leadFollowUpInfo,
+                                  enrollmentId: '',
+                                  nextFollowUpAt: null,
+                                  followUpStatus: 'stopped',
+                                  currentStepIndex: 0,
+                                  totalSteps: 0,
+                                  nextMessagePreview: null,
+                                  pendingSuggestionId: null,
+                                  lastStoppedReason: 'manual',
+                                });
+                                try {
+                                  await followUpApi.stopEnrollment(enrollmentId, 'manual');
+                                } catch {
+                                  // Rollback on failure
+                                  setLeadFollowUpInfo(prev);
                                 }
                               }}
                             >
