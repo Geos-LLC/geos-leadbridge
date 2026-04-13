@@ -1644,15 +1644,23 @@ export class WebhooksService {
       // Verify by fetching the latest event from Yelp API — check user_type.
       // MUST run BEFORE handleCustomerReply — echo would kill follow-up enrollments.
       let isCustomerMessage = true;
+      let latestCustomerMessage = leadData.message || '';
       try {
         const yelpAdapter = this.platformFactory.getAdapter('yelp') as any;
         const events = await yelpAdapter.getLeadEvents({ accessToken }, leadId);
         if (events.length > 0) {
           // Sort by time, get the latest event
-          const latest = events.sort((a: any, b: any) => new Date(b.time_created).getTime() - new Date(a.time_created).getTime())[0];
+          const sorted = events.sort((a: any, b: any) => new Date(b.time_created).getTime() - new Date(a.time_created).getTime());
+          const latest = sorted[0];
           if (latest.user_type === 'BIZ') {
             isCustomerMessage = false;
             this.logger.log(`Yelp NEW_EVENT for ${leadId} — latest event is BIZ (our own message), skipping customer reply handling`);
+          }
+          // Extract the latest CONSUMER TEXT message for re-engagement alerts
+          const latestConsumer = sorted.find((e: any) => e.user_type === 'CONSUMER' && e.event_type === 'TEXT');
+          if (latestConsumer) {
+            const content = latestConsumer.event_content;
+            latestCustomerMessage = typeof content === 'string' ? content : content?.text || latestCustomerMessage;
           }
         }
       } catch {
@@ -1672,7 +1680,7 @@ export class WebhooksService {
       // Confirmed customer reply — stop follow-up enrollments
       if (lead.threadId) {
         try {
-          const fuResult = await this.followUpEngine.handleCustomerReply(lead.threadId, leadData.message || '');
+          const fuResult = await this.followUpEngine.handleCustomerReply(lead.threadId, latestCustomerMessage);
           if (fuResult.reEngagementAlert && savedAccount) {
             this.notificationsService.sendReEngagementAlert(userId, savedAccount.id, fuResult.reEngagementAlert)
               .catch(err => this.logger.warn(`[ReEngagement] Yelp alert failed: ${err.message}`));
