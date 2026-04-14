@@ -805,7 +805,8 @@ export function Services() {
         const accountPlatform = accounts.find(a => a.id === selectedAccountId)?.platform || 'yelp';
 
         const THUMBTACK_ALERT_TEMPLATE =
-          'New lead: {lead.name}, Price {lead.price}\n' +
+          'New lead for {account.name}\n' +
+          '{lead.name}, Price {lead.price}\n' +
           'Location: {lead.location}, {lead.zip}\n' +
           'Service: {lead.service} {lead.bedrooms} bed / {lead.bathrooms} bath\n' +
           'Frequency: {lead.frequency}\n' +
@@ -816,7 +817,8 @@ export function Services() {
           'Phone: {lead.phone}';
 
         const YELP_ALERT_TEMPLATE =
-          'New Yelp lead: {lead.name}\n' +
+          'New Yelp lead for {account.name}\n' +
+          '{lead.name}\n' +
           'Service: {lead.service}\n' +
           'Location: {lead.location}, {lead.zip}\n' +
           'Availability: {lead.availability}\n' +

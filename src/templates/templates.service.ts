@@ -57,13 +57,13 @@ export class TemplatesService {
     },
     {
       name: 'Lead Alert - Thumbtack',
-      content: 'New lead: {lead.name}, Price {lead.price}\nLocation: {lead.location}, {lead.zip}\nService: {lead.service} {lead.bedrooms} bed / {lead.bathrooms} bath\nFrequency: {lead.frequency}\nDescription: {lead.serviceDescription}\nAdd-ons: {lead.addons}\nPets: {lead.pets}\nMessage: {lead.message}\nPhone: {lead.phone}',
+      content: 'New lead for {account.name}\n{lead.name}, Price {lead.price}\nLocation: {lead.location}, {lead.zip}\nService: {lead.service} {lead.bedrooms} bed / {lead.bathrooms} bath\nFrequency: {lead.frequency}\nDescription: {lead.serviceDescription}\nAdd-ons: {lead.addons}\nPets: {lead.pets}\nMessage: {lead.message}\nPhone: {lead.phone}',
       type: 'message',
       isDefault: false,
     },
     {
       name: 'Lead Alert - Yelp',
-      content: 'New Yelp lead: {lead.name}\nService: {lead.service}\nLocation: {lead.location}, {lead.zip}\nAvailability: {lead.availability}\nMessage: {lead.message}\nPhone: {lead.phone}\nEmail: {lead.email}',
+      content: 'New Yelp lead for {account.name}\n{lead.name}\nService: {lead.service}\nLocation: {lead.location}, {lead.zip}\nAvailability: {lead.availability}\nMessage: {lead.message}\nPhone: {lead.phone}\nEmail: {lead.email}',
       type: 'message',
       isDefault: false,
     },
