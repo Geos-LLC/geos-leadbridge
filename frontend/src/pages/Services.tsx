@@ -801,8 +801,10 @@ export function Services() {
         const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { enabled });
         setLeadAlertRule(rule);
       } else if (enabled) {
-        // Find or create a default Lead Alert template
-        const DEFAULT_ALERT_TEMPLATE =
+        // Platform-specific default template — Thumbtack and Yelp have different data structures
+        const accountPlatform = accounts.find(a => a.id === selectedAccountId)?.platform || 'yelp';
+
+        const THUMBTACK_ALERT_TEMPLATE =
           'New lead: {lead.name}, Price {lead.price}\n' +
           'Location: {lead.location}, {lead.zip}\n' +
           'Service: {lead.service} {lead.bedrooms} bed / {lead.bathrooms} bath\n' +
@@ -813,10 +815,23 @@ export function Services() {
           'Message: {lead.message}\n' +
           'Phone: {lead.phone}';
 
-        let templateId = templates.find(t => t.name.includes('Lead Alert'))?.id;
+        const YELP_ALERT_TEMPLATE =
+          'New Yelp lead: {lead.name}\n' +
+          'Service: {lead.service}\n' +
+          'Location: {lead.location}, {lead.zip}\n' +
+          'Availability: {lead.availability}\n' +
+          'Message: {lead.message}\n' +
+          'Phone: {lead.phone}\n' +
+          'Email: {lead.email}';
+
+        const DEFAULT_ALERT_TEMPLATE = accountPlatform === 'yelp' ? YELP_ALERT_TEMPLATE : THUMBTACK_ALERT_TEMPLATE;
+        const templateName = accountPlatform === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack';
+
+        // Find existing template by platform-specific name
+        let templateId = templates.find(t => t.name === templateName)?.id;
         if (!templateId) {
           const { template } = await templatesApi.createTemplate(
-            'Lead Alert - SMS',
+            templateName,
             DEFAULT_ALERT_TEMPLATE,
           );
           templateId = template.id;
@@ -824,7 +839,7 @@ export function Services() {
         }
 
         const { rule } = await notificationsApi.createRule(selectedAccountId, {
-          name: 'Lead Alert - SMS',
+          name: templateName,
           triggerType: 'new_lead',
           toPhone: alertToPhone,
           sendToCustomer: false,
