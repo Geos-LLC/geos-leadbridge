@@ -860,7 +860,7 @@ export class FollowUpEngineController {
     const message = execution.generatedMessage || '';
     let messageId: string | null = null;
     try {
-      const sent = await this.leadsService.sendMessage(lead.userId, lead.id, message);
+      const sent = await this.leadsService.sendMessage(lead.userId, lead.id, message, 'ai');
       messageId = sent?.id || null;
 
       // Record in thread context
