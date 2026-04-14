@@ -283,12 +283,23 @@ export class LeadsService {
       // Enrich with senderType from local Message records (AI vs user distinction)
       if (lead.threadId) {
         const localMessages = await this.prisma.message.findMany({
-          where: { conversationId: lead.threadId },
-          select: { externalMessageId: true, senderType: true },
+          where: { conversationId: lead.threadId, sender: 'pro', senderType: { not: null } },
+          select: { externalMessageId: true, senderType: true, content: true, sentAt: true },
         });
-        const senderTypeMap = new Map(localMessages.filter(m => m.externalMessageId).map(m => [m.externalMessageId, m.senderType]));
+        const senderTypeMap = new Map(
+          localMessages.filter(m => m.externalMessageId).map(m => [m.externalMessageId, m.senderType]),
+        );
         for (const msg of messages) {
-          const st = senderTypeMap.get(msg.externalMessageId);
+          if (msg.sender !== 'pro') continue;
+          // Primary match: externalMessageId
+          let st = senderTypeMap.get(msg.externalMessageId);
+          // Fallback: match by exact content for historical messages that lack externalMessageId
+          if (!st) {
+            const match = localMessages.find(
+              m => !m.externalMessageId && m.content === msg.content,
+            );
+            if (match) st = match.senderType;
+          }
           if (st) msg.senderType = st;
         }
       }

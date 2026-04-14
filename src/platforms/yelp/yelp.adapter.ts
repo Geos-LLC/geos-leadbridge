@@ -300,10 +300,12 @@ export class YelpAdapter implements IPlatformAdapter {
       this.logger.log(`[Yelp sendMessage] SUCCESS — status=${response.status}`);
       const data = response.data;
       const msg = new NormalizedMessage();
-      msg.id = data.id || crypto.randomUUID();
+      // Yelp's POST /events response returns `event_id` (sometimes `id`)
+      const eventId = data.event_id || data.id;
+      msg.id = eventId || crypto.randomUUID();
       msg.conversationId = leadId;
       msg.platform = PlatformName.YELP;
-      msg.externalMessageId = data.id;
+      msg.externalMessageId = eventId;
       msg.sender = MessageSender.PRO;
       msg.content = message;
       msg.isRead = true;
