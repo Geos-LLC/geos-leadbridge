@@ -299,6 +299,7 @@ export class YelpAdapter implements IPlatformAdapter {
       );
       this.logger.log(`[Yelp sendMessage] SUCCESS — status=${response.status}`);
       const data = response.data;
+      this.logger.log(`[Yelp sendMessage] Response data: ${JSON.stringify(data).substring(0, 500)}`);
       const msg = new NormalizedMessage();
       // Yelp's POST /events response returns `event_id` (sometimes `id`)
       const eventId = data.event_id || data.id;
