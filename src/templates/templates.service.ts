@@ -56,6 +56,18 @@ export class TemplatesService {
       isDefault: false,
     },
     {
+      name: 'Lead Alert - Thumbtack',
+      content: 'New lead: {lead.name}, Price {lead.price}\nLocation: {lead.location}, {lead.zip}\nService: {lead.service} {lead.bedrooms} bed / {lead.bathrooms} bath\nFrequency: {lead.frequency}\nDescription: {lead.serviceDescription}\nAdd-ons: {lead.addons}\nPets: {lead.pets}\nMessage: {lead.message}\nPhone: {lead.phone}',
+      type: 'message',
+      isDefault: false,
+    },
+    {
+      name: 'Lead Alert - Yelp',
+      content: 'New Yelp lead: {lead.name}\nService: {lead.service}\nLocation: {lead.location}, {lead.zip}\nAvailability: {lead.availability}\nMessage: {lead.message}\nPhone: {lead.phone}\nEmail: {lead.email}',
+      type: 'message',
+      isDefault: false,
+    },
+    {
       name: 'Auto Reply - Welcome',
       content: 'Welcome to {accountName}! Thanks for choosing us for your {category} needs. We\'ll be in touch soon to discuss your project. Feel free to reply with any questions!',
       type: 'message',
@@ -240,14 +252,16 @@ Output:
       ],
     });
 
-    // Seed defaults for new users — check each type separately
+    // Seed missing defaults (per-name) so new platform-specific templates
+    // get added even for existing users who already have some templates.
     const typesToSeed = type ? [type] : ['message', 'prompt'] as const;
     for (const t of typesToSeed) {
-      const hasType = templates.some((tmpl: any) => tmpl.type === t);
-      if (!hasType) {
-        const defaults = t === 'prompt' ? TemplatesService.DEFAULT_PROMPTS : TemplatesService.DEFAULT_TEMPLATES;
+      const defaults = t === 'prompt' ? TemplatesService.DEFAULT_PROMPTS : TemplatesService.DEFAULT_TEMPLATES;
+      const existingNames = new Set(templates.filter((tmpl: any) => tmpl.type === t).map((tmpl: any) => tmpl.name));
+      const missing = defaults.filter(d => !existingNames.has(d.name));
+      if (missing.length > 0) {
         await this.prisma.messageTemplate.createMany({
-          data: defaults.map(d => ({ userId, name: d.name, content: d.content, type: d.type, isDefault: d.isDefault })),
+          data: missing.map(d => ({ userId, name: d.name, content: d.content, type: d.type, isDefault: d.isDefault })),
           skipDuplicates: true,
         });
       }
