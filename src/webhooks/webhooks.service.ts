@@ -1554,7 +1554,8 @@ export class WebhooksService {
     });
 
     // Ensure conversation exists for this Yelp lead (same pattern as Thumbtack).
-    // This powers lastMessageAt sorting — without it, Yelp leads stay stuck at createdAt.
+    // Do NOT update lastMessageAt here — it's updated below only when we confirm
+    // the event is a customer message (not an echo of our own AI/manual send).
     const conversation = await this.prisma.conversation.upsert({
       where: { platform_externalThreadId: { platform: 'yelp', externalThreadId: leadId } },
       create: {
@@ -1565,9 +1566,7 @@ export class WebhooksService {
         lastMessageAt: new Date(),
         status: 'active',
       },
-      update: {
-        lastMessageAt: new Date(),
-      },
+      update: {},
     });
 
     const lead = await this.prisma.lead.upsert({
@@ -1677,7 +1676,15 @@ export class WebhooksService {
 
       if (!isCustomerMessage) return;
 
-      // Confirmed customer reply — stop follow-up enrollments
+      // Confirmed customer reply — update conversation lastMessageAt to actual event time
+      if (conversation) {
+        await this.prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { lastMessageAt: new Date() },
+        }).catch(() => {});
+      }
+
+      // Stop follow-up enrollments
       if (lead.threadId) {
         try {
           const fuResult = await this.followUpEngine.handleCustomerReply(lead.threadId, latestCustomerMessage);
