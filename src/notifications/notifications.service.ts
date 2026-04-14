@@ -1585,6 +1585,9 @@ export class NotificationsService {
     let pets = 'Not specified';
     let estimate = 'Not specified';
     let dates = 'Not specified';
+    let email = 'Not provided';
+    let availability = 'Not specified';
+    let jobName = 'Not specified';
 
     if (lead.rawJson) {
       try {
@@ -1606,13 +1609,24 @@ export class NotificationsService {
         }
 
         // Yelp: use job_names as service description
-        if (raw.project?.job_names?.[0] && serviceDescription === 'Not specified') {
-          serviceDescription = raw.project.job_names[0];
+        if (raw.project?.job_names?.[0]) {
+          jobName = raw.project.job_names[0];
+          if (serviceDescription === 'Not specified') {
+            serviceDescription = jobName;
+          }
         }
 
-        // Yelp: use availability as dates
-        if (raw.project?.availability?.status && dates === 'Not specified') {
-          dates = raw.project.availability.status;
+        // Yelp: use availability as dates + standalone availability var
+        if (raw.project?.availability?.status) {
+          availability = raw.project.availability.status;
+          if (dates === 'Not specified') {
+            dates = availability;
+          }
+        }
+
+        // Yelp: temporary email address
+        if (raw.temporary_email_address) {
+          email = raw.temporary_email_address;
         }
 
         // Find specific answers from details array
@@ -1695,6 +1709,13 @@ export class NotificationsService {
     message = message.replace(/\{lead\.estimate\}/gi, estimate);
     message = message.replace(/\{\{lead\.dates\}\}/gi, dates);
     message = message.replace(/\{lead\.dates\}/gi, dates);
+    // Yelp-specific variables
+    message = message.replace(/\{\{lead\.email\}\}/gi, email);
+    message = message.replace(/\{lead\.email\}/gi, email);
+    message = message.replace(/\{\{lead\.availability\}\}/gi, availability);
+    message = message.replace(/\{lead\.availability\}/gi, availability);
+    message = message.replace(/\{\{lead\.jobName\}\}/gi, jobName);
+    message = message.replace(/\{lead\.jobName\}/gi, jobName);
 
     return message;
   }
