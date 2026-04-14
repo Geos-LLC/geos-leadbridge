@@ -1659,7 +1659,10 @@ export class WebhooksService {
           const latestConsumer = sorted.find((e: any) => e.user_type === 'CONSUMER' && e.event_type === 'TEXT');
           if (latestConsumer) {
             const content = latestConsumer.event_content;
-            latestCustomerMessage = typeof content === 'string' ? content : content?.text || latestCustomerMessage;
+            const extracted = typeof content === 'string'
+              ? content
+              : (content?.text || content?.fallback_text || latestConsumer.text || '');
+            if (extracted) latestCustomerMessage = extracted;
           }
         }
       } catch {
