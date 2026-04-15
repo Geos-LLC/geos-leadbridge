@@ -286,21 +286,30 @@ export class LeadsService {
           where: { conversationId: lead.threadId, sender: 'pro', senderType: { not: null } },
           select: { externalMessageId: true, senderType: true, content: true, sentAt: true },
         });
+        const normalize = (s: string | null | undefined) =>
+          (s || '').trim().replace(/\s+/g, ' ');
         const senderTypeMap = new Map(
           localMessages.filter(m => m.externalMessageId).map(m => [m.externalMessageId, m.senderType]),
         );
+        let matchedByContent = 0;
         for (const msg of messages) {
           if (msg.sender !== 'pro') continue;
           // Primary match: externalMessageId
           let st = senderTypeMap.get(msg.externalMessageId);
-          // Fallback: match by exact content for historical messages that lack externalMessageId
+          // Fallback 1: match by normalized content (for messages where Yelp returned
+          // empty response and externalMessageId wasn't captured)
           if (!st) {
-            const match = localMessages.find(
-              m => !m.externalMessageId && m.content === msg.content,
-            );
-            if (match) st = match.senderType;
+            const normalizedApi = normalize(msg.content);
+            const match = localMessages.find(m => normalize(m.content) === normalizedApi);
+            if (match) {
+              st = match.senderType;
+              matchedByContent++;
+            }
           }
           if (st) msg.senderType = st;
+        }
+        if (matchedByContent > 0) {
+          this.logger.log(`[getYelpMessages] Enriched ${matchedByContent} messages via content fallback for ${lead.threadId}`);
         }
       }
 
@@ -327,11 +336,30 @@ export class LeadsService {
     const conversationId = lead.threadId;
     if (!conversationId) return;
 
+    const normalize = (s: string | null | undefined) =>
+      (s || '').trim().replace(/\s+/g, ' ');
+
     for (const msg of messages) {
       const exists = await this.prisma.message.findFirst({
         where: { platform: 'yelp', externalMessageId: msg.externalMessageId },
       });
       if (exists) continue;
+
+      // Try to find an existing local Message with matching content but null
+      // externalMessageId (this happens for AI/manual sends where Yelp returned
+      // an empty response). Update it instead of creating a duplicate.
+      const normalizedContent = normalize(msg.content);
+      const candidates = await this.prisma.message.findMany({
+        where: { conversationId, platform: 'yelp', sender: msg.sender, externalMessageId: null },
+      });
+      const existingByContent = candidates.find(c => normalize(c.content) === normalizedContent);
+      if (existingByContent) {
+        await this.prisma.message.update({
+          where: { id: existingByContent.id },
+          data: { externalMessageId: msg.externalMessageId, sentAt: new Date(msg.sentAt) },
+        });
+        continue;
+      }
 
       await this.prisma.message.create({
         data: {
