@@ -1186,10 +1186,12 @@ export class NotificationsService {
       }
     }
 
-    // Render the message — Yelp uses compact format for agent alerts
+    // Render the message using the configured template.
+    // If no template is set, fall back to a compact platform-specific default.
     let messageBody: string;
-    if (context.platform === 'yelp' && !rule?.sendToCustomer) {
-      // Short Yelp alert: name, service, location, message snippet
+    if (template) {
+      messageBody = this.renderTemplate(template, lead, context.accountName);
+    } else if (context.platform === 'yelp' && !rule?.sendToCustomer) {
       const name = lead.customerName || 'Unknown';
       const service = lead.category || 'Not specified';
       const location = [lead.city, lead.state, lead.postcode].filter(Boolean).join(', ') || 'Not specified';
@@ -1197,7 +1199,7 @@ export class NotificationsService {
       messageBody = `[Yelp] New lead: ${name}\n${service}\n${location}${msg ? '\n\n' + msg : ''}`;
     } else {
       const platformLabel = context.platform === 'yelp' ? '[Yelp] ' : context.platform === 'thumbtack' ? '[TT] ' : '';
-      messageBody = `${platformLabel}${this.renderTemplate(template, lead, context.accountName)}`;
+      messageBody = `${platformLabel}New lead from ${lead.customerName || 'customer'}`;
     }
 
     this.logger.log(

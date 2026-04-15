@@ -1440,10 +1440,23 @@ export class WebhooksService {
     if (eventId && this.isDuplicateWebhook('yelp.NEW_EVENT', eventId)) {
       return;
     }
-    // Cross-instance dedup: check if a webhookEvent for this eventId was already
-    // successfully processed (processed=true, no error) within the last 60 seconds.
-    // The 60s window is enough for the first instance to finish and mark processed.
+    // Cross-instance dedup via pg advisory lock on eventId hash.
+    // Only one instance acquires the lock — the other skips entirely.
+    // Lock is held for the duration of processing (released at end of method).
+    let lockKey: number | null = null;
     if (eventId) {
+      // Stable 32-bit hash of the event id
+      let h = 5381;
+      for (let i = 0; i < eventId.length; i++) h = ((h << 5) + h + eventId.charCodeAt(i)) | 0;
+      lockKey = Math.abs(h) || 1;
+      const lockResult = await this.prisma.$queryRawUnsafe<any[]>(`SELECT pg_try_advisory_lock(${lockKey}) AS locked`);
+      const gotLock = lockResult?.[0]?.locked === true;
+      if (!gotLock) {
+        this.logger.log(`Skipping duplicate Yelp NEW_EVENT ${eventId} — another instance holds the lock`);
+        return;
+      }
+      // Also check if a recently-processed webhookEvent exists (the other instance
+      // may have finished and released the lock already).
       const alreadyDone = await this.prisma.webhookEvent.findFirst({
         where: {
           platform: 'yelp',
@@ -1455,10 +1468,22 @@ export class WebhooksService {
         select: { id: true },
       });
       if (alreadyDone) {
-        this.logger.log(`Skipping duplicate Yelp NEW_EVENT ${eventId} (cross-instance: already processed)`);
+        await this.prisma.$queryRawUnsafe(`SELECT pg_advisory_unlock(${lockKey})`).catch(() => {});
+        this.logger.log(`Skipping duplicate Yelp NEW_EVENT ${eventId} — already processed by another instance`);
         return;
       }
     }
+
+    try {
+      await this.handleYelpNewEventInner(businessId, data, leadId, eventId);
+    } finally {
+      if (lockKey !== null) {
+        await this.prisma.$queryRawUnsafe(`SELECT pg_advisory_unlock(${lockKey})`).catch(() => {});
+      }
+    }
+  }
+
+  private async handleYelpNewEventInner(businessId: string, data: any, leadId: string, eventId: string | undefined): Promise<void> {
 
     // Find saved account for this business
     this.logger.log(`[Yelp] Step 1: Finding saved account for business ${businessId}`);
