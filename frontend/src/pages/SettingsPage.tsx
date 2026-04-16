@@ -1346,17 +1346,26 @@ export default function SettingsPage() {
                                 onClick={() => {
                                   const acc = accounts.find(a => a.id === importAccountId);
                                   if (!acc) return;
-                                  // Store selected account for the extension to pick up
+                                  // Store selected account (auth script syncs to chrome.storage)
                                   localStorage.setItem('lb_yelp_launch_accountId', acc.id);
                                   localStorage.setItem('lb_yelp_launch_accountName', acc.businessName);
-                                  const yelpUrl = `https://biz.yelp.com/leads_center/${acc.businessId}/leads`;
-                                  window.open(yelpUrl, '_blank');
+                                  // Dispatch event — auth script forwards to extension background,
+                                  // which opens Yelp inbox + side panel and auto-starts sync.
+                                  window.dispatchEvent(new CustomEvent('leadbridge-yelp-launch', {
+                                    detail: {
+                                      action: 'sync-leads',
+                                      accountId: acc.id,
+                                      accountName: acc.businessName,
+                                      businessId: acc.businessId,
+                                      autoStart: true,
+                                    },
+                                  }));
                                 }}
                                 className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700 inline-flex items-center gap-1.5"
                               >
                                 <Download size={13} /> Get IDs
                               </button>
-                              <p className="text-[10px] text-slate-400 mt-1">Opens Yelp inbox for this location. Click the extension icon to start syncing.</p>
+                              <p className="text-[10px] text-slate-400 mt-1">Opens Yelp inbox and starts syncing automatically.</p>
                             </>
                           ) : (
                             <div className="flex items-center justify-between gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
