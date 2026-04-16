@@ -1406,15 +1406,40 @@ export class WebhooksService {
         break;
       case 'CONSUMER_PHONE_NUMBER_OPT_IN_EVENT':
         this.logger.log(`Yelp consumer phone opt-in: business=${businessId} lead=${data?.lead_id} data=${JSON.stringify(data).substring(0, 500)}`);
-        // Store phone number on the lead
+        // Per Yelp's Apr 16, 2026 update: webhook is the SIGNAL that phone is now available.
+        // First check the webhook payload directly. If not present, call GET_LEAD to fetch
+        // the unmasked phone from the Leads API.
         if (data?.lead_id) {
-          const phoneNumber = data?.phone_number || data?.consumer_phone_number || data?.event_content?.phone_number;
+          let phoneNumber = data?.phone_number || data?.consumer_phone_number || data?.event_content?.phone_number;
+
+          if (!phoneNumber) {
+            try {
+              const savedAccount = await this.prisma.savedAccount.findFirst({
+                where: { platform: 'yelp', businessId },
+              });
+              if (savedAccount?.credentialsJson) {
+                const encryptionKey = this.configService.get<string>('encryption.key') || '';
+                const creds = EncryptionUtil.decryptObject<any>(savedAccount.credentialsJson, encryptionKey);
+                if (creds?.accessToken) {
+                  const yelpAdapter = this.platformFactory.getAdapter('yelp') as any;
+                  const leadData = await yelpAdapter.getLead({ accessToken: creds.accessToken }, data.lead_id);
+                  phoneNumber = leadData?.customerPhone;
+                  this.logger.log(`Yelp opt-in: fetched phone via GET_LEAD for ${data.lead_id}: ${phoneNumber || 'still null'}`);
+                }
+              }
+            } catch (err: any) {
+              this.logger.warn(`Yelp opt-in GET_LEAD failed for ${data.lead_id}: ${err.message}`);
+            }
+          }
+
           if (phoneNumber) {
             await this.prisma.lead.updateMany({
               where: { externalRequestId: data.lead_id, platform: 'yelp' },
               data: { customerPhone: phoneNumber },
             });
             this.logger.log(`Yelp phone stored for lead ${data.lead_id}: ${phoneNumber}`);
+          } else {
+            this.logger.warn(`Yelp opt-in for ${data.lead_id} but no phone number found in webhook or GET_LEAD`);
           }
         }
         break;
