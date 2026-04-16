@@ -1824,7 +1824,9 @@ export class WebhooksService {
             category: leadData.category,
             city: leadData.city,
             state: leadData.state,
+            postcode: leadData.postcode,
             message: leadData.message,
+            rawJson: JSON.stringify(leadData.raw || data),
           },
         });
       } catch (err: any) {
