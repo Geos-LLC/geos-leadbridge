@@ -640,7 +640,7 @@ export class FollowUpEngineController {
             if (leadStatus) {
               const s = (leadStatus.status || '').toLowerCase();
               const ts = (leadStatus.thumbtackStatus || '').toLowerCase();
-              const terminal = ['done', 'scheduled', 'in_progress', 'in progress', 'booked', 'hired', 'job done', 'job scheduled', 'completed', 'archived', 'lost'];
+              const terminal = ['done', 'scheduled', 'in_progress', 'in progress', 'booked', 'hired', 'job done', 'job scheduled', 'completed', 'archived', 'lost', 'closed', 'not hired', 'not_hired'];
               if (terminal.includes(s) || terminal.includes(ts)) { skipped.terminal++; continue; }
             }
 
