@@ -1187,10 +1187,14 @@ export class NotificationsService {
     }
 
     // Render the message using the configured template.
-    // If no template is set, fall back to a compact platform-specific default.
+    // Prepend platform label so the recipient knows which channel the lead came from
+    // (unless the template already mentions the platform).
+    const platformLabel = context.platform === 'yelp' ? '[Yelp] ' : context.platform === 'thumbtack' ? '[TT] ' : '';
     let messageBody: string;
     if (template) {
-      messageBody = this.renderTemplate(template, lead, context.accountName);
+      const rendered = this.renderTemplate(template, lead, context.accountName);
+      const alreadyHasPlatform = /yelp|thumbtack|\[tt\]|\[yelp\]/i.test(rendered.split('\n')[0] || '');
+      messageBody = alreadyHasPlatform ? rendered : `${platformLabel}${rendered}`;
     } else if (context.platform === 'yelp' && !rule?.sendToCustomer) {
       const name = lead.customerName || 'Unknown';
       const service = lead.category || 'Not specified';
@@ -1198,7 +1202,6 @@ export class NotificationsService {
       const msg = lead.message ? lead.message.substring(0, 100) : '';
       messageBody = `[Yelp] New lead: ${name}\n${service}\n${location}${msg ? '\n\n' + msg : ''}`;
     } else {
-      const platformLabel = context.platform === 'yelp' ? '[Yelp] ' : context.platform === 'thumbtack' ? '[TT] ' : '';
       messageBody = `${platformLabel}New lead from ${lead.customerName || 'customer'}`;
     }
 
