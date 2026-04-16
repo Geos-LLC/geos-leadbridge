@@ -1296,7 +1296,11 @@ export default function SettingsPage() {
             {/* Import Negotiations — Yelp Chrome Extension */}
             {accounts.filter(a => a.platform === 'yelp').length > 0 && (() => {
               const yelpAccounts = accounts.filter(a => a.platform === 'yelp');
-              const yelpExtInstalled = document.documentElement.getAttribute('data-leadbridge-ext-type') === 'yelp' || extensionInstalled;
+              // Yelp ext is detected when its per-extension flag is set.
+              // Falls back to ext-type for older versions before the per-ext flag was added.
+              const yelpExtInstalled =
+                document.documentElement.getAttribute('data-leadbridge-ext-yelp') === 'true' ||
+                document.documentElement.getAttribute('data-leadbridge-ext-type') === 'yelp';
               return (
                 <div className="bg-red-50/50 rounded-2xl border border-red-100 overflow-hidden">
                   <div
@@ -1360,6 +1364,15 @@ export default function SettingsPage() {
                                 <p className="text-sm font-semibold text-amber-900">Extension not detected</p>
                                 <p className="text-xs text-amber-700 mt-0.5">Install the LeadBridge Sync - Yelp extension to import leads.</p>
                               </div>
+                              <a
+                                href="https://chromewebstore.google.com/detail/olpfodkjdkcmdmombgifpnnhmaecfkmg"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={() => localStorage.setItem('lb_expectingYelpExtension', '1')}
+                                className="px-3 py-2 rounded-xl text-xs font-semibold bg-amber-600 text-white hover:bg-amber-700 whitespace-nowrap inline-flex items-center gap-1.5 shrink-0"
+                              >
+                                Install Extension
+                              </a>
                             </div>
                           )}
                         </div>
