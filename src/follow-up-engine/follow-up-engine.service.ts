@@ -398,6 +398,177 @@ export class FollowUpEngineService {
     });
   }
 
+  // ──────────────────────────────────────────────────────────────────
+  // Engagement-aware mode switching
+  // See plans/2026-04-17-job-sync-sf-lb.md §7
+  // ──────────────────────────────────────────────────────────────────
+
+  /**
+   * A conversation is engaged if ANY of:
+   *  - customer has replied at least once (after the initial lead form)
+   *  - price was discussed
+   *  - the conversation reached a booking/scheduling stage
+   *  - thread has ≥ 4 total messages (initial + 3+ back-and-forth)
+   *  - engagement level is warm or hot
+   *
+   * Ghost = none of the above. Used to decide stop vs long-term follow-up.
+   */
+  async isEngaged(conversationId: string): Promise<boolean> {
+    const threadState = await this.conversationContext.getThreadState(conversationId);
+    if (threadState) {
+      if ((threadState.customerMessages ?? 0) > 0) return true;
+      if (threadState.priceDiscussed) return true;
+      const stage = (threadState.stage || '').toLowerCase();
+      if (['booking', 'scheduling', 'scheduled', 'booked'].includes(stage)) return true;
+      const total =
+        (threadState.customerMessages ?? 0) +
+        (threadState.businessMessages ?? 0) +
+        (threadState.aiMessages ?? 0);
+      if (total >= 4) return true;
+      const level = (threadState.engagementLevel || '').toLowerCase();
+      if (level === 'warm' || level === 'hot') return true;
+    }
+
+    // Fallback: count messages directly
+    const customerCount = await this.prisma.message.count({
+      where: { conversationId, sender: 'customer' },
+    });
+    if (customerCount > 0) return true;
+
+    const totalCount = await this.prisma.message.count({
+      where: { conversationId },
+    });
+    return totalCount >= 4;
+  }
+
+  /**
+   * Switch an active enrollment to long-term mode.
+   * Resets the current step index to 0 and schedules the first long-term send
+   * 7 days out. Idempotent — calling twice does not double the reset.
+   */
+  async switchToLongTermMode(enrollmentId: string, reason: string): Promise<boolean> {
+    const fresh = await this.prisma.followUpEnrollment.findUnique({
+      where: { id: enrollmentId },
+      select: { id: true, status: true, followUpMode: true, conversationId: true },
+    });
+    if (!fresh || fresh.status !== 'active') return false;
+    if (fresh.followUpMode === 'long_term') return false; // idempotent
+
+    const firstDue = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // +7 days
+
+    await this.prisma.followUpEnrollment.update({
+      where: { id: enrollmentId },
+      data: {
+        followUpMode: 'long_term',
+        modeChangedAt: new Date(),
+        modeReason: reason,
+        currentStepIndex: 0,
+        nextStepDueAt: firstDue,
+      },
+    });
+
+    await this.prisma.threadContext.updateMany({
+      where: { conversationId: fresh.conversationId },
+      data: { nextFollowUpAt: firstDue, followUpStatus: 'active' },
+    });
+
+    this.logger.log(`[FollowUp] switchToLongTermMode ${enrollmentId} (reason=${reason}, firstDue=${firstDue.toISOString()})`);
+    return true;
+  }
+
+  /**
+   * Switch an enrollment back to short-term mode.
+   * Used when a ghosted lead replies and becomes engaged again.
+   */
+  async switchToShortTermMode(enrollmentId: string, reason: string): Promise<boolean> {
+    const fresh = await this.prisma.followUpEnrollment.findUnique({
+      where: { id: enrollmentId },
+      select: { id: true, status: true, followUpMode: true, conversationId: true },
+    });
+    if (!fresh || fresh.status !== 'active') return false;
+    if (fresh.followUpMode === 'short_term') return false;
+
+    await this.prisma.followUpEnrollment.update({
+      where: { id: enrollmentId },
+      data: {
+        followUpMode: 'short_term',
+        modeChangedAt: new Date(),
+        modeReason: reason,
+        currentStepIndex: 0,
+      },
+    });
+
+    this.logger.log(`[FollowUp] switchToShortTermMode ${enrollmentId} (reason=${reason})`);
+    return true;
+  }
+
+  /**
+   * React to a platform-level status signal (Yelp/Thumbtack "Not hired",
+   * "Hired", "Archived"). Implements the decision tree from §7.2 of the plan:
+   *
+   *   explicit opt-out → stop
+   *   SF status terminal → stop
+   *   not engaged + Not hired/Archived → stop (ghost)
+   *   engaged + Not hired → switch to long-term
+   *   signal says re-activate → switch to short-term if currently long-term
+   *
+   * Returns the action taken for observability.
+   */
+  async handlePlatformSignal(
+    conversationId: string,
+    signal: 'Not hired' | 'Archived' | 'Hired' | string,
+  ): Promise<'stopped' | 'switched_long' | 'switched_short' | 'no_change' | 'no_enrollment'> {
+    const enrollment = await this.prisma.followUpEnrollment.findFirst({
+      where: { conversationId, status: 'active' },
+      select: { id: true, followUpMode: true, leadId: true },
+    });
+    if (!enrollment) return 'no_enrollment';
+
+    // Check lead's SF status first — if SF already called it terminal, stop
+    if (enrollment.leadId) {
+      const lead = await this.prisma.lead.findUnique({
+        where: { id: enrollment.leadId },
+        select: { status: true, statusSource: true },
+      });
+      const sfTerminal = ['scheduled', 'in_progress', 'completed', 'cancelled', 'lost', 'archived'];
+      if (
+        lead?.statusSource === 'service_flow' &&
+        lead.status &&
+        sfTerminal.includes(lead.status.toLowerCase())
+      ) {
+        await this.stopEnrollment(enrollment.id, `sf_status_${lead.status}`);
+        return 'stopped';
+      }
+    }
+
+    const normalized = (signal || '').toLowerCase();
+
+    if (normalized === 'hired' || normalized === 'active') {
+      // Platform signal says lead is active — if we're long-term-mode, switch back.
+      if (enrollment.followUpMode === 'long_term') {
+        await this.switchToShortTermMode(enrollment.id, 'platform_signal_active');
+        return 'switched_short';
+      }
+      return 'no_change';
+    }
+
+    if (normalized === 'not hired' || normalized === 'archived') {
+      const engaged = await this.isEngaged(conversationId);
+      if (!engaged) {
+        await this.stopEnrollment(enrollment.id, 'platform_not_hired_ghost');
+        return 'stopped';
+      }
+      // Engaged lead — switch to long-term rather than stop
+      if (enrollment.followUpMode !== 'long_term') {
+        await this.switchToLongTermMode(enrollment.id, 'platform_not_hired_engaged');
+        return 'switched_long';
+      }
+      return 'no_change';
+    }
+
+    return 'no_change';
+  }
+
   /**
    * Compute next step due time, respecting active hours.
    * Handles day boundaries and overnight windows.

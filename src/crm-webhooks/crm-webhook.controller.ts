@@ -33,7 +33,13 @@ export class CrmWebhookController {
     const secret = body.secret || crypto.randomBytes(32).toString('hex');
 
     const subscription = await this.prisma.crmWebhookSubscription.upsert({
-      where: { userId_webhookUrl: { userId: user.id, webhookUrl: body.webhookUrl } },
+      where: {
+        userId_direction_webhookUrl: {
+          userId: user.id,
+          direction: 'outbound',
+          webhookUrl: body.webhookUrl,
+        },
+      },
       create: {
         userId: user.id,
         name: body.name,
@@ -41,6 +47,7 @@ export class CrmWebhookController {
         secret,
         events: body.events,
         metadata: body.metadata,
+        direction: 'outbound',
       },
       update: {
         name: body.name,
@@ -72,7 +79,7 @@ export class CrmWebhookController {
   @Get()
   async list(@CurrentUser() user: any) {
     const subscriptions = await this.prisma.crmWebhookSubscription.findMany({
-      where: { userId: user.id },
+      where: { userId: user.id, direction: 'outbound' },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,

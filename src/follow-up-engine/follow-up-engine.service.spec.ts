@@ -304,4 +304,284 @@ describe('FollowUpEngineService', () => {
       });
     });
   });
+
+  // ======================================================================
+  // Engagement-aware follow-up (SF sync plan §7)
+  // ======================================================================
+
+  describe('isEngaged', () => {
+    it('returns true when customer has replied at least once', async () => {
+      contextService.getThreadState.mockResolvedValue({
+        stage: 'initial', engagementLevel: 'cold', awaitingCustomerReply: true,
+        priceDiscussed: false, lastQuestionAsked: null,
+        businessMessages: 1, aiMessages: 0, customerMessages: 1,
+      });
+      expect(await service.isEngaged(CONVERSATION_ID)).toBe(true);
+    });
+
+    it('returns true when priceDiscussed is true', async () => {
+      contextService.getThreadState.mockResolvedValue({
+        stage: 'initial', engagementLevel: 'cold', awaitingCustomerReply: true,
+        priceDiscussed: true, lastQuestionAsked: null,
+        businessMessages: 1, aiMessages: 0, customerMessages: 0,
+      });
+      expect(await service.isEngaged(CONVERSATION_ID)).toBe(true);
+    });
+
+    it('returns true when stage is booking/scheduled', async () => {
+      contextService.getThreadState.mockResolvedValue({
+        stage: 'booking', engagementLevel: 'cold', awaitingCustomerReply: false,
+        priceDiscussed: false, lastQuestionAsked: null,
+        businessMessages: 1, aiMessages: 0, customerMessages: 0,
+      });
+      expect(await service.isEngaged(CONVERSATION_ID)).toBe(true);
+    });
+
+    it('returns true when total messages ≥ 4', async () => {
+      contextService.getThreadState.mockResolvedValue({
+        stage: 'initial', engagementLevel: 'cold', awaitingCustomerReply: false,
+        priceDiscussed: false, lastQuestionAsked: null,
+        businessMessages: 2, aiMessages: 2, customerMessages: 0,
+      });
+      expect(await service.isEngaged(CONVERSATION_ID)).toBe(true);
+    });
+
+    it('returns true when engagement level is warm', async () => {
+      contextService.getThreadState.mockResolvedValue({
+        stage: 'initial', engagementLevel: 'warm', awaitingCustomerReply: true,
+        priceDiscussed: false, lastQuestionAsked: null,
+        businessMessages: 1, aiMessages: 0, customerMessages: 0,
+      });
+      expect(await service.isEngaged(CONVERSATION_ID)).toBe(true);
+    });
+
+    it('returns false for ghost lead (no reply, cold, short thread, no price)', async () => {
+      contextService.getThreadState.mockResolvedValue({
+        stage: 'initial', engagementLevel: 'cold', awaitingCustomerReply: true,
+        priceDiscussed: false, lastQuestionAsked: null,
+        businessMessages: 1, aiMessages: 0, customerMessages: 0,
+      });
+      prisma.message.count.mockResolvedValue(0);
+      expect(await service.isEngaged(CONVERSATION_ID)).toBe(false);
+    });
+
+    it('falls back to direct count when ThreadContext missing', async () => {
+      contextService.getThreadState.mockResolvedValue(null);
+      prisma.message.count
+        .mockResolvedValueOnce(1) // customer count
+        .mockResolvedValueOnce(0);
+      expect(await service.isEngaged(CONVERSATION_ID)).toBe(true);
+    });
+  });
+
+  describe('switchToLongTermMode', () => {
+    it('switches active enrollment and schedules first step 7 days out', async () => {
+      prisma.followUpEnrollment.findUnique.mockResolvedValue({
+        id: 'enroll-1', status: 'active', followUpMode: 'short_term',
+        conversationId: CONVERSATION_ID,
+      });
+      prisma.followUpEnrollment.update = jest.fn().mockResolvedValue({});
+
+      const before = Date.now();
+      const result = await service.switchToLongTermMode('enroll-1', 'platform_not_hired_engaged');
+      const after = Date.now();
+
+      expect(result).toBe(true);
+      const call = (prisma.followUpEnrollment.update as jest.Mock).mock.calls[0][0];
+      expect(call.where).toEqual({ id: 'enroll-1' });
+      expect(call.data.followUpMode).toBe('long_term');
+      expect(call.data.currentStepIndex).toBe(0);
+      expect(call.data.modeReason).toBe('platform_not_hired_engaged');
+      const dueMs = call.data.nextStepDueAt.getTime();
+      expect(dueMs).toBeGreaterThanOrEqual(before + 7 * 24 * 60 * 60 * 1000 - 1000);
+      expect(dueMs).toBeLessThanOrEqual(after + 7 * 24 * 60 * 60 * 1000 + 1000);
+    });
+
+    it('is idempotent — does not re-switch if already long_term', async () => {
+      prisma.followUpEnrollment.findUnique.mockResolvedValue({
+        id: 'enroll-1', status: 'active', followUpMode: 'long_term',
+        conversationId: CONVERSATION_ID,
+      });
+      prisma.followUpEnrollment.update = jest.fn();
+
+      const result = await service.switchToLongTermMode('enroll-1', 'any_reason');
+
+      expect(result).toBe(false);
+      expect(prisma.followUpEnrollment.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses to switch non-active enrollments', async () => {
+      prisma.followUpEnrollment.findUnique.mockResolvedValue({
+        id: 'enroll-1', status: 'stopped', followUpMode: 'short_term',
+        conversationId: CONVERSATION_ID,
+      });
+      prisma.followUpEnrollment.update = jest.fn();
+
+      const result = await service.switchToLongTermMode('enroll-1', 'any');
+
+      expect(result).toBe(false);
+      expect(prisma.followUpEnrollment.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('switchToShortTermMode', () => {
+    it('flips long_term back to short_term and resets step', async () => {
+      prisma.followUpEnrollment.findUnique.mockResolvedValue({
+        id: 'enroll-1', status: 'active', followUpMode: 'long_term',
+        conversationId: CONVERSATION_ID,
+      });
+      prisma.followUpEnrollment.update = jest.fn().mockResolvedValue({});
+
+      const result = await service.switchToShortTermMode('enroll-1', 'ghost_returned');
+
+      expect(result).toBe(true);
+      const call = (prisma.followUpEnrollment.update as jest.Mock).mock.calls[0][0];
+      expect(call.data.followUpMode).toBe('short_term');
+      expect(call.data.currentStepIndex).toBe(0);
+      expect(call.data.modeReason).toBe('ghost_returned');
+    });
+
+    it('is a no-op when already short_term', async () => {
+      prisma.followUpEnrollment.findUnique.mockResolvedValue({
+        id: 'enroll-1', status: 'active', followUpMode: 'short_term',
+        conversationId: CONVERSATION_ID,
+      });
+      prisma.followUpEnrollment.update = jest.fn();
+
+      const result = await service.switchToShortTermMode('enroll-1', 'any');
+
+      expect(result).toBe(false);
+      expect(prisma.followUpEnrollment.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('handlePlatformSignal', () => {
+    function mockEnrollment(overrides: any = {}) {
+      prisma.followUpEnrollment.findFirst.mockResolvedValue({
+        id: 'enroll-1',
+        followUpMode: 'short_term',
+        leadId: LEAD_ID,
+        ...overrides,
+      });
+    }
+
+    it('returns no_enrollment when no active enrollment exists', async () => {
+      prisma.followUpEnrollment.findFirst.mockResolvedValue(null);
+      const result = await service.handlePlatformSignal(CONVERSATION_ID, 'Not hired');
+      expect(result).toBe('no_enrollment');
+    });
+
+    it('Not hired + ghost → stops', async () => {
+      mockEnrollment();
+      prisma.lead.findUnique.mockResolvedValue({ status: 'new', statusSource: null });
+      contextService.getThreadState.mockResolvedValue({
+        stage: 'initial', engagementLevel: 'cold', awaitingCustomerReply: true,
+        priceDiscussed: false, lastQuestionAsked: null,
+        businessMessages: 1, aiMessages: 0, customerMessages: 0,
+      });
+      prisma.message.count.mockResolvedValue(0);
+
+      const result = await service.handlePlatformSignal(CONVERSATION_ID, 'Not hired');
+
+      expect(result).toBe('stopped');
+      expect(prisma.followUpEnrollment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'enroll-1', status: 'active' },
+        data: expect.objectContaining({ stoppedReason: 'platform_not_hired_ghost' }),
+      });
+    });
+
+    it('Not hired + engaged → switches to long_term', async () => {
+      mockEnrollment({ followUpMode: 'short_term' });
+      prisma.lead.findUnique.mockResolvedValue({ status: 'new', statusSource: null });
+      contextService.getThreadState.mockResolvedValue({
+        stage: 'initial', engagementLevel: 'warm', awaitingCustomerReply: true,
+        priceDiscussed: true, lastQuestionAsked: null,
+        businessMessages: 2, aiMessages: 1, customerMessages: 1,
+      });
+      prisma.followUpEnrollment.findUnique.mockResolvedValue({
+        id: 'enroll-1', status: 'active', followUpMode: 'short_term',
+        conversationId: CONVERSATION_ID,
+      });
+      prisma.followUpEnrollment.update = jest.fn().mockResolvedValue({});
+
+      const result = await service.handlePlatformSignal(CONVERSATION_ID, 'Not hired');
+
+      expect(result).toBe('switched_long');
+      const updateCall = (prisma.followUpEnrollment.update as jest.Mock).mock.calls[0][0];
+      expect(updateCall.data.followUpMode).toBe('long_term');
+    });
+
+    it('SF status terminal always wins (even if engaged)', async () => {
+      mockEnrollment();
+      prisma.lead.findUnique.mockResolvedValue({
+        status: 'completed',
+        statusSource: 'service_flow',
+      });
+      contextService.getThreadState.mockResolvedValue({
+        stage: 'booking', engagementLevel: 'hot', awaitingCustomerReply: false,
+        priceDiscussed: true, lastQuestionAsked: null,
+        businessMessages: 5, aiMessages: 3, customerMessages: 4,
+      });
+
+      const result = await service.handlePlatformSignal(CONVERSATION_ID, 'Not hired');
+
+      expect(result).toBe('stopped');
+      expect(prisma.followUpEnrollment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'enroll-1', status: 'active' },
+        data: expect.objectContaining({ stoppedReason: 'sf_status_completed' }),
+      });
+    });
+
+    it('Hired signal on long-term enrollment → switches back to short_term', async () => {
+      mockEnrollment({ followUpMode: 'long_term' });
+      prisma.lead.findUnique.mockResolvedValue({ status: 'new', statusSource: null });
+      prisma.followUpEnrollment.findUnique.mockResolvedValue({
+        id: 'enroll-1', status: 'active', followUpMode: 'long_term',
+        conversationId: CONVERSATION_ID,
+      });
+      prisma.followUpEnrollment.update = jest.fn().mockResolvedValue({});
+
+      const result = await service.handlePlatformSignal(CONVERSATION_ID, 'Hired');
+
+      expect(result).toBe('switched_short');
+      const updateCall = (prisma.followUpEnrollment.update as jest.Mock).mock.calls[0][0];
+      expect(updateCall.data.followUpMode).toBe('short_term');
+    });
+
+    it('Hired signal on short-term enrollment → no change', async () => {
+      mockEnrollment({ followUpMode: 'short_term' });
+      prisma.lead.findUnique.mockResolvedValue({ status: 'new', statusSource: null });
+
+      const result = await service.handlePlatformSignal(CONVERSATION_ID, 'Hired');
+
+      expect(result).toBe('no_change');
+    });
+
+    it('unknown signal → no change', async () => {
+      mockEnrollment();
+      prisma.lead.findUnique.mockResolvedValue({ status: 'new', statusSource: null });
+
+      const result = await service.handlePlatformSignal(CONVERSATION_ID, 'something-else');
+
+      expect(result).toBe('no_change');
+    });
+
+    it('engaged Not hired on already-long_term enrollment → no_change (idempotent)', async () => {
+      mockEnrollment({ followUpMode: 'long_term' });
+      prisma.lead.findUnique.mockResolvedValue({ status: 'new', statusSource: null });
+      contextService.getThreadState.mockResolvedValue({
+        stage: 'initial', engagementLevel: 'warm', awaitingCustomerReply: true,
+        priceDiscussed: true, lastQuestionAsked: null,
+        businessMessages: 2, aiMessages: 1, customerMessages: 1,
+      });
+      prisma.followUpEnrollment.findUnique.mockResolvedValue({
+        id: 'enroll-1', status: 'active', followUpMode: 'long_term',
+        conversationId: CONVERSATION_ID,
+      });
+
+      const result = await service.handlePlatformSignal(CONVERSATION_ID, 'Not hired');
+
+      expect(result).toBe('no_change');
+    });
+  });
 });

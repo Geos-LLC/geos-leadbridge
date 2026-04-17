@@ -331,4 +331,68 @@ describe('CrmWebhookService', () => {
       expect(result.status).toBe(502);
     });
   });
+
+  // ===================================================================
+  // Loop prevention (SF sync plan §5.2)
+  // ===================================================================
+  describe('loop prevention', () => {
+    it('suppresses lead.status_changed when lead.statusSource = service_flow', async () => {
+      const axios = require('axios');
+      axios.post.mockClear();
+      (prisma.lead as any).findUnique.mockResolvedValue({ statusSource: 'service_flow' });
+
+      await service.emit(USER_ID, 'lead.status_changed', {
+        userId: USER_ID,
+        platform: 'yelp',
+        leadId: LEAD_ID,
+      });
+
+      expect(axios.post).not.toHaveBeenCalled();
+      // findMany must not be called either — the guard short-circuits
+      expect(prisma.crmWebhookSubscription.findMany).not.toHaveBeenCalled();
+    });
+
+    it('still emits lead.status_changed when source is manual', async () => {
+      const axios = require('axios');
+      axios.post.mockClear();
+      axios.post.mockResolvedValue({ status: 200 });
+      (prisma.lead as any).findUnique.mockResolvedValue({
+        id: LEAD_ID, status: 'new', category: 'House Cleaning', budget: 189,
+        city: 'Tampa', state: 'FL', customerName: 'Test', customerPhone: '+10000000000',
+        customerEmail: null, externalRequestId: 'ext-1', threadId: 'conv-1',
+        businessId: BUSINESS_ID, statusSource: 'manual',
+      });
+      prisma.crmWebhookSubscription.findMany.mockResolvedValue([
+        {
+          id: 'sub-1',
+          name: 'SF',
+          webhookUrl: WEBHOOK_URL,
+          secret: WEBHOOK_SECRET,
+          events: ['lead.status_changed'],
+        },
+      ]);
+
+      await service.emit(USER_ID, 'lead.status_changed', {
+        userId: USER_ID,
+        platform: 'yelp',
+        leadId: LEAD_ID,
+      });
+
+      expect(axios.post).toHaveBeenCalled();
+    });
+
+    it('only loads outbound subscriptions when emitting', async () => {
+      prisma.crmWebhookSubscription.findMany.mockResolvedValue([]);
+
+      await service.emit(USER_ID, 'lead.created', {
+        userId: USER_ID,
+        platform: 'yelp',
+        leadId: LEAD_ID,
+      });
+
+      expect(prisma.crmWebhookSubscription.findMany).toHaveBeenCalledWith({
+        where: { userId: USER_ID, isActive: true, direction: 'outbound' },
+      });
+    });
+  });
 });

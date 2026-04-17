@@ -1,11 +1,22 @@
 /**
  * Backfill senderType='ai' on historical follow-up/AI messages
  *
- * When the Yelp webhook echo landed before our sendMessage completed, the Message
- * row was stored with senderType=null. As a result, the UI shows "Platform" for
- * those messages instead of "AI". This script fixes historical rows by cross-
- * referencing FollowUpStepExecution.messageId and FollowUpStepExecution.finalMessage
- * content matches.
+ * Why: before the fix in leads.service.ts that stamps senderType onto the
+ * Message row even when the Yelp webhook echo raced ahead, every Yelp pro
+ * message got senderType=null. The UI "AI vs Platform" badge keys on that
+ * field, so AI follow-ups display as "Platform".
+ *
+ * Strategy (in order of specificity):
+ *   1. FollowUpStepExecution.messageId → Message.externalMessageId / Message.id
+ *      (rare — adapter often returns a random UUID that doesn't map to the
+ *      webhook-created row).
+ *   2. Per-conversation content match (normalized whitespace + em-dash fold).
+ *      This is the dominant path for Yelp follow-ups.
+ *
+ * AI Conversation (automation.service auto-replies) messages also match via
+ * ThreadContext stats + content, but those are harder to attribute historically —
+ * out of scope for this script. Going-forward, leads.service.ts now stamps
+ * senderType correctly.
  *
  * Usage:
  *   node scripts/backfill-ai-sender-type.js            # dry-run
@@ -17,78 +28,111 @@ const { PrismaClient } = require('../generated/prisma');
 const prisma = new PrismaClient();
 const APPLY = process.argv.includes('--apply');
 
+// Normalize: trim, collapse whitespace, fold em/en dashes to hyphen, curly → straight quotes
+function normalize(s) {
+  return (s || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/[\u2014\u2013]/g, '-')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"');
+}
+
 async function main() {
   console.log(`[backfill] mode=${APPLY ? 'APPLY' : 'DRY-RUN'}`);
 
-  // Strategy 1: direct match via FollowUpStepExecution.messageId → Message.id
-  const execsWithMessageId = await prisma.followUpStepExecution.findMany({
-    where: { messageId: { not: null }, status: { in: ['sent', 'approved'] } },
-    select: { id: true, messageId: true, finalMessage: true, generatedMessage: true, enrollment: { select: { conversationId: true, platform: true } } },
+  // All sent/approved step executions with some message text
+  const execs = await prisma.followUpStepExecution.findMany({
+    where: {
+      status: { in: ['sent', 'approved'] },
+      OR: [{ finalMessage: { not: null } }, { generatedMessage: { not: null } }],
+    },
+    select: {
+      id: true,
+      messageId: true,
+      finalMessage: true,
+      generatedMessage: true,
+      executedAt: true,
+      enrollment: { select: { conversationId: true, platform: true } },
+    },
   });
 
-  console.log(`[backfill] Found ${execsWithMessageId.length} step executions with messageId`);
+  console.log(`[backfill] Found ${execs.length} step executions to process`);
 
   let stampedViaId = 0;
   let stampedViaContent = 0;
+  let alreadyTagged = 0;
+  let unmatched = 0;
 
-  for (const exec of execsWithMessageId) {
-    if (!exec.messageId) continue;
-    const msg = await prisma.message.findFirst({
-      where: { id: exec.messageId },
-      select: { id: true, senderType: true },
-    });
-    if (msg && !msg.senderType) {
-      if (APPLY) {
-        await prisma.message.update({
-          where: { id: msg.id },
-          data: { senderType: 'ai' },
-        });
+  for (const exec of execs) {
+    const convId = exec.enrollment?.conversationId;
+    if (!convId) { unmatched++; continue; }
+
+    const text = exec.finalMessage || exec.generatedMessage;
+    if (!text) { unmatched++; continue; }
+
+    let targetMsg = null;
+
+    // Strategy 1: direct messageId lookup (rare success path)
+    if (exec.messageId) {
+      targetMsg = await prisma.message.findFirst({
+        where: {
+          conversationId: convId,
+          sender: 'pro',
+          OR: [
+            { externalMessageId: exec.messageId },
+            { id: exec.messageId },
+          ],
+        },
+        select: { id: true, senderType: true },
+      });
+    }
+
+    // Strategy 2: per-conversation content match with normalization
+    if (!targetMsg) {
+      const candidates = await prisma.message.findMany({
+        where: { conversationId: convId, sender: 'pro' },
+        select: { id: true, content: true, senderType: true, sentAt: true },
+      });
+      const target = normalize(text);
+      // Prefer the closest sentAt to exec.executedAt if there are ties
+      const matches = candidates.filter((c) => normalize(c.content) === target);
+      if (matches.length > 0 && exec.executedAt) {
+        matches.sort(
+          (a, b) =>
+            Math.abs(a.sentAt.getTime() - exec.executedAt.getTime()) -
+            Math.abs(b.sentAt.getTime() - exec.executedAt.getTime()),
+        );
       }
+      if (matches.length > 0) {
+        targetMsg = matches[0];
+        if (exec.messageId) {
+          // Strategy 2 hit, not strategy 1 — still count as content path
+          stampedViaContent++;
+        } else {
+          stampedViaContent++;
+        }
+      }
+    } else {
       stampedViaId++;
     }
-  }
 
-  // Strategy 2: match by conversation + content for execs that have no messageId
-  // (these are cases where sendMessage failed to capture externalMessageId)
-  const execsNoMessageId = await prisma.followUpStepExecution.findMany({
-    where: { messageId: null, status: { in: ['sent', 'approved'] }, finalMessage: { not: null } },
-    select: { id: true, finalMessage: true, generatedMessage: true, enrollment: { select: { conversationId: true, platform: true } } },
-  });
+    if (!targetMsg) { unmatched++; continue; }
+    if (targetMsg.senderType === 'ai' || targetMsg.senderType === 'user') {
+      alreadyTagged++;
+      continue;
+    }
 
-  console.log(`[backfill] Found ${execsNoMessageId.length} step executions without messageId`);
-
-  const normalize = (s) => (s || '').trim().replace(/\s+/g, ' ');
-
-  for (const exec of execsNoMessageId) {
-    const text = exec.finalMessage || exec.generatedMessage;
-    if (!text || !exec.enrollment?.conversationId) continue;
-
-    const candidates = await prisma.message.findMany({
-      where: {
-        conversationId: exec.enrollment.conversationId,
-        sender: 'pro',
-        senderType: null,
-      },
-      select: { id: true, content: true, senderType: true },
-      take: 20,
-    });
-
-    const normalizedTarget = normalize(text);
-    for (const c of candidates) {
-      if (normalize(c.content) === normalizedTarget) {
-        if (APPLY) {
-          await prisma.message.update({
-            where: { id: c.id },
-            data: { senderType: 'ai' },
-          });
-        }
-        stampedViaContent++;
-        break;
-      }
+    if (APPLY) {
+      await prisma.message.update({
+        where: { id: targetMsg.id },
+        data: { senderType: 'ai' },
+      });
     }
   }
 
-  console.log(`[backfill] ${APPLY ? 'Stamped' : 'Would stamp'} senderType=ai on ${stampedViaId} (via messageId) + ${stampedViaContent} (via content match) = ${stampedViaId + stampedViaContent} total`);
+  console.log(`[backfill] ${APPLY ? 'Stamped' : 'Would stamp'} senderType=ai — via messageId: ${stampedViaId}, via content: ${stampedViaContent}, already tagged (skipped): ${alreadyTagged}, unmatched: ${unmatched}`);
+  console.log(`[backfill] total = ${stampedViaId + stampedViaContent}`);
 
   if (!APPLY) {
     console.log('[backfill] Dry-run complete. Re-run with --apply to commit.');

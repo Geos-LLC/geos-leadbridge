@@ -69,7 +69,7 @@ model User {
   id        String   @id @default(uuid())
   email     String   @unique
   name      String?
-  password  String?  // For user authentication in your app
+  password  String? // For user authentication in your app
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -84,11 +84,11 @@ model User {
   hasOwnNumber          Boolean             @default(false)
 
   // Trial period
-  trialStartDate        DateTime?
-  trialEndDate          DateTime?
-  trialUsed             Boolean             @default(false)
-  trialLeadsHandled     Int                 @default(0)
-  trialLeadsLimit       Int                 @default(10)
+  trialStartDate    DateTime?
+  trialEndDate      DateTime?
+  trialUsed         Boolean   @default(false)
+  trialLeadsHandled Int       @default(0)
+  trialLeadsLimit   Int       @default(10)
 
   // Track Thumbtack account to prevent trial abuse
   // Users can't get another trial with same Thumbtack account
@@ -96,45 +96,45 @@ model User {
   thumbtackAccountEmail String?
 
   // Business phone (agent's personal phone for receiving forwarded calls/SMS)
-  businessPhone         String?
+  businessPhone String?
 
   // Sigcore phone number provisioning
-  phoneNumber           String?  // User's dedicated Sigcore/Twilio number
-  sigcoreAllocationId   String?  @map("callioAllocationId") // Sigcore's allocation ID for this number
+  phoneNumber         String? // User's dedicated Sigcore/Twilio number
+  sigcoreAllocationId String? @map("callioAllocationId") // Sigcore's allocation ID for this number
 
   // Cross-app business identity (Sigcore registry references — transitional on User, will move to workspace+membership)
-  sigcoreWorkspaceId    String?  @map("sigcore_workspace_id")  // product_workspaces.id in Sigcore
-  sigcoreBusinessId     String?  @map("sigcore_business_id")   // businesses.id in Sigcore
+  sigcoreWorkspaceId String? @map("sigcore_workspace_id") // product_workspaces.id in Sigcore
+  sigcoreBusinessId  String? @map("sigcore_business_id") // businesses.id in Sigcore
 
   // AI settings
-  globalAiPrompt        String?   @db.Text @map("global_ai_prompt") // Global AI system prompt — applied to all AI replies
+  globalAiPrompt String? @map("global_ai_prompt") @db.Text // Global AI system prompt — applied to all AI replies
 
   // Password reset
-  passwordResetToken    String?
-  passwordResetExpires  DateTime?
+  passwordResetToken   String?
+  passwordResetExpires DateTime?
 
   // Relationships
-  platforms                Platform[]
-  leads                    Lead[]
-  conversations            Conversation[]
-  messages                 Message[]
-  savedAccounts            SavedAccount[]
-  messageTemplates         MessageTemplate[]
-  automationRules          AutomationRule[]
-  subscriptionHistory      SubscriptionHistory[]
-  adminLogs                AdminLog[]
-  notificationSettings     NotificationSettings[] // Account-specific and user-level default notification settings
-  poolPhones               PhonePool[]            // Legacy: single-assignment relation
-  phonePoolAssignments     PhonePoolAssignment[]  // Many-to-many phone pool assignments
-  thumbtackSnapshots       ThumbtackSettingsSnapshot[]
-  thumbtackLeadIds         ThumbtackLeadId[]
-  callConnectSettings      CallConnectSettings[]
-  tenantPhoneNumbers       TenantPhoneNumber[]
+  platforms                   Platform[]
+  leads                       Lead[]
+  conversations               Conversation[]
+  messages                    Message[]
+  savedAccounts               SavedAccount[]
+  messageTemplates            MessageTemplate[]
+  automationRules             AutomationRule[]
+  subscriptionHistory         SubscriptionHistory[]
+  adminLogs                   AdminLog[]
+  notificationSettings        NotificationSettings[] // Account-specific and user-level default notification settings
+  poolPhones                  PhonePool[] // Legacy: single-assignment relation
+  phonePoolAssignments        PhonePoolAssignment[] // Many-to-many phone pool assignments
+  thumbtackSnapshots          ThumbtackSettingsSnapshot[]
+  thumbtackLeadIds            ThumbtackLeadId[]
+  callConnectSettings         CallConnectSettings[]
+  tenantPhoneNumbers          TenantPhoneNumber[]
   conversationSyncConnections ConversationSyncConnection[]
-  followUpSequenceTemplates FollowUpSequenceTemplate[]
-  orgMemberships           OrgMembership[]
-  crmWebhookSubscriptions  CrmWebhookSubscription[]
-  accountHealthStatuses    AccountHealthStatus[]
+  followUpSequenceTemplates   FollowUpSequenceTemplate[]
+  orgMemberships              OrgMembership[]
+  crmWebhookSubscriptions     CrmWebhookSubscription[]
+  accountHealthStatuses       AccountHealthStatus[]
 
   @@map("users")
 }
@@ -144,19 +144,19 @@ model User {
 // ==========================================
 
 model Platform {
-  id                 String   @id @default(uuid())
+  id                 String    @id @default(uuid())
   userId             String
-  platformName       String   // "thumbtack" | "yelp" | "angi" | "bark"
-  connected          Boolean  @default(true)
-  externalUserId     String?  // Platform's user ID
-  externalBusinessId String?  // Platform's business ID (for webhook matching)
-  credentialsJson    String   // Encrypted: access_token, refresh_token, api_key, etc.
-  webhookSecret      String?  // Encrypted webhook verification secret
-  webhookId          String?  // Platform's webhook subscription ID
+  platformName       String // "thumbtack" | "yelp" | "angi" | "bark"
+  connected          Boolean   @default(true)
+  externalUserId     String? // Platform's user ID
+  externalBusinessId String? // Platform's business ID (for webhook matching)
+  credentialsJson    String // Encrypted: access_token, refresh_token, api_key, etc.
+  webhookSecret      String? // Encrypted webhook verification secret
+  webhookId          String? // Platform's webhook subscription ID
   lastSyncAt         DateTime?
-  metadataJson       String?  // Additional platform-specific data
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  metadataJson       String? // Additional platform-specific data
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   // Relationships
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -173,37 +173,47 @@ model Platform {
 // ==========================================
 
 model Lead {
-  id                String   @id @default(uuid())
+  id                String    @id @default(uuid())
   userId            String
-  platform          String   // "thumbtack" | "yelp" | etc.
-  businessId        String?  // Platform's business ID (for multi-account filtering)
-  externalRequestId String   // Platform's unique lead/request ID
+  platform          String // "thumbtack" | "yelp" | etc.
+  businessId        String? // Platform's business ID (for multi-account filtering)
+  externalRequestId String // Platform's unique lead/request ID
   customerName      String
   customerPhone     String?
   customerEmail     String?
-  message           String   @db.Text
-  budget            Decimal? @db.Decimal(10, 2)
+  message           String    @db.Text
+  budget            Decimal?  @db.Decimal(10, 2)
   postcode          String?
   city              String?
   state             String?
-  category          String?  // Service category
-  status            String   @default("new") // "new" | "contacted" | "quoted" | "booked" | "lost"
-  thumbtackStatus   String?  // Job status from Thumbtack UI (e.g. "Hired", "Not hired")
-  threadId          String?  // Universal conversation ID
-  rawJson           String   @db.Text // Original platform payload
-  syncedToCrm       Boolean  @default(false)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  category          String? // Service category
+  status            String    @default("new") // "new" | "contacted" | "quoted" | "booked" | "lost"
+  thumbtackStatus   String? // Job status from Thumbtack UI (e.g. "Hired", "Not hired")
+  platformStatus    String? // Generic platform-native status (Yelp Done/Closed/Hired, etc.)
+  platformStatusAt  DateTime? // When platform status was last observed
+  threadId          String? // Universal conversation ID
+  rawJson           String    @db.Text // Original platform payload
+  syncedToCrm       Boolean   @default(false)
+  // Service Flow sync fields (see plans/2026-04-17-job-sync-sf-lb.md)
+  sfJobId           String? // SF jobs.id — sticky mapping
+  sfJobMappedAt     DateTime?
+  sfLastEventAt     DateTime? // Last accepted SF event occurred_at
+  statusSource      String? // 'service_flow' | 'platform_sync' | 'manual' | 'lb_automation'
+  statusUpdatedAt   DateTime? // When Lead.status last changed; used for ordering
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   // Relationships
-  user                    User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  conversation            Conversation?                 @relation(fields: [threadId], references: [id])
+  user                    User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation            Conversation?                @relation(fields: [threadId], references: [id])
   pendingMessages         PendingAutomatedMessage[]
   pendingNotificationMsgs PendingNotificationMessage[]
   callConnectSessions     LeadCallConnect[]
   leadConversations       LeadConversation[]
-  threadContexts          ThreadContext[]       // Intelligence layer (multiple if lead has multiple threads)
-  followUpEnrollments     FollowUpEnrollment[]  // Follow-up sequences for this lead
+  threadContexts          ThreadContext[] // Intelligence layer (multiple if lead has multiple threads)
+  followUpEnrollments     FollowUpEnrollment[] // Follow-up sequences for this lead
+  statusAuditLogs         LeadStatusAuditLog[]
+  sfInboundEvents         SfInboundEvent[]
 
   @@unique([platform, externalRequestId])
   @@index([userId])
@@ -211,6 +221,8 @@ model Lead {
   @@index([businessId])
   @@index([status])
   @@index([createdAt])
+  @@index([sfJobId])
+  @@index([statusSource])
   @@map("leads")
 }
 
@@ -219,23 +231,23 @@ model Lead {
 // ==========================================
 
 model Conversation {
-  id              String   @id @default(uuid())
-  userId          String
-  platform        String   // "thumbtack" | "yelp" | etc.
-  externalThreadId String  // Platform's conversation/thread ID
-  customerName    String
-  lastMessageAt   DateTime @default(now())
-  unreadCount     Int      @default(0)
-  status          String   @default("active") // "active" | "archived" | "closed"
-  metadataJson    String?  @db.Text
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String   @id @default(uuid())
+  userId           String
+  platform         String // "thumbtack" | "yelp" | etc.
+  externalThreadId String // Platform's conversation/thread ID
+  customerName     String
+  lastMessageAt    DateTime @default(now())
+  unreadCount      Int      @default(0)
+  status           String   @default("active") // "active" | "archived" | "closed"
+  metadataJson     String?  @db.Text
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   // Relationships
-  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages      Message[]
-  leads         Lead[]
-  threadContext    ThreadContext?       // Intelligence layer (1:1, owned by conversation-context module)
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages            Message[]
+  leads               Lead[]
+  threadContext       ThreadContext? // Intelligence layer (1:1, owned by conversation-context module)
   followUpEnrollments FollowUpEnrollment[] // Follow-up sequences attached to this conversation
 
   @@unique([platform, externalThreadId])
@@ -246,20 +258,20 @@ model Conversation {
 }
 
 model Message {
-  id              String   @id @default(uuid())
-  conversationId  String
-  userId          String
-  platform        String   // "thumbtack" | "yelp" | etc.
+  id                String    @id @default(uuid())
+  conversationId    String
+  userId            String
+  platform          String // "thumbtack" | "yelp" | etc.
   externalMessageId String? // Platform's message ID
-  sender          String   // "pro" | "customer" | "system"
-  senderType      String?  // "user" | "ai" — distinguishes human vs AI-sent messages (for sender="pro")
-  content         String   @db.Text
-  isRead          Boolean  @default(false)
-  sentAt          DateTime @default(now())
-  deliveredAt     DateTime?
-  rawJson           String?  @db.Text
-  notificationLogId String?  // Links outbound SMS to NotificationLog for delivery status
-  createdAt         DateTime @default(now())
+  sender            String // "pro" | "customer" | "system"
+  senderType        String? // "user" | "ai" — distinguishes human vs AI-sent messages (for sender="pro")
+  content           String    @db.Text
+  isRead            Boolean   @default(false)
+  sentAt            DateTime  @default(now())
+  deliveredAt       DateTime?
+  rawJson           String?   @db.Text
+  notificationLogId String? // Links outbound SMS to NotificationLog for delivery status
+  createdAt         DateTime  @default(now())
 
   // Relationships
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -278,19 +290,19 @@ model Message {
 // ==========================================
 
 model Quote {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   userId          String
   platform        String
-  externalQuoteId String?  // Platform's quote ID
-  leadId          String?  // Reference to lead if applicable
-  amount          Decimal  @db.Decimal(10, 2)
-  currency        String   @default("USD")
-  description     String?  @db.Text
-  status          String   @default("pending") // "pending" | "accepted" | "rejected" | "expired"
+  externalQuoteId String? // Platform's quote ID
+  leadId          String? // Reference to lead if applicable
+  amount          Decimal   @db.Decimal(10, 2)
+  currency        String    @default("USD")
+  description     String?   @db.Text
+  status          String    @default("pending") // "pending" | "accepted" | "rejected" | "expired"
   validUntil      DateTime?
-  rawJson         String?  @db.Text
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  rawJson         String?   @db.Text
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([userId])
   @@index([platform])
@@ -305,22 +317,22 @@ model Quote {
 // ==========================================
 
 model MessageTemplate {
-  id          String    @id @default(uuid())
-  userId      String
-  name        String    // Template name for identification
-  content     String    @db.Text // Template content with {variables} OR AI system prompt text
-  type        String    @default("message") // "message" | "prompt"
-  isDefault   Boolean   @default(false)
-  usageCount  Int       @default(0)
-  lastUsedAt  DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id         String    @id @default(uuid())
+  userId     String
+  name       String // Template name for identification
+  content    String    @db.Text // Template content with {variables} OR AI system prompt text
+  type       String    @default("message") // "message" | "prompt"
+  isDefault  Boolean   @default(false)
+  usageCount Int       @default(0)
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   // Relationships
-  user                    User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  automationRules         AutomationRule[]   @relation("RuleMessageTemplate")
-  automationPromptRules   AutomationRule[]   @relation("RulePromptTemplate")
-  notificationRules       NotificationRule[]
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  automationRules       AutomationRule[]   @relation("RuleMessageTemplate")
+  automationPromptRules AutomationRule[]   @relation("RulePromptTemplate")
+  notificationRules     NotificationRule[]
 
   @@unique([userId, name])
   @@index([userId])
@@ -333,35 +345,35 @@ model MessageTemplate {
 // ==========================================
 
 model SavedAccount {
-  id              String   @id @default(uuid())
-  userId          String
-  platform        String   // "thumbtack"
-  businessId      String   // Platform's business ID
-  businessName    String   // Display name
-  emailHint       String?  // Email used for this account (optional hint)
-  imageUrl        String?  // Business logo URL
-  webhookId       String?  // Webhook subscription ID for this business
-  credentialsJson String?  // Encrypted: access_token, refresh_token for THIS account
-  agentPhoneOverride String?  // Per-business agent phone; when null, inherits User.businessPhone
+  id                       String   @id @default(uuid())
+  userId                   String
+  platform                 String // "thumbtack"
+  businessId               String // Platform's business ID
+  businessName             String // Display name
+  emailHint                String? // Email used for this account (optional hint)
+  imageUrl                 String? // Business logo URL
+  webhookId                String? // Webhook subscription ID for this business
+  credentialsJson          String? // Encrypted: access_token, refresh_token for THIS account
+  agentPhoneOverride       String? // Per-business agent phone; when null, inherits User.businessPhone
   // Follow-up settings (per-account)
-  followUpMode     String?  // 'off' | 'suggest' | 'auto_send'
-  aiConversationEnabled Boolean @default(false) // Separate toggle: auto-reply to customer messages
-  followUpPreset   String?  // 'conservative' | 'standard' | 'persistent'
-  followUpReplyType String? // 'template' | 'ai'
+  followUpMode             String? // 'off' | 'suggest' | 'auto_send'
+  aiConversationEnabled    Boolean  @default(false) // Separate toggle: auto-reply to customer messages
+  followUpPreset           String? // 'conservative' | 'standard' | 'persistent'
+  followUpReplyType        String? // 'template' | 'ai'
   followUpActiveHoursStart String? // e.g. "09:00"
   followUpActiveHoursEnd   String? // e.g. "21:00"
   followUpTimezone         String? // e.g. "America/New_York"
-  followUpSettingsJson     String? @db.Text // Extended follow-up settings (timing, rules, scenarios)
+  followUpSettingsJson     String?  @db.Text // Extended follow-up settings (timing, rules, scenarios)
   // Service pricing configuration (JSON — per-account pricing table)
-  servicePricingJson String? @db.Text
+  servicePricingJson       String?  @db.Text
   // Team — when set, org members can access this account
-  organizationId   String?
-  lastUsedAt      DateTime @default(now())
-  createdAt       DateTime @default(now())
+  organizationId           String?
+  lastUsedAt               DateTime @default(now())
+  createdAt                DateTime @default(now())
 
   // Relationships
-  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  organization         Organization?         @relation("OrgAccounts", fields: [organizationId], references: [id], onDelete: SetNull)
+  user                 User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization         Organization?               @relation("OrgAccounts", fields: [organizationId], references: [id], onDelete: SetNull)
   automationRules      AutomationRule[]
   notificationSettings NotificationSettings?
   callConnectSettings  CallConnectSettings?
@@ -381,16 +393,16 @@ model SavedAccount {
 // ==========================================
 
 model WebhookEvent {
-  id           String   @id @default(uuid())
-  platform     String
-  eventType    String   // "request.created" | "message.created" | etc.
-  payload      String   @db.Text
-  signature    String?
-  verified     Boolean  @default(false)
-  processed    Boolean  @default(false)
-  processingError String? @db.Text
-  receivedAt   DateTime @default(now())
-  processedAt  DateTime?
+  id              String    @id @default(uuid())
+  platform        String
+  eventType       String // "request.created" | "message.created" | etc.
+  payload         String    @db.Text
+  signature       String?
+  verified        Boolean   @default(false)
+  processed       Boolean   @default(false)
+  processingError String?   @db.Text
+  receivedAt      DateTime  @default(now())
+  processedAt     DateTime?
 
   @@index([platform])
   @@index([eventType])
@@ -404,28 +416,28 @@ model WebhookEvent {
 // ==========================================
 
 model AutomationRule {
-  id               String    @id @default(uuid())
-  savedAccountId   String    // Per-account rules
-  userId           String
-  name             String    // User-friendly rule name
-  triggerType      String    // "new_lead" | "customer_reply"
-  replyTriggerMode String?   // For customer_reply: "first_only" | "every_reply"
-  templateId       String?   // Message template (null when useAi=true)
-  promptTemplateId String?   @map("prompt_template_id") // AI prompt template (type="prompt")
-  delayMinutes     Int       @default(0) // Delay before sending (0 = immediate)
-  enabled          Boolean   @default(true)
-  useAi            Boolean   @default(false) // Use AI to generate reply instead of template
-  aiSystemPrompt   String?   // DEPRECATED — use promptTemplateId. Kept for backward compat.
+  id                  String    @id @default(uuid())
+  savedAccountId      String // Per-account rules
+  userId              String
+  name                String // User-friendly rule name
+  triggerType         String // "new_lead" | "customer_reply"
+  replyTriggerMode    String? // For customer_reply: "first_only" | "every_reply"
+  templateId          String? // Message template (null when useAi=true)
+  promptTemplateId    String?   @map("prompt_template_id") // AI prompt template (type="prompt")
+  delayMinutes        Int       @default(0) // Delay before sending (0 = immediate)
+  enabled             Boolean   @default(true)
+  useAi               Boolean   @default(false) // Use AI to generate reply instead of template
+  aiSystemPrompt      String? // DEPRECATED — use promptTemplateId. Kept for backward compat.
   // Follow-up active hours — window when delayed follow-ups are allowed to fire
-  activeHoursStart String?   @map("active_hours_start") // e.g. "09:00"
-  activeHoursEnd   String?   @map("active_hours_end")   // e.g. "21:00"
-  activeHoursTimezone String? @map("active_hours_tz") @default("America/New_York")
-  isFollowUp       Boolean   @default(false) @map("is_follow_up") // Marks as follow-up (vs immediate auto-reply)
-  stopOnCustomerReply Boolean @default(true) @map("stop_on_customer_reply")
-  triggerCount     Int       @default(0)
-  lastTriggeredAt  DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  activeHoursStart    String?   @map("active_hours_start") // e.g. "09:00"
+  activeHoursEnd      String?   @map("active_hours_end") // e.g. "21:00"
+  activeHoursTimezone String?   @default("America/New_York") @map("active_hours_tz")
+  isFollowUp          Boolean   @default(false) @map("is_follow_up") // Marks as follow-up (vs immediate auto-reply)
+  stopOnCustomerReply Boolean   @default(true) @map("stop_on_customer_reply")
+  triggerCount        Int       @default(0)
+  lastTriggeredAt     DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   // Relationships
   savedAccount    SavedAccount              @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
@@ -445,8 +457,8 @@ model PendingAutomatedMessage {
   id               String    @id @default(uuid())
   automationRuleId String
   leadId           String
-  negotiationId    String    // External negotiation ID (for dedup)
-  scheduledFor     DateTime  // When to send
+  negotiationId    String // External negotiation ID (for dedup)
+  scheduledFor     DateTime // When to send
   status           String    @default("pending") // "pending" | "sent" | "cancelled" | "failed"
   failureReason    String?
   sentAt           DateTime?
@@ -467,34 +479,34 @@ model PendingAutomatedMessage {
 // ==========================================
 
 model NotificationSettings {
-  id                String   @id @default(uuid())
-  savedAccountId    String?  @unique // Per-account settings (optional - if null, this is user-level default)
-  userId            String?  // User ID (for account-specific AND user-level settings)
-  enabled           Boolean  @default(false)
-  destinationPhone  String?  // Company phone to send notifications to
-  senderMode        String   @default("shared") // "shared" | "dedicated" | "openphone"
-  sigcoreApiKey      String?  @map("callioApiKey") // Encrypted Sigcore API key
-  sigcoreFromPhone   String?  @map("callioFromPhone") // Selected phone number from Sigcore to send from
-  sigcoreWorkspaceId String?  @map("callioWorkspaceId") // Sigcore workspace ID for this tenant
-  sigcoreWebhookId   String?  @map("callioWebhookId") // Sigcore webhook ID for delivery status updates
-  sigcoreProvider      String?  // Connected provider: "openphone" | "twilio"
-  sigcoreTenantId      String?  @map("sigcore_tenant_id")       // Sigcore Tenant UUID for this account
-  sigcoreProvisionedAt DateTime? @map("sigcore_provisioned_at") // When the tenant was provisioned in Sigcore
-  template          String   @db.Text @default("New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}")
-  quietHoursStart   String?  // e.g., "22:00"
-  quietHoursEnd     String?  // e.g., "08:00"
-  quietHoursTimezone String? @default("America/New_York")
-  requirePhone            Boolean  @default(true) // Only notify if lead has phone
-  customerTextingEnabled  Boolean  @default(false) // Separate toggle for customer-facing SMS texting
-  inboundSmsWebhookId     String?  // Sigcore webhook ID for inbound SMS
-  smsForwardingNumber     String?  // E.164 phone to forward inbound SMS to (e.g. OpenPhone)
-  callForwardingNumber    String?  // E.164 phone to forward inbound calls to
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  id                     String    @id @default(uuid())
+  savedAccountId         String?   @unique // Per-account settings (optional - if null, this is user-level default)
+  userId                 String? // User ID (for account-specific AND user-level settings)
+  enabled                Boolean   @default(false)
+  destinationPhone       String? // Company phone to send notifications to
+  senderMode             String    @default("shared") // "shared" | "dedicated" | "openphone"
+  sigcoreApiKey          String?   @map("callioApiKey") // Encrypted Sigcore API key
+  sigcoreFromPhone       String?   @map("callioFromPhone") // Selected phone number from Sigcore to send from
+  sigcoreWorkspaceId     String?   @map("callioWorkspaceId") // Sigcore workspace ID for this tenant
+  sigcoreWebhookId       String?   @map("callioWebhookId") // Sigcore webhook ID for delivery status updates
+  sigcoreProvider        String? // Connected provider: "openphone" | "twilio"
+  sigcoreTenantId        String?   @map("sigcore_tenant_id") // Sigcore Tenant UUID for this account
+  sigcoreProvisionedAt   DateTime? @map("sigcore_provisioned_at") // When the tenant was provisioned in Sigcore
+  template               String    @default("New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}") @db.Text
+  quietHoursStart        String? // e.g., "22:00"
+  quietHoursEnd          String? // e.g., "08:00"
+  quietHoursTimezone     String?   @default("America/New_York")
+  requirePhone           Boolean   @default(true) // Only notify if lead has phone
+  customerTextingEnabled Boolean   @default(false) // Separate toggle for customer-facing SMS texting
+  inboundSmsWebhookId    String? // Sigcore webhook ID for inbound SMS
+  smsForwardingNumber    String? // E.164 phone to forward inbound SMS to (e.g. OpenPhone)
+  callForwardingNumber   String? // E.164 phone to forward inbound calls to
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   // Relationships
-  user              User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  savedAccount      SavedAccount?       @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
+  user              User?              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  savedAccount      SavedAccount?      @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
   notificationLogs  NotificationLog[]
   notificationRules NotificationRule[]
 
@@ -508,29 +520,29 @@ model NotificationSettings {
 // ==========================================
 
 model NotificationRule {
-  id                     String   @id @default(uuid())
-  notificationSettingsId String   // Link to parent settings
-  name                   String   // User-friendly rule name (e.g., "New Lead Alert")
-  triggerType            String   // "new_lead" | "customer_reply"
-  replyTriggerMode       String?  // For customer_reply: "first_only" | "every_reply"
-  fromPhone              String?  // Sigcore phone number to send FROM
-  toPhone                String?  // Destination phone number to send TO
-  sendToCustomer         Boolean  @default(false) // If true, send SMS to lead.customerPhone instead of toPhone
-  template               String   @db.Text // SMS template for this specific rule (fallback if no templateId)
-  templateId             String?  // Optional link to MessageTemplate
-  delayMinutes           Int      @default(0) // Delay before sending (0 = immediate)
-  stopOnCustomerReply    Boolean  @default(true) // Cancel pending follow-ups if customer replies
-  stopOnLeadClosed       Boolean  @default(true) // Cancel pending follow-ups if lead closed/won/lost
-  stopOnOptOut           Boolean  @default(true) // Cancel pending follow-ups if customer sends STOP
-  enabled                Boolean  @default(true)
-  triggerCount           Int      @default(0)
+  id                     String    @id @default(uuid())
+  notificationSettingsId String // Link to parent settings
+  name                   String // User-friendly rule name (e.g., "New Lead Alert")
+  triggerType            String // "new_lead" | "customer_reply"
+  replyTriggerMode       String? // For customer_reply: "first_only" | "every_reply"
+  fromPhone              String? // Sigcore phone number to send FROM
+  toPhone                String? // Destination phone number to send TO
+  sendToCustomer         Boolean   @default(false) // If true, send SMS to lead.customerPhone instead of toPhone
+  template               String    @db.Text // SMS template for this specific rule (fallback if no templateId)
+  templateId             String? // Optional link to MessageTemplate
+  delayMinutes           Int       @default(0) // Delay before sending (0 = immediate)
+  stopOnCustomerReply    Boolean   @default(true) // Cancel pending follow-ups if customer replies
+  stopOnLeadClosed       Boolean   @default(true) // Cancel pending follow-ups if lead closed/won/lost
+  stopOnOptOut           Boolean   @default(true) // Cancel pending follow-ups if customer sends STOP
+  enabled                Boolean   @default(true)
+  triggerCount           Int       @default(0)
   lastTriggeredAt        DateTime?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   // Relationships
-  notificationSettings NotificationSettings @relation(fields: [notificationSettingsId], references: [id], onDelete: Cascade)
-  messageTemplate      MessageTemplate?     @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  notificationSettings NotificationSettings         @relation(fields: [notificationSettingsId], references: [id], onDelete: Cascade)
+  messageTemplate      MessageTemplate?             @relation(fields: [templateId], references: [id], onDelete: SetNull)
   notificationLogs     NotificationLog[]
   pendingMessages      PendingNotificationMessage[]
 
@@ -541,19 +553,19 @@ model NotificationRule {
 }
 
 model PendingNotificationMessage {
-  id                   String    @id @default(uuid())
-  notificationRuleId   String
-  leadId               String
-  savedAccountId       String    // For quick lookups by account
-  scheduledFor         DateTime  // When to send
-  status               String    @default("pending") // "pending" | "sent" | "cancelled" | "failed"
-  failureReason        String?
-  sentAt               DateTime?
-  createdAt            DateTime  @default(now())
+  id                 String    @id @default(uuid())
+  notificationRuleId String
+  leadId             String
+  savedAccountId     String // For quick lookups by account
+  scheduledFor       DateTime // When to send
+  status             String    @default("pending") // "pending" | "sent" | "cancelled" | "failed"
+  failureReason      String?
+  sentAt             DateTime?
+  createdAt          DateTime  @default(now())
 
   // Relationships
   notificationRule NotificationRule @relation(fields: [notificationRuleId], references: [id], onDelete: Cascade)
-  lead             Lead              @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  lead             Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@unique([notificationRuleId, leadId])
   @@index([status])
@@ -563,23 +575,23 @@ model PendingNotificationMessage {
 }
 
 model NotificationLog {
-  id                    String    @id @default(uuid())
+  id                     String    @id @default(uuid())
   notificationSettingsId String
-  notificationRuleId    String?   // Reference to the rule that triggered this
-  ruleName              String?   // Cached rule name for display
-  leadId                String?   // Reference to the lead that triggered this
-  toPhone               String    // Destination phone number
-  fromPhone             String?   // Sender phone number
-  provider              String?   // "twilio" | "openphone" | etc.
+  notificationRuleId     String? // Reference to the rule that triggered this
+  ruleName               String? // Cached rule name for display
+  leadId                 String? // Reference to the lead that triggered this
+  toPhone                String // Destination phone number
+  fromPhone              String? // Sender phone number
+  provider               String? // "twilio" | "openphone" | etc.
   sigcoreMessageId       String?   @map("callioMessageId") // Sigcore's message ID
   sigcoreConversationId  String?   @map("callioConversationId") // Sigcore's conversation ID
-  status                String    @default("pending") // "pending" | "queued" | "sent" | "delivered" | "failed"
-  error                 String?   @db.Text
-  messageBody           String    @db.Text // Rendered message content
-  metadata              String?   @db.Text // JSON metadata
-  createdAt             DateTime  @default(now())
-  sentAt                DateTime?
-  deliveredAt           DateTime?
+  status                 String    @default("pending") // "pending" | "queued" | "sent" | "delivered" | "failed"
+  error                  String?   @db.Text
+  messageBody            String    @db.Text // Rendered message content
+  metadata               String?   @db.Text // JSON metadata
+  createdAt              DateTime  @default(now())
+  sentAt                 DateTime?
+  deliveredAt            DateTime?
 
   // Relationships
   notificationSettings NotificationSettings @relation(fields: [notificationSettingsId], references: [id], onDelete: Cascade)
@@ -647,22 +659,22 @@ model PhonePool {
   phoneNumber         String          @unique
   provider            String          @default("twilio") // "twilio" | "openphone"
   areaCode            String?
-  state               String?         // US state abbreviation
+  state               String? // US state abbreviation
   friendlyName        String?
   sigcoreAllocationId String?
   status              PhonePoolStatus @default(AVAILABLE)
-  assignedToUserId    String?         // Legacy: kept for backward compat
-  assignedAt          DateTime?       // Legacy: kept for backward compat
+  assignedToUserId    String? // Legacy: kept for backward compat
+  assignedAt          DateTime? // Legacy: kept for backward compat
   provisionedAt       DateTime        @default(now())
   releasedAt          DateTime?
-  smsApproved         Boolean         @default(true)  // A2P 10DLC approved for SMS
+  smsApproved         Boolean         @default(true) // A2P 10DLC approved for SMS
   smsCapable          Boolean         @default(false) // Twilio capability: can send/receive SMS
   voiceCapable        Boolean         @default(false) // Twilio capability: can make/receive calls
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 
   // Relationships
-  assignedToUser User?               @relation(fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  assignedToUser User?                 @relation(fields: [assignedToUserId], references: [id], onDelete: SetNull)
   assignments    PhonePoolAssignment[] // Many-to-many assignments
 
   @@index([status])
@@ -724,29 +736,29 @@ model ThumbtackSettingsSnapshot {
 // ==========================================
 
 model CallConnectSettings {
-  id                   String          @id @default(uuid())
-  savedAccountId       String          @unique
-  userId               String
-  enabled              Boolean         @default(false)
-  mode                 CallConnectMode @default(AGENT_FIRST)
-  agentStrategy        String          @default("owner") // "owner" | "round_robin" | "on_duty"
-  agentPhoneE164       String?         // Agent's phone number to ring
-  botNumberE164        String?         // Shared bot caller-ID number
-  sigcoreWebhookSecret String?         // HMAC secret registered with Sigcore webhook subscription
-  sigcoreWebhookId     String?         // Sigcore webhook subscription ID (for dedup)
+  id                        String          @id @default(uuid())
+  savedAccountId            String          @unique
+  userId                    String
+  enabled                   Boolean         @default(false)
+  mode                      CallConnectMode @default(AGENT_FIRST)
+  agentStrategy             String          @default("owner") // "owner" | "round_robin" | "on_duty"
+  agentPhoneE164            String? // Agent's phone number to ring
+  botNumberE164             String? // Shared bot caller-ID number
+  sigcoreWebhookSecret      String? // HMAC secret registered with Sigcore webhook subscription
+  sigcoreWebhookId          String? // Sigcore webhook subscription ID (for dedup)
   maxAgentAttempts          Int             @default(2)
   quietHoursEnabled         Boolean         @default(false)
   quietHoursTimezone        String?
-  quietHoursStart           String?         // "HH:MM"
-  quietHoursEnd             String?         // "HH:MM"
+  quietHoursStart           String? // "HH:MM"
+  quietHoursEnd             String? // "HH:MM"
   agentAcceptDigits         String?         @default("0123456789*#") // Digits agent can press to accept the bridge (any key)
-  agentWhisperMessage       String?         // TTS played to agent before bridge; supports {summary} {digit}
-  leadGreetingMessage       String?         // TTS played to lead while waiting for agent
+  agentWhisperMessage       String? // TTS played to agent before bridge; supports {summary} {digit}
+  leadGreetingMessage       String? // TTS played to lead while waiting for agent
   leadVoicemailEnabled      Boolean         @default(false) // Auto Voicemail Drop
-  leadVoicemailMessage      String?         // TTS voicemail text (fallback when no recording URL)
-  leadVoicemailRecordingUrl String?         // Pre-recorded voicemail audio URL (takes priority over TTS)
+  leadVoicemailMessage      String? // TTS voicemail text (fallback when no recording URL)
+  leadVoicemailRecordingUrl String? // Pre-recorded voicemail audio URL (takes priority over TTS)
   createdAt                 DateTime        @default(now())
-  updatedAt            DateTime        @updatedAt
+  updatedAt                 DateTime        @updatedAt
 
   savedAccount SavedAccount @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -758,7 +770,7 @@ model CallConnectSettings {
 model LeadCallConnect {
   id               String            @id @default(uuid())
   leadId           String
-  businessId       String?           // Sigcore workspace/business ID (stored for reference)
+  businessId       String? // Sigcore workspace/business ID (stored for reference)
   sigcoreSessionId String            @unique
   status           CallConnectStatus @default(CREATED)
   attempt          Int               @default(0)
@@ -789,7 +801,7 @@ model ThumbtackLeadId {
   pageTitle       String?
   thumbtackStatus String?
   customerName    String?
-  leadDate        String?   // Lead date from Thumbtack page (e.g. "Feb 23")
+  leadDate        String? // Lead date from Thumbtack page (e.g. "Feb 23")
   imported        Boolean   @default(false)
   importedAt      DateTime?
   needsRefetch    Boolean   @default(false)
@@ -810,25 +822,25 @@ model ThumbtackLeadId {
 // ==========================================
 
 model AdminConfig {
-  id               String   @id @default("global")
-  testCustomerName String   @default("Test Customer")
-  testCategory     String   @default("House Cleaning")
-  testLocation     String   @default("Tampa, FL")
+  id               String @id @default("global")
+  testCustomerName String @default("Test Customer")
+  testCategory     String @default("House Cleaning")
+  testLocation     String @default("Tampa, FL")
   /// Full map of template variable test values — keys match variable names (without braces)
-  testData         Json?    @map("test_data")
+  testData         Json?  @map("test_data")
   /// Yelp-specific test data (survey answers, different structure from Thumbtack)
-  yelpTestData     Json?    @map("yelp_test_data")
+  yelpTestData     Json?  @map("yelp_test_data")
 
   // Phone number reselling pricing
-  phonePriceMonthly    Decimal?  @db.Decimal(10, 2) @map("phone_price_monthly")
-  phoneGracePeriodDays Int       @default(30)        @map("phone_grace_period_days")
-  stripePriceId        String?                       @map("stripe_price_id")
+  phonePriceMonthly    Decimal? @map("phone_price_monthly") @db.Decimal(10, 2)
+  phoneGracePeriodDays Int      @default(30) @map("phone_grace_period_days")
+  stripePriceId        String?  @map("stripe_price_id")
 
   // A2P 10DLC — Twilio Messaging Service SID (synced to Sigcore)
-  messagingServiceSid  String?                       @map("messaging_service_sid")
+  messagingServiceSid String? @map("messaging_service_sid")
 
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("admin_config")
 }
@@ -896,20 +908,20 @@ enum ConversationSyncStatus {
 }
 
 model ConversationSyncConnection {
-  id                String                 @id @default(uuid())
-  userId            String
-  savedAccountId    String                 @unique
-  provider          String                 @default("openphone") // "openphone"
-  providerApiKey    String?                // OpenPhone API key (passed to Sigcore)
-  sigcoreApiKey     String?                // Sigcore tenant API key (reused from NotificationSettings)
-  webhookId         String?                // Sigcore webhook subscription ID for inbound events
-  status            ConversationSyncStatus @default(DISCONNECTED)
-  connectedNumbers  Json?                  // Array of connected phone numbers [{phoneNumber, name, id}]
-  lastError         String?
-  createdAt         DateTime               @default(now()) @map("created_at")
-  updatedAt         DateTime               @updatedAt @map("updated_at")
+  id               String                 @id @default(uuid())
+  userId           String
+  savedAccountId   String                 @unique
+  provider         String                 @default("openphone") // "openphone"
+  providerApiKey   String? // OpenPhone API key (passed to Sigcore)
+  sigcoreApiKey    String? // Sigcore tenant API key (reused from NotificationSettings)
+  webhookId        String? // Sigcore webhook subscription ID for inbound events
+  status           ConversationSyncStatus @default(DISCONNECTED)
+  connectedNumbers Json? // Array of connected phone numbers [{phoneNumber, name, id}]
+  lastError        String?
+  createdAt        DateTime               @default(now()) @map("created_at")
+  updatedAt        DateTime               @updatedAt @map("updated_at")
 
-  user              User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   leadConversations LeadConversation[]
 
   @@index([userId])
@@ -918,22 +930,22 @@ model ConversationSyncConnection {
 
 // Lead-scoped conversation from BYO phone (matched by customerPhone)
 model LeadConversation {
-  id                String   @id @default(uuid())
-  connectionId      String
-  leadId            String
-  sigcoreConversationId String  // Sigcore conversation ID for fetching messages
-  phoneNumber       String      // Business phone number used
-  customerPhone     String      // Lead's phone number
-  customerName      String?     // Lead name (denormalized for display)
-  lastMessageAt     DateTime?   @map("last_message_at")
-  lastMessagePreview String?    @map("last_message_preview")
-  messageCount      Int         @default(0) @map("message_count")
-  createdAt         DateTime    @default(now()) @map("created_at")
-  updatedAt         DateTime    @updatedAt @map("updated_at")
+  id                    String    @id @default(uuid())
+  connectionId          String
+  leadId                String
+  sigcoreConversationId String // Sigcore conversation ID for fetching messages
+  phoneNumber           String // Business phone number used
+  customerPhone         String // Lead's phone number
+  customerName          String? // Lead name (denormalized for display)
+  lastMessageAt         DateTime? @map("last_message_at")
+  lastMessagePreview    String?   @map("last_message_preview")
+  messageCount          Int       @default(0) @map("message_count")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
 
-  connection  ConversationSyncConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  lead        Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  messages    LeadSmsMessage[]
+  connection ConversationSyncConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  lead       Lead                       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  messages   LeadSmsMessage[]
 
   @@unique([connectionId, sigcoreConversationId])
   @@unique([connectionId, leadId]) // One conversation per lead per connection
@@ -945,16 +957,16 @@ model LeadConversation {
 
 // Individual SMS messages attached to a lead conversation (for activity timeline)
 model LeadSmsMessage {
-  id                  String   @id @default(uuid())
-  leadConversationId  String
-  externalId          String   // Sigcore message ID (for dedup)
-  direction           String   // "in" | "out"
-  body                String   @db.Text
-  fromNumber          String
-  toNumber            String
-  status              String   @default("delivered")
-  sentAt              DateTime @default(now()) @map("sent_at")
-  createdAt           DateTime @default(now()) @map("created_at")
+  id                 String   @id @default(uuid())
+  leadConversationId String
+  externalId         String // Sigcore message ID (for dedup)
+  direction          String // "in" | "out"
+  body               String   @db.Text
+  fromNumber         String
+  toNumber           String
+  status             String   @default("delivered")
+  sentAt             DateTime @default(now()) @map("sent_at")
+  createdAt          DateTime @default(now()) @map("created_at")
 
   leadConversation LeadConversation @relation(fields: [leadConversationId], references: [id], onDelete: Cascade)
 
@@ -967,15 +979,15 @@ model LeadSmsMessage {
 // System-wide error log for monitoring and alerting
 model SystemErrorLog {
   id          String    @id @default(cuid())
-  category    String    // 'automation' | 'token_refresh' | 'webhook' | 'notification' | 'yelp' | 'other'
-  code        String?   // Structured issue code: 'token_expired', 'webhook_missing', 'automation_failure'
-  platform    String?   // Platform context for dedup: 'thumbtack' | 'yelp'
+  category    String // 'automation' | 'token_refresh' | 'webhook' | 'notification' | 'yelp' | 'other'
+  code        String? // Structured issue code: 'token_expired', 'webhook_missing', 'automation_failure'
+  platform    String? // Platform context for dedup: 'thumbtack' | 'yelp'
   severity    String    @default("error") // 'error' | 'warning'
   message     String    @db.Text
   context     String?   @db.Text // JSON: accountName, leadId, negotiationId, etc.
   userId      String?
-  accountId   String?   // SavedAccount id
-  accountName String?   // Denormalized for quick display
+  accountId   String? // SavedAccount id
+  accountName String? // Denormalized for quick display
   resolved    Boolean   @default(false)
   emailedAt   DateTime? // Last time an alert email was sent for this error
   createdAt   DateTime  @default(now())
@@ -999,8 +1011,8 @@ model AccountHealthStatus {
   userId            String
   accountId         String
   platform          String
-  status            String    // 'healthy' | 'warning' | 'critical'
-  issueCode         String    // 'token_expired' | 'webhook_missing' | 'notifications_disabled' | 'automation_failures' | 'yelp_connection'
+  status            String // 'healthy' | 'warning' | 'critical'
+  issueCode         String // 'token_expired' | 'webhook_missing' | 'notifications_disabled' | 'automation_failures' | 'yelp_connection'
   issueMessage      String    @db.Text
   metadata          Json?
   isActive          Boolean   @default(true)
@@ -1030,56 +1042,56 @@ model AccountHealthStatus {
 // ==========================================
 
 model ThreadContext {
-  id                String   @id @default(cuid())
-  conversationId    String   @unique // 1:1 with Conversation
-  leadId            String?  // Denormalized for lead-level queries
-  platform          String   // Denormalized: "thumbtack" | "yelp"
+  id             String  @id @default(cuid())
+  conversationId String  @unique // 1:1 with Conversation
+  leadId         String? // Denormalized for lead-level queries
+  platform       String // Denormalized: "thumbtack" | "yelp"
 
   // Conversation stage & strategy
-  stage             String   @default("new") // new, qualification, quoting, negotiation, booked, lost, closed
-  customerIntent    String?  // price_shopping, ready_to_book, just_browsing, urgent, unknown
-  engagementLevel   String   @default("unknown") // cold, warm, hot, unknown
-  activeStrategy    String?  // Current strategy being used
-  suggestedStrategy String?  // AI-suggested next strategy
+  stage             String  @default("new") // new, qualification, quoting, negotiation, booked, lost, closed
+  customerIntent    String? // price_shopping, ready_to_book, just_browsing, urgent, unknown
+  engagementLevel   String  @default("unknown") // cold, warm, hot, unknown
+  activeStrategy    String? // Current strategy being used
+  suggestedStrategy String? // AI-suggested next strategy
 
   // Rolling summary — AI-friendly, updated after messages
-  summary           String?  @db.Text
+  summary String? @db.Text
 
   // Full structured state — machine-readable JSON
-  stateJson         String?  @db.Text
+  stateJson String? @db.Text
 
   // Price tracking
-  priceDiscussed    Boolean  @default(false)
-  priceRange        String?  // e.g. "$120-$180"
+  priceDiscussed Boolean @default(false)
+  priceRange     String? // e.g. "$120-$180"
 
   // Conversation progress
-  lastQuestionAsked String?  @db.Text
-  missingFields     Json?    // Array of field names still needed
+  lastQuestionAsked     String? @db.Text
+  missingFields         Json? // Array of field names still needed
   awaitingCustomerReply Boolean @default(false)
 
   // Follow-up tracking (cached from FollowUpEnrollment — derived, not source of truth)
-  followUpCount     Int      @default(0)
-  lastFollowUpAt    DateTime?
+  followUpCount      Int       @default(0)
+  lastFollowUpAt     DateTime?
   lastFollowUpSentAt DateTime? // Source of truth for conversation-level send cooldown
-  followUpStatus    String?  // none, active, suggested, paused, completed, stopped
+  followUpStatus     String? // none, active, suggested, paused, completed, stopped
   activeEnrollmentId String? // FK FollowUpEnrollment (cached, nullable)
-  nextFollowUpAt    DateTime? // Denormalized from enrollment.nextStepDueAt
-  waitingSince      DateTime? // When business last spoke, customer hasn't replied
-  followUpState     String?  // Derived: no_reply_after_initial, no_reply_after_question, etc.
+  nextFollowUpAt     DateTime? // Denormalized from enrollment.nextStepDueAt
+  waitingSince       DateTime? // When business last spoke, customer hasn't replied
+  followUpState      String? // Derived: no_reply_after_initial, no_reply_after_question, etc.
 
   // Per-sender-type timestamps
-  lastCustomerMessageAt  DateTime?
-  lastBusinessMessageAt  DateTime?
-  lastAiMessageAt        DateTime?
+  lastCustomerMessageAt DateTime?
+  lastBusinessMessageAt DateTime?
+  lastAiMessageAt       DateTime?
 
   // Message stats (denormalized for quick reads)
-  totalMessages      Int     @default(0)
-  customerMessages   Int     @default(0)
-  businessMessages   Int     @default(0)
-  aiMessages         Int     @default(0)
+  totalMessages    Int @default(0)
+  customerMessages Int @default(0)
+  businessMessages Int @default(0)
+  aiMessages       Int @default(0)
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relationships
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -1101,28 +1113,28 @@ model ThreadContext {
 // ==========================================
 
 model FollowUpSequenceTemplate {
-  id                String   @id @default(cuid())
-  userId            String
-  savedAccountId    String?  // Per-account scoping (same as AutomationRule, NotificationSettings)
-  platform          String   // "yelp" | "thumbtack" | "all" — required everywhere
-  name              String   // e.g. "Standard — No Reply After Initial"
-  triggerState      String   // "no_reply_after_initial" | "no_reply_after_question" | "no_reply_after_price" | "no_reply_after_conversion"
-  mode              String   @default("suggest") // "suggest" | "auto_send"
-  generationMode    String   @default("ai") // "ai" | "template"
-  promptTemplateId  String?  // FK MessageTemplate (AI mode prompt)
-  preset            String?  // "conservative" | "standard" | "persistent"
-  isDefault         Boolean  @default(false)
-  activeHoursStart  String?  @map("active_hours_start") // "09:00"
-  activeHoursEnd    String?  @map("active_hours_end")   // "21:00"
-  activeHoursTimezone String? @map("active_hours_tz") @default("America/New_York")
-  stepsJson         Json     // Versioned: { schemaVersion: 1, steps: [...] }
-  schemaVersion     Int      @default(1) @map("schema_version")
-  enabled           Boolean  @default(true)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  userId              String
+  savedAccountId      String? // Per-account scoping (same as AutomationRule, NotificationSettings)
+  platform            String // "yelp" | "thumbtack" | "all" — required everywhere
+  name                String // e.g. "Standard — No Reply After Initial"
+  triggerState        String // "no_reply_after_initial" | "no_reply_after_question" | "no_reply_after_price" | "no_reply_after_conversion"
+  mode                String   @default("suggest") // "suggest" | "auto_send"
+  generationMode      String   @default("ai") // "ai" | "template"
+  promptTemplateId    String? // FK MessageTemplate (AI mode prompt)
+  preset              String? // "conservative" | "standard" | "persistent"
+  isDefault           Boolean  @default(false)
+  activeHoursStart    String?  @map("active_hours_start") // "09:00"
+  activeHoursEnd      String?  @map("active_hours_end") // "21:00"
+  activeHoursTimezone String?  @default("America/New_York") @map("active_hours_tz")
+  stepsJson           Json // Versioned: { schemaVersion: 1, steps: [...] }
+  schemaVersion       Int      @default(1) @map("schema_version")
+  enabled             Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
-  user         User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  savedAccount SavedAccount? @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  savedAccount SavedAccount?        @relation(fields: [savedAccountId], references: [id], onDelete: Cascade)
   enrollments  FollowUpEnrollment[]
 
   @@index([savedAccountId, platform, triggerState])
@@ -1132,36 +1144,41 @@ model FollowUpSequenceTemplate {
 }
 
 model FollowUpEnrollment {
-  id                  String    @id @default(cuid())
-  sequenceTemplateId  String
-  conversationId      String    // FK Conversation
-  leadId              String?   // FK Lead (nullable)
-  platform            String    // "yelp" | "thumbtack"
-  status              String    @default("active") // "active" | "paused" | "completed" | "stopped"
-  stoppedReason       String?   // "customer_replied" | "manual" | "switched" | "thread_closed"
-  currentStepIndex    Int       @default(0) // 0-based pointer into stepsJson
-  nextStepDueAt       DateTime? // CRITICAL: scheduler queries this
-  mode                String    @default("suggest") // can override template default
-  startedAt           DateTime  @default(now())
-  lastExecutedAt      DateTime?
-  completedAt         DateTime?
+  id                 String    @id @default(cuid())
+  sequenceTemplateId String
+  conversationId     String // FK Conversation
+  leadId             String? // FK Lead (nullable)
+  platform           String // "yelp" | "thumbtack"
+  status             String    @default("active") // "active" | "paused" | "completed" | "stopped"
+  stoppedReason      String? // "customer_replied" | "manual" | "switched" | "thread_closed"
+  currentStepIndex   Int       @default(0) // 0-based pointer into stepsJson
+  nextStepDueAt      DateTime? // CRITICAL: scheduler queries this
+  mode               String    @default("suggest") // can override template default
+  startedAt          DateTime  @default(now())
+  lastExecutedAt     DateTime?
+  completedAt        DateTime?
   // Atomic scheduler claim (lease-based). processingUntil is the lease
   // expiration; processingToken is the worker's random token. A lease
   // is "live" while processingUntil > now(). Workers claim a row by
   // conditionally updating these fields.
-  processingUntil     DateTime?
-  processingToken     String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  processingUntil    DateTime?
+  processingToken    String?
+  // Engagement-aware follow-up (see plans/2026-04-17-job-sync-sf-lb.md §7.4)
+  followUpMode       String    @default("short_term") // "short_term" | "long_term"
+  modeChangedAt      DateTime?
+  modeReason         String? // e.g. 'platform_not_hired_engaged' | 'ghost_returned'
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   sequenceTemplate FollowUpSequenceTemplate @relation(fields: [sequenceTemplateId], references: [id], onDelete: Cascade)
-  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  lead             Lead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  conversation     Conversation             @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  lead             Lead?                    @relation(fields: [leadId], references: [id], onDelete: SetNull)
   stepExecutions   FollowUpStepExecution[]
 
   @@index([status, nextStepDueAt]) // Scheduler query: find due active enrollments
   @@index([conversationId, status]) // Active enrollment lookup per thread
   @@index([leadId])
+  @@index([followUpMode, status])
   // NOTE: Partial unique index enforced via raw SQL migration
   //   20260417120000_followup_duplicate_fix:
   //     CREATE UNIQUE INDEX ... ON follow_up_enrollments (conversation_id) WHERE status = 'active';
@@ -1169,19 +1186,19 @@ model FollowUpEnrollment {
 }
 
 model FollowUpStepExecution {
-  id                String    @id @default(cuid())
-  enrollmentId      String
-  stepIndex         Int       // Which step in stepsJson
-  objective         String    // "quick_check_in" | "value_add" | "soft_nudge" | "re_engagement" | "last_chance" | ...
-  status            String    @default("scheduled") // "scheduled" | "suggested" | "approved" | "sent" | "skipped" | "cancelled" | "failed" | "expired"
-  scheduledAt       DateTime  // When it was supposed to fire
-  executedAt        DateTime? // When it actually fired
-  generatedMessage  String?   @db.Text // AI/template output (what was generated)
-  finalMessage      String?   @db.Text // What was actually sent (may differ if user edited)
-  messageId         String?   // FK to Message table (if sent to platform)
-  strategyUsed      String?   // Active AI strategy at generation time
-  metadataJson      String?   @db.Text // Delivery status, error info, context snapshot
-  createdAt         DateTime  @default(now())
+  id               String    @id @default(cuid())
+  enrollmentId     String
+  stepIndex        Int // Which step in stepsJson
+  objective        String // "quick_check_in" | "value_add" | "soft_nudge" | "re_engagement" | "last_chance" | ...
+  status           String    @default("scheduled") // "scheduled" | "suggested" | "approved" | "sent" | "skipped" | "cancelled" | "failed" | "expired"
+  scheduledAt      DateTime // When it was supposed to fire
+  executedAt       DateTime? // When it actually fired
+  generatedMessage String?   @db.Text // AI/template output (what was generated)
+  finalMessage     String?   @db.Text // What was actually sent (may differ if user edited)
+  messageId        String? // FK to Message table (if sent to platform)
+  strategyUsed     String? // Active AI strategy at generation time
+  metadataJson     String?   @db.Text // Delivery status, error info, context snapshot
+  createdAt        DateTime  @default(now())
 
   enrollment FollowUpEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
 
@@ -1253,20 +1270,72 @@ model OrgInvitation {
 // ==========================================
 
 model CrmWebhookSubscription {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   userId      String
-  name        String   // e.g. "Service Flow CRM"
+  name        String // e.g. "Service Flow CRM"
   webhookUrl  String
-  secret      String   // HMAC-SHA256 signing secret
+  secret      String // HMAC-SHA256 signing secret
   events      String[] // e.g. ["lead.created", "message.received", "message.sent", "lead.status_changed"]
-  isActive    Boolean  @default(true)
-  metadata    Json?    // Extra context (e.g. source app, version)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isActive    Boolean   @default(true)
+  direction   String    @default("outbound") // "outbound" | "inbound"
+  lastEventAt DateTime? // For inbound: last received event time
+  metadata    Json? // Extra context (e.g. source app, version)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, webhookUrl])
+  @@unique([userId, direction, webhookUrl])
   @@index([userId, isActive])
+  @@index([direction, isActive])
   @@map("crm_webhook_subscriptions")
+}
+
+// ==========================================
+// Service Flow sync: inbound events + audit log
+// See plans/2026-04-17-job-sync-sf-lb.md
+// ==========================================
+
+model SfInboundEvent {
+  id               String   @id @default(uuid())
+  eventId          String   @unique // payload.event_id — idempotency key
+  userId           String? // Resolved LB user (null when lookup failed)
+  leadId           String? // Resolved LB lead (null when deferred)
+  sfJobId          String?
+  sfSubscriptionId String?
+  eventType        String // "job.status_changed" | future types
+  occurredAt       DateTime // payload.occurred_at
+  receivedAt       DateTime @default(now())
+  status           String // 'applied'|'noop'|'deferred'|'stale'|'unmapped_status'|'unauthorized'|'dry_run'
+  result           String?
+  payloadJson      Json
+
+  lead Lead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([leadId])
+  @@index([status, receivedAt])
+  @@index([sfJobId])
+  @@map("sf_inbound_events")
+}
+
+model LeadStatusAuditLog {
+  id            String   @id @default(uuid())
+  leadId        String
+  oldStatus     String?
+  newStatus     String
+  source        String // 'service_flow'|'platform_sync'|'manual'|'lb_automation'
+  sourceEventId String? // e.g. SfInboundEvent.eventId
+  actorType     String? // 'account_owner'|'team_member'|'system'|'operator'
+  actorId       String?
+  actorName     String?
+  conflict      Boolean  @default(false) // true for discrepancy-audit rows
+  conflictNote  String?
+  occurredAt    DateTime
+  createdAt     DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, occurredAt])
+  @@index([conflict])
+  @@map("lead_status_audit_log")
 }
