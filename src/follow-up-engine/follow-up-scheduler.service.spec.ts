@@ -25,8 +25,10 @@ function buildPrismaMock() {
       findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn().mockResolvedValue({ id: 'exec-1' }),
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     threadContext: {
+      findFirst: jest.fn().mockResolvedValue(null),
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     lead: {
@@ -134,6 +136,169 @@ describe('FollowUpSchedulerService', () => {
       // Should advance past the already-sent step, not send again
       expect(prisma.followUpEnrollment.update).toHaveBeenCalled();
       expect(generatorService.generateMessage).not.toHaveBeenCalled();
+    });
+
+    it('conversation-level cooldown reschedules and does not send', async () => {
+      // ThreadContext says we sent something 5 minutes ago — inside the 10-min cooldown
+      const now = new Date('2026-04-17T12:00:00Z');
+      const lastSent = new Date(now.getTime() - 5 * 60_000);
+      prisma.threadContext.findFirst.mockResolvedValue({ lastFollowUpSentAt: lastSent });
+      prisma.lead.findUnique.mockResolvedValue({ id: LEAD_ID, status: 'new', thumbtackStatus: null });
+
+      await (service as any).processEnrollment(
+        {
+          id: ENROLLMENT_ID,
+          conversationId: CONVERSATION_ID,
+          leadId: LEAD_ID,
+          currentStepIndex: 0,
+          createdAt: new Date('2026-04-01'),
+          mode: 'auto_send',
+          sequenceTemplate: { stepsJson: { steps: [{ delayMinutes: 2, objective: 'test' }] } },
+        },
+        now,
+      );
+
+      // Should reschedule to lastSent + 10min and NOT send a new message
+      expect(prisma.followUpEnrollment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: ENROLLMENT_ID },
+          data: expect.objectContaining({
+            nextStepDueAt: new Date(lastSent.getTime() + 10 * 60_000),
+          }),
+        }),
+      );
+      expect(generatorService.generateMessage).not.toHaveBeenCalled();
+      // Terminal-status check runs AFTER cooldown, so it should also not fire
+      expect(engineService.stopEnrollment).not.toHaveBeenCalled();
+    });
+
+    it('conversation-level cooldown holds across duplicate enrollments', async () => {
+      // Even if multiple active enrollments exist, ThreadContext.lastFollowUpSentAt
+      // is the single source of truth — any enrollment for this conversation
+      // should be blocked by a recent send on a sibling.
+      const now = new Date('2026-04-17T12:00:00Z');
+      const lastSent = new Date(now.getTime() - 2 * 60_000); // 2 min ago
+      prisma.threadContext.findFirst.mockResolvedValue({ lastFollowUpSentAt: lastSent });
+      prisma.lead.findUnique.mockResolvedValue({ id: LEAD_ID, status: 'new', thumbtackStatus: null });
+
+      // Different enrollment id (simulating a sibling duplicate)
+      await (service as any).processEnrollment(
+        {
+          id: 'enroll-sibling',
+          conversationId: CONVERSATION_ID,
+          leadId: LEAD_ID,
+          currentStepIndex: 0,
+          createdAt: new Date('2026-04-01'),
+          mode: 'auto_send',
+          sequenceTemplate: { stepsJson: { steps: [{ delayMinutes: 2, objective: 'test' }] } },
+        },
+        now,
+      );
+
+      // The sibling must NOT send — gated by conversation-level state, not its own lastExecutedAt
+      expect(generatorService.generateMessage).not.toHaveBeenCalled();
+    });
+
+    it('writes lastFollowUpSentAt on successful auto-send', async () => {
+      prisma.lead.findUnique.mockResolvedValue({ id: LEAD_ID, status: 'new', thumbtackStatus: null, userId: 'user-1' });
+      prisma.message.findFirst.mockResolvedValue(null);
+      prisma.threadContext.findFirst.mockResolvedValue(null);
+      prisma.followUpStepExecution.findFirst.mockResolvedValue(null);
+      // findUnique for lead with userId (the auto-send path)
+      prisma.lead.findUnique.mockResolvedValue({ id: LEAD_ID, status: 'new', thumbtackStatus: null, userId: 'user-1' });
+
+      const now = new Date('2026-04-17T12:00:00Z');
+
+      await (service as any).processEnrollment(
+        {
+          id: ENROLLMENT_ID,
+          conversationId: CONVERSATION_ID,
+          leadId: LEAD_ID,
+          currentStepIndex: 0,
+          createdAt: new Date('2026-04-01'),
+          mode: 'auto_send',
+          platform: 'yelp',
+          nextStepDueAt: now,
+          sequenceTemplate: {
+            stepsJson: { steps: [{ delayMinutes: 2, objective: 'test' }] },
+            activeHoursStart: null, activeHoursEnd: null, activeHoursTimezone: 'America/New_York',
+            generationMode: 'ai',
+          },
+        },
+        now,
+      );
+
+      // After successful auto-send, lastFollowUpSentAt must be bumped on ThreadContext
+      const updates = prisma.threadContext.updateMany.mock.calls.filter(
+        (c: any[]) => c[0]?.data?.lastFollowUpSentAt,
+      );
+      expect(updates.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('per-conversation grouping in processFollowUps', () => {
+    it('stops duplicate active enrollments and processes only the oldest canonical', async () => {
+      // 3 due enrollments on the SAME conversation — simulate historical data or race.
+      const enrollments = [
+        { id: 'dup-1', conversationId: CONVERSATION_ID, createdAt: new Date('2026-04-01T10:00:00Z'), currentStepIndex: 1, status: 'active', nextStepDueAt: new Date(), mode: 'auto_send', leadId: LEAD_ID, platform: 'yelp', sequenceTemplate: { stepsJson: { steps: [{ delayMinutes: 2, objective: 'test' }] } } },
+        { id: 'dup-2', conversationId: CONVERSATION_ID, createdAt: new Date('2026-04-01T09:00:00Z'), currentStepIndex: 0, status: 'active', nextStepDueAt: new Date(), mode: 'auto_send', leadId: LEAD_ID, platform: 'yelp', sequenceTemplate: { stepsJson: { steps: [{ delayMinutes: 2, objective: 'test' }] } } },
+        { id: 'dup-3', conversationId: CONVERSATION_ID, createdAt: new Date('2026-04-01T11:00:00Z'), currentStepIndex: 2, status: 'active', nextStepDueAt: new Date(), mode: 'auto_send', leadId: LEAD_ID, platform: 'yelp', sequenceTemplate: { stepsJson: { steps: [{ delayMinutes: 2, objective: 'test' }] } } },
+      ];
+      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: true }]);
+      prisma.followUpEnrollment.findMany.mockResolvedValue(enrollments);
+      // Claim succeeds for canonical
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+
+      // Stub processEnrollment to isolate the grouping behavior
+      const processSpy = jest.spyOn(service as any, 'processEnrollment').mockResolvedValue(undefined);
+
+      await service.processFollowUps();
+
+      // processEnrollment should be invoked exactly once — with dup-2 (oldest createdAt)
+      expect(processSpy).toHaveBeenCalledTimes(1);
+      expect((processSpy.mock.calls[0][0] as any).id).toBe('dup-2');
+
+      // Duplicates dup-1 and dup-3 should be stopped with duplicate_cleanup
+      const stopCalls = (prisma.followUpEnrollment.updateMany.mock.calls as any[]).filter(
+        (c: any[]) => c[0]?.data?.stoppedReason === 'duplicate_cleanup',
+      );
+      expect(stopCalls.length).toBe(1);
+      expect(stopCalls[0][0].where.id.in.sort()).toEqual(['dup-1', 'dup-3']);
+
+      processSpy.mockRestore();
+    });
+
+    it('does not process an enrollment when atomic claim fails', async () => {
+      const enrollment = { id: ENROLLMENT_ID, conversationId: CONVERSATION_ID, createdAt: new Date('2026-04-01'), currentStepIndex: 0, status: 'active', nextStepDueAt: new Date(), mode: 'auto_send', leadId: LEAD_ID, platform: 'yelp', sequenceTemplate: { stepsJson: { steps: [{ delayMinutes: 2, objective: 'test' }] } } };
+      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: true }]);
+      prisma.followUpEnrollment.findMany.mockResolvedValue([enrollment]);
+      // Claim returns count=0 — another worker already holds the lease
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 0 });
+
+      const processSpy = jest.spyOn(service as any, 'processEnrollment').mockResolvedValue(undefined);
+
+      await service.processFollowUps();
+
+      expect(processSpy).not.toHaveBeenCalled();
+      processSpy.mockRestore();
+    });
+
+    it('releases the lease only when the caller still holds the token', async () => {
+      const enrollment = { id: ENROLLMENT_ID, conversationId: CONVERSATION_ID, createdAt: new Date('2026-04-01'), currentStepIndex: 0, status: 'active', nextStepDueAt: new Date(), mode: 'auto_send', leadId: LEAD_ID, platform: 'yelp', sequenceTemplate: { stepsJson: { steps: [{ delayMinutes: 2, objective: 'test' }] } } };
+      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: true }]);
+      prisma.followUpEnrollment.findMany.mockResolvedValue([enrollment]);
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+
+      jest.spyOn(service as any, 'processEnrollment').mockResolvedValue(undefined);
+
+      await service.processFollowUps();
+
+      // Release call must be scoped by processingToken, not just id
+      const releaseCalls = prisma.followUpEnrollment.updateMany.mock.calls.filter(
+        (c: any[]) => c[0]?.where?.processingToken && c[0]?.data?.processingUntil === null,
+      );
+      expect(releaseCalls.length).toBe(1);
+      expect(releaseCalls[0][0].where.id).toBe(ENROLLMENT_ID);
     });
   });
 

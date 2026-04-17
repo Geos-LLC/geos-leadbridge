@@ -6,6 +6,7 @@
  * Auto-send mode supported but gated by enrollment.mode.
  */
 
+import { randomUUID } from 'crypto';
 import { Injectable, Logger, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -107,8 +108,23 @@ export class FollowUpSchedulerService implements OnModuleInit {
       if (trulyAllFailed.length > 0) {
         this.logger.log(`[FollowUpScheduler] Found ${trulyAllFailed.length} enrollments with all steps failed — re-activating`);
         const baseOffset = stuckEnrollments.length;
+        let reactivated = 0;
         for (let i = 0; i < trulyAllFailed.length; i++) {
           const enrollment = trulyAllFailed[i];
+          // Partial unique index enforces one active per conversation — skip
+          // re-activation if a sibling active enrollment already exists.
+          const sibling = await this.prisma.followUpEnrollment.findFirst({
+            where: {
+              conversationId: enrollment.conversationId,
+              status: 'active',
+              id: { not: enrollment.id },
+            },
+            select: { id: true },
+          });
+          if (sibling) {
+            this.logger.log(`[FollowUpScheduler] Skipping re-activation of ${enrollment.id} — conversation already has active enrollment ${sibling.id}`);
+            continue;
+          }
           const staggeredDue = new Date(now.getTime() + (baseOffset + i) * 60_000);
           // Delete all failed executions and restart from step 0
           await this.prisma.followUpStepExecution.deleteMany({
@@ -122,8 +138,9 @@ export class FollowUpSchedulerService implements OnModuleInit {
             where: { conversationId: enrollment.conversationId },
             data: { activeEnrollmentId: enrollment.id, nextFollowUpAt: staggeredDue, followUpStatus: 'active' },
           });
+          reactivated++;
         }
-        this.logger.log(`[FollowUpScheduler] Re-activated ${trulyAllFailed.length} all-failed enrollments`);
+        this.logger.log(`[FollowUpScheduler] Re-activated ${reactivated}/${trulyAllFailed.length} all-failed enrollments`);
       }
     } catch (err: any) {
       this.logger.error(`[FollowUpScheduler] Failed to reset stuck enrollments: ${err.message}`);
@@ -171,11 +188,71 @@ export class FollowUpSchedulerService implements OnModuleInit {
 
       this.logger.log(`[FollowUpScheduler] Processing ${dueEnrollments.length} due enrollments`);
 
-      for (const enrollment of dueEnrollments) {
+      // Defense-in-depth: group by conversationId, process ONE canonical enrollment
+      // per conversation per cycle. Even with the partial unique index, historical
+      // data or brief races could leave sibling active rows — stop them instead of
+      // letting each one fire its step.
+      const byConversation = new Map<string, typeof dueEnrollments>();
+      for (const e of dueEnrollments) {
+        const arr = byConversation.get(e.conversationId) ?? [];
+        arr.push(e);
+        byConversation.set(e.conversationId, arr);
+      }
+
+      for (const [conversationId, group] of byConversation) {
+        group.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+        const [canonical, ...duplicates] = group;
+
+        if (duplicates.length > 0) {
+          this.logger.warn(`[FollowUpScheduler] Found ${duplicates.length} duplicate active enrollments on conversation ${conversationId} — stopping duplicates, processing ${canonical.id}`);
+          await this.prisma.followUpEnrollment.updateMany({
+            where: { id: { in: duplicates.map((d) => d.id) } },
+            data: {
+              status: 'stopped',
+              stoppedReason: 'duplicate_cleanup',
+              completedAt: new Date(),
+            },
+          });
+          await this.prisma.followUpStepExecution.updateMany({
+            where: {
+              enrollmentId: { in: duplicates.map((d) => d.id) },
+              status: { in: ['scheduled', 'suggested'] },
+            },
+            data: { status: 'cancelled' },
+          });
+        }
+
+        // Atomic claim — only one worker processes a given enrollment per lease window.
+        // Lease of 2 minutes auto-expires if processing crashes.
+        const token = randomUUID();
+        const leaseEnd = new Date(now.getTime() + 2 * 60_000);
+        const { count } = await this.prisma.followUpEnrollment.updateMany({
+          where: {
+            id: canonical.id,
+            status: 'active',
+            OR: [
+              { processingUntil: null },
+              { processingUntil: { lt: now } },
+            ],
+          },
+          data: { processingUntil: leaseEnd, processingToken: token },
+        });
+        if (count === 0) {
+          this.logger.debug(`[FollowUpScheduler] Could not claim ${canonical.id} — another worker or already processed`);
+          continue;
+        }
+
         try {
-          await this.processEnrollment(enrollment, now);
+          await this.processEnrollment(canonical, now);
         } catch (err: any) {
-          this.logger.error(`[FollowUpScheduler] Error processing enrollment ${enrollment.id}: ${err.message}`);
+          this.logger.error(`[FollowUpScheduler] Error processing enrollment ${canonical.id}: ${err.message}`);
+        } finally {
+          // Release the lease only if WE still hold it (token match). A stale lease
+          // from a crashed previous run will be reclaimed by whoever gets there next.
+          await this.prisma.followUpEnrollment.updateMany({
+            where: { id: canonical.id, processingToken: token },
+            data: { processingUntil: null, processingToken: null },
+          }).catch(() => {});
         }
       }
     } catch (err: any) {
@@ -194,17 +271,22 @@ export class FollowUpSchedulerService implements OnModuleInit {
     });
     if (!fresh || fresh.status !== 'active') return;
 
-    // Minimum 10-minute gap between consecutive sends to the same conversation
-    if (enrollment.lastExecutedAt) {
-      const sinceLastSend = Date.now() - new Date(enrollment.lastExecutedAt).getTime();
+    // Conversation-level cooldown: minimum 10-minute gap between consecutive sends
+    // to the SAME CONVERSATION (not just the same enrollment). ThreadContext.lastFollowUpSentAt
+    // is the single source of truth — it survives duplicate enrollments being cleaned up.
+    const tc = await this.prisma.threadContext.findFirst({
+      where: { conversationId: enrollment.conversationId },
+      select: { lastFollowUpSentAt: true },
+    });
+    if (tc?.lastFollowUpSentAt) {
+      const sinceLastSend = now.getTime() - tc.lastFollowUpSentAt.getTime();
       if (sinceLastSend < 10 * 60_000) {
-        // Reschedule to 10 minutes after last send
-        const nextDue = new Date(new Date(enrollment.lastExecutedAt).getTime() + 10 * 60_000);
+        const nextDue = new Date(tc.lastFollowUpSentAt.getTime() + 10 * 60_000);
         await this.prisma.followUpEnrollment.update({
           where: { id: enrollment.id },
           data: { nextStepDueAt: nextDue },
         });
-        this.logger.log(`[FollowUpScheduler] Too soon since last send — rescheduled ${enrollment.id} to ${nextDue.toISOString()}`);
+        this.logger.log(`[FollowUpScheduler] Conversation-level cooldown — rescheduled ${enrollment.id} to ${nextDue.toISOString()}`);
         return;
       }
     }
@@ -438,6 +520,12 @@ export class FollowUpSchedulerService implements OnModuleInit {
         this.logger.log(`[FollowUpScheduler] Will retry step ${enrollment.currentStepIndex} at ${retryAt.toISOString()}`);
         return;
       }
+
+      // Successful auto-send: bump conversation-level cooldown source of truth
+      await this.prisma.threadContext.updateMany({
+        where: { conversationId: enrollment.conversationId },
+        data: { lastFollowUpSentAt: now },
+      });
     }
 
     // Advance to next step (only on success or suggest).

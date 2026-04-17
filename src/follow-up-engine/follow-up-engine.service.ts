@@ -7,6 +7,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Prisma } from '../../generated/prisma';
 import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { FollowUpStateService, FollowUpState } from './follow-up-state.service';
@@ -206,31 +207,62 @@ export class FollowUpEngineService {
       }
     }
 
-    const enrollment = await this.prisma.followUpEnrollment.create({
-      data: {
-        sequenceTemplateId: templateId,
-        conversationId,
-        leadId,
-        platform,
-        status: 'active',
-        currentStepIndex: startStepIndex,
-        nextStepDueAt: effectiveNextDue,
-        mode: enrollMode,
-      },
-    });
+    // Transactional create + ThreadContext update. The partial unique index
+    // "follow_up_enrollments_conversationId_active_unique" (WHERE status='active')
+    // guarantees that concurrent calls can't both succeed — the loser gets P2002
+    // and we return the winner's id instead of creating a duplicate.
+    try {
+      const enrollmentId = await this.prisma.$transaction(async (tx) => {
+        // Pre-check inside the txn short-circuits the happy path (no race).
+        const existingInTx = await tx.followUpEnrollment.findFirst({
+          where: { conversationId, status: 'active' },
+          select: { id: true },
+        });
+        if (existingInTx) return existingInTx.id;
 
-    // Update ThreadContext cached fields
-    await this.prisma.threadContext.updateMany({
-      where: { conversationId },
-      data: {
-        activeEnrollmentId: enrollment.id,
-        nextFollowUpAt: effectiveNextDue,
-        followUpStatus: 'active',
-      },
-    });
+        const created = await tx.followUpEnrollment.create({
+          data: {
+            sequenceTemplateId: templateId,
+            conversationId,
+            leadId,
+            platform,
+            status: 'active',
+            currentStepIndex: startStepIndex,
+            nextStepDueAt: effectiveNextDue,
+            mode: enrollMode,
+          },
+          select: { id: true },
+        });
 
-    this.logger.log(`Enrolled conversation ${conversationId} in sequence ${template.name} (${enrollment.id}), step ${startStepIndex}/${steps.length}, due: ${effectiveNextDue.toISOString()}`);
-    return enrollment.id;
+        await tx.threadContext.updateMany({
+          where: { conversationId },
+          data: {
+            activeEnrollmentId: created.id,
+            nextFollowUpAt: effectiveNextDue,
+            followUpStatus: 'active',
+          },
+        });
+
+        return created.id;
+      });
+
+      this.logger.log(`Enrolled conversation ${conversationId} in sequence ${template.name} (${enrollmentId}), step ${startStepIndex}/${steps.length}, due: ${effectiveNextDue.toISOString()}`);
+      return enrollmentId;
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        // Partial unique index hit — another concurrent caller won the race.
+        // Return the winner's id so the caller sees the idempotent result.
+        const winner = await this.prisma.followUpEnrollment.findFirst({
+          where: { conversationId, status: 'active' },
+          select: { id: true },
+        });
+        if (winner) {
+          this.logger.warn(`[FollowUp] P2002 race on conversation ${conversationId} — returning existing enrollment ${winner.id}`);
+          return winner.id;
+        }
+      }
+      throw err;
+    }
   }
 
   /**

@@ -1,11 +1,12 @@
 /**
  * Follow-Up Engine Service Tests
  *
- * Tests: enrollInSequence (dedup, step skipping, re-enroll delay),
+ * Tests: enrollInSequence (dedup, step skipping, re-enroll delay, P2002 race),
  * evaluateThread (terminal status), handleCustomerReply (idempotent)
  */
 
 import { FollowUpEngineService } from './follow-up-engine.service';
+import { Prisma } from '../../generated/prisma';
 
 const USER_ID = 'user-123';
 const CONVERSATION_ID = 'conv-456';
@@ -13,7 +14,7 @@ const TEMPLATE_ID = 'tmpl-789';
 const LEAD_ID = 'lead-001';
 
 function buildPrismaMock() {
-  return {
+  const mock: any = {
     followUpEnrollment: {
       findFirst: jest.fn().mockResolvedValue(null),
       findUnique: jest.fn().mockResolvedValue(null),
@@ -53,7 +54,19 @@ function buildPrismaMock() {
       findFirst: jest.fn().mockResolvedValue(null),
       count: jest.fn().mockResolvedValue(0),
     },
-  } as any;
+  };
+  // Simulate $transaction by invoking the callback with the same mock client.
+  // Tests that need to simulate P2002 can override `create` to throw it.
+  mock.$transaction = jest.fn().mockImplementation(async (cb: any) => cb(mock));
+  return mock;
+}
+
+/** Build a Prisma P2002 error with the correct class identity for instanceof checks. */
+function buildP2002(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    'Unique constraint failed on the fields: (`conversationId`)',
+    { code: 'P2002', clientVersion: 'test' } as any,
+  );
 }
 
 function buildContextMock() {
@@ -154,6 +167,60 @@ describe('FollowUpEngineService', () => {
       await expect(
         service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID),
       ).rejects.toThrow('not found');
+    });
+
+    it('P2002 race — returns existing winner id instead of duplicating', async () => {
+      // Simulate: pre-check in txn sees no existing, but create trips the partial
+      // unique index (another concurrent caller won the race). Fallback lookup
+      // should find the winner and return its id.
+      prisma.followUpEnrollment.create.mockRejectedValueOnce(buildP2002());
+      // Second findFirst (outside txn, fallback) returns the winner
+      prisma.followUpEnrollment.findFirst
+        .mockResolvedValueOnce(null) // inside-txn pre-check — appears empty
+        .mockResolvedValueOnce({ id: 'winner-enroll' }); // fallback lookup after P2002
+
+      const id = await service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID);
+      expect(id).toBe('winner-enroll');
+    });
+
+    it('non-P2002 Prisma errors are re-thrown', async () => {
+      const otherErr = new Prisma.PrismaClientKnownRequestError(
+        'Some other error',
+        { code: 'P2003', clientVersion: 'test' } as any,
+      );
+      prisma.followUpEnrollment.create.mockRejectedValueOnce(otherErr);
+
+      await expect(
+        service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID),
+      ).rejects.toThrow('Some other error');
+    });
+
+    it('concurrent parallel enrolls collapse to one enrollment id (P2002 race)', async () => {
+      // Simulate the true race: both calls race through the pre-check and both
+      // reach `create`. The DB partial unique index allows only one INSERT —
+      // the loser throws P2002, and the service must return the winner's id.
+      let persisted: any = null;
+      prisma.followUpEnrollment.findFirst.mockImplementation(async () => persisted);
+      prisma.followUpEnrollment.create.mockImplementation(async (args: any) => {
+        if (persisted) {
+          // Second create hits the unique index in production — simulate P2002.
+          throw buildP2002();
+        }
+        persisted = { id: 'enroll-first', ...args.data };
+        return persisted;
+      });
+
+      const [a, b] = await Promise.all([
+        service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID),
+        service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID),
+      ]);
+      // Both callers observe the same winning id — the invariant is "one id",
+      // not "one create call" (the partial unique index is the real guard; the
+      // service just translates P2002 into idempotent behavior).
+      expect(a).toBe(b);
+      expect(a).toBe('enroll-first');
+      // Exactly one row survives in our simulated store.
+      expect(persisted).not.toBeNull();
     });
   });
 

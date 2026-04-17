@@ -1060,6 +1060,7 @@ model ThreadContext {
   // Follow-up tracking (cached from FollowUpEnrollment — derived, not source of truth)
   followUpCount     Int      @default(0)
   lastFollowUpAt    DateTime?
+  lastFollowUpSentAt DateTime? // Source of truth for conversation-level send cooldown
   followUpStatus    String?  // none, active, suggested, paused, completed, stopped
   activeEnrollmentId String? // FK FollowUpEnrollment (cached, nullable)
   nextFollowUpAt    DateTime? // Denormalized from enrollment.nextStepDueAt
@@ -1144,6 +1145,12 @@ model FollowUpEnrollment {
   startedAt           DateTime  @default(now())
   lastExecutedAt      DateTime?
   completedAt         DateTime?
+  // Atomic scheduler claim (lease-based). processingUntil is the lease
+  // expiration; processingToken is the worker's random token. A lease
+  // is "live" while processingUntil > now(). Workers claim a row by
+  // conditionally updating these fields.
+  processingUntil     DateTime?
+  processingToken     String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -1155,6 +1162,9 @@ model FollowUpEnrollment {
   @@index([status, nextStepDueAt]) // Scheduler query: find due active enrollments
   @@index([conversationId, status]) // Active enrollment lookup per thread
   @@index([leadId])
+  // NOTE: Partial unique index enforced via raw SQL migration
+  //   20260417120000_followup_duplicate_fix:
+  //     CREATE UNIQUE INDEX ... ON follow_up_enrollments (conversation_id) WHERE status = 'active';
   @@map("follow_up_enrollments")
 }
 
