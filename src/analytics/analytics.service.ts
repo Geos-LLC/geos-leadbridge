@@ -150,7 +150,12 @@ export class AnalyticsService {
     // period is validated by DTO @IsIn — safe to embed as SQL literal
     const period = dto.period ?? 'month';
 
-    const HIRED_STATUSES = new Set(['hired', 'job scheduled', 'scheduled', 'job done']);
+    // Statuses that count as 'hired/converted' for conversion rate.
+    // Includes Thumbtack terminal-complete + Yelp terminal-complete (done/closed/completed).
+    const HIRED_STATUSES = new Set([
+      'hired', 'job scheduled', 'scheduled', 'job done',
+      'done', 'closed', 'completed', 'job complete', 'booked',
+    ]);
 
     // Use tli.leadDate ("Feb 23") with year inference as the canonical lead date.
     // leads.createdAt and tli.capturedAt are both the import/capture timestamp (same day for bulk imports).
@@ -162,6 +167,7 @@ export class AnalyticsService {
           l."userId",
           l."businessId",
           l."thumbtackStatus",
+          l."status" AS lead_status,
           l."rawJson",
           tli."thumbtackStatus" AS tli_status,
           tli."capturedAt"      AS tli_captured_at,
@@ -183,7 +189,7 @@ export class AnalyticsService {
       ),
       lead_dates AS (
         SELECT
-          id, "userId", "businessId", "thumbtackStatus", "rawJson", tli_status,
+          id, "userId", "businessId", "thumbtackStatus", lead_status, "rawJson", tli_status,
           CASE
             WHEN date_str IS NOT NULL AND date_str <> ''
             THEN
@@ -199,7 +205,13 @@ export class AnalyticsService {
       status_counts AS (
         SELECT
           DATE_TRUNC('${period}', ld.lead_date AT TIME ZONE 'UTC') AS bucket,
-          COALESCE(NULLIF(TRIM(COALESCE(ld."thumbtackStatus", ld.tli_status)), ''), 'No Status') AS job_status,
+          -- Prefer thumbtackStatus, fall back to tli_status (Thumbtack), then lead_status (Yelp + generic).
+          -- Exclude 'new' — that's the default on creation and doesn't represent a job outcome.
+          COALESCE(
+            NULLIF(TRIM(COALESCE(ld."thumbtackStatus", ld.tli_status)), ''),
+            NULLIF(CASE WHEN LOWER(ld.lead_status) = 'new' THEN NULL ELSE ld.lead_status END, ''),
+            'No Status'
+          ) AS job_status,
           COUNT(*) AS cnt
         FROM lead_dates ld
         WHERE ($3::timestamptz IS NULL OR ld.lead_date >= $3::timestamptz)
@@ -251,14 +263,19 @@ export class AnalyticsService {
       dto.endDate   ? new Date(dto.endDate)   : null,
     );
 
-    // Normalize display labels: merge similar statuses into canonical buckets
+    // Normalize display labels: merge similar statuses into canonical buckets.
+    // Covers both Thumbtack (Hired, Job Done, etc.) and Yelp (Hired, Done, Closed, etc.).
     const normalizeStatus = (s: string): string => {
       const lower = s.toLowerCase();
-      if (lower === 'hired')             return 'Hired';
-      if (lower === 'job done')          return 'Job done';
-      if (lower === 'job scheduled' || lower === 'scheduled') return 'Scheduled';
+      if (lower === 'hired')                               return 'Hired';
+      if (lower === 'done' || lower === 'job done' || lower === 'job complete' || lower === 'completed')
+                                                           return 'Job done';
+      if (lower === 'closed' || lower === 'booked')        return 'Job done';
+      if (lower === 'job scheduled' || lower === 'scheduled' || lower === 'in progress')
+                                                           return 'Scheduled';
       if (lower === 'not scheduled yet') return 'Not hired';
       if (lower === 'not hired')         return 'Not hired';
+      if (lower === 'no response' || lower === 'lost')     return 'Not hired';
       if (lower === 'no status')         return 'Not hired';   // no status → not hired
       return 'Not hired'; // any other unknown status → not hired
     };
@@ -425,51 +442,65 @@ export class AnalyticsService {
     return filter;
   }
 
-  // Job Status Distribution - Thumbtack job status from extension (Hired, Not hired, etc.)
-  // Uses Lead.thumbtackStatus when available, falls back to ThumbtackLeadId.thumbtackStatus
+  // Job Status Distribution — combines Thumbtack (thumbtackStatus) and Yelp (lead.status)
+  // into a single distribution. Yelp uses l.status with values like 'done', 'closed',
+  // 'hired', etc. Thumbtack uses thumbtackStatus. 'new' is excluded for both.
   private async getJobStatusDistribution(
     where: any,
   ): Promise<ServiceDetailDistribution[]> {
-    // First try leads that have thumbtackStatus directly
-    const leadsWithStatus = await this.prisma.lead.groupBy({
-      by: ['thumbtackStatus'],
-      where: { ...where, thumbtackStatus: { not: null } },
-      _count: { id: true },
-      orderBy: { _count: { id: 'desc' } },
-    });
+    // Pull all leads with any terminal status via raw SQL so we can COALESCE and filter
+    const userId = where.userId;
+    if (!userId) return [];
 
-    if (leadsWithStatus.length > 0) {
-      const total = leadsWithStatus.reduce((sum, r) => sum + r._count.id, 0);
-      return leadsWithStatus.map((r) => ({
+    const rows = await this.prisma.$queryRawUnsafe<Array<{ job_status: string; cnt: bigint }>>(
+      `SELECT
+         COALESCE(
+           NULLIF(TRIM(l."thumbtackStatus"), ''),
+           NULLIF(CASE WHEN LOWER(l."status") = 'new' THEN NULL ELSE l."status" END, ''),
+           'Unknown'
+         ) AS job_status,
+         COUNT(*)::bigint AS cnt
+       FROM leads l
+       WHERE l."userId" = $1
+         AND ($2::text IS NULL OR l."businessId" = $2::text)
+         AND (
+           (l."thumbtackStatus" IS NOT NULL AND TRIM(l."thumbtackStatus") <> '')
+           OR (l."status" IS NOT NULL AND LOWER(l."status") NOT IN ('new', '') AND TRIM(l."status") <> '')
+         )
+       GROUP BY job_status
+       ORDER BY cnt DESC`,
+      userId,
+      where.businessId ?? null,
+    );
+
+    if (rows.length === 0) {
+      // Fallback for legacy Thumbtack leads: ThumbtackLeadId table
+      const collectedWithStatus = await this.prisma.thumbtackLeadId.groupBy({
+        by: ['thumbtackStatus'],
+        where: {
+          userId,
+          thumbtackStatus: { not: null },
+          imported: true,
+          ...(where.businessId ? {
+            savedAccount: { businessId: where.businessId },
+          } : {}),
+        },
+        _count: { id: true },
+        orderBy: { _count: { id: 'desc' } },
+      });
+      const total = collectedWithStatus.reduce((sum, r) => sum + r._count.id, 0);
+      return collectedWithStatus.map((r) => ({
         name: r.thumbtackStatus || 'Unknown',
         count: r._count.id,
         percentage: total > 0 ? (r._count.id / total) * 100 : 0,
       }));
     }
 
-    // Fallback: query ThumbtackLeadId table for status data (for leads imported before this feature)
-    const userId = where.userId;
-    if (!userId) return [];
-
-    const collectedWithStatus = await this.prisma.thumbtackLeadId.groupBy({
-      by: ['thumbtackStatus'],
-      where: {
-        userId,
-        thumbtackStatus: { not: null },
-        imported: true,
-        ...(where.businessId ? {
-          savedAccount: { businessId: where.businessId },
-        } : {}),
-      },
-      _count: { id: true },
-      orderBy: { _count: { id: 'desc' } },
-    });
-
-    const total = collectedWithStatus.reduce((sum, r) => sum + r._count.id, 0);
-    return collectedWithStatus.map((r) => ({
-      name: r.thumbtackStatus || 'Unknown',
-      count: r._count.id,
-      percentage: total > 0 ? (r._count.id / total) * 100 : 0,
+    const total = rows.reduce((sum, r) => sum + Number(r.cnt), 0);
+    return rows.map((r) => ({
+      name: r.job_status,
+      count: Number(r.cnt),
+      percentage: total > 0 ? (Number(r.cnt) / total) * 100 : 0,
     }));
   }
 
