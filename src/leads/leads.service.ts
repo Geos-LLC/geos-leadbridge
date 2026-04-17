@@ -347,7 +347,8 @@ export class LeadsService {
 
       // Try to find an existing local Message with matching content but null
       // externalMessageId (this happens for AI/manual sends where Yelp returned
-      // an empty response). Update it instead of creating a duplicate.
+      // an empty response). Update it instead of creating a duplicate —
+      // preserving whatever senderType was set by sendMessage.
       const normalizedContent = normalize(msg.content);
       const candidates = await this.prisma.message.findMany({
         where: { conversationId, platform: 'yelp', sender: msg.sender, externalMessageId: null },
@@ -361,6 +362,9 @@ export class LeadsService {
         continue;
       }
 
+      // Creating from Yelp API — no senderType is known here (API doesn't say
+      // AI vs manual). Leave senderType null so it falls back to "Platform" in
+      // the UI. sendMessage will have stamped 'ai'/'user' on rows it created.
       await this.prisma.message.create({
         data: {
           conversationId,
@@ -536,21 +540,20 @@ export class LeadsService {
         }).catch(() => {}); // non-critical
       }
 
-      // Upsert — if the webhook echo raced ahead and already stored this message,
-      // we still need to stamp senderType so the UI can distinguish AI from manual.
-      // The webhook backfill path stores Messages without senderType (null), which
-      // would otherwise make every AI follow-up show as "Platform" in the feed.
-      const existingMessage = await this.prisma.message.findFirst({
-        where: {
-          platform: lead.platform,
-          externalMessageId: sentMessage.externalMessageId,
-        },
-        select: { id: true, senderType: true },
-      });
-
-      if (!existingMessage) {
-        await this.prisma.message.create({
-          data: {
+      // Atomic upsert — always stamps senderType ('ai' or 'user') regardless of
+      // whether the row was created fresh or racing with another writer (webhook
+      // echo, Yelp message sync, etc.). If senderType was already 'ai' or 'user',
+      // we preserve it; null rows get stamped. This is what makes the UI badge
+      // correctly distinguish AI from manual sends.
+      if (sentMessage.externalMessageId) {
+        await this.prisma.message.upsert({
+          where: {
+            platform_externalMessageId: {
+              platform: lead.platform,
+              externalMessageId: sentMessage.externalMessageId,
+            },
+          },
+          create: {
             conversationId: conversation.id,
             userId,
             platform: lead.platform,
@@ -562,15 +565,41 @@ export class LeadsService {
             sentAt: new Date(sentMessage.sentAt),
             rawJson: JSON.stringify(sentMessage),
           },
+          update: {
+            // Stamp senderType on existing rows only if they don't already have one.
+            // Prisma doesn't support conditional updates natively, so we use raw
+            // COALESCE via a separate updateMany below — this update() is a no-op
+            // placeholder to make upsert idempotent.
+          },
         });
-        console.log(`[LeadsService] Stored sent message locally: ${sentMessage.externalMessageId}`);
-      } else if (!existingMessage.senderType) {
-        // Webhook echo landed first without senderType — stamp it now.
-        await this.prisma.message.update({
-          where: { id: existingMessage.id },
+        // COALESCE-style stamp: only overwrite when column is NULL. This handles
+        // the case where the Yelp webhook echo created the row first with no
+        // senderType (webhook backfill path does not set it).
+        await this.prisma.message.updateMany({
+          where: {
+            platform: lead.platform,
+            externalMessageId: sentMessage.externalMessageId,
+            senderType: null,
+          },
           data: { senderType },
         });
-        console.log(`[LeadsService] Stamped senderType=${senderType} on webhook-first message ${sentMessage.externalMessageId}`);
+      } else {
+        // Yelp returned no event_id — fall back to plain create with a synthetic id.
+        // Fine-grained deduplication via content match happens later in syncYelpMessagesToLocal.
+        await this.prisma.message.create({
+          data: {
+            conversationId: conversation.id,
+            userId,
+            platform: lead.platform,
+            externalMessageId: null,
+            sender: 'pro',
+            senderType,
+            content: message,
+            isRead: true,
+            sentAt: new Date(sentMessage.sentAt),
+            rawJson: JSON.stringify(sentMessage),
+          },
+        });
       }
 
       // Update thread context so AI previews have conversation history.
@@ -659,7 +688,11 @@ export class LeadsService {
             if (!template) return;
 
             await this.followUpEngine!.enrollInSequence(conversation!.id, template.id, lead.platform, leadId);
-          } catch {}
+          } catch (err: any) {
+            // Surfacing the error instead of silently swallowing — we had
+            // an incident where a missing column silently broke every enrollment.
+            this.logger.error(`[LeadsService] enrollInSequence failed for conversation ${conversation?.id}: ${err.message}`);
+          }
         })();
       }
 
