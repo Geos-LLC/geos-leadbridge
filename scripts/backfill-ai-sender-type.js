@@ -132,7 +132,77 @@ async function main() {
   }
 
   console.log(`[backfill] ${APPLY ? 'Stamped' : 'Would stamp'} senderType=ai — via messageId: ${stampedViaId}, via content: ${stampedViaContent}, already tagged (skipped): ${alreadyTagged}, unmatched: ${unmatched}`);
-  console.log(`[backfill] total = ${stampedViaId + stampedViaContent}`);
+  console.log(`[backfill] total follow-up = ${stampedViaId + stampedViaContent}`);
+
+  // ==========================================
+  // Strategy 3: AI automation rule sends (automation.service.ts)
+  // Match via PendingAutomatedMessage.sentAt proximity to Message.sentAt
+  // where the rule has useAi=true. This catches "Auto Reply - Immediate"
+  // and AI Conversation sends that happened before the senderType fix.
+  // ==========================================
+  const pendings = await prisma.pendingAutomatedMessage.findMany({
+    where: {
+      status: 'sent',
+      sentAt: { not: null },
+      automationRule: { useAi: true },
+    },
+    select: {
+      id: true,
+      sentAt: true,
+      lead: { select: { threadId: true } },
+    },
+  });
+  console.log(`\n[backfill] Found ${pendings.length} sent AI-automation messages to consider`);
+
+  let autoStamped = 0;
+  let autoAlready = 0;
+  let autoUnmatched = 0;
+
+  for (const pm of pendings) {
+    const threadId = pm.lead?.threadId;
+    if (!threadId || !pm.sentAt) { autoUnmatched++; continue; }
+
+    // Find the pro message sent closest in time to this pending's sentAt
+    // within a ±5-minute window. Skip if already tagged.
+    const window = 5 * 60_000;
+    const candidates = await prisma.message.findMany({
+      where: {
+        conversationId: threadId,
+        sender: 'pro',
+        sentAt: {
+          gte: new Date(pm.sentAt.getTime() - window),
+          lte: new Date(pm.sentAt.getTime() + window),
+        },
+      },
+      orderBy: { sentAt: 'asc' },
+      select: { id: true, senderType: true, sentAt: true },
+    });
+    if (candidates.length === 0) { autoUnmatched++; continue; }
+
+    // Pick closest by sentAt delta
+    candidates.sort(
+      (a, b) =>
+        Math.abs(a.sentAt.getTime() - pm.sentAt.getTime()) -
+        Math.abs(b.sentAt.getTime() - pm.sentAt.getTime()),
+    );
+    const target = candidates[0];
+    if (target.senderType === 'ai' || target.senderType === 'user') {
+      autoAlready++;
+      continue;
+    }
+
+    if (APPLY) {
+      await prisma.message.update({
+        where: { id: target.id },
+        data: { senderType: 'ai' },
+      });
+    }
+    autoStamped++;
+  }
+
+  console.log(`[backfill] ${APPLY ? 'Stamped' : 'Would stamp'} senderType=ai from automation — matched: ${autoStamped}, already tagged: ${autoAlready}, unmatched: ${autoUnmatched}`);
+  console.log(`[backfill] total automation = ${autoStamped}`);
+  console.log(`[backfill] GRAND TOTAL = ${stampedViaId + stampedViaContent + autoStamped}`);
 
   if (!APPLY) {
     console.log('[backfill] Dry-run complete. Re-run with --apply to commit.');
