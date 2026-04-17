@@ -882,9 +882,16 @@ export class FollowUpEngineController {
       return { success: false, error: err.message };
     }
 
+    const sentAt = new Date();
     await this.prisma.followUpStepExecution.update({
       where: { id },
-      data: { status: 'sent', executedAt: new Date(), finalMessage: message, messageId },
+      data: { status: 'sent', executedAt: sentAt, finalMessage: message, messageId },
+    });
+
+    // Bump conversation-level cooldown source of truth
+    await this.prisma.threadContext.updateMany({
+      where: { conversationId: execution.enrollment.conversationId },
+      data: { lastFollowUpSentAt: sentAt },
     });
 
     return { success: true, messageId };
@@ -931,9 +938,16 @@ export class FollowUpEngineController {
       return { success: false, error: err.message };
     }
 
+    const sentAt = new Date();
     await this.prisma.followUpStepExecution.update({
       where: { id },
-      data: { status: 'approved', executedAt: new Date(), finalMessage: editedMessage, messageId },
+      data: { status: 'approved', executedAt: sentAt, finalMessage: editedMessage, messageId },
+    });
+
+    // Bump conversation-level cooldown source of truth
+    await this.prisma.threadContext.updateMany({
+      where: { conversationId: execution.enrollment.conversationId },
+      data: { lastFollowUpSentAt: sentAt },
     });
 
     return { success: true, messageId };
