@@ -536,12 +536,16 @@ export class LeadsService {
         }).catch(() => {}); // non-critical
       }
 
-      // Check if message already exists (webhook might have already stored it)
+      // Upsert — if the webhook echo raced ahead and already stored this message,
+      // we still need to stamp senderType so the UI can distinguish AI from manual.
+      // The webhook backfill path stores Messages without senderType (null), which
+      // would otherwise make every AI follow-up show as "Platform" in the feed.
       const existingMessage = await this.prisma.message.findFirst({
         where: {
           platform: lead.platform,
           externalMessageId: sentMessage.externalMessageId,
         },
+        select: { id: true, senderType: true },
       });
 
       if (!existingMessage) {
@@ -560,17 +564,26 @@ export class LeadsService {
           },
         });
         console.log(`[LeadsService] Stored sent message locally: ${sentMessage.externalMessageId}`);
-
-        // Update thread context so AI previews have conversation history
-        this.conversationContext.recordMessage({
-          conversationId: conversation.id,
-          leadId: leadId,
-          platform: lead.platform,
-          sender: 'pro',
-          senderType: 'user',
-          content: message,
-        }).catch(err => console.error(`[LeadsService] recordMessage failed: ${err.message}`));
+      } else if (!existingMessage.senderType) {
+        // Webhook echo landed first without senderType — stamp it now.
+        await this.prisma.message.update({
+          where: { id: existingMessage.id },
+          data: { senderType },
+        });
+        console.log(`[LeadsService] Stamped senderType=${senderType} on webhook-first message ${sentMessage.externalMessageId}`);
       }
+
+      // Update thread context so AI previews have conversation history.
+      // Pass the actual senderType ('ai' for follow-ups / auto-replies, 'user' for manual sends)
+      // so downstream consumers can tell the two apart.
+      this.conversationContext.recordMessage({
+        conversationId: conversation.id,
+        leadId: leadId,
+        platform: lead.platform,
+        sender: 'pro',
+        senderType,
+        content: message,
+      }).catch(err => console.error(`[LeadsService] recordMessage failed: ${err.message}`));
 
       // Update conversation's lastMessageAt
       await this.prisma.conversation.update({
