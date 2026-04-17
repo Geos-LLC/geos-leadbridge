@@ -336,8 +336,16 @@ export class LeadsService {
     const conversationId = lead.threadId;
     if (!conversationId) return;
 
+    // Yelp frequently folds em-dash/en-dash to '--' and curly quotes to straight.
+    // Normalize for content-based matching so sendMessage-created rows (which
+    // carry senderType='ai'/'user') are detected instead of creating duplicates.
     const normalize = (s: string | null | undefined) =>
-      (s || '').trim().replace(/\s+/g, ' ');
+      (s || '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .replace(/[\u2014\u2013]/g, '--')
+        .replace(/[\u2018\u2019]/g, "'")
+        .replace(/[\u201C\u201D]/g, '"');
 
     for (const msg of messages) {
       const exists = await this.prisma.message.findFirst({
