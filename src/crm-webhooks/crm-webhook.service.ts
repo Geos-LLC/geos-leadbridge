@@ -101,13 +101,29 @@ export class CrmWebhookService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Emit a CRM webhook event to all active subscriptions for this user.
+   * Emit a CRM webhook event to all active OUTBOUND subscriptions for this user.
    * Fire-and-forget — never throws, never blocks core processing.
+   *
+   * Loop prevention: for lead.status_changed, if the triggering write came from
+   * Service Flow (lead.statusSource = 'service_flow'), suppress emission to
+   * avoid SF → LB → SF → LB bouncing. See plans/2026-04-17-job-sync-sf-lb.md §5.2.
    */
   async emit(userId: string, eventType: CrmEventType, context: CrmEventContext): Promise<void> {
     try {
+      // Loop guard: skip lead.status_changed when the write came from SF itself.
+      if (eventType === 'lead.status_changed' && context.leadId) {
+        const lead = await this.prisma.lead.findUnique({
+          where: { id: context.leadId },
+          select: { statusSource: true },
+        });
+        if (lead?.statusSource === 'service_flow') {
+          this.logger.debug(`[CrmWebhook] Suppressing lead.status_changed for ${context.leadId} — source is service_flow (loop guard)`);
+          return;
+        }
+      }
+
       const subscriptions = await this.prisma.crmWebhookSubscription.findMany({
-        where: { userId, isActive: true },
+        where: { userId, isActive: true, direction: 'outbound' },
       });
 
       if (subscriptions.length === 0) return;
@@ -277,9 +293,9 @@ export class CrmWebhookService {
    */
   async sendTestEvent(subscriptionId: string, userId: string): Promise<{ success: boolean; status?: number; error?: string }> {
     const sub = await this.prisma.crmWebhookSubscription.findFirst({
-      where: { id: subscriptionId, userId },
+      where: { id: subscriptionId, userId, direction: 'outbound' },
     });
-    if (!sub) return { success: false, error: 'Subscription not found' };
+    if (!sub) return { success: false, error: 'Outbound subscription not found' };
 
     const testPayload: CrmEventPayload = {
       event_id: `evt_test_${crypto.randomUUID()}`,

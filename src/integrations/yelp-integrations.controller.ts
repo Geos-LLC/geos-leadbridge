@@ -6,7 +6,7 @@
  * from Yelp API, and creates leads in the database.
  */
 
-import { Controller, Post, Get, Body, Query, UseGuards, Logger } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, UseGuards, Logger, Inject, Optional, forwardRef } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PrismaService } from '../common/utils/prisma.service';
@@ -14,6 +14,7 @@ import { PlatformService } from '../platforms/platform.service';
 import { PlatformFactory } from '../platforms/platform.factory';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { ConfigService } from '@nestjs/config';
+import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 
 @Controller('v1/integrations/yelp')
 @UseGuards(JwtAuthGuard)
@@ -25,6 +26,9 @@ export class YelpIntegrationsController {
     private readonly platformService: PlatformService,
     private readonly platformFactory: PlatformFactory,
     private readonly configService: ConfigService,
+    @Optional()
+    @Inject(forwardRef(() => FollowUpEngineService))
+    private readonly followUpEngine: FollowUpEngineService | null,
   ) {}
 
   /**
@@ -75,18 +79,36 @@ export class YelpIntegrationsController {
         // Check if anything changed
         const newName = leadNames?.[leadId];
         const newCategory = leadCategories?.[leadId];
-        const newStatus = leadStatuses?.[leadId]?.toLowerCase();
+        const newStatusRaw = leadStatuses?.[leadId];
+        const newStatus = newStatusRaw?.toLowerCase();
         const newLocation = leadLocations?.[leadId];
 
         const nameChanged = newName && existing.customerName !== newName && (existing.customerName === 'Unknown' || newName !== 'Unknown');
         const statusChanged = newStatus && existing.status !== newStatus;
+        // Platform-native status lives in its own column. Post-rollout plan:
+        // SF writes Lead.status, platform writes Lead.platformStatus. During
+        // rollout (SF_STATUS_WINS=false) we still write both for backward compat.
+        const platformStatusChanged = newStatusRaw && existing.platformStatus !== newStatusRaw;
         const categoryChanged = newCategory && existing.category !== newCategory && !existing.category;
         const locationChanged = newLocation && !existing.city;
 
-        if (nameChanged || statusChanged || categoryChanged || locationChanged) {
+        const sfWins = this.configService.get<string>('SF_STATUS_WINS', 'false') === 'true';
+        // If SF is the authority and this lead is SF-mapped, do NOT overwrite lead.status
+        // from platform. Platform still writes platformStatus.
+        const skipLeadStatusWrite = sfWins && existing.sfJobId !== null && existing.sfJobId !== undefined;
+
+        if (nameChanged || statusChanged || categoryChanged || locationChanged || platformStatusChanged) {
           const updates: any = {};
           if (nameChanged) updates.customerName = newName;
-          if (statusChanged) updates.status = newStatus;
+          if (statusChanged && !skipLeadStatusWrite) {
+            updates.status = newStatus;
+            updates.statusSource = 'platform_sync';
+            updates.statusUpdatedAt = new Date();
+          }
+          if (platformStatusChanged) {
+            updates.platformStatus = newStatusRaw;
+            updates.platformStatusAt = new Date();
+          }
           if (categoryChanged) updates.category = newCategory;
           if (locationChanged) {
             updates.city = newLocation.split(',')[0]?.trim();
@@ -102,6 +124,23 @@ export class YelpIntegrationsController {
               where: { id: existing.threadId },
               data: { customerName: newName },
             }).catch(() => {});
+          }
+
+          // Trigger engagement-aware re-evaluation when the platform signal
+          // is one we care about (Not hired / Archived / Hired / Active).
+          // Only fire on transitions — skip no-op.
+          if (platformStatusChanged && existing.threadId && this.followUpEngine) {
+            const signal = newStatusRaw || '';
+            const relevant = /^(not hired|archived|hired|active)$/i.test(signal);
+            if (relevant) {
+              this.followUpEngine.handlePlatformSignal(existing.threadId, signal)
+                .then(action => {
+                  if (action !== 'no_change' && action !== 'no_enrollment') {
+                    this.logger.log(`[Yelp Import] Platform signal "${signal}" on lead ${leadId} → ${action}`);
+                  }
+                })
+                .catch(err => this.logger.warn(`[Yelp Import] handlePlatformSignal failed: ${err.message}`));
+            }
           }
 
           imported++;

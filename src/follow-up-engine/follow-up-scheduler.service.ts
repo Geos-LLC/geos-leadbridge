@@ -16,6 +16,7 @@ import { ConversationContextService } from '../conversation-context/conversation
 import { LeadsService } from '../leads/leads.service';
 import { FollowUpEngineService } from './follow-up-engine.service';
 import { FollowUpGeneratorService, SequenceStep } from './follow-up-generator.service';
+import { LONG_TERM_STEPS } from './long-term-steps';
 
 @Injectable()
 export class FollowUpSchedulerService implements OnModuleInit {
@@ -370,14 +371,24 @@ export class FollowUpSchedulerService implements OnModuleInit {
       return;
     }
 
-    // Get steps: prefer user-configured steps from account settings, fall back to seed template
+    // Get steps:
+    //   long_term mode → hardcoded LONG_TERM_STEPS (7d/14d/30d/90d)
+    //   short_term mode → user-configured (if any), else seed template
     let steps: SequenceStep[] = [];
-    const userSteps = await this.getUserConfiguredSteps(enrollment.conversationId);
-    if (userSteps && userSteps.length > 0) {
-      steps = userSteps;
+    if ((enrollment as any).followUpMode === 'long_term') {
+      steps = LONG_TERM_STEPS.map(s => ({
+        stepOrder: s.stepOrder,
+        delayMinutes: s.delayMinutes,
+        objective: s.objective,
+      }));
     } else {
-      const stepsData = enrollment.sequenceTemplate.stepsJson as any;
-      steps = stepsData?.steps || [];
+      const userSteps = await this.getUserConfiguredSteps(enrollment.conversationId);
+      if (userSteps && userSteps.length > 0) {
+        steps = userSteps;
+      } else {
+        const stepsData = enrollment.sequenceTemplate.stepsJson as any;
+        steps = stepsData?.steps || [];
+      }
     }
     const step = steps[enrollment.currentStepIndex];
 

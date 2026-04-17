@@ -28,6 +28,7 @@ import { ConversationContextModule } from './conversation-context/conversation-c
 import { FollowUpEngineModule } from './follow-up-engine/follow-up-engine.module';
 import { TeamsModule } from './teams/teams.module';
 import { CrmWebhookModule } from './crm-webhooks/crm-webhook.module';
+import { ServiceFlowModule } from './integrations/service-flow/service-flow.module';
 import { HealthModule } from './health/health.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -63,6 +64,7 @@ import { PrismaModule } from './common/utils/prisma.module';
     FollowUpEngineModule,
     TeamsModule,
     CrmWebhookModule,
+    ServiceFlowModule,
     HealthModule,
     MonitoringModule,
   ],
