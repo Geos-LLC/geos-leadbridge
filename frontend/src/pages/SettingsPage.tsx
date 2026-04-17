@@ -958,8 +958,8 @@ export default function SettingsPage() {
                         className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
                       >
                         <option value="">Choose account...</option>
-                        {accounts.map(a => (
-                          <option key={a.id} value={a.id}>{a.platform === 'yelp' ? '\uD83D\uDD34' : '\uD83D\uDD35'} {a.businessName}</option>
+                        {accounts.filter(a => a.platform === 'thumbtack').map(a => (
+                          <option key={a.id} value={a.id}>{a.businessName}</option>
                         ))}
                       </select>
                     </div>
