@@ -369,6 +369,7 @@ export interface ApiMessage {
   platform: string;
   externalMessageId: string;
   sender: 'customer' | 'pro' | 'system';
+  senderType?: 'ai' | 'user' | null;
   content: string;
   attachments?: MessageAttachment[];
   isRead: boolean;
