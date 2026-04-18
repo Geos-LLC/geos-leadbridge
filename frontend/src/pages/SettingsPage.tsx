@@ -517,7 +517,7 @@ export default function SettingsPage() {
             <p className="text-slate-500">Manage your business profile, marketplace connections, and billing.</p>
           </div>
         </div>
-        <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8">
+        <div className="p-6" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
           <div className="flex items-center justify-center h-32">
             <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
           </div>
@@ -535,25 +535,36 @@ export default function SettingsPage() {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   return (
-    <div className="p-6 lg:p-10 max-w-5xl mx-auto space-y-10">
+    <div style={{ padding: '24px 28px', maxWidth: 980, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 22 }}>
       {/* Header */}
-      <div className="flex items-center gap-4 mb-2">
-        <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-600">
-          <Settings className="w-6 h-6" />
+      <div>
+        <div
+          style={{
+            fontSize: 10,
+            fontFamily: 'var(--lb-font-mono)',
+            fontWeight: 700,
+            color: 'var(--lb-accent)',
+            textTransform: 'uppercase',
+            letterSpacing: 0.1,
+          }}
+        >
+          Settings
         </div>
-        <div>
-          <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Account <span className="gradient-text">Settings</span></h2>
-          <p className="text-slate-500">Manage your business profile, marketplace connections, and billing.</p>
-        </div>
+        <h2 style={{ margin: '4px 0 2px', fontSize: 22, fontWeight: 600, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+          Account settings
+        </h2>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--lb-ink-5)' }}>
+          Manage your business profile, marketplace connections, and billing.
+        </p>
       </div>
 
       {/* Section 1: Account Info */}
-      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-        <div className="px-8 py-6 border-b border-slate-50">
-          <h3 className="text-lg font-bold text-slate-900">Business Profile</h3>
+      <div className="overflow-hidden" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
+        <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--lb-line-soft)' }}>
+          <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>Business profile</h3>
         </div>
-        <div className="p-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <div className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           <div className="space-y-1">
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Name</p>
             {editingName ? (
@@ -1419,7 +1430,7 @@ export default function SettingsPage() {
 
         {/* STATE 1: Free Trial Active */}
         {isTrialActive && !isActivePaid && trial && (
-          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8">
+          <div className="p-6" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600">
                 <Rocket className="w-5 h-5" />
@@ -1604,9 +1615,9 @@ export default function SettingsPage() {
       </div>
 
       {/* Section 4: Payment Method */}
-      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-        <div className="px-8 py-6 border-b border-slate-50">
-          <h3 className="text-lg font-bold text-slate-900">Payment Method</h3>
+      <div className="overflow-hidden" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
+        <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--lb-line-soft)' }}>
+          <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>Payment method</h3>
         </div>
         <div className="p-8">
           <div className="flex items-center gap-6">
@@ -1632,9 +1643,9 @@ export default function SettingsPage() {
       </div>
 
       {/* Section 5: Invoices */}
-      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-        <div className="px-8 py-6 border-b border-slate-50">
-          <h3 className="text-lg font-bold text-slate-900">Invoices</h3>
+      <div className="overflow-hidden" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
+        <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--lb-line-soft)' }}>
+          <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>Invoices</h3>
         </div>
         <div className="p-8">
           {isActivePaid || isCancelled ? (
