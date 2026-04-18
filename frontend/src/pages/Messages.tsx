@@ -727,6 +727,7 @@ export function Messages() {
           id: msg.id || msg.externalMessageId,
           content: msg.content,
           sender,
+          senderType: msg.senderType ?? null,
           sentAt: new Date(msg.sentAt),
           externalId: msg.externalMessageId,
           attachments: msg.attachments,
