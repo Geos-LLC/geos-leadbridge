@@ -45,77 +45,217 @@ interface ServiceCardProps {
   cardRef?: (el: HTMLDivElement | null) => void;
 }
 
-function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, expanded, onExpand, statusText, warningText, setupRequired, children, iconBgColor = 'bg-blue-50', iconTextColor = 'text-blue-600', cardRef }: ServiceCardProps) {
+function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, expanded, onExpand, statusText, warningText, setupRequired, children, cardRef }: ServiceCardProps) {
+  const borderColor = comingSoon
+    ? 'var(--lb-line-soft)'
+    : setupRequired
+      ? 'oklch(0.85 0.1 75)'
+      : enabled
+        ? 'var(--lb-accent-line)'
+        : 'var(--lb-line)';
+
   return (
-    <div ref={cardRef} className={`bg-white rounded-3xl border shadow-sm overflow-hidden transition-all ${comingSoon ? 'opacity-75 bg-slate-50/50 border-slate-100' : setupRequired ? 'border-orange-200 hover:border-orange-300' : 'border-slate-100 hover:border-blue-200'}`}>
-      <div className="p-6 md:p-8">
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
-          <div className="flex gap-5">
-            <div className={`w-14 h-14 ${comingSoon ? 'bg-white text-slate-400 border border-slate-100' : `${iconBgColor} ${iconTextColor}`} rounded-2xl flex items-center justify-center shrink-0`}>
-              {icon}
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className={`text-xl font-bold ${comingSoon ? 'text-slate-400' : 'text-slate-900'}`}>{title}</h3>
-                {comingSoon && (
-                  <span className="px-2 py-0.5 bg-slate-200 text-slate-500 text-[10px] font-bold rounded uppercase">Coming Soon</span>
-                )}
-                {!comingSoon && (
-                  <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full border uppercase tracking-wider ${
-                    enabled
-                      ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
-                      : 'bg-slate-100 text-slate-400 border-slate-200'
-                  }`}>
-                    {enabled ? 'Active' : 'Disabled'}
-                  </span>
-                )}
-                {setupRequired && !comingSoon && (
-                  <span className="px-2 py-0.5 bg-orange-100 text-orange-600 text-[10px] font-bold rounded-full border border-orange-200 uppercase tracking-wider">Setup Required</span>
-                )}
-              </div>
-              <p className={`mt-1 ${comingSoon ? 'text-slate-400' : 'text-slate-500'}`}>{description}</p>
-              {warningText && !comingSoon && (
-                <div className="flex items-center gap-2 mt-3">
-                  <span className="w-2 h-2 rounded-full bg-orange-400"></span>
-                  <span className="text-xs font-bold text-orange-600 uppercase tracking-tight">{warningText}</span>
-                </div>
-              )}
-              {statusText && !warningText && !comingSoon && (
-                <div className="flex items-center gap-2 mt-3">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                  <span className="text-xs font-bold text-slate-600 uppercase tracking-tight">{statusText}</span>
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            {!comingSoon && onExpand && (
-              <button
-                onClick={onExpand}
-                className="p-2 text-slate-400 hover:text-slate-600 transition-colors"
-              >
-                {expanded ? <ChevronUp className="w-6 h-6" /> : <ChevronDown className="w-6 h-6" />}
-              </button>
-            )}
-            <label className="inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={(e) => onToggle(e.target.checked)}
-                disabled={comingSoon}
-                className="sr-only peer"
-              />
-              <div className={`relative w-14 h-7 ${comingSoon ? 'bg-slate-100 cursor-not-allowed' : 'bg-slate-200'} peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:start-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600`}></div>
-            </label>
-          </div>
+    <div
+      ref={cardRef}
+      style={{
+        background: 'var(--lb-surface)',
+        border: `1px solid ${borderColor}`,
+        borderRadius: 'var(--lb-radius-lg)',
+        overflow: 'hidden',
+        transition: 'border-color 160ms ease, opacity 160ms ease',
+        opacity: comingSoon ? 0.7 : enabled ? 1 : 0.82,
+      }}
+    >
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '36px 1fr auto',
+          gap: 14,
+          padding: '14px 18px',
+          alignItems: 'center',
+        }}
+      >
+        <div
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 8,
+            background: comingSoon ? 'var(--lb-ink-10)' : enabled ? 'var(--lb-accent-tint)' : 'var(--lb-ink-10)',
+            color: comingSoon ? 'var(--lb-ink-6)' : enabled ? 'var(--lb-accent)' : 'var(--lb-ink-5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'all 160ms ease',
+          }}
+        >
+          <span style={{ display: 'inline-flex', width: 16, height: 16, alignItems: 'center', justifyContent: 'center' }}>
+            {icon}
+          </span>
         </div>
 
-        {expanded && children && (
-          <div className="mt-10 pt-8 border-t border-slate-50 space-y-6">
-            {children}
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <h3
+              style={{
+                margin: 0,
+                fontSize: 14,
+                fontWeight: 600,
+                color: comingSoon ? 'var(--lb-ink-5)' : 'var(--lb-ink-1)',
+                letterSpacing: '-0.005em',
+              }}
+            >
+              {title}
+            </h3>
+            {comingSoon && (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontFamily: 'var(--lb-font-mono)',
+                  fontWeight: 600,
+                  padding: '1px 6px',
+                  borderRadius: 99,
+                  background: 'var(--lb-ink-10)',
+                  color: 'var(--lb-ink-5)',
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.06,
+                }}
+              >
+                Coming soon
+              </span>
+            )}
+            {setupRequired && !comingSoon && (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontFamily: 'var(--lb-font-mono)',
+                  fontWeight: 600,
+                  padding: '1px 6px',
+                  borderRadius: 99,
+                  background: 'oklch(0.95 0.04 75)',
+                  color: '#5e3b0a',
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.06,
+                }}
+              >
+                Setup required
+              </span>
+            )}
           </div>
-        )}
+          <p
+            style={{
+              margin: '3px 0 0',
+              fontSize: 12,
+              color: 'var(--lb-ink-5)',
+            }}
+          >
+            {description}
+          </p>
+          {warningText && !comingSoon && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+              <span style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--lb-warn)' }} />
+              <span
+                style={{
+                  fontSize: 11,
+                  fontFamily: 'var(--lb-font-mono)',
+                  fontWeight: 600,
+                  color: '#5e3b0a',
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.04,
+                }}
+              >
+                {warningText}
+              </span>
+            </div>
+          )}
+          {statusText && !warningText && !comingSoon && enabled && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+              <span style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--lb-success)' }} />
+              <span
+                style={{
+                  fontSize: 11,
+                  fontFamily: 'var(--lb-font-mono)',
+                  fontWeight: 500,
+                  color: 'var(--lb-ink-4)',
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.04,
+                }}
+              >
+                {statusText}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {!comingSoon && onExpand && (
+            <button
+              onClick={onExpand}
+              style={{
+                width: 28,
+                height: 28,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'transparent',
+                border: 0,
+                borderRadius: 4,
+                cursor: 'pointer',
+                color: 'var(--lb-ink-5)',
+              }}
+              title={expanded ? 'Collapse' : 'Expand'}
+            >
+              {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+          )}
+          <label style={{ display: 'inline-flex', alignItems: 'center', cursor: comingSoon ? 'not-allowed' : 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => onToggle(e.target.checked)}
+              disabled={comingSoon}
+              className="sr-only peer"
+            />
+            <span
+              style={{
+                position: 'relative',
+                width: 36,
+                height: 20,
+                background: enabled ? 'var(--lb-accent)' : 'var(--lb-ink-8)',
+                borderRadius: 999,
+                transition: 'background 160ms ease',
+                display: 'inline-block',
+                opacity: comingSoon ? 0.5 : 1,
+              }}
+            >
+              <span
+                style={{
+                  position: 'absolute',
+                  top: 2,
+                  left: enabled ? 18 : 2,
+                  width: 16,
+                  height: 16,
+                  borderRadius: 99,
+                  background: 'white',
+                  transition: 'left 160ms ease',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
+                }}
+              />
+            </span>
+          </label>
+        </div>
       </div>
+
+      {expanded && children && (
+        <div
+          style={{
+            padding: '18px 18px 20px',
+            background: 'var(--lb-bg)',
+            borderTop: '1px solid var(--lb-line-soft)',
+          }}
+        >
+          {children}
+        </div>
+      )}
     </div>
   );
 }
@@ -1451,58 +1591,198 @@ export function Services() {
   }
 
   return (
-    <div className="p-6 lg:p-10 max-w-5xl mx-auto space-y-8">
+    <div style={{ padding: '24px 28px', maxWidth: 980, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 22 }}>
       {accounts.length === 0 && <NoAccountsOverlay />}
       {/* Floating Notifications */}
       {error && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 max-w-md w-full mx-4 bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-3 text-red-600 text-sm font-medium shadow-lg animate-in slide-in-from-top-2">
+        <div
+          className="fixed top-20 left-1/2 -translate-x-1/2 z-50 max-w-md w-full mx-4 animate-in slide-in-from-top-2"
+          style={{
+            background: 'oklch(0.96 0.04 27)',
+            border: '1px solid oklch(0.88 0.08 27)',
+            borderRadius: 'var(--lb-radius-lg)',
+            padding: '12px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            color: '#7a1a14',
+            fontSize: 13,
+            fontWeight: 500,
+            boxShadow: 'var(--lb-shadow-md)',
+          }}
+        >
           <AlertCircle size={16} className="shrink-0" />
           <span className="flex-1">{error}</span>
-          <button onClick={() => setError(null)} className="p-1 hover:bg-red-100 rounded-lg transition-colors">
-            <X size={16} />
+          <button
+            onClick={() => setError(null)}
+            style={{ background: 'transparent', border: 0, cursor: 'pointer', color: 'var(--lb-danger)', padding: 2 }}
+          >
+            <X size={14} />
           </button>
         </div>
       )}
 
       {successMessage && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 max-w-md w-full mx-4 bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3 text-emerald-600 text-sm font-medium shadow-lg animate-in slide-in-from-top-2">
+        <div
+          className="fixed top-20 left-1/2 -translate-x-1/2 z-50 max-w-md w-full mx-4 animate-in slide-in-from-top-2"
+          style={{
+            background: 'oklch(0.95 0.04 150)',
+            border: '1px solid oklch(0.85 0.08 150)',
+            borderRadius: 'var(--lb-radius-lg)',
+            padding: '12px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            color: '#0c4a2b',
+            fontSize: 13,
+            fontWeight: 500,
+            boxShadow: 'var(--lb-shadow-md)',
+          }}
+        >
           <CheckCircle size={16} className="shrink-0" />
           <span>{successMessage}</span>
         </div>
       )}
 
+      {/* Context bar — systems active */}
+      {(() => {
+        const systems = [
+          autoReplyEnabled || (leadAlertRule?.enabled ?? false),
+          ctEnabled || ccEnabled,
+          fuMode !== 'off',
+        ];
+        const active = systems.filter(Boolean).length;
+        return (
+          <div
+            style={{
+              background: 'var(--lb-surface)',
+              border: '1px solid var(--lb-line)',
+              borderRadius: 'var(--lb-radius-lg)',
+              padding: '14px 18px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 14,
+            }}
+          >
+            <div
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 8,
+                background: 'var(--lb-accent-tint)',
+                color: 'var(--lb-accent)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Zap size={16} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+                {active}/{systems.length} systems active
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--lb-ink-5)', marginTop: 1 }}>
+                Leadbridge handles new leads end-to-end — alerts, replies, calls, and follow-ups.
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Account Selector */}
-      <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div
+        style={{
+          background: 'var(--lb-surface)',
+          border: '1px solid var(--lb-line)',
+          borderRadius: 'var(--lb-radius-lg)',
+          padding: '14px 18px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+          flexWrap: 'wrap',
+        }}
+      >
         <div>
-          <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-1">Select Account</h2>
-          <p className="text-slate-600 text-sm">Configure automation rules for your business profile.</p>
+          <div
+            style={{
+              fontSize: 10,
+              fontFamily: 'var(--lb-font-mono)',
+              fontWeight: 700,
+              color: 'var(--lb-accent)',
+              textTransform: 'uppercase',
+              letterSpacing: 0.1,
+            }}
+          >
+            Defaults
+          </div>
+          <h2 style={{ margin: '3px 0 2px', fontSize: 16, fontWeight: 600, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            Configure automation
+          </h2>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--lb-ink-5)' }}>
+            The big switches. Turn these on and Leadbridge handles new leads for you.
+          </p>
         </div>
-        <div className="relative min-w-[240px]">
+        <div style={{ position: 'relative', minWidth: 240 }}>
           <select
             value={selectedAccountId}
             onChange={e => setSelectedAccountId(e.target.value)}
-            className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-xl focus:ring-blue-500 focus:border-blue-500 block p-3 appearance-none font-semibold"
+            style={{
+              width: '100%',
+              padding: '8px 36px 8px 12px',
+              fontSize: 13,
+              fontFamily: 'inherit',
+              fontWeight: 500,
+              background: 'var(--lb-ink-10)',
+              border: '1px solid var(--lb-line)',
+              color: 'var(--lb-ink-1)',
+              borderRadius: 'var(--lb-radius)',
+              outline: 'none',
+              appearance: 'none',
+              cursor: 'pointer',
+            }}
           >
             {accounts.map(acc => (
               <option key={acc.id} value={acc.id}>{acc.platform === 'yelp' ? '\uD83D\uDD34 ' : '\uD83D\uDD35 '}{acc.businessName}</option>
             ))}
           </select>
-          <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
-            <ChevronDown className="w-4 h-4" />
+          <div style={{ position: 'absolute', top: 0, right: 10, bottom: 0, display: 'flex', alignItems: 'center', pointerEvents: 'none', color: 'var(--lb-ink-5)' }}>
+            <ChevronDown size={14} />
           </div>
         </div>
       </div>
 
       {/* Your LeadBridge Number — shared across all service cards */}
       {!loading && (
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-9 h-9 bg-blue-50 rounded-2xl flex items-center justify-center">
-              <Phone className="w-5 h-5 text-blue-600" />
+        <div
+          style={{
+            background: 'var(--lb-surface)',
+            border: '1px solid var(--lb-line)',
+            borderRadius: 'var(--lb-radius-lg)',
+            padding: '16px 18px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <div
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 6,
+                background: 'var(--lb-accent-tint)',
+                color: 'var(--lb-accent)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Phone size={15} />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-slate-900">Your LeadBridge Number</h2>
-              <p className="text-xs text-slate-400">Used for all outbound SMS and calls</p>
+              <h2 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>Your Leadbridge number</h2>
+              <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--lb-ink-5)' }}>Used for all outbound SMS and calls</p>
             </div>
           </div>
 
