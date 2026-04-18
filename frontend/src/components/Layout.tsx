@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Outlet, Link as RouterLink, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
-  MessageSquare, BarChart3, Settings, LogOut, Shield, FlaskConical,
-  Menu, GraduationCap, Zap, AlertTriangle, Workflow, LayoutGrid, Smartphone
+  Settings, LogOut, Shield, FlaskConical, Menu, GraduationCap,
+  AlertTriangle, Workflow, LayoutGrid, Smartphone, Inbox, FileText,
+  BarChart3, ChevronsUpDown,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store/appStore';
@@ -10,6 +11,17 @@ import TrialBanner from './TrialBanner';
 import TrialExpiredModal from './TrialExpiredModal';
 import CancelledSubscriptionBanner from './CancelledSubscriptionBanner';
 import ImpersonationBanner from './ImpersonationBanner';
+
+function BrandMark({ size = 26 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className="shrink-0">
+      <rect x="1" y="1" width="22" height="22" rx="6" fill="var(--lb-ink-1)" />
+      <circle cx="7" cy="15" r="2.2" fill="var(--lb-accent)" />
+      <circle cx="17" cy="15" r="2.2" fill="var(--lb-accent)" />
+      <path d="M5 15 Q 12 5, 19 15" stroke="var(--lb-accent)" strokeWidth="1.8" strokeLinecap="round" fill="none" />
+    </svg>
+  );
+}
 
 export function Layout() {
   const navigate = useNavigate();
@@ -22,7 +34,6 @@ export function Layout() {
   const systemHealth = useAppStore(state => state.systemHealth);
   const loadSystemHealth = useAppStore(state => state.loadSystemHealth);
 
-  // Preload analytics + system health on app start
   useEffect(() => {
     loadAnalytics(true);
     loadSystemHealth(true);
@@ -46,20 +57,17 @@ export function Layout() {
   };
 
   const NAV_ITEMS = [
-    { icon: <LayoutGrid size={20} />, label: 'Overview', path: '/dashboard' },
-    { icon: <Workflow size={20} />, label: 'Automation', path: '/services' },
-    { icon: <Settings size={20} />, label: 'Templates', path: '/message-settings' },
-    { icon: <MessageSquare size={20} />, label: 'Lead Activity', path: '/messages' },
-{ icon: <BarChart3 size={20} />, label: 'Insights', path: '/analytics' },
+    { icon: <LayoutGrid size={15} />,  label: 'Overview',      path: '/dashboard' },
+    { icon: <Inbox size={15} />,       label: 'Lead Activity', path: '/messages' },
+    { icon: <Workflow size={15} />,    label: 'Automation',    path: '/services' },
+    { icon: <FileText size={15} />,    label: 'Templates',     path: '/message-settings' },
+    { icon: <BarChart3 size={15} />,   label: 'Insights',      path: '/analytics' },
   ];
 
-  // Get current page name from route
   const getPageName = () => {
     const path = location.pathname;
     const navItem = NAV_ITEMS.find(item => item.path === path);
     if (navItem) return navItem.label;
-
-    // Handle other routes
     if (path === '/sms-history') return 'SMS History';
     if (path === '/settings') return 'Settings';
     if (path === '/pricing') return 'Pricing';
@@ -67,12 +75,43 @@ export function Layout() {
     if (path === '/admin/tenant-numbers') return 'Tenant Numbers';
     if (path === '/api-test') return 'API Test';
     if (path.startsWith('/admin/users/')) return 'User Details';
-
-    return 'LeadBridge';
+    return 'Leadbridge';
   };
 
+  const initials = (user?.name?.[0] || user?.email?.[0] || 'U').toUpperCase();
+  const businessName = (user as any)?.businessName || user?.name || 'Leadbridge';
+  const connectedCount = savedAccounts?.length ?? 0;
+
+  // Shared nav-item renderer — dense, active state uses ink-10 bg + accent-colored icon
+  const renderNavItem = (item: { icon: React.ReactNode; label: string; path: string }) => (
+    <NavLink
+      key={item.path}
+      to={item.path}
+      className={({ isActive }) =>
+        `group flex items-center gap-2.5 px-2.5 py-[7px] rounded-md transition-colors mb-[1px] ` +
+        (isActive
+          ? 'bg-[var(--lb-ink-10)] text-[var(--lb-ink-1)] font-semibold'
+          : 'text-[var(--lb-ink-4)] hover:bg-[var(--lb-ink-10)]/60 font-medium')
+      }
+      onClick={() => setMobileMenuOpen(false)}
+      style={{ fontSize: 13 }}
+    >
+      {({ isActive }) => (
+        <>
+          <span
+            className="shrink-0 inline-flex items-center justify-center"
+            style={{ color: isActive ? 'var(--lb-accent)' : 'var(--lb-ink-5)' }}
+          >
+            {item.icon}
+          </span>
+          <span className="flex-1 truncate">{item.label}</span>
+        </>
+      )}
+    </NavLink>
+  );
+
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen" style={{ background: 'var(--lb-bg)' }}>
       <TrialExpiredModal />
 
       {/* Mobile Navigation Overlay */}
@@ -80,94 +119,166 @@ export function Layout() {
         <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 lg:hidden" onClick={() => setMobileMenuOpen(false)} />
       )}
 
-      {/* Sidebar */}
-      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-slate-100 transform transition-transform duration-300 ease-in-out ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
-        <div className="flex flex-col h-full p-6">
-          {/* Brand */}
-          <RouterLink to="/" className="flex items-center gap-3 mb-10 px-2 hover:opacity-80 transition-opacity">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
-              <Zap className="w-6 h-6" />
+      {/* Sidebar — 232px, dense, utility-first */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-300 ease-in-out ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}
+        style={{
+          width: 232,
+          background: 'var(--lb-surface)',
+          borderRight: '1px solid var(--lb-line)',
+        }}
+      >
+        <div className="flex flex-col h-full" style={{ padding: '14px 10px' }}>
+          {/* Brand block */}
+          <RouterLink
+            to="/"
+            className="flex items-center gap-[9px] hover:opacity-90 transition-opacity"
+            style={{
+              padding: '4px 8px 10px',
+              borderBottom: '1px solid var(--lb-line-soft)',
+              marginBottom: 4,
+            }}
+          >
+            <BrandMark size={22} />
+            <div style={{ lineHeight: 1.1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--lb-ink-1)' }}>Leadbridge</div>
+              <div
+                style={{
+                  fontSize: 10,
+                  fontFamily: 'var(--lb-font-mono)',
+                  color: 'var(--lb-ink-5)',
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.06,
+                }}
+              >
+                {user?.role === 'ADMIN' ? 'Admin' : 'Pro'}
+              </div>
             </div>
-            <span className="text-xl font-bold tracking-tight">LeadBridge</span>
           </RouterLink>
 
-          {/* Navigation Links */}
-          <nav className="flex-1 space-y-1 sidebar-scroll overflow-y-auto">
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 px-2">Main Menu</div>
-            {NAV_ITEMS.map((item) => (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                {item.icon}
-                <span>{item.label}</span>
-              </NavLink>
-            ))}
-
-            <div className="pt-8 mb-4 px-2 text-[11px] font-bold text-slate-400 uppercase tracking-widest">Account</div>
-            <NavLink
-              to="/settings"
-              className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
-              onClick={() => setMobileMenuOpen(false)}
+          {/* Account selector */}
+          <button
+            className="flex items-center gap-[9px] w-full text-left"
+            style={{
+              padding: '8px 10px',
+              margin: '6px 0',
+              background: 'var(--lb-ink-10)',
+              border: '1px solid var(--lb-line-soft)',
+              borderRadius: 'var(--lb-radius)',
+              cursor: 'pointer',
+            }}
+            onClick={() => navigate('/settings')}
+            title="Account settings"
+          >
+            <div
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 4,
+                background: 'oklch(0.9 0.1 145)',
+                color: '#0c4a2b',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 11,
+                fontWeight: 700,
+                flexShrink: 0,
+              }}
             >
-              <Settings size={20} />
-              <span>Settings</span>
-            </NavLink>
+              {(businessName[0] || '?').toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div
+                className="truncate"
+                style={{ fontSize: 12, fontWeight: 500, color: 'var(--lb-ink-1)' }}
+              >
+                {businessName}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--lb-ink-5)' }}>
+                {connectedCount} {connectedCount === 1 ? 'source' : 'sources'}
+              </div>
+            </div>
+            <ChevronsUpDown size={13} style={{ color: 'var(--lb-ink-5)' }} />
+          </button>
+
+          {/* Primary nav */}
+          <nav className="flex-1 sidebar-scroll overflow-y-auto" style={{ marginTop: 4 }}>
+            {NAV_ITEMS.map(renderNavItem)}
 
             {user?.role === 'ADMIN' && !impersonatingUser && (
               <>
-                <div className="pt-8 mb-4 px-2 text-[11px] font-bold text-slate-400 uppercase tracking-widest">Admin</div>
-                <NavLink
-                  to="/admin"
-                  end
-                  className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
-                  onClick={() => setMobileMenuOpen(false)}
+                <div
+                  style={{
+                    margin: '14px 10px 6px',
+                    fontSize: 10,
+                    fontFamily: 'var(--lb-font-mono)',
+                    color: 'var(--lb-ink-6)',
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.08,
+                    fontWeight: 600,
+                  }}
                 >
-                  <Shield size={20} />
-                  <span>Admin Dashboard</span>
-                </NavLink>
-                <NavLink
-                  to="/admin/tenant-numbers"
-                  className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  <Smartphone size={20} />
-                  <span>Tenant Numbers</span>
-                </NavLink>
-                <NavLink
-                  to="/sms-history"
-                  className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  <MessageSquare size={20} />
-                  <span>SMS History</span>
-                </NavLink>
-                <NavLink
-                  to="/api-test"
-                  className={({ isActive }) => `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive ? 'nav-item-active' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  <FlaskConical size={20} />
-                  <span>API Test</span>
-                </NavLink>
+                  Admin
+                </div>
+                {renderNavItem({ icon: <Shield size={15} />, label: 'Admin Dashboard', path: '/admin' })}
+                {renderNavItem({ icon: <Smartphone size={15} />, label: 'Tenant Numbers', path: '/admin/tenant-numbers' })}
+                {renderNavItem({ icon: <Inbox size={15} />, label: 'SMS History', path: '/sms-history' })}
+                {renderNavItem({ icon: <FlaskConical size={15} />, label: 'API Test', path: '/api-test' })}
               </>
             )}
           </nav>
 
-          {/* Profile Footer */}
-          <div className="mt-auto pt-6 border-t border-slate-100">
-            <div className="flex items-center gap-4 px-2">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-100 to-indigo-100 flex items-center justify-center text-blue-700 font-bold border-2 border-white shadow-sm">
-                {(user?.name?.[0] || user?.email?.[0] || 'U').toUpperCase()}
+          {/* Secondary nav + user card */}
+          <div className="mt-auto">
+            {renderNavItem({ icon: <Settings size={15} />, label: 'Settings', path: '/settings' })}
+
+            <div
+              className="flex items-center gap-[9px]"
+              style={{
+                padding: '8px 8px',
+                marginTop: 6,
+                borderTop: '1px solid var(--lb-line-soft)',
+              }}
+            >
+              <div
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: 99,
+                  background: 'oklch(0.92 0.04 200)',
+                  color: 'oklch(0.35 0.1 200)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: 0.03,
+                  flexShrink: 0,
+                }}
+              >
+                {initials}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-slate-900 truncate">{user?.name || 'User'}</p>
-                <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+                <div
+                  className="truncate"
+                  style={{ fontSize: 12, fontWeight: 500, color: 'var(--lb-ink-1)' }}
+                >
+                  {user?.name || 'User'}
+                </div>
+                <div
+                  className="truncate"
+                  style={{ fontSize: 10, color: 'var(--lb-ink-5)' }}
+                >
+                  {user?.email}
+                </div>
               </div>
-              <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors" title="Logout">
-                <LogOut className="w-5 h-5" />
+              <button
+                onClick={handleLogout}
+                title="Logout"
+                className="hover:text-[var(--lb-danger)] transition-colors"
+                style={{ color: 'var(--lb-ink-5)', background: 'transparent', border: 0, padding: 2, cursor: 'pointer' }}
+              >
+                <LogOut size={13} />
               </button>
             </div>
           </div>
@@ -175,78 +286,139 @@ export function Layout() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 lg:ml-72 min-h-screen">
-        <ImpersonationBanner />
-        {/* Top Navbar — hidden on Messages page (has its own lead header) */}
-        {location.pathname !== '/messages' && (
-          <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-100 px-6 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden p-2 text-slate-600">
-                  <Menu className="w-6 h-6" />
-                </button>
-                <RouterLink to="/" className="flex items-center gap-2 lg:hidden hover:opacity-80 transition-opacity">
-                  <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-sm shadow-blue-200">
-                    <Zap className="w-4 h-4" />
-                  </div>
-                  <span className="text-lg font-bold tracking-tight text-slate-900">LeadBridge</span>
-                </RouterLink>
-                <h1 className="text-xl font-bold text-slate-900 lg:block hidden">{getPageName()}</h1>
-              </div>
-              <div className="flex items-center gap-3">
-              </div>
-            </div>
-          </header>
-        )}
-        {/* Mobile menu button for Messages page (no top navbar) */}
-        {location.pathname === '/messages' && (
-          <div className="lg:hidden sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-100 px-4 py-2">
-            <div className="flex items-center gap-2">
-              <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="p-2 text-slate-600">
-                <Menu className="w-5 h-5" />
-              </button>
-              <RouterLink to="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-                <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-sm shadow-blue-200">
-                  <Zap className="w-3.5 h-3.5" />
+      <main className="flex-1 min-h-screen" style={{ marginLeft: 0 }}>
+        <div className="lg:ml-[232px]">
+          <ImpersonationBanner />
+
+          {/* Top page header — utility-first, minimal decoration */}
+          {location.pathname !== '/messages' && (
+            <header
+              className="sticky top-0 z-30"
+              style={{
+                background: 'var(--lb-surface)',
+                borderBottom: '1px solid var(--lb-line)',
+                padding: '14px 24px',
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                    className="lg:hidden"
+                    style={{ color: 'var(--lb-ink-4)', background: 'transparent', border: 0, padding: 6, cursor: 'pointer' }}
+                  >
+                    <Menu size={20} />
+                  </button>
+                  <RouterLink to="/" className="flex items-center gap-2 lg:hidden hover:opacity-80 transition-opacity">
+                    <BrandMark size={22} />
+                    <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--lb-ink-1)' }}>
+                      Leadbridge
+                    </span>
+                  </RouterLink>
+                  <h1
+                    className="hidden lg:block"
+                    style={{ fontSize: 20, fontWeight: 600, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em', margin: 0 }}
+                  >
+                    {getPageName()}
+                  </h1>
                 </div>
-                <span className="text-base font-bold tracking-tight text-slate-900">LeadBridge</span>
-              </RouterLink>
+                <div className="flex items-center gap-3" />
+              </div>
+            </header>
+          )}
+
+          {/* Mobile menu button for Messages page (no top navbar) */}
+          {location.pathname === '/messages' && (
+            <div
+              className="lg:hidden sticky top-0 z-30"
+              style={{
+                background: 'var(--lb-surface)',
+                borderBottom: '1px solid var(--lb-line)',
+                padding: '8px 16px',
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                  style={{ color: 'var(--lb-ink-4)', background: 'transparent', border: 0, padding: 6, cursor: 'pointer' }}
+                >
+                  <Menu size={20} />
+                </button>
+                <RouterLink to="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+                  <BrandMark size={20} />
+                  <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--lb-ink-1)' }}>
+                    Leadbridge
+                  </span>
+                </RouterLink>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Trial Banner - sits below the header, overlays the top of page content */}
-        <TrialBanner />
+          <TrialBanner />
 
-        {/* System Health Banner */}
-        {(hasCriticalIssues || hasWarningIssues) && (
-          <div className={`px-6 py-3 ${hasCriticalIssues ? 'bg-red-50 border-b border-red-100' : 'bg-amber-50 border-b border-amber-100'}`}>
-            <div className="flex items-center gap-3">
-              <AlertTriangle className={`w-5 h-5 ${hasCriticalIssues ? 'text-red-600' : 'text-amber-600'}`} />
-              <span className={`text-sm font-semibold ${hasCriticalIssues ? 'text-red-900' : 'text-amber-900'}`}>
-                {systemHealth!.issues.length === 1
-                  ? `${systemHealth!.issues[0].accountName} — ${systemHealth!.issues[0].message}`
-                  : `${systemHealth!.issues.length} account issue${systemHealth!.issues.length > 1 ? 's' : ''} detected`}
-              </span>
-              <RouterLink to="/dashboard" className={`ml-auto text-sm font-bold ${hasCriticalIssues ? 'text-red-600 hover:text-red-700' : 'text-amber-600 hover:text-amber-700'}`}>
-                Review in Dashboard →
-              </RouterLink>
+          {/* System Health Banner */}
+          {(hasCriticalIssues || hasWarningIssues) && (
+            <div
+              style={{
+                padding: '10px 24px',
+                background: hasCriticalIssues ? 'oklch(0.96 0.04 27)' : 'oklch(0.96 0.05 75)',
+                borderBottom: `1px solid ${hasCriticalIssues ? 'oklch(0.88 0.08 27)' : 'oklch(0.88 0.1 75)'}`,
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <AlertTriangle
+                  size={18}
+                  style={{ color: hasCriticalIssues ? 'var(--lb-danger)' : 'var(--lb-warn)' }}
+                />
+                <span
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: hasCriticalIssues ? '#7a1a14' : '#5e3b0a',
+                  }}
+                >
+                  {systemHealth!.issues.length === 1
+                    ? `${systemHealth!.issues[0].accountName} — ${systemHealth!.issues[0].message}`
+                    : `${systemHealth!.issues.length} account issue${systemHealth!.issues.length > 1 ? 's' : ''} detected`}
+                </span>
+                <RouterLink
+                  to="/dashboard"
+                  className="ml-auto hover:underline"
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: hasCriticalIssues ? 'var(--lb-danger)' : 'var(--lb-warn)',
+                  }}
+                >
+                  Review in Dashboard →
+                </RouterLink>
+              </div>
             </div>
-          </div>
-        )}
-        <CancelledSubscriptionBanner />
+          )}
 
-        {/* Page Content */}
-        <Outlet />
+          <CancelledSubscriptionBanner />
 
-        {/* Floating tour button */}
-        <button
-          onClick={() => window.dispatchEvent(new Event('lb:start-tour'))}
-          className="fixed bottom-6 right-6 z-30 w-12 h-12 bg-blue-600 text-white rounded-full shadow-lg shadow-blue-200 hover:bg-blue-700 hover:scale-105 transition-all flex items-center justify-center"
-          title="Quick tour"
-        >
-          <GraduationCap className="w-5 h-5" />
-        </button>
+          <Outlet />
+
+          {/* Floating tour button — accent-colored, consistent with design */}
+          <button
+            onClick={() => window.dispatchEvent(new Event('lb:start-tour'))}
+            className="fixed bottom-6 right-6 z-30 flex items-center justify-center hover:scale-105 transition-all"
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 999,
+              background: 'var(--lb-accent)',
+              color: 'var(--lb-accent-fg)',
+              border: 0,
+              cursor: 'pointer',
+              boxShadow: 'var(--lb-shadow-md)',
+            }}
+            title="Quick tour"
+          >
+            <GraduationCap size={18} />
+          </button>
+        </div>
       </main>
     </div>
   );

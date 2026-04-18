@@ -1,6 +1,61 @@
-/* Base reset - App.css handles all styling */
+/* Leadbridge App Shell — design tokens (from handoff design h/InUjeTOlZJTchGrm8vwHEA) */
+:root {
+  /* Neutrals (warm-cool) */
+  --lb-ink-0: #0c1012;
+  --lb-ink-1: #15191c;
+  --lb-ink-2: #1e2428;
+  --lb-ink-3: #2a3137;
+  --lb-ink-4: #3a434a;
+  --lb-ink-5: #5b6770;
+  --lb-ink-6: #8a949d;
+  --lb-ink-7: #b7bec3;
+  --lb-ink-8: #d8dcdf;
+  --lb-ink-9: #eceeef;
+  --lb-ink-10: #f5f6f7;
+  --lb-bg: #fafaf8;
+  --lb-surface: #ffffff;
+  --lb-line: #e6e8ea;
+  --lb-line-soft: #eef0f1;
+
+  /* Accent — utility teal/graphite */
+  --lb-accent: oklch(0.52 0.09 190);
+  --lb-accent-fg: #ffffff;
+  --lb-accent-tint: oklch(0.95 0.03 190);
+  --lb-accent-line: oklch(0.86 0.05 190);
+
+  /* Semantic */
+  --lb-success: oklch(0.62 0.12 150);
+  --lb-warn: oklch(0.72 0.14 75);
+  --lb-danger: oklch(0.58 0.18 27);
+  --lb-info: oklch(0.58 0.1 235);
+
+  /* Platform badges */
+  --lb-yelp: #c4302b;
+  --lb-thumbtack: #009fd9;
+  --lb-angi: #ff6153;
+  --lb-google: #34a853;
+
+  --lb-radius: 6px;
+  --lb-radius-lg: 10px;
+  --lb-radius-sm: 4px;
+
+  --lb-shadow-sm: 0 1px 0 rgba(18, 22, 25, 0.04), 0 1px 2px rgba(18, 22, 25, 0.04);
+  --lb-shadow-md: 0 1px 0 rgba(18, 22, 25, 0.04), 0 4px 12px rgba(18, 22, 25, 0.06);
+  --lb-shadow-lg: 0 2px 0 rgba(18, 22, 25, 0.04), 0 16px 40px rgba(18, 22, 25, 0.12);
+
+  --lb-font-sans: 'Geist', 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --lb-font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+}
+
+/* Utility class used by the app shell sidebar for active nav item */
+.nav-item-active {
+  background: var(--lb-ink-10);
+  color: var(--lb-ink-1);
+  font-weight: 600;
 }
