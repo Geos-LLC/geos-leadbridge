@@ -32,6 +32,7 @@ import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
+import { Kpi } from '../components/ui';
 import { notify } from '../store/notificationStore';
 
 export function Analytics() {
@@ -230,7 +231,7 @@ export function Analytics() {
         {/* Skeleton Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {[1, 2].map((i) => (
-            <div key={i} className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
+            <div key={i} className="p-5 md:p-6" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
               <div className="h-6 w-48 bg-slate-100 rounded mb-8 animate-pulse" />
               <div className="h-64 w-full bg-slate-100 rounded-2xl animate-pulse" />
             </div>
@@ -255,41 +256,97 @@ export function Analytics() {
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658'];
 
   return (
-    <div className="p-6 lg:p-10 max-w-7xl mx-auto space-y-10">
+    <div
+      style={{ padding: '24px 28px', maxWidth: 1120, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}
+    >
       {savedAccounts.length === 0 && useAuthStore.getState().user?.role !== 'ADMIN' && <NoAccountsOverlay />}
       {/* Updating indicator */}
       {isUpdating && (
-        <div className="fixed top-0 left-0 right-0 h-1 bg-blue-600 z-50 animate-pulse" />
+        <div
+          className="fixed top-0 left-0 right-0 z-50 animate-pulse"
+          style={{ height: 2, background: 'var(--lb-accent)' }}
+        />
       )}
 
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div>
-          <p className="text-blue-600 font-semibold mb-1 uppercase tracking-wider text-xs">Performance Reports</p>
-          <h2 className="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">Business <span className="gradient-text">Insights.</span></h2>
-          <p className="text-slate-500 mt-2 text-lg">Track your leads, engagement, and response metrics.</p>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 10,
+              fontFamily: 'var(--lb-font-mono)',
+              fontWeight: 700,
+              color: 'var(--lb-accent)',
+              textTransform: 'uppercase',
+              letterSpacing: 0.1,
+            }}
+          >
+            Insights
+          </div>
+          <h2 style={{ margin: '4px 0 2px', fontSize: 22, fontWeight: 600, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+            Business insights
+          </h2>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--lb-ink-5)' }}>
+            Track leads, engagement, and response metrics.
+          </p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Last updated + Refresh */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {calculatedAt && (
-            <span className="text-xs text-slate-400 whitespace-nowrap">
+            <span
+              style={{
+                fontSize: 11,
+                color: 'var(--lb-ink-5)',
+                fontFamily: 'var(--lb-font-mono)',
+                whiteSpace: 'nowrap',
+              }}
+            >
               Updated {formatRelativeTime(calculatedAt)}
             </span>
           )}
           <button
             onClick={handleRefresh}
             disabled={refreshing || loading}
-            className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              background: 'var(--lb-surface)',
+              color: 'var(--lb-ink-2)',
+              border: '1px solid var(--lb-line)',
+              borderRadius: 'var(--lb-radius)',
+              fontSize: 12,
+              fontWeight: 500,
+              fontFamily: 'inherit',
+              cursor: refreshing || loading ? 'not-allowed' : 'pointer',
+              opacity: refreshing || loading ? 0.5 : 1,
+            }}
           >
-            {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            {refreshing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
             Refresh
           </button>
           {/* Account Filter */}
-          <div className="relative">
+          <div style={{ position: 'relative' }}>
+            <Building2
+              size={13}
+              style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--lb-ink-5)', pointerEvents: 'none' }}
+            />
             <select
               value={businessId}
               onChange={(e) => setFilter('businessId', e.target.value)}
-              className="appearance-none pl-10 pr-10 py-3 bg-white border border-slate-200 rounded-xl font-medium text-slate-700 hover:border-blue-300 focus:ring-2 focus:ring-blue-100 transition-all cursor-pointer"
+              style={{
+                appearance: 'none',
+                padding: '6px 30px 6px 28px',
+                background: 'var(--lb-ink-10)',
+                border: '1px solid var(--lb-line)',
+                borderRadius: 'var(--lb-radius)',
+                fontSize: 12,
+                fontWeight: 500,
+                color: 'var(--lb-ink-1)',
+                fontFamily: 'inherit',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
             >
               <option value="all">All Accounts</option>
               {savedAccounts.map((account) => (
@@ -298,17 +355,33 @@ export function Analytics() {
                 </option>
               ))}
             </select>
-            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-              <Building2 className="w-4 h-4" />
+            <div style={{ position: 'absolute', right: 8, top: 0, bottom: 0, display: 'flex', alignItems: 'center', pointerEvents: 'none', color: 'var(--lb-ink-5)' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
           </div>
 
           {/* Time Range Filter */}
-          <div className="relative">
+          <div style={{ position: 'relative' }}>
+            <Calendar
+              size={13}
+              style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--lb-ink-5)', pointerEvents: 'none' }}
+            />
             <select
               value={timeRange}
               onChange={(e) => setFilter('range', e.target.value)}
-              className="appearance-none pl-10 pr-10 py-3 bg-white border border-slate-200 rounded-xl font-medium text-slate-700 hover:border-blue-300 focus:ring-2 focus:ring-blue-100 transition-all cursor-pointer"
+              style={{
+                appearance: 'none',
+                padding: '6px 30px 6px 28px',
+                background: 'var(--lb-ink-10)',
+                border: '1px solid var(--lb-line)',
+                borderRadius: 'var(--lb-radius)',
+                fontSize: 12,
+                fontWeight: 500,
+                color: 'var(--lb-ink-1)',
+                fontFamily: 'inherit',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
             >
               {timeRanges.map((range) => (
                 <option key={range.value} value={range.value}>
@@ -316,65 +389,95 @@ export function Analytics() {
                 </option>
               ))}
             </select>
-            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-              <Calendar className="w-4 h-4" />
+            <div style={{ position: 'absolute', right: 8, top: 0, bottom: 0, display: 'flex', alignItems: 'center', pointerEvents: 'none', color: 'var(--lb-ink-5)' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
           </div>
-
-          <button
-            onClick={loadAnalytics}
-            title="Refresh"
-            className="p-3 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-xl transition-colors"
-          >
-            {isUpdating ? <Loader2 size={20} className="animate-spin" /> : <RefreshCw size={20} />}
-          </button>
         </div>
       </div>
 
       {/* Custom Date Inputs - shown when custom is selected */}
       {timeRange === 'custom' && (
-        <div className="flex items-center gap-3">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <input
             type="date"
             value={customStart}
             onChange={(e) => setFilter('startDate', e.target.value)}
-            className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+            style={{
+              padding: '6px 10px',
+              background: 'var(--lb-surface)',
+              border: '1px solid var(--lb-line)',
+              borderRadius: 'var(--lb-radius)',
+              fontSize: 12,
+              fontFamily: 'inherit',
+              color: 'var(--lb-ink-1)',
+              outline: 'none',
+            }}
           />
-          <span className="text-slate-500">to</span>
+          <span style={{ fontSize: 12, color: 'var(--lb-ink-5)' }}>to</span>
           <input
             type="date"
             value={customEnd}
             onChange={(e) => setFilter('endDate', e.target.value)}
-            className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+            style={{
+              padding: '6px 10px',
+              background: 'var(--lb-surface)',
+              border: '1px solid var(--lb-line)',
+              borderRadius: 'var(--lb-radius)',
+              fontSize: 12,
+              fontFamily: 'inherit',
+              color: 'var(--lb-ink-1)',
+              outline: 'none',
+            }}
           />
         </div>
       )}
 
       {/* ── Trends Over Time ── */}
-      <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+      <div className="p-5 md:p-6" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
           <div>
-            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-blue-600" />
-              Trends Over Time
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--lb-ink-1)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <TrendingUp size={14} style={{ color: 'var(--lb-accent)' }} />
+              Trends over time
             </h3>
-            <p className="text-sm text-slate-500 mt-0.5">Lead volume, revenue, and hire rate by period</p>
+            <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--lb-ink-5)' }}>Lead volume, revenue, and hire rate by period</p>
           </div>
           {/* Period selector */}
-          <div className="flex rounded-xl border border-slate-200 overflow-hidden text-sm font-medium">
-            {(['day', 'week', 'month', 'year'] as const).map((p) => (
-              <button
-                key={p}
-                onClick={() => setTsPeriod(p)}
-                className={`px-4 py-2 transition-colors capitalize ${
-                  tsPeriod === p
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-white text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                {p === 'day' ? 'Daily' : p === 'week' ? 'Weekly' : p === 'month' ? 'Monthly' : 'Yearly'}
-              </button>
-            ))}
+          <div
+            style={{
+              display: 'inline-flex',
+              background: 'var(--lb-ink-10)',
+              border: '1px solid var(--lb-line)',
+              borderRadius: 'var(--lb-radius)',
+              padding: 2,
+              gap: 2,
+            }}
+          >
+            {(['day', 'week', 'month', 'year'] as const).map((p) => {
+              const active = tsPeriod === p;
+              return (
+                <button
+                  key={p}
+                  onClick={() => setTsPeriod(p)}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: 11,
+                    fontWeight: 500,
+                    fontFamily: 'inherit',
+                    textTransform: 'capitalize',
+                    background: active ? 'var(--lb-surface)' : 'transparent',
+                    color: active ? 'var(--lb-ink-1)' : 'var(--lb-ink-5)',
+                    border: 0,
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    boxShadow: active ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                  }}
+                >
+                  {p === 'day' ? 'Daily' : p === 'week' ? 'Weekly' : p === 'month' ? 'Monthly' : 'Yearly'}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -429,9 +532,28 @@ export function Analytics() {
                     })(),
                   },
                 ].map(({ label, value }) => (
-                  <div key={label} className="bg-slate-50 rounded-2xl p-4">
-                    <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">{label}</p>
-                    <p className="text-xl font-bold text-slate-900 mt-1">{value}</p>
+                  <div
+                    key={label}
+                    style={{
+                      background: 'var(--lb-ink-10)',
+                      borderRadius: 'var(--lb-radius)',
+                      padding: '10px 14px',
+                    }}
+                  >
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: 11,
+                        color: 'var(--lb-ink-5)',
+                        textTransform: 'uppercase',
+                        letterSpacing: 0.06,
+                        fontWeight: 500,
+                        fontFamily: 'var(--lb-font-mono)',
+                      }}
+                    >
+                      {label}
+                    </p>
+                    <p style={{ margin: '3px 0 0', fontSize: 18, fontWeight: 600, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>{value}</p>
                   </div>
                 ))}
               </div>
@@ -513,73 +635,45 @@ export function Analytics() {
 
       {displayData ? (
         <>
-          {/* Summary Cards - 2 per row on mobile, 4 on desktop */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-            <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
-              <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-50 text-blue-600 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
-                <Users className="w-5 h-5 md:w-6 md:h-6" />
-              </div>
-              <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Total Leads</p>
-              <h3 className={`text-2xl md:text-3xl font-bold text-slate-900 mt-1 transition-opacity ${isUpdating ? 'opacity-40' : 'opacity-100'}`}>
-                {displayData.totalLeads}
-              </h3>
-            </div>
-
-            {displayData.connectionTime ? (
-              <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
-                <div className="w-10 h-10 md:w-12 md:h-12 bg-emerald-50 text-emerald-600 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
-                  <Clock className="w-5 h-5 md:w-6 md:h-6" />
-                </div>
-                <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Avg Connection</p>
-                <h3 className={`text-2xl md:text-3xl font-bold text-slate-900 mt-1 transition-opacity ${isUpdating ? 'opacity-40' : 'opacity-100'}`}>
-                  {formatDuration(displayData.connectionTime.averageMinutes)}
-                </h3>
-              </div>
-            ) : (
-              <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm">
-                <div className="w-10 h-10 md:w-12 md:h-12 bg-slate-100 rounded-xl md:rounded-2xl mb-3 md:mb-4 animate-pulse" />
-                <div className="h-3 w-20 bg-slate-100 rounded mb-2 animate-pulse" />
-                <div className="h-7 w-14 bg-slate-100 rounded animate-pulse" />
-              </div>
-            )}
-
-            {displayData.messagesPerLead ? (
-              <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
-                <div className="w-10 h-10 md:w-12 md:h-12 bg-purple-50 text-purple-600 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
-                  <MessageSquare className="w-5 h-5 md:w-6 md:h-6" />
-                </div>
-                <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Msgs/Lead</p>
-                <h3 className={`text-2xl md:text-3xl font-bold text-slate-900 mt-1 transition-opacity ${isUpdating ? 'opacity-40' : 'opacity-100'}`}>
-                  {displayData.messagesPerLead.average.toFixed(1)}
-                </h3>
-              </div>
-            ) : (
-              <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm">
-                <div className="w-10 h-10 md:w-12 md:h-12 bg-slate-100 rounded-xl md:rounded-2xl mb-3 md:mb-4 animate-pulse" />
-                <div className="h-3 w-20 bg-slate-100 rounded mb-2 animate-pulse" />
-                <div className="h-7 w-14 bg-slate-100 rounded animate-pulse" />
-              </div>
-            )}
-
-            <div className="bg-indigo-600 p-4 md:p-6 rounded-2xl md:rounded-3xl shadow-xl shadow-indigo-100 text-white">
-              <div className="w-10 h-10 md:w-12 md:h-12 bg-white/20 text-white rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
-                <TrendingUp className="w-5 h-5 md:w-6 md:h-6" />
-              </div>
-              <p className="text-indigo-100 text-xs md:text-sm font-medium uppercase tracking-wide">Engagement</p>
-              <div className="flex items-baseline gap-1 md:gap-2 mt-1">
-                <h3 className={`text-2xl md:text-3xl font-bold transition-opacity ${isUpdating ? 'opacity-40' : 'opacity-100'}`}>
-                  {displayData.customerEngagement?.engagementRate?.toFixed(1) ?? 0}%
-                </h3>
-                <span className="text-indigo-200 text-xs md:text-sm">Active</span>
-              </div>
-            </div>
+          {/* Summary KPIs — single bordered row */}
+          <div
+            className="grid grid-cols-2 md:grid-cols-4"
+            style={{
+              background: 'var(--lb-surface)',
+              border: '1px solid var(--lb-line)',
+              borderRadius: 'var(--lb-radius-lg)',
+            }}
+          >
+            <Kpi
+              label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Total leads</span>}
+              value={displayData.totalLeads}
+              loading={isUpdating}
+            />
+            <Kpi
+              label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Clock size={12} /> Avg connection</span>}
+              value={displayData.connectionTime ? formatDuration(displayData.connectionTime.averageMinutes) : '—'}
+              loading={isUpdating}
+            />
+            <Kpi
+              label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><MessageSquare size={12} /> Msgs/lead</span>}
+              value={displayData.messagesPerLead ? displayData.messagesPerLead.average.toFixed(1) : '—'}
+              loading={isUpdating}
+            />
+            <Kpi
+              label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Engagement</span>}
+              value={`${displayData.customerEngagement?.engagementRate?.toFixed(1) ?? 0}%`}
+              delta="active"
+              deltaDir="up"
+              loading={isUpdating}
+              muted
+            />
           </div>
 
           {/* Charts Section */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Category Distribution - Progress Bars */}
             {displayData.categoryDistribution && displayData.categoryDistribution.length > 0 && (
-              <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
+              <div className="p-5 md:p-6" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
                 <div className="flex items-center justify-between mb-6 md:mb-8">
                   <h3 className="text-lg md:text-xl font-bold text-slate-900">Service Categories</h3>
                   <BarChart3 className="w-5 h-5 text-slate-400" />
@@ -608,7 +702,7 @@ export function Analytics() {
 
             {/* Job Status Distribution */}
             {displayData.jobStatusDistribution && displayData.jobStatusDistribution.length > 0 && (
-              <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
+              <div className="p-5 md:p-6" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
                 <div className="flex items-center justify-between mb-6 md:mb-8">
                   <div>
                     <h3 className="text-lg md:text-xl font-bold text-slate-900">Job Status</h3>
@@ -636,7 +730,7 @@ export function Analytics() {
 
             {/* Connection Time Details */}
             {displayData.connectionTime ? (
-              <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
+              <div className="p-5 md:p-6" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
                 <div className="flex items-center justify-between mb-6 md:mb-8">
                   <h3 className="text-lg md:text-xl font-bold text-slate-900">Response Speed</h3>
                   <Clock className="w-5 h-5 text-slate-400" />
@@ -673,7 +767,7 @@ export function Analytics() {
                 </div>
               </div>
             ) : (
-              <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
+              <div className="p-5 md:p-6" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
                 <div className="h-6 w-48 bg-slate-100 rounded mb-8 animate-pulse" />
                 <div className="grid grid-cols-2 gap-3 md:gap-4">
                   {[1, 2, 3, 4].map((i) => (
@@ -685,7 +779,7 @@ export function Analytics() {
 
             {/* Response Times - Bar Chart */}
             {displayData.proResponseTime && displayData.customerResponseTime && (
-              <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm overflow-hidden">
+              <div className="p-5 md:p-6 overflow-hidden" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
                 <h3 className="text-lg md:text-xl font-bold text-slate-900 mb-6 md:mb-8">Response Times</h3>
                 <div className="w-full -ml-4 md:ml-0">
                   <ResponsiveContainer width="100%" height={280}>
@@ -719,7 +813,7 @@ export function Analytics() {
 
             {/* Messages Per Lead Details */}
             {displayData.messagesPerLead && (
-              <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
+              <div className="p-5 md:p-6" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
                 <h3 className="text-lg md:text-xl font-bold text-slate-900 mb-6 md:mb-8">Messages Per Lead</h3>
                 <div className="grid grid-cols-2 gap-3 md:gap-4">
                   <div className="p-4 md:p-5 bg-slate-50 rounded-2xl md:rounded-3xl border border-slate-100 text-center">
@@ -752,7 +846,7 @@ export function Analytics() {
 
             {/* Cleaning Type Distribution */}
             {displayData.cleaningTypeDistribution && displayData.cleaningTypeDistribution.length > 0 && (
-              <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm overflow-hidden">
+              <div className="p-5 md:p-6 overflow-hidden" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
                 <h3 className="text-lg md:text-xl font-bold text-slate-900 mb-6 md:mb-8">Cleaning Type Distribution</h3>
                 <ResponsiveContainer width="100%" height={300}>
                   <PieChart>
@@ -783,7 +877,7 @@ export function Analytics() {
 
             {/* Add-ons Distribution */}
             {displayData.addOnsDistribution && displayData.addOnsDistribution.length > 0 && (
-              <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm overflow-hidden">
+              <div className="p-5 md:p-6 overflow-hidden" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
                 <h3 className="text-lg md:text-xl font-bold text-slate-900 mb-6 md:mb-8">Popular Add-ons</h3>
                 <div className="w-full -ml-2 md:ml-0">
                   <ResponsiveContainer width="100%" height={300}>
@@ -811,7 +905,7 @@ export function Analytics() {
 
             {/* Frequency Distribution */}
             {displayData.frequencyDistribution && displayData.frequencyDistribution.length > 0 && (
-              <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm overflow-hidden">
+              <div className="p-5 md:p-6 overflow-hidden" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
                 <h3 className="text-lg md:text-xl font-bold text-slate-900 mb-6 md:mb-8">Service Frequency</h3>
                 <ResponsiveContainer width="100%" height={300}>
                   <PieChart>
@@ -842,7 +936,7 @@ export function Analytics() {
 
             {/* Room Statistics */}
             {displayData.roomStats && displayData.roomStats.averageBedrooms > 0 && (
-              <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
+              <div className="p-5 md:p-6" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
                 <h3 className="text-lg md:text-xl font-bold text-slate-900 mb-6 md:mb-8">Room Statistics</h3>
                 <div className="grid grid-cols-2 gap-3 md:gap-4">
                   <div className="p-4 md:p-5 bg-slate-50 rounded-2xl md:rounded-3xl border border-slate-100 text-center">
@@ -904,7 +998,7 @@ export function Analytics() {
 
           {/* Zip Codes Chart */}
           {displayData.zipCodeDistribution && displayData.zipCodeDistribution.length > 0 && (
-            <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm overflow-hidden">
+            <div className="p-5 md:p-6 overflow-hidden" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
               <h3 className="text-lg md:text-xl font-bold text-slate-900 mb-6 md:mb-8">Top Zip Codes</h3>
               <div className="w-full -ml-2 md:ml-0">
                 <ResponsiveContainer width="100%" height={300}>
