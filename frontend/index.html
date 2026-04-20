@@ -5,17 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LeadBridge - Lead Management</title>
 
-    <!-- Plus Jakarta Sans Font -->
+    <!-- Geist + Geist Mono (Leadbridge App Shell) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
     <!-- Base styles -->
     <style>
       body {
-        font-family: 'Plus Jakarta Sans', sans-serif;
-        background-color: #fcfcfd;
-        color: #1a1a1e;
+        font-family: 'Geist', 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+        font-feature-settings: "cv11", "ss01";
+        -webkit-font-smoothing: antialiased;
+        background-color: #fafaf8;
+        color: #15191c;
       }
       .glass-card {
         background: rgba(255, 255, 255, 0.8);
@@ -28,8 +30,8 @@
         -webkit-text-fill-color: transparent;
       }
       .nav-item-active {
-        background: #eff6ff;
-        color: #2563eb;
+        background: var(--lb-ink-10, #f5f6f7);
+        color: var(--lb-ink-1, #15191c);
         font-weight: 600;
       }
       @keyframes float {

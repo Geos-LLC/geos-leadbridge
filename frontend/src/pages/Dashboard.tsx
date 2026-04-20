@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Users, Send, Clock, TrendingUp, Plus, ChevronRight,
   Briefcase, Sparkles, AlertCircle, ExternalLink, Loader2, CheckCircle, BellOff,
-  MoreVertical, Unlink, Trash2, RefreshCw,
+  MoreVertical, Unlink, Trash2, RefreshCw, Rocket,
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import type { DashboardStats } from '../store/appStore';
@@ -12,6 +12,7 @@ import { thumbtackApi, analyticsApi, notificationsApi, platformsApi } from '../s
 import ConnectionModal from '../components/ConnectionModal';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import type { SavedAccount } from '../types';
+import { Btn, Card, Kpi, PlatformBadge, StatusPill, EmptyState } from '../components/ui';
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -19,7 +20,6 @@ export function Dashboard() {
   const { user, impersonatingUser } = useAuthStore();
   const { savedAccounts, setSavedAccounts, dashboardStats: cachedStats, setDashboardStats, accountDiagnostics, loadDiagnostics, systemHealth, systemHealthLoading } = useAppStore();
 
-  // Start with cached stats (instant) — zeros only if nothing cached yet
   const [stats, setStats] = useState<DashboardStats>(
     cachedStats ?? {
       leadsToday: 0,
@@ -32,7 +32,6 @@ export function Dashboard() {
       messagesSent: 0,
     }
   );
-  // Only show skeleton loading on very first load (no cache)
   const [loading, setLoading] = useState(!cachedStats);
   const [refreshing, setRefreshing] = useState(false);
   const [connectionModalOpen, setConnectionModalOpen] = useState(false);
@@ -41,7 +40,6 @@ export function Dashboard() {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     if (!menuOpenId) return;
     const close = (e: MouseEvent) => {
@@ -53,17 +51,13 @@ export function Dashboard() {
   }, [menuOpenId]);
 
   useEffect(() => {
-    // Always force-refresh diagnostics on mount so stale warnings don't persist
-    // (e.g. after setting up alerts on Services page and navigating back)
     loadAccounts(true);
     loadDashboardStats();
   }, []);
 
-  // Auto-redirect to Yelp OAuth after user logs in and returns to dashboard
   useEffect(() => {
     console.log('[Yelp OAuth] Dashboard mount — checking for stored OAuth URL', { connected: searchParams.get('connected'), error: searchParams.get('error'), hasStored: !!sessionStorage.getItem('yelp_oauth_url') });
 
-    // Don't redirect if this is already a callback from OAuth
     if (searchParams.get('connected') || searchParams.get('error')) {
       console.log('[Yelp OAuth] Dashboard: skipping redirect — already a callback');
       return;
@@ -89,7 +83,6 @@ export function Dashboard() {
     }
   }, []);
 
-  // Handle Yelp OAuth success (callback redirects here with ?connected=yelp)
   useEffect(() => {
     const connected = searchParams.get('connected');
     if (connected === 'yelp') {
@@ -99,13 +92,11 @@ export function Dashboard() {
       if (warning === 'no_businesses') {
         setOauthError('Yelp authorization succeeded but no businesses were found. Please add a business manually or contact support.');
       }
-      // Reload accounts to show the newly connected Yelp business
       loadAccounts(true);
       setSearchParams({}, { replace: true });
     }
   }, []);
 
-  // Handle OAuth callback params and auto-open reconnect modal
   useEffect(() => {
     const webhookError = searchParams.get('webhook_error');
     const reconnect = searchParams.get('reconnect');
@@ -116,8 +107,6 @@ export function Dashboard() {
       setOauthError(`Thumbtack authorization succeeded but webhook setup failed: ${webhookError}. Please try reconnecting again.`);
     } else if (error) {
       const desc = searchParams.get('error_description') || error;
-      // "consent verifier already used" = user double-clicked the authorize button on Thumbtack.
-      // The first click usually succeeded, so ignore this error silently.
       if (desc.toLowerCase().includes('consent verifier')) {
         console.log('[Dashboard] Ignoring consent-verifier error (likely double-click):', desc);
       } else {
@@ -143,8 +132,6 @@ export function Dashboard() {
       const { accounts } = await thumbtackApi.getSavedAccounts();
       console.log('[Dashboard] Loaded accounts:', accounts.map(a => ({ id: a.id, name: a.businessName, webhookId: a.webhookId })));
       setSavedAccounts(accounts);
-
-      // Load diagnostics for all accounts (shared store)
       if (accounts.length > 0) {
         loadDiagnostics(accounts, forceDiagnostics);
       }
@@ -155,34 +142,26 @@ export function Dashboard() {
 
   async function loadDashboardStats() {
     try {
-      // If we have cached data, show refresh indicator instead of full skeleton
       if (cachedStats) {
         setRefreshing(true);
       } else {
         setLoading(true);
       }
 
-      // Calculate date ranges
       const now = new Date();
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const sevenDaysAgo = new Date(now);
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-      // Load analytics data + real notification counts in parallel
       const [todayData, weekData, allTimeData, allRules] = await Promise.all([
-        // Today's leads
         analyticsApi.getBasicAnalytics({
           startDate: todayStart.toISOString(),
           endDate: now.toISOString(),
         }).catch(() => ({ data: { totalLeads: 0 } })),
-
-        // Last 7 days
         analyticsApi.getBasicAnalytics({
           startDate: sevenDaysAgo.toISOString(),
           endDate: now.toISOString(),
         }).catch(() => ({ data: { totalLeads: 0, customerEngagement: { engagementRate: 0 } } })),
-
-        // All time stats
         analyticsApi.getAnalytics({}).catch(() => ({
           data: {
             totalLeads: 0,
@@ -191,12 +170,9 @@ export function Dashboard() {
             messagesPerLead: { average: 0 },
           },
         })),
-
-        // Real notification rule trigger counts
         notificationsApi.getAllRules().catch(() => ({ success: false, count: 0, rules: [] as any[] })),
       ]);
 
-      // Format average response time
       const formatDuration = (minutes: number): string => {
         if (!minutes || minutes <= 0) return '—';
         if (minutes < 1) {
@@ -211,7 +187,6 @@ export function Dashboard() {
         return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
       };
 
-      // Real counts from notification rules triggerCount
       const rules = allRules.rules || [];
       const autoReplyRules = rules.filter((r: any) => r.sendToCustomer === true);
       const alertRules = rules.filter((r: any) => !r.sendToCustomer);
@@ -231,10 +206,9 @@ export function Dashboard() {
       };
 
       setStats(freshStats);
-      setDashboardStats(freshStats); // Persist to localStorage for next visit
+      setDashboardStats(freshStats);
     } catch (err) {
       console.error('Failed to load dashboard stats:', err);
-      // Keep cached/existing stats on error
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -278,7 +252,6 @@ export function Dashboard() {
       await loadAccounts(true);
     } catch (err: any) {
       console.error('Failed to reconnect:', err);
-      // If reconnect fails, open the connection modal
       setAccountToReconnect(account);
       setConnectionModalOpen(true);
     } finally {
@@ -290,7 +263,6 @@ export function Dashboard() {
     const deleteLeads = confirm(
       `Remove "${account.businessName}" entirely?\n\nClick OK to also delete all leads from this account, or Cancel to keep leads.`
     );
-    // Second confirm for the actual removal
     if (!confirm(`Are you sure you want to remove "${account.businessName}"? This cannot be undone.`)) return;
     setActionLoading(account.id);
     setMenuOpenId(null);
@@ -307,29 +279,36 @@ export function Dashboard() {
   const handleConnectionSuccess = async () => {
     console.log('[Dashboard] handleConnectionSuccess called - reloading accounts');
     setAccountToReconnect(null);
-
-    // Wait a moment for backend to process the reconnection
     await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Reload accounts and diagnostics (force refresh after reconnection)
     await loadAccounts(true);
   };
 
   const isAdmin = user?.role === 'ADMIN';
   const hasNoAccounts = savedAccounts.length === 0;
+  const greeting = new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening';
 
-  // Admin with no accounts and not impersonating — show empty state
+  // Admin empty state
   if (isAdmin && hasNoAccounts && !impersonatingUser && !loading) {
     return (
-      <div className="p-6 lg:p-10 max-w-7xl mx-auto">
-        <section className="mb-8">
-          <p className="text-blue-600 font-semibold mb-1 uppercase tracking-wider text-xs">
-            Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, {user?.name || 'Admin'}
+      <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div>
+          <p
+            style={{
+              fontSize: 11,
+              color: 'var(--lb-accent)',
+              textTransform: 'uppercase',
+              letterSpacing: 0.08,
+              fontWeight: 600,
+              fontFamily: 'var(--lb-font-mono)',
+              margin: 0,
+            }}
+          >
+            Good {greeting}, {user?.name || 'Admin'}
           </p>
-          <h2 className="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">
+          <h2 style={{ margin: '6px 0 0', fontSize: 22, fontWeight: 600, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
             Admin Dashboard
           </h2>
-        </section>
+        </div>
         <AdminNoAccountsState onConnectAccount={() => setConnectionModalOpen(true)} />
         <ConnectionModal
           isOpen={connectionModalOpen}
@@ -341,488 +320,410 @@ export function Dashboard() {
     );
   }
 
+  const connectedIssues = savedAccounts.filter(a => {
+    const diag = accountDiagnostics[a.id];
+    return a.tokenDead || (a.platform === 'thumbtack' && !a.webhookId) || (diag && !diag.healthy);
+  });
+  const hasAccounts = savedAccounts.length > 0;
+  const healthyAccounts = savedAccounts.filter(a => {
+    const diag = accountDiagnostics[a.id];
+    if (a.platform === 'yelp') return diag?.healthy !== false;
+    return a.webhookId && diag?.healthy;
+  });
+  const accountConnected = healthyAccounts.length > 0;
+  const smsConfigured = accountConnected && healthyAccounts.some(a => {
+    const issues = accountDiagnostics[a.id]?.notificationIssues || [];
+    return issues.length === 0 || issues.every((i: string) => i.toLowerCase().includes('disabled'));
+  });
+  const automationEnabled = accountConnected && healthyAccounts.some(a => {
+    const issues = accountDiagnostics[a.id]?.notificationIssues || [];
+    return issues.length === 0;
+  });
+
   return (
-    <div className="p-6 lg:p-10 max-w-7xl mx-auto flex flex-col gap-6 md:gap-10">
+    <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 1400, margin: '0 auto' }}>
       {/* OAuth error banner */}
       {oauthError && (
-        <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-2xl text-red-800">
-          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-600" />
-          <div className="flex-1 text-sm">{oauthError}</div>
-          <button onClick={() => setOauthError(null)} className="text-red-400 hover:text-red-600 transition-colors">×</button>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+            padding: '12px 14px',
+            background: 'oklch(0.96 0.04 27)',
+            border: '1px solid oklch(0.88 0.08 27)',
+            borderRadius: 'var(--lb-radius-lg)',
+            color: '#7a1a14',
+          }}
+        >
+          <AlertCircle size={18} style={{ flexShrink: 0, marginTop: 1, color: 'var(--lb-danger)' }} />
+          <div style={{ flex: 1, fontSize: 13 }}>{oauthError}</div>
+          <button
+            onClick={() => setOauthError(null)}
+            style={{ background: 'transparent', border: 0, color: 'var(--lb-danger)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
+          >
+            ×
+          </button>
         </div>
       )}
 
-      {/* Welcome Section */}
-      <section className="order-1">
-        <p className="text-blue-600 font-semibold mb-1 uppercase tracking-wider text-xs">
-          Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, {user?.name || 'User'}
+      {/* Greeting */}
+      <div>
+        <p
+          style={{
+            fontSize: 11,
+            color: 'var(--lb-accent)',
+            textTransform: 'uppercase',
+            letterSpacing: 0.08,
+            fontWeight: 600,
+            fontFamily: 'var(--lb-font-mono)',
+            margin: 0,
+          }}
+        >
+          Good {greeting}, {user?.name || 'User'}
         </p>
-        <h2 className="text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight">
-          Your business is <span className="gradient-text">growing.</span>
+        <h2 style={{ margin: '6px 0 4px', fontSize: 22, fontWeight: 600, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em' }}>
+          Overview
         </h2>
-        <p className="text-slate-500 mt-2 text-lg">
-          LeadBridge captured {stats.leadsToday} new lead{stats.leadsToday !== 1 ? 's' : ''} from Thumbtack today.
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--lb-ink-5)' }}>
+          Leadbridge captured {stats.leadsToday} new lead{stats.leadsToday !== 1 ? 's' : ''} today.
         </p>
-      </section>
+      </div>
 
-      {/* Core Metrics */}
-      <section className="order-4 lg:order-2 grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 relative">
+      {/* KPI row */}
+      <div style={{ position: 'relative' }}>
         {refreshing && (
-          <div className="absolute -top-6 right-0 flex items-center gap-1.5 text-xs text-slate-400">
-            <Loader2 className="w-3 h-3 animate-spin" />
+          <div
+            style={{
+              position: 'absolute',
+              top: -20,
+              right: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 11,
+              color: 'var(--lb-ink-5)',
+              fontFamily: 'var(--lb-font-mono)',
+            }}
+          >
+            <Loader2 size={12} className="animate-spin" />
             Updating...
           </div>
         )}
-        <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
-          <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-50 text-blue-600 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
-            <Users className="w-5 h-5 md:w-6 md:h-6" />
-          </div>
-          <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Leads Today</p>
-          <div className="flex items-baseline gap-1 md:gap-2 mt-1">
-            <h3 className={`text-2xl md:text-3xl font-bold text-slate-900 transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
-              {loading ? '0' : stats.leadsToday}
-            </h3>
-          </div>
-        </div>
-
-        <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
-          <div className="w-10 h-10 md:w-12 md:h-12 bg-emerald-50 text-emerald-600 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
-            <Send className="w-5 h-5 md:w-6 md:h-6" />
-          </div>
-          <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Auto Replies</p>
-          <div className="flex items-baseline gap-1 md:gap-2 mt-1">
-            <h3 className={`text-2xl md:text-3xl font-bold text-slate-900 transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
-              {loading ? '0' : stats.automatedReplies}
-            </h3>
-          </div>
-        </div>
-
-        <div className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
-          <div className="w-10 h-10 md:w-12 md:h-12 bg-orange-50 text-orange-600 rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
-            <Clock className="w-5 h-5 md:w-6 md:h-6" />
-          </div>
-          <p className="text-slate-500 text-xs md:text-sm font-medium uppercase tracking-wide">Avg Response</p>
-          <div className="flex items-baseline gap-1 md:gap-2 mt-1">
-            <h3 className={`text-2xl md:text-3xl font-bold text-slate-900 transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
-              {loading ? '—' : stats.avgResponseTime}
-            </h3>
-          </div>
-        </div>
-
-        <div className="bg-indigo-600 p-4 md:p-6 rounded-2xl md:rounded-3xl shadow-xl shadow-indigo-100 text-white">
-          <div className="w-10 h-10 md:w-12 md:h-12 bg-white/20 text-white rounded-xl md:rounded-2xl flex items-center justify-center mb-3 md:mb-4">
-            <TrendingUp className="w-5 h-5 md:w-6 md:h-6" />
-          </div>
-          <p className="text-indigo-100 text-xs md:text-sm font-medium uppercase tracking-wide">Engagement</p>
-          <div className="flex items-baseline gap-1 md:gap-2 mt-1">
-            <h3 className={`text-2xl md:text-3xl font-bold transition-opacity ${loading ? 'opacity-30' : 'opacity-100'}`}>
-              {loading ? '0' : stats.conversionRate}%
-            </h3>
-            <span className="text-indigo-200 text-xs md:text-sm">of leads replied</span>
-          </div>
-        </div>
-      </section>
-
-      <div className="contents lg:grid lg:grid-cols-3 lg:gap-8 lg:items-start lg:order-3">
-        {/* Accounts & Platforms */}
-        <div className="contents lg:block lg:col-span-2 lg:space-y-6">
-          <div className="order-2 lg:order-none space-y-6">
-          <div className="flex items-center justify-between px-2">
-            <h3 className="text-xl font-bold text-slate-900">Connected Platforms</h3>
-            {savedAccounts.length > 0 && (
-              <button
-                onClick={() => setConnectionModalOpen(true)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-1.5"
-              >
-                <Plus className="w-4 h-4" />
-                <span className="hidden sm:inline">New Account</span>
-                <span className="sm:hidden">Add</span>
-              </button>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {savedAccounts.length > 0 ? (
-              (() => {
-                return savedAccounts.map((account) => {
-                  const diag = accountDiagnostics[account.id];
-                  const isCheckingDiag = !diag;
-                  const hasConnectionIssues = account.tokenDead || (!isCheckingDiag && (diag && !diag.healthy));
-                  const notifIssues = diag?.notificationIssues || [];
-                  // "disabled" = rule exists but toggled off; everything else = real config problem
-                  const isJustDisabled = !isCheckingDiag && !hasConnectionIssues && notifIssues.length > 0 && notifIssues.every((i: string) => i.toLowerCase().includes('disabled'));
-                  const hasConfigIssues = !isCheckingDiag && !hasConnectionIssues && notifIssues.length > 0 && !isJustDisabled;
-
-                  const platformBorder = account.platform === 'yelp' ? 'border-[#FF1A1A]/30' : 'border-[#41B1E1]/30';
-                  const borderClass = isCheckingDiag
-                    ? 'border-slate-200'
-                    : hasConnectionIssues
-                      ? 'border-amber-200 hover:border-amber-300'
-                      : hasConfigIssues
-                        ? 'border-orange-200 hover:border-orange-300'
-                        : `${platformBorder} hover:border-[${account.platform === 'yelp' ? '#FF1A1A' : '#41B1E1'}]/50`;
-
-                  return (
-                    <div
-                      key={account.id}
-                      className={`bg-white border-2 rounded-3xl p-5 flex items-center gap-5 transition-all cursor-pointer group shadow-sm ${borderClass}`}
-                      onClick={() => handleAccountClick(account)}
-                    >
-                      {account.imageUrl ? (
-                        <img
-                          src={account.imageUrl}
-                          alt={account.businessName}
-                          className="w-14 h-14 rounded-2xl object-cover"
-                        />
-                      ) : (
-                        <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors">
-                          <Briefcase className="w-7 h-7" />
-                        </div>
-                      )}
-                      <div className="flex-1">
-                        <h4 className="font-bold text-slate-900">{account.businessName}</h4>
-                        <div className="flex items-center gap-2 mt-1">
-                          {/* Platform badge — always visible */}
-                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md text-white ${account.platform === 'yelp' ? 'bg-[#FF1A1A]' : 'bg-[#41B1E1]'}`}>
-                            {account.platform === 'yelp' ? 'Yelp' : 'TT'}
-                          </span>
-                          {isCheckingDiag ? (
-                            <>
-                              <Loader2 className="w-3 h-3 animate-spin text-slate-400" />
-                              <span className="text-xs text-slate-400 font-medium">Checking...</span>
-                            </>
-                          ) : hasConnectionIssues ? (
-                            <>
-                              <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                              <span className="text-xs text-slate-500 font-medium">
-                                {account.tokenDead ? 'Token expired — reconnect' : diag && !diag.healthy ? 'Needs attention' : 'Disconnected'}
-                              </span>
-                            </>
-                          ) : hasConfigIssues ? (
-                            <>
-                              <span className="w-2 h-2 rounded-full bg-orange-400"></span>
-                              <span className="text-xs text-slate-500 font-medium">SMS not configured</span>
-                            </>
-                          ) : isJustDisabled ? (
-                            <>
-                              <span className="w-2 h-2 rounded-full bg-slate-300"></span>
-                              <span className="text-xs text-slate-400 font-medium">Lead alerts off</span>
-                            </>
-                          ) : (
-                            <>
-                              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                              <span className="text-xs text-slate-500 font-medium">Synced</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {/* Status icon */}
-                        {isCheckingDiag ? (
-                          <div className="w-5 h-5" />
-                        ) : hasConnectionIssues ? (
-                          <AlertCircle className="w-5 h-5 text-amber-500 group-hover:text-amber-600" />
-                        ) : hasConfigIssues ? (
-                          <BellOff className="w-5 h-5 text-orange-400 group-hover:text-orange-500" />
-                        ) : (
-                          <ExternalLink className="w-5 h-5 text-slate-300 group-hover:text-blue-500" />
-                        )}
-
-                        {/* Actions menu */}
-                        <div className="relative" data-account-menu>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === account.id ? null : account.id); }}
-                            className="w-8 h-8 flex items-center justify-center text-slate-300 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all"
-                            disabled={actionLoading === account.id}
-                          >
-                            {actionLoading === account.id ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <MoreVertical className="w-4 h-4" />
-                            )}
-                          </button>
-                          {menuOpenId === account.id && (
-                            <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg py-1 z-20 min-w-[180px]">
-                              {account.platform === 'yelp' ? (
-                                <button
-                                  onClick={async (e) => { e.stopPropagation(); await platformsApi.disconnectYelp(account.id); loadAccounts(); setMenuOpenId(null); }}
-                                  className="w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
-                                >
-                                  <Unlink className="w-4 h-4 text-slate-400" />
-                                  Disconnect Yelp
-                                </button>
-                              ) : account.webhookId ? (
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); handleDisconnectWebhook(account); }}
-                                  className="w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
-                                >
-                                  <Unlink className="w-4 h-4 text-slate-400" />
-                                  Disconnect
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); handleReconnectWebhook(account); }}
-                                  className="w-full px-4 py-2.5 text-left text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-2.5 transition-colors"
-                                >
-                                  <RefreshCw className="w-4 h-4" />
-                                  Reconnect
-                                </button>
-                              )}
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleRemoveAccount(account); }}
-                                className="w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2.5 transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                                Remove Account
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                });
-              })()
-            ) : (
-              <div className="col-span-2 bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-8 text-center">
-                <p className="text-slate-600 font-medium mb-4">No accounts connected yet</p>
-                <button
-                  onClick={() => setConnectionModalOpen(true)}
-                  className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all"
-                >
-                  <Plus className="w-5 h-5" />
-                  Connect Account
-                </button>
-              </div>
-            )}
-          </div>
-          </div>
-
-          {/* System Health */}
-          {(() => {
-            const hasAccounts = savedAccounts.length > 0;
-            const healthyAccounts = savedAccounts.filter(a => {
-              const diag = accountDiagnostics[a.id];
-              if (a.platform === 'yelp') return diag?.healthy !== false;
-              return a.webhookId && diag?.healthy;
-            });
-
-            // Account connected = at least one account with a working webhook
-            const accountConnected = healthyAccounts.length > 0;
-
-            // SMS alerts configured = healthy account whose notification issues are all "disabled"
-            // (rules exist but toggled off) or empty (fully configured and on)
-            const smsConfigured = accountConnected && healthyAccounts.some(a => {
-              const issues = accountDiagnostics[a.id]?.notificationIssues || [];
-              return issues.length === 0 || issues.every((i: string) => i.toLowerCase().includes('disabled'));
-            });
-
-            // Automation enabled = healthy account with zero notification issues (rules exist and are on)
-            const automationEnabled = accountConnected && healthyAccounts.some(a => {
-              const issues = accountDiagnostics[a.id]?.notificationIssues || [];
-              return issues.length === 0;
-            });
-
-            const subtitle = !hasAccounts
-              ? 'Connect a Thumbtack account to get started.'
-              : !accountConnected
-              ? 'Your account connection needs attention.'
-              : !smsConfigured
-              ? 'Account connected. Configure SMS alerts to enable automation.'
-              : !automationEnabled
-              ? 'SMS alerts configured but automation is currently off.'
-              : 'All systems connected and running.';
-
-            return (
-              <div className="order-5 lg:order-none bg-slate-900 rounded-[2rem] p-6 md:p-8 text-white relative overflow-hidden">
-                <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-8">
-                  <div className="md:max-w-xs">
-                    <h3 className="text-xl md:text-2xl font-bold mb-2">Account Status</h3>
-                    <p className="text-slate-400 text-sm">{subtitle}</p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 md:gap-4 flex-1">
-                    <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${accountConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-slate-500'}`}></div>
-                      <span className="text-xs md:text-sm font-medium">Accounts: {accountConnected ? 'Connected' : 'Not Connected'}</span>
-                    </div>
-                    <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${smsConfigured ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-slate-500'}`}></div>
-                      <span className="text-xs md:text-sm font-medium">SMS Alerts: {smsConfigured ? 'Configured' : 'Not Set Up'}</span>
-                    </div>
-                    <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${automationEnabled ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-slate-500'}`}></div>
-                      <span className="text-xs md:text-sm font-medium">Automation: {automationEnabled ? 'Enabled' : 'Off'}</span>
-                    </div>
-                    <div className="bg-white/10 rounded-2xl p-3 md:p-4 flex items-center gap-2 md:gap-3">
-                      <div className="w-2 h-2 rounded-full bg-amber-400 shrink-0"></div>
-                      <span className="text-xs md:text-sm font-medium opacity-60 italic">Voice: Beta</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="absolute -right-20 -bottom-20 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl"></div>
-              </div>
-            );
-          })()}
-        </div>
-
-        {/* Alerts & Quick Actions */}
-        <div className="contents lg:block lg:space-y-6">
-          <div className="order-3 lg:order-none flex flex-col gap-6">
-          {(() => {
-            const health = systemHealth;
-            const isLoading = systemHealthLoading || !health;
-            const hasCritical = health && health.summary.critical > 0;
-            const hasWarning = health && health.summary.warning > 0 && !hasCritical;
-
-            return (
-              <>
-                <div className="flex items-center justify-between px-2">
-                  <h3 className="text-xl font-bold text-slate-900">System Status</h3>
-                  {isLoading ? (
-                    <span className="bg-slate-100 text-slate-500 text-xs font-bold px-2 py-1 rounded-md flex items-center gap-1.5">
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                      CHECKING
-                    </span>
-                  ) : hasCritical ? (
-                    <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-1 rounded-md">
-                      {health!.summary.critical} URGENT
-                    </span>
-                  ) : hasWarning ? (
-                    <span className="bg-orange-50 text-orange-600 text-xs font-bold px-2 py-1 rounded-md">
-                      {health!.summary.warning} WARNING
-                    </span>
-                  ) : (
-                    <span className="bg-emerald-50 text-emerald-600 text-xs font-bold px-2 py-1 rounded-md">
-                      ALL GOOD
-                    </span>
-                  )}
-                </div>
-
-                {isLoading ? (
-                  <div className="bg-slate-50/50 border border-slate-200 rounded-3xl p-5 relative overflow-hidden flex items-center">
-                    <div className="flex items-start gap-4 w-full">
-                      <div className="w-10 h-10 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center shrink-0">
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                      </div>
-                      <div className="flex-1">
-                        <h5 className="font-bold text-slate-900">Checking Systems...</h5>
-                        <p className="text-sm text-slate-500 mt-1 leading-relaxed">
-                          Verifying account connections and notification settings.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ) : hasCritical || hasWarning ? (
-                  <div className={`${hasCritical ? 'bg-rose-50/50 border-rose-100' : 'bg-orange-50/50 border-orange-100'} border rounded-3xl p-5 relative overflow-hidden`}>
-                    <div className="flex items-start gap-4 w-full">
-                      <div className={`w-10 h-10 ${hasCritical ? 'bg-rose-100 text-rose-600' : 'bg-orange-100 text-orange-600'} rounded-xl flex items-center justify-center shrink-0`}>
-                        <AlertCircle className="w-5 h-5" />
-                      </div>
-                      <div className="flex-1">
-                        <h5 className="font-bold text-slate-900">
-                          {hasCritical ? 'Action Required' : 'Attention Needed'}
-                        </h5>
-                        <div className="mt-2 space-y-1.5">
-                          {health!.issues.map((issue: any, i: number) => (
-                            <div key={i} className="flex items-center gap-2 text-sm text-slate-600">
-                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${issue.status === 'critical' ? 'bg-red-500' : 'bg-orange-400'}`} />
-                              <span><strong>{issue.accountName}</strong> ({issue.platform}) — {issue.message}</span>
-                            </div>
-                          ))}
-                        </div>
-                        <button
-                          onClick={() => {
-                            // Find the first critical account and open reconnect modal
-                            const firstIssue = health!.issues.find((i: any) => i.status === 'critical') || health!.issues[0];
-                            if (firstIssue) {
-                              const account = savedAccounts.find(a => a.id === firstIssue.accountId);
-                              if (account) {
-                                setAccountToReconnect(account);
-                                setConnectionModalOpen(true);
-                              }
-                            }
-                          }}
-                          className={`mt-4 text-xs font-bold uppercase tracking-wider flex items-center gap-1 transition-colors ${hasCritical ? 'text-rose-600 hover:text-rose-700' : 'text-orange-600 hover:text-orange-700'}`}
-                        >
-                          Fix Now <ChevronRight className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : health?.healthy ? (
-                  <div className="bg-emerald-50/50 border border-emerald-100 rounded-3xl p-5 relative overflow-hidden flex items-center">
-                    <div className="flex items-start gap-4 w-full">
-                      <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center shrink-0">
-                        <CheckCircle className="w-5 h-5" />
-                      </div>
-                      <div className="flex-1">
-                        <h5 className="font-bold text-slate-900">All Systems Operational</h5>
-                        <p className="text-sm text-slate-600 mt-1 leading-relaxed">
-                          All accounts are connected and automation is running smoothly.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-              </>
-            );
-          })()}
-          </div>
-
-          <div className="order-6 lg:order-none bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] p-8 text-white shadow-lg shadow-indigo-100 relative overflow-hidden">
-            <div className="relative z-10 flex flex-col items-center justify-center text-center h-full">
-              <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6">
-                <Sparkles className="w-8 h-8" />
-              </div>
-              <h3 className="text-2xl font-bold mb-3">AI Templates</h3>
-              <p className="text-indigo-100 text-sm mb-6 leading-relaxed max-w-xs">
-                AI-powered response templates are coming soon. Stay tuned!
-              </p>
-              <span className="px-8 py-3 bg-white/20 text-white rounded-xl font-bold text-sm cursor-default">
-                Coming Soon
-              </span>
-            </div>
-            <div className="absolute -right-20 -bottom-20 w-64 h-64 bg-purple-600/20 rounded-full blur-3xl"></div>
-          </div>
+        <div
+          className="grid grid-cols-2 md:grid-cols-4"
+          style={{
+            background: 'var(--lb-surface)',
+            border: '1px solid var(--lb-line)',
+            borderRadius: 'var(--lb-radius-lg)',
+          }}
+        >
+          <Kpi
+            label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Leads today</span>}
+            value={loading ? '—' : stats.leadsToday}
+            loading={loading}
+          />
+          <Kpi
+            label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Send size={12} /> Auto replies</span>}
+            value={loading ? '—' : stats.automatedReplies}
+            loading={loading}
+          />
+          <Kpi
+            label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Clock size={12} /> Avg response</span>}
+            value={loading ? '—' : stats.avgResponseTime}
+            loading={loading}
+          />
+          <Kpi
+            label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Engagement</span>}
+            value={loading ? '—' : `${stats.conversionRate}%`}
+            delta={loading ? undefined : 'of leads replied'}
+            deltaDir="up"
+            loading={loading}
+            muted
+          />
         </div>
       </div>
 
-      {/* 7-Day Snapshot */}
-      <section className="order-7 lg:order-4 space-y-6">
-        <div className="flex items-center justify-between px-2">
-          <h3 className="text-xl font-bold text-slate-900">7-Day Snapshot</h3>
-        </div>
-        <div className="bg-white border border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm">
-          <div className="p-8 border-b border-slate-50 flex flex-wrap items-center gap-8 justify-around">
-            <div className="text-center">
-              <p className="text-slate-400 text-sm font-medium mb-1">Weekly Leads</p>
-              <p className="text-3xl font-extrabold text-slate-900">{loading ? '...' : stats.weeklyLeads}</p>
-            </div>
-            <div className="w-px h-12 bg-slate-100 hidden md:block"></div>
-            <div className="text-center">
-              <p className="text-slate-400 text-sm font-medium mb-1">Engagement</p>
-              <p className="text-3xl font-extrabold text-slate-900">{loading ? '...' : stats.engagement}%</p>
-            </div>
-            <div className="w-px h-12 bg-slate-100 hidden md:block"></div>
-            <div className="text-center">
-              <p className="text-slate-400 text-sm font-medium mb-1">Lifetime Replies</p>
-              <p className="text-3xl font-extrabold text-slate-900">{loading ? '...' : stats.lifetimeReplies}</p>
-            </div>
-            <div className="w-px h-12 bg-slate-100 hidden md:block"></div>
-            <div className="text-center">
-              <p className="text-slate-400 text-sm font-medium mb-1">Messages Sent</p>
-              <p className="text-3xl font-extrabold text-slate-900">{loading ? '...' : stats.messagesSent}</p>
-            </div>
-          </div>
-          <div className="bg-slate-50/50 p-6 flex items-center justify-center">
-            <Link to="/analytics" className="px-6 py-3 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700 hover:bg-slate-50 shadow-sm transition-all flex items-center gap-2">
-              View Full Reports <ChevronRight className="w-4 h-4" />
-            </Link>
-          </div>
-        </div>
-      </section>
+      {/* 2-col main grid */}
+      <div
+        style={{ gap: 20 }}
+        className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]"
+      >
+        {/* Left column */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
+          {/* Connected accounts */}
+          <Card
+            title="Connected accounts"
+            subtitle={hasAccounts ? `${savedAccounts.length} source${savedAccounts.length === 1 ? '' : 's'}` : undefined}
+            padding={0}
+            action={
+              hasAccounts ? (
+                <Btn size="sm" variant="accent" icon={<Plus size={13} />} onClick={() => setConnectionModalOpen(true)}>
+                  Connect
+                </Btn>
+              ) : null
+            }
+          >
+            {!hasAccounts ? (
+              <div style={{ padding: 20 }}>
+                <EmptyState
+                  icon={<Rocket size={18} />}
+                  title="Connect your first lead source"
+                  body="Leadbridge will auto-reply, follow up, and route calls while you work."
+                  action={
+                    <Btn variant="accent" icon={<Plus size={14} />} onClick={() => setConnectionModalOpen(true)}>
+                      Connect account
+                    </Btn>
+                  }
+                />
+              </div>
+            ) : (
+              savedAccounts.map((account, i) => {
+                const diag = accountDiagnostics[account.id];
+                const isCheckingDiag = !diag;
+                const hasConnectionIssues = account.tokenDead || (!isCheckingDiag && (diag && !diag.healthy));
+                const notifIssues = diag?.notificationIssues || [];
+                const isJustDisabled = !isCheckingDiag && !hasConnectionIssues && notifIssues.length > 0 && notifIssues.every((i: string) => i.toLowerCase().includes('disabled'));
+                const hasConfigIssues = !isCheckingDiag && !hasConnectionIssues && notifIssues.length > 0 && !isJustDisabled;
+                const isLast = i === savedAccounts.length - 1;
 
-      {/* Connection Modal */}
+                const statusLabel = isCheckingDiag
+                  ? 'Checking…'
+                  : hasConnectionIssues
+                    ? (account.tokenDead ? 'Reconnect needed' : diag && !diag.healthy ? 'Needs attention' : 'Disconnected')
+                    : hasConfigIssues
+                      ? 'SMS not configured'
+                      : isJustDisabled
+                        ? 'Lead alerts off'
+                        : 'Connected';
+                const statusKind = isCheckingDiag
+                  ? 'neutral'
+                  : hasConnectionIssues
+                    ? 'warning'
+                    : hasConfigIssues
+                      ? 'warning'
+                      : isJustDisabled
+                        ? 'lost'
+                        : 'won';
+
+                return (
+                  <div
+                    key={account.id}
+                    onClick={() => handleAccountClick(account)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '12px 14px',
+                      borderBottom: isLast ? 'none' : '1px solid var(--lb-line-soft)',
+                      cursor: 'pointer',
+                      transition: 'background 120ms ease',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--lb-ink-10)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    {account.imageUrl ? (
+                      <img
+                        src={account.imageUrl}
+                        alt={account.businessName}
+                        style={{ width: 30, height: 30, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: 30, height: 30, borderRadius: 6,
+                          background: 'var(--lb-ink-10)',
+                          color: 'var(--lb-ink-5)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Briefcase size={14} />
+                      </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 500,
+                            color: 'var(--lb-ink-1)',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {account.businessName}
+                        </span>
+                        <PlatformBadge platform={account.platform} />
+                      </div>
+                      <div style={{ marginTop: 3, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {isCheckingDiag && <Loader2 size={10} className="animate-spin" style={{ color: 'var(--lb-ink-5)' }} />}
+                        <StatusPill status={statusKind as any} label={statusLabel} />
+                      </div>
+                    </div>
+                    {/* Status icon + menu */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      {!isCheckingDiag && hasConnectionIssues && (
+                        <AlertCircle size={15} style={{ color: 'var(--lb-warn)' }} />
+                      )}
+                      {!isCheckingDiag && !hasConnectionIssues && hasConfigIssues && (
+                        <BellOff size={15} style={{ color: 'var(--lb-warn)' }} />
+                      )}
+                      {!isCheckingDiag && !hasConnectionIssues && !hasConfigIssues && !isJustDisabled && (
+                        <ExternalLink size={14} style={{ color: 'var(--lb-ink-6)' }} />
+                      )}
+                      <div style={{ position: 'relative' }} data-account-menu>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === account.id ? null : account.id); }}
+                          disabled={actionLoading === account.id}
+                          style={{
+                            width: 26, height: 26,
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            background: 'transparent', border: 0, cursor: 'pointer',
+                            color: 'var(--lb-ink-5)', borderRadius: 4,
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = 'var(--lb-ink-9)'; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          {actionLoading === account.id ? <Loader2 size={13} className="animate-spin" /> : <MoreVertical size={13} />}
+                        </button>
+                        {menuOpenId === account.id && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              right: 0,
+                              top: '100%',
+                              marginTop: 4,
+                              background: 'var(--lb-surface)',
+                              border: '1px solid var(--lb-line)',
+                              borderRadius: 'var(--lb-radius)',
+                              boxShadow: 'var(--lb-shadow-md)',
+                              padding: 4,
+                              zIndex: 20,
+                              minWidth: 180,
+                            }}
+                          >
+                            {account.platform === 'yelp' ? (
+                              <MenuItem
+                                icon={<Unlink size={13} />}
+                                label="Disconnect Yelp"
+                                onClick={async (e) => { e.stopPropagation(); await platformsApi.disconnectYelp(account.id); loadAccounts(); setMenuOpenId(null); }}
+                              />
+                            ) : account.webhookId ? (
+                              <MenuItem
+                                icon={<Unlink size={13} />}
+                                label="Disconnect"
+                                onClick={(e) => { e.stopPropagation(); handleDisconnectWebhook(account); }}
+                              />
+                            ) : (
+                              <MenuItem
+                                icon={<RefreshCw size={13} />}
+                                label="Reconnect"
+                                accent
+                                onClick={(e) => { e.stopPropagation(); handleReconnectWebhook(account); }}
+                              />
+                            )}
+                            <MenuItem
+                              icon={<Trash2 size={13} />}
+                              label="Remove account"
+                              danger
+                              onClick={(e) => { e.stopPropagation(); handleRemoveAccount(account); }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </Card>
+
+          {/* Weekly snapshot */}
+          <Card title="7-day snapshot" padding={0}>
+            <div className="grid grid-cols-2 md:grid-cols-4">
+              <Kpi label="Leads" value={loading ? '—' : stats.weeklyLeads} loading={loading} />
+              <Kpi label="Engagement" value={loading ? '—' : `${stats.engagement}%`} loading={loading} />
+              <Kpi label="Lifetime replies" value={loading ? '—' : stats.lifetimeReplies} loading={loading} />
+              <Kpi label="Messages sent" value={loading ? '—' : stats.messagesSent} loading={loading} muted />
+            </div>
+            <div
+              style={{
+                padding: '10px 14px',
+                borderTop: '1px solid var(--lb-line-soft)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+              }}
+            >
+              <Link
+                to="/analytics"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: 'var(--lb-ink-4)',
+                  textDecoration: 'none',
+                }}
+              >
+                View full reports <ChevronRight size={13} />
+              </Link>
+            </div>
+          </Card>
+        </div>
+
+        {/* Right column */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
+          {/* Account status */}
+          <Card title="Account status" padding={0}>
+            <SystemRow
+              label="Accounts"
+              sub={accountConnected ? 'At least one source synced' : 'No sources connected yet'}
+              ok={accountConnected}
+            />
+            <SystemRow
+              label="SMS alerts"
+              sub={smsConfigured ? 'Lead alerts are configured' : 'Set up SMS alerts to get notified'}
+              ok={smsConfigured}
+            />
+            <SystemRow
+              label="Automation"
+              sub={automationEnabled ? 'Rules are active' : 'Enable automation rules'}
+              ok={automationEnabled}
+            />
+            <SystemRow label="Voice" sub="Beta" ok={null} last />
+          </Card>
+
+          {/* System status / alerts */}
+          <SystemStatusCard
+            systemHealth={systemHealth}
+            systemHealthLoading={systemHealthLoading}
+            savedAccounts={savedAccounts}
+            onFixAccount={(acc) => { setAccountToReconnect(acc); setConnectionModalOpen(true); }}
+          />
+
+          {/* Tips / accent card */}
+          {connectedIssues.length === 0 && hasAccounts && (
+            <Card
+              padding={14}
+              style={{
+                background: 'var(--lb-accent-tint)',
+                borderColor: 'var(--lb-accent-line)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <Sparkles size={16} style={{ color: 'var(--lb-accent)', flexShrink: 0, marginTop: 2 }} />
+                <div style={{ fontSize: 12, color: 'var(--lb-ink-3)', lineHeight: 1.5 }}>
+                  <strong style={{ color: 'var(--lb-ink-1)' }}>AI templates are coming soon.</strong> Leadbridge will learn from your past replies and suggest variations your customers actually respond to.
+                </div>
+              </div>
+            </Card>
+          )}
+        </div>
+      </div>
+
       <ConnectionModal
         isOpen={connectionModalOpen}
         onClose={() => {
@@ -834,5 +735,178 @@ export function Dashboard() {
         onSuccess={handleConnectionSuccess}
       />
     </div>
+  );
+}
+
+function MenuItem({ icon, label, onClick, accent, danger }: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: (e: React.MouseEvent) => void;
+  accent?: boolean;
+  danger?: boolean;
+}) {
+  const color = danger ? 'var(--lb-danger)' : accent ? 'var(--lb-accent)' : 'var(--lb-ink-2)';
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '7px 10px',
+        background: 'transparent',
+        border: 0,
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        fontSize: 12,
+        color,
+        borderRadius: 4,
+        textAlign: 'left',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.background = 'var(--lb-ink-10)'; }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function SystemRow({ label, sub, ok, last }: { label: string; sub: string; ok: boolean | null; last?: boolean }) {
+  const dotColor = ok === true ? 'var(--lb-success)' : ok === false ? 'var(--lb-ink-6)' : 'var(--lb-warn)';
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        padding: '12px 14px',
+        borderBottom: last ? 'none' : '1px solid var(--lb-line-soft)',
+      }}
+    >
+      <span style={{ width: 7, height: 7, borderRadius: 99, background: dotColor, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--lb-ink-1)' }}>{label}</div>
+        <div style={{ fontSize: 11, color: 'var(--lb-ink-5)' }}>{sub}</div>
+      </div>
+      <span
+        style={{
+          fontSize: 11,
+          fontFamily: 'var(--lb-font-mono)',
+          color: 'var(--lb-ink-5)',
+          textTransform: 'uppercase',
+          letterSpacing: 0.06,
+        }}
+      >
+        {ok === true ? 'OK' : ok === false ? 'Off' : 'Beta'}
+      </span>
+    </div>
+  );
+}
+
+function SystemStatusCard({
+  systemHealth,
+  systemHealthLoading,
+  savedAccounts,
+  onFixAccount,
+}: {
+  systemHealth: any;
+  systemHealthLoading: boolean;
+  savedAccounts: SavedAccount[];
+  onFixAccount: (acc: SavedAccount) => void;
+}) {
+  const isLoading = systemHealthLoading || !systemHealth;
+  const hasCritical = systemHealth && systemHealth.summary.critical > 0;
+  const hasWarning = systemHealth && systemHealth.summary.warning > 0 && !hasCritical;
+
+  const headerPill = isLoading
+    ? { label: 'Checking', bg: 'var(--lb-ink-10)', fg: 'var(--lb-ink-5)' }
+    : hasCritical
+      ? { label: `${systemHealth.summary.critical} urgent`, bg: 'oklch(0.96 0.04 27)', fg: 'var(--lb-danger)' }
+      : hasWarning
+        ? { label: `${systemHealth.summary.warning} warning`, bg: 'oklch(0.96 0.05 75)', fg: 'var(--lb-warn)' }
+        : { label: 'All good', bg: 'oklch(0.95 0.04 150)', fg: '#0c4a2b' };
+
+  return (
+    <Card
+      title="System status"
+      action={
+        <span
+          style={{
+            fontSize: 10,
+            fontFamily: 'var(--lb-font-mono)',
+            fontWeight: 600,
+            padding: '2px 7px',
+            borderRadius: 99,
+            background: headerPill.bg,
+            color: headerPill.fg,
+            textTransform: 'uppercase',
+            letterSpacing: 0.06,
+          }}
+        >
+          {headerPill.label}
+        </span>
+      }
+      padding={14}
+    >
+      {isLoading ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Loader2 size={14} className="animate-spin" style={{ color: 'var(--lb-ink-5)' }} />
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--lb-ink-1)' }}>Checking systems…</div>
+            <div style={{ fontSize: 11, color: 'var(--lb-ink-5)' }}>
+              Verifying connections and notification settings.
+            </div>
+          </div>
+        </div>
+      ) : hasCritical || hasWarning ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>
+            {hasCritical ? 'Action required' : 'Attention needed'}
+          </div>
+          {systemHealth.issues.map((issue: any, i: number) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--lb-ink-4)' }}>
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: 99,
+                  flexShrink: 0,
+                  background: issue.status === 'critical' ? 'var(--lb-danger)' : 'var(--lb-warn)',
+                }}
+              />
+              <span><strong style={{ color: 'var(--lb-ink-1)' }}>{issue.accountName}</strong> ({issue.platform}) — {issue.message}</span>
+            </div>
+          ))}
+          <div style={{ marginTop: 6 }}>
+            <Btn
+              size="sm"
+              variant="accent"
+              iconRight={<ChevronRight size={13} />}
+              onClick={() => {
+                const firstIssue = systemHealth.issues.find((i: any) => i.status === 'critical') || systemHealth.issues[0];
+                if (firstIssue) {
+                  const account = savedAccounts.find(a => a.id === firstIssue.accountId);
+                  if (account) onFixAccount(account);
+                }
+              }}
+            >
+              Fix now
+            </Btn>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <CheckCircle size={16} style={{ color: 'var(--lb-success)', flexShrink: 0, marginTop: 2 }} />
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--lb-ink-1)' }}>All systems operational</div>
+            <div style={{ fontSize: 11, color: 'var(--lb-ink-5)' }}>
+              Accounts are connected and automation is running.
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }

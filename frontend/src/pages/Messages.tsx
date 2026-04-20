@@ -25,12 +25,14 @@ import {
   Smartphone,
   MessageCircle,
   Sparkles,
+  AlertTriangle,
 } from 'lucide-react';
-import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, followUpApi, type MessageAttachment } from '../services/api';
+import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, followUpApi, type MessageAttachment, type StatusConflict } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
+import { PlatformBadge, StatusPill } from '../components/ui';
 import type { Lead, MessageTemplate, BulkMessagePreview, NotificationLog, TimelineEvent, TimelineChannel, CommunicationSummary } from '../types';
 
 interface LocalMessage {
@@ -162,6 +164,24 @@ function mergeTimeline(
   return events;
 }
 
+/**
+ * LeadBridge canonical pipeline statuses (mirrors LB_PIPELINE_STATUSES on the
+ * backend — see src/integrations/service-flow/sf-status-map.ts). Manual writes
+ * from the status dropdown must use one of these values.
+ */
+const LB_PIPELINE_STATUSES: Array<{ value: string; label: string; tone: string }> = [
+  { value: 'new',         label: 'New',         tone: 'bg-blue-100 text-blue-700' },
+  { value: 'contacted',   label: 'Contacted',   tone: 'bg-green-100 text-green-700' },
+  { value: 'quoted',      label: 'Quoted',      tone: 'bg-orange-100 text-orange-700' },
+  { value: 'scheduled',   label: 'Scheduled',   tone: 'bg-purple-100 text-purple-700' },
+  { value: 'in_progress', label: 'In progress', tone: 'bg-amber-100 text-amber-700' },
+  { value: 'completed',   label: 'Completed',   tone: 'bg-emerald-100 text-emerald-700' },
+  { value: 'cancelled',   label: 'Cancelled',   tone: 'bg-slate-200 text-slate-700' },
+  { value: 'no_show',     label: 'No show',     tone: 'bg-slate-200 text-slate-700' },
+  { value: 'lost',        label: 'Lost',        tone: 'bg-red-100 text-red-700' },
+  { value: 'archived',    label: 'Archived',    tone: 'bg-slate-100 text-slate-500' },
+];
+
 function computeSummary(
   platformMessages: LocalMessage[],
   smsLogs: NotificationLog[],
@@ -237,6 +257,12 @@ export function Messages() {
   const [fuEditMsg, setFuEditMsg] = useState('');
   const [fuEditId, setFuEditId] = useState<string | null>(null);
   const [fuActionLoading, setFuActionLoading] = useState(false);
+
+  // Lead status editor state
+  const [statusEditorOpen, setStatusEditorOpen] = useState(false);
+  const [savingStatus, setSavingStatus] = useState(false);
+  const [statusConflict, setStatusConflict] = useState<StatusConflict | null>(null);
+  const [statusConflictLeadId, setStatusConflictLeadId] = useState<string | null>(null);
 
   // Load follow-up suggestions when selected lead changes
   useEffect(() => {
@@ -839,6 +865,45 @@ export function Messages() {
     }
   };
 
+  /**
+   * Manual lead status change. Closes the dropdown on success, then pops the
+   * conflict modal if the backend flagged a divergence (SF integrated, or
+   * platform status disagrees).
+   */
+  const handleStatusChange = async (newStatus: string) => {
+    if (!selectedLead || savingStatus) return;
+    setSavingStatus(true);
+    try {
+      const res = await leadsApi.updateStatus(selectedLead.id, newStatus);
+      if (res.success && res.lead) {
+        setSelectedLead(res.lead as any);
+        setLeads(leads.map(l => (l.id === res.lead!.id ? (res.lead as any) : l)));
+      }
+      setStatusEditorOpen(false);
+      if (res.conflict) {
+        setStatusConflict(res.conflict);
+        setStatusConflictLeadId(selectedLead.id);
+      }
+    } catch (err: any) {
+      console.error('[Messages] Failed to update status:', err?.response?.data || err);
+      alert('Could not update status: ' + (err?.response?.data?.error || err?.message));
+    } finally {
+      setSavingStatus(false);
+    }
+  };
+
+  const handleResolveConflict = async (resolveNote: string) => {
+    if (!statusConflict || !statusConflictLeadId) return;
+    try {
+      await leadsApi.resolveStatusConflict(statusConflictLeadId, statusConflict.auditLogId, resolveNote);
+    } catch (err) {
+      console.error('[Messages] Failed to resolve conflict:', err);
+    } finally {
+      setStatusConflict(null);
+      setStatusConflictLeadId(null);
+    }
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!messageText.trim() || !selectedLead) return;
@@ -1228,24 +1293,75 @@ export function Messages() {
   }
 
   return (
-    <div className="flex h-[100dvh] lg:h-screen w-full max-w-[100vw] lg:max-w-none bg-slate-50 overflow-hidden">
+    <div
+      className="flex h-[100dvh] lg:h-screen w-full max-w-[100vw] lg:max-w-none overflow-hidden"
+      style={{ background: 'var(--lb-bg)' }}
+    >
       {savedAccounts.length === 0 && useAuthStore.getState().user?.role !== 'ADMIN' && <NoAccountsOverlay />}
       {/* Leads Sidebar */}
-      <aside className={`w-full md:w-80 bg-white border-r border-slate-100 flex flex-col ${mobilePanel !== 'list' ? 'hidden md:flex' : 'flex'}`}>
-        <div className="p-4 border-b border-slate-100 flex items-center gap-3">
-          <button className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors" onClick={() => navigate('/dashboard')}>
-            <ArrowLeft size={20} />
-          </button>
-          <h2 className="text-lg font-bold text-slate-900 flex-1">Leads</h2>
+      <aside
+        className={`w-full md:w-80 flex flex-col ${mobilePanel !== 'list' ? 'hidden md:flex' : 'flex'}`}
+        style={{ background: 'var(--lb-surface)', borderRight: '1px solid var(--lb-line)' }}
+      >
+        <div
+          style={{
+            padding: '14px 14px 10px',
+            borderBottom: '1px solid var(--lb-line-soft)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
           <button
-            className={`p-2 rounded-lg transition-colors ${multiSelectMode ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'}`}
+            onClick={() => navigate('/dashboard')}
+            style={{
+              width: 28, height: 28,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              background: 'transparent', border: 0, cursor: 'pointer',
+              color: 'var(--lb-ink-5)', borderRadius: 4,
+            }}
+            className="md:hidden"
+            title="Back"
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--lb-ink-1)', flex: 1 }}>
+            Lead Activity
+          </h2>
+          <span
+            style={{
+              fontSize: 11,
+              color: 'var(--lb-ink-5)',
+              fontFamily: 'var(--lb-font-mono)',
+              fontWeight: 500,
+            }}
+          >
+            {filteredLeads.length}
+          </span>
+          <button
             onClick={toggleMultiSelect}
             title={multiSelectMode ? 'Exit selection mode' : 'Select multiple'}
+            style={{
+              width: 28, height: 28,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              background: multiSelectMode ? 'var(--lb-accent-tint)' : 'transparent',
+              color: multiSelectMode ? 'var(--lb-accent)' : 'var(--lb-ink-5)',
+              border: 0, cursor: 'pointer', borderRadius: 4,
+            }}
           >
-            <CheckSquare size={18} />
+            <CheckSquare size={15} />
           </button>
-          <button className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors" onClick={loadLeads} title="Refresh">
-            <RefreshCw size={18} />
+          <button
+            onClick={loadLeads}
+            title="Refresh"
+            style={{
+              width: 28, height: 28,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              background: 'transparent', border: 0, cursor: 'pointer',
+              color: 'var(--lb-ink-5)', borderRadius: 4,
+            }}
+          >
+            <RefreshCw size={15} />
           </button>
         </div>
 
@@ -1280,15 +1396,36 @@ export function Messages() {
         )}
 
         {/* Search Input */}
-        <div className="p-4 border-b border-slate-100">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--lb-line-soft)' }}>
+          <div style={{ position: 'relative' }}>
+            <Search
+              size={13}
+              style={{
+                position: 'absolute',
+                left: 9,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: 'var(--lb-ink-6)',
+              }}
+            />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name..."
-              className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="Search leads, services, places..."
+              style={{
+                width: '100%',
+                padding: '7px 10px 7px 28px',
+                fontSize: 12,
+                fontFamily: 'inherit',
+                background: 'var(--lb-ink-10)',
+                border: '1px solid transparent',
+                borderRadius: 'var(--lb-radius)',
+                color: 'var(--lb-ink-1)',
+                outline: 'none',
+              }}
+              onFocus={e => { e.currentTarget.style.borderColor = 'var(--lb-accent-line)'; e.currentTarget.style.background = 'var(--lb-surface)'; }}
+              onBlur={e => { e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.background = 'var(--lb-ink-10)'; }}
             />
           </div>
         </div>
@@ -1353,12 +1490,16 @@ export function Messages() {
               const isUpdated = hasNewUpdates(lead, lastSeenTimestamps);
               const isChecked = selectedLeadIds.has(lead.id);
               const isSelected = selectedLead?.id === lead.id;
+              const rawStatus = (lead.status || '').toLowerCase();
+              const statusKind: 'new' | 'replied' | 'quoted' | 'won' | 'lost' | 'neutral' =
+                rawStatus === 'new' ? 'new' :
+                rawStatus === 'contacted' ? 'replied' :
+                rawStatus === 'quoted' ? 'quoted' :
+                rawStatus === 'booked' ? 'won' :
+                rawStatus === 'lost' ? 'lost' : 'neutral';
               return (
                 <div
                   key={lead.id}
-                  className={`p-4 border-b border-slate-100 cursor-pointer transition-colors flex gap-3 ${
-                    isSelected ? 'bg-blue-50 border-l-4 border-l-blue-600' : 'hover:bg-slate-50'
-                  } ${!isCurrentAccount ? 'opacity-60' : ''} ${isChecked ? 'bg-blue-50' : ''}`}
                   onClick={() => {
                     if (multiSelectMode) {
                       toggleLeadSelection(lead.id, { stopPropagation: () => {} } as React.MouseEvent);
@@ -1371,48 +1512,114 @@ export function Messages() {
                       setMobilePanel('chat');
                     }
                   }}
+                  style={{
+                    padding: '12px 14px',
+                    borderBottom: '1px solid var(--lb-line-soft)',
+                    display: 'flex',
+                    gap: 10,
+                    cursor: 'pointer',
+                    background: isSelected || isChecked ? 'var(--lb-accent-tint)' : 'var(--lb-surface)',
+                    borderLeft: isSelected ? '2px solid var(--lb-accent)' : '2px solid transparent',
+                    opacity: !isCurrentAccount ? 0.6 : 1,
+                    position: 'relative',
+                    transition: 'background 120ms ease',
+                  }}
+                  onMouseEnter={e => { if (!isSelected && !isChecked) e.currentTarget.style.background = 'var(--lb-ink-10)'; }}
+                  onMouseLeave={e => { if (!isSelected && !isChecked) e.currentTarget.style.background = 'var(--lb-surface)'; }}
                 >
                   {multiSelectMode && (
                     <div
-                      className="flex-shrink-0 pt-1"
+                      style={{ paddingTop: 4, flexShrink: 0 }}
                       onClick={(e) => toggleLeadSelection(lead.id, e)}
                     >
-                      {isChecked ? <CheckSquare size={20} className="text-blue-600" /> : <Square size={20} className="text-slate-300" />}
+                      {isChecked
+                        ? <CheckSquare size={18} style={{ color: 'var(--lb-accent)' }} />
+                        : <Square size={18} style={{ color: 'var(--lb-ink-7)' }} />}
                     </div>
                   )}
-                  <div className="flex-shrink-0 relative">
-                    <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
-                      <User size={20} />
+                  <div style={{ flexShrink: 0, position: 'relative' }}>
+                    <div
+                      style={{
+                        width: 34, height: 34,
+                        borderRadius: 99,
+                        background: 'oklch(0.92 0.04 200)',
+                        color: 'oklch(0.35 0.1 200)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 12, fontWeight: 600, letterSpacing: 0.03,
+                      }}
+                    >
+                      {(lead.customerName || '?').split(' ').slice(0, 2).map(s => s[0]).join('').toUpperCase()}
                     </div>
-                    {isUpdated && <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-600 rounded-full border-2 border-white" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <span className="font-semibold text-slate-900 text-sm truncate">{lead.customerName}</span>
-                      <span className="text-xs text-slate-400 flex-shrink-0">{formatLeadTime(lead.lastMessageAt || lead.createdAt)}</span>
-                    </div>
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded text-white ${lead.platform === 'yelp' ? 'bg-[#FF1A1A]' : 'bg-[#41B1E1]'}`}>
-                        {lead.platform === 'yelp' ? 'Yelp' : 'TT'}
-                      </span>
-                      <span className="text-xs text-slate-600 truncate">{lead.category || 'Service Request'}</span>
-                      <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded uppercase ${
-                        lead.status?.toLowerCase() === 'new' ? 'bg-blue-100 text-blue-700' :
-                        lead.status?.toLowerCase() === 'contacted' ? 'bg-green-100 text-green-700' :
-                        'bg-slate-100 text-slate-600'
-                      }`}>
-                        {lead.status}
-                      </span>
-                    </div>
-                    {accountName && (
-                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded mb-1 ${
-                        isCurrentAccount ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
-                      }`}>
-                        <Building2 size={10} />
-                        {accountName}
-                      </span>
+                    {isUpdated && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          top: -2,
+                          right: -2,
+                          width: 10,
+                          height: 10,
+                          borderRadius: 99,
+                          background: 'var(--lb-accent)',
+                          border: '2px solid var(--lb-surface)',
+                        }}
+                      />
                     )}
-                    <p className="text-xs text-slate-500 truncate">{lead.message?.slice(0, 60)}...</p>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontWeight: isUpdated ? 600 : 500,
+                          color: 'var(--lb-ink-1)',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {lead.customerName}
+                      </span>
+                      <PlatformBadge platform={lead.platform} size="sm" />
+                      <span
+                        style={{
+                          marginLeft: 'auto',
+                          fontSize: 10,
+                          color: 'var(--lb-ink-5)',
+                          fontFamily: 'var(--lb-font-mono)',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {formatLeadTime(lead.lastMessageAt || lead.createdAt)}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--lb-ink-4)',
+                        marginTop: 2,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {lead.category || 'Service Request'}
+                      {accountName && <span style={{ color: 'var(--lb-ink-5)' }}> · {accountName}</span>}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--lb-ink-5)',
+                        marginTop: 3,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {lead.message?.slice(0, 80)}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                      <StatusPill status={statusKind} label={lead.status} />
+                    </div>
                   </div>
                 </div>
               );
@@ -1422,11 +1629,21 @@ export function Messages() {
       </aside>
 
       {/* Chat Area */}
-      <main className={`flex-1 min-w-0 flex flex-col bg-white ${mobilePanel !== 'chat' ? 'hidden md:flex' : 'flex'}`}>
+      <main
+        className={`flex-1 min-w-0 flex flex-col ${mobilePanel !== 'chat' ? 'hidden md:flex' : 'flex'}`}
+        style={{ background: 'var(--lb-bg)' }}
+      >
         {selectedLead ? (
           <>
             {/* Lead Info Header — fixed, never scrolls */}
-            <div className="p-3 sm:p-4 border-b border-slate-100 bg-white shrink-0">
+            <div
+              className="shrink-0"
+              style={{
+                padding: '14px 20px',
+                background: 'var(--lb-surface)',
+                borderBottom: '1px solid var(--lb-line)',
+              }}
+            >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                   {/* Mobile back button */}
@@ -1445,24 +1662,61 @@ export function Messages() {
                       <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded text-white ${selectedLead.platform === 'yelp' ? 'bg-[#FF1A1A]' : 'bg-[#41B1E1]'}`}>
                         {selectedLead.platform === 'yelp' ? 'Yelp' : 'TT'}
                       </span>
-                      <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase ${
-                        (() => {
-                          const s = (selectedLead.status || '').toLowerCase();
-                          const ts = (selectedLead.thumbtackStatus || '').toLowerCase();
-                          const display = ts || s;
-                          if (['done', 'completed', 'job done'].includes(display)) return 'bg-emerald-100 text-emerald-700';
-                          if (['scheduled', 'job scheduled'].includes(display)) return 'bg-purple-100 text-purple-700';
-                          if (['in_progress', 'in progress', 'hired'].includes(display)) return 'bg-amber-100 text-amber-700';
-                          if (['booked'].includes(s)) return 'bg-purple-100 text-purple-700';
-                          if (s === 'quoted') return 'bg-orange-100 text-orange-700';
-                          if (s === 'contacted') return 'bg-green-100 text-green-700';
-                          if (s === 'new') return 'bg-blue-100 text-blue-700';
-                          if (s === 'lost') return 'bg-red-100 text-red-700';
-                          return 'bg-slate-100 text-slate-600';
-                        })()
-                      }`}>
-                        {selectedLead.thumbtackStatus || selectedLead.status}
-                      </span>
+                      {/* Editable lead status pill — click to open dropdown of LB
+                          canonical statuses. Manual writes may surface a conflict
+                          modal if SF is integrated or platform status disagrees. */}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          disabled={savingStatus}
+                          onClick={() => setStatusEditorOpen(o => !o)}
+                          className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase hover:ring-2 hover:ring-offset-1 hover:ring-blue-400 transition ${
+                            LB_PIPELINE_STATUSES.find(s => s.value === (selectedLead.status || '').toLowerCase())?.tone
+                            || 'bg-slate-100 text-slate-600'
+                          }`}
+                          title="Click to change status"
+                        >
+                          {LB_PIPELINE_STATUSES.find(s => s.value === (selectedLead.status || '').toLowerCase())?.label
+                            || selectedLead.thumbtackStatus
+                            || selectedLead.status
+                            || 'unknown'}
+                          {savingStatus && '…'}
+                        </button>
+                        {statusEditorOpen && (
+                          <>
+                            <button
+                              className="fixed inset-0 z-30 bg-transparent cursor-default"
+                              onClick={() => setStatusEditorOpen(false)}
+                              aria-label="Close status menu"
+                            />
+                            <div className="absolute z-40 top-full mt-1 left-0 w-44 bg-white rounded-xl border border-slate-200 shadow-xl py-1">
+                              {LB_PIPELINE_STATUSES.map(opt => {
+                                const isCurrent = (selectedLead.status || '').toLowerCase() === opt.value;
+                                return (
+                                  <button
+                                    key={opt.value}
+                                    type="button"
+                                    disabled={savingStatus}
+                                    onClick={() => handleStatusChange(opt.value)}
+                                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 flex items-center justify-between ${isCurrent ? 'font-bold' : ''}`}
+                                  >
+                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${opt.tone}`}>{opt.label}</span>
+                                    {isCurrent && <span className="text-slate-400">✓</span>}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      {selectedLead.thumbtackStatus && selectedLead.thumbtackStatus.toLowerCase() !== (selectedLead.status || '').toLowerCase() && (
+                        <span
+                          className="px-2 py-0.5 text-[10px] font-semibold rounded uppercase bg-slate-50 border border-slate-200 text-slate-500"
+                          title={`Platform-native status from ${selectedLead.platform}`}
+                        >
+                          {selectedLead.platform === 'yelp' ? 'Yelp' : 'TT'}: {selectedLead.thumbtackStatus}
+                        </span>
+                      )}
                     </div>
                     <p className="text-sm text-slate-500 truncate">{selectedLead.category || 'Service Request'}</p>
                   </div>
@@ -1524,22 +1778,43 @@ export function Messages() {
             )}
 
             {/* Channel Filter Bar */}
-            <div className="flex gap-2 p-3 sm:p-4 border-b border-slate-100 shrink-0">
-              {(['all', 'platform', 'sms'] as const).map((filter) => (
-                <button
-                  key={filter}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-                    channelFilter === filter
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-                  }`}
-                  onClick={() => setChannelFilter(filter)}
-                >
-                  {filter === 'all' && 'All'}
-                  {filter === 'platform' && <><MessageCircle size={14} /> Platform</>}
-                  {filter === 'sms' && <><Smartphone size={14} /> SMS</>}
-                </button>
-              ))}
+            <div
+              className="shrink-0"
+              style={{
+                display: 'flex',
+                gap: 6,
+                padding: '10px 20px',
+                borderBottom: '1px solid var(--lb-line)',
+                background: 'var(--lb-surface)',
+              }}
+            >
+              {(['all', 'platform', 'sms'] as const).map((filter) => {
+                const active = channelFilter === filter;
+                return (
+                  <button
+                    key={filter}
+                    onClick={() => setChannelFilter(filter)}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: 11,
+                      fontWeight: 500,
+                      fontFamily: 'inherit',
+                      background: active ? 'var(--lb-accent-tint)' : 'transparent',
+                      color: active ? 'var(--lb-accent)' : 'var(--lb-ink-5)',
+                      border: `1px solid ${active ? 'var(--lb-accent-line)' : 'var(--lb-line)'}`,
+                      borderRadius: 999,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    {filter === 'all' && 'All'}
+                    {filter === 'platform' && <><MessageCircle size={12} /> Platform</>}
+                    {filter === 'sms' && <><Smartphone size={12} /> SMS</>}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Activity Timeline */}
@@ -1567,17 +1842,37 @@ export function Messages() {
                       key={event.id}
                       className={`flex ${event.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}
                     >
-                      <div className={`max-w-[85%] sm:max-w-md ${
-                        isSmsDisconnected && event.direction === 'outbound'
-                          ? 'bg-yellow-50 text-slate-900 border-2 border-yellow-200'
-                          : event.channel === 'sms' && event.direction === 'inbound'
-                          ? 'bg-green-50 text-slate-900'
-                          : event.channel === 'sms'
-                          ? 'bg-yellow-50 text-slate-900'
-                          : event.direction === 'outbound'
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-slate-100 text-slate-900'
-                      } rounded-2xl px-4 py-2.5`}>
+                      <div
+                        className="max-w-[85%] sm:max-w-md px-4 py-2.5"
+                        style={{
+                          borderRadius: 10,
+                          fontSize: 13,
+                          lineHeight: 1.45,
+                          border: '1px solid',
+                          background:
+                            isSmsDisconnected && event.direction === 'outbound'
+                              ? 'oklch(0.96 0.05 75)'
+                              : event.channel === 'sms' && event.direction === 'inbound'
+                              ? 'oklch(0.95 0.04 150)'
+                              : event.channel === 'sms'
+                              ? 'oklch(0.96 0.05 75)'
+                              : event.direction === 'outbound'
+                              ? (event.senderType === 'ai' ? 'var(--lb-accent-tint)' : 'var(--lb-ink-1)')
+                              : 'var(--lb-surface)',
+                          color:
+                            event.direction === 'outbound' && event.senderType !== 'ai' && !(event.channel === 'sms')
+                              ? 'white'
+                              : 'var(--lb-ink-1)',
+                          borderColor:
+                            isSmsDisconnected && event.direction === 'outbound'
+                              ? 'oklch(0.85 0.1 75)'
+                              : event.channel === 'sms'
+                              ? 'oklch(0.85 0.06 150)'
+                              : event.direction === 'outbound'
+                              ? (event.senderType === 'ai' ? 'var(--lb-accent-line)' : 'var(--lb-ink-1)')
+                              : 'var(--lb-line)',
+                        }}
+                      >
                       {/* Channel Badge */}
                       <div className="flex items-center gap-2 mb-1">
                         <span className={`text-[10px] font-bold uppercase ${
@@ -2398,6 +2693,68 @@ export function Messages() {
 
           </div>
         </aside>
+      )}
+
+      {/* Status conflict modal. Two variants, keyed off conflict.kind:
+          - sf_push_needed: "this lead is tracked in Service Flow — update there"
+          - platform_nudge_needed: "platform status is different — update on platform"
+          The LB write has ALREADY been persisted before this modal opens; the
+          modal is purely advisory, so the only actions are dismiss (which
+          resolves the audit row with a note) or a deep-link to the source. */}
+      {statusConflict && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4"
+          onClick={() => handleResolveConflict('dismissed_without_action')}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`p-2 rounded-lg ${
+                statusConflict.kind === 'sf_push_needed' ? 'bg-amber-100' : 'bg-blue-100'
+              }`}>
+                <AlertTriangle
+                  size={20}
+                  className={statusConflict.kind === 'sf_push_needed' ? 'text-amber-600' : 'text-blue-600'}
+                />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-bold text-slate-900 text-base">
+                  {statusConflict.kind === 'sf_push_needed'
+                    ? 'Update Service Flow too?'
+                    : `Update ${statusConflict.platform === 'yelp' ? 'Yelp' : 'Thumbtack'} too?`}
+                </h3>
+                <p className="text-sm text-slate-600 mt-1">
+                  {statusConflict.kind === 'sf_push_needed'
+                    ? 'Status saved in LeadBridge. Since this lead is tracked in Service Flow, the job there still shows the old status. Update it in Service Flow to keep both in sync.'
+                    : `Status saved in LeadBridge. The lead still shows "${statusConflict.platformStatus}" on ${statusConflict.platform === 'yelp' ? 'Yelp' : 'Thumbtack'}. Update it on the platform so customer-facing state matches.`}
+                </p>
+                {statusConflict.kind === 'sf_push_needed' && statusConflict.sfJobId && (
+                  <p className="text-xs text-slate-400 mt-2 font-mono">
+                    SF job: {statusConflict.sfJobId}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => handleResolveConflict('acknowledged')}
+                className="flex-1 px-4 py-2 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Got it
+              </button>
+              <button
+                type="button"
+                onClick={() => handleResolveConflict('dismissed_without_action')}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Bulk Send Modal */}
