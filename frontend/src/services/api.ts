@@ -409,7 +409,59 @@ export const leadsApi = {
     const { data } = await api.post(`/v1/leads/${leadId}/resync-messages`);
     return data;
   },
+  /**
+   * Manually change a lead's pipeline status.
+   * Backend always writes the status; `conflict` is populated when the write
+   * diverges from what SF or the platform last knew — the UI should surface
+   * it as a modal. See LeadStatusService.writeStatus.
+   */
+  updateStatus: async (leadId: string, status: string): Promise<{
+    success: boolean;
+    lead?: Lead;
+    conflict?: StatusConflict | null;
+    error?: string;
+  }> => {
+    const { data } = await api.patch(`/v1/leads/${leadId}/status`, { status });
+    return data;
+  },
+  listStatusConflicts: async (leadId: string): Promise<{
+    success: boolean;
+    conflicts?: StatusConflict[];
+    error?: string;
+  }> => {
+    const { data } = await api.get(`/v1/leads/${leadId}/status-conflicts`);
+    return data;
+  },
+  resolveStatusConflict: async (
+    leadId: string,
+    auditId: string,
+    resolveNote: string,
+  ): Promise<{ success: boolean; error?: string }> => {
+    const { data } = await api.post(
+      `/v1/leads/${leadId}/status-conflicts/${auditId}/resolve`,
+      { resolveNote },
+    );
+    return data;
+  },
 };
+
+/**
+ * Status-conflict payload emitted by the backend when a manual status change
+ * diverges from SF's or the platform's last-known status.
+ *
+ * - `sf_push_needed`: lead has an sfJobId → operator must push new status to SF.
+ *   Frontend shows: "This lead is tracked in Service Flow. Update there too?"
+ * - `platform_nudge_needed`: lead.platformStatus differs from the new LB status.
+ *   Frontend shows: "Platform status is '{platformStatus}' on {platform}. Update it too?"
+ */
+export interface StatusConflict {
+  kind: 'sf_push_needed' | 'platform_nudge_needed';
+  auditLogId: string;
+  note: string;
+  sfJobId?: string | null;
+  platform?: string;
+  platformStatus?: string | null;
+}
 
 // Message Templates
 export const templatesApi = {

@@ -21,6 +21,7 @@ import { JwtSseAuthGuard } from '../common/guards/jwt-sse-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { LeadsService } from './leads.service';
+import { LeadStatusService } from './lead-status.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Observable, fromEvent, merge, interval } from 'rxjs';
 import { map } from 'rxjs/operators';
@@ -30,6 +31,7 @@ import { map } from 'rxjs/operators';
 export class LeadsController {
   constructor(
     private leadsService: LeadsService,
+    private leadStatusService: LeadStatusService,
     private eventEmitter: EventEmitter2,
     private prisma: PrismaService,
     private crmWebhookService: CrmWebhookService,
@@ -65,6 +67,11 @@ export class LeadsController {
       fromEvent(this.eventEmitter, `sms.status.${userId}`).pipe(
         map((payload) => ({
           data: { type: 'sms.status', ...(payload as any) },
+        })),
+      ),
+      fromEvent(this.eventEmitter, `lead.status.conflict.${userId}`).pipe(
+        map((payload) => ({
+          data: { type: 'lead.status.conflict', ...(payload as any) },
         })),
       ),
     );
@@ -107,7 +114,20 @@ export class LeadsController {
   }
 
   /**
-   * Update lead status
+   * Update lead status manually (operator clicked in UI).
+   *
+   * Runs through LeadStatusService.writeStatus with source='manual' so the
+   * conflict-detection rules fire:
+   *  - If SF is integrated (lead.sfJobId set) → returns a `conflict` payload
+   *    of kind 'sf_push_needed' that the frontend renders as a modal asking
+   *    the operator to push to SF.
+   *  - Else if the platform's last-known status (platformStatus /
+   *    thumbtackStatus) disagrees with the new LB status → returns a
+   *    conflict of kind 'platform_nudge_needed' so the frontend can prompt
+   *    the operator to also update status on Thumbtack/Yelp.
+   *
+   * The write itself ALWAYS succeeds (LB is the source of truth for its own
+   * state); the conflict is just advisory.
    */
   @Patch(':id/status')
   async updateStatus(
@@ -115,7 +135,79 @@ export class LeadsController {
     @Param('id') id: string,
     @Body('status') status: string,
   ) {
-    return this.leadsService.updateLeadStatus(user.id, id, status);
+    // Guard: user must own the lead.
+    const lead = await this.prisma.lead.findFirst({
+      where: { id, userId: user.id },
+      select: { id: true, status: true, platform: true, businessId: true },
+    });
+    if (!lead) return { success: false, error: 'Lead not found' };
+
+    const result = await this.leadStatusService.writeStatus({
+      leadId: id,
+      source: 'manual',
+      newStatus: status,
+      actorType: 'user',
+      actorId: user.id,
+      actorName: user.email || user.name || null,
+    });
+
+    // Keep emitting the CRM webhook the UI listens for.
+    if (result.applied) {
+      this.crmWebhookService
+        .emit(user.id, 'lead.status_changed', {
+          userId: user.id,
+          platform: lead.platform,
+          businessId: lead.businessId ?? null,
+          leadId: id,
+          previousStatus: lead.status,
+        })
+        .catch(() => {});
+    }
+
+    const refreshed = await this.leadsService.getLead(user.id, id);
+    return {
+      success: true,
+      lead: refreshed,
+      conflict: result.conflict,
+    };
+  }
+
+  /**
+   * List unresolved status conflicts for a lead — polled by the Messages /
+   * Lead detail page after a manual status change or on page load.
+   */
+  @Get(':id/status-conflicts')
+  async listStatusConflicts(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id, userId: user.id },
+      select: { id: true },
+    });
+    if (!lead) return { success: false, error: 'Lead not found' };
+    const conflicts = await this.leadStatusService.listConflicts(id);
+    return { success: true, conflicts };
+  }
+
+  /**
+   * Resolve a status conflict (operator clicked "Keep mine" / "Accept upstream"
+   * / "Pushed to SF" in the modal). resolveNote records the operator's choice.
+   */
+  @Post(':id/status-conflicts/:auditId/resolve')
+  async resolveStatusConflict(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Param('auditId') auditId: string,
+    @Body('resolveNote') resolveNote: string,
+  ) {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id, userId: user.id },
+      select: { id: true },
+    });
+    if (!lead) return { success: false, error: 'Lead not found' };
+    await this.leadStatusService.resolveConflict(auditId, resolveNote || 'resolved');
+    return { success: true };
   }
 
   /**

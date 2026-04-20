@@ -15,6 +15,7 @@ import { PlatformFactory } from '../platforms/platform.factory';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { ConfigService } from '@nestjs/config';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
+import { LeadStatusService } from '../leads/lead-status.service';
 
 @Controller('v1/integrations/yelp')
 @UseGuards(JwtAuthGuard)
@@ -26,6 +27,7 @@ export class YelpIntegrationsController {
     private readonly platformService: PlatformService,
     private readonly platformFactory: PlatformFactory,
     private readonly configService: ConfigService,
+    private readonly leadStatusService: LeadStatusService,
     @Optional()
     @Inject(forwardRef(() => FollowUpEngineService))
     private readonly followUpEngine: FollowUpEngineService | null,
@@ -98,25 +100,43 @@ export class YelpIntegrationsController {
         const skipLeadStatusWrite = sfWins && existing.sfJobId !== null && existing.sfJobId !== undefined;
 
         if (nameChanged || statusChanged || categoryChanged || locationChanged || platformStatusChanged) {
-          const updates: any = {};
-          if (nameChanged) updates.customerName = newName;
-          if (statusChanged && !skipLeadStatusWrite) {
-            updates.status = newStatus;
-            updates.statusSource = 'platform_sync';
-            updates.statusUpdatedAt = new Date();
-          }
-          if (platformStatusChanged) {
-            updates.platformStatus = newStatusRaw;
-            updates.platformStatusAt = new Date();
-          }
-          if (categoryChanged) updates.category = newCategory;
+          // Non-status updates go in a direct write.
+          const nonStatusUpdates: any = {};
+          if (nameChanged) nonStatusUpdates.customerName = newName;
+          if (categoryChanged) nonStatusUpdates.category = newCategory;
           if (locationChanged) {
-            updates.city = newLocation.split(',')[0]?.trim();
-            updates.state = newLocation.split(',')[1]?.trim()?.split(' ')[0];
-            updates.postcode = newLocation.match(/\d{5}/)?.[0];
+            nonStatusUpdates.city = newLocation.split(',')[0]?.trim();
+            nonStatusUpdates.state = newLocation.split(',')[1]?.trim()?.split(' ')[0];
+            nonStatusUpdates.postcode = newLocation.match(/\d{5}/)?.[0];
+          }
+          if (Object.keys(nonStatusUpdates).length > 0) {
+            await this.prisma.lead.update({ where: { id: existing.id }, data: nonStatusUpdates });
           }
 
-          await this.prisma.lead.update({ where: { id: existing.id }, data: updates });
+          // Status writes go through LeadStatusService so they land in the
+          // audit log and (manual writes only) trigger conflict detection.
+          // Platform sync never conflicts — it silently updates platformStatus.
+          if (platformStatusChanged) {
+            await this.leadStatusService.writeStatus({
+              leadId: existing.id,
+              source: 'platform_sync',
+              platformStatus: newStatusRaw,
+              actorType: 'extension',
+              sourceEventId: `yelp_scrape_${Date.now()}`,
+            });
+          }
+          // Pre-SF-rollout: also copy platform status into Lead.status for
+          // non-SF-mapped leads (legacy behavior). Post-rollout this branch
+          // is short-circuited by skipLeadStatusWrite.
+          if (statusChanged && !skipLeadStatusWrite) {
+            await this.leadStatusService.writeStatus({
+              leadId: existing.id,
+              source: 'platform_sync',
+              newStatus,
+              actorType: 'extension',
+              sourceEventId: `yelp_scrape_${Date.now()}`,
+            });
+          }
 
           // Also update conversation name if changed
           if (nameChanged && existing.threadId) {
@@ -144,7 +164,11 @@ export class YelpIntegrationsController {
           }
 
           imported++;
-          this.logger.log(`[Yelp Import] Updated lead ${leadId}: ${Object.keys(updates).join(', ')}`);
+          const touched: string[] = [];
+          if (Object.keys(nonStatusUpdates).length > 0) touched.push(...Object.keys(nonStatusUpdates));
+          if (platformStatusChanged) touched.push('platformStatus');
+          if (statusChanged && !skipLeadStatusWrite) touched.push('status');
+          this.logger.log(`[Yelp Import] Updated lead ${leadId}: ${touched.join(', ')}`);
         } else {
           skipped++;
         }

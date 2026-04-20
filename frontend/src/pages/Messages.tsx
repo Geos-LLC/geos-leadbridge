@@ -25,8 +25,9 @@ import {
   Smartphone,
   MessageCircle,
   Sparkles,
+  AlertTriangle,
 } from 'lucide-react';
-import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, followUpApi, type MessageAttachment } from '../services/api';
+import api, { leadsApi, thumbtackApi, templatesApi, bulkMessageApi, notificationsApi, aiApi, conversationContextApi, followUpApi, type MessageAttachment, type StatusConflict } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
@@ -163,6 +164,24 @@ function mergeTimeline(
   return events;
 }
 
+/**
+ * LeadBridge canonical pipeline statuses (mirrors LB_PIPELINE_STATUSES on the
+ * backend — see src/integrations/service-flow/sf-status-map.ts). Manual writes
+ * from the status dropdown must use one of these values.
+ */
+const LB_PIPELINE_STATUSES: Array<{ value: string; label: string; tone: string }> = [
+  { value: 'new',         label: 'New',         tone: 'bg-blue-100 text-blue-700' },
+  { value: 'contacted',   label: 'Contacted',   tone: 'bg-green-100 text-green-700' },
+  { value: 'quoted',      label: 'Quoted',      tone: 'bg-orange-100 text-orange-700' },
+  { value: 'scheduled',   label: 'Scheduled',   tone: 'bg-purple-100 text-purple-700' },
+  { value: 'in_progress', label: 'In progress', tone: 'bg-amber-100 text-amber-700' },
+  { value: 'completed',   label: 'Completed',   tone: 'bg-emerald-100 text-emerald-700' },
+  { value: 'cancelled',   label: 'Cancelled',   tone: 'bg-slate-200 text-slate-700' },
+  { value: 'no_show',     label: 'No show',     tone: 'bg-slate-200 text-slate-700' },
+  { value: 'lost',        label: 'Lost',        tone: 'bg-red-100 text-red-700' },
+  { value: 'archived',    label: 'Archived',    tone: 'bg-slate-100 text-slate-500' },
+];
+
 function computeSummary(
   platformMessages: LocalMessage[],
   smsLogs: NotificationLog[],
@@ -238,6 +257,12 @@ export function Messages() {
   const [fuEditMsg, setFuEditMsg] = useState('');
   const [fuEditId, setFuEditId] = useState<string | null>(null);
   const [fuActionLoading, setFuActionLoading] = useState(false);
+
+  // Lead status editor state
+  const [statusEditorOpen, setStatusEditorOpen] = useState(false);
+  const [savingStatus, setSavingStatus] = useState(false);
+  const [statusConflict, setStatusConflict] = useState<StatusConflict | null>(null);
+  const [statusConflictLeadId, setStatusConflictLeadId] = useState<string | null>(null);
 
   // Load follow-up suggestions when selected lead changes
   useEffect(() => {
@@ -837,6 +862,45 @@ export function Messages() {
       setResyncError(errorMessage);
     } finally {
       setResyncingMessages(false);
+    }
+  };
+
+  /**
+   * Manual lead status change. Closes the dropdown on success, then pops the
+   * conflict modal if the backend flagged a divergence (SF integrated, or
+   * platform status disagrees).
+   */
+  const handleStatusChange = async (newStatus: string) => {
+    if (!selectedLead || savingStatus) return;
+    setSavingStatus(true);
+    try {
+      const res = await leadsApi.updateStatus(selectedLead.id, newStatus);
+      if (res.success && res.lead) {
+        setSelectedLead(res.lead as any);
+        setLeads(leads.map(l => (l.id === res.lead!.id ? (res.lead as any) : l)));
+      }
+      setStatusEditorOpen(false);
+      if (res.conflict) {
+        setStatusConflict(res.conflict);
+        setStatusConflictLeadId(selectedLead.id);
+      }
+    } catch (err: any) {
+      console.error('[Messages] Failed to update status:', err?.response?.data || err);
+      alert('Could not update status: ' + (err?.response?.data?.error || err?.message));
+    } finally {
+      setSavingStatus(false);
+    }
+  };
+
+  const handleResolveConflict = async (resolveNote: string) => {
+    if (!statusConflict || !statusConflictLeadId) return;
+    try {
+      await leadsApi.resolveStatusConflict(statusConflictLeadId, statusConflict.auditLogId, resolveNote);
+    } catch (err) {
+      console.error('[Messages] Failed to resolve conflict:', err);
+    } finally {
+      setStatusConflict(null);
+      setStatusConflictLeadId(null);
     }
   };
 
@@ -1598,24 +1662,61 @@ export function Messages() {
                       <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded text-white ${selectedLead.platform === 'yelp' ? 'bg-[#FF1A1A]' : 'bg-[#41B1E1]'}`}>
                         {selectedLead.platform === 'yelp' ? 'Yelp' : 'TT'}
                       </span>
-                      <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase ${
-                        (() => {
-                          const s = (selectedLead.status || '').toLowerCase();
-                          const ts = (selectedLead.thumbtackStatus || '').toLowerCase();
-                          const display = ts || s;
-                          if (['done', 'completed', 'job done'].includes(display)) return 'bg-emerald-100 text-emerald-700';
-                          if (['scheduled', 'job scheduled'].includes(display)) return 'bg-purple-100 text-purple-700';
-                          if (['in_progress', 'in progress', 'hired'].includes(display)) return 'bg-amber-100 text-amber-700';
-                          if (['booked'].includes(s)) return 'bg-purple-100 text-purple-700';
-                          if (s === 'quoted') return 'bg-orange-100 text-orange-700';
-                          if (s === 'contacted') return 'bg-green-100 text-green-700';
-                          if (s === 'new') return 'bg-blue-100 text-blue-700';
-                          if (s === 'lost') return 'bg-red-100 text-red-700';
-                          return 'bg-slate-100 text-slate-600';
-                        })()
-                      }`}>
-                        {selectedLead.thumbtackStatus || selectedLead.status}
-                      </span>
+                      {/* Editable lead status pill — click to open dropdown of LB
+                          canonical statuses. Manual writes may surface a conflict
+                          modal if SF is integrated or platform status disagrees. */}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          disabled={savingStatus}
+                          onClick={() => setStatusEditorOpen(o => !o)}
+                          className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase hover:ring-2 hover:ring-offset-1 hover:ring-blue-400 transition ${
+                            LB_PIPELINE_STATUSES.find(s => s.value === (selectedLead.status || '').toLowerCase())?.tone
+                            || 'bg-slate-100 text-slate-600'
+                          }`}
+                          title="Click to change status"
+                        >
+                          {LB_PIPELINE_STATUSES.find(s => s.value === (selectedLead.status || '').toLowerCase())?.label
+                            || selectedLead.thumbtackStatus
+                            || selectedLead.status
+                            || 'unknown'}
+                          {savingStatus && '…'}
+                        </button>
+                        {statusEditorOpen && (
+                          <>
+                            <button
+                              className="fixed inset-0 z-30 bg-transparent cursor-default"
+                              onClick={() => setStatusEditorOpen(false)}
+                              aria-label="Close status menu"
+                            />
+                            <div className="absolute z-40 top-full mt-1 left-0 w-44 bg-white rounded-xl border border-slate-200 shadow-xl py-1">
+                              {LB_PIPELINE_STATUSES.map(opt => {
+                                const isCurrent = (selectedLead.status || '').toLowerCase() === opt.value;
+                                return (
+                                  <button
+                                    key={opt.value}
+                                    type="button"
+                                    disabled={savingStatus}
+                                    onClick={() => handleStatusChange(opt.value)}
+                                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 flex items-center justify-between ${isCurrent ? 'font-bold' : ''}`}
+                                  >
+                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${opt.tone}`}>{opt.label}</span>
+                                    {isCurrent && <span className="text-slate-400">✓</span>}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      {selectedLead.thumbtackStatus && selectedLead.thumbtackStatus.toLowerCase() !== (selectedLead.status || '').toLowerCase() && (
+                        <span
+                          className="px-2 py-0.5 text-[10px] font-semibold rounded uppercase bg-slate-50 border border-slate-200 text-slate-500"
+                          title={`Platform-native status from ${selectedLead.platform}`}
+                        >
+                          {selectedLead.platform === 'yelp' ? 'Yelp' : 'TT'}: {selectedLead.thumbtackStatus}
+                        </span>
+                      )}
                     </div>
                     <p className="text-sm text-slate-500 truncate">{selectedLead.category || 'Service Request'}</p>
                   </div>
@@ -2592,6 +2693,68 @@ export function Messages() {
 
           </div>
         </aside>
+      )}
+
+      {/* Status conflict modal. Two variants, keyed off conflict.kind:
+          - sf_push_needed: "this lead is tracked in Service Flow — update there"
+          - platform_nudge_needed: "platform status is different — update on platform"
+          The LB write has ALREADY been persisted before this modal opens; the
+          modal is purely advisory, so the only actions are dismiss (which
+          resolves the audit row with a note) or a deep-link to the source. */}
+      {statusConflict && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4"
+          onClick={() => handleResolveConflict('dismissed_without_action')}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`p-2 rounded-lg ${
+                statusConflict.kind === 'sf_push_needed' ? 'bg-amber-100' : 'bg-blue-100'
+              }`}>
+                <AlertTriangle
+                  size={20}
+                  className={statusConflict.kind === 'sf_push_needed' ? 'text-amber-600' : 'text-blue-600'}
+                />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-bold text-slate-900 text-base">
+                  {statusConflict.kind === 'sf_push_needed'
+                    ? 'Update Service Flow too?'
+                    : `Update ${statusConflict.platform === 'yelp' ? 'Yelp' : 'Thumbtack'} too?`}
+                </h3>
+                <p className="text-sm text-slate-600 mt-1">
+                  {statusConflict.kind === 'sf_push_needed'
+                    ? 'Status saved in LeadBridge. Since this lead is tracked in Service Flow, the job there still shows the old status. Update it in Service Flow to keep both in sync.'
+                    : `Status saved in LeadBridge. The lead still shows "${statusConflict.platformStatus}" on ${statusConflict.platform === 'yelp' ? 'Yelp' : 'Thumbtack'}. Update it on the platform so customer-facing state matches.`}
+                </p>
+                {statusConflict.kind === 'sf_push_needed' && statusConflict.sfJobId && (
+                  <p className="text-xs text-slate-400 mt-2 font-mono">
+                    SF job: {statusConflict.sfJobId}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => handleResolveConflict('acknowledged')}
+                className="flex-1 px-4 py-2 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Got it
+              </button>
+              <button
+                type="button"
+                onClick={() => handleResolveConflict('dismissed_without_action')}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Bulk Send Modal */}
