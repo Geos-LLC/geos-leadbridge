@@ -46,6 +46,7 @@ import { PrismaModule } from './common/utils/prisma.module';
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
     PrismaModule,
+    TrialModule,
     AuthModule,
     PlatformsModule,
     LeadsModule,
@@ -70,7 +71,6 @@ import { PrismaModule } from './common/utils/prisma.module';
     HealthModule,
     MonitoringModule,
     OnboardingModule,
-    TrialModule,
   ],
   providers: [
     {
