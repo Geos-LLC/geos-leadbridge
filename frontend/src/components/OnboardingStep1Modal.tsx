@@ -28,13 +28,36 @@ const VOLUMES = [
   { value: '50+', label: '50+ / week' },
 ];
 
-const SERVICE_TYPES = [
-  { value: 'house_cleaning', label: 'House Cleaning' },
-  { value: 'deep_cleaning', label: 'Deep Cleaning' },
-  { value: 'move_out_cleaning', label: 'Move-out Cleaning' },
-  { value: 'commercial_cleaning', label: 'Commercial Cleaning' },
-  { value: 'other', label: 'Other' },
+const SERVICE_TYPE_GROUPS: { label: string; items: { value: string; label: string }[] }[] = [
+  {
+    label: 'Core home services',
+    items: [
+      { value: 'house_cleaning', label: 'House Cleaning' },
+      { value: 'carpet_upholstery', label: 'Carpet / Upholstery Cleaning' },
+      { value: 'window_cleaning', label: 'Window Cleaning' },
+      { value: 'pressure_washing', label: 'Pressure Washing' },
+    ],
+  },
+  {
+    label: 'Field services',
+    items: [
+      { value: 'plumbing', label: 'Plumbing' },
+      { value: 'electrical', label: 'Electrical' },
+      { value: 'hvac', label: 'HVAC' },
+      { value: 'handyman', label: 'Handyman' },
+    ],
+  },
+  {
+    label: 'Outdoor / property',
+    items: [
+      { value: 'landscaping', label: 'Landscaping / Lawn Care' },
+      { value: 'junk_removal', label: 'Junk Removal' },
+      { value: 'moving', label: 'Moving Services' },
+      { value: 'pest_control', label: 'Pest Control' },
+    ],
+  },
 ];
+const SERVICE_TYPE_OTHER = { value: 'other', label: 'Other' };
 
 type Props = {
   onComplete: (profile: OnboardingProfile) => void;
@@ -239,31 +262,57 @@ export default function OnboardingStep1Modal({ onComplete }: Props) {
         {step === 3 && (
           <div>
             <label className="block text-sm font-bold text-slate-900 mb-3">
-              What type of service do you offer?
+              What type of service business do you run?
             </label>
-            <div className="space-y-2">
-              {SERVICE_TYPES.map(s => (
+            <div className="max-h-[50vh] overflow-y-auto pr-1 space-y-5">
+              {SERVICE_TYPE_GROUPS.map(group => (
+                <div key={group.label}>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                    {group.label}
+                  </p>
+                  <div className="space-y-2">
+                    {group.items.map(s => (
+                      <button
+                        key={s.value}
+                        type="button"
+                        onClick={() => setService(s.value)}
+                        className={`w-full text-left px-4 py-3 rounded-2xl border-2 font-medium transition-all flex items-center justify-between cursor-pointer ${
+                          service === s.value
+                            ? 'border-blue-600 bg-blue-50 text-blue-900'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        {s.label}
+                        {service === s.value && <Check className="w-4 h-4 text-blue-600" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                  Other
+                </p>
                 <button
-                  key={s.value}
                   type="button"
-                  onClick={() => setService(s.value)}
+                  onClick={() => setService(SERVICE_TYPE_OTHER.value)}
                   className={`w-full text-left px-4 py-3 rounded-2xl border-2 font-medium transition-all flex items-center justify-between cursor-pointer ${
-                    service === s.value
+                    service === SERVICE_TYPE_OTHER.value
                       ? 'border-blue-600 bg-blue-50 text-blue-900'
                       : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
                   }`}
                 >
-                  {s.label}
-                  {service === s.value && <Check className="w-4 h-4 text-blue-600" />}
+                  {SERVICE_TYPE_OTHER.label}
+                  {service === SERVICE_TYPE_OTHER.value && <Check className="w-4 h-4 text-blue-600" />}
                 </button>
-              ))}
+              </div>
             </div>
             {service === 'other' && (
               <input
                 type="text"
                 value={serviceOther}
                 onChange={e => setServiceOther(e.target.value)}
-                placeholder="Describe your service"
+                placeholder="Type your service (e.g. Pool cleaning)"
                 autoFocus
                 className="w-full mt-3 px-4 py-3 rounded-2xl border-2 border-slate-200 focus:border-blue-600 focus:outline-none text-slate-900"
               />

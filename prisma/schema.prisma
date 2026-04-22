@@ -152,7 +152,7 @@ model OnboardingProfile {
   primaryLeadSource    String? // "thumbtack" | "yelp" | "google" | "facebook" | "other"
   secondaryLeadSources String[] @default([])
   weeklyLeadVolume     String? // "0-5" | "5-15" | "15-50" | "50+"
-  serviceType          String? // "house_cleaning" | "deep_cleaning" | "move_out_cleaning" | "commercial_cleaning" | "other"
+  serviceType          String? // "house_cleaning" | "carpet_upholstery" | "window_cleaning" | "pressure_washing" | "plumbing" | "electrical" | "hvac" | "handyman" | "landscaping" | "junk_removal" | "moving" | "pest_control" | "other"
   serviceTypeOther     String?
   step1CompletedAt     DateTime?
 
