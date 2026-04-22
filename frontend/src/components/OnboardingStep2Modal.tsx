@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ArrowRight, Loader2, Check, X } from 'lucide-react';
+import { Loader2, Check, X } from 'lucide-react';
 import { onboardingApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
@@ -100,29 +100,30 @@ export default function OnboardingStep2Modal({ onComplete }: Props) {
     },
   ];
 
-  const handleNext = () => {
-    if (currentValue) {
-      trackEvent('qualification_answered', {
-        step_group: 'step2',
-        question_key: STEP_KEYS[step],
-        answer_value: currentValue,
-      });
-    }
+  // Auto-advance on single-select click. On the last step, finish immediately
+  // with the explicit value so we don't race React's state commit.
+  const pickAnswer = (value: string) => {
+    updateCurrent(value);
+    trackEvent('qualification_answered', {
+      step_group: 'step2',
+      question_key: STEP_KEYS[step],
+      answer_value: value,
+    });
     if (step < totalSteps - 1) {
       setStep((step + 1) as 0 | 1 | 2 | 3);
     } else {
-      void handleFinish();
+      void handleFinish({ goal: value });
     }
   };
 
-  const handleFinish = async () => {
+  const handleFinish = async (override?: { goal?: string }) => {
     try {
       setSaving(true);
       const { profile } = await onboardingApi.saveStep2({
         responseSpeed: responseSpeed || undefined,
         missedLeadOutcome: missedOutcome || undefined,
         avgJobValue: jobValue || undefined,
-        userGoal: goal || undefined,
+        userGoal: override?.goal ?? goal ?? undefined,
       });
       if (user) {
         const token = localStorage.getItem('token') || '';
@@ -188,14 +189,8 @@ export default function OnboardingStep2Modal({ onComplete }: Props) {
             />
           ))}
         </div>
-        <p className="text-xs font-bold uppercase tracking-widest text-blue-600 mb-2">
+        <p className="text-xs font-bold uppercase tracking-widest text-blue-600 mb-6">
           Step {step + 1} of {totalSteps}
-        </p>
-        <h2 className="text-2xl font-extrabold text-slate-900 mb-1 tracking-tight">
-          Help us tailor your automation
-        </h2>
-        <p className="text-sm text-slate-500 mb-6">
-          Optional — but helps us personalize your experience.
         </p>
 
         <label className="block text-sm font-bold text-slate-900 mb-3">{q.label}</label>
@@ -204,7 +199,7 @@ export default function OnboardingStep2Modal({ onComplete }: Props) {
             <button
               key={opt.value}
               type="button"
-              onClick={() => updateCurrent(opt.value)}
+              onClick={() => pickAnswer(opt.value)}
               className={`w-full text-left px-4 py-3 rounded-2xl border-2 font-medium transition-all flex items-center justify-between cursor-pointer ${
                 currentValue === opt.value
                   ? 'border-blue-600 bg-blue-50 text-blue-900'
@@ -217,7 +212,7 @@ export default function OnboardingStep2Modal({ onComplete }: Props) {
           ))}
         </div>
 
-        <div className="flex items-center justify-between mt-8">
+        <div className="flex items-center justify-between mt-8 min-h-[48px]">
           <div className="flex items-center gap-4">
             <button
               type="button"
@@ -236,29 +231,14 @@ export default function OnboardingStep2Modal({ onComplete }: Props) {
               Skip all
             </button>
           </div>
-          <button
-            type="button"
-            onClick={handleNext}
-            disabled={saving}
-            className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-2xl text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          >
-            {saving ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Saving…
-              </>
-            ) : step === totalSteps - 1 ? (
-              <>
-                Finish
-                <Check className="w-4 h-4" />
-              </>
-            ) : (
-              <>
-                Continue
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
-          </button>
+          {saving ? (
+            <span className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-2xl text-sm font-bold shadow-lg shadow-blue-200">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Saving…
+            </span>
+          ) : (
+            <span className="text-xs text-slate-400">Tap an option to continue</span>
+          )}
         </div>
       </div>
     </div>

@@ -121,15 +121,35 @@ export default function OnboardingStep1Modal({ onComplete }: Props) {
     }
   };
 
-  const handleFinish = async () => {
+  // Auto-advance for single-select answers. Pass explicit values so the async
+  // submit (step 3) doesn't race against React's state commit.
+  const pickPrimary = (value: string) => {
+    setPrimary(value);
+    trackEvent('qualification_answered', { step_group: 'step1', question_key: STEP_KEYS[0], answer_value: value });
+    setStep(1);
+  };
+  const pickVolume = (value: string) => {
+    setVolume(value);
+    trackEvent('qualification_answered', { step_group: 'step1', question_key: STEP_KEYS[2], answer_value: value });
+    setStep(3);
+  };
+  const pickService = (value: string) => {
+    setService(value);
+    if (value === 'other') return; // wait for free-text + Finish button
+    trackEvent('qualification_answered', { step_group: 'step1', question_key: STEP_KEYS[3], answer_value: value });
+    void handleFinish(value);
+  };
+
+  const handleFinish = async (serviceOverride?: string) => {
     try {
       setSaving(true);
+      const finalService = serviceOverride ?? service;
       const { profile } = await onboardingApi.saveStep1({
         primaryLeadSource: primary,
         secondaryLeadSources: secondary.filter(s => s !== primary),
         weeklyLeadVolume: volume,
-        serviceType: service,
-        serviceTypeOther: service === 'other' ? serviceOther.trim() : undefined,
+        serviceType: finalService,
+        serviceTypeOther: finalService === 'other' ? serviceOther.trim() : undefined,
       });
       if (user) {
         const token = localStorage.getItem('token') || '';
@@ -167,14 +187,8 @@ export default function OnboardingStep1Modal({ onComplete }: Props) {
             />
           ))}
         </div>
-        <p className="text-xs font-bold uppercase tracking-widest text-blue-600 mb-2">
-          Step {step + 1} of {totalSteps} · ~30 seconds
-        </p>
-        <h2 className="text-2xl font-extrabold text-slate-900 mb-1 tracking-tight">
-          Let's set up your account
-        </h2>
-        <p className="text-sm text-slate-500 mb-6">
-          A few quick questions so LeadBridge can tailor itself to your business.
+        <p className="text-xs font-bold uppercase tracking-widest text-blue-600 mb-6">
+          Step {step + 1} of {totalSteps}
         </p>
 
         {/* Step 0 — primary source */}
@@ -188,7 +202,7 @@ export default function OnboardingStep1Modal({ onComplete }: Props) {
                 <button
                   key={src.value}
                   type="button"
-                  onClick={() => setPrimary(src.value)}
+                  onClick={() => pickPrimary(src.value)}
                   className={`w-full text-left px-4 py-3 rounded-2xl border-2 font-medium transition-all flex items-center justify-between cursor-pointer ${
                     primary === src.value
                       ? 'border-blue-600 bg-blue-50 text-blue-900'
@@ -244,7 +258,7 @@ export default function OnboardingStep1Modal({ onComplete }: Props) {
                 <button
                   key={v.value}
                   type="button"
-                  onClick={() => setVolume(v.value)}
+                  onClick={() => pickVolume(v.value)}
                   className={`px-4 py-4 rounded-2xl border-2 font-semibold transition-all cursor-pointer ${
                     volume === v.value
                       ? 'border-blue-600 bg-blue-50 text-blue-900'
@@ -275,7 +289,7 @@ export default function OnboardingStep1Modal({ onComplete }: Props) {
                       <button
                         key={s.value}
                         type="button"
-                        onClick={() => setService(s.value)}
+                        onClick={() => pickService(s.value)}
                         className={`w-full text-left px-4 py-3 rounded-2xl border-2 font-medium transition-all flex items-center justify-between cursor-pointer ${
                           service === s.value
                             ? 'border-blue-600 bg-blue-50 text-blue-900'
@@ -295,7 +309,7 @@ export default function OnboardingStep1Modal({ onComplete }: Props) {
                 </p>
                 <button
                   type="button"
-                  onClick={() => setService(SERVICE_TYPE_OTHER.value)}
+                  onClick={() => pickService(SERVICE_TYPE_OTHER.value)}
                   className={`w-full text-left px-4 py-3 rounded-2xl border-2 font-medium transition-all flex items-center justify-between cursor-pointer ${
                     service === SERVICE_TYPE_OTHER.value
                       ? 'border-blue-600 bg-blue-50 text-blue-900'
@@ -320,40 +334,53 @@ export default function OnboardingStep1Modal({ onComplete }: Props) {
           </div>
         )}
 
-        {/* Actions */}
-        <div className="flex items-center justify-between mt-8">
-          <button
-            type="button"
-            onClick={() => setStep(Math.max(0, step - 1) as 0 | 1 | 2 | 3)}
-            disabled={step === 0 || saving}
-            className="text-sm font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-          >
-            Back
-          </button>
-          <button
-            type="button"
-            onClick={handleNext}
-            disabled={!canGoNext || saving}
-            className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-2xl text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          >
-            {saving ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Saving…
-              </>
-            ) : step === totalSteps - 1 ? (
-              <>
-                Finish Setup
-                <Check className="w-4 h-4" />
-              </>
-            ) : (
-              <>
-                Continue
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
-          </button>
-        </div>
+        {/* Actions — auto-advance on single-select clicks; button only needed
+             for multi-select (step 1), Other + text on step 3, and saving feedback */}
+        {(() => {
+          const showContinue = step === 1; // multi-select
+          const showFinish = step === 3 && service === 'other';
+          const showSaving = saving;
+          const showActionButton = showContinue || showFinish || showSaving;
+          return (
+            <div className="flex items-center justify-between mt-8 min-h-[48px]">
+              <button
+                type="button"
+                onClick={() => setStep(Math.max(0, step - 1) as 0 | 1 | 2 | 3)}
+                disabled={step === 0 || saving}
+                className="text-sm font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Back
+              </button>
+              {showActionButton ? (
+                <button
+                  type="button"
+                  onClick={handleNext}
+                  disabled={!canGoNext || saving}
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-2xl text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {showSaving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Saving…
+                    </>
+                  ) : showFinish ? (
+                    <>
+                      Finish Setup
+                      <Check className="w-4 h-4" />
+                    </>
+                  ) : (
+                    <>
+                      Continue
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              ) : (
+                <span className="text-xs text-slate-400">Tap an option to continue</span>
+              )}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
