@@ -1883,7 +1883,8 @@ export function Messages() {
                             : event.channel === 'sms'
                             ? 'text-yellow-700'
                             : event.direction === 'outbound'
-                            ? 'text-blue-100'
+                            // AI bubble bg is a light tint → use dark-on-light; manual (dark bg) keeps light text.
+                            ? (event.senderType === 'ai' ? 'text-blue-700' : 'text-blue-100')
                             : 'text-blue-600'
                         }`}>
                           {event.channel === 'platform' && (event.direction === 'outbound' && event.senderType === 'ai' ? 'AI' : 'Platform')}
@@ -1939,7 +1940,8 @@ export function Messages() {
                           : event.channel === 'sms'
                           ? 'text-yellow-700'
                           : event.direction === 'outbound'
-                          ? 'text-blue-100'
+                          // AI bubble bg is a light tint → use slate-500 for contrast; manual (dark bg) keeps light text.
+                          ? (event.senderType === 'ai' ? 'text-slate-500' : 'text-blue-100')
                           : 'text-slate-500'
                       }`}>
                         <span>
