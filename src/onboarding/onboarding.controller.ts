@@ -6,10 +6,22 @@ import { OnboardingService, Step1Input, Step2Input } from './onboarding.service'
 const VALID_PRIMARY_SOURCES = ['thumbtack', 'yelp', 'google', 'facebook', 'other'];
 const VALID_VOLUMES = ['0-5', '5-15', '15-50', '50+'];
 const VALID_SERVICE_TYPES = [
+  // Core home services
   'house_cleaning',
-  'deep_cleaning',
-  'move_out_cleaning',
-  'commercial_cleaning',
+  'carpet_upholstery',
+  'window_cleaning',
+  'pressure_washing',
+  // Field services
+  'plumbing',
+  'electrical',
+  'hvac',
+  'handyman',
+  // Outdoor / property
+  'landscaping',
+  'junk_removal',
+  'moving',
+  'pest_control',
+  // Fallback
   'other',
 ];
 
