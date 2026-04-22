@@ -1729,4 +1729,34 @@ export const followUpApi = {
   },
 };
 
+export const onboardingApi = {
+  getProfile: async (): Promise<{ success: boolean; profile: import('../types').OnboardingProfile | null }> => {
+    const { data } = await api.get('/v1/onboarding/profile');
+    return data;
+  },
+  saveStep1: async (input: {
+    primaryLeadSource: string;
+    secondaryLeadSources?: string[];
+    weeklyLeadVolume: string;
+    serviceType: string;
+    serviceTypeOther?: string;
+  }): Promise<{ success: boolean; profile: import('../types').OnboardingProfile }> => {
+    const { data } = await api.post('/v1/onboarding/step1', input);
+    return data;
+  },
+  saveStep2: async (input: {
+    responseSpeed?: string;
+    missedLeadOutcome?: string;
+    avgJobValue?: string;
+    userGoal?: string;
+  }): Promise<{ success: boolean; profile: import('../types').OnboardingProfile }> => {
+    const { data } = await api.post('/v1/onboarding/step2', input);
+    return data;
+  },
+  skipStep2: async (): Promise<{ success: boolean; profile: import('../types').OnboardingProfile }> => {
+    const { data } = await api.post('/v1/onboarding/step2/skip');
+    return data;
+  },
+};
+
 export default api;

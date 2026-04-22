@@ -1,3 +1,22 @@
+export interface OnboardingProfile {
+  id: string;
+  userId: string;
+  primaryLeadSource: string | null;
+  secondaryLeadSources: string[];
+  weeklyLeadVolume: string | null;
+  serviceType: string | null;
+  serviceTypeOther: string | null;
+  step1CompletedAt: string | null;
+  responseSpeed: string | null;
+  missedLeadOutcome: string | null;
+  avgJobValue: string | null;
+  userGoal: string | null;
+  step2CompletedAt: string | null;
+  step2SkippedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -12,6 +31,7 @@ export interface User {
   trialStartDate?: string;
   trialEndDate?: string;
   trialUsed?: boolean;
+  onboardingProfile?: OnboardingProfile | null;
 }
 
 export interface AuthResponse {

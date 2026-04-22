@@ -1,6 +1,21 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { User } from '../types';
+import { setAnalyticsUserId, setAnalyticsUserProperties, resetAnalyticsSession } from '../services/analytics';
+
+function userPropsFrom(user: User): Record<string, string | number | boolean | undefined | null> {
+  const profile = user.onboardingProfile ?? null;
+  return {
+    plan_type: user.subscriptionTier ?? 'none',
+    trial_status: user.trialUsed ? 'used' : user.subscriptionStatus === 'TRIALING' ? 'active' : 'none',
+    primary_lead_source: profile?.primaryLeadSource ?? undefined,
+    weekly_lead_volume: profile?.weeklyLeadVolume ?? undefined,
+    service_type: profile?.serviceType ?? undefined,
+    response_speed: profile?.responseSpeed ?? undefined,
+    avg_job_value: profile?.avgJobValue ?? undefined,
+    user_goal: profile?.userGoal ?? undefined,
+  };
+}
 
 interface AuthState {
   user: User | null;
@@ -38,10 +53,13 @@ export const useAuthStore = create<AuthState>()(
         console.log('[AuthStore] User role:', user.role);
         localStorage.setItem('token', token);
         set({ user, token, isAuthenticated: true });
+        setAnalyticsUserId(user.id);
+        setAnalyticsUserProperties(userPropsFrom(user));
       },
       logout: () => {
         localStorage.removeItem('token');
         set({ user: null, token: null, isAuthenticated: false, impersonatingUser: null });
+        resetAnalyticsSession();
       },
     }),
     {

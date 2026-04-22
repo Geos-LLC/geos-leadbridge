@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, Building2, Phone, ArrowRight, Zap, ShieldCheck, RefreshCw } from 'lucide-react';
 import { authApi } from '../services/api';
 import { useAuthStore } from '../store/authStore';
+import { trackEvent } from '../services/analytics';
 
 export function Register() {
   const navigate = useNavigate();
@@ -14,18 +15,32 @@ export function Register() {
   const [businessPhone, setBusinessPhone] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const startedRef = useRef(false);
+
+  useEffect(() => {
+    trackEvent('signup_page_viewed');
+  }, []);
+
+  const markStarted = () => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    trackEvent('signup_started');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    trackEvent('signup_submitted');
 
     if (password !== confirmPassword) {
       setError('Passwords do not match');
+      trackEvent('signup_failed', { error_type: 'password_mismatch' });
       return;
     }
 
     if (password.length < 6) {
       setError('Password must be at least 6 characters');
+      trackEvent('signup_failed', { error_type: 'password_too_short' });
       return;
     }
 
@@ -34,9 +49,14 @@ export function Register() {
     try {
       const { user, token } = await authApi.register(email, password, name || undefined, businessPhone || undefined);
       setAuth(user, token);
+      trackEvent('signup_success', { method: 'email' });
+      trackEvent('first_login');
+      localStorage.setItem('lb_has_logged_in', '1');
       navigate('/dashboard');
     } catch (err: any) {
+      const errorType = err.response?.status === 409 ? 'email_exists' : err.response?.status >= 500 ? 'server_error' : 'validation';
       setError(err.response?.data?.message || 'Registration failed. Please try again.');
+      trackEvent('signup_failed', { error_type: errorType });
     } finally {
       setLoading(false);
     }
@@ -72,7 +92,7 @@ export function Register() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} onFocus={markStarted} className="space-y-5">
             {/* Company Name Field */}
             <div className="space-y-2">
               <label htmlFor="name" className="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">
