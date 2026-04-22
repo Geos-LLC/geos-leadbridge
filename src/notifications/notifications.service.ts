@@ -2724,6 +2724,48 @@ export class NotificationsService {
   }
 
   /**
+   * Send a system SMS directly to a user's business phone (e.g. trial-end alert).
+   * Uses any active TenantPhoneNumber the user owns as the from-number, falls back
+   * to letting Sigcore pick. Skips silently if no businessPhone configured.
+   */
+  async sendSystemSmsToUser(
+    userId: string,
+    body: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { businessPhone: true },
+    });
+    if (!user?.businessPhone) {
+      return { success: false, error: 'no_business_phone' };
+    }
+
+    const fromPhone = await this.resolveBotPhone(userId);
+    const apiKey =
+      this.configService.get<string>('SIGCORE_API_KEY') ||
+      this.appSigcoreApiKey;
+    if (!apiKey) {
+      return { success: false, error: 'no_sigcore_key' };
+    }
+
+    try {
+      const result = await this.sendViaSigcore({
+        to: user.businessPhone,
+        body,
+        fromPhone,
+        apiKey,
+        sigcoreWorkspaceId: null,
+        metadata: { purpose: 'system_alert', tenantId: userId },
+      });
+      this.logger.log(`[SystemSMS] Sent to user ${userId} (${user.businessPhone}): ${result.status}`);
+      return { success: true };
+    } catch (err: any) {
+      this.logger.error(`[SystemSMS] Failed for user ${userId}: ${err.message}`);
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
    * Send message via Sigcore API
    */
   private async sendViaSigcore(params: {

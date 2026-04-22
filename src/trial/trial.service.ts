@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../common/utils/prisma.service';
 import { TrialType, SubscriptionStatus } from '../../generated/prisma';
+
+export const TRIAL_ENDED_EVENT = 'trial.ended';
 
 const TT = 'thumbtack';
 const YELP = 'yelp';
@@ -30,7 +33,10 @@ type CanProcessResult =
 export class TrialService {
   private readonly logger = new Logger(TrialService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private eventEmitter: EventEmitter2,
+  ) {}
 
   /**
    * Initialize or upgrade trial when a platform is connected.
@@ -180,12 +186,17 @@ export class TrialService {
   /**
    * Mark trial as ended (idempotent). Returns whether this call was the one
    * that flipped trialEndedAt. Used by the time-based scheduler too.
+   * On the first transition, fires `trial.ended` so notifications can dispatch
+   * without TrialService having to depend on TrialNotificationService directly.
    */
   async markEnded(userId: string): Promise<{ justExhausted: boolean; nowEnded: boolean }> {
     const result = await this.prisma.user.updateMany({
       where: { id: userId, trialEndedAt: null },
       data: { trialEndedAt: new Date() },
     });
+    if (result.count > 0) {
+      this.eventEmitter.emit(TRIAL_ENDED_EVENT, { userId });
+    }
     return { justExhausted: result.count > 0, nowEnded: true };
   }
 
