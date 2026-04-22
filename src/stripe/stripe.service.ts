@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
 import { PrismaService } from '../common/utils/prisma.service';
 import { SubscriptionTier, SubscriptionStatus } from '../../generated/prisma';
+import { TrialService } from '../trial/trial.service';
 
 @Injectable()
 export class StripeService {
@@ -12,6 +13,7 @@ export class StripeService {
   constructor(
     private configService: ConfigService,
     private prisma: PrismaService,
+    private trialService: TrialService,
   ) {
     const secretKey = this.configService.get<string>('STRIPE_SECRET_KEY');
     if (secretKey) {
@@ -243,6 +245,8 @@ export class StripeService {
         trialUsed: true,
         trialLeadsHandled: true,
         trialLeadsLimit: true,
+        trialType: true,
+        trialEndedAt: true,
       },
     });
 
@@ -250,30 +254,18 @@ export class StripeService {
       throw new BadRequestException('User not found');
     }
 
-    // If subscription is cancelled, return the cancelled status (not null)
-    // Only return null if there was never a subscription
     const tier = user.subscriptionTier;
     const status = user.subscriptionStatus;
-
-    // Get features based on tier (null if cancelled or no subscription)
     const features = status === SubscriptionStatus.CANCELLED || !tier ? [] : this.getFeaturesForTier(tier);
 
-    // Check trial status — leads are the hard limit, time is soft (warning only)
-    const now = new Date();
-    const usageNotExpired = user.trialLeadsHandled < user.trialLeadsLimit;
-    const trialExpiredByTime = !!(user.trialEndDate && now > user.trialEndDate);
-    const trialExpiredByUsage = user.trialLeadsHandled >= user.trialLeadsLimit;
-
-    // Trial is active as long as leads remain (time expiry is just a warning)
-    const isOnTrial = usageNotExpired && !user.subscriptionTier;
-
-    // Trial only truly expires when ALL leads are used
-    const trialExpired = trialExpiredByUsage && !user.subscriptionTier;
-
-    const trialDaysRemaining = user.trialEndDate
-      ? Math.max(0, Math.ceil((user.trialEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
-      : 0;
-    const trialLeadsRemaining = Math.max(0, user.trialLeadsLimit - user.trialLeadsHandled);
+    const view = this.trialService.buildTrialView({
+      subscriptionTier: tier,
+      trialType: user.trialType,
+      trialEndDate: user.trialEndDate,
+      trialEndedAt: user.trialEndedAt,
+      trialLeadsHandled: user.trialLeadsHandled,
+      trialLeadsLimit: user.trialLeadsLimit,
+    });
 
     return {
       tier,
@@ -283,15 +275,30 @@ export class StripeService {
       hasOwnNumber: user.hasOwnNumber || false,
       features,
       trial: {
-        isOnTrial,
-        trialDaysRemaining,
-        trialExpired,
-        trialExpiredByTime,
-        trialExpiredByUsage,
-        trialEndDate: user.trialEndDate,
-        trialLeadsHandled: user.trialLeadsHandled,
-        trialLeadsLimit: user.trialLeadsLimit,
-        trialLeadsRemaining,
+        // Adaptive view (preferred for new UI)
+        type: view.trialType,
+        isActive: view.isActive,
+        isEnded: view.isEnded,
+        daysRemaining: view.daysRemaining,
+        leadsHandled: view.leadsHandled,
+        leadsLimit: view.leadsLimit,
+        leadsRemaining: view.leadsRemaining,
+        endDate: view.endDate,
+        endedAt: view.endedAt,
+        label: view.label,
+        progress: view.progress,
+
+        // Legacy fields kept for back-compat with existing TrialBanner /
+        // TrialExpiredModal until they're swapped to the adaptive view.
+        isOnTrial: view.isActive,
+        trialExpired: view.isEnded,
+        trialExpiredByTime: view.trialType !== null && !view.isActive && view.daysRemaining === 0,
+        trialExpiredByUsage: view.trialType !== null && view.leadsRemaining === 0,
+        trialDaysRemaining: view.daysRemaining ?? 0,
+        trialEndDate: view.endDate,
+        trialLeadsHandled: view.leadsHandled,
+        trialLeadsLimit: view.leadsLimit,
+        trialLeadsRemaining: view.leadsRemaining,
       },
     };
   }

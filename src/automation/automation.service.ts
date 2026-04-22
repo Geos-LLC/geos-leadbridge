@@ -11,6 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { AiService } from '../ai/ai.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
+import { TrialService } from '../trial/trial.service';
 
 export interface CreateAutomationRuleDto {
   savedAccountId: string;
@@ -83,6 +84,7 @@ export class AutomationService implements OnModuleInit {
     private aiService: AiService,
     private monitoring: MonitoringService,
     private conversationContext: ConversationContextService,
+    private trialService: TrialService,
   ) {}
 
   /**
@@ -380,6 +382,15 @@ export class AutomationService implements OnModuleInit {
   async handleNewLead(context: AutomationTriggerContext): Promise<void> {
     this.logger.log(`Handling new lead automation: ${context.negotiationId} for business ${context.businessId}`);
 
+    // Trial paywall: new leads are blocked the moment trial ends. Existing
+    // conversations get the 24h grace via canProcessLead(conversationId), but
+    // a new lead has no prior conversation so we omit conversationId here.
+    const allowed = await this.trialService.canProcessLead(context.userId);
+    if (!allowed.allowed) {
+      this.logger.log(`[AUTOMATION] ✗ BLOCKED handleNewLead — user ${context.userId} reason=${allowed.reason}`);
+      return;
+    }
+
     // Find saved account by businessId (any platform — Thumbtack, Yelp, etc.)
     const savedAccount = await this.prisma.savedAccount.findFirst({
       where: {
@@ -430,6 +441,18 @@ export class AutomationService implements OnModuleInit {
     }
 
     this.logger.log(`[AUTOMATION] ✓ ELIGIBLE: This is a customer reply (not the first message)`);
+
+    // Trial paywall: customer replies on existing conversations get 24h grace
+    // after trial end. Look up the lead's thread so canProcessLead can check.
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: context.leadId },
+      select: { threadId: true },
+    });
+    const allowed = await this.trialService.canProcessLead(context.userId, lead?.threadId ?? undefined);
+    if (!allowed.allowed) {
+      this.logger.log(`[AUTOMATION] ✗ BLOCKED handleCustomerReply — user ${context.userId} reason=${allowed.reason}`);
+      return;
+    }
 
     // Find saved account by businessId (any platform — Thumbtack, Yelp, etc.)
     const savedAccount = await this.prisma.savedAccount.findFirst({

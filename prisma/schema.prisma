@@ -61,6 +61,12 @@ enum SubscriptionStatus {
   INCOMPLETE
 }
 
+enum TrialType {
+  LEAD_BASED
+  TIME_BASED
+  HYBRID
+}
+
 // ==========================================
 // Core User Management
 // ==========================================
@@ -84,11 +90,14 @@ model User {
   hasOwnNumber          Boolean             @default(false)
 
   // Trial period
-  trialStartDate    DateTime?
-  trialEndDate      DateTime?
-  trialUsed         Boolean   @default(false)
-  trialLeadsHandled Int       @default(0)
-  trialLeadsLimit   Int       @default(10)
+  trialStartDate       DateTime?
+  trialEndDate         DateTime?
+  trialUsed            Boolean    @default(false)
+  trialLeadsHandled    Int        @default(0)
+  trialLeadsLimit      Int        @default(10)
+  trialType            TrialType?
+  trialEndedAt         DateTime?
+  trialEndNotifiedAt   DateTime?
 
   // Track Thumbtack account to prevent trial abuse
   // Users can't get another trial with same Thumbtack account
