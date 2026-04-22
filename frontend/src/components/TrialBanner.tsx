@@ -2,117 +2,54 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { billingApi } from '../services/api';
 import { X, AlertCircle, Zap } from 'lucide-react';
+import type { SubscriptionDetails } from '../types';
 
-interface TrialStatus {
-  isOnTrial: boolean;
-  trialDaysRemaining: number;
-  trialExpired: boolean;
-  trialExpiredByTime: boolean;
-  trialExpiredByUsage: boolean;
-  trialEndDate: string | null;
-  trialLeadsHandled: number;
-  trialLeadsLimit: number;
-  trialLeadsRemaining: number;
-}
+type Trial = SubscriptionDetails['trial'];
 
 export default function TrialBanner() {
-  const [trialStatus, setTrialStatus] = useState<TrialStatus | null>(null);
+  const [trial, setTrial] = useState<Trial | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isVisible, setIsVisible] = useState(true);
 
   useEffect(() => {
-    loadTrialStatus();
+    let cancelled = false;
+    (async () => {
+      try {
+        const sub = await billingApi.getSubscription();
+        if (cancelled) return;
+        const hasPaid = sub.tier && ['ACTIVE', 'PAST_DUE'].includes(sub.status || '');
+        if (hasPaid) return;
+        setTrial(sub.trial ?? null);
+      } catch (err) {
+        console.error('[TrialBanner] API error:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
-  // Auto-hide after 6 seconds
+  // Auto-hide after 6 seconds (only the active-trial banner; ended trial banner stays)
   useEffect(() => {
-    if (trialStatus && !dismissed) {
-      const timer = setTimeout(() => {
-        setIsVisible(false);
-      }, 6000);
-
+    if (trial && trial.isActive && !dismissed) {
+      const timer = setTimeout(() => setIsVisible(false), 6000);
       return () => clearTimeout(timer);
     }
-  }, [trialStatus, dismissed]);
+  }, [trial, dismissed]);
 
-  const loadTrialStatus = async () => {
-    try {
-      const subscription = await billingApi.getSubscription();
+  if (loading || !trial || dismissed) return null;
+  // No trial yet (user hasn't connected a platform) — nothing to show
+  if (!trial.type) return null;
 
-      // Don't show banner if user has an active PAID subscription (not trial)
-      const hasPaidSubscription = subscription.tier &&
-        ['ACTIVE', 'PAST_DUE'].includes(subscription.status || '');
-
-      if (hasPaidSubscription) {
-        setLoading(false);
-        return;
-      }
-
-      // Show trial banner if user is on trial or if trial data exists
-      if (subscription.trial) {
-        setTrialStatus(subscription.trial);
-      } else if (subscription.status === 'TRIALING') {
-        setTrialStatus({
-          isOnTrial: true,
-          trialDaysRemaining: 10,
-          trialExpired: false,
-          trialExpiredByTime: false,
-          trialExpiredByUsage: false,
-          trialEndDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
-          trialLeadsHandled: 3,
-          trialLeadsLimit: 10,
-          trialLeadsRemaining: 7,
-        });
-      } else {
-        setTrialStatus({
-          isOnTrial: true,
-          trialDaysRemaining: 10,
-          trialExpired: false,
-          trialExpiredByTime: false,
-          trialExpiredByUsage: false,
-          trialEndDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
-          trialLeadsHandled: 3,
-          trialLeadsLimit: 10,
-          trialLeadsRemaining: 7,
-        });
-      }
-    } catch (error) {
-      console.error('[TrialBanner] API error:', error);
-      // Show demo trial banner on error for testing
-      setTrialStatus({
-        isOnTrial: true,
-        trialDaysRemaining: 10,
-        trialExpired: false,
-        trialExpiredByTime: false,
-        trialExpiredByUsage: false,
-        trialEndDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
-        trialLeadsHandled: 3,
-        trialLeadsLimit: 10,
-        trialLeadsRemaining: 7,
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDismiss = () => {
-    setIsVisible(false);
-    setTimeout(() => setDismissed(true), 300); // Wait for animation
-  };
-
-  if (loading || !trialStatus || dismissed) {
-    return null;
-  }
-
-  // Don't show if user is not on trial and trial hasn't expired
-  if (!trialStatus.isOnTrial && !trialStatus.trialExpired) {
-    return null;
-  }
-
-  // All leads used — hard block
-  if (trialStatus.trialExpired) {
-    const leadsLimit = trialStatus.trialLeadsLimit || 10;
+  // Trial ended — hard block banner
+  if (trial.isEnded) {
+    const reason =
+      trial.type === 'TIME_BASED'
+        ? 'Your free trial has ended'
+        : trial.type === 'LEAD_BASED'
+          ? `All ${trial.leadsLimit} trial leads used`
+          : `Trial ended (${trial.leadsHandled}/${trial.leadsLimit} leads used)`;
 
     return (
       <div className="fixed top-0 left-0 lg:left-72 right-0 z-40 px-6 py-3 bg-red-600 border-b border-red-700 shadow-lg">
@@ -121,7 +58,7 @@ export default function TrialBanner() {
             <AlertCircle className="w-4 h-4 text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-white">All {leadsLimit} trial leads used — Subscribe to continue</p>
+            <p className="text-sm font-bold text-white">{reason} — Subscribe to continue</p>
             <p className="text-xs text-red-200 mt-0.5">Upgrade to unlock unlimited leads + premium features</p>
           </div>
           <Link
@@ -136,19 +73,29 @@ export default function TrialBanner() {
     );
   }
 
-  // Active trial - show leads remaining (no date countdown)
-  const leadsRemaining = trialStatus.trialLeadsRemaining || 0;
-  const leadsUsed = trialStatus.trialLeadsHandled || 0;
-  const leadsLimit = trialStatus.trialLeadsLimit || 10;
-
-  const usageUrgent = leadsRemaining <= 2;
-  const isUrgent = usageUrgent;
-  const isWarning = leadsRemaining <= 5;
+  // Active trial — adaptive copy per trial type
+  const usageUrgent =
+    (trial.type === 'LEAD_BASED' || trial.type === 'HYBRID') && trial.leadsRemaining <= 2;
+  const timeUrgent =
+    (trial.type === 'TIME_BASED' || trial.type === 'HYBRID') &&
+    trial.daysRemaining !== null &&
+    trial.daysRemaining <= 2;
+  const isUrgent = usageUrgent || timeUrgent;
+  const isWarning =
+    !isUrgent &&
+    (((trial.type === 'LEAD_BASED' || trial.type === 'HYBRID') && trial.leadsRemaining <= 5) ||
+      ((trial.type === 'TIME_BASED' || trial.type === 'HYBRID') &&
+        trial.daysRemaining !== null &&
+        trial.daysRemaining <= 5));
 
   const bgColor = isUrgent ? 'bg-amber-500' : isWarning ? 'bg-blue-600' : 'bg-slate-800';
   const borderColor = isUrgent ? 'border-amber-600' : isWarning ? 'border-blue-700' : 'border-slate-700';
   const subtextColor = isUrgent ? 'text-amber-100' : isWarning ? 'text-blue-100' : 'text-slate-300';
-  const btnBg = isUrgent ? 'bg-white text-amber-600 hover:bg-amber-50' : isWarning ? 'bg-white text-blue-600 hover:bg-blue-50' : 'bg-white text-slate-800 hover:bg-slate-50';
+  const btnBg = isUrgent
+    ? 'bg-white text-amber-600 hover:bg-amber-50'
+    : isWarning
+      ? 'bg-white text-blue-600 hover:bg-blue-50'
+      : 'bg-white text-slate-800 hover:bg-slate-50';
 
   return (
     <div
@@ -158,7 +105,7 @@ export default function TrialBanner() {
     >
       <div className="flex items-center gap-4 max-w-7xl mx-auto">
         <button
-          onClick={handleDismiss}
+          onClick={() => { setIsVisible(false); setTimeout(() => setDismissed(true), 300); }}
           className="p-1.5 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-all shrink-0"
           aria-label="Dismiss"
         >
@@ -168,11 +115,9 @@ export default function TrialBanner() {
           {isUrgent ? <AlertCircle className="w-5 h-5 text-white" /> : <Zap className="w-5 h-5 text-white" />}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-white">
-            {leadsRemaining} of {leadsLimit} trial leads left
-          </p>
+          <p className="text-sm font-bold text-white">{trial.label}</p>
           <p className={`text-xs ${subtextColor} mt-0.5`}>
-            {leadsUsed} leads handled • Upgrade to unlock unlimited leads + premium features
+            {trial.progress} • Upgrade to unlock unlimited leads + premium features
           </p>
         </div>
         <Link

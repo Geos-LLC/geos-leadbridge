@@ -317,6 +317,20 @@ export interface SubscriptionDetails {
   hasOwnNumber: boolean;
   features: string[];
   trial: {
+    // Adaptive trial fields (preferred)
+    type: 'LEAD_BASED' | 'TIME_BASED' | 'HYBRID' | null;
+    isActive: boolean;
+    isEnded: boolean;
+    daysRemaining: number | null;
+    leadsHandled: number;
+    leadsLimit: number;
+    leadsRemaining: number;
+    endDate: string | null;
+    endedAt: string | null;
+    label: string;
+    progress: string;
+
+    // Legacy fields kept for back-compat
     isOnTrial: boolean;
     trialDaysRemaining: number;
     trialExpired: boolean;

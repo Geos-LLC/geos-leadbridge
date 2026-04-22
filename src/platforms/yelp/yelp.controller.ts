@@ -26,6 +26,7 @@ import { PlatformService } from '../platform.service';
 import { YelpAdapter } from './yelp.adapter';
 import { PlatformName } from '../../common/interfaces/platform.interface';
 import { EncryptionUtil } from '../../common/utils/encryption.util';
+import { TrialService } from '../../trial/trial.service';
 
 @Controller('v1/yelp')
 @UseGuards(JwtAuthGuard)
@@ -39,6 +40,7 @@ export class YelpController {
     private platformService: PlatformService,
     private prisma: PrismaService,
     private configService: ConfigService,
+    private trialService: TrialService,
   ) {
     const rawUrl = this.configService.get<string>('frontendUrl') || 'http://localhost:5173';
     this.frontendUrl = rawUrl.trim().replace(/\/+$/, '');
@@ -163,6 +165,9 @@ export class YelpController {
               credentialsJson: encryptedCreds,
             },
           });
+          this.trialService.onPlatformConnected(userId, PlatformName.YELP).catch((err) => {
+            this.logger.warn(`[Yelp OAuth] Trial init failed for ${userId}: ${err.message}`);
+          });
         }
 
         // Subscribe this business to webhooks (uses API key, not OAuth)
@@ -234,6 +239,10 @@ export class YelpController {
       where: { userId_platform_businessId: { userId: user.id, platform: PlatformName.YELP, businessId } },
       create: { userId: user.id, platform: PlatformName.YELP, businessId, businessName, imageUrl },
       update: { businessName, imageUrl },
+    });
+
+    this.trialService.onPlatformConnected(user.id, PlatformName.YELP).catch((err) => {
+      this.logger.warn(`[addBusiness] Trial init failed for ${user.id}: ${err.message}`);
     });
 
     await this.yelpAdapter.subscribeToBusinesses([businessId]);

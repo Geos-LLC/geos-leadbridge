@@ -17,6 +17,7 @@ import { LeadsService } from '../leads/leads.service';
 import { FollowUpEngineService } from './follow-up-engine.service';
 import { FollowUpGeneratorService, SequenceStep } from './follow-up-generator.service';
 import { LONG_TERM_STEPS } from './long-term-steps';
+import { TrialService } from '../trial/trial.service';
 
 @Injectable()
 export class FollowUpSchedulerService implements OnModuleInit {
@@ -33,6 +34,7 @@ export class FollowUpSchedulerService implements OnModuleInit {
     private readonly generatorService: FollowUpGeneratorService,
     private readonly eventEmitter: EventEmitter2,
     private readonly configService: ConfigService,
+    private readonly trialService: TrialService,
   ) {
     // FOLLOWUP_SCHEDULER env var: set to 'false' on staging to let production handle it.
     // Defaults to true (enabled). User controls follow-ups via per-account settings.
@@ -271,6 +273,23 @@ export class FollowUpSchedulerService implements OnModuleInit {
       where: { id: enrollment.id },
     });
     if (!fresh || fresh.status !== 'active') return;
+
+    // Trial paywall: stop the enrollment outright when the trial has ended
+    // (canProcessLead already accounts for the 24h grace on existing convos).
+    if (enrollment.leadId) {
+      const owner = await this.prisma.lead.findUnique({
+        where: { id: enrollment.leadId },
+        select: { userId: true },
+      });
+      if (owner) {
+        const allowed = await this.trialService.canProcessLead(owner.userId, enrollment.conversationId);
+        if (!allowed.allowed) {
+          await this.engineService.stopEnrollment(enrollment.id, `trial_${allowed.reason}`);
+          this.logger.log(`[FollowUpScheduler] Stopped enrollment ${enrollment.id} — trial ${allowed.reason}`);
+          return;
+        }
+      }
+    }
 
     // Conversation-level cooldown: minimum 10-minute gap between consecutive sends
     // to the SAME CONVERSATION (not just the same enrollment). ThreadContext.lastFollowUpSentAt

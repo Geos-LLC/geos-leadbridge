@@ -15,6 +15,7 @@ import { AnalyticsService } from '../analytics/analytics.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
+import { TrialService } from '../trial/trial.service';
 
 @Injectable()
 export class LeadsService {
@@ -29,6 +30,7 @@ export class LeadsService {
     private conversationContext: ConversationContextService,
     @Optional() @Inject(FollowUpEngineService) private followUpEngine: FollowUpEngineService | null,
     @Optional() @Inject(CrmWebhookService) private crmWebhookService: CrmWebhookService | null,
+    private trialService: TrialService,
   ) {}
 
   /**
@@ -628,35 +630,38 @@ export class LeadsService {
         data: { lastMessageAt: new Date() },
       });
 
-      // Track trial usage: Increment counter if this is first reply to this lead
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: {
-          trialStartDate: true,
-          trialEndDate: true,
-          subscriptionTier: true,
-          trialLeadsHandled: true,
-        },
-      });
-
-      // Only count if user is on trial (has trial dates, no subscription)
-      if (user && user.trialStartDate && user.trialEndDate && !user.subscriptionTier) {
-        // Check if this is the first message from pro to this lead
-        const previousProMessages = await this.prisma.message.count({
-          where: {
-            conversationId: conversation.id,
-            sender: 'pro',
-            userId: userId,
+      // Trial usage: only count first AI auto-response per lead. Manual sends do
+      // not consume trial leads — the spec scopes the meter to automation.
+      if (senderType === 'ai') {
+        const user = await this.prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            subscriptionTier: true,
+            trialType: true,
+            trialEndedAt: true,
           },
         });
 
-        // If this is the first reply to this lead, increment trial counter
-        if (previousProMessages === 1) {  // === 1 because we just created one above
-          await this.prisma.user.update({
-            where: { id: userId },
-            data: { trialLeadsHandled: { increment: 1 } },
+        const onTrial = user && !user.subscriptionTier && user.trialType !== null && !user.trialEndedAt;
+        if (onTrial) {
+          const previousAiMessages = await this.prisma.message.count({
+            where: {
+              conversationId: conversation.id,
+              sender: 'pro',
+              senderType: 'ai',
+              userId,
+            },
           });
-          console.log(`[LeadsService] Trial lead tracked: ${user.trialLeadsHandled + 1} leads handled`);
+
+          // === 1 because we just created the AI message above
+          if (previousAiMessages === 1) {
+            const result = await this.trialService.consumeLead(userId);
+            this.logger.log(
+              `[LeadsService] Trial lead consumed for ${userId} (justExhausted=${result.justExhausted})`,
+            );
+            // Trial-end notifications are dispatched in a follow-up step; for now
+            // the transition is captured in user.trialEndedAt.
+          }
         }
       }
       // After sending a business message, ensure a follow-up enrollment exists.

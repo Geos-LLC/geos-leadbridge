@@ -14,6 +14,7 @@ import { LeadsService } from '../leads/leads.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { FollowUpEngineService } from './follow-up-engine.service';
 import { FollowUpGeneratorService, SequenceStep } from './follow-up-generator.service';
+import { TrialService } from '../trial/trial.service';
 
 @Controller('v1/follow-ups')
 @UseGuards(JwtAuthGuard)
@@ -27,6 +28,7 @@ export class FollowUpEngineController {
     private readonly leadsService: LeadsService,
     private readonly conversationContext: ConversationContextService,
     private readonly generatorService: FollowUpGeneratorService,
+    private readonly trialService: TrialService,
   ) {}
 
   /**
@@ -854,6 +856,12 @@ export class FollowUpEngineController {
     const lead = execution.enrollment.lead;
     if (!lead || lead.userId !== user.id) {
       return { success: false, error: 'Not authorized' };
+    }
+
+    // Trial paywall: AI-approval send is automation, not a manual reply.
+    const allowed = await this.trialService.canProcessLead(user.id, execution.enrollment.conversationId);
+    if (!allowed.allowed) {
+      return { success: false, error: 'trial_ended', reason: allowed.reason };
     }
 
     // Send the message

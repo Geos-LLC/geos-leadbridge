@@ -12,6 +12,7 @@ import { PlatformFactory } from './platform.factory';
 import { PlatformCredentials } from '../common/interfaces/platform.interface';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
+import { TrialService } from '../trial/trial.service';
 
 @Injectable()
 export class PlatformService {
@@ -28,6 +29,7 @@ export class PlatformService {
     @Inject(forwardRef(() => NotificationsService))
     private notificationsService: NotificationsService,
     private monitoring: MonitoringService,
+    private trialService: TrialService,
   ) {
     this.encryptionKey = this.configService.get<string>('encryption.key') || 'default-32-char-encryption-key';
   }
@@ -903,6 +905,11 @@ export class PlatformService {
     // Auto-provision Sigcore workspace for this account (idempotent, non-blocking)
     this.autoProvisionSigcore(savedAccount.id, businessName).catch((err) => {
       this.logger.warn(`[saveAccount] Sigcore auto-provision failed for ${savedAccount.id}: ${err.message}`);
+    });
+
+    // Initialize/upgrade adaptive trial based on connected platforms
+    this.trialService.onPlatformConnected(userId, platform).catch((err) => {
+      this.logger.warn(`[saveAccount] Trial init failed for ${userId}: ${err.message}`);
     });
   }
 

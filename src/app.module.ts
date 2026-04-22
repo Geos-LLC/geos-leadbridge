@@ -32,6 +32,7 @@ import { ServiceFlowModule } from './integrations/service-flow/service-flow.modu
 import { HealthModule } from './health/health.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
+import { TrialModule } from './trial/trial.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { ImpersonationGuard, ImpersonationInterceptor } from './common/guards/impersonation.guard';
 import { PrismaModule } from './common/utils/prisma.module';
@@ -69,6 +70,7 @@ import { PrismaModule } from './common/utils/prisma.module';
     HealthModule,
     MonitoringModule,
     OnboardingModule,
+    TrialModule,
   ],
   providers: [
     {
