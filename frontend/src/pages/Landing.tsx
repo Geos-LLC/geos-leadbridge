@@ -1,5 +1,19 @@
 import { Link } from 'react-router-dom';
-import { Check, Phone, MessageSquare, Bell, ArrowRight, Star, Zap } from 'lucide-react';
+import {
+  Check,
+  Phone,
+  MessageSquare,
+  Bell,
+  ArrowRight,
+  Star,
+  Zap,
+  TrendingUp,
+  Timer,
+  BarChart3,
+  Sparkles,
+  RefreshCw,
+  Plus,
+} from 'lucide-react';
 import leadConversationImg from '../assets/lead-conversation-thumbtack.png';
 
 export function Landing() {
@@ -17,11 +31,12 @@ export function Landing() {
           </div>
           <div className="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-500">
             <a href="#how" className="hover:text-blue-600 transition-colors">How It Works</a>
+            <a href="#demo" className="hover:text-blue-600 transition-colors">Demo</a>
             <a href="#pricing" className="hover:text-blue-600 transition-colors">Pricing</a>
           </div>
           <div className="flex items-center gap-3">
             <Link to="/login" className="text-sm font-semibold text-slate-500 hover:text-blue-600 transition-colors hidden sm:block">Sign In</Link>
-            <Link to="/register" className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow">Start Early Access</Link>
+            <Link to="/register" className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow">Start Free Trial</Link>
           </div>
         </div>
       </nav>
@@ -32,20 +47,23 @@ export function Landing() {
         <div className="absolute top-20 right-0 w-[600px] h-[600px] bg-blue-100/30 rounded-full blur-3xl -z-10" />
         <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-16 items-center">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-xs font-bold uppercase tracking-wider mb-8">
-              <span className="w-2 h-2 bg-amber-400 rounded-full animate-pulse" />
-              Early Access — Limited Spots
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold uppercase tracking-wider mb-8">
+              <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+              For Thumbtack & Yelp Pros
             </div>
             <h1 className="text-5xl lg:text-6xl font-extrabold leading-[1.08] tracking-tight mb-6">
-              Never miss a<br />
-              <span className="text-blue-600">lead again.</span>
+              Win more leads<br />
+              <span className="text-blue-600">without chasing them.</span>
             </h1>
-            <p className="text-xl text-slate-600 leading-relaxed mb-8 max-w-lg">
-              LeadBridge notifies you, replies to customers, and connects calls automatically — so you book more jobs without chasing leads.
+            <p className="text-xl text-slate-600 leading-relaxed mb-5 max-w-lg">
+              Respond instantly, follow up automatically, and convert more jobs from Thumbtack and Yelp — all in one place.
+            </p>
+            <p className="text-sm text-slate-500 leading-relaxed mb-8 max-w-lg">
+              Built for cleaning companies and home service pros who want faster replies, fewer missed leads, and more booked jobs.
             </p>
             <div className="flex flex-wrap gap-4 mb-10">
               <Link to="/register" className="inline-flex items-center gap-2 px-7 py-4 bg-blue-600 text-white rounded-2xl text-base font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 group">
-                Start Early Access
+                Start Free Trial
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </Link>
               <a href="#how" className="inline-flex items-center gap-2 px-6 py-4 border-2 border-slate-200 text-slate-700 rounded-2xl text-base font-bold hover:border-blue-300 hover:text-blue-600 transition-all">
@@ -78,93 +96,198 @@ export function Landing() {
         </div>
       </header>
 
-      {/* Problem */}
+      {/* Pain */}
       <section className="py-20 bg-slate-900 text-white">
-        <div className="max-w-4xl mx-auto px-6 text-center">
-          <p className="text-blue-400 font-bold uppercase tracking-widest text-sm mb-4">The Problem</p>
-          <h2 className="text-4xl font-extrabold mb-4">You're losing leads without realizing it.</h2>
-          <p className="text-slate-400 text-lg mb-14 max-w-xl mx-auto">Most businesses lose 30–50% of leads due to slow response times. The fastest reply wins — every time.</p>
-          <div className="grid md:grid-cols-3 gap-6">
+        <div className="max-w-4xl mx-auto px-6">
+          <div className="text-center mb-14">
+            <p className="text-blue-400 font-bold uppercase tracking-widest text-sm mb-4">The Problem</p>
+            <h2 className="text-4xl font-extrabold mb-4">You're losing leads — not because of price, but timing.</h2>
+          </div>
+          <div className="grid md:grid-cols-2 gap-4 max-w-3xl mx-auto mb-10">
             {[
-              { emoji: '📵', title: 'Missed calls = lost jobs', desc: 'If you don\'t pick up, they call the next pro on the list.' },
-              { emoji: '⏱️', title: 'Slow responses = lost customers', desc: 'A 20-minute delay drops your close rate by over 80%.' },
-              { emoji: '😤', title: 'Manual follow-ups = wasted time', desc: 'Chasing leads manually takes hours you don\'t have.' },
-            ].map((item, i) => (
-              <div key={i} className="bg-slate-800 rounded-2xl p-6 text-left border border-slate-700">
-                <div className="text-3xl mb-3">{item.emoji}</div>
-                <h3 className="font-bold text-white mb-2">{item.title}</h3>
-                <p className="text-slate-400 text-sm leading-relaxed">{item.desc}</p>
+              "You don't reply fast enough",
+              'You miss messages while working',
+              'Leads go silent after the first message',
+              "You don't have time to follow up",
+              'Conversations die before booking',
+            ].map((pain, i) => (
+              <div key={i} className="flex items-start gap-3 bg-slate-800 rounded-2xl px-5 py-4 border border-slate-700">
+                <span className="text-red-400 text-lg leading-none mt-0.5">✕</span>
+                <p className="text-slate-200 font-medium">{pain}</p>
               </div>
             ))}
           </div>
+          <p className="text-center text-xl text-blue-300 font-bold">
+            And every missed reply = lost revenue.
+          </p>
         </div>
       </section>
 
-      {/* Solution — 3 blocks */}
+      {/* Value — core product */}
       <section id="how" className="py-24 bg-white">
         <div className="max-w-5xl mx-auto px-6">
           <div className="text-center mb-16">
-            <p className="text-blue-600 font-bold uppercase tracking-widest text-sm mb-4">The Solution</p>
-            <h2 className="text-4xl font-extrabold">One system. Every lead handled.</h2>
+            <p className="text-blue-600 font-bold uppercase tracking-widest text-sm mb-4">How It Works</p>
+            <h2 className="text-4xl font-extrabold">One system to handle every lead —<br />from first message to booking.</h2>
           </div>
-          <div className="grid md:grid-cols-3 gap-8">
+          <div className="grid md:grid-cols-3 gap-8 mb-20">
             {[
               {
-                icon: MessageSquare,
+                icon: Zap,
                 color: 'bg-blue-50 text-blue-600',
-                title: 'Instant Response',
-                desc: 'Auto-reply to every new lead within seconds — even at night or while on a job.',
+                label: 'Respond instantly',
+                tagline: 'Be the first to reply — automatically.',
+                bullets: [
+                  'Send a reply the moment a lead arrives',
+                  'Include pricing or ask for missing details',
+                  'Reply from your phone without opening apps',
+                ],
               },
               {
-                icon: Phone,
+                icon: RefreshCw,
                 color: 'bg-emerald-50 text-emerald-600',
-                title: 'Call Connect',
-                desc: 'Get an instant call when a lead comes in. Connect you and the customer immediately.',
+                label: 'Stay in control',
+                tagline: "Don't lose leads that go silent.",
+                bullets: [
+                  'Send follow-ups automatically',
+                  'Get notified when a lead responds',
+                  'Call or text at the right moment',
+                ],
               },
               {
-                icon: Bell,
-                color: 'bg-amber-50 text-amber-600',
-                title: 'Smart Follow-Up',
-                desc: 'Automatically follow up with customers until the job is booked — no manual effort.',
+                icon: Sparkles,
+                color: 'bg-violet-50 text-violet-600',
+                label: 'Let the system convert for you',
+                tagline: 'Stop managing conversations manually.',
+                bullets: [
+                  'AI handles replies and follow-ups',
+                  'Adjusts based on customer responses',
+                  'Moves leads toward booking',
+                ],
               },
             ].map((block, i) => (
-              <div key={i} className="bg-slate-50 rounded-3xl p-8 border border-slate-100 hover:shadow-xl transition-all">
+              <div key={i} className="bg-slate-50 rounded-3xl p-8 border border-slate-100 hover:shadow-xl transition-all flex flex-col">
                 <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-5 ${block.color}`}>
                   <block.icon className="w-7 h-7" />
                 </div>
-                <h3 className="text-xl font-bold mb-3">{block.title}</h3>
-                <p className="text-slate-500 leading-relaxed">{block.desc}</p>
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">{`Step ${i + 1}`}</p>
+                <h3 className="text-xl font-bold mb-2">{block.label}</h3>
+                <p className="text-slate-500 mb-5 italic">{block.tagline}</p>
+                <ul className="space-y-2.5">
+                  {block.bullets.map((b, j) => (
+                    <li key={j} className="flex items-start gap-2.5 text-sm text-slate-700">
+                      <Check className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                      <span>{b}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             ))}
+          </div>
+
+          {/* Platform-specific */}
+          <div className="bg-gradient-to-br from-slate-50 to-blue-50/50 rounded-3xl border border-slate-100 p-10">
+            <div className="text-center mb-10">
+              <p className="text-blue-600 font-bold uppercase tracking-widest text-sm mb-3">🎯 Built for how you actually work</p>
+              <h3 className="text-2xl font-extrabold">Tuned for each platform.</h3>
+            </div>
+            <div className="grid md:grid-cols-2 gap-6">
+              <div className="bg-white rounded-2xl p-7 border border-slate-100">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+                    <Phone className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  <h4 className="font-bold text-lg">For Thumbtack users</h4>
+                </div>
+                <ul className="space-y-2.5">
+                  <li className="flex items-start gap-2.5 text-sm text-slate-700">
+                    <Check className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <span>Call leads instantly</span>
+                  </li>
+                  <li className="flex items-start gap-2.5 text-sm text-slate-700">
+                    <Check className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <span>Respond faster than competitors</span>
+                  </li>
+                </ul>
+              </div>
+              <div className="bg-white rounded-2xl p-7 border border-slate-100">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center">
+                    <MessageSquare className="w-5 h-5 text-red-600" />
+                  </div>
+                  <h4 className="font-bold text-lg">For Yelp users</h4>
+                </div>
+                <ul className="space-y-2.5">
+                  <li className="flex items-start gap-2.5 text-sm text-slate-700">
+                    <Check className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <span>Handle high volume conversations</span>
+                  </li>
+                  <li className="flex items-start gap-2.5 text-sm text-slate-700">
+                    <Check className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <span>Follow up and capture more responses</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Differentiation */}
-      <section className="py-20 bg-blue-600 text-white">
-        <div className="max-w-4xl mx-auto px-6">
+      {/* Demo */}
+      <section id="demo" className="py-24 bg-slate-50 border-y border-slate-100">
+        <div className="max-w-5xl mx-auto px-6">
           <div className="text-center mb-12">
-            <h2 className="text-4xl font-extrabold mb-3">Why LeadBridge is different</h2>
-            <p className="text-blue-200 text-lg">Not just another chatbot. A complete lead handling system.</p>
+            <p className="text-blue-600 font-bold uppercase tracking-widest text-sm mb-4">See It In Action</p>
+            <h2 className="text-4xl font-extrabold">See how it works in seconds.</h2>
           </div>
-          <div className="bg-white/10 backdrop-blur rounded-3xl overflow-hidden border border-white/20">
-            <div className="grid grid-cols-2 text-sm font-bold uppercase tracking-wide">
-              <div className="px-8 py-4 text-blue-200 border-b border-white/10">Others</div>
-              <div className="px-8 py-4 text-white border-b border-white/10">LeadBridge</div>
-            </div>
+          <div className="grid md:grid-cols-5 gap-4 mb-10">
             {[
-              ['SMS only', 'Calls + SMS + alerts'],
-              ['Per-lead pricing', 'Flat monthly pricing'],
-              ['Just first reply', 'Full conversation handling'],
-              ['Complex setup', '2-minute setup'],
-            ].map(([other, us], i) => (
-              <div key={i} className={`grid grid-cols-2 ${i < 3 ? 'border-b border-white/10' : ''}`}>
-                <div className="px-8 py-5 text-blue-200/80 flex items-center gap-2">
-                  <span className="text-red-400">✕</span> {other}
+              { step: '1', title: 'New lead arrives', icon: Bell, color: 'bg-blue-50 text-blue-600' },
+              { step: '2', title: 'Instant reply sent', icon: Zap, color: 'bg-emerald-50 text-emerald-600' },
+              { step: '3', title: 'Follow-ups triggered', icon: RefreshCw, color: 'bg-amber-50 text-amber-600' },
+              { step: '4', title: 'Lead responds — you get notified', icon: MessageSquare, color: 'bg-violet-50 text-violet-600' },
+              { step: '5', title: 'AI continues or you take over', icon: Sparkles, color: 'bg-pink-50 text-pink-600' },
+            ].map((s, i) => (
+              <div key={i} className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm text-center">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3 ${s.color}`}>
+                  <s.icon className="w-6 h-6" />
                 </div>
-                <div className="px-8 py-5 text-white font-semibold flex items-center gap-2">
-                  <span className="text-emerald-400">✓</span> {us}
+                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1">Step {s.step}</p>
+                <p className="text-sm font-semibold text-slate-800 leading-snug">{s.title}</p>
+              </div>
+            ))}
+          </div>
+          <div className="bg-white rounded-3xl border-2 border-dashed border-slate-200 aspect-video flex items-center justify-center">
+            <div className="text-center">
+              <div className="w-20 h-20 rounded-full bg-blue-600 text-white flex items-center justify-center mx-auto mb-4 shadow-xl shadow-blue-200">
+                <svg className="w-8 h-8 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+              </div>
+              <p className="text-slate-500 font-medium">Demo video coming soon</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Benefits */}
+      <section className="py-20 bg-white">
+        <div className="max-w-5xl mx-auto px-6">
+          <div className="text-center mb-12">
+            <p className="text-blue-600 font-bold uppercase tracking-widest text-sm mb-4">What You Get</p>
+            <h2 className="text-4xl font-extrabold">More leads booked. Less work on your end.</h2>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-5">
+            {[
+              { icon: Zap, color: 'bg-blue-50 text-blue-600', title: 'Faster response times' },
+              { icon: TrendingUp, color: 'bg-emerald-50 text-emerald-600', title: 'Higher conversion rate' },
+              { icon: Timer, color: 'bg-amber-50 text-amber-600', title: 'Less manual work' },
+              { icon: MessageSquare, color: 'bg-violet-50 text-violet-600', title: 'Centralized communication' },
+              { icon: BarChart3, color: 'bg-pink-50 text-pink-600', title: 'Clear performance insights' },
+            ].map((b, i) => (
+              <div key={i} className="bg-slate-50 rounded-2xl p-6 border border-slate-100 text-center">
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-4 ${b.color}`}>
+                  <b.icon className="w-6 h-6" />
                 </div>
+                <p className="text-sm font-bold text-slate-800 leading-tight">{b.title}</p>
               </div>
             ))}
           </div>
@@ -172,39 +295,32 @@ export function Landing() {
       </section>
 
       {/* Pricing */}
-      <section id="pricing" className="py-24 bg-white">
-        <div className="max-w-4xl mx-auto px-6">
-          <div className="text-center mb-6">
+      <section id="pricing" className="py-24 bg-slate-50 border-t border-slate-100">
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="text-center mb-14">
             <p className="text-blue-600 font-bold uppercase tracking-widest text-sm mb-4">Pricing</p>
-            <h2 className="text-4xl font-extrabold mb-3">Simple, flat pricing.</h2>
-            <p className="text-slate-500 text-lg">No per-lead fees. No surprises. Cancel anytime.</p>
+            <h2 className="text-4xl font-extrabold mb-3">Choose how much LeadBridge should handle for you.</h2>
+            <p className="text-slate-500 text-lg">Flat monthly pricing. No per-lead fees. Cancel anytime.</p>
           </div>
-          <div className="flex justify-center mb-12">
-            <div className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-50 border border-amber-200 rounded-2xl">
-              <span className="text-amber-600 font-bold text-sm">🎉 Early Access Pricing — Lock in before public launch</span>
-            </div>
-          </div>
-          <div className="grid md:grid-cols-2 gap-8">
-            {/* Starter */}
-            <div className="rounded-3xl border border-slate-200 p-10 flex flex-col hover:shadow-xl transition-all">
-              <div className="mb-8">
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Starter</p>
-                <h3 className="text-2xl font-bold mb-1">For getting started</h3>
-                <div className="flex items-baseline gap-2 mt-5 mb-1">
-                  <span className="text-slate-300 line-through text-xl">$29</span>
-                  <span className="text-5xl font-extrabold text-slate-900">$19</span>
-                  <span className="text-slate-400">/mo</span>
-                </div>
-                <p className="text-xs text-amber-600 font-semibold">Early Access Price</p>
+          <div className="grid md:grid-cols-3 gap-6 mb-10">
+            {/* Respond */}
+            <div className="rounded-3xl border border-slate-200 bg-white p-8 flex flex-col hover:shadow-xl transition-all">
+              <div className="flex items-center gap-2 mb-4">
+                <span className="w-3 h-3 rounded-full bg-emerald-500" />
+                <p className="text-xs font-bold uppercase tracking-widest text-emerald-700">Respond</p>
+              </div>
+              <h3 className="text-xl font-bold mb-1">Reply instantly and stay on top of new leads</h3>
+              <div className="flex items-baseline gap-1.5 mt-5 mb-8">
+                <span className="text-5xl font-extrabold text-slate-900">$39</span>
+                <span className="text-slate-400">/mo</span>
               </div>
               <ul className="space-y-3 flex-1 mb-8">
                 {[
-                  'Lead notifications (SMS alerts)',
-                  'First auto-reply only',
-                  '1 phone number included',
-                  'Manual follow-up & calls',
+                  'Instant Reply (custom, price-based, or auto message)',
+                  'Lead details with phone (when available)',
+                  'Respond from your phone',
                 ].map((f, i) => (
-                  <li key={i} className="flex items-start gap-3 text-slate-600 text-sm">
+                  <li key={i} className="flex items-start gap-3 text-slate-700 text-sm">
                     <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5">
                       <Check className="w-3 h-3 text-emerald-600" />
                     </div>
@@ -212,66 +328,120 @@ export function Landing() {
                   </li>
                 ))}
               </ul>
-              <Link to="/register" className="block w-full py-4 text-center bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all">
-                Start Early Access
+              <p className="text-xs text-slate-500 mb-5"><span className="font-semibold text-slate-700">Best for:</span> solo cleaners & basic use</p>
+              <Link to="/register" className="block w-full py-3.5 text-center bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all">
+                Start Free Trial
               </Link>
             </div>
 
-            {/* Pro */}
-            <div className="rounded-3xl border-2 border-blue-600 p-10 flex flex-col shadow-2xl shadow-blue-100 scale-[1.02] relative">
+            {/* Engage */}
+            <div className="rounded-3xl border-2 border-blue-600 bg-white p-8 flex flex-col shadow-2xl shadow-blue-100 relative md:-my-3">
               <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest px-4 py-1.5 rounded-full flex items-center gap-1.5">
                 <Star className="w-3 h-3" /> Most Popular
               </div>
-              <div className="mb-8">
-                <p className="text-xs font-bold uppercase tracking-widest text-blue-600 mb-2">Pro</p>
-                <h3 className="text-2xl font-bold mb-1">Best for growing businesses</h3>
-                <div className="flex items-baseline gap-2 mt-5 mb-1">
-                  <span className="text-slate-300 line-through text-xl">$99</span>
-                  <span className="text-5xl font-extrabold text-slate-900">$49</span>
-                  <span className="text-slate-400">/mo</span>
-                </div>
-                <p className="text-xs text-amber-600 font-semibold">Early Access Price</p>
+              <div className="flex items-center gap-2 mb-4">
+                <span className="w-3 h-3 rounded-full bg-blue-500" />
+                <p className="text-xs font-bold uppercase tracking-widest text-blue-700">Engage</p>
+              </div>
+              <h3 className="text-xl font-bold mb-1">Follow up, react faster, and capture more leads</h3>
+              <div className="flex items-baseline gap-1.5 mt-5 mb-8">
+                <span className="text-5xl font-extrabold text-slate-900">$89</span>
+                <span className="text-slate-400">/mo</span>
               </div>
               <ul className="space-y-3 flex-1 mb-8">
                 {[
-                  'Full auto-replies (ongoing conversations)',
-                  '2-way messaging (SMS + calls)',
-                  'Call connect (instant call to new leads)',
-                  ['Automatic follow-ups', '(coming soon)'],
-                  'Handles up to 500 leads/month',
-                  'Everything in Starter',
+                  'Everything in Respond',
+                  'Automated follow-ups',
+                  'Re-engagement alerts',
+                  'Instant call (Thumbtack)',
+                  'Call when phone appears (Yelp)',
+                  'SMS communication',
                 ].map((f, i) => (
                   <li key={i} className="flex items-start gap-3 text-slate-700 text-sm font-medium">
                     <div className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center shrink-0 mt-0.5">
                       <Check className="w-3 h-3 text-white" />
                     </div>
-                    {Array.isArray(f) ? (
-                      <span>{f[0]} <span className="text-slate-400 font-normal">{f[1]}</span></span>
-                    ) : f}
+                    {f}
                   </li>
                 ))}
               </ul>
-              <Link to="/register" className="block w-full py-4 text-center bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200">
-                Start Early Access
+              <p className="text-xs text-slate-500 mb-5"><span className="font-semibold text-slate-700">Best for:</span> serious operators & growing teams</p>
+              <Link to="/register" className="block w-full py-3.5 text-center bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200">
+                Start Free Trial
               </Link>
+            </div>
+
+            {/* Convert (AI) */}
+            <div className="rounded-3xl border border-slate-200 bg-white p-8 flex flex-col hover:shadow-xl transition-all">
+              <div className="flex items-center gap-2 mb-4">
+                <span className="w-3 h-3 rounded-full bg-violet-500" />
+                <p className="text-xs font-bold uppercase tracking-widest text-violet-700">Convert · AI</p>
+              </div>
+              <h3 className="text-xl font-bold mb-1">Let AI handle conversations and convert leads</h3>
+              <div className="flex items-baseline gap-1.5 mt-5 mb-8">
+                <span className="text-5xl font-extrabold text-slate-900">$139</span>
+                <span className="text-slate-400">/mo</span>
+              </div>
+              <ul className="space-y-3 flex-1 mb-8">
+                {[
+                  'Everything in Engage',
+                  'AI-powered conversation (not just first message)',
+                  'Adaptive replies based on customer responses',
+                  'AI pricing & qualification logic',
+                  'Smart conversation summaries',
+                ].map((f, i) => (
+                  <li key={i} className="flex items-start gap-3 text-slate-700 text-sm">
+                    <div className="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center shrink-0 mt-0.5">
+                      <Check className="w-3 h-3 text-violet-600" />
+                    </div>
+                    {f}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-slate-500 mb-5"><span className="font-semibold text-slate-700">Best for:</span> high-volume & scaling businesses</p>
+              <Link to="/register" className="block w-full py-3.5 text-center bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all">
+                Start Free Trial
+              </Link>
+            </div>
+          </div>
+
+          {/* Add-ons */}
+          <div className="bg-white rounded-3xl border border-slate-200 p-8">
+            <div className="flex items-start gap-5 flex-col sm:flex-row sm:items-center">
+              <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center shrink-0">
+                <Plus className="w-7 h-7 text-slate-600" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-baseline gap-3 flex-wrap mb-1">
+                  <h3 className="text-lg font-bold">Extra Numbers / Locations</h3>
+                  <span className="text-sm font-bold text-blue-600">+$20 per number</span>
+                </div>
+                <p className="text-sm text-slate-500 leading-relaxed">
+                  Separate communication per business · Multi-location setup · Team routing <span className="text-slate-400">(coming soon)</span>
+                </p>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Trust */}
-      <section className="py-16 bg-slate-50 border-y border-slate-100">
-        <div className="max-w-4xl mx-auto px-6">
-          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-6">
+      {/* Social Proof / Trust */}
+      <section className="py-16 bg-white">
+        <div className="max-w-4xl mx-auto px-6 text-center">
+          <p className="text-slate-500 font-bold uppercase tracking-widest text-sm mb-6">Social Proof</p>
+          <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 mb-10">
+            Trusted by home service pros across the U.S.
+          </h2>
+          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-4">
             {[
               { emoji: '⚡', text: 'Setup in under 2 minutes' },
               { emoji: '🔌', text: 'Works with your existing leads' },
               { emoji: '📋', text: 'No contracts required' },
               { emoji: '↩️', text: 'Cancel anytime' },
             ].map((item, i) => (
-              <div key={i} className="flex items-center gap-3 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+              <div key={i} className="flex items-center gap-3 bg-slate-50 rounded-2xl p-4 border border-slate-100">
                 <span className="text-2xl">{item.emoji}</span>
-                <p className="text-sm font-semibold text-slate-700">{item.text}</p>
+                <p className="text-sm font-semibold text-slate-700 text-left">{item.text}</p>
               </div>
             ))}
           </div>
@@ -279,26 +449,26 @@ export function Landing() {
       </section>
 
       {/* Final CTA */}
-      <section className="py-24 bg-white">
+      <section className="py-24 bg-gradient-to-br from-blue-600 to-blue-700 text-white">
         <div className="max-w-3xl mx-auto px-6 text-center">
           <h2 className="text-4xl lg:text-5xl font-extrabold mb-5 leading-tight">
-            Start handling every lead<br />automatically today.
+            Stop missing leads.<br />Start converting them.
           </h2>
-          <p className="text-xl text-slate-500 mb-10">Join pros already using LeadBridge to respond faster and book more jobs.</p>
-          <Link to="/register" className="inline-flex items-center gap-3 px-10 py-5 bg-blue-600 text-white rounded-2xl text-xl font-bold hover:bg-blue-700 transition-all shadow-xl shadow-blue-200 group">
-            Start Early Access
+          <p className="text-xl text-blue-100 mb-10">Get your first leads handled automatically.</p>
+          <Link to="/register" className="inline-flex items-center gap-3 px-10 py-5 bg-white text-blue-700 rounded-2xl text-xl font-bold hover:bg-blue-50 transition-all shadow-xl group">
+            Start Free Trial
             <ArrowRight className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
           </Link>
-          <div className="flex flex-wrap justify-center gap-6 mt-8 text-sm text-slate-400 font-medium">
-            <span className="flex items-center gap-1.5"><Check className="w-4 h-4 text-emerald-500" /> No per-lead fees</span>
-            <span className="flex items-center gap-1.5"><Check className="w-4 h-4 text-emerald-500" /> Setup in 2 minutes</span>
-            <span className="flex items-center gap-1.5"><Check className="w-4 h-4 text-emerald-500" /> Cancel anytime</span>
+          <div className="flex flex-wrap justify-center gap-6 mt-8 text-sm text-blue-100 font-medium">
+            <span className="flex items-center gap-1.5"><Check className="w-4 h-4" /> No per-lead fees</span>
+            <span className="flex items-center gap-1.5"><Check className="w-4 h-4" /> Setup in 2 minutes</span>
+            <span className="flex items-center gap-1.5"><Check className="w-4 h-4" /> Cancel anytime</span>
           </div>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="py-10 border-t border-slate-100">
+      <footer className="py-10 border-t border-slate-100 bg-white">
         <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
