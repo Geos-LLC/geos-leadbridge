@@ -2,6 +2,15 @@
  * Main Application Entry Point
  */
 
+// Surface ANY error before logger is wired so we never lose a startup crash.
+process.on('uncaughtException', (e) => {
+  console.error('[BOOT] uncaughtException:', e?.stack || e);
+});
+process.on('unhandledRejection', (e: any) => {
+  console.error('[BOOT] unhandledRejection:', e?.stack || e);
+});
+console.log('[BOOT] main.ts loaded', new Date().toISOString(), 'node', process.version);
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -15,12 +24,15 @@ import * as fs from 'fs';
 
 // Load environment variables
 dotenv.config();
+console.log('[BOOT] imports complete, DATABASE_URL host:', (process.env.DATABASE_URL || '').replace(/^.*@/, '').split('?')[0] || '(unset)');
 
 async function bootstrap() {
+  console.log('[BOOT] bootstrap() entered');
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true, // Enable raw body for webhook signature verification
     logger: new LoghubLogger({ service: 'leadbridge-api', app: 'leadbridge' }),
   });
+  console.log('[BOOT] NestFactory.create resolved');
 
   // Get configuration
   const configService = app.get(ConfigService);
@@ -146,4 +158,7 @@ async function bootstrap() {
   `);
 }
 
-bootstrap();
+bootstrap().catch((e) => {
+  console.error('[BOOT] bootstrap rejected:', e?.stack || e);
+  process.exit(1);
+});
