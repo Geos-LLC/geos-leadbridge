@@ -76,21 +76,42 @@ export function Landing() {
               <span className="flex items-center gap-1.5"><Check className="w-4 h-4 text-emerald-500" /> Cancel anytime</span>
             </div>
           </div>
-          <div className="relative hidden lg:block">
-            <div className="rounded-3xl overflow-hidden shadow-2xl border-8 border-white bg-slate-100">
-              <img src={leadConversationImg} alt="LeadBridge in action" className="w-full h-full object-cover" />
+          <div className="relative hidden lg:block h-[580px]">
+            {/* Yelp screenshot — back-left card */}
+            <div className="absolute top-6 -left-2 w-[58%] rounded-2xl overflow-hidden shadow-xl border-[6px] border-white bg-white -rotate-2 z-10 transition-transform duration-300 hover:-rotate-1">
+              <div className="absolute top-3 left-3 z-10 inline-flex items-center gap-1.5 px-2.5 py-1 bg-white/95 backdrop-blur rounded-full shadow-sm border border-slate-100">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                <span className="text-[10px] font-black tracking-wider text-red-600">YELP</span>
+              </div>
+              <img src="/yelp-screen.jpg" alt="Yelp for Business lead conversation" className="w-full h-auto block" />
             </div>
-            <div className="absolute -bottom-6 -left-6 bg-white rounded-2xl shadow-xl p-5 max-w-xs border border-slate-100">
+
+            {/* Thumbtack mockup — foreground card */}
+            <div className="absolute top-0 right-0 w-[58%] rounded-3xl overflow-hidden shadow-2xl border-8 border-white bg-slate-100 rotate-1 z-20 transition-transform duration-300 hover:rotate-0">
+              <div className="absolute top-3 left-3 z-10 inline-flex items-center gap-1.5 px-2.5 py-1 bg-white/95 backdrop-blur rounded-full shadow-sm border border-slate-100">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                <span className="text-[10px] font-black tracking-wider text-blue-700">THUMBTACK</span>
+              </div>
+              <img src={leadConversationImg} alt="LeadBridge handling a Thumbtack lead" className="w-full h-full object-cover" />
+            </div>
+
+            {/* Floating social-proof card — bottom-right so it doesn't cover Yelp */}
+            <div className="absolute -bottom-4 right-2 bg-white rounded-2xl shadow-xl p-5 max-w-xs border border-slate-100 z-30">
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-9 h-9 bg-emerald-100 rounded-full flex items-center justify-center">
+                <div className="w-9 h-9 bg-emerald-100 rounded-full flex items-center justify-center shrink-0">
                   <Check className="w-5 h-5 text-emerald-600" />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-400 font-semibold uppercase">New Lead — Auto-Replied</p>
+                  <p className="text-xs text-slate-400 font-semibold uppercase">Auto-Replied</p>
                   <p className="font-bold text-slate-900 text-sm">Response sent in 4 seconds</p>
                 </div>
               </div>
               <p className="text-sm text-slate-500 italic">"Hi! Thanks for reaching out — I'd love to help. What's the best time to connect?"</p>
+            </div>
+
+            {/* "Works with both" chip — bridges the two cards */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 bg-slate-900 text-white text-[11px] font-bold tracking-wider uppercase px-3 py-1.5 rounded-full shadow-lg">
+              Works with both
             </div>
           </div>
         </div>
@@ -318,7 +339,7 @@ export function Landing() {
                 {[
                   'Instant Reply (custom, price-based, or auto message)',
                   'Lead details with phone (when available)',
-                  'Respond from your phone',
+                  'Basic analytics',
                 ].map((f, i) => (
                   <li key={i} className="flex items-start gap-3 text-slate-700 text-sm">
                     <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5">
@@ -356,6 +377,7 @@ export function Landing() {
                   'Instant call (Thumbtack)',
                   'Call when phone appears (Yelp)',
                   'SMS communication',
+                  'Advanced analytics',
                 ].map((f, i) => (
                   <li key={i} className="flex items-start gap-3 text-slate-700 text-sm font-medium">
                     <div className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center shrink-0 mt-0.5">
@@ -389,6 +411,7 @@ export function Landing() {
                   'Adaptive replies based on customer responses',
                   'AI pricing & qualification logic',
                   'Smart conversation summaries',
+                  'Full analytics',
                 ].map((f, i) => (
                   <li key={i} className="flex items-start gap-3 text-slate-700 text-sm">
                     <div className="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center shrink-0 mt-0.5">
