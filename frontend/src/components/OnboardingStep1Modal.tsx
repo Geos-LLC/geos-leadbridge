@@ -194,7 +194,7 @@ export default function OnboardingStep1Modal({ onComplete }: Props) {
         {/* Step 0 — primary source */}
         {step === 0 && (
           <div>
-            <label className="block text-sm font-bold text-slate-900 mb-3">
+            <label className="block text-2xl lg:text-3xl font-extrabold text-slate-900 leading-tight tracking-tight mb-5">
               Where do most of your leads come from?
             </label>
             <div className="space-y-2">
@@ -220,10 +220,10 @@ export default function OnboardingStep1Modal({ onComplete }: Props) {
         {/* Step 1 — secondary sources (optional, multi) */}
         {step === 1 && (
           <div>
-            <label className="block text-sm font-bold text-slate-900 mb-1">
-              Any other sources? <span className="text-slate-400 font-normal">(optional)</span>
+            <label className="block text-2xl lg:text-3xl font-extrabold text-slate-900 leading-tight tracking-tight mb-2">
+              Any other sources? <span className="text-slate-400 font-normal text-xl lg:text-2xl">(optional)</span>
             </label>
-            <p className="text-xs text-slate-500 mb-3">Select all that apply.</p>
+            <p className="text-sm text-slate-500 mb-5">Select all that apply.</p>
             <div className="space-y-2">
               {LEAD_SOURCES.filter(s => s.value !== primary).map(src => {
                 const active = secondary.includes(src.value);
@@ -250,7 +250,7 @@ export default function OnboardingStep1Modal({ onComplete }: Props) {
         {/* Step 2 — volume */}
         {step === 2 && (
           <div>
-            <label className="block text-sm font-bold text-slate-900 mb-3">
+            <label className="block text-2xl lg:text-3xl font-extrabold text-slate-900 leading-tight tracking-tight mb-5">
               About how many new leads do you receive per week?
             </label>
             <div className="grid grid-cols-2 gap-2">
@@ -275,7 +275,7 @@ export default function OnboardingStep1Modal({ onComplete }: Props) {
         {/* Step 3 — service type */}
         {step === 3 && (
           <div>
-            <label className="block text-sm font-bold text-slate-900 mb-3">
+            <label className="block text-2xl lg:text-3xl font-extrabold text-slate-900 leading-tight tracking-tight mb-5">
               What type of service business do you run?
             </label>
             <div className="max-h-[50vh] overflow-y-auto pr-1 space-y-5">

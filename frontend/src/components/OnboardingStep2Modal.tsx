@@ -193,7 +193,7 @@ export default function OnboardingStep2Modal({ onComplete }: Props) {
           Step {step + 1} of {totalSteps}
         </p>
 
-        <label className="block text-sm font-bold text-slate-900 mb-3">{q.label}</label>
+        <label className="block text-2xl lg:text-3xl font-extrabold text-slate-900 leading-tight tracking-tight mb-5">{q.label}</label>
         <div className="space-y-2">
           {q.options.map(opt => (
             <button
