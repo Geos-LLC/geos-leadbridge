@@ -39,6 +39,7 @@ function buildPrismaMock() {
     },
     followUpStepExecution: {
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      count: jest.fn().mockResolvedValue(0),
     },
     threadContext: {
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
@@ -121,10 +122,10 @@ describe('FollowUpEngineService', () => {
       expect(prisma.followUpEnrollment.create).not.toHaveBeenCalled();
     });
 
-    it('starts from step 0 for new leads (no customer replies after business message)', async () => {
-      // No customer replies after first pro message
-      prisma.message.findFirst.mockResolvedValue({ sentAt: new Date() }); // first pro msg exists
-      prisma.message.count.mockResolvedValue(0); // no customer replies after
+    it('starts from step 0 for new leads (no prior follow-up executions)', async () => {
+      // Initial AI auto-reply exists but NO prior follow-up sends.
+      prisma.message.findFirst.mockResolvedValue({ sentAt: new Date() });
+      prisma.followUpStepExecution.count.mockResolvedValue(0);
 
       await service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID);
 
@@ -132,24 +133,36 @@ describe('FollowUpEngineService', () => {
       expect(createCall.data.currentStepIndex).toBe(0);
     });
 
-    it('skips to later step for leads with prior conversation', async () => {
-      // Customer replied after business message
-      prisma.message.findFirst.mockResolvedValue({ sentAt: new Date('2026-04-01') }); // first pro msg
-      prisma.message.count.mockResolvedValue(2); // 2 customer replies after
-      // Account has default 24h re-enroll delay
+    it('does NOT count the initial AI auto-reply as a follow-up (Ruth regression)', async () => {
+      // Ruth-style state: 1 pro message (the initial AI auto-reply) but 0
+      // follow-up step executions yet. Start must be step 0 so the configured
+      // "2 min" first follow-up fires, not the template's 30-min step.
+      prisma.message.findFirst.mockResolvedValue({ sentAt: new Date() });
+      prisma.followUpStepExecution.count.mockResolvedValue(0);
+
+      await service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID);
+
+      const createCall = prisma.followUpEnrollment.create.mock.calls[0][0];
+      expect(createCall.data.currentStepIndex).toBe(0);
+    });
+
+    it('skips ahead when prior follow-up executions exist', async () => {
+      // Re-enrollment after a previous enrollment actually SENT follow-ups.
+      prisma.message.findFirst.mockResolvedValue({ sentAt: new Date('2026-04-01') });
+      prisma.followUpStepExecution.count.mockResolvedValue(2); // 2 prior follow-ups sent
       prisma.savedAccount.findFirst.mockResolvedValue({ followUpSettingsJson: null });
 
       await service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID);
 
       const createCall = prisma.followUpEnrollment.create.mock.calls[0][0];
-      // Should skip to step 2 (1440min = 24h), which is the first step >= 1440
+      // 2 prior follow-ups → messageBasedIndex=2, + 24h re-enroll delay
+      // (template step 2 = 1440min) → start at step 2.
       expect(createCall.data.currentStepIndex).toBe(2);
     });
 
-    it('respects custom re-enroll delay from settings', async () => {
+    it('respects custom re-enroll delay from settings when prior follow-ups exist', async () => {
       prisma.message.findFirst.mockResolvedValue({ sentAt: new Date('2026-04-01') });
-      prisma.message.count.mockResolvedValue(1);
-      // Account has 4h re-enroll delay
+      prisma.followUpStepExecution.count.mockResolvedValue(1);
       prisma.savedAccount.findFirst.mockResolvedValue({
         followUpSettingsJson: JSON.stringify({ fuReEnrollDelay: '4h' }),
       });
@@ -159,6 +172,33 @@ describe('FollowUpEngineService', () => {
       const createCall = prisma.followUpEnrollment.create.mock.calls[0][0];
       // 4h = 240 min, first step >= 240 is step 2 (1440min)
       expect(createCall.data.currentStepIndex).toBe(2);
+    });
+
+    it('uses user-configured step delays (not template) when computing first nextDue', async () => {
+      // User configured first step as "2 min"; template has 30 min. Verify
+      // enrollInSequence picks up the user delay so the first follow-up fires
+      // at now+2min, not now+30min (Ruth regression).
+      const now = new Date('2026-04-20T22:03:00Z');
+      jest.useFakeTimers({ now });
+
+      prisma.message.findFirst.mockResolvedValue({ sentAt: now });
+      prisma.followUpStepExecution.count.mockResolvedValue(0);
+      prisma.savedAccount.findFirst.mockResolvedValue({
+        followUpMode: 'auto_send',
+        followUpSettingsJson: JSON.stringify({
+          followUpSteps: [
+            { label: '1st', delay: '2 min', message: 'checkin' },
+            { label: '2nd', delay: '10 min', message: 'followup' },
+          ],
+        }),
+      });
+
+      await service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID);
+
+      const createCall = prisma.followUpEnrollment.create.mock.calls[0][0];
+      const expected = new Date(now.getTime() + 2 * 60_000);
+      expect(createCall.data.nextStepDueAt.getTime()).toBe(expected.getTime());
+      jest.useRealTimers();
     });
 
     it('throws when template not found', async () => {
