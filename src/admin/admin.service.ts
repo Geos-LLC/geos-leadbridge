@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
 import { StripeService } from '../stripe/stripe.service';
+import { TrialService } from '../trial/trial.service';
 import { ListUsersDto } from './dto/list-users.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { SubscriptionTier, SubscriptionStatus } from '../../generated/prisma';
@@ -12,7 +13,83 @@ export class AdminService {
   constructor(
     private prisma: PrismaService,
     private stripeService: StripeService,
+    private trialService: TrialService,
   ) {}
+
+  /**
+   * Reset trials for all non-paid users back to a fresh start, then re-init
+   * trialType per their currently connected platforms (adaptive trial system).
+   * Paid users (subscriptionTier set + active/past_due/trialing) are skipped.
+   */
+  async resetAllTrials(adminId: string): Promise<{ totalScanned: number; reset: number; reInitialized: number; skippedPaid: number }> {
+    const users = await this.prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        subscriptionTier: true,
+        subscriptionStatus: true,
+      },
+    });
+
+    let reset = 0;
+    let reInitialized = 0;
+    let skippedPaid = 0;
+
+    for (const u of users) {
+      const isActivePaid =
+        u.subscriptionTier &&
+        (u.subscriptionStatus === SubscriptionStatus.ACTIVE ||
+          u.subscriptionStatus === SubscriptionStatus.TRIALING ||
+          u.subscriptionStatus === SubscriptionStatus.PAST_DUE);
+      if (isActivePaid) {
+        skippedPaid++;
+        continue;
+      }
+
+      // Wipe trial state to a fresh starting point
+      await this.prisma.user.update({
+        where: { id: u.id },
+        data: {
+          trialLeadsHandled: 0,
+          trialEndedAt: null,
+          trialEndNotifiedAt: null,
+          trialUsed: false,
+          trialType: null,
+          trialEndDate: null,
+          trialStartDate: null,
+        },
+      });
+      reset++;
+
+      // If they already have platforms connected, re-init trialType per the
+      // adaptive rules. Otherwise trialType stays null until they connect one.
+      const platforms = await this.prisma.savedAccount.findMany({
+        where: { userId: u.id },
+        select: { platform: true },
+        distinct: ['platform'],
+      });
+      if (platforms.length > 0) {
+        // onPlatformConnected reads ALL their connected platforms internally,
+        // so a single call with any one of them computes the right config.
+        await this.trialService.onPlatformConnected(u.id, platforms[0].platform);
+        reInitialized++;
+      }
+    }
+
+    await this.prisma.adminLog.create({
+      data: {
+        adminId,
+        action: 'reset_all_trials',
+        details: { totalScanned: users.length, reset, reInitialized, skippedPaid } as any,
+      },
+    });
+
+    this.logger.log(
+      `[resetAllTrials] admin=${adminId} scanned=${users.length} reset=${reset} reInit=${reInitialized} skippedPaid=${skippedPaid}`,
+    );
+
+    return { totalScanned: users.length, reset, reInitialized, skippedPaid };
+  }
 
   async listUsers(query: ListUsersDto) {
     const { search, tier, offset = 0, limit = 50 } = query;

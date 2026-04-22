@@ -90,6 +90,13 @@ export class AdminController {
     };
   }
 
+  @Post('trials/reset-all')
+  async resetAllTrials(@Req() req: any) {
+    const adminId = req.user.id;
+    const result = await this.adminService.resetAllTrials(adminId);
+    return { success: true, data: result };
+  }
+
   @Delete('users/:userId')
   async deleteUser(@Req() req: any, @Param('userId') userId: string) {
     const adminId = req.user.id;

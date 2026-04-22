@@ -7,9 +7,10 @@ import { AdminPhonePoolService } from './admin-phone-pool.service';
 import { StripeModule } from '../stripe/stripe.module';
 import { SigcoreModule } from '../sigcore/sigcore.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { TrialModule } from '../trial/trial.module';
 
 @Module({
-  imports: [ConfigModule, StripeModule, SigcoreModule, NotificationsModule],
+  imports: [ConfigModule, StripeModule, SigcoreModule, NotificationsModule, TrialModule],
   controllers: [AdminController, AdminPhonePoolController],
   providers: [AdminService, AdminPhonePoolService],
   exports: [AdminService, AdminPhonePoolService],
