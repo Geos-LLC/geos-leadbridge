@@ -135,8 +135,39 @@ model User {
   orgMemberships              OrgMembership[]
   crmWebhookSubscriptions     CrmWebhookSubscription[]
   accountHealthStatuses       AccountHealthStatus[]
+  onboardingProfile           OnboardingProfile?
 
   @@map("users")
+}
+
+// One-to-one profile capturing the answers from the post-signup qualification flow.
+// Step 1 (required) collects lead source + volume + service type.
+// Step 2 (optional) collects pain & value signals used for personalization.
+model OnboardingProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Step 1 — required (blocking)
+  primaryLeadSource    String? // "thumbtack" | "yelp" | "google" | "facebook" | "other"
+  secondaryLeadSources String[] @default([])
+  weeklyLeadVolume     String? // "0-5" | "5-15" | "15-50" | "50+"
+  serviceType          String? // "house_cleaning" | "deep_cleaning" | "move_out_cleaning" | "commercial_cleaning" | "other"
+  serviceTypeOther     String?
+  step1CompletedAt     DateTime?
+
+  // Step 2 — optional (skippable)
+  responseSpeed     String? // "5min" | "30min" | "few_hours" | "later"
+  missedLeadOutcome String? // "hire_someone_else" | "stop_replying" | "follow_up_later" | "not_sure"
+  avgJobValue       String? // "under_100" | "100_200" | "200_500" | "500_plus"
+  userGoal          String? // "respond_instantly" | "book_more" | "automate_follow_ups" | "notifications_only"
+  step2CompletedAt  DateTime?
+  step2SkippedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("onboarding_profiles")
 }
 
 // ==========================================

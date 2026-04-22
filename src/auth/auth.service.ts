@@ -98,6 +98,7 @@ export class AuthService {
         trialStartDate: user.trialStartDate,
         trialEndDate: user.trialEndDate,
         trialUsed: user.trialUsed,
+        onboardingProfile: null,
       },
       token,
     };
@@ -110,6 +111,7 @@ export class AuthService {
     // Find user
     const user = await this.prisma.user.findUnique({
       where: { email },
+      include: { onboardingProfile: true },
     });
 
     if (!user || !user.password) {
@@ -141,6 +143,7 @@ export class AuthService {
         trialStartDate: user.trialStartDate,
         trialEndDate: user.trialEndDate,
         trialUsed: user.trialUsed,
+        onboardingProfile: user.onboardingProfile,
       },
       token,
     };
@@ -171,6 +174,7 @@ export class AuthService {
             lastSyncAt: true,
           },
         },
+        onboardingProfile: true,
       },
     });
 

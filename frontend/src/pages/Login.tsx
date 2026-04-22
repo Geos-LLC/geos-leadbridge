@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, ArrowRight, Zap, ShieldCheck, RefreshCw, Eye, EyeOff } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { authApi } from '../services/api';
+import { trackEvent } from '../services/analytics';
 
 export function Login() {
   const navigate = useNavigate();
@@ -22,6 +23,13 @@ export function Login() {
     try {
       const { user, token } = await authApi.login(email, password);
       setAuth(user, token);
+      const fresh = localStorage.getItem('lb_fresh_signup') === '1';
+      const hasLoggedInBefore = localStorage.getItem('lb_has_logged_in') === '1';
+      if (fresh || !hasLoggedInBefore) {
+        trackEvent('first_login');
+        localStorage.removeItem('lb_fresh_signup');
+        localStorage.setItem('lb_has_logged_in', '1');
+      }
       navigate('/dashboard');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to sign in. Please check your credentials.');

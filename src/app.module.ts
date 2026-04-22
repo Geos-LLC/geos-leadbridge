@@ -31,6 +31,7 @@ import { CrmWebhookModule } from './crm-webhooks/crm-webhook.module';
 import { ServiceFlowModule } from './integrations/service-flow/service-flow.module';
 import { HealthModule } from './health/health.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { ImpersonationGuard, ImpersonationInterceptor } from './common/guards/impersonation.guard';
 import { PrismaModule } from './common/utils/prisma.module';
@@ -67,6 +68,7 @@ import { PrismaModule } from './common/utils/prisma.module';
     ServiceFlowModule,
     HealthModule,
     MonitoringModule,
+    OnboardingModule,
   ],
   providers: [
     {

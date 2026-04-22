@@ -11,6 +11,8 @@ import TrialBanner from './TrialBanner';
 import TrialExpiredModal from './TrialExpiredModal';
 import CancelledSubscriptionBanner from './CancelledSubscriptionBanner';
 import ImpersonationBanner from './ImpersonationBanner';
+import OnboardingStep1Modal from './OnboardingStep1Modal';
+import OnboardingStep2Modal from './OnboardingStep2Modal';
 
 function BrandMark({ size = 26 }: { size?: number }) {
   return (
@@ -110,9 +112,20 @@ export function Layout() {
     </NavLink>
   );
 
+  const profile = user?.onboardingProfile ?? null;
+  const needsStep1 = !impersonatingUser && !!user && !profile?.step1CompletedAt;
+  const needsStep2 =
+    !impersonatingUser &&
+    !!user &&
+    !!profile?.step1CompletedAt &&
+    !profile?.step2CompletedAt &&
+    !profile?.step2SkippedAt;
+
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--lb-bg)' }}>
       <TrialExpiredModal />
+      {needsStep1 && <OnboardingStep1Modal onComplete={() => { /* authStore updated inside modal */ }} />}
+      {!needsStep1 && needsStep2 && <OnboardingStep2Modal onComplete={() => { /* authStore updated inside modal */ }} />}
 
       {/* Mobile Navigation Overlay */}
       {mobileMenuOpen && (

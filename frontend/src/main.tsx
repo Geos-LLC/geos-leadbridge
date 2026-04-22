@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client'
 import './tailwind.css'
 import './index.css'
 import App from './App.tsx'
+import { initAnalytics } from './services/analytics'
+
+void initAnalytics()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

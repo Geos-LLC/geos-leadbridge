@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Check,
@@ -15,8 +16,16 @@ import {
   Plus,
 } from 'lucide-react';
 import leadConversationImg from '../assets/lead-conversation-thumbtack.png';
+import { trackEvent } from '../services/analytics';
 
 export function Landing() {
+  useEffect(() => {
+    trackEvent('landing_page_viewed', { source_page: 'landing' });
+  }, []);
+
+  const trackUpgrade = (planType: string, entryPoint: string) =>
+    trackEvent('upgrade_clicked', { plan_type: planType, entry_point: entryPoint });
+
   return (
     <div className="antialiased bg-white text-slate-900">
 
@@ -62,7 +71,7 @@ export function Landing() {
               Built for cleaning companies and home service pros who want faster replies, fewer missed leads, and more booked jobs.
             </p>
             <div className="flex flex-wrap gap-4 mb-10">
-              <Link to="/register" className="inline-flex items-center gap-2 px-7 py-4 bg-blue-600 text-white rounded-2xl text-base font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 group">
+              <Link to="/register" onClick={() => trackUpgrade('unknown', 'hero')} className="inline-flex items-center gap-2 px-7 py-4 bg-blue-600 text-white rounded-2xl text-base font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 group">
                 Start Free Trial
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </Link>
@@ -350,7 +359,7 @@ export function Landing() {
                 ))}
               </ul>
               <p className="text-xs text-slate-500 mb-5"><span className="font-semibold text-slate-700">Best for:</span> solo cleaners & basic use</p>
-              <Link to="/register" className="block w-full py-3.5 text-center bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all">
+              <Link to="/register" onClick={() => trackUpgrade('respond', 'pricing_card')} className="block w-full py-3.5 text-center bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all">
                 Start Free Trial
               </Link>
             </div>
@@ -388,7 +397,7 @@ export function Landing() {
                 ))}
               </ul>
               <p className="text-xs text-slate-500 mb-5"><span className="font-semibold text-slate-700">Best for:</span> serious operators & growing teams</p>
-              <Link to="/register" className="block w-full py-3.5 text-center bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200">
+              <Link to="/register" onClick={() => trackUpgrade('engage', 'pricing_card')} className="block w-full py-3.5 text-center bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200">
                 Start Free Trial
               </Link>
             </div>
@@ -422,7 +431,7 @@ export function Landing() {
                 ))}
               </ul>
               <p className="text-xs text-slate-500 mb-5"><span className="font-semibold text-slate-700">Best for:</span> high-volume & scaling businesses</p>
-              <Link to="/register" className="block w-full py-3.5 text-center bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all">
+              <Link to="/register" onClick={() => trackUpgrade('convert', 'pricing_card')} className="block w-full py-3.5 text-center bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all">
                 Start Free Trial
               </Link>
             </div>
@@ -478,7 +487,7 @@ export function Landing() {
             Stop missing leads.<br />Start converting them.
           </h2>
           <p className="text-xl text-blue-100 mb-10">Get your first leads handled automatically.</p>
-          <Link to="/register" className="inline-flex items-center gap-3 px-10 py-5 bg-white text-blue-700 rounded-2xl text-xl font-bold hover:bg-blue-50 transition-all shadow-xl group">
+          <Link to="/register" onClick={() => trackUpgrade('unknown', 'final_cta')} className="inline-flex items-center gap-3 px-10 py-5 bg-white text-blue-700 rounded-2xl text-xl font-bold hover:bg-blue-50 transition-all shadow-xl group">
             Start Free Trial
             <ArrowRight className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
           </Link>
