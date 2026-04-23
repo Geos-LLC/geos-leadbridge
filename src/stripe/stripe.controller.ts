@@ -71,6 +71,17 @@ export class StripeController {
     });
   }
 
+  @Get('invoices')
+  @UseGuards(JwtAuthGuard)
+  async listInvoices(@Req() req: any) {
+    const userId = req.user.id;
+    const result = await this.stripeService.listInvoices(userId);
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
   @Public()
   @Post('webhook')
   async handleWebhook(

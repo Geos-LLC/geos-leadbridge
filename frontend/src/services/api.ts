@@ -996,7 +996,27 @@ export const billingApi = {
     const { data } = await api.get('/v1/stripe/subscription');
     return data.data;
   },
+  getInvoices: async (): Promise<{ invoices: StripeInvoice[] }> => {
+    const { data } = await api.get('/v1/stripe/invoices');
+    return data.data;
+  },
 };
+
+export interface StripeInvoice {
+  id: string;
+  number: string | null;
+  status: 'draft' | 'open' | 'paid' | 'uncollectible' | 'void' | null;
+  amountPaid: number;
+  amountDue: number;
+  total: number;
+  currency: string;
+  created: number;
+  periodStart: number;
+  periodEnd: number;
+  hostedInvoiceUrl: string | null;
+  invoicePdf: string | null;
+  description: string | null;
+}
 
 // Users API (Phone provisioning, etc)
 export const usersApi = {

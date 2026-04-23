@@ -139,6 +139,47 @@ export class StripeService {
     }
   }
 
+  async listInvoices(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.stripeCustomerId) {
+      return { invoices: [] };
+    }
+
+    try {
+      const result = await this.requireStripe().invoices.list({
+        customer: user.stripeCustomerId,
+        limit: 24,
+      });
+
+      const invoices = result.data.map((inv) => ({
+        id: inv.id,
+        number: inv.number,
+        status: inv.status,
+        amountPaid: inv.amount_paid,
+        amountDue: inv.amount_due,
+        total: inv.total,
+        currency: inv.currency,
+        created: inv.created,
+        periodStart: inv.period_start,
+        periodEnd: inv.period_end,
+        hostedInvoiceUrl: inv.hosted_invoice_url,
+        invoicePdf: inv.invoice_pdf,
+        description:
+          inv.lines?.data?.[0]?.description ||
+          inv.lines?.data?.[0]?.price?.nickname ||
+          null,
+      }));
+
+      return { invoices };
+    } catch (err: any) {
+      this.logger.error(`[listInvoices] Stripe error: ${err.message}`);
+      if (err.code === 'resource_missing' || err.message?.includes('No such customer')) {
+        return { invoices: [] };
+      }
+      throw new BadRequestException(err.message || 'Failed to list invoices');
+    }
+  }
+
   async cancelSubscription(userId: string, immediate: boolean = true) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
