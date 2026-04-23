@@ -502,6 +502,11 @@ export class FollowUpSchedulerService implements OnModuleInit {
           });
           if (lead) {
             const sentMsg = await this.leadsService.sendMessage(lead.userId, lead.id, generated.message, 'ai');
+            // TODO: sentMsg.id is the Yelp adapter's in-memory id (often a random UUID
+            // when Yelp's response omits event_id) — NOT a persisted Message.id.
+            // FollowUpStepExecution.messageId therefore frequently orphans.
+            // To fix, look up Message by externalMessageId (sentMsg.externalMessageId)
+            // or by conversationId + finalMessage content.
             messageId = sentMsg?.id || null;
 
             // Record in thread context

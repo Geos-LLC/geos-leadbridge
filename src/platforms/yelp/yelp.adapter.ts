@@ -303,6 +303,9 @@ export class YelpAdapter implements IPlatformAdapter {
       const msg = new NormalizedMessage();
       // Yelp's POST /events response returns `event_id` (sometimes `id`)
       const eventId = data.event_id || data.id;
+      // TODO: msg.id is NOT a persisted DB identifier — when eventId is missing
+      // this is a throwaway UUID. Callers that store it (e.g. FollowUpStepExecution.messageId)
+      // end up with orphaned references. Prefer externalMessageId for lookups.
       msg.id = eventId || crypto.randomUUID();
       msg.conversationId = leadId;
       msg.platform = PlatformName.YELP;

@@ -33,7 +33,7 @@ function normalize(s) {
   return (s || '')
     .trim()
     .replace(/\s+/g, ' ')
-    .replace(/[\u2014\u2013]/g, '-')
+    .replace(/[\u2014\u2013]/g, '--')
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201C\u201D]/g, '"');
 }
