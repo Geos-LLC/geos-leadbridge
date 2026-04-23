@@ -97,6 +97,7 @@ export class StripeService {
       payment_method_types: ['card'],
       line_items: lineItems,
       mode: 'subscription',
+      allow_promotion_codes: true,
       success_url: `${this.configService.get<string>('FRONTEND_URL')}/billing?success=true`,
       cancel_url: `${this.configService.get<string>('FRONTEND_URL')}/pricing?canceled=true`,
       metadata: {
