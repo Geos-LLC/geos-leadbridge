@@ -1915,14 +1915,20 @@ export function Services() {
               {/* Row 1: Bot Number + Business Phone */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div data-tour="bot-number">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🤖 LeadBridge Number</label>
+                  <div className="flex items-center gap-2 mb-1">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🤖 LeadBridge Number</label>
+                    <TierBadge tier="engage" />
+                  </div>
                   <p className="text-[11px] text-slate-400 mb-2">Customers receive texts and calls from this number.</p>
                   <div className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700">
                     {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName && tenantPhones[0].friendlyName !== tenantPhones[0].phoneNumber ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
                   </div>
                 </div>
                 <div data-tour="business-phone">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">📱 Your Business Phone</label>
+                  <div className="flex items-center gap-2 mb-1">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">📱 Your Business Phone</label>
+                    <TierBadge tier="respond" />
+                  </div>
                   <p className="text-[11px] text-slate-400 mb-2">Lead notifications and alerts are sent to this number.</p>
                   {editingAgentPhone ? (
                     <div className="flex items-center gap-2">
@@ -2012,6 +2018,7 @@ export function Services() {
                      testStatus === 'failed' ? <X size={14} /> :
                      <Send size={14} />}
                     {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Sent!' : testStatus === 'failed' ? 'Failed' : 'Test Alert'}
+                    <TierBadge tier="respond" />
                   </button>
                   <button
                     onClick={sendCtTest}
@@ -2029,6 +2036,7 @@ export function Services() {
                      ctTestStatus === 'failed' ? <X size={14} /> :
                      <Send size={14} />}
                     {ctTestStatus === 'sending' ? 'Sending...' : ctTestStatus === 'delivered' ? 'Sent' : ctTestStatus === 'failed' ? 'Failed' : 'Test Text'}
+                    <TierBadge tier="engage" />
                   </button>
                   <button
                     onClick={handleTestCall}
@@ -2040,6 +2048,7 @@ export function Services() {
                   >
                     {ccTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
                     {ccTesting ? 'Calling…' : 'Test Call'}
+                    <TierBadge tier="engage" />
                   </button>
                   </div>
                 </div>
@@ -2050,10 +2059,13 @@ export function Services() {
               {/* Row 1: Locked LeadBridge Number + editable Business Phone */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div data-tour="bot-number">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block flex items-center gap-1.5">
-                    🤖 LeadBridge Number
-                    <Lock className="w-3 h-3 text-slate-400" />
-                  </label>
+                  <div className="flex items-center gap-2 mb-1">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                      🤖 LeadBridge Number
+                      <Lock className="w-3 h-3 text-slate-400" />
+                    </label>
+                    <TierBadge tier="engage" />
+                  </div>
                   <p className="text-[11px] text-slate-400 mb-2">Send SMS and call leads from your own number.</p>
                   <div className="w-full rounded-xl p-3 text-sm font-medium bg-slate-50 border-2 border-dashed border-slate-200 text-slate-500 flex items-center justify-between gap-2">
                     <span className="flex items-center gap-2">
@@ -2070,7 +2082,10 @@ export function Services() {
                   <p className="mt-1.5 text-[11px] text-slate-400">Upgrade to Engage to enable outbound messaging and calls.</p>
                 </div>
                 <div data-tour="business-phone">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">📱 Your Business Phone</label>
+                  <div className="flex items-center gap-2 mb-1">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">📱 Your Business Phone</label>
+                    <TierBadge tier="respond" />
+                  </div>
                   <p className="text-[11px] text-slate-400 mb-2">Lead notifications and alerts are sent to this number.</p>
                   {editingAgentPhone ? (
                     <div className="flex items-center gap-2">
@@ -2148,6 +2163,7 @@ export function Services() {
                        testStatus === 'failed' ? <X size={14} /> :
                        <Send size={14} />}
                       {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Sent!' : testStatus === 'failed' ? 'Failed' : 'Test Alert'}
+                      <TierBadge tier="respond" />
                     </button>
                     <button
                       disabled
@@ -2155,6 +2171,7 @@ export function Services() {
                       className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-slate-50 text-slate-400 border border-dashed border-slate-200 cursor-not-allowed whitespace-nowrap"
                     >
                       <Lock size={12} /> Test Text
+                      <TierBadge tier="engage" />
                     </button>
                     <button
                       disabled
@@ -2162,6 +2179,7 @@ export function Services() {
                       className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-slate-50 text-slate-400 border border-dashed border-slate-200 cursor-not-allowed whitespace-nowrap"
                     >
                       <Lock size={12} /> Test Call
+                      <TierBadge tier="engage" />
                     </button>
                   </div>
                 </div>
