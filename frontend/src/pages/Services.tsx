@@ -44,9 +44,10 @@ interface ServiceCardProps {
   iconBgColor?: string;
   iconTextColor?: string;
   cardRef?: (el: HTMLDivElement | null) => void;
+  titleBadge?: React.ReactNode;
 }
 
-function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, expanded, onExpand, statusText, warningText, setupRequired, children, cardRef }: ServiceCardProps) {
+function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, expanded, onExpand, statusText, warningText, setupRequired, children, cardRef, titleBadge }: ServiceCardProps) {
   const borderColor = comingSoon
     ? 'var(--lb-line-soft)'
     : setupRequired
@@ -107,6 +108,7 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
             >
               {title}
             </h3>
+            {titleBadge}
             {comingSoon && (
               <span
                 style={{
@@ -266,12 +268,47 @@ function ServiceCard({ icon, title, description, enabled, onToggle, comingSoon, 
 const _svcCache = new Map<string, Record<string, any>>();
 let _svcLoaded = false; // true once we've fetched at least once (even if no accounts)
 
+// Tier badges — flow stays the page's structure, tiers get annotated per feature block.
+// Respond = STARTER (included), Engage = PRO, Convert = ENTERPRISE.
+function TierBadge({ tier }: { tier: 'respond' | 'engage' | 'convert' }) {
+  const config = {
+    respond: { label: 'Respond', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    engage:  { label: 'Engage',  cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+    convert: { label: 'Convert', cls: 'bg-violet-50 text-violet-700 border-violet-200' },
+  } as const;
+  const c = config[tier];
+  return (
+    <span className={`inline-flex items-center text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${c.cls}`}>
+      {c.label}
+    </span>
+  );
+}
+
+// Lock overlay — keep the feature visible and explained, but fade + block interaction and offer upgrade.
+function LockedFeatureOverlay({ ctaLabel }: { ctaLabel: string }) {
+  return (
+    <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/55 backdrop-blur-[1px] rounded-2xl">
+      <Link
+        to="/pricing"
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-blue-600 shadow-sm hover:bg-blue-50 hover:border-blue-200 transition-colors"
+      >
+        <Lock className="w-3 h-3" />
+        {ctaLabel}
+      </Link>
+    </div>
+  );
+}
+
 // -- Main Services Page --
 export function Services() {
   const [searchParams] = useSearchParams();
   const subscriptionTier = useAuthStore(s => s.user?.subscriptionTier);
   // Tier 1 = Respond (STARTER or no/inactive plan). No LeadBridge number, no outbound SMS/calls.
   const isTier1Respond = !subscriptionTier || subscriptionTier === 'STARTER';
+  // Tier 2+ = Engage (PRO or ENTERPRISE). Unlocks SMS, calls, follow-ups, re-engagement alerts.
+  const canUseEngage = subscriptionTier === 'PRO' || subscriptionTier === 'ENTERPRISE';
+  // Tier 3 = Convert (ENTERPRISE). Unlocks AI Conversation.
+  const canUseConvert = subscriptionTier === 'ENTERPRISE';
   const storedAccounts = useAppStore(state => state.savedAccounts);
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
   const setAccountDiagnostics = useAppStore(state => state.setAccountDiagnostics);
@@ -2199,7 +2236,10 @@ export function Services() {
                   <div className="flex items-center gap-3">
                     <Zap className="w-5 h-5 text-blue-600" />
                     <div>
-                      <h4 className="text-sm font-bold text-slate-800">Instant Reply</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-bold text-slate-800">Instant Reply</h4>
+                        <TierBadge tier="respond" />
+                      </div>
                       <p className="text-xs text-slate-400">Send the first message automatically when a new lead arrives</p>
                     </div>
                   </div>
@@ -2501,7 +2541,10 @@ export function Services() {
                   <div className="flex items-center gap-3">
                     <MessageSquare className="w-5 h-5 text-amber-600" />
                     <div>
-                      <h4 className="text-sm font-bold text-slate-800">Alerts</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-bold text-slate-800">Alerts</h4>
+                        <TierBadge tier="respond" />
+                      </div>
                       <p className="text-xs text-slate-400">Get notified when a new lead arrives.</p>
                     </div>
                   </div>
@@ -2628,21 +2671,25 @@ export function Services() {
               </div>
 
               {/* ── Instant Text sub-section ── */}
-              <div className="border border-slate-100 rounded-2xl overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50">
+              <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
+                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage" />}
+                <div className={`flex items-center justify-between px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
                   <div className="flex items-center gap-3">
                     <MessageSquare className="w-5 h-5 text-emerald-600" />
                     <div>
-                      <h4 className="text-sm font-bold text-slate-800">Instant Text</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-bold text-slate-800">Instant Text</h4>
+                        <TierBadge tier="engage" />
+                      </div>
                       <p className="text-xs text-slate-400">Automatically text the lead when a new lead arrives</p>
                     </div>
                   </div>
-                  <label className="inline-flex items-center cursor-pointer">
+                  <label className={`inline-flex items-center ${canUseEngage ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
                     <input
                       type="checkbox"
                       checked={ctEnabled}
                       onChange={e => toggleCustomerTexting(e.target.checked)}
-                      disabled={ctSaving}
+                      disabled={ctSaving || !canUseEngage}
                       className="sr-only peer"
                     />
                     <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
@@ -2701,21 +2748,25 @@ export function Services() {
               </div>
 
               {/* ── Instant Call Connect sub-section ── */}
-              <div className="border border-slate-100 rounded-2xl overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50">
+              <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
+                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage" />}
+                <div className={`flex items-center justify-between px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
                   <div className="flex items-center gap-3">
                     <PhoneCall className="w-5 h-5 text-violet-600" />
                     <div>
-                      <h4 className="text-sm font-bold text-slate-800">Instant Call</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-bold text-slate-800">Instant Call</h4>
+                        <TierBadge tier="engage" />
+                      </div>
                       <p className="text-xs text-slate-400">Call your team and connect to the lead right away</p>
                     </div>
                   </div>
-                  <label className="inline-flex items-center cursor-pointer">
+                  <label className={`inline-flex items-center ${canUseEngage ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
                     <input
                       type="checkbox"
                       checked={ccEnabled}
                       onChange={e => toggleCallConnect(e.target.checked)}
-                      disabled={ccSaving}
+                      disabled={ccSaving || !canUseEngage}
                       className="sr-only peer"
                     />
                     <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
@@ -2889,302 +2940,6 @@ export function Services() {
             );
           })()}
 
-          {/* 3. Customer Communications (combined CT + ICC) — REMOVED, merged into "When a Lead Arrives" */}
-          {false && (
-          <ServiceCard
-            icon={<Phone className="w-7 h-7" />}
-            title="Customer Contact"
-            description="Text and call customers from your LeadBridge number."
-            enabled={ctEnabled || ccEnabled}
-            onToggle={(on) => {
-              if (on && tenantPhones.length === 0) { setShowDedicatedModal(true); return; }
-              // Optimistic: flip both sub-switches immediately
-              setCtEnabled(on);
-              setCcEnabled(on);
-              if (!expandedCard || expandedCard !== 'comms') setExpandedCard('comms');
-              // Persist to backend (fire & forget — each handles its own rollback)
-              if (on !== ctEnabled && selectedAccountId) {
-                notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
-                  enabled: on,
-                  autoReplyTemplate: ctAutoReplyTemplate,
-                }).catch((err) => { console.error('CT save failed:', err); setCtEnabled(!on); });
-              }
-              if (on !== ccEnabled && selectedAccountId) {
-                callConnectApi.saveSettings(selectedAccountId, { enabled: on })
-                  .then(({ settings }) => setCcEnabled(settings.enabled))
-                  .catch((err) => { console.error('CC save failed:', err); setCcEnabled(!on); });
-              }
-            }}
-            expanded={expandedCard === 'comms'}
-            onExpand={() => toggleExpand('comms')}
-            setupRequired={tenantPhones.length === 0 || (!ccAgentPhone && tenantPhones.length > 0)}
-            warningText={tenantPhones.length === 0 ? 'LeadBridge number required' : (!ccAgentPhone && tenantPhones.length > 0) ? 'Agent phone required' : undefined}
-            statusText={undefined}
-            iconBgColor="bg-blue-50"
-            iconTextColor="text-blue-600"
-            cardRef={el => { cardRefs.current['comms'] = el; if (el) el.setAttribute('data-tour', 'comms-card'); }}
-          >
-            <div className={`space-y-6${tenantPhones.length === 0 ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-
-              {/* ── Customer Texting sub-section ── */}
-              <div className="border border-slate-100 rounded-2xl overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50">
-                  <div className="flex items-center gap-3">
-                    <MessageSquare className="w-5 h-5 text-emerald-600" />
-                    <div>
-                      <h4 className="text-sm font-bold text-slate-800">Instant Text</h4>
-                      <p className="text-xs text-slate-400">Automatically text the lead when a new lead arrives</p>
-                    </div>
-                  </div>
-                  <label className="inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={ctEnabled}
-                      onChange={e => toggleCustomerTexting(e.target.checked)}
-                      disabled={ctSaving}
-                      className="sr-only peer"
-                    />
-                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
-                  </label>
-                </div>
-                <div className={`px-5 py-4 space-y-4${!ctEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-                  {/* Auto-reply template */}
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Auto-Reply Message</label>
-                    <p className="text-xs text-slate-400 mb-2">Sent immediately when a new lead arrives.</p>
-                    <select
-                      value={ctSelectedTemplateId}
-                      onChange={e => {
-                        if (e.target.value === '__create_new__') {
-                          setTemplateEditor({ mode: 'create', ruleId: '', content: '', type: 'ct' });
-                        } else {
-                          const tpl = templates.find(t => t.id === e.target.value);
-                          if (tpl) {
-                            setCtSelectedTemplateId(tpl.id);
-                            setCtAutoReplyTemplate(tpl.content);
-                          }
-                        }
-                      }}
-                      className="w-full rounded-xl p-3 text-sm font-medium bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                    >
-                      <option value="">Select template</option>
-                      {templates.map(t => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                      <option value="__create_new__">+ Create New Template</option>
-                    </select>
-                    {ctAutoReplyTemplate && (
-                      <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
-                        {ctAutoReplyTemplate}
-                        <button
-                          type="button"
-                          onClick={() => setTemplateEditor({
-                            mode: ctSelectedTemplateId ? 'service-edit' : 'create',
-                            ruleId: '',
-                            ...(ctSelectedTemplateId && {
-                              templateId: ctSelectedTemplateId,
-                              templateName: templates.find(t => t.id === ctSelectedTemplateId)?.name || 'template',
-                            }),
-                            content: ctAutoReplyTemplate,
-                            type: 'ct',
-                          })}
-                          className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-emerald-600"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                </div>
-              </div>
-
-              {/* ── Instant Call Connect sub-section ── */}
-              <div className="border border-slate-100 rounded-2xl overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50">
-                  <div className="flex items-center gap-3">
-                    <PhoneCall className="w-5 h-5 text-violet-600" />
-                    <div>
-                      <h4 className="text-sm font-bold text-slate-800">Instant Call</h4>
-                      <p className="text-xs text-slate-400">Call your team and connect to the lead right away</p>
-                    </div>
-                  </div>
-                  <label className="inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={ccEnabled}
-                      onChange={e => toggleCallConnect(e.target.checked)}
-                      disabled={ccSaving}
-                      className="sr-only peer"
-                    />
-                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
-                  </label>
-                </div>
-                <div className={`px-5 py-4 space-y-4${!ccEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-                  {/* Connection Mode */}
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Connection Mode</label>
-                    <div className="flex bg-slate-100 rounded-2xl p-1 max-w-lg">
-                      <button
-                        onClick={() => setCcMode('AGENT_FIRST')}
-                        className={`flex-1 flex flex-col items-center gap-0.5 rounded-xl px-4 py-3 transition-all ${
-                          ccMode === 'AGENT_FIRST' ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'
-                        }`}
-                      >
-                        <Phone className="w-4 h-4" />
-                        <span className="text-sm font-bold">Agent First</span>
-                        <span className="text-[11px] font-normal text-slate-400 leading-tight text-center">We call you, then bridge the lead</span>
-                      </button>
-                      <button
-                        onClick={() => setCcMode('PARALLEL')}
-                        className={`flex-1 flex flex-col items-center gap-0.5 rounded-xl px-4 py-3 transition-all ${
-                          ccMode === 'PARALLEL' ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'
-                        }`}
-                      >
-                        <Zap className="w-4 h-4" />
-                        <span className="text-sm font-bold">Parallel</span>
-                        <span className="text-[11px] font-normal text-slate-400 leading-tight text-center">Call you and lead simultaneously</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Agent Whisper Message */}
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Agent Whisper Message</label>
-                    <p className="text-xs text-slate-400 mb-3">Played to you before the bridge. Press <span className="font-semibold text-slate-500">any key</span> to accept.</p>
-                    <select
-                      value={ccWhisperTemplateId || ''}
-                      onChange={e => {
-                        if (e.target.value === '__create_new__') {
-                          setTemplateEditor({ mode: 'create', ruleId: '', content: ccAgentWhisperMessage, type: 'cc-whisper' });
-                        } else {
-                          const t = templates.find(x => x.id === e.target.value);
-                          if (t) { setCcAgentWhisperMessage(t.content); setCcWhisperTemplateId(t.id); }
-                        }
-                      }}
-                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
-                    >
-                      <option value="">Select template…</option>
-                      {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                      <option value="__create_new__">+ Create New Template</option>
-                    </select>
-                    {ccAgentWhisperMessage && (
-                      <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
-                        {ccAgentWhisperMessage}
-                        <button
-                          onClick={() => {
-                            const tpl = ccWhisperTemplateId ? templates.find(t => t.id === ccWhisperTemplateId) : null;
-                            setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccAgentWhisperMessage, type: 'cc-whisper' });
-                          }}
-                          className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Lead Greeting — Parallel mode only */}
-                  {ccMode === 'PARALLEL' && (
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Lead Greeting Message</label>
-                      <p className="text-xs text-slate-400 mb-3">Played to the lead while they wait for you to answer.</p>
-                      <select
-                        value={ccGreetingTemplateId || ''}
-                        onChange={e => {
-                          if (e.target.value === '__create_new__') {
-                            setTemplateEditor({ mode: 'create', ruleId: '', content: ccLeadGreetingMessage, type: 'cc-greeting' });
-                          } else {
-                            const t = templates.find(x => x.id === e.target.value);
-                            if (t) { setCcLeadGreetingMessage(t.content); setCcGreetingTemplateId(t.id); }
-                          }
-                        }}
-                        className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
-                      >
-                        <option value="">Select template…</option>
-                        {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                        <option value="__create_new__">+ Create New Template</option>
-                      </select>
-                      {ccLeadGreetingMessage && (
-                        <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
-                          {ccLeadGreetingMessage}
-                          <button
-                            onClick={() => {
-                              const tpl = ccGreetingTemplateId ? templates.find(t => t.id === ccGreetingTemplateId) : null;
-                              setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccLeadGreetingMessage, type: 'cc-greeting' });
-                            }}
-                            className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Voicemail */}
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Voicemail Message</label>
-                    <p className="text-xs text-slate-400 mb-3">Left automatically when the lead doesn't answer.</p>
-                    <select
-                      value={ccVoicemailTemplateId || ''}
-                      onChange={e => {
-                        if (e.target.value === '__create_new__') {
-                          setTemplateEditor({ mode: 'create', ruleId: '', content: ccVoicemailMessage, type: 'cc-voicemail' });
-                        } else {
-                          const t = templates.find(x => x.id === e.target.value);
-                          if (t) { setCcVoicemailMessage(t.content); setCcVoicemailTemplateId(t.id); }
-                        }
-                      }}
-                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
-                    >
-                      <option value="">Select template…</option>
-                      {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                      <option value="__create_new__">+ Create New Template</option>
-                    </select>
-                    {ccVoicemailMessage && (
-                      <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
-                        {ccVoicemailMessage}
-                        <button
-                          onClick={() => {
-                            const tpl = ccVoicemailTemplateId ? templates.find(t => t.id === ccVoicemailTemplateId) : null;
-                            setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccVoicemailMessage, type: 'cc-voicemail' });
-                          }}
-                          className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                </div>
-              </div>
-
-              {/* ── Save / unsaved changes ── */}
-              <div className="pt-4 border-t border-slate-100">
-                {commsDirty ? (
-                  <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
-                    <div className="flex items-center gap-2 text-amber-700">
-                      <AlertCircle className="w-4 h-4 shrink-0" />
-                      <span className="text-sm font-medium">You have unsaved changes</span>
-                    </div>
-                    <div className="flex gap-2 shrink-0">
-                      <button onClick={discardCommsChanges} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Discard</button>
-                      <button onClick={saveCommsSettings} disabled={ctSaving || ccSaving} className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1">
-                        {(ctSaving || ccSaving) && <Loader2 className="w-3 h-3 animate-spin" />} Save Settings
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button onClick={saveCommsSettings} disabled={ctSaving || ccSaving} className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50">
-                    {(ctSaving || ccSaving) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save Settings
-                  </button>
-                )}
-              </div>
-            </div>
-          </ServiceCard>
-          )}
 
           {/* 3. If the Lead Doesn't Respond — Follow-ups + Re-engagement Alerts */}
           {selectedAccountId && (
@@ -3201,17 +2956,21 @@ export function Services() {
             >
 
               {/* ── Follow-ups sub-section ── */}
-              <div className="border border-slate-100 rounded-2xl overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50">
+              <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
+                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage" />}
+                <div className={`flex items-center justify-between px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
                   <div className="flex items-center gap-3">
                     <Clock className="w-5 h-5 text-red-600" />
                     <div>
-                      <h4 className="text-sm font-bold text-slate-800">Follow-ups</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-bold text-slate-800">Follow-ups</h4>
+                        <TierBadge tier="engage" />
+                      </div>
                       <p className="text-xs text-slate-400">Automated messages for leads who don't respond</p>
                     </div>
                   </div>
-                  <label className="inline-flex items-center cursor-pointer">
-                    <input type="checkbox" checked={fuMode !== 'off'} onChange={e => setFuMode(e.target.checked ? 'suggest' : 'off')} className="sr-only peer" />
+                  <label className={`inline-flex items-center ${canUseEngage ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                    <input type="checkbox" checked={fuMode !== 'off'} disabled={!canUseEngage} onChange={e => setFuMode(e.target.checked ? 'suggest' : 'off')} className="sr-only peer" />
                     <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
                   </label>
                 </div>
@@ -3647,17 +3406,21 @@ export function Services() {
               )}
 
               {/* ── Re-engagement Alerts sub-section ── */}
-              <div className="border border-slate-100 rounded-2xl overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50">
+              <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
+                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage" />}
+                <div className={`flex items-center justify-between px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
                   <div className="flex items-center gap-3">
                     <Bell className="w-5 h-5 text-amber-500" />
                     <div>
-                      <h4 className="text-sm font-bold text-slate-800">Re-engagement Alerts</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-bold text-slate-800">Re-engagement Alerts</h4>
+                        <TierBadge tier="engage" />
+                      </div>
                       <p className="text-xs text-slate-400">Get notified when a previously inactive lead replies.</p>
                     </div>
                   </div>
-                  <label className="inline-flex items-center cursor-pointer">
-                    <input type="checkbox" checked={reEngagementAlertOn} onChange={e => setReEngagementAlertOn(e.target.checked)} className="sr-only peer" />
+                  <label className={`inline-flex items-center ${canUseEngage ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                    <input type="checkbox" checked={reEngagementAlertOn} disabled={!canUseEngage} onChange={e => setReEngagementAlertOn(e.target.checked)} className="sr-only peer" />
                     <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
                   </label>
                 </div>
@@ -3753,16 +3516,32 @@ export function Services() {
             <ServiceCard
               icon={<Zap className="w-7 h-7" />}
               title="AI Conversation"
+              titleBadge={<TierBadge tier="convert" />}
               description="Let the system continue the conversation based on previous messages."
-              enabled={aiConversationOn}
-              onToggle={(on) => setAiConversationOn(on)}
+              enabled={aiConversationOn && canUseConvert}
+              onToggle={(on) => { if (canUseConvert) setAiConversationOn(on); }}
               expanded={expandedCard === 'ai-conversation'}
               onExpand={() => setExpandedCard(expandedCard === 'ai-conversation' ? null : 'ai-conversation')}
               iconBgColor="bg-violet-50"
               iconTextColor="text-violet-600"
             >
-              {aiConversationOn && (
-                <div className="space-y-4">
+              {!canUseConvert && (
+                <div className="mb-4 rounded-2xl border border-violet-200 bg-violet-50/70 p-4 flex items-start gap-3">
+                  <Lock className="w-4 h-4 text-violet-600 mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-bold text-violet-900">AI Conversation — Convert plan</span>
+                      <TierBadge tier="convert" />
+                    </div>
+                    <p className="text-xs text-violet-800 mt-1">Let the system handle conversations and convert leads automatically.</p>
+                  </div>
+                  <Link to="/pricing" className="shrink-0 px-3 py-1.5 bg-violet-600 text-white text-xs font-semibold rounded-lg hover:bg-violet-700 transition-colors whitespace-nowrap">
+                    Upgrade to Convert
+                  </Link>
+                </div>
+              )}
+              {(aiConversationOn || !canUseConvert) && (
+                <div className={`space-y-4 relative${!canUseConvert ? ' opacity-60 pointer-events-none select-none' : ''}`}>
                   {/* AI Strategy */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Conversation Strategy</label>
