@@ -7,9 +7,9 @@ import { useAuthStore } from '../../store/authStore';
 import type { AdminUser, AdminStats } from '../../types';
 
 const tierNames: Record<string, string> = {
-  STARTER: 'Instant Reply',
-  PRO: 'Call Assist',
-  ENTERPRISE: 'AI Conversations',
+  STARTER: 'Respond',
+  PRO: 'Engage',
+  ENTERPRISE: 'Convert',
 };
 
 function getTierDisplay(u: AdminUser): { label: string; className: string } {

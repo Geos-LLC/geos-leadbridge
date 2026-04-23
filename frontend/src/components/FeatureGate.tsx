@@ -25,9 +25,9 @@ const featureNames: Record<Feature, string> = {
 };
 
 const featureUpgradePlan: Record<Feature, string> = {
-  CUSTOM_REPLIES: 'Instant Reply',
-  PHONE_CALLS: 'Call Assist',
-  AI_FOLLOWUPS: 'AI Conversations',
+  CUSTOM_REPLIES: 'Respond',
+  PHONE_CALLS: 'Engage',
+  AI_FOLLOWUPS: 'Convert',
   OWN_NUMBER: 'Any plan with Own Number add-on',
 };
 

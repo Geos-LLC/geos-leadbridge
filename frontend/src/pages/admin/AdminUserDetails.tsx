@@ -8,9 +8,9 @@ import { useAppStore } from '../../store/appStore';
 import type { AdminUserDetails } from '../../types';
 
 const tierLabel: Record<string, string> = {
-  STARTER: 'Instant Reply',
-  PRO: 'Call Assist',
-  ENTERPRISE: 'AI Conversations',
+  STARTER: 'Respond',
+  PRO: 'Engage',
+  ENTERPRISE: 'Convert',
 };
 
 const tierColor: Record<string, string> = {
@@ -270,9 +270,9 @@ export default function AdminUserDetailsPage() {
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all"
                 >
                   <option value="">No Subscription</option>
-                  <option value="STARTER">Instant Reply</option>
-                  <option value="PRO">Call Assist</option>
-                  <option value="ENTERPRISE">AI Conversations</option>
+                  <option value="STARTER">Respond</option>
+                  <option value="PRO">Engage</option>
+                  <option value="ENTERPRISE">Convert</option>
                 </select>
               </div>
               <div className="space-y-1">

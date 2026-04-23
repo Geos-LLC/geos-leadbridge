@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useSearchParams, Link } from 'react-router-dom';
 import {
-  automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi, conversationSyncApi, followUpApi, usersApi,
+  automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi, conversationSyncApi, followUpApi, usersApi, authApi,
 } from '../services/api';
 import type { TenantPhoneNumber } from '../services/api';
 import type {
@@ -303,6 +303,19 @@ function LockedFeatureOverlay({ ctaLabel }: { ctaLabel: string }) {
 export function Services() {
   const [searchParams] = useSearchParams();
   const subscriptionTier = useAuthStore(s => s.user?.subscriptionTier);
+  const setAuthUser = useAuthStore(s => s.setAuth);
+  const authToken = useAuthStore(s => s.token);
+  // Refresh the cached user on mount so a newly-purchased plan applies without requiring re-login.
+  // Zustand persist keeps the old subscriptionTier around across sessions — this reconciles it.
+  useEffect(() => {
+    if (!authToken) return;
+    authApi.getProfile()
+      .then((profile: any) => {
+        const freshUser = profile?.user ?? profile;
+        if (freshUser?.id) setAuthUser(freshUser, authToken);
+      })
+      .catch(() => { /* silent: stale cache is not fatal */ });
+  }, [authToken, setAuthUser]);
   // Tier 1 = Respond (STARTER or no/inactive plan). No LeadBridge number, no outbound SMS/calls.
   const isTier1Respond = !subscriptionTier || subscriptionTier === 'STARTER';
   // Tier 2+ = Engage (PRO or ENTERPRISE). Unlocks SMS, calls, follow-ups, re-engagement alerts.

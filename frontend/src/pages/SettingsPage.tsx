@@ -12,15 +12,15 @@ import ServicePricingForm from '../components/ServicePricingForm';
 import TeamSection from '../components/TeamSection';
 
 const tierNames: Record<string, string> = {
-  STARTER: 'Instant Reply',
-  PRO: 'Call Assist',
-  ENTERPRISE: 'AI Conversations',
+  STARTER: 'Respond',
+  PRO: 'Engage',
+  ENTERPRISE: 'Convert',
 };
 
 const tierPrices: Record<string, number> = {
-  STARTER: 49,
-  PRO: 99,
-  ENTERPRISE: 129,
+  STARTER: 39,
+  PRO: 89,
+  ENTERPRISE: 139,
 };
 
 // Module-level cache — survives navigation unmounts
