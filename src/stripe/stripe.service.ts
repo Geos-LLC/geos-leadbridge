@@ -166,7 +166,7 @@ export class StripeService {
         invoicePdf: inv.invoice_pdf,
         description:
           inv.lines?.data?.[0]?.description ||
-          inv.lines?.data?.[0]?.price?.nickname ||
+          inv.description ||
           null,
       }));
 
