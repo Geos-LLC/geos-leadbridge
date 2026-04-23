@@ -61,6 +61,10 @@ const DEFAULT_CLEANING_PRICING = {
     { minAmount: 300, discount: 15 },
   ],
   recurringDiscount: 10,
+  priceRange: {
+    minus: { type: '%', value: 10 },
+    plus: { type: '%', value: 10 },
+  },
 };
 
 interface ServicePricingFormProps {
@@ -76,15 +80,19 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
   const [saved, setSaved] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({ priceTable: true });
 
+  // In shared mode, load from the first account; otherwise from the selected one.
+  // Depend on the primitive id, not the saveToAll array — callers frequently build
+  // that array inline (accounts.map(...)), which would otherwise retrigger the load
+  // on every parent render and loop the "Loading pricing..." spinner.
+  const loadId = saveToAll && saveToAll.length > 0 ? saveToAll[0] : accountId;
   useEffect(() => {
+    if (!loadId) return;
     setLoading(true);
-    // In shared mode, load from the first account
-    const loadId = saveToAll ? saveToAll[0] : accountId;
     usersApi.getServicePricing(loadId)
       .then(res => setPricing(res.pricing || DEFAULT_CLEANING_PRICING))
       .catch(() => setPricing(DEFAULT_CLEANING_PRICING))
       .finally(() => setLoading(false));
-  }, [accountId, saveToAll]);
+  }, [loadId]);
 
   const toggleSection = (key: string) => setExpandedSections(p => ({ ...p, [key]: !p[key] }));
 
