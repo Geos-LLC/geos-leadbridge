@@ -310,16 +310,48 @@ export class UsersService {
   }
 
   /**
-   * Get service pricing config for a saved account
+   * Resolve pricing for an account, falling back to any sibling account with pricing
+   * when the account itself has none. Used by both the UI preview and AI execution
+   * so pricing set on one account is effectively shared until the user configures
+   * per-account overrides.
    */
-  async getServicePricing(userId: string, accountId: string) {
-    const account = await this.prisma.savedAccount.findFirst({
+  async resolveServicePricing(userId: string, accountId: string): Promise<{ pricing: any; sourceAccountId: string | null }> {
+    const own = await this.prisma.savedAccount.findFirst({
       where: { id: accountId, userId },
       select: { servicePricingJson: true },
     });
+    if (own?.servicePricingJson) {
+      try { return { pricing: JSON.parse(own.servicePricingJson), sourceAccountId: accountId }; } catch { /* fall through */ }
+    }
+    const sibling = await this.prisma.savedAccount.findFirst({
+      where: { userId, servicePricingJson: { not: null }, id: { not: accountId } },
+      select: { id: true, servicePricingJson: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (sibling?.servicePricingJson) {
+      try { return { pricing: JSON.parse(sibling.servicePricingJson), sourceAccountId: sibling.id }; } catch { /* ignore */ }
+    }
+    return { pricing: null, sourceAccountId: null };
+  }
+
+  /**
+   * Get service pricing config for a saved account (with sibling fallback).
+   * `inherited` is true when the returned pricing was borrowed from a sibling account.
+   */
+  async getServicePricing(userId: string, accountId: string) {
+    // Verify the account belongs to the user before resolving
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: accountId, userId },
+      select: { id: true },
+    });
     if (!account) throw new NotFoundException('Account not found');
-    const pricing = account.servicePricingJson ? JSON.parse(account.servicePricingJson) : null;
-    return { success: true, pricing };
+    const { pricing, sourceAccountId } = await this.resolveServicePricing(userId, accountId);
+    return {
+      success: true,
+      pricing,
+      inherited: sourceAccountId !== null && sourceAccountId !== accountId,
+      sourceAccountId,
+    };
   }
 
   /**
@@ -335,6 +367,23 @@ export class UsersService {
       data: { servicePricingJson: JSON.stringify(pricing) },
     });
     return { success: true };
+  }
+
+  /**
+   * Copy an account's pricing to every other account owned by the same user.
+   */
+  async copyServicePricingToAll(userId: string, sourceAccountId: string) {
+    const source = await this.prisma.savedAccount.findFirst({
+      where: { id: sourceAccountId, userId },
+      select: { servicePricingJson: true },
+    });
+    if (!source) throw new NotFoundException('Source account not found');
+    if (!source.servicePricingJson) throw new NotFoundException('Source account has no pricing to copy');
+    const result = await this.prisma.savedAccount.updateMany({
+      where: { userId, id: { not: sourceAccountId } },
+      data: { servicePricingJson: source.servicePricingJson },
+    });
+    return { success: true, updated: result.count };
   }
 
   /**

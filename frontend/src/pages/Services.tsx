@@ -305,6 +305,9 @@ export function Services() {
   const [pricingModalTab, setPricingModalTab] = useState<'view' | 'edit'>('view');
   const [pricingPreview, setPricingPreview] = useState<any>(null);
   const [pricingPreviewLoading, setPricingPreviewLoading] = useState(false);
+  const [pricingPreviewInherited, setPricingPreviewInherited] = useState(false);
+  const [copyingPricingToAll, setCopyingPricingToAll] = useState(false);
+  const [copyPricingResult, setCopyPricingResult] = useState<string | null>(null);
   const [autoReplyAiPrompt, setAutoReplyAiPrompt] = useState<string>(firstReplyRule?.aiSystemPrompt ?? '');
   const [autoReplyPromptTemplateId, setAutoReplyPromptTemplateId] = useState<string>(firstReplyRule?.promptTemplateId || '');
   const [promptTemplates, setPromptTemplates] = useState<MessageTemplate[]>([]);
@@ -526,10 +529,27 @@ export function Services() {
     if (!showPricingModal || pricingModalTab !== 'view' || !selectedAccountId) return;
     setPricingPreviewLoading(true);
     usersApi.getServicePricing(selectedAccountId)
-      .then(res => setPricingPreview(res.pricing || null))
-      .catch(() => setPricingPreview(null))
+      .then(res => {
+        setPricingPreview(res.pricing || null);
+        setPricingPreviewInherited(!!res.inherited);
+      })
+      .catch(() => { setPricingPreview(null); setPricingPreviewInherited(false); })
       .finally(() => setPricingPreviewLoading(false));
   }, [showPricingModal, pricingModalTab, selectedAccountId]);
+
+  async function handleCopyPricingToAll() {
+    if (!selectedAccountId || copyingPricingToAll) return;
+    setCopyingPricingToAll(true);
+    setCopyPricingResult(null);
+    try {
+      const res = await usersApi.copyServicePricingToAll(selectedAccountId);
+      setCopyPricingResult(`Copied to ${res.updated} other account${res.updated === 1 ? '' : 's'}.`);
+    } catch (err: any) {
+      setCopyPricingResult(err?.response?.data?.message || err?.message || 'Failed to copy pricing');
+    } finally {
+      setCopyingPricingToAll(false);
+    }
+  }
 
   // Load follow-up settings when account changes
   useEffect(() => {
@@ -3740,10 +3760,31 @@ export function Services() {
             {/* Scrollable body */}
             <div className="flex-1 overflow-y-auto px-8 py-6">
               {pricingModalTab === 'edit' ? (
-                <ServicePricingForm
-                  accountId={selectedAccountId}
-                  accountName={accounts.find(a => a.id === selectedAccountId)?.businessName || ''}
-                />
+                <div className="space-y-5">
+                  {accounts.length > 1 && (
+                    <div className="flex items-center justify-between gap-3 bg-blue-50/60 border border-blue-100 rounded-xl px-4 py-3">
+                      <div className="text-xs text-slate-700 leading-relaxed">
+                        <span className="font-semibold text-slate-900">Pricing is per-account.</span> Save your changes below, then use this button to copy the same prices to every other account.
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCopyPricingToAll}
+                        disabled={copyingPricingToAll}
+                        className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      >
+                        {copyingPricingToAll ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                        Copy to all accounts
+                      </button>
+                    </div>
+                  )}
+                  {copyPricingResult && (
+                    <div className="text-xs text-slate-600 px-2">{copyPricingResult}</div>
+                  )}
+                  <ServicePricingForm
+                    accountId={selectedAccountId}
+                    accountName={accounts.find(a => a.id === selectedAccountId)?.businessName || ''}
+                  />
+                </div>
               ) : pricingPreviewLoading ? (
                 <div className="flex items-center gap-2 text-sm text-slate-400 py-8 justify-center">
                   <Loader2 size={16} className="animate-spin" /> Loading pricing...
@@ -3757,6 +3798,11 @@ export function Services() {
                 const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
                 return (
                   <div className="space-y-6 text-sm">
+                    {pricingPreviewInherited && (
+                      <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-xs text-amber-800 leading-relaxed">
+                        <span className="font-semibold">Inherited pricing.</span> This account has no pricing of its own, so the AI will use the pricing from another one of your accounts. Switch to <button className="underline font-semibold" onClick={() => setPricingModalTab('edit')}>Edit</button> to set pricing specifically for this account.
+                      </div>
+                    )}
                     {/* Service type + enabled types */}
                     <div>
                       <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">Service</div>

@@ -120,6 +120,15 @@ export class UsersController {
   }
 
   /**
+   * Copy an account's pricing to every other account owned by the same user.
+   * POST /v1/users/me/pricing/:accountId/copy-to-all
+   */
+  @Post('me/pricing/:accountId/copy-to-all')
+  async copyPricingToAll(@Request() req: any, @Param('accountId') accountId: string) {
+    return this.usersService.copyServicePricingToAll(req.user.id, accountId);
+  }
+
+  /**
    * Delete the current user's own account
    * DELETE /v1/users/me
    */

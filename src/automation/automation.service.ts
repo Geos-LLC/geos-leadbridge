@@ -808,7 +808,8 @@ export class AutomationService implements OnModuleInit {
           ? `${strategyPrompt}\n\n${threadContextPrompt}`.trim()
           : strategyPrompt;
 
-        // Inject pricing context from account settings
+        // Inject pricing context from account settings, falling back to any
+        // sibling account's pricing when this account has none set.
         const account = context.businessId
           ? await this.prisma.savedAccount.findFirst({
               where: { userId: context.userId, businessId: context.businessId },
@@ -816,9 +817,19 @@ export class AutomationService implements OnModuleInit {
             })
           : null;
 
-        if (account?.servicePricingJson) {
+        let pricingJson: string | null = account?.servicePricingJson ?? null;
+        if (!pricingJson) {
+          const sibling = await this.prisma.savedAccount.findFirst({
+            where: { userId: context.userId, servicePricingJson: { not: null } },
+            select: { servicePricingJson: true },
+            orderBy: { createdAt: 'asc' },
+          });
+          pricingJson = sibling?.servicePricingJson ?? null;
+        }
+
+        if (pricingJson) {
           try {
-            const p = JSON.parse(account.servicePricingJson);
+            const p = JSON.parse(pricingJson);
             const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
             if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
               const priceParts = ['--- PRICING TABLE (reference for accurate quoting) ---'];

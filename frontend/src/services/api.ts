@@ -1025,12 +1025,16 @@ export const usersApi = {
     const { data } = await api.patch('/v1/users/me/ai-prompt', { prompt });
     return data;
   },
-  getServicePricing: async (accountId: string): Promise<{ success: boolean; pricing: any }> => {
+  getServicePricing: async (accountId: string): Promise<{ success: boolean; pricing: any; inherited?: boolean; sourceAccountId?: string | null }> => {
     const { data } = await api.get(`/v1/users/me/pricing/${accountId}`);
     return data;
   },
   updateServicePricing: async (accountId: string, pricing: any): Promise<{ success: boolean }> => {
     const { data } = await api.patch(`/v1/users/me/pricing/${accountId}`, { pricing });
+    return data;
+  },
+  copyServicePricingToAll: async (sourceAccountId: string): Promise<{ success: boolean; updated: number }> => {
+    const { data } = await api.post(`/v1/users/me/pricing/${sourceAccountId}/copy-to-all`);
     return data;
   },
 };
