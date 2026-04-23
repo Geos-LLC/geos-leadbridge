@@ -32,6 +32,33 @@ export class StripeService {
     return this.stripe;
   }
 
+  // Recover stripeCustomerId when only stripeSubscriptionId is persisted.
+  // A stale test-mode checkout path has cleared customerId for some users in
+  // the past; as long as we still have the subscriptionId, Stripe can tell us
+  // the customer. Persists the recovered id back so the next call is a hit.
+  private async resolveCustomerId(user: {
+    id: string;
+    stripeCustomerId: string | null;
+    stripeSubscriptionId: string | null;
+  }): Promise<string | null> {
+    if (user.stripeCustomerId) return user.stripeCustomerId;
+    if (!user.stripeSubscriptionId || !this.stripe) return null;
+    try {
+      const sub = await this.stripe.subscriptions.retrieve(user.stripeSubscriptionId);
+      const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id ?? null;
+      if (customerId) {
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { stripeCustomerId: customerId },
+        });
+        return customerId;
+      }
+    } catch (err: any) {
+      this.logger.warn(`[resolveCustomerId] Could not recover customerId for user ${user.id}: ${err.message}`);
+    }
+    return null;
+  }
+
   async createCheckoutSession(
     userId: string,
     tier: SubscriptionTier,
@@ -113,14 +140,15 @@ export class StripeService {
 
   async createBillingPortalSession(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.stripeCustomerId) {
+    const customerId = user ? await this.resolveCustomerId(user) : null;
+    if (!user || !customerId) {
       const frontendUrl = this.configService.get<string>('FRONTEND_URL');
       return { portalUrl: `${frontendUrl}/pricing` };
     }
 
     try {
       const session = await this.requireStripe().billingPortal.sessions.create({
-        customer: user.stripeCustomerId,
+        customer: customerId,
         return_url: `${this.configService.get<string>('FRONTEND_URL')}/billing`,
       });
       return { portalUrl: session.url };
@@ -141,13 +169,14 @@ export class StripeService {
 
   async listInvoices(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.stripeCustomerId) {
+    const customerId = user ? await this.resolveCustomerId(user) : null;
+    if (!user || !customerId) {
       return { invoices: [] };
     }
 
     try {
       const result = await this.requireStripe().invoices.list({
-        customer: user.stripeCustomerId,
+        customer: customerId,
         limit: 24,
       });
 
