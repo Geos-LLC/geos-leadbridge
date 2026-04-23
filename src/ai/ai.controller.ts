@@ -4,6 +4,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AiService, ConversationMessage } from './ai.service';
 import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
+import { buildPriceRangeInstruction } from './price-range';
 
 @Controller('v1/ai')
 @UseGuards(JwtAuthGuard)
@@ -247,7 +248,8 @@ export class AiController {
       }
 
       parts.push('--- End Pricing Guide ---');
-      parts.push('When the strategy requires pricing, use the EXACT prices from the table above. Match bedrooms and bathrooms from the lead details to find the right row. If the exact combination is not in the table, use the closest match. Mention applicable discounts (recurring, order amount) when relevant.');
+      parts.push(buildPriceRangeInstruction(p.priceRange));
+      parts.push('When the strategy requires pricing, match bedrooms and bathrooms from the lead details to find the right row in the table above. If the exact combination is not in the table, use the closest match. Mention applicable discounts (recurring, order amount) when relevant.');
 
       return parts.join('\n');
     } catch {

@@ -12,6 +12,7 @@ import { AiService } from '../ai/ai.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { TrialService } from '../trial/trial.service';
+import { buildPriceRangeInstruction } from '../ai/price-range';
 
 export type ReplyMode = 'custom' | 'price' | 'auto';
 
@@ -838,7 +839,7 @@ export class AutomationService implements OnModuleInit {
                 priceParts.push(`  ${row.bed}BR/${row.bath}BA — ${prices}`);
               }
               priceParts.push('--- END PRICING ---');
-              priceParts.push('Use these prices as your reference. Match the customer\'s bedrooms/bathrooms to the correct row. You may quote a range around the table price but it MUST be based on the actual table values — do NOT invent prices unrelated to the table.');
+              priceParts.push(buildPriceRangeInstruction(p.priceRange));
               systemPrompt = `${systemPrompt}\n\n${priceParts.join('\n')}`;
             }
           } catch { /* invalid JSON */ }

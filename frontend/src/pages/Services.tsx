@@ -539,6 +539,24 @@ export function Services() {
       .finally(() => setPricingPreviewLoading(false));
   }, [replyMode, showPricingModal, pricingModalTab, selectedAccountId]);
 
+  async function handlePriceRangeChange(side: 'minus' | 'plus', field: 'value' | 'type', next: number | string) {
+    if (!selectedAccountId) return;
+    const base = pricingPreview || {};
+    const current = base.priceRange || { minus: { type: '%', value: 0 }, plus: { type: '%', value: 0 } };
+    const sideCurrent = current[side] || { type: '%', value: 0 };
+    const updatedSide = field === 'value'
+      ? { ...sideCurrent, value: Math.max(0, Number(next) || 0) }
+      : { ...sideCurrent, type: next as '%' | '$' };
+    const nextPricing = { ...base, priceRange: { ...current, [side]: updatedSide } };
+    // Optimistic
+    setPricingPreview(nextPricing);
+    try {
+      await usersApi.updateServicePricing(selectedAccountId, nextPricing);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to save price range');
+    }
+  }
+
   async function handleCopyPricingToAll() {
     if (!selectedAccountId || copyingPricingToAll) return;
     setCopyingPricingToAll(true);
@@ -2216,6 +2234,65 @@ export function Services() {
                                       </table>
                                     </div>
                                   )}
+                                  {/* Quote range gap — how wide of a range the AI quotes around the table price */}
+                                  {(() => {
+                                    const range = p.priceRange || { minus: { type: '%', value: 0 }, plus: { type: '%', value: 0 } };
+                                    const mVal = Number(range.minus?.value) || 0;
+                                    const pVal = Number(range.plus?.value) || 0;
+                                    const mType = range.minus?.type === '$' ? '$' : '%';
+                                    const pType = range.plus?.type === '$' ? '$' : '%';
+                                    const isExact = mVal === 0 && pVal === 0;
+                                    return (
+                                      <div className="bg-white border border-slate-200 rounded-lg p-3">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <div className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Quote Range Gap</div>
+                                          <div className="text-[10px] text-slate-400">{isExact ? 'AI quotes the exact price' : 'AI quotes a range around the price'}</div>
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-xs font-semibold text-slate-500 w-5 text-right">−</span>
+                                          <input
+                                            type="number"
+                                            min={0}
+                                            value={mVal}
+                                            onChange={e => handlePriceRangeChange('minus', 'value', e.target.value)}
+                                            className="w-16 px-2 py-1.5 bg-white border border-slate-200 rounded-md text-xs font-semibold text-right"
+                                          />
+                                          <select
+                                            value={mType}
+                                            onChange={e => handlePriceRangeChange('minus', 'type', e.target.value)}
+                                            className="px-2 py-1.5 bg-white border border-slate-200 rounded-md text-xs font-semibold"
+                                          >
+                                            <option value="%">%</option>
+                                            <option value="$">$</option>
+                                          </select>
+                                          <span className="text-xs text-slate-400 px-1">to</span>
+                                          <span className="text-xs font-semibold text-slate-500 w-5 text-right">+</span>
+                                          <input
+                                            type="number"
+                                            min={0}
+                                            value={pVal}
+                                            onChange={e => handlePriceRangeChange('plus', 'value', e.target.value)}
+                                            className="w-16 px-2 py-1.5 bg-white border border-slate-200 rounded-md text-xs font-semibold text-right"
+                                          />
+                                          <select
+                                            value={pType}
+                                            onChange={e => handlePriceRangeChange('plus', 'type', e.target.value)}
+                                            className="px-2 py-1.5 bg-white border border-slate-200 rounded-md text-xs font-semibold"
+                                          >
+                                            <option value="%">%</option>
+                                            <option value="$">$</option>
+                                          </select>
+                                          <span className="text-[11px] text-slate-500 ml-1">
+                                            {isExact
+                                              ? ''
+                                              : `(e.g. table $200 → ${mType === '%' ? `$${Math.round(200 * (1 - mVal/100))}` : `$${200 - mVal}`}–${pType === '%' ? `$${Math.round(200 * (1 + pVal/100))}` : `$${200 + pVal}`})`
+                                            }
+                                          </span>
+                                        </div>
+                                        <div className="text-[10px] text-slate-400 mt-1.5">Set both to 0 to quote the exact price with no range.</div>
+                                      </div>
+                                    );
+                                  })()}
                                   {/* Compact extras summary */}
                                   {(p.frequencyDiscounts?.some((fd: any) => fd.discount > 0) || p.extras?.some((e: any) => e.label && e.price > 0) || p.petSurcharge > 0) && (
                                     <div className="flex flex-wrap gap-1.5 text-[10px]">
