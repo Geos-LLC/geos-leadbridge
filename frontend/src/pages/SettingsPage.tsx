@@ -513,6 +513,25 @@ export default function SettingsPage() {
     }
   };
 
+  const hasSubscription = Boolean(subscription?.tier && subscription?.status);
+  const isCancelled = subscription?.status === 'CANCELLED';
+  const isActivePaid = hasSubscription && !isCancelled && subscription?.status !== 'TRIALING';
+
+  // Load Stripe invoices once the subscription state says the user ever had one.
+  // MUST sit above the `if (loading)` early return below — React disallows hook
+  // counts that change between renders.
+  useEffect(() => {
+    if (!isActivePaid && !isCancelled) { setInvoices([]); return; }
+    let cancelled = false;
+    setInvoicesLoading(true);
+    setInvoicesError(null);
+    billingApi.getInvoices()
+      .then(res => { if (!cancelled) setInvoices(res.invoices || []); })
+      .catch((err: any) => { if (!cancelled) setInvoicesError(err?.response?.data?.message || err?.message || 'Failed to load invoices'); })
+      .finally(() => { if (!cancelled) setInvoicesLoading(false); });
+    return () => { cancelled = true; };
+  }, [isActivePaid, isCancelled]);
+
   if (loading) {
     return (
       <div className="p-6 lg:p-10 max-w-5xl mx-auto space-y-10">
@@ -533,23 +552,6 @@ export default function SettingsPage() {
       </div>
     );
   }
-
-  const hasSubscription = Boolean(subscription?.tier && subscription?.status);
-  const isCancelled = subscription?.status === 'CANCELLED';
-  const isActivePaid = hasSubscription && !isCancelled && subscription?.status !== 'TRIALING';
-
-  // Load Stripe invoices once the subscription state says the user ever had one.
-  useEffect(() => {
-    if (!isActivePaid && !isCancelled) { setInvoices([]); return; }
-    let cancelled = false;
-    setInvoicesLoading(true);
-    setInvoicesError(null);
-    billingApi.getInvoices()
-      .then(res => { if (!cancelled) setInvoices(res.invoices || []); })
-      .catch((err: any) => { if (!cancelled) setInvoicesError(err?.response?.data?.message || err?.message || 'Failed to load invoices'); })
-      .finally(() => { if (!cancelled) setInvoicesLoading(false); });
-    return () => { cancelled = true; };
-  }, [isActivePaid, isCancelled]);
   const trial = subscription?.trial;
   const isTrialActive = trial?.isOnTrial && !trial?.trialExpired;
   const isTrialExpired = trial?.trialExpired;
