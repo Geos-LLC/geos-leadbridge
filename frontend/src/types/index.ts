@@ -173,6 +173,7 @@ export interface AutomationRule {
   delayMinutes: number;
   enabled: boolean;
   useAi: boolean;
+  replyMode?: 'custom' | 'price' | 'auto';
   promptTemplateId?: string | null;
   aiSystemPrompt: string | null;
   triggerCount: number;

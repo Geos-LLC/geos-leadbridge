@@ -13,6 +13,8 @@ import { MonitoringService } from '../monitoring/monitoring.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { TrialService } from '../trial/trial.service';
 
+export type ReplyMode = 'custom' | 'price' | 'auto';
+
 export interface CreateAutomationRuleDto {
   savedAccountId: string;
   name: string;
@@ -23,6 +25,7 @@ export interface CreateAutomationRuleDto {
   delayMinutes?: number;
   enabled?: boolean;
   useAi?: boolean;
+  replyMode?: ReplyMode;
   aiSystemPrompt?: string; // deprecated — use promptTemplateId
   // Follow-up fields
   isFollowUp?: boolean;
@@ -41,6 +44,7 @@ export interface UpdateAutomationRuleDto {
   delayMinutes?: number;
   enabled?: boolean;
   useAi?: boolean;
+  replyMode?: ReplyMode;
   aiSystemPrompt?: string; // deprecated — use promptTemplateId
   // Follow-up fields
   isFollowUp?: boolean;
@@ -204,6 +208,7 @@ export class AutomationService implements OnModuleInit {
         delayMinutes: data.delayMinutes ?? 0,
         enabled: data.enabled ?? true,
         useAi: data.useAi ?? false,
+        replyMode: data.replyMode ?? (data.useAi ? 'auto' : 'custom'),
         promptTemplateId: data.useAi ? (data.promptTemplateId ?? null) : null,
         aiSystemPrompt: data.aiSystemPrompt ?? null,
         isFollowUp: data.isFollowUp ?? false,
@@ -259,6 +264,7 @@ export class AutomationService implements OnModuleInit {
         ...(data.delayMinutes !== undefined && { delayMinutes: data.delayMinutes }),
         ...(data.enabled !== undefined && { enabled: data.enabled }),
         ...(data.useAi !== undefined && { useAi: data.useAi }),
+        ...(data.replyMode !== undefined && { replyMode: data.replyMode }),
         ...(data.promptTemplateId !== undefined && { promptTemplateId: data.promptTemplateId || null }),
         ...(data.aiSystemPrompt !== undefined && { aiSystemPrompt: data.aiSystemPrompt }),
       },
@@ -661,7 +667,7 @@ export class AutomationService implements OnModuleInit {
    */
   private async executePendingMessage(
     pendingId: string,
-    rule: { id: string; useAi: boolean; aiSystemPrompt?: string | null; promptTemplate?: { id: string; content: string } | null; template?: { id: string; content: string } | null },
+    rule: { id: string; useAi: boolean; replyMode?: string | null; aiSystemPrompt?: string | null; promptTemplate?: { id: string; content: string } | null; template?: { id: string; content: string } | null },
     context: AutomationTriggerContext,
   ): Promise<void> {
     this.logger.log(`Executing pending message: ${pendingId} (useAi=${rule.useAi})`);
@@ -785,12 +791,16 @@ export class AutomationService implements OnModuleInit {
           select: { globalAiPrompt: true },
         });
 
-        // Build strategy prompt — use rule template, or default to Hybrid strategy
-        let strategyPrompt = rule.promptTemplate?.content || rule.aiSystemPrompt || undefined;
-        if (!strategyPrompt) {
-          // Default: use Hybrid strategy prompt
-          const { STRATEGY_PROMPTS } = require('../ai/strategy-prompts');
-          strategyPrompt = STRATEGY_PROMPTS.hybrid;
+        // Build strategy prompt
+        // - replyMode='price' → force price anchor strategy (ignore user prompt template)
+        // - replyMode='auto'  → rule.promptTemplate/aiSystemPrompt → fallback hybrid
+        const { STRATEGY_PROMPTS } = require('../ai/strategy-prompts');
+        const ruleReplyMode = (rule as any).replyMode as 'custom' | 'price' | 'auto' | undefined;
+        let strategyPrompt: string;
+        if (ruleReplyMode === 'price') {
+          strategyPrompt = STRATEGY_PROMPTS.price;
+        } else {
+          strategyPrompt = rule.promptTemplate?.content || rule.aiSystemPrompt || STRATEGY_PROMPTS.hybrid;
         }
 
         // Inject thread context
@@ -908,7 +918,7 @@ export class AutomationService implements OnModuleInit {
   private scheduleTimer(
     pendingId: string,
     delayMs: number,
-    rule: { id: string; useAi: boolean; aiSystemPrompt?: string | null; promptTemplate?: { id: string; content: string } | null; template?: { id: string; content: string } | null },
+    rule: { id: string; useAi: boolean; replyMode?: string | null; aiSystemPrompt?: string | null; promptTemplate?: { id: string; content: string } | null; template?: { id: string; content: string } | null },
     context: AutomationTriggerContext,
   ): void {
     const timer = setTimeout(async () => {
@@ -1054,6 +1064,7 @@ export class AutomationService implements OnModuleInit {
       delayMinutes: rule.delayMinutes,
       enabled: rule.enabled,
       useAi: rule.useAi,
+      replyMode: (rule.replyMode as 'custom' | 'price' | 'auto') || (rule.useAi ? 'auto' : 'custom'),
       promptTemplateId: rule.promptTemplateId || null,
       aiSystemPrompt: rule.aiSystemPrompt || null,
       isFollowUp: rule.isFollowUp || false,

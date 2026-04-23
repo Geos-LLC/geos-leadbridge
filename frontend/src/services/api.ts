@@ -510,6 +510,7 @@ export interface CreateAutomationRuleDto {
   delayMinutes?: number;
   enabled?: boolean;
   useAi?: boolean;
+  replyMode?: 'custom' | 'price' | 'auto';
   aiSystemPrompt?: string;
   isFollowUp?: boolean;
   activeHoursStart?: string;
@@ -527,6 +528,7 @@ export interface UpdateAutomationRuleDto {
   delayMinutes?: number;
   enabled?: boolean;
   useAi?: boolean;
+  replyMode?: 'custom' | 'price' | 'auto';
   aiSystemPrompt?: string;
   isFollowUp?: boolean;
   activeHoursStart?: string;

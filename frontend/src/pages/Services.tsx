@@ -15,6 +15,7 @@ import type {
   CallConnectMode, AgentStrategy, SigcorePhoneNumber, AvailablePhoneNumber,
 } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
+import ServicePricingForm from '../components/ServicePricingForm';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
 import OnboardingTour, { ONBOARDING_STORAGE_KEY } from '../components/OnboardingTour';
@@ -297,6 +298,10 @@ export function Services() {
   const autoReplyEnabled = autoReplyRules.some(r => r.enabled);
   const firstReplyRule = autoReplyRules.find(r => r.delayMinutes === 0 || !r.delayMinutes) || null;
   const [autoReplyUseAi, setAutoReplyUseAi] = useState<boolean>(firstReplyRule?.useAi ?? false);
+  const [replyMode, setReplyMode] = useState<'custom' | 'price' | 'auto'>(
+    firstReplyRule?.replyMode ?? (firstReplyRule?.useAi ? 'auto' : 'custom')
+  );
+  const [showPricingModal, setShowPricingModal] = useState(false);
   const [autoReplyAiPrompt, setAutoReplyAiPrompt] = useState<string>(firstReplyRule?.aiSystemPrompt ?? '');
   const [autoReplyPromptTemplateId, setAutoReplyPromptTemplateId] = useState<string>(firstReplyRule?.promptTemplateId || '');
   const [promptTemplates, setPromptTemplates] = useState<MessageTemplate[]>([]);
@@ -658,11 +663,13 @@ export function Services() {
       const loadedFirstRule = allAutoReplies.find((r: AutomationRule) => r.delayMinutes === 0 || !r.delayMinutes) || null;
       if (loadedFirstRule) {
         setAutoReplyUseAi(loadedFirstRule.useAi ?? false);
+        setReplyMode(loadedFirstRule.replyMode ?? (loadedFirstRule.useAi ? 'auto' : 'custom'));
         setAutoReplyAiPrompt(loadedFirstRule.aiSystemPrompt ?? '');
         setAutoReplyPromptTemplateId(loadedFirstRule.promptTemplateId || '');
       } else {
         // No rules for this account — reset to defaults so auto-select can run
         setAutoReplyUseAi(false);
+        setReplyMode('custom');
         setAutoReplyAiPrompt('');
         setAutoReplyPromptTemplateId('');
       }
@@ -1244,25 +1251,36 @@ export function Services() {
     }
   }
 
-  async function changeRuleAiMode(ruleId: string, useAi: boolean, aiSystemPrompt?: string) {
+  async function changeRuleReplyMode(ruleId: string, mode: 'custom' | 'price' | 'auto', aiSystemPrompt?: string) {
     if (!ruleId || ruleId === '_pending') return;
-    // Optimistic update — switch UI instantly
+    const useAi = mode !== 'custom';
+    const prevMode = replyMode;
+    const prevUseAi = autoReplyUseAi;
+    // Optimistic update
+    setReplyMode(mode);
     setAutoReplyUseAi(useAi);
-    setAutoReplyRules(prev => prev.map(r => r.id === ruleId ? { ...r, useAi, aiSystemPrompt: aiSystemPrompt ?? r.aiSystemPrompt ?? null } : r));
+    setAutoReplyRules(prev => prev.map(r => r.id === ruleId ? { ...r, useAi, replyMode: mode, aiSystemPrompt: aiSystemPrompt ?? r.aiSystemPrompt ?? null } : r));
     try {
-      const payload = {
+      const payload: any = {
         useAi,
-        aiSystemPrompt: useAi ? (aiSystemPrompt ?? '') : undefined,
-        templateId: useAi ? undefined : (firstReplyRule?.templateId ?? undefined),
+        replyMode: mode,
+        aiSystemPrompt: mode === 'auto' ? (aiSystemPrompt ?? '') : undefined,
+        templateId: mode === 'custom' ? (firstReplyRule?.templateId ?? undefined) : undefined,
       };
       const { rule } = await automationApi.updateRule(ruleId, payload);
       setAutoReplyRules(prev => prev.map(r => r.id === ruleId ? rule : r));
     } catch (err: any) {
       // Revert on failure
-      setAutoReplyUseAi(!useAi);
-      setAutoReplyRules(prev => prev.map(r => r.id === ruleId ? { ...r, useAi: !useAi } : r));
+      setReplyMode(prevMode);
+      setAutoReplyUseAi(prevUseAi);
+      setAutoReplyRules(prev => prev.map(r => r.id === ruleId ? { ...r, useAi: prevUseAi, replyMode: prevMode } : r));
       setError(err.message || 'Failed to update reply mode');
     }
+  }
+
+  // Back-compat shim — existing call sites still pass (ruleId, useAi, prompt)
+  async function changeRuleAiMode(ruleId: string, useAi: boolean, aiSystemPrompt?: string) {
+    return changeRuleReplyMode(ruleId, useAi ? 'auto' : 'custom', aiSystemPrompt);
   }
 
   // --- Lead Alert Handlers ---
@@ -2018,39 +2036,41 @@ export function Services() {
                   </label>
                 </div>
                 <div className="px-5 py-4 space-y-4">
-                  {/* Reply Type toggle — always visible */}
+                  {/* Reply Type selector — 3 modes */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Instant Reply Mode</label>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => { setAutoReplyUseAi(false); if (firstReplyRule) changeRuleAiMode(firstReplyRule.id, false); }}
-                        className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all"
-                        style={{
-                          background: !autoReplyUseAi ? '#1d4ed8' : '#f1f5f9',
-                          color: !autoReplyUseAi ? '#fff' : '#64748b',
-                          borderColor: !autoReplyUseAi ? '#1d4ed8' : '#e2e8f0',
-                        }}
-                      >
-                        📝 Template Reply
-                      </button>
-                      <button
-                        onClick={() => { setAutoReplyUseAi(true); if (firstReplyRule) changeRuleAiMode(firstReplyRule.id, true, autoReplyAiPrompt); }}
-                        className="flex-1 py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all"
-                        style={{
-                          background: autoReplyUseAi ? '#1d4ed8' : '#f1f5f9',
-                          color: autoReplyUseAi ? '#fff' : '#64748b',
-                          borderColor: autoReplyUseAi ? '#1d4ed8' : '#e2e8f0',
-                        }}
-                      >
-                        ✨ AI Reply
-                      </button>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(() => {
+                        const modes: Array<{ key: 'custom' | 'price' | 'auto'; emoji: string; label: string; active: string }> = [
+                          { key: 'custom', emoji: '🟢', label: 'Custom Message', active: '#16a34a' },
+                          { key: 'price',  emoji: '🔵', label: 'With Price Range', active: '#1d4ed8' },
+                          { key: 'auto',   emoji: '🟣', label: 'Auto Message', active: '#7c3aed' },
+                        ];
+                        return modes.map(m => {
+                          const isActive = replyMode === m.key;
+                          return (
+                            <button
+                              key={m.key}
+                              onClick={() => { if (firstReplyRule) changeRuleReplyMode(firstReplyRule.id, m.key, m.key === 'auto' ? autoReplyAiPrompt : undefined); }}
+                              className="py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all"
+                              style={{
+                                background: isActive ? m.active : '#f1f5f9',
+                                color: isActive ? '#fff' : '#64748b',
+                                borderColor: isActive ? m.active : '#e2e8f0',
+                              }}
+                            >
+                              {m.emoji} {m.label}
+                            </button>
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
 
                   <div className={!autoReplyEnabled ? 'opacity-40 pointer-events-none select-none' : ''}>
                   {firstReplyRule && (
                     <div className="space-y-4">
-                      {!autoReplyUseAi ? (
+                      {replyMode === 'custom' ? (
                         /* Template selector */
                         <div>
                           <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Template</label>
@@ -2091,8 +2111,26 @@ export function Services() {
                             </div>
                           )}
                         </div>
+                      ) : replyMode === 'price' ? (
+                        /* Price mode: AI generates reply using the account pricing table */
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Pricing Source</label>
+                          <div className="bg-blue-50/60 border border-blue-100 rounded-xl p-4 text-sm text-slate-700 leading-relaxed">
+                            <p className="mb-2">
+                              AI writes the first reply using your <span className="font-semibold text-blue-700">pricing table</span>. It matches the lead's bedrooms/bathrooms and quotes a price range based on your rates.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => setShowPricingModal(true)}
+                              className="inline-flex items-center gap-1.5 mt-1 px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              Edit Pricing Table
+                            </button>
+                          </div>
+                        </div>
                       ) : (
-                        /* AI mode: prompt selector + editable content */
+                        /* Auto mode: prompt selector + editable content */
                         <div>
                           <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Reply Instructions</label>
                           <select
@@ -2108,6 +2146,7 @@ export function Services() {
                                     // Save both the prompt content AND the template ID
                                     automationApi.updateRule(firstReplyRule.id, {
                                       useAi: true,
+                                      replyMode: 'auto',
                                       aiSystemPrompt: selected.content,
                                       promptTemplateId: id,
                                     } as any).then(({ rule }) => {
@@ -3651,6 +3690,29 @@ export function Services() {
 
       {/* Onboarding Tour */}
       <OnboardingTour active={tourActive} onComplete={() => setTourActive(false)} />
+
+      {/* Pricing Table Modal — edit the same table as Settings, right from Instant Reply */}
+      {showPricingModal && selectedAccountId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowPricingModal(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto relative" onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white border-b border-slate-100 px-8 py-5 flex items-center justify-between z-10">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Pricing Table</h3>
+                <p className="text-sm text-slate-500 mt-0.5">AI will use these prices to write the first reply.</p>
+              </div>
+              <button onClick={() => setShowPricingModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="px-8 py-6">
+              <ServicePricingForm
+                accountId={selectedAccountId}
+                accountName={accounts.find(a => a.id === selectedAccountId)?.businessName || ''}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
