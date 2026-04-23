@@ -296,10 +296,14 @@ export default function SettingsPage() {
     try {
       setPortalLoading(true);
       const { portalUrl } = await billingApi.createPortalSession();
-      window.location.href = portalUrl;
+      const win = window.open(portalUrl, '_blank', 'noopener,noreferrer');
+      if (!win) {
+        window.location.href = portalUrl;
+      }
     } catch (error: any) {
       console.error('Failed to open billing portal:', error);
       notify.error('Error', 'Failed to open billing portal');
+    } finally {
       setPortalLoading(false);
     }
   };
