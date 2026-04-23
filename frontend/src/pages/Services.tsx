@@ -3,9 +3,9 @@ import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
   Pencil, Phone, Send, ChevronUp, Trash2, Save,
-  Key, Hash, ExternalLink, Link2, Sparkles, RefreshCw, Unlink, Clock,
+  Key, Hash, ExternalLink, Link2, Sparkles, RefreshCw, Unlink, Clock, Lock,
 } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import {
   automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi, conversationSyncApi, followUpApi, usersApi,
 } from '../services/api';
@@ -269,6 +269,9 @@ let _svcLoaded = false; // true once we've fetched at least once (even if no acc
 // -- Main Services Page --
 export function Services() {
   const [searchParams] = useSearchParams();
+  const subscriptionTier = useAuthStore(s => s.user?.subscriptionTier);
+  // Tier 1 = Respond (STARTER or no/inactive plan). No LeadBridge number, no outbound SMS/calls.
+  const isTier1Respond = !subscriptionTier || subscriptionTier === 'STARTER';
   const storedAccounts = useAppStore(state => state.savedAccounts);
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
   const setAccountDiagnostics = useAppStore(state => state.setAccountDiagnostics);
@@ -542,8 +545,8 @@ export function Services() {
   async function handlePriceRangeChange(side: 'minus' | 'plus', field: 'value' | 'type', next: number | string) {
     if (!selectedAccountId) return;
     const base = pricingPreview || {};
-    const current = base.priceRange || { minus: { type: '%', value: 0 }, plus: { type: '%', value: 0 } };
-    const sideCurrent = current[side] || { type: '%', value: 0 };
+    const current = base.priceRange || { minus: { type: '%', value: 10 }, plus: { type: '%', value: 10 } };
+    const sideCurrent = current[side] || { type: '%', value: 10 };
     const updatedSide = field === 'value'
       ? { ...sideCurrent, value: Math.max(0, Number(next) || 0) }
       : { ...sideCurrent, type: next as '%' | '$' };
@@ -1852,8 +1855,8 @@ export function Services() {
               <Phone size={15} />
             </div>
             <div>
-              <h2 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>Your Leadbridge number</h2>
-              <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--lb-ink-5)' }}>Used for all outbound SMS and calls</p>
+              <h2 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>Communication Setup</h2>
+              <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--lb-ink-5)' }}>Set up the numbers used for alerts, messaging, and calls.</p>
             </div>
           </div>
 
@@ -1992,6 +1995,128 @@ export function Services() {
                 </div>
               </div>
             </div>
+          ) : isTier1Respond ? (
+            <div className="space-y-4">
+              {/* Row 1: Locked LeadBridge Number + editable Business Phone */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div data-tour="bot-number">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block flex items-center gap-1.5">
+                    🤖 LeadBridge Number
+                    <Lock className="w-3 h-3 text-slate-400" />
+                  </label>
+                  <p className="text-[11px] text-slate-400 mb-2">Send SMS and call leads from your own number.</p>
+                  <div className="w-full rounded-xl p-3 text-sm font-medium bg-slate-50 border-2 border-dashed border-slate-200 text-slate-500 flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-2">
+                      <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      Not available on Respond
+                    </span>
+                    <Link
+                      to="/pricing"
+                      className="text-xs font-semibold text-blue-600 hover:text-blue-700 whitespace-nowrap"
+                    >
+                      Upgrade to Engage →
+                    </Link>
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-slate-400">Upgrade to Engage to enable outbound messaging and calls.</p>
+                </div>
+                <div data-tour="business-phone">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">📱 Your Business Phone</label>
+                  <p className="text-[11px] text-slate-400 mb-2">Lead notifications and alerts are sent to this number.</p>
+                  {editingAgentPhone ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="tel"
+                        value={ccAgentPhone}
+                        onChange={e => setAllAgentPhones(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                        onBlur={() => saveAgentPhone()}
+                        onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') saveAgentPhone(); }}
+                        autoFocus
+                        placeholder="+15551234567"
+                        className="flex-1 rounded-xl px-3 py-2.5 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                      />
+                      <button onClick={() => saveAgentPhone()} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-medium font-mono transition-colors ${
+                        agentPhoneSaveStatus === 'saved' ? 'bg-emerald-50 border-2 border-emerald-300 text-emerald-700' :
+                        agentPhoneSaveStatus === 'saving' ? 'bg-blue-50 border-2 border-blue-200 text-blue-700' :
+                        'bg-slate-50 border border-slate-200 text-slate-800'
+                      }`}>
+                        {agentPhoneSaveStatus === 'saved' && <CheckCircle className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />}
+                        {ccAgentPhone || <span className="text-slate-400">Not set</span>}
+                      </div>
+                      <button
+                        onClick={() => setEditingAgentPhone(true)}
+                        className="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors shrink-0"
+                      >
+                        Change
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Row 2: Test Number + tier-limited test buttons (Test Alert only) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div data-tour="test-number">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🧪 Test Number</label>
+                  <p className="text-[11px] text-slate-400 mb-2">Test alerts and notifications.</p>
+                  <input
+                    type="tel"
+                    value={ccTestPhone}
+                    onChange={e => { const v = e.target.value.replace(/[^\d+\s\-()]/g, ''); setCcTestPhone(v); if (selectedAccountId) localStorage.setItem(`cc_test_phone_${selectedAccountId}`, v); }}
+                    onBlur={e => { const formatted = formatPhoneE164(e.target.value); if (formatted !== e.target.value) { setCcTestPhone(formatted); if (selectedAccountId) localStorage.setItem(`cc_test_phone_${selectedAccountId}`, formatted); } }}
+                    placeholder="+15559876543"
+                    className={`w-full rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                      ccTestPhone && !isValidPhoneE164(ccTestPhone) ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                        : ccTestPhone && isValidPhoneE164(ccTestPhone) ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                        : 'bg-slate-50 border border-slate-200 focus:ring-blue-500'
+                    }`}
+                  />
+                  {ccTestPhone && !isValidPhoneE164(ccTestPhone) && (
+                    <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" /> Must be E.164 format, e.g. +12125550100
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-end" data-tour="test-buttons">
+                  <div className="flex gap-2 flex-wrap pb-[1px]">
+                    <button
+                      onClick={sendTestAlert}
+                      disabled={testStatus !== 'idle' || !(leadAlertRule?.enabled) || !alertToPhone || !isValidPhoneE164(alertToPhone) || alertDirty}
+                      title={!(leadAlertRule?.enabled) ? 'Enable Lead Alerts first' : alertDirty ? 'Save changes first' : !alertToPhone ? 'Set agent phone first' : ''}
+                      className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                        testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                        testStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                        testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                        'bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50'
+                      }`}
+                    >
+                      {testStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
+                       testStatus === 'delivered' ? <CheckCircle size={14} /> :
+                       testStatus === 'failed' ? <X size={14} /> :
+                       <Send size={14} />}
+                      {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Sent!' : testStatus === 'failed' ? 'Failed' : 'Test Alert'}
+                    </button>
+                    <button
+                      disabled
+                      title="Upgrade to Engage to send SMS and call leads"
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-slate-50 text-slate-400 border border-dashed border-slate-200 cursor-not-allowed whitespace-nowrap"
+                    >
+                      <Lock size={12} /> Test Text
+                    </button>
+                    <button
+                      disabled
+                      title="Upgrade to Engage to send SMS and call leads"
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-slate-50 text-slate-400 border border-dashed border-slate-200 cursor-not-allowed whitespace-nowrap"
+                    >
+                      <Lock size={12} /> Test Call
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           ) : (
             <div className="flex flex-col items-center gap-3 py-6 px-4 bg-amber-50/50 rounded-2xl border border-amber-200">
               <Phone className="w-8 h-8 text-amber-500" />
@@ -2034,8 +2159,8 @@ export function Services() {
             return (
           <ServiceCard
             icon={<Bell className="w-7 h-7" />}
-            title="New Lead Handling"
-            description="What happens immediately when a new lead arrives."
+            title="When a Lead Arrives"
+            description="Choose what happens immediately when a new lead comes in."
             enabled={autoReplyEnabled || (leadAlertRule?.enabled ?? false)}
             onToggle={(on) => {
               if (on && noPhone) { setShowDedicatedModal(true); return; }
@@ -2236,7 +2361,7 @@ export function Services() {
                                   )}
                                   {/* Quote range gap — how wide of a range the AI quotes around the table price */}
                                   {(() => {
-                                    const range = p.priceRange || { minus: { type: '%', value: 0 }, plus: { type: '%', value: 0 } };
+                                    const range = p.priceRange || { minus: { type: '%', value: 10 }, plus: { type: '%', value: 10 } };
                                     const mVal = Number(range.minus?.value) || 0;
                                     const pVal = Number(range.plus?.value) || 0;
                                     const mType = range.minus?.type === '$' ? '$' : '%';
@@ -2376,8 +2501,8 @@ export function Services() {
                   <div className="flex items-center gap-3">
                     <MessageSquare className="w-5 h-5 text-amber-600" />
                     <div>
-                      <h4 className="text-sm font-bold text-slate-800">New Lead Alerts</h4>
-                      <p className="text-xs text-slate-400">Get notified as soon as a new lead arrives</p>
+                      <h4 className="text-sm font-bold text-slate-800">Alerts</h4>
+                      <p className="text-xs text-slate-400">Get notified when a new lead arrives.</p>
                     </div>
                   </div>
                   <label className="inline-flex items-center cursor-pointer">
@@ -2496,12 +2621,276 @@ export function Services() {
                 )}
               </div>
 
+              {/* ── Contact Immediately ── */}
+              <div className="px-1 pt-2">
+                <h4 className="text-sm font-bold text-slate-800">Contact Immediately</h4>
+                <p className="text-xs text-slate-400 mt-0.5">Reach out to the lead right away by text or call.</p>
+              </div>
+
+              {/* ── Instant Text sub-section ── */}
+              <div className="border border-slate-100 rounded-2xl overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50">
+                  <div className="flex items-center gap-3">
+                    <MessageSquare className="w-5 h-5 text-emerald-600" />
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-800">Instant Text</h4>
+                      <p className="text-xs text-slate-400">Automatically text the lead when a new lead arrives</p>
+                    </div>
+                  </div>
+                  <label className="inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={ctEnabled}
+                      onChange={e => toggleCustomerTexting(e.target.checked)}
+                      disabled={ctSaving}
+                      className="sr-only peer"
+                    />
+                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
+                  </label>
+                </div>
+                <div className={`px-5 py-4 space-y-4${!ctEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+                  {/* Auto-reply template */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Auto-Reply Message</label>
+                    <p className="text-xs text-slate-400 mb-2">Sent immediately when a new lead arrives.</p>
+                    <select
+                      value={ctSelectedTemplateId}
+                      onChange={e => {
+                        if (e.target.value === '__create_new__') {
+                          setTemplateEditor({ mode: 'create', ruleId: '', content: '', type: 'ct' });
+                        } else {
+                          const tpl = templates.find(t => t.id === e.target.value);
+                          if (tpl) {
+                            setCtSelectedTemplateId(tpl.id);
+                            setCtAutoReplyTemplate(tpl.content);
+                          }
+                        }
+                      }}
+                      className="w-full rounded-xl p-3 text-sm font-medium bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    >
+                      <option value="">Select template</option>
+                      {templates.map(t => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                      <option value="__create_new__">+ Create New Template</option>
+                    </select>
+                    {ctAutoReplyTemplate && (
+                      <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                        {ctAutoReplyTemplate}
+                        <button
+                          type="button"
+                          onClick={() => setTemplateEditor({
+                            mode: ctSelectedTemplateId ? 'service-edit' : 'create',
+                            ruleId: '',
+                            ...(ctSelectedTemplateId && {
+                              templateId: ctSelectedTemplateId,
+                              templateName: templates.find(t => t.id === ctSelectedTemplateId)?.name || 'template',
+                            }),
+                            content: ctAutoReplyTemplate,
+                            type: 'ct',
+                          })}
+                          className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-emerald-600"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+              </div>
+
+              {/* ── Instant Call Connect sub-section ── */}
+              <div className="border border-slate-100 rounded-2xl overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50">
+                  <div className="flex items-center gap-3">
+                    <PhoneCall className="w-5 h-5 text-violet-600" />
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-800">Instant Call</h4>
+                      <p className="text-xs text-slate-400">Call your team and connect to the lead right away</p>
+                    </div>
+                  </div>
+                  <label className="inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={ccEnabled}
+                      onChange={e => toggleCallConnect(e.target.checked)}
+                      disabled={ccSaving}
+                      className="sr-only peer"
+                    />
+                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
+                  </label>
+                </div>
+                <div className={`px-5 py-4 space-y-4${!ccEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+                  {/* Connection Mode */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Connection Mode</label>
+                    <div className="flex bg-slate-100 rounded-2xl p-1 max-w-lg">
+                      <button
+                        onClick={() => setCcMode('AGENT_FIRST')}
+                        className={`flex-1 flex flex-col items-center gap-0.5 rounded-xl px-4 py-3 transition-all ${
+                          ccMode === 'AGENT_FIRST' ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                        }`}
+                      >
+                        <Phone className="w-4 h-4" />
+                        <span className="text-sm font-bold">Agent First</span>
+                        <span className="text-[11px] font-normal text-slate-400 leading-tight text-center">We call you, then bridge the lead</span>
+                      </button>
+                      <button
+                        onClick={() => setCcMode('PARALLEL')}
+                        className={`flex-1 flex flex-col items-center gap-0.5 rounded-xl px-4 py-3 transition-all ${
+                          ccMode === 'PARALLEL' ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                        }`}
+                      >
+                        <Zap className="w-4 h-4" />
+                        <span className="text-sm font-bold">Parallel</span>
+                        <span className="text-[11px] font-normal text-slate-400 leading-tight text-center">Call you and lead simultaneously</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Agent Whisper Message */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Agent Whisper Message</label>
+                    <p className="text-xs text-slate-400 mb-3">Played to you before the bridge. Press <span className="font-semibold text-slate-500">any key</span> to accept.</p>
+                    <select
+                      value={ccWhisperTemplateId || ''}
+                      onChange={e => {
+                        if (e.target.value === '__create_new__') {
+                          setTemplateEditor({ mode: 'create', ruleId: '', content: ccAgentWhisperMessage, type: 'cc-whisper' });
+                        } else {
+                          const t = templates.find(x => x.id === e.target.value);
+                          if (t) { setCcAgentWhisperMessage(t.content); setCcWhisperTemplateId(t.id); }
+                        }
+                      }}
+                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
+                    >
+                      <option value="">Select template…</option>
+                      {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      <option value="__create_new__">+ Create New Template</option>
+                    </select>
+                    {ccAgentWhisperMessage && (
+                      <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                        {ccAgentWhisperMessage}
+                        <button
+                          onClick={() => {
+                            const tpl = ccWhisperTemplateId ? templates.find(t => t.id === ccWhisperTemplateId) : null;
+                            setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccAgentWhisperMessage, type: 'cc-whisper' });
+                          }}
+                          className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Lead Greeting — Parallel mode only */}
+                  {ccMode === 'PARALLEL' && (
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Lead Greeting Message</label>
+                      <p className="text-xs text-slate-400 mb-3">Played to the lead while they wait for you to answer.</p>
+                      <select
+                        value={ccGreetingTemplateId || ''}
+                        onChange={e => {
+                          if (e.target.value === '__create_new__') {
+                            setTemplateEditor({ mode: 'create', ruleId: '', content: ccLeadGreetingMessage, type: 'cc-greeting' });
+                          } else {
+                            const t = templates.find(x => x.id === e.target.value);
+                            if (t) { setCcLeadGreetingMessage(t.content); setCcGreetingTemplateId(t.id); }
+                          }
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
+                      >
+                        <option value="">Select template…</option>
+                        {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        <option value="__create_new__">+ Create New Template</option>
+                      </select>
+                      {ccLeadGreetingMessage && (
+                        <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                          {ccLeadGreetingMessage}
+                          <button
+                            onClick={() => {
+                              const tpl = ccGreetingTemplateId ? templates.find(t => t.id === ccGreetingTemplateId) : null;
+                              setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccLeadGreetingMessage, type: 'cc-greeting' });
+                            }}
+                            className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Voicemail */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Voicemail Message</label>
+                    <p className="text-xs text-slate-400 mb-3">Left automatically when the lead doesn't answer.</p>
+                    <select
+                      value={ccVoicemailTemplateId || ''}
+                      onChange={e => {
+                        if (e.target.value === '__create_new__') {
+                          setTemplateEditor({ mode: 'create', ruleId: '', content: ccVoicemailMessage, type: 'cc-voicemail' });
+                        } else {
+                          const t = templates.find(x => x.id === e.target.value);
+                          if (t) { setCcVoicemailMessage(t.content); setCcVoicemailTemplateId(t.id); }
+                        }
+                      }}
+                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-sm font-medium"
+                    >
+                      <option value="">Select template…</option>
+                      {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      <option value="__create_new__">+ Create New Template</option>
+                    </select>
+                    {ccVoicemailMessage && (
+                      <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                        {ccVoicemailMessage}
+                        <button
+                          onClick={() => {
+                            const tpl = ccVoicemailTemplateId ? templates.find(t => t.id === ccVoicemailTemplateId) : null;
+                            setTemplateEditor({ mode: tpl ? 'service-edit' : 'create', ruleId: '', templateId: tpl?.id, templateName: tpl?.name, content: ccVoicemailMessage, type: 'cc-voicemail' });
+                          }}
+                          className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+              </div>
+
+              {/* ── Contact Immediately — Save / unsaved changes ── */}
+              <div className="pt-4 border-t border-slate-100">
+                {commsDirty ? (
+                  <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
+                    <div className="flex items-center gap-2 text-amber-700">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span className="text-sm font-medium">You have unsaved changes</span>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button onClick={discardCommsChanges} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Discard</button>
+                      <button onClick={saveCommsSettings} disabled={ctSaving || ccSaving} className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1">
+                        {(ctSaving || ccSaving) && <Loader2 className="w-3 h-3 animate-spin" />} Save Settings
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={saveCommsSettings} disabled={ctSaving || ccSaving} className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50">
+                    {(ctSaving || ccSaving) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save Settings
+                  </button>
+                )}
+              </div>
+
             </div>
           </ServiceCard>
             );
           })()}
 
-          {/* 3. Customer Communications (combined CT + ICC) */}
+          {/* 3. Customer Communications (combined CT + ICC) — REMOVED, merged into "When a Lead Arrives" */}
+          {false && (
           <ServiceCard
             icon={<Phone className="w-7 h-7" />}
             title="Customer Contact"
@@ -2795,13 +3184,14 @@ export function Services() {
               </div>
             </div>
           </ServiceCard>
+          )}
 
-          {/* 4. Ongoing Communication — Follow-ups + AI Conversation */}
+          {/* 3. If the Lead Doesn't Respond — Follow-ups + Re-engagement Alerts */}
           {selectedAccountId && (
             <ServiceCard
               icon={<Clock className="w-7 h-7" />}
-              title="Ongoing Communication"
-              description="Follow-ups and AI conversation for leads after the first reply."
+              title="If the Lead Doesn't Respond"
+              description="Control what happens after the first reply if the lead goes quiet."
               enabled={fuMode !== 'off'}
               onToggle={(on) => setFuMode(on ? 'suggest' : 'off')}
               expanded={expandedCard === 'yelp-followups'}
@@ -2827,7 +3217,9 @@ export function Services() {
                 </div>
                 {fuMode !== 'off' && (
                   <div className="px-5 py-4 space-y-4">
-                    {/* Follow-up Mode */}
+                    {/* Follow-up Mode — hidden: Follow-ups and AI Conversation are now separate sections.
+                        State is still set by legacy code; AI conversation controls live in its own card below. */}
+                    {false && (
                     <div>
                       <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Mode</label>
                       <p className="text-[10px] text-slate-400 mb-2">Choose whether follow-ups use preset templates or AI conversation handling.</p>
@@ -2848,6 +3240,7 @@ export function Services() {
                         ))}
                       </div>
                     </div>
+                    )}
 
                     {/* Follow-up Plan */}
                     <div>
@@ -3064,7 +3457,8 @@ export function Services() {
                 )}
               </div>
 
-              {/* ── AI Conversation sub-section ── */}
+              {/* ── AI Conversation subsection relocated to its own ServiceCard below. Legacy block hidden to preserve state hooks. ── */}
+              {false && (
               <div className="border border-slate-100 rounded-2xl overflow-hidden">
                 <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50">
                   <div className="flex items-center gap-3">
@@ -3250,6 +3644,7 @@ export function Services() {
                   </div>
                 )}
               </div>
+              )}
 
               {/* ── Re-engagement Alerts sub-section ── */}
               <div className="border border-slate-100 rounded-2xl overflow-hidden">
@@ -3258,7 +3653,7 @@ export function Services() {
                     <Bell className="w-5 h-5 text-amber-500" />
                     <div>
                       <h4 className="text-sm font-bold text-slate-800">Re-engagement Alerts</h4>
-                      <p className="text-xs text-slate-400">Get notified when a lead replies after being inactive</p>
+                      <p className="text-xs text-slate-400">Get notified when a previously inactive lead replies.</p>
                     </div>
                   </div>
                   <label className="inline-flex items-center cursor-pointer">
@@ -3350,6 +3745,185 @@ export function Services() {
                   <><Save className="w-4 h-4" /> Save Settings</>
                 )}
               </button>
+            </ServiceCard>
+          )}
+
+          {/* 4. AI Conversation — standalone card (decision engine) */}
+          {selectedAccountId && (
+            <ServiceCard
+              icon={<Zap className="w-7 h-7" />}
+              title="AI Conversation"
+              description="Let the system continue the conversation based on previous messages."
+              enabled={aiConversationOn}
+              onToggle={(on) => setAiConversationOn(on)}
+              expanded={expandedCard === 'ai-conversation'}
+              onExpand={() => setExpandedCard(expandedCard === 'ai-conversation' ? null : 'ai-conversation')}
+              iconBgColor="bg-violet-50"
+              iconTextColor="text-violet-600"
+            >
+              {aiConversationOn && (
+                <div className="space-y-4">
+                  {/* AI Strategy */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Conversation Strategy</label>
+                    <p className="text-[10px] text-slate-400 mb-2">Choose how AI should guide the conversation.</p>
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {([
+                        { key: 'auto' as const, emoji: '🤖', label: 'Auto', desc: 'AI picks best strategy per conversation' },
+                        { key: 'hybrid' as const, emoji: '⚖️', label: 'Hybrid', desc: 'Price + one question' },
+                        { key: 'price' as const, emoji: '💰', label: 'Price', desc: 'Lead with pricing' },
+                        { key: 'qualify' as const, emoji: '🧠', label: 'Qualify', desc: 'Ask for details' },
+                        { key: 'convert' as const, emoji: '📞', label: 'Convert', desc: 'Push to booking' },
+                        { key: 'phone' as const, emoji: '📱', label: 'Phone', desc: 'Escalate to call' },
+                      ]).map(s => (
+                        <button key={s.key}
+                          onClick={() => {
+                            setFuStrategy(s.key);
+                            if (s.key !== 'auto') {
+                              const prompts: Record<string, string> = {
+                                hybrid: 'STRATEGY: HYBRID\n\nYou MUST:\n- Provide a price range based on pricing settings\n- Ask EXACTLY ONE question that moves toward booking\n\nDO NOT:\n- Ask more than one question\n- Ask vague questions',
+                                price: 'STRATEGY: PRICE ANCHOR\n\nYou MUST:\n- Lead with a price range based on pricing settings\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Be vague or hesitant',
+                                qualify: 'STRATEGY: QUALIFICATION\n\nYou MUST:\n- Ask 2-3 specific questions about missing details\n- Explain why you need the info\n\nDO NOT:\n- Give pricing\n- Ask generic questions',
+                                convert: 'STRATEGY: CONVERSION\n\nYou MUST:\n- Include pricing based on settings\n- Offer a SPECIFIC time or 2 options\n- Push toward scheduling\n\nDO NOT:\n- Ask open-ended questions',
+                                phone: 'STRATEGY: PHONE / ESCALATION\n\nYou MUST:\n- Explain why a call is needed\n- Ask for phone naturally\n\nDO NOT:\n- Push phone too early\n- Sound forceful',
+                              };
+                              setFuStrategyPrompt(prompts[s.key] || '');
+                            }
+                          }}
+                          className={`text-[11px] px-2.5 py-1.5 rounded-lg font-semibold border-2 transition-all ${fuStrategy === s.key ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}
+                          title={s.desc}>
+                          {s.emoji} {s.label}
+                        </button>
+                      ))}
+                    </div>
+                    {fuStrategy === 'auto' ? (
+                      <p className="text-[11px] text-slate-400">AI picks the best strategy based on conversation context.</p>
+                    ) : (
+                      <div className="bg-white p-3 rounded-xl border border-dashed border-slate-200 text-slate-600 text-xs leading-relaxed max-h-28 overflow-y-auto whitespace-pre-wrap relative group">
+                        {fuStrategyPrompt || 'No prompt set'}
+                        <button onClick={() => setTemplateEditor({ mode: 'create', ruleId: '', templateId: undefined, templateName: `AI Strategy — ${fuStrategy.charAt(0).toUpperCase() + fuStrategy.slice(1)}`, content: fuStrategyPrompt || '', type: `fu-strategy-${fuStrategy}` })}
+                          className="absolute top-2 right-2 p-1.5 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600">
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Availability */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Auto Reply Availability</label>
+                    <p className="text-[11px] text-slate-400 mb-2">Choose when AI can reply automatically.</p>
+                    <div className="flex gap-2 mb-3">
+                      <button onClick={() => setFuAvailability('always')}
+                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'always' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                        Always (24/7)
+                      </button>
+                      <button onClick={() => setFuAvailability('active_hours')}
+                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'active_hours' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                        Set up active time
+                      </button>
+                    </div>
+                    {fuAvailability === 'active_hours' && (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-3 gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
+                            <input type="time" value={fuStart} onChange={e => setFuStart(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
+                            <input type="time" value={fuEnd} onChange={e => setFuEnd(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Timezone</label>
+                            <select value={fuTz} onChange={e => setFuTz(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
+                              <option value="America/New_York">Eastern</option>
+                              <option value="America/Chicago">Central</option>
+                              <option value="America/Denver">Mountain</option>
+                              <option value="America/Los_Angeles">Pacific</option>
+                            </select>
+                          </div>
+                        </div>
+                        {fuExtraWindows.map((w, i) => (
+                          <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
+                              <input type="time" value={w.start} onChange={e => { const u = [...fuExtraWindows]; u[i] = { ...u[i], start: e.target.value }; setFuExtraWindows(u); }}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
+                              <input type="time" value={w.end} onChange={e => { const u = [...fuExtraWindows]; u[i] = { ...u[i], end: e.target.value }; setFuExtraWindows(u); }}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                            </div>
+                            <div className="flex items-end pb-1">
+                              <button onClick={() => setFuExtraWindows(fuExtraWindows.filter((_, j) => j !== i))}
+                                className="p-2 text-slate-400 hover:text-red-500 transition-colors">
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        <button onClick={() => setFuExtraWindows([...fuExtraWindows, { start: '13:00', end: '17:00' }])}
+                          className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-1">
+                          + Add time window
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* AI Conversation Rules (collapsed) */}
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <button onClick={() => setAiShowRules(!aiShowRules)} className="w-full px-4 py-3 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
+                      <div>
+                        <span className="text-[11px] font-bold text-slate-600 uppercase tracking-widest">AI Conversation Rules</span>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Control when AI stops replying and special handling.</p>
+                      </div>
+                      {aiShowRules ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                    </button>
+                    {aiShowRules && (
+                      <div className="px-4 py-4 space-y-4 border-t border-slate-100">
+                        <div>
+                          <div className="text-[11px] font-semibold text-slate-600 mb-2">AI stops replying when:</div>
+                          <div className="space-y-1.5">
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={aiStopOnOptOut} onChange={e => setAiStopOnOptOut(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
+                              Customer asks not to be contacted
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={aiStopOnBooked} onChange={e => setAiStopOnBooked(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
+                              Job is booked or confirmed
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={aiStopOnPriceAgreed} onChange={e => setAiStopOnPriceAgreed(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
+                              Customer agrees on price — hand off to manager
+                            </label>
+                            <div className="flex items-center gap-2 text-sm text-slate-500">
+                              <span className="text-emerald-500 text-xs">&#10003;</span> Lead is done, scheduled, or archived
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[11px] font-semibold text-slate-600 mb-1">Max AI replies per conversation</div>
+                          <p className="text-[10px] text-slate-400 mb-2">Limit how many times AI replies before handing off to a manager. 0 = unlimited.</p>
+                          <div className="flex gap-1.5">
+                            {[0, 3, 5, 10].map(n => (
+                              <button key={n} onClick={() => setAiMaxReplies(n)}
+                                className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border-2 transition-all ${aiMaxReplies === n ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-violet-200'}`}>
+                                {n === 0 ? 'Unlimited' : n}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+                          <span className="text-emerald-500 text-xs">&#10003;</span>
+                          Manager can always take over by sending a message manually
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </ServiceCard>
           )}
 
