@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi, conversationSyncApi, followUpApi,
+  automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi, conversationSyncApi, followUpApi, usersApi,
 } from '../services/api';
 import type { TenantPhoneNumber } from '../services/api';
 import type {
@@ -302,6 +302,9 @@ export function Services() {
     firstReplyRule?.replyMode ?? (firstReplyRule?.useAi ? 'auto' : 'custom')
   );
   const [showPricingModal, setShowPricingModal] = useState(false);
+  const [pricingModalTab, setPricingModalTab] = useState<'view' | 'edit'>('view');
+  const [pricingPreview, setPricingPreview] = useState<any>(null);
+  const [pricingPreviewLoading, setPricingPreviewLoading] = useState(false);
   const [autoReplyAiPrompt, setAutoReplyAiPrompt] = useState<string>(firstReplyRule?.aiSystemPrompt ?? '');
   const [autoReplyPromptTemplateId, setAutoReplyPromptTemplateId] = useState<string>(firstReplyRule?.promptTemplateId || '');
   const [promptTemplates, setPromptTemplates] = useState<MessageTemplate[]>([]);
@@ -517,6 +520,16 @@ export function Services() {
       loadServiceData(selectedAccountId);
     }
   }, [selectedAccountId]);
+
+  // Load pricing preview whenever View tab is active on the pricing modal
+  useEffect(() => {
+    if (!showPricingModal || pricingModalTab !== 'view' || !selectedAccountId) return;
+    setPricingPreviewLoading(true);
+    usersApi.getServicePricing(selectedAccountId)
+      .then(res => setPricingPreview(res.pricing || null))
+      .catch(() => setPricingPreview(null))
+      .finally(() => setPricingPreviewLoading(false));
+  }, [showPricingModal, pricingModalTab, selectedAccountId]);
 
   // Load follow-up settings when account changes
   useEffect(() => {
@@ -2121,11 +2134,11 @@ export function Services() {
                             </p>
                             <button
                               type="button"
-                              onClick={() => setShowPricingModal(true)}
+                              onClick={() => { setPricingModalTab('view'); setShowPricingModal(true); }}
                               className="inline-flex items-center gap-1.5 mt-1 px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors"
                             >
                               <Pencil className="w-3 h-3" />
-                              Edit Pricing Table
+                              View Pricing Table
                             </button>
                           </div>
                         </div>
@@ -3691,24 +3704,169 @@ export function Services() {
       {/* Onboarding Tour */}
       <OnboardingTour active={tourActive} onComplete={() => setTourActive(false)} />
 
-      {/* Pricing Table Modal — edit the same table as Settings, right from Instant Reply */}
+      {/* Pricing Table Modal — read-only View or full Edit */}
       {showPricingModal && selectedAccountId && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowPricingModal(false)}>
-          <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto relative" onClick={e => e.stopPropagation()}>
-            <div className="sticky top-0 bg-white border-b border-slate-100 px-8 py-5 flex items-center justify-between z-10">
-              <div>
-                <h3 className="text-xl font-bold text-slate-900">Pricing Table</h3>
-                <p className="text-sm text-slate-500 mt-0.5">AI will use these prices to write the first reply.</p>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col relative" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="shrink-0 bg-white border-b border-slate-100 px-8 pt-5 pb-0 rounded-t-3xl">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-slate-900">Pricing Table</h3>
+                  <p className="text-sm text-slate-500 mt-0.5">AI will use these prices to write the first reply.</p>
+                </div>
+                <button onClick={() => setShowPricingModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button onClick={() => setShowPricingModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
-                <X className="w-5 h-5" />
-              </button>
+              {/* Tabs */}
+              <div className="flex gap-1 mt-5 -mb-px">
+                {(['view', 'edit'] as const).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setPricingModalTab(t)}
+                    className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+                      pricingModalTab === t
+                        ? 'border-blue-600 text-blue-700'
+                        : 'border-transparent text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    {t === 'view' ? 'View' : 'Edit'}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="px-8 py-6">
-              <ServicePricingForm
-                accountId={selectedAccountId}
-                accountName={accounts.find(a => a.id === selectedAccountId)?.businessName || ''}
-              />
+
+            {/* Scrollable body */}
+            <div className="flex-1 overflow-y-auto px-8 py-6">
+              {pricingModalTab === 'edit' ? (
+                <ServicePricingForm
+                  accountId={selectedAccountId}
+                  accountName={accounts.find(a => a.id === selectedAccountId)?.businessName || ''}
+                />
+              ) : pricingPreviewLoading ? (
+                <div className="flex items-center gap-2 text-sm text-slate-400 py-8 justify-center">
+                  <Loader2 size={16} className="animate-spin" /> Loading pricing...
+                </div>
+              ) : !pricingPreview ? (
+                <div className="text-sm text-slate-500 py-8 text-center">
+                  No pricing configured yet. Switch to <button className="text-blue-600 font-semibold" onClick={() => setPricingModalTab('edit')}>Edit</button> to set it up.
+                </div>
+              ) : (() => {
+                const p = pricingPreview;
+                const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
+                return (
+                  <div className="space-y-6 text-sm">
+                    {/* Service type + enabled types */}
+                    <div>
+                      <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">Service</div>
+                      <div className="flex items-center flex-wrap gap-2">
+                        <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold capitalize">{p.serviceType || 'cleaning'}</span>
+                        {enabledTypes.map((t: any) => (
+                          <span key={t.key} className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg text-xs font-semibold">{t.label}</span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Price table */}
+                    {p.priceTable?.length > 0 && enabledTypes.length > 0 && (
+                      <div>
+                        <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">Base Prices</div>
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                          <table className="w-full text-sm">
+                            <thead className="bg-slate-50">
+                              <tr className="text-slate-500">
+                                <th className="px-3 py-2 text-left font-semibold text-xs">Bed</th>
+                                <th className="px-3 py-2 text-left font-semibold text-xs">Bath</th>
+                                {enabledTypes.map((t: any) => (
+                                  <th key={t.key} className="px-3 py-2 text-left font-semibold text-xs">{t.label}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {p.priceTable.map((row: any, i: number) => (
+                                <tr key={i} className="border-t border-slate-100">
+                                  <td className="px-3 py-2 text-slate-700 font-medium">{row.bed}</td>
+                                  <td className="px-3 py-2 text-slate-700 font-medium">{row.bath}</td>
+                                  {enabledTypes.map((t: any) => (
+                                    <td key={t.key} className="px-3 py-2 text-slate-900 font-semibold">${row[t.key] || '—'}</td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Frequency discounts */}
+                    {p.frequencyDiscounts?.some((fd: any) => fd.discount > 0) && (
+                      <div>
+                        <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">Recurring Discounts</div>
+                        <div className="flex flex-wrap gap-2">
+                          {p.frequencyDiscounts.filter((fd: any) => fd.discount > 0).map((fd: any) => (
+                            <span key={fd.key} className="px-2.5 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-semibold">
+                              {fd.label}: {fd.discount}% off
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Extras */}
+                    {p.extras?.some((e: any) => e.label && e.price > 0) && (
+                      <div>
+                        <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">Add-ons</div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {p.extras.filter((e: any) => e.label && e.price > 0).map((e: any) => (
+                            <div key={e.key} className="flex items-center justify-between px-3 py-1.5 bg-slate-50 rounded-lg">
+                              <span className="text-slate-700">{e.label}</span>
+                              <span className="text-slate-900 font-semibold">+${e.price}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Condition surcharges */}
+                    {p.conditionSurcharges?.some((c: any) => c.surcharge > 0) && (
+                      <div>
+                        <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">Condition Surcharges</div>
+                        <div className="flex flex-wrap gap-2">
+                          {p.conditionSurcharges.filter((c: any) => c.surcharge > 0).map((c: any) => (
+                            <span key={c.key} className="px-2.5 py-1.5 bg-amber-50 text-amber-700 rounded-lg text-xs font-semibold">
+                              {c.label}: +${c.surcharge}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Misc */}
+                    {(p.petSurcharge > 0 || p.recurringDiscount > 0 || p.orderDiscounts?.some((od: any) => od.minAmount > 0 && od.discount > 0)) && (
+                      <div>
+                        <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">Other</div>
+                        <div className="space-y-1.5">
+                          {p.petSurcharge > 0 && <div className="text-slate-700">Pet surcharge: <span className="font-semibold text-slate-900">+${p.petSurcharge}</span></div>}
+                          {p.recurringDiscount > 0 && <div className="text-slate-700">Recurring service discount: <span className="font-semibold text-slate-900">{p.recurringDiscount}% off</span></div>}
+                          {p.orderDiscounts?.filter((od: any) => od.minAmount > 0 && od.discount > 0).map((od: any, i: number) => (
+                            <div key={i} className="text-slate-700">Orders over ${od.minAmount}: <span className="font-semibold text-slate-900">{od.discount}% off</span></div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="pt-2 flex justify-end">
+                      <button
+                        onClick={() => setPricingModalTab('edit')}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700 transition-colors"
+                      >
+                        <Pencil className="w-3 h-3" /> Edit pricing
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
