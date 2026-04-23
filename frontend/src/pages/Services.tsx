@@ -2069,7 +2069,7 @@ export function Services() {
                   <p className="text-xs text-slate-500 mt-0.5">Upgrade to Engage to enable outbound messaging and calls.</p>
                 </div>
                 <Link to="/pricing" className="shrink-0 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap">
-                  Upgrade to Engage
+                  Upgrade to Engage · $89/mo
                 </Link>
               </div>
             ) : (
@@ -2596,7 +2596,7 @@ export function Services() {
 
               {/* ── Instant Text sub-section ── */}
               <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
-                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage" />}
+                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
                 <div className={`flex items-center justify-between px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
                   <div className="flex items-center gap-3">
                     <MessageSquare className="w-5 h-5 text-emerald-600" />
@@ -2673,7 +2673,7 @@ export function Services() {
 
               {/* ── Instant Call Connect sub-section ── */}
               <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
-                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage" />}
+                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
                 <div className={`flex items-center justify-between px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
                   <div className="flex items-center gap-3">
                     <PhoneCall className="w-5 h-5 text-violet-600" />
@@ -2881,7 +2881,7 @@ export function Services() {
 
               {/* ── Follow-ups sub-section ── */}
               <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
-                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage" />}
+                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
                 <div className={`flex items-center justify-between px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
                   <div className="flex items-center gap-3">
                     <Clock className="w-5 h-5 text-red-600" />
@@ -3331,7 +3331,7 @@ export function Services() {
 
               {/* ── Re-engagement Alerts sub-section ── */}
               <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
-                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage" />}
+                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
                 <div className={`flex items-center justify-between px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
                   <div className="flex items-center gap-3">
                     <Bell className="w-5 h-5 text-amber-500" />
@@ -3460,7 +3460,7 @@ export function Services() {
                     <p className="text-xs text-violet-800 mt-1">Let the system handle conversations and convert leads automatically.</p>
                   </div>
                   <Link to="/pricing" className="shrink-0 px-3 py-1.5 bg-violet-600 text-white text-xs font-semibold rounded-lg hover:bg-violet-700 transition-colors whitespace-nowrap">
-                    Upgrade to Convert
+                    Upgrade to Convert · $139/mo
                   </Link>
                 </div>
               )}
