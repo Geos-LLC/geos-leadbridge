@@ -113,7 +113,7 @@ export function Layout() {
   );
 
   const profile = user?.onboardingProfile ?? null;
-  const needsStep1 = !impersonatingUser && !!user && !profile?.step1CompletedAt;
+  const needsStep1 = !impersonatingUser && !!user && !profile?.step1CompletedAt && !profile?.step1SkippedAt;
   const needsStep2 =
     !impersonatingUser &&
     !!user &&

@@ -69,4 +69,10 @@ export class OnboardingController {
     const profile = await this.onboardingService.skipStep2(user.id);
     return { success: true, profile };
   }
+
+  @Post('step1/skip')
+  async skipStep1(@CurrentUser() user: any) {
+    const profile = await this.onboardingService.skipStep1(user.id);
+    return { success: true, profile };
+  }
 }

@@ -164,6 +164,7 @@ model OnboardingProfile {
   serviceType          String? // "house_cleaning" | "carpet_upholstery" | "window_cleaning" | "pressure_washing" | "plumbing" | "electrical" | "hvac" | "handyman" | "landscaping" | "junk_removal" | "moving" | "pest_control" | "other"
   serviceTypeOther     String?
   step1CompletedAt     DateTime?
+  step1SkippedAt       DateTime?
 
   // Step 2 — optional (skippable)
   responseSpeed     String? // "5min" | "30min" | "few_hours" | "later"

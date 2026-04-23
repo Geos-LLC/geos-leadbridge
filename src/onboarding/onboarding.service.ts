@@ -84,4 +84,15 @@ export class OnboardingService {
     this.logger.log(`[Onboarding] Step 2 skipped for user ${userId}`);
     return profile;
   }
+
+  async skipStep1(userId: string) {
+    const now = new Date();
+    const profile = await this.prisma.onboardingProfile.upsert({
+      where: { userId },
+      create: { userId, step1SkippedAt: now },
+      update: { step1SkippedAt: now },
+    });
+    this.logger.log(`[Onboarding] Step 1 skipped for user ${userId}`);
+    return profile;
+  }
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ArrowRight, Loader2, Check } from 'lucide-react';
+import { ArrowRight, Loader2, Check, X } from 'lucide-react';
 import { onboardingApi } from '../services/api';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
@@ -140,6 +140,24 @@ export default function OnboardingStep1Modal({ onComplete }: Props) {
     void handleFinish(value);
   };
 
+  const handleSkip = async () => {
+    if (saving) return;
+    try {
+      setSaving(true);
+      const { profile } = await onboardingApi.skipStep1();
+      if (user) {
+        const token = localStorage.getItem('token') || '';
+        setAuth({ ...user, onboardingProfile: profile }, token);
+      }
+      trackEvent('qualification_skipped', { step_group: 'step1' });
+      onComplete(profile);
+    } catch (err: any) {
+      notify.error('Could not skip', err.response?.data?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleFinish = async (serviceOverride?: string) => {
     try {
       setSaving(true);
@@ -176,6 +194,18 @@ export default function OnboardingStep1Modal({ onComplete }: Props) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg p-8 relative">
+        {/* Skip / close — does not block the user. We persist the dismissal so
+             this modal won't reappear on next login until they reopen it. */}
+        <button
+          type="button"
+          onClick={handleSkip}
+          disabled={saving}
+          aria-label="Skip for now"
+          title="Skip for now — you can finish this later"
+          className="absolute top-4 right-4 w-8 h-8 rounded-full inline-flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+        >
+          <X className="w-4 h-4" />
+        </button>
         {/* Progress */}
         <div className="flex items-center gap-2 mb-6">
           {Array.from({ length: totalSteps }).map((_, i) => (

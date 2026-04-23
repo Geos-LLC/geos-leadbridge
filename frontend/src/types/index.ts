@@ -7,6 +7,7 @@ export interface OnboardingProfile {
   serviceType: string | null;
   serviceTypeOther: string | null;
   step1CompletedAt: string | null;
+  step1SkippedAt: string | null;
   responseSpeed: string | null;
   missedLeadOutcome: string | null;
   avgJobValue: string | null;

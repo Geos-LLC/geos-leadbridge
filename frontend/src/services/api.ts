@@ -1757,6 +1757,10 @@ export const onboardingApi = {
     const { data } = await api.post('/v1/onboarding/step2/skip');
     return data;
   },
+  skipStep1: async (): Promise<{ success: boolean; profile: import('../types').OnboardingProfile }> => {
+    const { data } = await api.post('/v1/onboarding/step1/skip');
+    return data;
+  },
 };
 
 export default api;
