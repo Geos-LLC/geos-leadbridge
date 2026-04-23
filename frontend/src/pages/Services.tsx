@@ -1910,9 +1910,82 @@ export function Services() {
             </div>
           </div>
 
-          {tenantPhones.length > 0 ? (
-            <div className="space-y-4">
-              {/* Row 1: Bot Number + Business Phone */}
+          <div className="space-y-4">
+            {/* Row 1 — Respond tier: Business Phone + Test Alert. Always visible. */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div data-tour="business-phone">
+                <div className="flex items-center gap-2 mb-1">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">📱 Your Business Phone</label>
+                  <TierBadge tier="respond" />
+                </div>
+                <p className="text-[11px] text-slate-400 mb-2">Lead notifications and alerts are sent to this number.</p>
+                {editingAgentPhone ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="tel"
+                      value={ccAgentPhone}
+                      onChange={e => setAllAgentPhones(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                      onBlur={() => saveAgentPhone()}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') saveAgentPhone(); }}
+                      autoFocus
+                      placeholder="+15551234567"
+                      className="flex-1 rounded-xl px-3 py-2.5 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                    />
+                    <button onClick={() => saveAgentPhone()} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <div className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-medium font-mono transition-colors ${
+                      agentPhoneSaveStatus === 'saved' ? 'bg-emerald-50 border-2 border-emerald-300 text-emerald-700' :
+                      agentPhoneSaveStatus === 'saving' ? 'bg-blue-50 border-2 border-blue-200 text-blue-700' :
+                      'bg-slate-50 border border-slate-200 text-slate-800'
+                    }`}>
+                      {agentPhoneSaveStatus === 'saved' && <CheckCircle className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />}
+                      {ccAgentPhone || <span className="text-slate-400">Not set</span>}
+                    </div>
+                    <button
+                      onClick={() => setEditingAgentPhone(true)}
+                      className="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors shrink-0"
+                    >
+                      Change
+                    </button>
+                  </div>
+                )}
+                {tenantPhones.length > 0 && ccAgentPhone && ccAgentPhone === tenantPhones[0].phoneNumber && (
+                  <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    This is your LeadBridge Number — enter your business phone instead
+                  </p>
+                )}
+              </div>
+              <div data-tour="test-alert">
+                <div className="flex items-center gap-2 mb-1">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🧪 Test Alert</label>
+                  <TierBadge tier="respond" />
+                </div>
+                <p className="text-[11px] text-slate-400 mb-2">Send a test SMS to your Business Phone.</p>
+                <button
+                  onClick={sendTestAlert}
+                  disabled={testStatus !== 'idle' || !(leadAlertRule?.enabled) || !alertToPhone || !isValidPhoneE164(alertToPhone) || alertDirty}
+                  title={!(leadAlertRule?.enabled) ? 'Enable Lead Alerts first' : alertDirty ? 'Save changes first' : !alertToPhone ? 'Set agent phone first' : ''}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                    testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                    testStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                    testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                    'bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50'
+                  }`}
+                >
+                  {testStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
+                   testStatus === 'delivered' ? <CheckCircle size={14} /> :
+                   testStatus === 'failed' ? <X size={14} /> :
+                   <Send size={14} />}
+                  {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Sent!' : testStatus === 'failed' ? 'Failed' : 'Test Alert'}
+                </button>
+              </div>
+            </div>
+
+            {/* Row 2 — Engage tier: LeadBridge Number + Test Number & buttons. Shown only once the number is acquired. */}
+            {tenantPhones.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div data-tour="bot-number">
                   <div className="flex items-center gap-2 mb-1">
@@ -1924,58 +1997,12 @@ export function Services() {
                     {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName && tenantPhones[0].friendlyName !== tenantPhones[0].phoneNumber ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
                   </div>
                 </div>
-                <div data-tour="business-phone">
-                  <div className="flex items-center gap-2 mb-1">
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">📱 Your Business Phone</label>
-                    <TierBadge tier="respond" />
-                  </div>
-                  <p className="text-[11px] text-slate-400 mb-2">Lead notifications and alerts are sent to this number.</p>
-                  {editingAgentPhone ? (
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="tel"
-                        value={ccAgentPhone}
-                        onChange={e => setAllAgentPhones(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
-                        onBlur={() => saveAgentPhone()}
-                        onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') saveAgentPhone(); }}
-                        autoFocus
-                        placeholder="+15551234567"
-                        className="flex-1 rounded-xl px-3 py-2.5 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                      />
-                      <button onClick={() => saveAgentPhone()} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <div className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-medium font-mono transition-colors ${
-                        agentPhoneSaveStatus === 'saved' ? 'bg-emerald-50 border-2 border-emerald-300 text-emerald-700' :
-                        agentPhoneSaveStatus === 'saving' ? 'bg-blue-50 border-2 border-blue-200 text-blue-700' :
-                        'bg-slate-50 border border-slate-200 text-slate-800'
-                      }`}>
-                        {agentPhoneSaveStatus === 'saved' && <CheckCircle className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />}
-                        {ccAgentPhone || <span className="text-slate-400">Not set</span>}
-                      </div>
-                      <button
-                        onClick={() => setEditingAgentPhone(true)}
-                        className="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors shrink-0"
-                      >
-                        Change
-                      </button>
-                    </div>
-                  )}
-                  {ccAgentPhone && tenantPhones.length > 0 && ccAgentPhone === tenantPhones[0].phoneNumber && (
-                    <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3 shrink-0" />
-                      This is your LeadBridge Number — enter your business phone instead
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Row 2: Test Number (aligned under Bot) + Test Buttons (aligned under Business Phone) */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div data-tour="test-number">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🧪 Test Number</label>
-                  <p className="text-[11px] text-slate-400 mb-2">Used to test messaging and automation safely.</p>
+                  <div className="flex items-center gap-2 mb-1">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🧪 Test Number</label>
+                    <TierBadge tier="engage" />
+                  </div>
+                  <p className="text-[11px] text-slate-400 mb-2">Used to test SMS and calls from your LeadBridge Number.</p>
                   <input
                     type="tel"
                     value={ccTestPhone}
@@ -1999,205 +2026,71 @@ export function Services() {
                       <AlertTriangle size={12} /> Test phone cannot be the same as the bot number or business phone.
                     </p>
                   )}
-                </div>
-                <div className="flex items-end" data-tour="test-buttons">
-                  <div className="flex gap-2 flex-wrap pb-[1px]">
-                  <button
-                    onClick={sendTestAlert}
-                    disabled={testStatus !== 'idle' || !(leadAlertRule?.enabled) || !alertToPhone || !isValidPhoneE164(alertToPhone) || alertDirty}
-                    title={!(leadAlertRule?.enabled) ? 'Enable Lead Alerts first' : alertDirty ? 'Save changes first' : !alertToPhone ? 'Set agent phone first' : ''}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
-                      testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
-                      testStatus === 'failed' ? 'bg-red-100 text-red-700' :
-                      testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
-                      'bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50'
-                    }`}
-                  >
-                    {testStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
-                     testStatus === 'delivered' ? <CheckCircle size={14} /> :
-                     testStatus === 'failed' ? <X size={14} /> :
-                     <Send size={14} />}
-                    {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Sent!' : testStatus === 'failed' ? 'Failed' : 'Test Alert'}
-                    <TierBadge tier="respond" />
-                  </button>
-                  <button
-                    onClick={sendCtTest}
-                    disabled={ctTestStatus === 'sending' || !ctEnabled || !ccTestPhone || !isValidPhoneE164(ccTestPhone) || tenantPhones.length === 0 || !!ccSamePhoneError || commsDirty}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
-                      ctTestStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
-                      ctTestStatus === 'failed' ? 'bg-red-100 text-red-700' :
-                      ctTestStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
-                      'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
-                    }`}
-                    title={!ctEnabled ? 'Enable Instant Text first' : commsDirty ? 'Save changes first' : ''}
-                  >
-                    {ctTestStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
-                     ctTestStatus === 'delivered' ? <CheckCircle size={14} /> :
-                     ctTestStatus === 'failed' ? <X size={14} /> :
-                     <Send size={14} />}
-                    {ctTestStatus === 'sending' ? 'Sending...' : ctTestStatus === 'delivered' ? 'Sent' : ctTestStatus === 'failed' ? 'Failed' : 'Test Text'}
-                    <TierBadge tier="engage" />
-                  </button>
-                  <button
-                    onClick={handleTestCall}
-                    disabled={ccTesting || !ccEnabled || !!ccSamePhoneError || !ccTestPhone || !isValidPhoneE164(ccTestPhone) || commsDirty}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
-                      ccTesting ? 'bg-slate-100 text-slate-500' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
-                    }`}
-                    title={!ccEnabled ? 'Enable Instant Calls first' : commsDirty ? 'Save changes first' : ''}
-                  >
-                    {ccTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
-                    {ccTesting ? 'Calling…' : 'Test Call'}
-                    <TierBadge tier="engage" />
-                  </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : isTier1Respond ? (
-            <div className="space-y-4">
-              {/* Row 1: Locked LeadBridge Number + editable Business Phone */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div data-tour="bot-number">
-                  <div className="flex items-center gap-2 mb-1">
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                      🤖 LeadBridge Number
-                      <Lock className="w-3 h-3 text-slate-400" />
-                    </label>
-                    <TierBadge tier="engage" />
-                  </div>
-                  <p className="text-[11px] text-slate-400 mb-2">Send SMS and call leads from your own number.</p>
-                  <div className="w-full rounded-xl p-3 text-sm font-medium bg-slate-50 border-2 border-dashed border-slate-200 text-slate-500 flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-2">
-                      <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      Not available on Respond
-                    </span>
-                    <Link
-                      to="/pricing"
-                      className="text-xs font-semibold text-blue-600 hover:text-blue-700 whitespace-nowrap"
-                    >
-                      Upgrade to Engage →
-                    </Link>
-                  </div>
-                  <p className="mt-1.5 text-[11px] text-slate-400">Upgrade to Engage to enable outbound messaging and calls.</p>
-                </div>
-                <div data-tour="business-phone">
-                  <div className="flex items-center gap-2 mb-1">
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">📱 Your Business Phone</label>
-                    <TierBadge tier="respond" />
-                  </div>
-                  <p className="text-[11px] text-slate-400 mb-2">Lead notifications and alerts are sent to this number.</p>
-                  {editingAgentPhone ? (
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="tel"
-                        value={ccAgentPhone}
-                        onChange={e => setAllAgentPhones(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
-                        onBlur={() => saveAgentPhone()}
-                        onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') saveAgentPhone(); }}
-                        autoFocus
-                        placeholder="+15551234567"
-                        className="flex-1 rounded-xl px-3 py-2.5 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                      />
-                      <button onClick={() => saveAgentPhone()} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Done</button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <div className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-medium font-mono transition-colors ${
-                        agentPhoneSaveStatus === 'saved' ? 'bg-emerald-50 border-2 border-emerald-300 text-emerald-700' :
-                        agentPhoneSaveStatus === 'saving' ? 'bg-blue-50 border-2 border-blue-200 text-blue-700' :
-                        'bg-slate-50 border border-slate-200 text-slate-800'
-                      }`}>
-                        {agentPhoneSaveStatus === 'saved' && <CheckCircle className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />}
-                        {ccAgentPhone || <span className="text-slate-400">Not set</span>}
-                      </div>
-                      <button
-                        onClick={() => setEditingAgentPhone(true)}
-                        className="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors shrink-0"
-                      >
-                        Change
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Row 2: Test Number + tier-limited test buttons (Test Alert only) */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div data-tour="test-number">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">🧪 Test Number</label>
-                  <p className="text-[11px] text-slate-400 mb-2">Test alerts and notifications.</p>
-                  <input
-                    type="tel"
-                    value={ccTestPhone}
-                    onChange={e => { const v = e.target.value.replace(/[^\d+\s\-()]/g, ''); setCcTestPhone(v); if (selectedAccountId) localStorage.setItem(`cc_test_phone_${selectedAccountId}`, v); }}
-                    onBlur={e => { const formatted = formatPhoneE164(e.target.value); if (formatted !== e.target.value) { setCcTestPhone(formatted); if (selectedAccountId) localStorage.setItem(`cc_test_phone_${selectedAccountId}`, formatted); } }}
-                    placeholder="+15559876543"
-                    className={`w-full rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
-                      ccTestPhone && !isValidPhoneE164(ccTestPhone) ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
-                        : ccTestPhone && isValidPhoneE164(ccTestPhone) ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
-                        : 'bg-slate-50 border border-slate-200 focus:ring-blue-500'
-                    }`}
-                  />
-                  {ccTestPhone && !isValidPhoneE164(ccTestPhone) && (
-                    <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3 shrink-0" /> Must be E.164 format, e.g. +12125550100
-                    </p>
-                  )}
-                </div>
-                <div className="flex items-end" data-tour="test-buttons">
-                  <div className="flex gap-2 flex-wrap pb-[1px]">
+                  <div className="flex gap-2 flex-wrap mt-3" data-tour="test-buttons">
                     <button
-                      onClick={sendTestAlert}
-                      disabled={testStatus !== 'idle' || !(leadAlertRule?.enabled) || !alertToPhone || !isValidPhoneE164(alertToPhone) || alertDirty}
-                      title={!(leadAlertRule?.enabled) ? 'Enable Lead Alerts first' : alertDirty ? 'Save changes first' : !alertToPhone ? 'Set agent phone first' : ''}
+                      onClick={sendCtTest}
+                      disabled={ctTestStatus === 'sending' || !ctEnabled || !ccTestPhone || !isValidPhoneE164(ccTestPhone) || tenantPhones.length === 0 || !!ccSamePhoneError || commsDirty}
                       className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
-                        testStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
-                        testStatus === 'failed' ? 'bg-red-100 text-red-700' :
-                        testStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
-                        'bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50'
+                        ctTestStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                        ctTestStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                        ctTestStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                        'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
                       }`}
+                      title={!ctEnabled ? 'Enable Instant Text first' : commsDirty ? 'Save changes first' : ''}
                     >
-                      {testStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
-                       testStatus === 'delivered' ? <CheckCircle size={14} /> :
-                       testStatus === 'failed' ? <X size={14} /> :
+                      {ctTestStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
+                       ctTestStatus === 'delivered' ? <CheckCircle size={14} /> :
+                       ctTestStatus === 'failed' ? <X size={14} /> :
                        <Send size={14} />}
-                      {testStatus === 'sending' ? 'Sending...' : testStatus === 'delivered' ? 'Sent!' : testStatus === 'failed' ? 'Failed' : 'Test Alert'}
-                      <TierBadge tier="respond" />
+                      {ctTestStatus === 'sending' ? 'Sending...' : ctTestStatus === 'delivered' ? 'Sent' : ctTestStatus === 'failed' ? 'Failed' : 'Test Text'}
                     </button>
                     <button
-                      disabled
-                      title="Upgrade to Engage to send SMS and call leads"
-                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-slate-50 text-slate-400 border border-dashed border-slate-200 cursor-not-allowed whitespace-nowrap"
+                      onClick={handleTestCall}
+                      disabled={ccTesting || !ccEnabled || !!ccSamePhoneError || !ccTestPhone || !isValidPhoneE164(ccTestPhone) || commsDirty}
+                      className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                        ccTesting ? 'bg-slate-100 text-slate-500' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
+                      }`}
+                      title={!ccEnabled ? 'Enable Instant Calls first' : commsDirty ? 'Save changes first' : ''}
                     >
-                      <Lock size={12} /> Test Text
-                      <TierBadge tier="engage" />
-                    </button>
-                    <button
-                      disabled
-                      title="Upgrade to Engage to send SMS and call leads"
-                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-slate-50 text-slate-400 border border-dashed border-slate-200 cursor-not-allowed whitespace-nowrap"
-                    >
-                      <Lock size={12} /> Test Call
-                      <TierBadge tier="engage" />
+                      {ccTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
+                      {ccTesting ? 'Calling…' : 'Test Call'}
                     </button>
                   </div>
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-3 py-6 px-4 bg-amber-50/50 rounded-2xl border border-amber-200">
-              <Phone className="w-8 h-8 text-amber-500" />
-              <p className="text-sm text-amber-700 font-medium text-center">You need a LeadBridge number to use notifications and communications</p>
-              <button
-                onClick={() => setShowDedicatedModal(true)}
-                className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors flex items-center gap-2"
-              >
-                <Phone className="w-4 h-4" />
-                Get a Number
-              </button>
-            </div>
-          )}
+            ) : isTier1Respond ? (
+              <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <Lock className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-slate-700">Send SMS & calls from your own LeadBridge Number</span>
+                    <TierBadge tier="engage" />
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">Upgrade to Engage to enable outbound messaging and calls.</p>
+                </div>
+                <Link to="/pricing" className="shrink-0 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap">
+                  Upgrade to Engage
+                </Link>
+              </div>
+            ) : (
+              <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+                <Phone className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-amber-800">Get a LeadBridge Number</span>
+                    <TierBadge tier="engage" />
+                  </div>
+                  <p className="text-xs text-amber-700/90 mt-0.5">You need a LeadBridge number to send SMS and call leads.</p>
+                </div>
+                <button
+                  onClick={() => setShowDedicatedModal(true)}
+                  className="shrink-0 px-3 py-1.5 bg-amber-500 text-white text-xs font-semibold rounded-lg hover:bg-amber-600 transition-colors flex items-center gap-1.5"
+                >
+                  <Phone className="w-3 h-3" /> Get a Number
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
