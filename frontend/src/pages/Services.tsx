@@ -317,8 +317,6 @@ export function Services() {
       })
       .catch(() => { /* silent: stale cache is not fatal */ });
   }, [authToken, setAuthUser]);
-  // Tier 1 = Respond (STARTER or no/inactive plan). No LeadBridge number, no outbound SMS/calls.
-  const isTier1Respond = !subscriptionTier || subscriptionTier === 'STARTER';
   // Tier 2+ = Engage (PRO or ENTERPRISE). Unlocks SMS, calls, follow-ups, re-engagement alerts.
   const canUseEngage = subscriptionTier === 'PRO' || subscriptionTier === 'ENTERPRISE';
   // Tier 3 = Convert (ENTERPRISE). Unlocks AI Conversation.
@@ -1943,9 +1941,10 @@ export function Services() {
               </div>
             </div>
 
-            {/* Row 2 — Engage tier: LeadBridge Numbers list + Test Number. Shown only once at least one number is acquired. */}
-            {tenantPhones.length > 0 ? (
-              <div className="space-y-4">
+            {/* Row 2 — Engage tier: LeadBridge Number + Test Number. Locked for Respond. */}
+            <div className="relative">
+              {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
+              <div className={`space-y-4${!canUseEngage ? ' opacity-60 pointer-events-none' : ''}`}>
                 <div data-tour="bot-number">
                   <div className="flex items-center gap-2 mb-1">
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🤖 LeadBridge Number</label>
@@ -1957,8 +1956,13 @@ export function Services() {
                       || tenantPhones.find(p => !p.savedAccountId && p.status === 'ACTIVE')
                       || tenantPhones.find(p => p.status === 'ACTIVE');
                     if (!accountPhone) return (
-                      <div className="w-full rounded-xl p-3 text-sm bg-slate-50 border border-slate-200 text-slate-500">
-                        No active number assigned to this account.
+                      <div className="w-full rounded-xl p-3 text-sm bg-slate-50 border border-slate-200 text-slate-500 flex items-center justify-between gap-3">
+                        <span>No active number assigned to this account.</span>
+                        {canUseEngage && (
+                          <Link to="/settings" className="shrink-0 text-xs font-semibold text-blue-600 hover:underline">
+                            Set one up →
+                          </Link>
+                        )}
                       </div>
                     );
                     return (
@@ -2033,38 +2037,7 @@ export function Services() {
                   </div>
                 </div>
               </div>
-            ) : isTier1Respond ? (
-              <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <Lock className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-semibold text-slate-700">Send SMS & calls from your own LeadBridge Number</span>
-                    <TierBadge tier="engage" />
-                  </div>
-                  <p className="text-xs text-slate-500 mt-0.5">Upgrade to Engage to enable outbound messaging and calls.</p>
-                </div>
-                <Link to="/pricing" className="shrink-0 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap">
-                  Upgrade to Engage · $89/mo
-                </Link>
-              </div>
-            ) : (
-              <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
-                <Phone className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-semibold text-amber-800">Get a LeadBridge Number</span>
-                    <TierBadge tier="engage" />
-                  </div>
-                  <p className="text-xs text-amber-700/90 mt-0.5">You need a LeadBridge number to send SMS and call leads.</p>
-                </div>
-                <Link
-                  to="/settings"
-                  className="shrink-0 px-3 py-1.5 bg-amber-500 text-white text-xs font-semibold rounded-lg hover:bg-amber-600 transition-colors flex items-center gap-1.5"
-                >
-                  <Phone className="w-3 h-3" /> Get a Number
-                </Link>
-              </div>
-            )}
+            </div>
           </div>
         </div>
       )}
