@@ -241,6 +241,10 @@ model Lead {
   sfLastEventAt     DateTime? // Last accepted SF event occurred_at
   statusSource      String? // 'service_flow' | 'platform_sync' | 'manual' | 'lb_automation'
   statusUpdatedAt   DateTime? // When Lead.status last changed; used for ordering
+  // Last time a customer message arrived on this lead. Provider-agnostic
+  // signal read by the follow-up scheduler self-heal to stop enrollments
+  // even when a provider failed to persist a Message row.
+  lastCustomerActivityAt DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -264,6 +268,7 @@ model Lead {
   @@index([createdAt])
   @@index([sfJobId])
   @@index([statusSource])
+  @@index([lastCustomerActivityAt])
   @@map("leads")
 }
 

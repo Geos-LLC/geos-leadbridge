@@ -107,6 +107,129 @@ export class ConversationContextService {
   // ==========================================
 
   /**
+   * Persist an inbound/outbound platform message to the Message table AND
+   * update ThreadContext in a single call. Dedup-safe via
+   * `(platform, externalMessageId)` unique constraint; safe to call on
+   * concurrent webhook retries.
+   *
+   * Phase A scope: the Yelp webhook path currently skips Message persistence
+   * for inbound events, which breaks the follow-up scheduler's self-heal check.
+   * Callers that already write Message rows directly (e.g. Thumbtack inbound)
+   * can migrate incrementally; this method is a superset of those writes.
+   *
+   * Returns the persisted Message.id (or the existing id on conflict).
+   */
+  async ensureMessagePersisted(input: {
+    conversationId: string;
+    leadId?: string;
+    userId: string;
+    platform: string;
+    externalMessageId: string | null;
+    sender: 'customer' | 'pro' | 'system';
+    senderType?: 'customer' | 'business' | 'ai' | 'user' | 'system';
+    content: string;
+    sentAt?: Date;
+    rawJson?: string;
+    aiGenerated?: boolean;
+    isAutoFollowUp?: boolean;
+    strategyUsed?: string;
+  }): Promise<{ id: string; created: boolean }> {
+    const sentAt = input.sentAt ?? new Date();
+    let created = false;
+    let messageId: string;
+
+    if (input.externalMessageId) {
+      const existing = await this.prisma.message.findUnique({
+        where: {
+          platform_externalMessageId: {
+            platform: input.platform,
+            externalMessageId: input.externalMessageId,
+          },
+        },
+        select: { id: true },
+      });
+      if (existing) {
+        messageId = existing.id;
+      } else {
+        try {
+          const row = await this.prisma.message.create({
+            data: {
+              conversationId: input.conversationId,
+              userId: input.userId,
+              platform: input.platform,
+              externalMessageId: input.externalMessageId,
+              sender: input.sender,
+              senderType: input.senderType,
+              content: input.content,
+              sentAt,
+              rawJson: input.rawJson,
+            },
+            select: { id: true },
+          });
+          messageId = row.id;
+          created = true;
+        } catch (err: any) {
+          if (err?.code === 'P2002') {
+            const conflict = await this.prisma.message.findUnique({
+              where: {
+                platform_externalMessageId: {
+                  platform: input.platform,
+                  externalMessageId: input.externalMessageId,
+                },
+              },
+              select: { id: true },
+            });
+            if (!conflict) throw err;
+            messageId = conflict.id;
+          } else {
+            throw err;
+          }
+        }
+      }
+    } else {
+      const row = await this.prisma.message.create({
+        data: {
+          conversationId: input.conversationId,
+          userId: input.userId,
+          platform: input.platform,
+          sender: input.sender,
+          senderType: input.senderType,
+          content: input.content,
+          sentAt,
+          rawJson: input.rawJson,
+        },
+        select: { id: true },
+      });
+      messageId = row.id;
+      created = true;
+    }
+
+    if (created) {
+      if (input.sender === 'customer' && input.leadId) {
+        await this.prisma.lead.update({
+          where: { id: input.leadId },
+          data: { lastCustomerActivityAt: sentAt },
+        }).catch(() => {});
+      }
+
+      await this.recordMessage({
+        conversationId: input.conversationId,
+        leadId: input.leadId,
+        platform: input.platform,
+        sender: input.sender,
+        senderType: input.senderType,
+        content: input.content,
+        aiGenerated: input.aiGenerated,
+        isAutoFollowUp: input.isAutoFollowUp,
+        strategyUsed: input.strategyUsed,
+        timestamp: sentAt,
+      }).catch(err => this.logger.warn(`ensureMessagePersisted: recordMessage failed for ${input.conversationId}: ${err.message}`));
+    }
+
+    return { id: messageId, created };
+  }
+
+  /**
    * Record a message in the thread context.
    * Called by webhook handlers after storing the message in the Message table.
    * Creates ThreadContext if it doesn't exist, updates stats and timestamps.

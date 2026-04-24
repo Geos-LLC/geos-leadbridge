@@ -760,26 +760,6 @@ export const notificationsApi = {
     const { data } = await api.post(`/v1/notifications/sigcore/api-key/${savedAccountId}`, { apiKey });
     return data;
   },
-  connectSigcore: async (
-    savedAccountId: string,
-    provider: 'openphone' | 'twilio',
-    providerCredentials: {
-      apiKey?: string;
-      accountSid?: string;
-      authToken?: string;
-      phoneNumber?: string;
-    },
-  ): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[]; error?: string }> => {
-    const { data } = await api.post(`/v1/notifications/sigcore/connect/${savedAccountId}`, {
-      provider,
-      providerCredentials,
-    });
-    return data;
-  },
-  disconnectSigcore: async (savedAccountId: string): Promise<{ success: boolean; error?: string }> => {
-    const { data } = await api.delete(`/v1/notifications/sigcore/disconnect/${savedAccountId}`);
-    return data;
-  },
   provisionSigcoreWorkspace: async (savedAccountId: string): Promise<{ success: boolean; data: { provisioned: boolean; tenantId: string } }> => {
     const { data } = await api.post(`/v1/notifications/sigcore/provision/${savedAccountId}`);
     return data;

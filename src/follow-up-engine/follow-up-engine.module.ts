@@ -11,6 +11,7 @@ import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextModule } from '../conversation-context/conversation-context.module';
 import { LeadsModule } from '../leads/leads.module';
+import { PlatformsModule } from '../platforms/platforms.module';
 import { FollowUpEngineService } from './follow-up-engine.service';
 import { FollowUpStateService } from './follow-up-state.service';
 import { FollowUpSchedulerService } from './follow-up-scheduler.service';
@@ -22,6 +23,7 @@ import { FollowUpEngineController } from './follow-up-engine.controller';
   imports: [
     ConfigModule,
     ConversationContextModule,
+    PlatformsModule,
     forwardRef(() => LeadsModule),
   ],
   providers: [

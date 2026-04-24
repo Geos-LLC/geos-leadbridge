@@ -122,7 +122,6 @@ export interface NotificationSettingsResponse {
   enabled: boolean;
   destinationPhone: string | null;
   sigcoreApiKey: string | null; // Will be masked in response
-  sigcoreFromPhone: string | null;
   sigcoreWorkspaceId: string | null;
   sigcoreConnected: boolean;
   sigcoreProvisioned: boolean;
@@ -1856,94 +1855,6 @@ export class NotificationsService {
   }
 
   /**
-   * Connect a provider (OpenPhone or Twilio) via Sigcore integration endpoints
-   */
-  async connectProviderViaSigcore(
-    tenantApiKey: string,
-    provider: 'openphone' | 'twilio',
-    credentials: {
-      apiKey?: string; // OpenPhone API key
-      accountSid?: string; // Twilio
-      authToken?: string; // Twilio
-      phoneNumber?: string; // Twilio
-    },
-  ): Promise<{ success: boolean; error?: string; data?: any; sigcoreAuthFailed?: boolean }> {
-    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
-
-    if (provider === 'openphone') {
-      const endpoint = `${sigcoreUrl}/integrations/openphone/connect`;
-      this.logger.log(`[connectProvider] Connecting OpenPhone via: ${endpoint}`);
-
-      try {
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'x-api-key': tenantApiKey,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ apiKey: credentials.apiKey }),
-        });
-
-        this.logger.log(`[connectProvider] OpenPhone response status: ${response.status}`);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          this.logger.error(`[connectProvider] OpenPhone connect failed: ${response.status} - ${errorText}`);
-          // 401 means the Sigcore API key is invalid/expired — not an OpenPhone key problem.
-          if (response.status === 401) {
-            return { success: false, sigcoreAuthFailed: true, error: `Sigcore API key rejected (401). The stored key may be expired.` };
-          }
-          return { success: false, error: `Failed to connect OpenPhone: ${response.status} — ${errorText}` };
-        }
-
-        const result = await response.json();
-        this.logger.log(`[connectProvider] OpenPhone connected: ${JSON.stringify(result)}`);
-        return { success: true, data: result };
-      } catch (error: any) {
-        this.logger.error(`[connectProvider] OpenPhone error: ${error.message}`);
-        return { success: false, error: error.message };
-      }
-    } else {
-      // Twilio
-      const endpoint = `${sigcoreUrl}/integrations/twilio`;
-      this.logger.log(`[connectProvider] Connecting Twilio via: ${endpoint}`);
-
-      try {
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'x-api-key': tenantApiKey,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            accountSid: credentials.accountSid,
-            authToken: credentials.authToken,
-            phoneNumber: credentials.phoneNumber,
-          }),
-        });
-
-        this.logger.log(`[connectProvider] Twilio response status: ${response.status}`);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          this.logger.error(`[connectProvider] Twilio connect failed: ${response.status} - ${errorText}`);
-          if (response.status === 401) {
-            return { success: false, sigcoreAuthFailed: true, error: `Sigcore API key rejected (401). The stored key may be expired.` };
-          }
-          return { success: false, error: `Failed to connect Twilio: ${response.status} — ${errorText}` };
-        }
-
-        const result = await response.json();
-        this.logger.log(`[connectProvider] Twilio connected: ${JSON.stringify(result)}`);
-        return { success: true, data: result };
-      } catch (error: any) {
-        this.logger.error(`[connectProvider] Twilio error: ${error.message}`);
-        return { success: false, error: error.message };
-      }
-    }
-  }
-
-  /**
    * Create a webhook subscription in Sigcore for delivery status updates
    */
   async createSigcoreWebhook(
@@ -1986,38 +1897,6 @@ export class NotificationsService {
     } catch (error: any) {
       this.logger.error('[createSigcoreWebhook] Error:', error.message);
       return { webhookId: null, error: error.message };
-    }
-  }
-
-  /**
-   * Delete a webhook subscription from Sigcore
-   */
-  async deleteSigcoreWebhook(apiKey: string, webhookId: string): Promise<{ success: boolean; error?: string }> {
-    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
-    const endpoint = `${sigcoreUrl}/v1/webhook-subscriptions/${webhookId}`;
-    this.logger.log(`[deleteSigcoreWebhook] Deleting webhook subscription: ${endpoint}`);
-
-    try {
-      const response = await fetch(endpoint, {
-        method: 'DELETE',
-        headers: {
-          'x-api-key': apiKey,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      this.logger.log(`[deleteSigcoreWebhook] Response status: ${response.status}`);
-
-      if (!response.ok && response.status !== 404) {
-        const errorText = await response.text();
-        this.logger.error(`[deleteSigcoreWebhook] Failed: ${response.status} - ${errorText}`);
-        return { success: false, error: `Failed to delete webhook: ${response.status}` };
-      }
-
-      return { success: true };
-    } catch (error: any) {
-      this.logger.error('[deleteSigcoreWebhook] Error:', error.message);
-      return { success: false, error: error.message };
     }
   }
 
@@ -2140,19 +2019,16 @@ export class NotificationsService {
         this.logger.warn(`[ensureSigcoreTenantProvisioned] Could not copy integrations: ${err.message}`);
       }
 
-      // After re-provisioning, clear fromPhone and webhooks so the system re-resolves
-      // the dedicated number from TenantPhoneNumber on next send.
+      // After re-provisioning, clear the inbound SMS webhook so it re-registers for the new tenant.
       await this.prisma.notificationSettings.update({
         where: { savedAccountId },
         data: {
-          sigcoreFromPhone: null,
-          sigcoreWebhookId: null,
           inboundSmsWebhookId: null,
         },
       });
       this.logger.log(
-        `[ensureSigcoreTenantProvisioned] Cleared fromPhone/webhooks for account ${savedAccountId} — ` +
-        `dedicated number will be auto-resolved from TenantPhoneNumber on new tenant ${data.tenantId}`,
+        `[ensureSigcoreTenantProvisioned] Cleared inbound SMS webhook for account ${savedAccountId} — ` +
+        `will re-register on new tenant ${data.tenantId}`,
       );
 
       // Reallocate any existing TenantPhoneNumbers in Sigcore to the new tenant.
@@ -2285,12 +2161,6 @@ export class NotificationsService {
     const allocation = json.data?.allocation || json.data;
     const allocationId = allocation?.id || allocation?.allocationId || '';
 
-    await this.prisma.notificationSettings.upsert({
-      where: { savedAccountId },
-      update: { sigcoreFromPhone: phoneNumber },
-      create: { savedAccountId, sigcoreFromPhone: phoneNumber },
-    });
-
     this.logger.log(`[purchaseSigcorePhoneNumber] Purchased ${phoneNumber} for account ${savedAccountId}`);
     return { phoneNumber, allocationId };
   }
@@ -2316,178 +2186,6 @@ export class NotificationsService {
       create: { savedAccountId, sigcoreApiKey: apiKey, enabled: true },
     });
 
-    return { success: true };
-  }
-
-  /**
-   * Connect to Sigcore - uses stored or provided API key, connects provider, creates webhook
-   */
-  async connectSigcore(
-    savedAccountId: string,
-    apiKey: string | null,
-    webhookBaseUrl: string,
-    provider?: 'openphone' | 'twilio',
-    providerCredentials?: {
-      apiKey?: string; // OpenPhone API key
-      accountSid?: string; // Twilio
-      authToken?: string; // Twilio
-      phoneNumber?: string; // Twilio phone number
-    },
-  ): Promise<{ success: boolean; phoneNumbers: SigcorePhoneNumber[]; error?: string }> {
-    this.logger.log(`[connectSigcore] Connecting account ${savedAccountId} with provider ${provider || 'none'}`);
-
-    // 1. Use provided API key, or fall back to stored tenant key. App-level key is NOT used here.
-    let effectiveApiKey = apiKey;
-    if (!effectiveApiKey) {
-      const settings = await this.prisma.notificationSettings.findUnique({
-        where: { savedAccountId },
-        select: { sigcoreApiKey: true },
-      });
-      effectiveApiKey = settings?.sigcoreApiKey || null;
-    }
-
-    if (!effectiveApiKey) {
-      return { success: false, phoneNumbers: [], error: 'No API key configured. Please provision your phone workspace first.' };
-    }
-
-    this.logger.log(`[connectSigcore] Using tenant API key prefix: ${effectiveApiKey.substring(0, 8)}...`);
-
-    // 2. Connect provider if specified
-    if (provider && providerCredentials) {
-      const providerResult = await this.connectProviderViaSigcore(effectiveApiKey, provider, providerCredentials);
-
-      if (!providerResult.success) {
-        return { success: false, phoneNumbers: [], error: providerResult.error || `Failed to connect ${provider}` };
-      }
-    }
-
-    // 3. Create webhook for delivery status — skip if one is already registered for this account
-    //    to prevent accumulating duplicate subscriptions when connectSigcore is called repeatedly.
-    const existingSettings = await this.prisma.notificationSettings.findUnique({
-      where: { savedAccountId },
-      select: { sigcoreWebhookId: true },
-    });
-
-    let deliveryWebhookId: string | null = existingSettings?.sigcoreWebhookId || null;
-    if (!deliveryWebhookId) {
-      const webhookUrl = `${webhookBaseUrl}/api/webhooks/sigcore/delivery-status`;
-      const webhookResult = await this.createSigcoreWebhook(effectiveApiKey, webhookUrl);
-      if (webhookResult.error) {
-        this.logger.warn(`[connectSigcore] Webhook creation failed: ${webhookResult.error}`);
-        // Continue anyway - webhook can be created manually later
-      }
-      deliveryWebhookId = webhookResult.webhookId;
-    } else {
-      this.logger.log(`[connectSigcore] Delivery webhook already registered (${deliveryWebhookId}), skipping creation`);
-    }
-
-    // 4. Store the webhook ID
-    await this.prisma.notificationSettings.upsert({
-      where: { savedAccountId },
-      update: {
-        sigcoreApiKey: effectiveApiKey,
-        sigcoreWebhookId: deliveryWebhookId,
-        enabled: true,
-      },
-      create: {
-        savedAccountId,
-        sigcoreApiKey: effectiveApiKey,
-        sigcoreWebhookId: deliveryWebhookId,
-        enabled: true,
-      },
-    });
-
-    this.logger.log(`[connectSigcore] Connected successfully. WebhookId: ${deliveryWebhookId}`);
-
-    return { success: true, phoneNumbers: [] };
-  }
-
-  /**
-   * Fetch phone numbers from OpenPhone via Sigcore conversations endpoint
-   */
-  async fetchOpenPhoneNumbers(tenantApiKey: string): Promise<SigcorePhoneNumber[]> {
-    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
-    // Use the dedicated phone-numbers endpoint so ALL configured numbers appear,
-    // not just those with recent conversations (conversations?days=1 missed inactive numbers).
-    const endpoint = `${sigcoreUrl}/integrations/openphone/numbers`;
-    this.logger.log(`[fetchOpenPhoneNumbers] Fetching from: ${endpoint}`);
-
-    try {
-      const response = await fetch(endpoint, {
-        method: 'GET',
-        headers: {
-          'x-api-key': tenantApiKey,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      this.logger.log(`[fetchOpenPhoneNumbers] Response status: ${response.status}`);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        this.logger.error(`[fetchOpenPhoneNumbers] Failed: ${response.status} - ${errorText}`);
-        return [];
-      }
-
-      const result = await response.json();
-      this.logger.log(`[fetchOpenPhoneNumbers] Result: ${JSON.stringify(result).substring(0, 500)}`);
-
-      const phones = result.data || result.phoneNumbers || result || [];
-      // Deduplicate by id first, then by phoneNumber, to guard against the /numbers
-      // endpoint returning the same number in multiple contexts (e.g. shared phone numbers
-      // across OpenPhone users, or multiple integrations returning overlapping numbers).
-      const seenIds = new Set<string>();
-      const seenNumbers = new Set<string>();
-      return phones
-        .map((phone: any) => this.mapSigcorePhoneNumber(phone))
-        .filter((p: any) => {
-          if (!p.phoneNumber || p.phoneNumber.length <= 5) return false;
-          if (seenIds.has(p.id)) return false;
-          if (seenNumbers.has(p.phoneNumber)) return false;
-          seenIds.add(p.id);
-          seenNumbers.add(p.phoneNumber);
-          return true;
-        });
-    } catch (error: any) {
-      this.logger.error(`[fetchOpenPhoneNumbers] Error: ${error.message}`);
-      return [];
-    }
-  }
-
-  /**
-   * Disconnect from Sigcore - deletes webhook and clears settings
-   */
-  async disconnectSigcore(savedAccountId: string): Promise<{ success: boolean; error?: string }> {
-    this.logger.log(`[disconnectSigcore] Disconnecting account ${savedAccountId}`);
-
-    const settings = await this.prisma.notificationSettings.findUnique({
-      where: { savedAccountId },
-    });
-
-    if (!settings) {
-      return { success: true }; // Already disconnected
-    }
-
-    const effectiveApiKey = settings.sigcoreApiKey;
-
-    // 1. Delete webhook if exists
-    if (effectiveApiKey && settings.sigcoreWebhookId) {
-      const deleteResult = await this.deleteSigcoreWebhook(effectiveApiKey, settings.sigcoreWebhookId);
-      if (!deleteResult.success) {
-        this.logger.warn(`[disconnectSigcore] Failed to delete webhook: ${deleteResult.error}`);
-      }
-    }
-
-    // 2. Clear webhook settings but KEEP the API key for re-connection
-    await this.prisma.notificationSettings.update({
-      where: { savedAccountId },
-      data: {
-        sigcoreFromPhone: null,
-        sigcoreWebhookId: null,
-      },
-    });
-
-    this.logger.log(`[disconnectSigcore] Disconnected successfully`);
     return { success: true };
   }
 
@@ -2524,37 +2222,6 @@ export class NotificationsService {
       }
     } catch (err: any) {
       this.logger.warn(`[deleteSigcoreTenant] Error: ${err.message}`);
-    }
-  }
-
-  /**
-   * Disconnect provider integration via Sigcore API
-   */
-  private async disconnectProviderViaSigcore(tenantApiKey: string, provider: string): Promise<void> {
-    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
-    const endpoint = provider === 'openphone'
-      ? `${sigcoreUrl}/integrations/openphone/disconnect`
-      : `${sigcoreUrl}/integrations/twilio`;
-
-    this.logger.log(`[disconnectProvider] Calling ${endpoint} for provider ${provider}`);
-
-    try {
-      const response = await fetch(endpoint, {
-        method: 'DELETE',
-        headers: {
-          'x-api-key': tenantApiKey,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        this.logger.warn(`[disconnectProvider] Failed: ${response.status} - ${errorText}`);
-      } else {
-        this.logger.log(`[disconnectProvider] Successfully disconnected ${provider}`);
-      }
-    } catch (error: any) {
-      this.logger.error(`[disconnectProvider] Error: ${error.message}`);
     }
   }
 
@@ -2876,7 +2543,6 @@ export class NotificationsService {
       enabled: settings.enabled,
       destinationPhone: settings.destinationPhone,
       sigcoreApiKey: maskedApiKey,
-      sigcoreFromPhone: settings.sigcoreFromPhone,
       sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
       sigcoreConnected: !!settings.sigcoreTenantId,
       sigcoreProvisioned: !!settings.sigcoreTenantId,
@@ -3058,20 +2724,7 @@ export class NotificationsService {
     // 4. Extract area code from phone number
     const areaCode = phoneNumber.replace(/\D/g, '').slice(1, 4); // +1XXXYYYZZZZ → XXX
 
-    // 5. Release pool record if this number exists in the pool (prevent dual-existence)
-    const poolEntry = await this.prisma.phonePool.findUnique({
-      where: { phoneNumber },
-    });
-    if (poolEntry && poolEntry.status !== 'RELEASED') {
-      await this.prisma.phonePoolAssignment.deleteMany({ where: { phonePoolId: poolEntry.id } });
-      await this.prisma.phonePool.update({
-        where: { id: poolEntry.id },
-        data: { status: 'RELEASED', releasedAt: new Date() },
-      });
-      this.logger.log(`[purchaseTenantPhone] Released pool entry for ${phoneNumber} (was ${poolEntry.status})`);
-    }
-
-    // 6. Create TenantPhoneNumber record
+    // 5. Create TenantPhoneNumber record
     const tenantPhone = await this.prisma.tenantPhoneNumber.create({
       data: {
         userId,
@@ -3169,19 +2822,6 @@ export class NotificationsService {
       data: { status: 'RELEASED', releasedAt: new Date() },
     });
 
-    // If this was the user's active fromPhone, clear it
-    if (tenantPhone.savedAccountId) {
-      const settings = await this.prisma.notificationSettings.findUnique({
-        where: { savedAccountId: tenantPhone.savedAccountId },
-      });
-      if (settings?.sigcoreFromPhone === tenantPhone.phoneNumber) {
-        await this.prisma.notificationSettings.update({
-          where: { savedAccountId: tenantPhone.savedAccountId },
-          data: { sigcoreFromPhone: null },
-        });
-      }
-    }
-
     this.logger.log(`[releaseTenantPhone] ${tenantPhone.phoneNumber} → RELEASED`);
     return { success: true };
   }
@@ -3233,32 +2873,10 @@ export class NotificationsService {
       }
     }
 
-    const previousAccountId = tenantPhone.savedAccountId;
-
-    if (previousAccountId && previousAccountId !== savedAccountId) {
-      const prevSettings = await this.prisma.notificationSettings.findUnique({
-        where: { savedAccountId: previousAccountId },
-      });
-      if (prevSettings?.sigcoreFromPhone === tenantPhone.phoneNumber) {
-        await this.prisma.notificationSettings.update({
-          where: { savedAccountId: previousAccountId },
-          data: { sigcoreFromPhone: null },
-        });
-      }
-    }
-
     const updated = await this.prisma.tenantPhoneNumber.update({
       where: { id: tenantPhoneId },
       data: { savedAccountId },
     });
-
-    if (savedAccountId) {
-      await this.prisma.notificationSettings.upsert({
-        where: { savedAccountId },
-        update: { sigcoreFromPhone: tenantPhone.phoneNumber },
-        create: { savedAccountId, sigcoreFromPhone: tenantPhone.phoneNumber },
-      });
-    }
 
     this.logger.log(`[assignTenantPhone] ${tenantPhone.phoneNumber} → account=${savedAccountId ?? 'unassigned'}`);
     return { success: true, tenantPhone: updated };

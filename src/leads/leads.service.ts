@@ -415,7 +415,12 @@ export class LeadsService {
           select: { externalMessageId: true, senderType: true, content: true, sentAt: true },
         });
         const normalize = (s: string | null | undefined) =>
-          (s || '').trim().replace(/\s+/g, ' ');
+          (s || '')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .replace(/[—–]/g, '--')
+            .replace(/[‘’]/g, "'")
+            .replace(/[“”]/g, '"');
         const senderTypeMap = new Map(
           localMessages.filter(m => m.externalMessageId).map(m => [m.externalMessageId, m.senderType]),
         );

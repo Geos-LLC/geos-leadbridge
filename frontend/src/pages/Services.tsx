@@ -3,7 +3,7 @@ import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
   Pencil, Phone, Send, ChevronUp, Trash2, Save,
-  Key, ExternalLink, Link2, Sparkles, RefreshCw, Unlink, Clock, Lock,
+  Link2, Sparkles, RefreshCw, Unlink, Clock, Lock,
 } from 'lucide-react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import {
@@ -378,11 +378,6 @@ export function Services() {
   // UI state
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [showPhoneSetupModal, setShowPhoneSetupModal] = useState(false);
-  // OpenPhone setup modal
-  const [showOpenPhoneModal, setShowOpenPhoneModal] = useState(false);
-  const [opApiKey, setOpApiKey] = useState('');
-  const [opConnecting, setOpConnecting] = useState(false);
-  const [opConnectError, setOpConnectError] = useState<string | null>(null);
   // Dedicated number management moved to Settings — see LeadBridgeNumberManager
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Template editor modal state
@@ -1468,26 +1463,6 @@ export function Services() {
   }
 
   // --- Customer Texting Handlers ---
-
-  async function handleOpConnect() {
-    if (!selectedAccountId || !opApiKey.trim()) return;
-    setOpConnecting(true);
-    setOpConnectError(null);
-    try {
-      const result = await notificationsApi.connectSigcore(selectedAccountId, 'openphone', { apiKey: opApiKey.trim() });
-      if (result.success) {
-        setShowOpenPhoneModal(false);
-        setOpApiKey('');
-        showSuccess('OpenPhone connected successfully');
-      } else {
-        setOpConnectError((result as any).error || 'Failed to connect');
-      }
-    } catch (err: any) {
-      setOpConnectError(err.response?.data?.message || err.message || 'Failed to connect');
-    } finally {
-      setOpConnecting(false);
-    }
-  }
 
   async function sendCtTest() {
     if (!selectedAccountId || !ccTestPhone) return;
@@ -3920,71 +3895,15 @@ export function Services() {
               Choose how you want to add a send-from number for customer texting:
             </p>
             <div className="space-y-4">
-              <div className="border border-slate-200 rounded-2xl p-5 hover:border-blue-200 transition-all cursor-pointer" onClick={() => { setShowPhoneSetupModal(false); setShowOpenPhoneModal(true); }}>
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5"><Phone className="w-4 h-4" /></div>
-                  <div>
-                    <p className="font-semibold text-slate-900 text-sm">Option 2 — Bring Your Own Phone</p>
-                    <p className="text-xs text-slate-500 mt-1">Connect your Quo, OpenPhone, or other provider.</p>
-                  </div>
-                </div>
-              </div>
               <div className="border border-slate-200 rounded-2xl p-5 hover:border-indigo-200 transition-all cursor-pointer" onClick={() => { setShowPhoneSetupModal(false); navigate('/settings'); }}>
                 <div className="flex items-start gap-3">
                   <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5"><Briefcase className="w-4 h-4" /></div>
                   <div>
-                    <p className="font-semibold text-slate-900 text-sm">Option 3 — Dedicated Number</p>
+                    <p className="font-semibold text-slate-900 text-sm">Dedicated Number</p>
                     <p className="text-xs text-slate-500 mt-1">Get a Twilio number exclusively assigned to your account.</p>
                   </div>
                 </div>
               </div>
-            </div>
-            <p className="mt-5 text-xs text-slate-400 text-center">Shared pool numbers (Option 1) cannot be used for customer texting.</p>
-          </div>
-        </div>
-      )}
-
-      {/* OpenPhone Setup Modal */}
-      {showOpenPhoneModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowOpenPhoneModal(false)}>
-          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 relative" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setShowOpenPhoneModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors">
-              <X className="w-5 h-5" />
-            </button>
-            <h3 className="text-xl font-bold text-slate-900 mb-2">Bring Your Own Phone</h3>
-            <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-              Enter your Quo, OpenPhone, or compatible provider API key to use your own phone numbers for customer texting.{' '}
-              <a href="https://my.quo.com/settings/api" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline inline-flex items-center gap-1">
-                Get your Quo API key <ExternalLink size={11} />
-              </a>
-            </p>
-            {opConnectError && (
-              <div className="mb-4 bg-red-50 border border-red-100 rounded-xl p-3 flex items-center gap-2 text-red-600 text-sm">
-                <AlertCircle size={14} className="shrink-0" />
-                <span className="flex-1">{opConnectError}</span>
-                <button onClick={() => setOpConnectError(null)}><X size={14} /></button>
-              </div>
-            )}
-            <div className="flex gap-3">
-              <div className="relative flex-1">
-                <Key size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="password"
-                  value={opApiKey}
-                  onChange={e => setOpApiKey(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleOpConnect()}
-                  placeholder="OpenPhone API key"
-                  className="w-full pl-8 pr-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
-                />
-              </div>
-              <button
-                onClick={handleOpConnect}
-                disabled={opConnecting || !opApiKey.trim()}
-                className="px-5 py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-200 transition-all"
-              >
-                {opConnecting ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
-                {opConnecting ? 'Connecting...' : 'Connect'}
-              </button>
             </div>
           </div>
         </div>
