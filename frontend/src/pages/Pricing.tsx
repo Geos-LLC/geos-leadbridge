@@ -79,9 +79,18 @@ export default function Pricing() {
   const [subscription, setSubscription] = useState<SubscriptionDetails | null>(null);
   const [extraNumberPrice, setExtraNumberPrice] = useState<number | null>(null);
   const isAuthenticated = useAuthStore(s => s.isAuthenticated);
+  const hasEngageOrConvert = subscription?.tier === 'PRO' || subscription?.tier === 'ENTERPRISE';
 
   const handleBuyExtraNumber = () => {
-    navigate(isAuthenticated ? '/settings' : '/register?intent=extra_number');
+    if (!isAuthenticated) {
+      navigate('/register?intent=extra_number');
+    } else if (hasEngageOrConvert) {
+      navigate('/settings');
+    } else {
+      // Tier 1 / no plan → scroll to Engage tier card to upgrade
+      const engageCard = document.getElementById('tier-PRO');
+      if (engageCard) engageCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   useEffect(() => {
@@ -149,6 +158,7 @@ export default function Pricing() {
           return (
             <div
               key={tier.id}
+              id={`tier-${tier.id}`}
               className={`p-8 rounded-3xl bg-white flex flex-col relative transition-all ${
                 isPopular
                   ? 'border-2 border-blue-600 shadow-2xl shadow-blue-100 md:-my-3'
@@ -250,7 +260,7 @@ export default function Pricing() {
             onClick={handleBuyExtraNumber}
             className="shrink-0 px-5 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 whitespace-nowrap"
           >
-            {isAuthenticated ? 'Manage numbers' : 'Get started'}
+            {!isAuthenticated ? 'Get started' : hasEngageOrConvert ? 'Manage numbers' : 'Upgrade to Engage'}
           </button>
         </div>
       </section>

@@ -2997,6 +2997,16 @@ export class NotificationsService {
   ): Promise<{ success: boolean; tenantPhone?: any; error?: string }> {
     this.logger.log(`[purchaseTenantPhone] userId=${userId}, account=${savedAccountId}, phone=${phoneNumber}`);
 
+    // 0. Tier gate: only Engage (PRO) and Convert (ENTERPRISE) can purchase LeadBridge Numbers.
+    const tierUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { subscriptionTier: true },
+    });
+    if (tierUser?.subscriptionTier !== 'PRO' && tierUser?.subscriptionTier !== 'ENTERPRISE') {
+      this.logger.warn(`[purchaseTenantPhone] Rejected: tier=${tierUser?.subscriptionTier || 'none'}`);
+      return { success: false, error: 'Upgrade to Engage or Convert to buy LeadBridge Numbers.' };
+    }
+
     // 1. Provision via Sigcore (reuse existing method)
     let allocationId: string;
     try {

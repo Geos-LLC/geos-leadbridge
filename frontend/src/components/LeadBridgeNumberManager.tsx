@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Loader2, Trash2, RefreshCw, Phone, AlertCircle, Clock, Hash, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Loader2, Trash2, RefreshCw, Phone, AlertCircle, Clock, Hash, X, Lock } from 'lucide-react';
 import { notificationsApi } from '../services/api';
 import type { TenantPhoneNumber } from '../services/api';
 import type { SavedAccount, AvailablePhoneNumber } from '../types';
 
 interface Props {
   accounts: SavedAccount[];
+  canPurchase: boolean; // true for PRO/ENTERPRISE, false for STARTER/no plan
   onError?: (msg: string) => void;
   onSuccess?: (msg: string) => void;
 }
 
-export function LeadBridgeNumberManager({ accounts, onError, onSuccess }: Props) {
+export function LeadBridgeNumberManager({ accounts, canPurchase, onError, onSuccess }: Props) {
   const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
   const [loading, setLoading] = useState(true);
   const [phonePrice, setPhonePrice] = useState<number | null>(null);
@@ -265,15 +267,25 @@ export function LeadBridgeNumberManager({ accounts, onError, onSuccess }: Props)
         </div>
       )}
 
-      <button
-        onClick={openBuyModal}
-        disabled={accounts.length === 0}
-        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-dashed border-blue-300 rounded-xl hover:bg-blue-100 disabled:opacity-50 transition-colors"
-      >
-        <Phone size={12} />
-        {tenantPhones.length === 0 ? 'Get your LeadBridge Number' : '+ Buy another number'}
-        {phonePrice != null && tenantPhones.length > 0 && ` — $${phonePrice.toFixed(0)}/mo`}
-      </button>
+      {canPurchase ? (
+        <button
+          onClick={openBuyModal}
+          disabled={accounts.length === 0}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-dashed border-blue-300 rounded-xl hover:bg-blue-100 disabled:opacity-50 transition-colors"
+        >
+          <Phone size={12} />
+          {tenantPhones.length === 0 ? 'Get your LeadBridge Number' : '+ Buy another number'}
+          {phonePrice != null && tenantPhones.length > 0 && ` — $${phonePrice.toFixed(0)}/mo`}
+        </button>
+      ) : (
+        <Link
+          to="/pricing"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-600 bg-slate-50 border border-dashed border-slate-300 rounded-xl hover:bg-slate-100 transition-colors"
+        >
+          <Lock size={12} />
+          Upgrade to Engage to buy a LeadBridge Number
+        </Link>
+      )}
 
       {/* Buy modal */}
       {showBuyModal && (
