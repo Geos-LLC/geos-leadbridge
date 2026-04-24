@@ -301,10 +301,10 @@ export default function SettingsPage() {
     try {
       setPortalLoading(true);
       const { portalUrl } = await billingApi.createPortalSession();
-      const win = window.open(portalUrl, '_blank', 'noopener,noreferrer');
-      if (!win) {
-        window.location.href = portalUrl;
-      }
+      // Open in a new tab without navigating this window. With `noopener`,
+      // window.open always returns null per spec, so don't treat that as
+      // popup-blocked — navigating the current tab to Stripe was the bug.
+      window.open(portalUrl, '_blank', 'noopener,noreferrer');
     } catch (error: any) {
       console.error('Failed to open billing portal:', error);
       notify.error('Error', 'Failed to open billing portal');
@@ -1636,34 +1636,6 @@ export default function SettingsPage() {
             </div>
           </div>
         )}
-      </div>
-
-      {/* Section 4: Payment Method */}
-      <div className="overflow-hidden" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
-        <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--lb-line-soft)' }}>
-          <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>Payment method</h3>
-        </div>
-        <div className="p-8">
-          <div className="flex items-center gap-6">
-            <div className="w-16 h-12 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-100">
-              <svg width="40" height="26" viewBox="0 0 40 26" fill="none">
-                <text x="20" y="16" textAnchor="middle" fill="white" fontSize="10" fontWeight="600">STRIPE</text>
-              </svg>
-            </div>
-            <div className="flex-1">
-              <p className="text-sm text-slate-600">
-                {isActivePaid ? 'Manage your payment method through the billing portal.' : 'Add a payment method to subscribe to a plan.'}
-              </p>
-            </div>
-            <button
-              className="px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200 transition-colors disabled:opacity-50 shrink-0"
-              onClick={handleManageSubscription}
-              disabled={portalLoading}
-            >
-              {portalLoading ? 'Opening...' : isActivePaid ? 'Update Card' : 'Add Card'}
-            </button>
-          </div>
-        </div>
       </div>
 
       {/* Section 5: Invoices */}
