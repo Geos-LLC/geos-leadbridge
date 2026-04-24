@@ -3,16 +3,16 @@ import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
   Pencil, Phone, Send, ChevronUp, Trash2, Save,
-  Key, Hash, ExternalLink, Link2, Sparkles, RefreshCw, Unlink, Clock, Lock,
+  Key, ExternalLink, Link2, Sparkles, RefreshCw, Unlink, Clock, Lock,
 } from 'lucide-react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import {
   automationApi, notificationsApi, thumbtackApi, templatesApi, callConnectApi, conversationSyncApi, followUpApi, usersApi, authApi,
 } from '../services/api';
 import type { TenantPhoneNumber } from '../services/api';
 import type {
   AutomationRule, NotificationRule, SavedAccount, MessageTemplate,
-  CallConnectMode, AgentStrategy, SigcorePhoneNumber, AvailablePhoneNumber,
+  CallConnectMode, AgentStrategy, SigcorePhoneNumber,
 } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
 import ServicePricingForm from '../components/ServicePricingForm';
@@ -302,6 +302,7 @@ function LockedFeatureOverlay({ ctaLabel }: { ctaLabel: string }) {
 // -- Main Services Page --
 export function Services() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const subscriptionTier = useAuthStore(s => s.user?.subscriptionTier);
   const setAuthUser = useAuthStore(s => s.setAuth);
   const authToken = useAuthStore(s => s.token);
@@ -384,22 +385,7 @@ export function Services() {
   const [opApiKey, setOpApiKey] = useState('');
   const [opConnecting, setOpConnecting] = useState(false);
   const [opConnectError, setOpConnectError] = useState<string | null>(null);
-  // Dedicated number setup modal
-  const [showDedicatedModal, setShowDedicatedModal] = useState(false);
-  const [dpAreaCode, setDpAreaCode] = useState('');
-  const [dpLocality, setDpLocality] = useState('');
-  const [dpSearchLoading, setDpSearchLoading] = useState(false);
-  const [dpAvailableNumbers, setDpAvailableNumbers] = useState<AvailablePhoneNumber[]>([]);
-  const [dpPurchasingNumber, setDpPurchasingNumber] = useState<string | null>(null);
-  const [dpSearchError, setDpSearchError] = useState<string | null>(null);
-  const [dpSmsConsent, setDpSmsConsent] = useState(false);
-  const [dpPhonePrice, setDpPhonePrice] = useState<number | null>(null);
-  const [dpGracePeriodDays, setDpGracePeriodDays] = useState<number>(30);
-  // Tenant-phone management (release / restore / reassign)
-  const [releasingPhoneId, setReleasingPhoneId] = useState<string | null>(null);
-  const [restoringPhoneId, setRestoringPhoneId] = useState<string | null>(null);
-  const [assigningPhoneId, setAssigningPhoneId] = useState<string | null>(null);
-  const [releaseConfirmPhone, setReleaseConfirmPhone] = useState<TenantPhoneNumber | null>(null);
+  // Dedicated number management moved to Settings — see LeadBridgeNumberManager
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Template editor modal state
   const [templateEditor, setTemplateEditor] = useState<{
@@ -906,9 +892,9 @@ export function Services() {
         setExpandedCard('notifications');
       }
 
-      // Auto-open the buy-number modal if arrived from Landing/Pricing CTA
+      // Legacy deep-link — buy flow now lives in Settings
       if (searchParams.get('buyNumber') === '1') {
-        openDedicatedModal();
+        navigate('/settings');
       }
 
       // Persist to module-level cache so returning to this page is instant
@@ -1055,7 +1041,8 @@ export function Services() {
 
   async function toggleLeadAlerts(enabled: boolean) {
     if (enabled && tenantPhones.length === 0) {
-      setShowDedicatedModal(true);
+      setError('Set up a LeadBridge Number in Settings first.');
+      navigate('/settings');
       return;
     }
     setError(null);
@@ -1141,7 +1128,8 @@ export function Services() {
   async function toggleCallConnect(enabled: boolean) {
     if (!selectedAccountId) return;
     if (enabled && tenantPhones.length === 0) {
-      setShowDedicatedModal(true);
+      setError('Set up a LeadBridge Number in Settings first.');
+      navigate('/settings');
       return;
     }
     setCcEnabled(enabled); // optimistic
@@ -1199,7 +1187,8 @@ export function Services() {
   async function toggleCustomerTexting(enabled: boolean) {
     if (!selectedAccountId) return;
     if (enabled && tenantPhones.length === 0) {
-      setShowDedicatedModal(true);
+      setError('Set up a LeadBridge Number in Settings first.');
+      navigate('/settings');
       return;
     }
     setCtEnabled(enabled); // optimistic
@@ -1482,17 +1471,6 @@ export function Services() {
 
   // --- Customer Texting Handlers ---
 
-  function openDedicatedModal() {
-    setShowDedicatedModal(true);
-    setShowPhoneSetupModal(false);
-    notificationsApi.getPhonePricing().then(r => {
-      if (r.success) {
-        setDpPhonePrice(r.data.priceMonthly);
-        setDpGracePeriodDays(r.data.gracePeriodDays ?? 30);
-      }
-    }).catch(() => {});
-  }
-
   async function handleOpConnect() {
     if (!selectedAccountId || !opApiKey.trim()) return;
     setOpConnecting(true);
@@ -1510,118 +1488,6 @@ export function Services() {
       setOpConnectError(err.response?.data?.message || err.message || 'Failed to connect');
     } finally {
       setOpConnecting(false);
-    }
-  }
-
-  async function handleDpSearch() {
-    if (!selectedAccountId) return;
-    setDpSearchLoading(true);
-    setDpSearchError(null);
-    try {
-      const result = await notificationsApi.searchAvailableNumbers(selectedAccountId, 'US', dpAreaCode || undefined, dpLocality || undefined);
-      if (result.success) {
-        setDpAvailableNumbers(result.data);
-      } else {
-        setDpSearchError('Search failed — try a different area code or city');
-      }
-    } catch (err: any) {
-      setDpSearchError(err.response?.data?.message || err.message || 'Search failed');
-    } finally {
-      setDpSearchLoading(false);
-    }
-  }
-
-  async function handleReleasePhone(phoneId: string) {
-    setReleasingPhoneId(phoneId);
-    try {
-      const result = await notificationsApi.cancelTenantPhone(phoneId);
-      if (result.success) {
-        const refreshed = await notificationsApi.listTenantPhones();
-        if (refreshed.success) {
-          const next = refreshed.data
-            .filter(tp => tp.status === 'ACTIVE' || tp.status === 'GRACE_PERIOD')
-            .sort((a, b) => (a.status === b.status ? 0 : a.status === 'ACTIVE' ? -1 : 1));
-          setTenantPhones(next);
-        }
-        setReleaseConfirmPhone(null);
-        showSuccess('Number scheduled for release');
-      } else {
-        setError(result.error || 'Failed to release number');
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Failed to release number');
-    } finally {
-      setReleasingPhoneId(null);
-    }
-  }
-
-  async function handleRestorePhone(phoneId: string) {
-    setRestoringPhoneId(phoneId);
-    try {
-      const result = await notificationsApi.restoreTenantPhone(phoneId);
-      if (result.success) {
-        const refreshed = await notificationsApi.listTenantPhones();
-        if (refreshed.success) {
-          const next = refreshed.data
-            .filter(tp => tp.status === 'ACTIVE' || tp.status === 'GRACE_PERIOD')
-            .sort((a, b) => (a.status === b.status ? 0 : a.status === 'ACTIVE' ? -1 : 1));
-          setTenantPhones(next);
-        }
-        showSuccess('Number restored');
-      } else {
-        setError(result.error || 'Failed to restore number');
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Failed to restore number');
-    } finally {
-      setRestoringPhoneId(null);
-    }
-  }
-
-  async function handleAssignPhone(phoneId: string, savedAccountId: string | null) {
-    setAssigningPhoneId(phoneId);
-    try {
-      const result = await notificationsApi.assignTenantPhone(phoneId, savedAccountId);
-      if (result.success) {
-        const refreshed = await notificationsApi.listTenantPhones();
-        if (refreshed.success) {
-          const next = refreshed.data
-            .filter(tp => tp.status === 'ACTIVE' || tp.status === 'GRACE_PERIOD')
-            .sort((a, b) => (a.status === b.status ? 0 : a.status === 'ACTIVE' ? -1 : 1));
-          setTenantPhones(next);
-        }
-        showSuccess('Assignment updated · only affects new conversations');
-      } else {
-        setError(result.error || 'Failed to reassign');
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Failed to reassign');
-    } finally {
-      setAssigningPhoneId(null);
-    }
-  }
-
-  async function handleDpPurchase(phoneNumber: string) {
-    if (!selectedAccountId || !dpSmsConsent) return;
-    setDpPurchasingNumber(phoneNumber);
-    setDpSearchError(null);
-    try {
-      const result = await notificationsApi.purchaseTenantPhone(selectedAccountId, phoneNumber);
-      if (result.success && result.tenantPhone) {
-        const refreshed = await notificationsApi.listTenantPhones();
-        if (refreshed.success) setTenantPhones(refreshed.data);
-        setShowDedicatedModal(false);
-        setDpAvailableNumbers([]);
-        setDpAreaCode('');
-        setDpLocality('');
-        showSuccess('LeadBridge number provisioned successfully');
-      } else {
-        setDpSearchError((result as any).error || 'Purchase failed');
-      }
-    } catch (err: any) {
-      setDpSearchError(err.response?.data?.message || err.message || 'Purchase failed');
-    } finally {
-      setDpPurchasingNumber(null);
     }
   }
 
@@ -2082,98 +1948,28 @@ export function Services() {
               <div className="space-y-4">
                 <div data-tour="bot-number">
                   <div className="flex items-center gap-2 mb-1">
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🤖 LeadBridge Numbers</label>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🤖 LeadBridge Number</label>
                     <TierBadge tier="engage" />
                   </div>
-                  <p className="text-[11px] text-slate-400 mb-2">Used for texting and calling leads.</p>
-                  <div className="space-y-2">
-                    {tenantPhones.map(phone => {
-                      const isGrace = phone.status === 'GRACE_PERIOD';
-                      const isReleasing = releasingPhoneId === phone.id;
-                      const isRestoring = restoringPhoneId === phone.id;
-                      const isAssigning = assigningPhoneId === phone.id;
-                      let daysLeft: number | null = null;
-                      if (isGrace && phone.gracePeriodEndsAt) {
-                        const diffMs = new Date(phone.gracePeriodEndsAt).getTime() - Date.now();
-                        daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-                      }
-                      return (
-                        <div
-                          key={phone.id}
-                          className={`rounded-xl border p-3 ${
-                            isGrace ? 'border-amber-200 bg-amber-50/40' : 'border-blue-200 bg-blue-50/30'
-                          }`}
-                        >
-                          <div className="flex flex-wrap items-center gap-3">
-                            <div className="flex-1 min-w-[180px]">
-                              <div className={`font-mono text-sm font-semibold ${isGrace ? 'text-amber-800' : 'text-blue-700'}`}>
-                                {phone.phoneNumber}
-                                {phone.friendlyName && phone.friendlyName !== phone.phoneNumber && (
-                                  <span className="ml-2 text-xs font-normal text-slate-500">— {phone.friendlyName}</span>
-                                )}
-                              </div>
-                              {isGrace && (
-                                <div className="mt-1 flex items-center gap-1 text-[11px] text-amber-700">
-                                  <Clock size={11} />
-                                  Releases in {daysLeft} day{daysLeft === 1 ? '' : 's'} · billing already stopped
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <label className="text-[11px] text-slate-500 whitespace-nowrap">Assigned to:</label>
-                              <select
-                                value={phone.savedAccountId || ''}
-                                onChange={e => handleAssignPhone(phone.id, e.target.value || null)}
-                                disabled={isGrace || isAssigning}
-                                className="px-2 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400 max-w-[180px]"
-                              >
-                                <option value="">Unassigned (shared)</option>
-                                {accounts.map(acc => (
-                                  <option key={acc.id} value={acc.id}>
-                                    {acc.platform === 'yelp' ? '🔴 ' : '🔵 '}{acc.businessName}
-                                  </option>
-                                ))}
-                              </select>
-                              {isGrace ? (
-                                <button
-                                  onClick={() => handleRestorePhone(phone.id)}
-                                  disabled={isRestoring}
-                                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 disabled:opacity-50 transition-colors whitespace-nowrap"
-                                >
-                                  {isRestoring ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                                  {isRestoring ? 'Restoring…' : 'Restore'}
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => setReleaseConfirmPhone(phone)}
-                                  disabled={isReleasing}
-                                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-600 bg-red-50 border border-red-100 rounded-lg hover:bg-red-100 disabled:opacity-50 transition-colors whitespace-nowrap"
-                                >
-                                  {isReleasing ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                                  {isReleasing ? 'Releasing…' : 'Release'}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                          {isAssigning && (
-                            <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1">
-                              <Loader2 size={10} className="animate-spin" /> Updating assignment…
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    <p className="text-[11px] text-slate-400 flex items-center gap-1 pl-1">
-                      <AlertCircle size={11} /> Changing assignment only affects new conversations.
-                    </p>
-                  </div>
-                  <button
-                    onClick={openDedicatedModal}
-                    className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-dashed border-blue-300 rounded-xl hover:bg-blue-100 transition-colors"
-                  >
-                    <Phone size={12} />
-                    + Buy another number {dpPhonePrice != null ? `— $${dpPhonePrice.toFixed(0)}/mo` : ''}
-                  </button>
+                  <p className="text-[11px] text-slate-400 mb-2">Used for texting and calling leads. Manage numbers in <Link to="/settings" className="text-blue-600 hover:underline">Settings</Link>.</p>
+                  {(() => {
+                    const accountPhone = tenantPhones.find(p => p.savedAccountId === selectedAccountId && p.status === 'ACTIVE')
+                      || tenantPhones.find(p => !p.savedAccountId && p.status === 'ACTIVE')
+                      || tenantPhones.find(p => p.status === 'ACTIVE');
+                    if (!accountPhone) return (
+                      <div className="w-full rounded-xl p-3 text-sm bg-slate-50 border border-slate-200 text-slate-500">
+                        No active number assigned to this account.
+                      </div>
+                    );
+                    return (
+                      <div className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700 font-mono">
+                        {accountPhone.phoneNumber}
+                        {accountPhone.friendlyName && accountPhone.friendlyName !== accountPhone.phoneNumber && (
+                          <span className="ml-2 text-xs font-normal text-slate-500">— {accountPhone.friendlyName}</span>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div data-tour="test-number">
@@ -2261,12 +2057,12 @@ export function Services() {
                   </div>
                   <p className="text-xs text-amber-700/90 mt-0.5">You need a LeadBridge number to send SMS and call leads.</p>
                 </div>
-                <button
-                  onClick={() => setShowDedicatedModal(true)}
+                <Link
+                  to="/settings"
                   className="shrink-0 px-3 py-1.5 bg-amber-500 text-white text-xs font-semibold rounded-lg hover:bg-amber-600 transition-colors flex items-center gap-1.5"
                 >
                   <Phone className="w-3 h-3" /> Get a Number
-                </button>
+                </Link>
               </div>
             )}
           </div>
@@ -2303,7 +2099,7 @@ export function Services() {
             description="Choose what happens immediately when a new lead comes in."
             enabled={autoReplyEnabled || (leadAlertRule?.enabled ?? false)}
             onToggle={(on) => {
-              if (on && noPhone) { setShowDedicatedModal(true); return; }
+              if (on && noPhone) { setError('Set up a LeadBridge Number in Settings first.'); navigate('/settings'); return; }
               // Optimistic: flip sub-switches immediately so the main toggle switches right away
               if (on) {
                 if (!autoReplyEnabled) setAutoReplyRules(prev => prev.length ? prev.map(r => ({ ...r, enabled: true })) : [{ id: '_pending', enabled: true } as any]);
@@ -4159,7 +3955,7 @@ export function Services() {
                   </div>
                 </div>
               </div>
-              <div className="border border-slate-200 rounded-2xl p-5 hover:border-indigo-200 transition-all cursor-pointer" onClick={() => openDedicatedModal()}>
+              <div className="border border-slate-200 rounded-2xl p-5 hover:border-indigo-200 transition-all cursor-pointer" onClick={() => { setShowPhoneSetupModal(false); navigate('/settings'); }}>
                 <div className="flex items-start gap-3">
                   <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center shrink-0 mt-0.5"><Briefcase className="w-4 h-4" /></div>
                   <div>
@@ -4214,153 +4010,6 @@ export function Services() {
               >
                 {opConnecting ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
                 {opConnecting ? 'Connecting...' : 'Connect'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* LeadBridge Number Setup Modal */}
-      {showDedicatedModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowDedicatedModal(false)}>
-          <div className="bg-white rounded-3xl shadow-2xl max-w-xl w-full p-8 relative" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setShowDedicatedModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors">
-              <X className="w-5 h-5" />
-            </button>
-            <h3 className="text-xl font-bold text-slate-900 mb-2">
-              {tenantPhones.length > 0 ? 'Buy another LeadBridge Number' : 'Get your LeadBridge Number'}
-            </h3>
-            <p className="text-sm text-slate-500 mb-4 leading-relaxed">
-              {tenantPhones.length > 0
-                ? 'Additional numbers are useful for separate communication per business or multi-location setup.'
-                : 'Search for an available number by area code or city, then pick it for your account.'}
-            </p>
-            <div className={`rounded-xl p-3 mb-4 text-xs leading-relaxed ${tenantPhones.length > 0 ? 'bg-blue-50/60 border border-blue-100 text-blue-800' : 'bg-emerald-50/60 border border-emerald-100 text-emerald-800'}`}>
-              {tenantPhones.length > 0
-                ? (<><span className="font-semibold">${dpPhonePrice != null ? dpPhonePrice.toFixed(0) : '—'}/mo</span> add-on, billed on top of your current plan.</>)
-                : (<><span className="font-semibold">Included with your plan.</span> No extra charge for your first number.</>)}
-            </div>
-
-            {dpSearchError && (
-              <div className="mb-4 bg-red-50 border border-red-100 rounded-xl p-3 flex items-center gap-2 text-red-600 text-sm">
-                <AlertCircle size={14} className="shrink-0" />
-                <span className="flex-1">{dpSearchError}</span>
-                <button onClick={() => setDpSearchError(null)}><X size={14} /></button>
-              </div>
-            )}
-
-            {/* SMS Consent */}
-            <div className={`rounded-xl border p-3 mb-4 ${dpSmsConsent ? 'bg-emerald-50/50 border-emerald-200' : 'bg-amber-50/50 border-amber-200'}`}>
-              <label className="flex items-start gap-3 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={dpSmsConsent}
-                  onChange={e => setDpSmsConsent(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                />
-                <span className="text-xs text-slate-600 leading-relaxed">
-                  I agree to receive SMS notifications from Geos LLC regarding account alerts and new leads. Message frequency varies. Message and data rates may apply. Reply STOP to unsubscribe or HELP for assistance.
-                </span>
-              </label>
-              {!dpSmsConsent && (
-                <div className="mt-2 ml-7 flex items-center gap-1.5 text-amber-600 text-xs font-medium">
-                  <AlertCircle size={11} className="shrink-0" />
-                  You must accept the SMS consent to purchase a number.
-                </div>
-              )}
-            </div>
-
-            {/* Search inputs */}
-            <div className="flex flex-wrap gap-3 mb-4">
-              <input
-                type="text"
-                value={dpAreaCode}
-                onChange={e => setDpAreaCode(e.target.value.replace(/\D/g, '').slice(0, 3))}
-                onKeyDown={e => e.key === 'Enter' && handleDpSearch()}
-                placeholder="Area code (e.g. 415)"
-                maxLength={3}
-                className="w-36 px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono tracking-widest"
-              />
-              <input
-                type="text"
-                value={dpLocality}
-                onChange={e => setDpLocality(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleDpSearch()}
-                placeholder="City (e.g. San Francisco)"
-                className="flex-1 min-w-40 px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-              <button
-                onClick={handleDpSearch}
-                disabled={dpSearchLoading}
-                className="px-5 py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-200 transition-all"
-              >
-                {dpSearchLoading ? <Loader2 size={14} className="animate-spin" /> : <Hash size={14} />}
-                {dpSearchLoading ? 'Searching...' : 'Search Numbers'}
-              </button>
-            </div>
-
-            {/* Available numbers grid */}
-            {dpAvailableNumbers.length > 0 && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
-                {dpAvailableNumbers.map(num => {
-                  const isAdditional = tenantPhones.length > 0;
-                  return (
-                    <div key={num.phoneNumber} className="bg-slate-50 rounded-xl border border-slate-200 p-3 flex flex-col gap-2 hover:border-blue-200 transition-all">
-                      <div>
-                        <div className="font-bold text-slate-900 font-mono text-sm">{num.phoneNumber}</div>
-                        <div className="text-xs text-slate-500">{[num.locality, num.region].filter(Boolean).join(', ') || 'US'}</div>
-                        {isAdditional
-                          ? (dpPhonePrice != null && <div className="text-xs text-slate-400">${dpPhonePrice.toFixed(2)}/mo (add-on)</div>)
-                          : <div className="text-xs text-emerald-600 font-medium">Included with your plan</div>}
-                      </div>
-                      <button
-                        onClick={() => handleDpPurchase(num.phoneNumber)}
-                        disabled={dpPurchasingNumber !== null || !dpSmsConsent}
-                        className="w-full px-3 py-2 bg-blue-600 text-white rounded-lg font-semibold text-xs hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
-                      >
-                        {dpPurchasingNumber === num.phoneNumber ? <><Loader2 size={12} className="animate-spin" /> Getting...</> : 'Get this number'}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Release confirmation modal */}
-      {releaseConfirmPhone && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setReleaseConfirmPhone(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
-                <Trash2 className="w-5 h-5 text-red-600" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Release this number?</h3>
-                <p className="text-xs font-mono text-slate-500 mt-0.5">{releaseConfirmPhone.phoneNumber}</p>
-              </div>
-            </div>
-            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 mb-4 text-xs text-amber-800 leading-relaxed space-y-1">
-              <p>• Billing stops immediately.</p>
-              <p>• The number stays active for <span className="font-semibold">{dpGracePeriodDays} days</span> so you can restore it.</p>
-              <p>• After that, the number is released and <span className="font-semibold">cannot be recovered</span>.</p>
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => setReleaseConfirmPhone(null)}
-                className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleReleasePhone(releaseConfirmPhone.id)}
-                disabled={releasingPhoneId === releaseConfirmPhone.id}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
-              >
-                {releasingPhoneId === releaseConfirmPhone.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                Release number
               </button>
             </div>
           </div>

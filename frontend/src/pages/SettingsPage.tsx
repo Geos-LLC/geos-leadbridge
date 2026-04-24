@@ -11,6 +11,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import ConnectionModal from '../components/ConnectionModal';
 import ServicePricingForm from '../components/ServicePricingForm';
 import TeamSection from '../components/TeamSection';
+import { LeadBridgeNumberManager } from '../components/LeadBridgeNumberManager';
 
 const tierNames: Record<string, string> = {
   STARTER: 'Respond',
@@ -1773,6 +1774,19 @@ export default function SettingsPage() {
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Section 3.5: LeadBridge Numbers */}
+      <div className="space-y-3">
+        <h3 className="text-xl font-bold text-slate-900 px-2">LeadBridge Numbers</h3>
+        <p className="text-sm text-slate-500 px-2">Dedicated phone numbers used for texting and calling leads. First number is included with Engage and Convert plans; additional numbers are billed as add-ons.</p>
+        <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-6">
+          <LeadBridgeNumberManager
+            accounts={accounts}
+            onSuccess={msg => notify.success('Success', msg)}
+            onError={msg => notify.error('Error', msg)}
+          />
         </div>
       </div>
 
