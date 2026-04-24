@@ -15,6 +15,7 @@ import {
   Sparkles,
   RefreshCw,
   Plus,
+  ShieldCheck,
 } from 'lucide-react';
 import leadConversationImg from '../assets/lead-conversation-thumbtack.png';
 import { trackEvent } from '../services/analytics';
@@ -492,6 +493,50 @@ export function Landing() {
                 <p className="text-sm font-semibold text-slate-700 text-left">{item.text}</p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Privacy & Security */}
+      <section className="py-20 bg-slate-50 border-y border-slate-100">
+        <div className="max-w-4xl mx-auto px-6">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-8 md:p-12">
+            <div className="flex flex-col md:flex-row gap-8 items-start">
+              <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                <ShieldCheck className="w-7 h-7" />
+              </div>
+              <div className="flex-1">
+                <p className="text-blue-600 font-bold uppercase tracking-widest text-xs mb-3">Private by design</p>
+                <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 mb-4 leading-tight">
+                  Your leads and customer conversations stay private.
+                </h2>
+                <p className="text-slate-600 leading-relaxed mb-5">
+                  Each business has its own protected data boundary. Your messages, follow-ups,
+                  and platform connections are used only to power your own automation —
+                  <strong className="text-slate-900"> we don't sell customer data and we don't use your conversations to train public AI models.</strong>
+                </p>
+                <ul className="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-sm text-slate-600 mb-6">
+                  {[
+                    'Tenant-level data separation',
+                    'Encrypted credentials & connections',
+                    'Restricted internal/support access',
+                    'Audit logging on sensitive actions',
+                  ].map((item) => (
+                    <li key={item} className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Link
+                  to="/security"
+                  className="inline-flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-700 transition-colors group"
+                >
+                  Read our full security & data privacy page
+                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </Link>
+              </div>
+            </div>
           </div>
         </div>
       </section>
