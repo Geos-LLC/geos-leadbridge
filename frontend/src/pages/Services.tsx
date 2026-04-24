@@ -906,6 +906,11 @@ export function Services() {
         setExpandedCard('notifications');
       }
 
+      // Auto-open the buy-number modal if arrived from Landing/Pricing CTA
+      if (searchParams.get('buyNumber') === '1') {
+        openDedicatedModal();
+      }
+
       // Persist to module-level cache so returning to this page is instant
       _svcCache.set(accountId, {
         autoReplyRules: allAutoReplies, leadAlertRule: leadAlert, templates: allTemplates,

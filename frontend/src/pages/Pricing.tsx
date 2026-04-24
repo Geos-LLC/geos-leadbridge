@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Check, Loader2, Star, Plus } from 'lucide-react';
-import { billingApi } from '../services/api';
+import { billingApi, notificationsApi } from '../services/api';
 import { notify } from '../store/notificationStore';
+import { useAuthStore } from '../store/authStore';
 import type { SubscriptionDetails } from '../types';
 
 type TierId = 'STARTER' | 'PRO' | 'ENTERPRISE';
@@ -24,15 +25,15 @@ const tiers: Tier[] = [
     label: 'Respond',
     id: 'STARTER',
     price: 39,
-    tagline: 'Reply instantly and stay on top of new leads',
+    tagline: 'Instant Reply (sent on Yelp/Thumbtack)',
     dotColor: 'bg-emerald-500',
     labelColor: 'text-emerald-700',
     features: [
-      'Instant Reply (custom, price-based, or auto message)',
-      'Lead details with phone (when available)',
-      'Basic analytics',
+      'Automatically respond to every new lead',
+      'Get lead details + phone (when available)',
+      'Instant SMS / call alerts',
     ],
-    bestFor: 'Solo cleaners & basic use',
+    bestFor: 'You continue the conversation manually',
   },
   {
     label: 'Engage',
@@ -76,6 +77,8 @@ export default function Pricing() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState<string | null>(null);
   const [subscription, setSubscription] = useState<SubscriptionDetails | null>(null);
+  const [extraNumberPrice, setExtraNumberPrice] = useState<number | null>(null);
+  const isAuthenticated = useAuthStore(s => s.isAuthenticated);
 
   useEffect(() => {
     const loadSubscription = async () => {
@@ -87,7 +90,18 @@ export default function Pricing() {
       }
     };
     loadSubscription();
+    notificationsApi.getPhonePricing()
+      .then(r => { if (r.success) setExtraNumberPrice(r.data.priceMonthly); })
+      .catch(() => {});
   }, []);
+
+  const handleBuyExtraNumber = () => {
+    if (isAuthenticated) {
+      navigate('/services?buyNumber=1');
+    } else {
+      navigate('/register?intent=extra_number');
+    }
+  };
 
   const handleSubscribe = async (tierId: TierId) => {
     try {
@@ -226,13 +240,22 @@ export default function Pricing() {
           <div className="flex-1">
             <div className="flex items-baseline gap-3 flex-wrap mb-1">
               <h3 className="text-lg font-bold text-slate-900">Extra Numbers / Locations</h3>
-              <span className="text-sm font-bold text-blue-600">+$20 per number</span>
+              <span className="text-sm font-bold text-blue-600">
+                +${extraNumberPrice != null ? extraNumberPrice.toFixed(0) : '20'} per number
+              </span>
             </div>
             <p className="text-sm text-slate-500 leading-relaxed">
               Separate communication per business · Multi-location setup · Team routing{' '}
               <span className="text-slate-400">(coming soon)</span>
             </p>
+            <p className="text-xs text-slate-400 mt-1">Your first number is included with Engage and Convert plans.</p>
           </div>
+          <button
+            onClick={handleBuyExtraNumber}
+            className="shrink-0 px-5 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 whitespace-nowrap"
+          >
+            {isAuthenticated ? 'Add a number' : 'Get started'}
+          </button>
         </div>
       </section>
 

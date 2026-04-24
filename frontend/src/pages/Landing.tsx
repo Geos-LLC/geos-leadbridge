@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { notificationsApi } from '../services/api';
 import {
   Check,
   Phone,
@@ -19,8 +20,13 @@ import leadConversationImg from '../assets/lead-conversation-thumbtack.png';
 import { trackEvent } from '../services/analytics';
 
 export function Landing() {
+  const [extraNumberPrice, setExtraNumberPrice] = useState<number | null>(null);
+
   useEffect(() => {
     trackEvent('landing_page_viewed', { source_page: 'landing' });
+    notificationsApi.getPhonePricing()
+      .then(r => { if (r.success) setExtraNumberPrice(r.data.priceMonthly); })
+      .catch(() => {});
   }, []);
 
   const trackUpgrade = (planType: string, entryPoint: string) =>
@@ -339,16 +345,16 @@ export function Landing() {
                 <span className="w-3 h-3 rounded-full bg-emerald-500" />
                 <p className="text-xs font-bold uppercase tracking-widest text-emerald-700">Respond</p>
               </div>
-              <h3 className="text-xl font-bold mb-1">Reply instantly and stay on top of new leads</h3>
+              <h3 className="text-xl font-bold mb-1">Instant Reply (sent on Yelp/Thumbtack)</h3>
               <div className="flex items-baseline gap-1.5 mt-5 mb-8">
                 <span className="text-5xl font-extrabold text-slate-900">$39</span>
                 <span className="text-slate-400">/mo</span>
               </div>
               <ul className="space-y-3 flex-1 mb-8">
                 {[
-                  'Instant Reply (custom, price-based, or auto message)',
-                  'Lead details with phone (when available)',
-                  'Basic analytics',
+                  'Automatically respond to every new lead',
+                  'Get lead details + phone (when available)',
+                  'Instant SMS / call alerts',
                 ].map((f, i) => (
                   <li key={i} className="flex items-start gap-3 text-slate-700 text-sm">
                     <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5">
@@ -358,7 +364,7 @@ export function Landing() {
                   </li>
                 ))}
               </ul>
-              <p className="text-xs text-slate-500 mb-5"><span className="font-semibold text-slate-700">Best for:</span> solo cleaners & basic use</p>
+              <p className="text-xs text-slate-500 mb-5">You continue the conversation manually</p>
               <Link to="/register" onClick={() => trackUpgrade('respond', 'pricing_card')} className="block w-full py-3.5 text-center bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all">
                 Start Free Trial
               </Link>
@@ -446,12 +452,22 @@ export function Landing() {
               <div className="flex-1">
                 <div className="flex items-baseline gap-3 flex-wrap mb-1">
                   <h3 className="text-lg font-bold">Extra Numbers / Locations</h3>
-                  <span className="text-sm font-bold text-blue-600">+$20 per number</span>
+                  <span className="text-sm font-bold text-blue-600">
+                    +${extraNumberPrice != null ? extraNumberPrice.toFixed(0) : '20'} per number
+                  </span>
                 </div>
                 <p className="text-sm text-slate-500 leading-relaxed">
                   Separate communication per business · Multi-location setup · Team routing <span className="text-slate-400">(coming soon)</span>
                 </p>
+                <p className="text-xs text-slate-400 mt-1">First number is included with Engage and Convert.</p>
               </div>
+              <Link
+                to="/register?intent=extra_number"
+                onClick={() => trackUpgrade('extra_number', 'addon_card')}
+                className="shrink-0 px-5 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 whitespace-nowrap"
+              >
+                Get started
+              </Link>
             </div>
           </div>
         </div>
