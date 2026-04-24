@@ -271,24 +271,33 @@ export class LeadsService {
         let source: string;
 
         if (lead.platform === 'yelp') {
-          const tYelpStart = Date.now();
-          const yelpMessages = await this.getYelpMessages(userId, lead);
-          const tYelpEnd = Date.now();
-          if (yelpMessages.length > 0) {
-            messages = yelpMessages;
-            source = `yelp-api(${tYelpEnd - tYelpStart}ms)`;
-          } else if (lead.threadId) {
+          // DB-first: webhook now persists both inbound customer messages
+          // (handleYelpNewEventInner) and outbound pro messages (sendMessage
+          // + Yelp message-backfill), so for webhook-synced leads the DB is
+          // authoritative. This eliminates the ~1.5s Yelp API call on every
+          // fresh click. Fall back to the live Yelp API only when DB is empty
+          // (historical lead that never webhook-synced, or a brand-new lead
+          // whose first message hasn't landed yet).
+          if (lead.threadId) {
+            const tDbStart = Date.now();
             const localMsgs = await this.getLocalMessages(userId, 'yelp', lead.externalRequestId);
+            const tDbEnd = Date.now();
             if (localMsgs.length > 0) {
               messages = localMsgs;
-              source = `db-fallback(yelp-api-${tYelpEnd - tYelpStart}ms-empty)`;
+              source = `db(yelp-${tDbEnd - tDbStart}ms)`;
             } else {
-              messages = [];
-              source = `empty(yelp-api-${tYelpEnd - tYelpStart}ms)`;
+              const tYelpStart = Date.now();
+              const yelpMessages = await this.getYelpMessages(userId, lead);
+              const tYelpEnd = Date.now();
+              messages = yelpMessages;
+              source = `yelp-api-fallback(db-${tDbEnd - tDbStart}ms-empty,api-${tYelpEnd - tYelpStart}ms)`;
             }
           } else {
-            messages = [];
-            source = `empty(no-thread)`;
+            const tYelpStart = Date.now();
+            const yelpMessages = await this.getYelpMessages(userId, lead);
+            const tYelpEnd = Date.now();
+            messages = yelpMessages;
+            source = `yelp-api-fallback(no-thread,api-${tYelpEnd - tYelpStart}ms)`;
           }
         } else {
           messages = await this.getLocalMessages(userId, lead.platform, negotiationId);
