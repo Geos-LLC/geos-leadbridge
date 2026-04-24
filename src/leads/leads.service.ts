@@ -22,6 +22,7 @@ import { CacheKeys } from '../common/cache/cache-keys';
 
 const LEAD_LIST_TTL_SECONDS = 30;
 const LEAD_DETAIL_TTL_SECONDS = 60;
+const LEAD_MESSAGES_TTL_SECONDS = 300; // 5 min — DB is authoritative; invalidated on every inbound/outbound write
 
 /**
  * Strict whitelist of cache-eligible filter shapes for the leads list.
@@ -238,38 +239,41 @@ export class LeadsService {
   }
 
   /**
-   * Get messages for a lead/negotiation
-   * All messages come from the database (stored via webhooks)
-   * No API fallback needed - webhooks handle all connected accounts
+   * Get messages for a lead/negotiation.
+   *
+   * Wrapped in Redis (5-min TTL, userId-scoped key). Cache is invalidated on:
+   *   - outbound send (`sendMessage`, `sendQuote`)
+   *   - inbound SMS (event listener `onSmsInbound`)
+   *   - Yelp NEW_EVENT webhook (explicit `invalidateLeadMessages` in webhooks.service)
+   *   - resync / refetch paths
+   *
+   * Keeps the existing read strategy: Yelp → live Yelp API (authoritative for
+   * customer replies; the webhook path records to ThreadContext but does NOT
+   * persist Message rows), Thumbtack/SMS → local DB (webhook-persisted).
    */
   async getMessages(userId: string, leadId: string): Promise<any[]> {
-    console.log(`[LeadsService] getMessages called - userId: ${userId}, leadId: ${leadId}`);
+    return this.cache.getOrSet<any[]>(
+      CacheKeys.leadMessages(userId, leadId),
+      LEAD_MESSAGES_TTL_SECONDS,
+      async () => {
+        const lead = await this.getLead(userId, leadId);
+        const negotiationId = lead.externalRequestId;
 
-    const lead = await this.getLead(userId, leadId);
-    console.log(`[LeadsService] Found lead - externalRequestId: ${lead.externalRequestId}, platform: ${lead.platform}, businessId: ${lead.businessId}`);
-
-    const negotiationId = lead.externalRequestId;
-
-    // For Yelp leads, fetch from Yelp API first, fallback to local DB
-    if (lead.platform === 'yelp') {
-      const yelpMessages = await this.getYelpMessages(userId, lead);
-      if (yelpMessages.length > 0) return yelpMessages;
-      // Fallback: if API returned nothing (token error), use locally synced messages
-      if (lead.threadId) {
-        const localMsgs = await this.getLocalMessages(userId, 'yelp', lead.externalRequestId);
-        if (localMsgs.length > 0) {
-          console.log(`[LeadsService] Yelp API returned 0 messages, using ${localMsgs.length} from local DB`);
-          return localMsgs;
+        if (lead.platform === 'yelp') {
+          const yelpMessages = await this.getYelpMessages(userId, lead);
+          if (yelpMessages.length > 0) return yelpMessages;
+          // Fallback: if Yelp API returned nothing (token error / archived), use locally synced.
+          if (lead.threadId) {
+            const localMsgs = await this.getLocalMessages(userId, 'yelp', lead.externalRequestId);
+            if (localMsgs.length > 0) return localMsgs;
+          }
+          return [];
         }
-      }
-      return [];
-    }
 
-    // Get messages from database (stored via webhooks)
-    const messages = await this.getLocalMessages(userId, lead.platform, negotiationId);
-    console.log(`[LeadsService] Found ${messages.length} messages in database for negotiation ${negotiationId}`);
-
-    return messages;
+        // Webhook-based platforms (Thumbtack, SMS) — always DB.
+        return this.getLocalMessages(userId, lead.platform, negotiationId);
+      },
+    );
   }
 
   private async getYelpMessages(userId: string, lead: any): Promise<any[]> {

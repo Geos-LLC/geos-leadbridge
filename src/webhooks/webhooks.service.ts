@@ -16,6 +16,7 @@ import { ConversationContextService } from '../conversation-context/conversation
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
+import { LeadCacheService } from '../common/cache/lead-cache.service';
 
 @Injectable()
 export class WebhooksService {
@@ -42,6 +43,7 @@ export class WebhooksService {
     private conversationContextService: ConversationContextService,
     private followUpEngine: FollowUpEngineService,
     private crmWebhookService: CrmWebhookService,
+    private leadCache: LeadCacheService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -1736,6 +1738,10 @@ export class WebhooksService {
           data: { lastMessageAt: new Date() },
         }).catch(() => {});
       }
+
+      // Invalidate the cached messages thread for this lead so the next fetch
+      // re-hits the Yelp API and includes the new customer reply.
+      await this.leadCache.invalidateLeadMessagesAndList(userId, lead.id);
 
       // Stop follow-up enrollments
       if (lead.threadId) {
