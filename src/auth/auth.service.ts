@@ -9,8 +9,12 @@ import { PrismaService } from '../common/utils/prisma.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { SigcoreService } from '../sigcore/sigcore.service';
 import { AdminPhonePoolService } from '../admin/admin-phone-pool.service';
+import { CacheService } from '../common/cache/cache.service';
+import { CacheKeys } from '../common/cache/cache-keys';
 import * as crypto from 'crypto';
 import emailjs from '@emailjs/nodejs';
+
+const ME_TTL_SECONDS = 60;
 
 @Injectable()
 export class AuthService {
@@ -21,7 +25,17 @@ export class AuthService {
     private jwtService: JwtService,
     private sigcoreService: SigcoreService,
     private adminPhonePoolService: AdminPhonePoolService,
+    private cache: CacheService,
   ) {}
+
+  /**
+   * Invalidate the cached /auth/me payload for a user.
+   * Callers must invoke this AFTER any DB mutation that changes the payload
+   * (name, email, collectedLeads count), so readers never see pre-commit state.
+   */
+  async invalidateMeCache(userId: string): Promise<void> {
+    await this.cache.del(CacheKeys.me(userId));
+  }
 
   /**
    * Register a new user
@@ -190,28 +204,30 @@ export class AuthService {
    * Returns { ok, account, stats } format expected by the extension.
    */
   async getMe(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, email: true, name: true },
+    return this.cache.getOrSet(CacheKeys.me(userId), ME_TTL_SECONDS, async () => {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, email: true, name: true },
+      });
+
+      if (!user) {
+        throw new UnauthorizedException('User not found');
+      }
+
+      const collectedLeads = await this.prisma.thumbtackLeadId.count({
+        where: { userId },
+      });
+
+      return {
+        ok: true,
+        account: {
+          tenantId: user.id,
+          name: user.name || user.email,
+          email: user.email,
+        },
+        stats: { collectedLeads },
+      };
     });
-
-    if (!user) {
-      throw new UnauthorizedException('User not found');
-    }
-
-    const collectedLeads = await this.prisma.thumbtackLeadId.count({
-      where: { userId },
-    });
-
-    return {
-      ok: true,
-      account: {
-        tenantId: user.id,
-        name: user.name || user.email,
-        email: user.email,
-      },
-      stats: { collectedLeads },
-    };
   }
 
   private normalizePhoneToE164(phone: string): string | null {
