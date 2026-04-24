@@ -86,16 +86,20 @@ export class LeadsController {
     @Query('platform') platform?: string,
     @Query('status') status?: string,
     @Query('limit') limit?: number,
+    @Query('businessId') businessId?: string,
   ) {
     if (platform) {
       // Get leads from specific platform
       return this.leadsService.getLeads(user.id, platform);
     }
 
-    // Get cached leads from database with filters
+    // Get cached leads from database with filters.
+    // Service caches `{ userId, businessId? }` shape with 30s TTL. Other filter
+    // shapes bypass the cache and hit the DB directly.
     const leads = await this.leadsService.getCachedLeads(user.id, {
       platform,
       status,
+      businessId,
       limit: limit ? parseInt(limit.toString(), 10) : undefined,
     });
 
