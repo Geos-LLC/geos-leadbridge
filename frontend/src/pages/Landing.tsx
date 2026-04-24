@@ -527,6 +527,7 @@ export function Landing() {
           <p className="text-slate-400 text-sm">© 2025 LeadBridge. Built for home service pros.</p>
           <div className="flex items-center gap-6 text-sm text-slate-400">
             <Link to="/demo" className="hover:text-blue-600 transition-colors">Demo</Link>
+            <Link to="/security" className="hover:text-blue-600 transition-colors">Security</Link>
             <a href="mailto:support@geos-ai.com" className="hover:text-blue-600 transition-colors">Support</a>
           </div>
         </div>
