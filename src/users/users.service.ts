@@ -3,6 +3,8 @@ import { PrismaService } from '../common/utils/prisma.service';
 import { SigcoreService, SigcoreSearchResult } from '../sigcore/sigcore.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StripeService } from '../stripe/stripe.service';
+import { CacheService } from '../common/cache/cache.service';
+import { CacheKeys } from '../common/cache/cache-keys';
 
 @Injectable()
 export class UsersService {
@@ -13,6 +15,7 @@ export class UsersService {
     private sigcoreService: SigcoreService,
     private notificationsService: NotificationsService,
     private stripeService: StripeService,
+    private cache: CacheService,
   ) {}
 
   async updateProfile(userId: string, updates: { name?: string; businessPhone?: string }) {
@@ -36,6 +39,10 @@ export class UsersService {
     if (data.businessPhone) {
       await this.syncBusinessPhoneToAccounts(userId, data.businessPhone);
     }
+
+    // Invalidate cached /auth/me AFTER the DB write commits so readers cannot
+    // repopulate the cache from pre-commit state.
+    await this.cache.del(CacheKeys.me(userId));
 
     return { success: true, user };
   }
@@ -366,6 +373,7 @@ export class UsersService {
       where: { id: accountId },
       data: { servicePricingJson: JSON.stringify(pricing) },
     });
+    await this.cache.delPattern(CacheKeys.savedAccountsPattern(userId));
     return { success: true };
   }
 
@@ -383,6 +391,7 @@ export class UsersService {
       where: { userId, id: { not: sourceAccountId } },
       data: { servicePricingJson: source.servicePricingJson },
     });
+    await this.cache.delPattern(CacheKeys.savedAccountsPattern(userId));
     return { success: true, updated: result.count };
   }
 

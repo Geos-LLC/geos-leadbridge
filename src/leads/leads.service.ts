@@ -16,6 +16,49 @@ import { ConversationContextService } from '../conversation-context/conversation
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { TrialService } from '../trial/trial.service';
+import { LeadCacheService } from '../common/cache/lead-cache.service';
+import { CacheService } from '../common/cache/cache.service';
+import { CacheKeys } from '../common/cache/cache-keys';
+
+const LEAD_LIST_TTL_SECONDS = 30;
+const LEAD_DETAIL_TTL_SECONDS = 60;
+
+/**
+ * Strict whitelist of cache-eligible filter shapes for the leads list.
+ *
+ * Exported for direct unit testing — the function has no LeadsService-specific
+ * dependencies and exercising it through the full service constructor is overkill.
+ *
+ * Returns true only when `filters` matches one of the two supported shapes:
+ *   1. undefined / `{}` / all fields empty  → key `leads:user:{userId}`
+ *   2. `{ businessId: string }` only         → key `leads:user:{userId}:biz:{businessId}`
+ *
+ * ANY other key (`platform`, `status`, `limit`, or a future field) → false.
+ * Filter keys are WHITELISTED: adding a new field to the filter type will
+ * automatically bypass the cache instead of silently poisoning an existing key.
+ */
+export function isCacheableLeadFilter(
+  filters?: { platform?: string; status?: string; businessId?: string; limit?: number } & Record<string, unknown>,
+): boolean {
+  if (!filters) return true;
+
+  const ALLOWED_KEYS = new Set(['businessId']);
+  const setKeys = Object.entries(filters)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key]) => key);
+
+  for (const key of setKeys) {
+    if (!ALLOWED_KEYS.has(key)) return false;
+  }
+
+  // businessId, when set, must be a non-empty string — defensive against `0`,
+  // `false`, or other truthy-but-invalid inputs.
+  if (setKeys.includes('businessId') && typeof filters.businessId !== 'string') {
+    return false;
+  }
+
+  return true;
+}
 
 @Injectable()
 export class LeadsService {
@@ -31,6 +74,8 @@ export class LeadsService {
     @Optional() @Inject(FollowUpEngineService) private followUpEngine: FollowUpEngineService | null,
     @Optional() @Inject(CrmWebhookService) private crmWebhookService: CrmWebhookService | null,
     private trialService: TrialService,
+    private leadCache: LeadCacheService,
+    private cache: CacheService,
   ) {}
 
   /**
@@ -111,18 +156,25 @@ export class LeadsService {
    * Get a single lead by ID
    */
   async getLead(userId: string, leadId: string): Promise<NormalizedLead> {
-    const lead = await this.prisma.lead.findFirst({
-      where: {
-        id: leadId,
-        userId,
+    return this.cache.getOrSet<NormalizedLead>(
+      // Key is scoped to userId to prevent cross-tenant leakage of cached leads.
+      CacheKeys.leadDetail(userId, leadId),
+      LEAD_DETAIL_TTL_SECONDS,
+      async () => {
+        const lead = await this.prisma.lead.findFirst({
+          where: {
+            id: leadId,
+            userId,
+          },
+        });
+
+        if (!lead) {
+          throw new NotFoundException('Lead not found');
+        }
+
+        return this.convertToNormalizedLead(lead);
       },
-    });
-
-    if (!lead) {
-      throw new NotFoundException('Lead not found');
-    }
-
-    return this.convertToNormalizedLead(lead);
+    );
   }
 
   /**
@@ -133,32 +185,56 @@ export class LeadsService {
     userId: string,
     filters?: { platform?: string; status?: string; businessId?: string; limit?: number },
   ) {
-    const queryOptions: any = {
-      where: {
-        userId,
-        ...(filters?.platform && { platform: filters.platform }),
-        ...(filters?.status && { status: filters.status }),
-        ...(filters?.businessId && { businessId: filters.businessId }),
-      },
-      include: {
-        conversation: {
-          select: {
-            lastMessageAt: true,
+    // STRICT cache eligibility — the filter object must exactly match one of
+    // the two supported shapes. This protects against a future field being
+    // added to the filter type: if someone later adds e.g. `dateRange`, it
+    // will automatically bypass the cache instead of silently poisoning the
+    // no-filter key.
+    const isCacheable = this.isCacheableLeadFilter(filters);
+
+    const loader = async () => {
+      const queryOptions: any = {
+        where: {
+          userId,
+          ...(filters?.platform && { platform: filters.platform }),
+          ...(filters?.status && { status: filters.status }),
+          ...(filters?.businessId && { businessId: filters.businessId }),
+        },
+        include: {
+          conversation: {
+            select: {
+              lastMessageAt: true,
+            },
           },
         },
-      },
-      orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: 'desc' },
+      };
+
+      // Only apply limit if explicitly specified
+      // Note: We don't use a default limit to allow date filtering across all leads
+      if (filters?.limit) {
+        queryOptions.take = filters.limit;
+      }
+
+      const leads = await this.prisma.lead.findMany(queryOptions);
+
+      return leads.map((lead) => this.convertToNormalizedLead(lead));
     };
 
-    // Only apply limit if explicitly specified
-    // Note: We don't use a default limit to allow date filtering across all leads
-    if (filters?.limit) {
-      queryOptions.take = filters.limit;
-    }
+    if (!isCacheable) return loader();
 
-    const leads = await this.prisma.lead.findMany(queryOptions);
+    return this.cache.getOrSet<NormalizedLead[]>(
+      CacheKeys.leadsList(userId, filters?.businessId),
+      LEAD_LIST_TTL_SECONDS,
+      loader,
+    );
+  }
 
-    return leads.map((lead) => this.convertToNormalizedLead(lead));
+  /** See `isCacheableLeadFilter` standalone export below. */
+  private isCacheableLeadFilter(
+    filters?: { platform?: string; status?: string; businessId?: string; limit?: number },
+  ): boolean {
+    return isCacheableLeadFilter(filters);
   }
 
   /**
@@ -721,6 +797,11 @@ export class LeadsService {
       console.error('[LeadsService] Failed to store sent message locally:', err.message);
     }
 
+    // Outbound send changes: Message row, Conversation.lastMessageAt, and possibly
+    // Lead.threadId. Invalidate the list (order shifts by lastMessageAt), the
+    // detail, and the messages thread.
+    await this.leadCache.invalidateLeadMessagesAndList(userId, leadId);
+
     return sentMessage;
   }
 
@@ -761,6 +842,7 @@ export class LeadsService {
       where: { id: leadId },
       data: { status: 'quoted' },
     });
+    await this.leadCache.invalidateLeadAndList(userId, leadId);
 
     return quote;
   }
@@ -780,6 +862,8 @@ export class LeadsService {
     if (lead.count === 0) {
       throw new NotFoundException('Lead not found');
     }
+
+    await this.leadCache.invalidateLeadAndList(userId, leadId);
 
     return this.getLead(userId, leadId);
   }
@@ -844,6 +928,7 @@ export class LeadsService {
             updatedAt: new Date(),
           },
         });
+        await this.leadCache.invalidateLeadAndList(userId, leadId);
         console.log(`[LeadsService] Updated lead status: ${lead.status} -> ${freshLead.status}`);
       }
 
@@ -915,7 +1000,7 @@ export class LeadsService {
    * Also imports and stores all messages for the negotiation
    * @param accountId - Optional saved account ID to associate the lead with the correct business
    */
-  async importThumbtackNegotiation(userId: string, negotiationId: string, accountId?: string): Promise<{ lead: NormalizedLead; isNew: boolean }> {
+  async importThumbtackNegotiation(userId: string, negotiationId: string, accountId?: string, opts?: { skipCacheInvalidate?: boolean }): Promise<{ lead: NormalizedLead; isNew: boolean }> {
     console.log(`[LeadsService] importThumbtackNegotiation - userId: ${userId}, negotiationId: ${negotiationId}, accountId: ${accountId}`);
 
     // If accountId provided, verify it belongs to this user and get the businessId and credentials
@@ -1088,6 +1173,13 @@ export class LeadsService {
       await this.analyticsService.invalidateCache(userId);
     }
 
+    // Bulk caller (`importThumbtackNegotiations`) sets skipCacheInvalidate and
+    // calls `invalidateLeadList(userId)` once after the loop — cheaper than
+    // N delPatterns for large imports.
+    if (!opts?.skipCacheInvalidate) {
+      await this.leadCache.invalidateLeadAndList(userId, storedLead.id);
+    }
+
     return { lead: this.convertToNormalizedLead(storedLead), isNew };
   }
 
@@ -1256,6 +1348,7 @@ export class LeadsService {
 
     if (Object.keys(updateData).length > 0) {
       await this.prisma.lead.update({ where: { id: lead.id }, data: updateData });
+      await this.leadCache.invalidateLeadAndList(userId, lead.id);
     }
 
     // Mark as no longer needing scrape
@@ -1279,12 +1372,18 @@ export class LeadsService {
 
     for (const negotiationId of negotiationIds) {
       try {
-        await this.importThumbtackNegotiation(userId, negotiationId, accountId);
+        await this.importThumbtackNegotiation(userId, negotiationId, accountId, { skipCacheInvalidate: true });
         results.imported++;
       } catch (error) {
         results.failed++;
         results.errors.push(`${negotiationId}: ${error.message}`);
       }
+    }
+
+    // One list-level invalidation for the whole batch. Do NOT invalidate each
+    // lead detail — cold-miss is acceptable; the list is the hot path.
+    if (results.imported > 0) {
+      await this.leadCache.invalidateLeadList(userId);
     }
 
     return results;
@@ -1402,6 +1501,7 @@ export class LeadsService {
     });
 
     this.logger.log(`Refetched lead ${leadId}: ${lead.customerName} → ${freshLead.customerName}`);
+    await this.leadCache.invalidateLeadAndList(userId, leadId);
     return { updated: true, customerName: freshLead.customerName };
   }
 
@@ -1536,6 +1636,10 @@ export class LeadsService {
       importedCount = messageCount;
     }
 
+    if (cleanedCount > 0 || importedCount > 0 || statusUpdated) {
+      await this.leadCache.invalidateLeadMessagesAndList(userId, leadId);
+    }
+
     return { cleaned: cleanedCount, imported: importedCount, statusUpdated };
   }
 
@@ -1634,6 +1738,9 @@ export class LeadsService {
     }
 
     console.log(`[LeadsService] Migration complete - updated: ${updated}, skipped: ${skipped}, errors: ${errors.length}`);
+    if (updated > 0) {
+      await this.leadCache.invalidateLeadList(userId);
+    }
     return { updated, skipped, errors };
   }
 

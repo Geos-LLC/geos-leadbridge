@@ -13,6 +13,75 @@ import { PlatformCredentials } from '../common/interfaces/platform.interface';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
 import { TrialService } from '../trial/trial.service';
+import { CacheService } from '../common/cache/cache.service';
+import { CacheKeys } from '../common/cache/cache-keys';
+import { LeadCacheService } from '../common/cache/lead-cache.service';
+
+const SAVED_ACCOUNTS_TTL_SECONDS = 60;
+
+/**
+ * Whitelist of SavedAccount fields safe to return from the API and cache in Redis.
+ *
+ * CRITICAL SAFETY RULE:
+ *   NEVER add `credentialsJson`, raw tokens, refresh tokens, or any provider
+ *   secret to this type. Encrypted credentials must only leave the database
+ *   via the dedicated `getAccountCredentials*` / `getValidAccessToken` paths,
+ *   never through the list endpoint.
+ *
+ * Using a whitelist (not a blacklist strip) means future additions to the
+ * Prisma `SavedAccount` model do not silently leak into the cache.
+ */
+export interface SafeSavedAccount {
+  id: string;
+  userId: string;
+  platform: string;
+  businessId: string;
+  businessName: string;
+  emailHint: string | null;
+  imageUrl: string | null;
+  webhookId: string | null;
+  agentPhoneOverride: string | null;
+  followUpMode: string | null;
+  aiConversationEnabled: boolean;
+  followUpPreset: string | null;
+  followUpReplyType: string | null;
+  followUpActiveHoursStart: string | null;
+  followUpActiveHoursEnd: string | null;
+  followUpTimezone: string | null;
+  followUpSettingsJson: string | null;
+  servicePricingJson: string | null;
+  organizationId: string | null;
+  lastUsedAt: Date;
+  createdAt: Date;
+  tokenDead: boolean;
+}
+
+function sanitizeSavedAccount(raw: any, tokenDead: boolean): SafeSavedAccount {
+  return {
+    id: raw.id,
+    userId: raw.userId,
+    platform: raw.platform,
+    businessId: raw.businessId,
+    businessName: raw.businessName,
+    emailHint: raw.emailHint ?? null,
+    imageUrl: raw.imageUrl ?? null,
+    webhookId: raw.webhookId ?? null,
+    agentPhoneOverride: raw.agentPhoneOverride ?? null,
+    followUpMode: raw.followUpMode ?? null,
+    aiConversationEnabled: Boolean(raw.aiConversationEnabled),
+    followUpPreset: raw.followUpPreset ?? null,
+    followUpReplyType: raw.followUpReplyType ?? null,
+    followUpActiveHoursStart: raw.followUpActiveHoursStart ?? null,
+    followUpActiveHoursEnd: raw.followUpActiveHoursEnd ?? null,
+    followUpTimezone: raw.followUpTimezone ?? null,
+    followUpSettingsJson: raw.followUpSettingsJson ?? null,
+    servicePricingJson: raw.servicePricingJson ?? null,
+    organizationId: raw.organizationId ?? null,
+    lastUsedAt: raw.lastUsedAt,
+    createdAt: raw.createdAt,
+    tokenDead,
+  };
+}
 
 @Injectable()
 export class PlatformService {
@@ -30,8 +99,28 @@ export class PlatformService {
     private notificationsService: NotificationsService,
     private monitoring: MonitoringService,
     private trialService: TrialService,
+    private cache: CacheService,
+    private leadCache: LeadCacheService,
   ) {
     this.encryptionKey = this.configService.get<string>('encryption.key') || 'default-32-char-encryption-key';
+  }
+
+  /**
+   * Invalidate the cached saved-accounts list for a user.
+   *
+   * MUST be called AFTER any DB write that affects the sanitized payload:
+   *   - OAuth connect / reconnect (saveAccount)
+   *   - Token refresh success/failure (updateAccountCredentials, proactive cron)
+   *   - Manual edits (updateSavedAccount)
+   *   - Webhook registration (setupThumbtackWebhook)
+   *   - Disconnect / remove (removeSavedAccount, disconnect)
+   *   - Pricing / follow-up settings updates (users.service, follow-up controller)
+   *   - Organization membership changes (teams.service)
+   *
+   * Uses delPattern because keys are partitioned by optional `platform` filter.
+   */
+  async invalidateSavedAccountsCache(userId: string): Promise<void> {
+    await this.cache.delPattern(CacheKeys.savedAccountsPattern(userId));
   }
 
   /**
@@ -463,6 +552,9 @@ export class PlatformService {
         data: { connected: false },
       });
     }
+
+    await this.invalidateSavedAccountsCache(userId);
+    await this.leadCache.invalidateLeadList(userId);
   }
 
   /**
@@ -573,6 +665,8 @@ export class PlatformService {
         webhookId: result.webhookId,
       },
     });
+
+    await this.invalidateSavedAccountsCache(userId);
 
     // Auto-register agent phone as Thumbtack associate phone (allows calling without access code)
     try {
@@ -911,6 +1005,12 @@ export class PlatformService {
     this.trialService.onPlatformConnected(userId, platform).catch((err) => {
       this.logger.warn(`[saveAccount] Trial init failed for ${userId}: ${err.message}`);
     });
+
+    // Invalidate AFTER commit so a concurrent reader cannot repopulate the cache
+    // from pre-commit state.
+    await this.invalidateSavedAccountsCache(userId);
+    // New businessId becomes visible in the leads list filter — invalidate.
+    await this.leadCache.invalidateLeadList(userId);
   }
 
   /**
@@ -1117,6 +1217,10 @@ export class PlatformService {
         data: { credentialsJson: encryptedCredentials },
       });
     }
+
+    // Token refresh flips tokenDead from true → false. Invalidate so the
+    // sanitized list reflects the live token state.
+    await this.invalidateSavedAccountsCache(account.userId);
   }
 
   /**
@@ -1192,7 +1296,19 @@ export class PlatformService {
   /**
    * Get all saved accounts for a user
    */
-  async getSavedAccounts(userId: string, platform?: string) {
+  async getSavedAccounts(userId: string, platform?: string): Promise<SafeSavedAccount[]> {
+    return this.cache.getOrSet<SafeSavedAccount[]>(
+      CacheKeys.savedAccounts(userId, platform),
+      SAVED_ACCOUNTS_TTL_SECONDS,
+      () => this.loadSavedAccounts(userId, platform),
+    );
+  }
+
+  /**
+   * Actual DB read + token-health computation. Never call directly — always
+   * go through `getSavedAccounts` so responses flow through the sanitizer + cache.
+   */
+  private async loadSavedAccounts(userId: string, platform?: string): Promise<SafeSavedAccount[]> {
     const accounts = await this.prisma.savedAccount.findMany({
       where: {
         userId,
@@ -1276,10 +1392,9 @@ export class PlatformService {
       this.logger.warn(`[getSavedAccounts] Dead tokens (unresolved token_refresh errors): ${deadNames.join(', ')}`);
     }
 
-    return accounts.map(({ credentialsJson: _, ...a }) => ({
-      ...a,
-      tokenDead: deadAccountIds.has(a.id),
-    }));
+    // Strict whitelist sanitizer: never let credentialsJson or provider tokens
+    // leave this method. See `SafeSavedAccount` for the contract.
+    return accounts.map((a) => sanitizeSavedAccount(a, deadAccountIds.has(a.id)));
   }
 
   /**
@@ -1309,6 +1424,8 @@ export class PlatformService {
         );
       }
     }
+
+    await this.invalidateSavedAccountsCache(userId);
   }
 
   /**
@@ -1378,6 +1495,10 @@ export class PlatformService {
     await this.prisma.savedAccount.delete({
       where: { id: accountId },
     });
+
+    await this.invalidateSavedAccountsCache(userId);
+    // BusinessId filter disappears from leads list — invalidate.
+    await this.leadCache.invalidateLeadList(userId);
 
     this.logger.log(`[removeSavedAccount] Removed account ${account.businessName}`);
     return { deletedLeads: deletedLeadsCount };

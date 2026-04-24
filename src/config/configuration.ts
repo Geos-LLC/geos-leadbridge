@@ -48,4 +48,13 @@ export default () => ({
 
   // Public base URL of this app — used to build webhook callback URLs sent to Sigcore
   appBaseUrl: process.env.APP_BASE_URL || process.env.FRONTEND_URL || 'https://leadbridge360.com',
+
+  cache: {
+    // Master kill switch. Set CACHE_ENABLED=false to disable Redis without a code change.
+    enabled: process.env.CACHE_ENABLED !== 'false',
+    // Railway auto-injects REDIS_URL when a Redis plugin is attached.
+    redisUrl: process.env.REDIS_URL,
+    // Env-scoped key prefix — lets staging and prod safely share one Redis instance.
+    keyPrefix: `lb:v1:${process.env.NODE_ENV || 'development'}:`,
+  },
 });

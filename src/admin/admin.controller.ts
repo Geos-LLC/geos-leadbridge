@@ -15,11 +15,20 @@ import { ListUsersDto } from './dto/list-users.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from './guards/admin.guard';
+import { CacheService } from '../common/cache/cache.service';
+import { CacheKeys } from '../common/cache/cache-keys';
+import { LeadCacheService } from '../common/cache/lead-cache.service';
+import { PrismaService } from '../common/utils/prisma.service';
 
 @Controller('v1/admin')
 @UseGuards(JwtAuthGuard, AdminGuard)
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly cache: CacheService,
+    private readonly leadCache: LeadCacheService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Get('users')
   async listUsers(@Query() query: ListUsersDto) {
@@ -162,5 +171,55 @@ export class AdminController {
       offset: offset ? parseInt(offset, 10) : 0,
     });
     return { success: true, data: result };
+  }
+
+  // ==========================================================================
+  // Cache admin — protected by JwtAuthGuard + AdminGuard above.
+  // ==========================================================================
+
+  /**
+   * GET /v1/admin/cache/status
+   * Returns Redis connectivity + hit/miss counters. Safe to call frequently.
+   */
+  @Get('cache/status')
+  getCacheStatus() {
+    return {
+      success: true,
+      data: this.cache.getStats(),
+    };
+  }
+
+  /**
+   * POST /v1/admin/cache/invalidate-user/:userId
+   * Wipe every cached entry we know about for a user: /auth/me, saved-accounts,
+   * leads list. Does NOT invalidate per-lead detail keys (unknown set) — those
+   * TTL out or can be invalidated individually via invalidate-lead.
+   */
+  @Post('cache/invalidate-user/:userId')
+  async invalidateUserCache(@Param('userId') userId: string) {
+    await Promise.all([
+      this.cache.del(CacheKeys.me(userId)),
+      this.cache.delPattern(CacheKeys.savedAccountsPattern(userId)),
+      this.leadCache.invalidateLeadList(userId),
+    ]);
+    return { success: true, userId };
+  }
+
+  /**
+   * POST /v1/admin/cache/invalidate-lead/:leadId
+   * Wipe detail + messages for the lead, and the list for its owning user.
+   * Looks up userId from the DB — the endpoint caller does not need to know it.
+   */
+  @Post('cache/invalidate-lead/:leadId')
+  async invalidateLeadCache(@Param('leadId') leadId: string) {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { userId: true },
+    });
+    if (!lead) {
+      return { success: false, leadId, error: 'Lead not found' };
+    }
+    await this.leadCache.invalidateLeadMessagesAndList(lead.userId, leadId);
+    return { success: true, leadId, userId: lead.userId };
   }
 }
