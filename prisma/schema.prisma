@@ -133,8 +133,6 @@ model User {
   subscriptionHistory         SubscriptionHistory[]
   adminLogs                   AdminLog[]
   notificationSettings        NotificationSettings[] // Account-specific and user-level default notification settings
-  poolPhones                  PhonePool[] // Legacy: single-assignment relation
-  phonePoolAssignments        PhonePoolAssignment[] // Many-to-many phone pool assignments
   thumbtackSnapshots          ThumbtackSettingsSnapshot[]
   thumbtackLeadIds            ThumbtackLeadId[]
   callConnectSettings         CallConnectSettings[]
@@ -533,10 +531,7 @@ model NotificationSettings {
   destinationPhone       String? // Company phone to send notifications to
   senderMode             String    @default("shared") // "shared" | "dedicated" | "openphone"
   sigcoreApiKey          String?   @map("callioApiKey") // Encrypted Sigcore API key
-  sigcoreFromPhone       String?   @map("callioFromPhone") // Selected phone number from Sigcore to send from
   sigcoreWorkspaceId     String?   @map("callioWorkspaceId") // Sigcore workspace ID for this tenant
-  sigcoreWebhookId       String?   @map("callioWebhookId") // Sigcore webhook ID for delivery status updates
-  sigcoreProvider        String? // Connected provider: "openphone" | "twilio"
   sigcoreTenantId        String?   @map("sigcore_tenant_id") // Sigcore Tenant UUID for this account
   sigcoreProvisionedAt   DateTime? @map("sigcore_provisioned_at") // When the tenant was provisioned in Sigcore
   template               String    @default("New lead: {{lead.name}}\nPhone: {{lead.phone}}\nService: {{lead.service}}\nLocation: {{lead.location}}") @db.Text
@@ -688,61 +683,6 @@ model AdminLog {
   @@index([adminId])
   @@index([createdAt])
   @@map("admin_logs")
-}
-
-// ==========================================
-// Admin Phone Pool
-// ==========================================
-
-enum PhonePoolStatus {
-  AVAILABLE
-  ASSIGNED
-  RESERVED
-  RELEASED
-}
-
-model PhonePool {
-  id                  String          @id @default(uuid())
-  phoneNumber         String          @unique
-  provider            String          @default("twilio") // "twilio" | "openphone"
-  areaCode            String?
-  state               String? // US state abbreviation
-  friendlyName        String?
-  sigcoreAllocationId String?
-  status              PhonePoolStatus @default(AVAILABLE)
-  assignedToUserId    String? // Legacy: kept for backward compat
-  assignedAt          DateTime? // Legacy: kept for backward compat
-  provisionedAt       DateTime        @default(now())
-  releasedAt          DateTime?
-  smsApproved         Boolean         @default(true) // A2P 10DLC approved for SMS
-  smsCapable          Boolean         @default(false) // Twilio capability: can send/receive SMS
-  voiceCapable        Boolean         @default(false) // Twilio capability: can make/receive calls
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
-
-  // Relationships
-  assignedToUser User?                 @relation(fields: [assignedToUserId], references: [id], onDelete: SetNull)
-  assignments    PhonePoolAssignment[] // Many-to-many assignments
-
-  @@index([status])
-  @@index([areaCode])
-  @@index([assignedToUserId])
-  @@map("phone_pool")
-}
-
-model PhonePoolAssignment {
-  id          String   @id @default(uuid())
-  phonePoolId String
-  userId      String
-  assignedAt  DateTime @default(now())
-
-  phonePool PhonePool @relation(fields: [phonePoolId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([phonePoolId, userId])
-  @@index([userId])
-  @@index([phonePoolId])
-  @@map("phone_pool_assignments")
 }
 
 // ==========================================
