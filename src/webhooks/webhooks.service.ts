@@ -1451,6 +1451,120 @@ export class WebhooksService {
     }
   }
 
+  /**
+   * Classify a Yelp NEW_EVENT by checking the latest event's user_type.
+   *
+   * Fail-open policy: if the fetch fails OR returns an empty list (a NEW_EVENT
+   * webhook always implies at least one event exists, so empty is a fetch
+   * failure signal), return outcome='unknown' and let the caller treat it as
+   * a customer reply while scheduling reconciliation.
+   */
+  private async classifyYelpNewEvent(
+    leadId: string,
+    eventId: string | undefined,
+    accessToken: string,
+  ): Promise<{
+    outcome: 'customer' | 'echo' | 'unknown';
+    reason: string;
+    latestCustomerMessage: string | null;
+    latestCustomerEventId: string | null;
+    latestCustomerSentAt: Date | null;
+    rawEvent: any | null;
+  }> {
+    let events: any[] = [];
+    try {
+      const yelpAdapter = this.platformFactory.getAdapter('yelp') as any;
+      events = await yelpAdapter.getLeadEvents({ accessToken }, leadId);
+    } catch (err: any) {
+      return {
+        outcome: 'unknown',
+        reason: `fetch_threw:${err.message?.substring(0, 120) ?? 'unknown'}`,
+        latestCustomerMessage: null,
+        latestCustomerEventId: null,
+        latestCustomerSentAt: null,
+        rawEvent: null,
+      };
+    }
+
+    if (!Array.isArray(events) || events.length === 0) {
+      // getLeadEvents swallows errors and returns []. A NEW_EVENT webhook
+      // implies the event exists; empty means the fetch effectively failed.
+      return {
+        outcome: 'unknown',
+        reason: 'empty_events_from_adapter',
+        latestCustomerMessage: null,
+        latestCustomerEventId: null,
+        latestCustomerSentAt: null,
+        rawEvent: null,
+      };
+    }
+
+    const sorted = events
+      .slice()
+      .sort((a: any, b: any) => new Date(b.time_created).getTime() - new Date(a.time_created).getTime());
+    const latest = sorted[0];
+
+    const latestConsumer = sorted.find((e: any) => e.user_type === 'CONSUMER' && e.event_type === 'TEXT');
+    let latestCustomerMessage: string | null = null;
+    if (latestConsumer) {
+      const content = latestConsumer.event_content;
+      const extracted = typeof content === 'string'
+        ? content
+        : (content?.text || content?.fallback_text || latestConsumer.text || '');
+      if (extracted) latestCustomerMessage = extracted;
+    }
+    const latestCustomerEventId: string | null = latestConsumer?.id ?? null;
+    const latestCustomerSentAt: Date | null = latestConsumer?.time_created
+      ? new Date(latestConsumer.time_created)
+      : null;
+
+    if (latest?.user_type === 'BIZ') {
+      return {
+        outcome: 'echo',
+        reason: 'latest_is_biz',
+        latestCustomerMessage,
+        latestCustomerEventId,
+        latestCustomerSentAt,
+        rawEvent: latest,
+      };
+    }
+
+    return {
+      outcome: 'customer',
+      reason: 'latest_is_consumer',
+      latestCustomerMessage,
+      latestCustomerEventId,
+      latestCustomerSentAt,
+      rawEvent: latestConsumer ?? latest,
+    };
+  }
+
+  /**
+   * Mark the most recent WebhookEvent row for this Yelp event_id as needing
+   * reconciliation. Picked up by FollowUpSchedulerService.reconcileYelpEvents().
+   */
+  private async markYelpEventForReconciliation(
+    eventId: string,
+    leadId: string,
+    businessId: string,
+    reason: string,
+  ): Promise<void> {
+    const recent = await this.prisma.webhookEvent.findFirst({
+      where: {
+        platform: 'yelp',
+        payload: { contains: eventId },
+      },
+      orderBy: { receivedAt: 'desc' },
+      select: { id: true },
+    });
+    if (!recent) return;
+    const marker = `reconcile:yelp:${leadId}:${businessId}:${reason}:attempts=0`;
+    await this.prisma.webhookEvent.update({
+      where: { id: recent.id },
+      data: { processingError: marker },
+    });
+  }
+
   private async handleYelpNewEvent(businessId: string, data: any): Promise<void> {
     this.logger.log(`[Yelp NEW_EVENT] businessId=${businessId} data=${JSON.stringify(data).substring(0, 500)}`);
     const leadId = data?.lead_id;
@@ -1657,20 +1771,6 @@ export class WebhooksService {
       userId, platform: 'yelp', businessId, leadId: lead.id,
     }).catch(() => {});
 
-    // Update thread context (conversation intelligence layer)
-    try {
-      await this.conversationContextService.recordMessage({
-        conversationId: lead.threadId || '',
-        leadId: lead.id,
-        platform: 'yelp',
-        sender: existingLead ? 'customer' : 'customer', // Yelp NEW_EVENT is always customer-initiated
-        content: leadData.message || '',
-        timestamp: leadData.createdAt || new Date(),
-      });
-    } catch (err: any) {
-      this.logger.warn(`Failed to update Yelp thread context: ${err.message}`);
-    }
-
     // Auto-detect phone number in customer message and save to lead if missing
     if (!lead.customerPhone && leadData.message) {
       const phoneMatch = leadData.message.match(/(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/);
@@ -1689,51 +1789,57 @@ export class WebhooksService {
     const isNewLead = !existingLead && (Date.now() - new Date(lead.createdAt).getTime()) < 10_000;
 
     if (!isNewLead && existingLead) {
-      // Yelp sends NEW_EVENT for BOTH customer messages AND our own outbound messages.
-      // Verify by fetching the latest event from Yelp API — check user_type.
-      // MUST run BEFORE handleCustomerReply — echo would kill follow-up enrollments.
-      let isCustomerMessage = true;
-      let latestCustomerMessage = leadData.message || '';
-      try {
-        const yelpAdapter = this.platformFactory.getAdapter('yelp') as any;
-        const events = await yelpAdapter.getLeadEvents({ accessToken }, leadId);
-        if (events.length > 0) {
-          // Sort by time, get the latest event
-          const sorted = events.sort((a: any, b: any) => new Date(b.time_created).getTime() - new Date(a.time_created).getTime());
-          const latest = sorted[0];
-          if (latest.user_type === 'BIZ') {
-            isCustomerMessage = false;
-            this.logger.log(`Yelp NEW_EVENT for ${leadId} — latest event is BIZ (our own message), skipping customer reply handling`);
-          }
-          // Extract the latest CONSUMER TEXT message for re-engagement alerts
-          const latestConsumer = sorted.find((e: any) => e.user_type === 'CONSUMER' && e.event_type === 'TEXT');
-          if (latestConsumer) {
-            const content = latestConsumer.event_content;
-            const extracted = typeof content === 'string'
-              ? content
-              : (content?.text || content?.fallback_text || latestConsumer.text || '');
-            if (extracted) latestCustomerMessage = extracted;
-          }
-        }
-      } catch {
-        // Fallback: check if we recently sent a message (within 90s)
-        const recentProMessage = lead.threadId ? await this.prisma.message.findFirst({
-          where: { conversationId: lead.threadId, sender: 'pro', sentAt: { gt: new Date(Date.now() - 90_000) } },
-          orderBy: { sentAt: 'desc' },
-        }) : null;
-        if (recentProMessage) {
-          isCustomerMessage = false;
-          this.logger.log(`Yelp NEW_EVENT for ${leadId} — likely echo (pro message ${Math.round((Date.now() - recentProMessage.sentAt.getTime()) / 1000)}s ago), skipping`);
+      // Yelp sends NEW_EVENT for BOTH customer messages AND our own outbound echoes.
+      // Classify by fetching /leads/{id}/events and checking the latest user_type.
+      //
+      // Fail-open policy (Decision 4 in FOLLOW_UP_AND_CONVERSATION_FIX_PLAN.md):
+      // if the fetch fails or returns empty, treat as customer reply AND mark the
+      // WebhookEvent row for reconciliation. Missing a real reply keeps follow-ups
+      // firing against an engaged customer (user-visible). Misclassifying an echo
+      // stops one enrollment that was going to fire anyway (invisible cost).
+      const classification = await this.classifyYelpNewEvent(leadId, eventId, accessToken);
+
+      if (classification.outcome === 'echo') {
+        this.logger.log(`[echo_confirmed] yelp lead=${leadId} eventId=${eventId ?? 'n/a'}`);
+        return;
+      }
+
+      const latestCustomerMessage = classification.latestCustomerMessage || leadData.message || '';
+      const customerEventId = classification.latestCustomerEventId || eventId || null;
+      const customerSentAt = classification.latestCustomerSentAt || new Date();
+
+      if (classification.outcome === 'unknown') {
+        this.logger.warn(`[yelp_event_fetch_failed] lead=${leadId} eventId=${eventId ?? 'n/a'} reason=${classification.reason}`);
+        if (eventId) {
+          await this.markYelpEventForReconciliation(eventId, leadId, businessId, classification.reason)
+            .catch(err => this.logger.warn(`Failed to mark Yelp event for reconciliation: ${err.message}`));
+          this.logger.log(`[yelp_event_reconciliation_scheduled] lead=${leadId} eventId=${eventId}`);
         }
       }
 
-      if (!isCustomerMessage) return;
+      this.logger.log(`[customer_reply_detected] yelp lead=${leadId} outcome=${classification.outcome} msgLen=${latestCustomerMessage.length}`);
+
+      // Persist inbound customer message (dedup via platform+externalMessageId).
+      if (lead.threadId) {
+        await this.conversationContextService.ensureMessagePersisted({
+          conversationId: lead.threadId,
+          leadId: lead.id,
+          userId,
+          platform: 'yelp',
+          externalMessageId: customerEventId,
+          sender: 'customer',
+          senderType: 'customer',
+          content: latestCustomerMessage,
+          sentAt: customerSentAt,
+          rawJson: classification.rawEvent ? JSON.stringify(classification.rawEvent) : undefined,
+        }).catch(err => this.logger.warn(`Failed to persist Yelp inbound message: ${err.message}`));
+      }
 
       // Confirmed customer reply — update conversation lastMessageAt to actual event time
       if (conversation) {
         await this.prisma.conversation.update({
           where: { id: conversation.id },
-          data: { lastMessageAt: new Date() },
+          data: { lastMessageAt: customerSentAt },
         }).catch(() => {});
       }
 
@@ -1790,6 +1896,23 @@ export class WebhooksService {
 
     // New lead — trigger new_lead automation + SMS notification
     this.logger.log(`Yelp new lead: ${leadId} customer=${leadData.customerName} business=${savedAccount.businessName}`);
+
+    // Persist the initial customer message (first event on a brand-new lead is
+    // always consumer-initiated — no echo classification needed).
+    if (lead.threadId && leadData.message) {
+      await this.conversationContextService.ensureMessagePersisted({
+        conversationId: lead.threadId,
+        leadId: lead.id,
+        userId,
+        platform: 'yelp',
+        externalMessageId: eventId ?? null,
+        sender: 'customer',
+        senderType: 'customer',
+        content: leadData.message,
+        sentAt: leadData.createdAt || new Date(),
+        rawJson: JSON.stringify(leadData.raw || data),
+      }).catch(err => this.logger.warn(`Failed to persist initial Yelp message for new lead ${leadId}: ${err.message}`));
+    }
 
     const automationPromise = (async () => {
       try {

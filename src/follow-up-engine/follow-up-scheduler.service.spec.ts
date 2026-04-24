@@ -41,6 +41,10 @@ function buildPrismaMock() {
     message: {
       findFirst: jest.fn().mockResolvedValue(null),
     },
+    webhookEvent: {
+      findMany: jest.fn().mockResolvedValue([]),
+      update: jest.fn().mockResolvedValue({}),
+    },
     $queryRawUnsafe: jest.fn().mockResolvedValue([{ locked: true }]),
   } as any;
 }
@@ -72,7 +76,9 @@ describe('FollowUpSchedulerService', () => {
     const leadsService = { sendMessage: jest.fn().mockResolvedValue({ id: 'msg-1' }) } as any;
     const eventEmitter = { emit: jest.fn() } as any;
     const configService = { get: jest.fn().mockReturnValue(undefined) } as any;
-    service = new FollowUpSchedulerService(prisma, contextService, leadsService, engineService, generatorService, eventEmitter, configService);
+    const trialService = { canProcessLead: jest.fn().mockResolvedValue({ allowed: true, reason: null }) } as any;
+    const platformFactory = { getAdapter: jest.fn().mockReturnValue({ getLeadEvents: jest.fn().mockResolvedValue([]) }) } as any;
+    service = new FollowUpSchedulerService(prisma, contextService, leadsService, engineService, generatorService, eventEmitter, configService, trialService, platformFactory);
     jest.clearAllMocks();
     // Reset mocks after construction
     prisma.followUpEnrollment.findUnique.mockResolvedValue({
@@ -121,6 +127,57 @@ describe('FollowUpSchedulerService', () => {
       );
 
       expect(engineService.stopEnrollment).toHaveBeenCalledWith(ENROLLMENT_ID, 'customer_replied');
+    });
+
+    it('stops enrollment when Lead.lastCustomerActivityAt is newer than enrollment.createdAt (Phase A self-heal)', async () => {
+      // No Message row exists (simulates Yelp pre-Phase-A state) but
+      // Lead.lastCustomerActivityAt was bumped directly — scheduler must
+      // still stop the enrollment.
+      const enrollmentCreated = new Date('2026-04-01T00:00:00Z');
+      const customerActivity = new Date('2026-04-01T01:00:00Z');
+
+      prisma.message.findFirst.mockResolvedValue(null);
+      // processEnrollment calls lead.findUnique multiple times with different
+      // `select` shapes (trial userId, terminal status, quiet-hours businessId,
+      // self-heal lastCustomerActivityAt). Return a superset that satisfies all.
+      prisma.lead.findUnique.mockResolvedValue({
+        id: LEAD_ID,
+        status: 'new',
+        thumbtackStatus: null,
+        userId: 'user-1',
+        businessId: 'biz-1',
+        lastCustomerActivityAt: customerActivity,
+      });
+
+      await (service as any).processEnrollment(
+        { id: ENROLLMENT_ID, conversationId: CONVERSATION_ID, leadId: LEAD_ID, currentStepIndex: 0, createdAt: enrollmentCreated, mode: 'auto_send', sequenceTemplate: { stepsJson: { steps: [{ delayMinutes: 2, objective: 'test' }] } } },
+        new Date('2026-04-01T02:00:00Z'),
+      );
+
+      expect(engineService.stopEnrollment).toHaveBeenCalledWith(ENROLLMENT_ID, 'customer_replied');
+    });
+
+    it('does not stop enrollment when lastCustomerActivityAt predates enrollment.createdAt', async () => {
+      // Customer activity BEFORE the enrollment started — stale signal, ignore.
+      const enrollmentCreated = new Date('2026-04-01T10:00:00Z');
+      const staleActivity = new Date('2026-04-01T09:00:00Z');
+
+      prisma.message.findFirst.mockResolvedValue(null);
+      prisma.lead.findUnique.mockResolvedValue({
+        id: LEAD_ID,
+        status: 'new',
+        thumbtackStatus: null,
+        userId: 'user-1',
+        businessId: 'biz-1',
+        lastCustomerActivityAt: staleActivity,
+      });
+
+      await (service as any).processEnrollment(
+        { id: ENROLLMENT_ID, conversationId: CONVERSATION_ID, leadId: LEAD_ID, currentStepIndex: 0, createdAt: enrollmentCreated, mode: 'auto_send', sequenceTemplate: { stepsJson: { steps: [{ delayMinutes: 2, objective: 'test' }] }, activeHoursStart: null, activeHoursEnd: null, activeHoursTimezone: 'America/New_York', generationMode: 'ai' } },
+        new Date('2026-04-01T12:00:00Z'),
+      );
+
+      expect(engineService.stopEnrollment).not.toHaveBeenCalledWith(ENROLLMENT_ID, 'customer_replied');
     });
 
     it('skips already-sent step (duplicate guard)', async () => {
@@ -320,6 +377,78 @@ describe('FollowUpSchedulerService', () => {
       await service.processFollowUps();
 
       expect(prisma.followUpEnrollment.findMany).toHaveBeenCalled();
+    });
+  });
+
+  describe('reconcileYelpEvents', () => {
+    it('skips when advisory lock 7003 is held by another instance', async () => {
+      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: false }]);
+
+      await service.reconcileYelpEvents();
+
+      expect(prisma.webhookEvent.findMany).not.toHaveBeenCalled();
+    });
+
+    it('marks reconciled:echo when retry classifies latest event as BIZ', async () => {
+      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: true }]);
+      prisma.webhookEvent.findMany.mockResolvedValue([
+        {
+          id: 'evt-1',
+          payload: '{}',
+          processingError: 'reconcile:yelp:lead-X:biz-Y:empty_events_from_adapter:attempts=0',
+        },
+      ]);
+      // Non-null credentialsJson is enough — decryption will fail and we fall
+      // through to the api key (which is also empty from the mocked config).
+      // The adapter is fully mocked so the token value is irrelevant.
+      prisma.savedAccount.findFirst.mockResolvedValue({ credentialsJson: 'unparseable' });
+
+      const getLeadEvents = jest.fn().mockResolvedValue([
+        { id: 'e-biz', user_type: 'BIZ', event_type: 'TEXT', time_created: '2026-04-20T12:00:01Z' },
+        { id: 'e-cons', user_type: 'CONSUMER', event_type: 'TEXT', time_created: '2026-04-20T11:00:00Z' },
+      ]);
+      (service as any).platformFactory = { getAdapter: jest.fn().mockReturnValue({ getLeadEvents }) };
+
+      await service.reconcileYelpEvents();
+
+      const updates = (prisma.webhookEvent.update.mock.calls as any[]).map(c => c[0]);
+      expect(updates[0].data.processingError).toContain('reconciled:echo');
+    });
+
+    it('bumps attempts when retry fetch still fails', async () => {
+      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: true }]);
+      prisma.webhookEvent.findMany.mockResolvedValue([
+        {
+          id: 'evt-2',
+          payload: '{}',
+          processingError: 'reconcile:yelp:lead-X:biz-Y:fetch_threw_timeout:attempts=2',
+        },
+      ]);
+      prisma.savedAccount.findFirst.mockResolvedValue({ credentialsJson: 'unparseable' });
+
+      const getLeadEvents = jest.fn().mockResolvedValue([]);
+      (service as any).platformFactory = { getAdapter: jest.fn().mockReturnValue({ getLeadEvents }) };
+
+      await service.reconcileYelpEvents();
+
+      const updates = (prisma.webhookEvent.update.mock.calls as any[]).map(c => c[0]);
+      expect(updates[0].data.processingError).toMatch(/attempts=3/);
+    });
+
+    it('caps at 5 attempts and marks reconciled:max_attempts', async () => {
+      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: true }]);
+      prisma.webhookEvent.findMany.mockResolvedValue([
+        {
+          id: 'evt-3',
+          payload: '{}',
+          processingError: 'reconcile:yelp:lead-X:biz-Y:empty_events_from_adapter:attempts=5',
+        },
+      ]);
+
+      await service.reconcileYelpEvents();
+
+      const updates = (prisma.webhookEvent.update.mock.calls as any[]).map(c => c[0]);
+      expect(updates[0].data.processingError).toContain('reconciled:max_attempts');
     });
   });
 });

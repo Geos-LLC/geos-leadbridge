@@ -18,6 +18,8 @@ import { FollowUpEngineService } from './follow-up-engine.service';
 import { FollowUpGeneratorService, SequenceStep } from './follow-up-generator.service';
 import { LONG_TERM_STEPS } from './long-term-steps';
 import { TrialService } from '../trial/trial.service';
+import { PlatformFactory } from '../platforms/platform.factory';
+import { EncryptionUtil } from '../common/utils/encryption.util';
 
 @Injectable()
 export class FollowUpSchedulerService implements OnModuleInit {
@@ -35,6 +37,7 @@ export class FollowUpSchedulerService implements OnModuleInit {
     private readonly eventEmitter: EventEmitter2,
     private readonly configService: ConfigService,
     private readonly trialService: TrialService,
+    private readonly platformFactory: PlatformFactory,
   ) {
     // FOLLOWUP_SCHEDULER env var: set to 'false' on staging to let production handle it.
     // Defaults to true (enabled). User controls follow-ups via per-account settings.
@@ -267,6 +270,129 @@ export class FollowUpSchedulerService implements OnModuleInit {
     }
   }
 
+  /**
+   * Cron: every 5 minutes, retry classification of Yelp webhook events that
+   * failed initial fetch. Events are marked by WebhooksService with
+   * `processingError='reconcile:yelp:<leadId>:<businessId>:<reason>:attempts=N'`.
+   *
+   * Fail-open already happened at webhook time — reconciliation is diagnostic:
+   * it confirms or reclassifies the original outcome and caps attempts at 5.
+   */
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async reconcileYelpEvents(): Promise<void> {
+    if (!this.schedulerEnabled) return;
+
+    const lockResult = await this.prisma.$queryRawUnsafe<any[]>('SELECT pg_try_advisory_lock(7003) AS locked');
+    const gotLock = lockResult?.[0]?.locked === true;
+    if (!gotLock) return;
+
+    try {
+      const cutoff = new Date(Date.now() - 60 * 60 * 1000); // 1h window
+      const rows = await this.prisma.webhookEvent.findMany({
+        where: {
+          platform: 'yelp',
+          processingError: { startsWith: 'reconcile:yelp:' },
+          receivedAt: { gte: cutoff },
+        },
+        take: 10,
+        orderBy: { receivedAt: 'asc' },
+      });
+
+      if (rows.length === 0) return;
+
+      this.logger.log(`[FollowUpScheduler] reconcileYelpEvents: processing ${rows.length} pending`);
+
+      for (const row of rows) {
+        await this.reconcileOneYelpEvent(row).catch(err =>
+          this.logger.warn(`[FollowUpScheduler] Reconcile failed for WebhookEvent ${row.id}: ${err.message}`),
+        );
+      }
+    } finally {
+      await this.prisma.$queryRawUnsafe('SELECT pg_advisory_unlock(7003)').catch(() => {});
+    }
+  }
+
+  private async reconcileOneYelpEvent(row: { id: string; payload: string; processingError: string | null }): Promise<void> {
+    const marker = row.processingError ?? '';
+    const parts = marker.split(':'); // reconcile, yelp, leadId, businessId, reason, attempts=N
+    if (parts.length < 6 || parts[0] !== 'reconcile' || parts[1] !== 'yelp') return;
+    const leadId = parts[2];
+    const businessId = parts[3];
+    const reason = parts[4];
+    const attemptsMatch = parts[5].match(/attempts=(\d+)/);
+    const attempts = attemptsMatch ? parseInt(attemptsMatch[1], 10) : 0;
+
+    if (attempts >= 5) {
+      await this.prisma.webhookEvent.update({
+        where: { id: row.id },
+        data: { processingError: `reconciled:max_attempts:${reason}` },
+      });
+      this.logger.warn(`[FollowUpScheduler] Yelp event reconcile capped for lead=${leadId} business=${businessId}`);
+      return;
+    }
+
+    const savedAccount = await this.prisma.savedAccount.findFirst({
+      where: { platform: 'yelp', businessId },
+      select: { credentialsJson: true },
+    });
+    if (!savedAccount?.credentialsJson) {
+      await this.prisma.webhookEvent.update({
+        where: { id: row.id },
+        data: { processingError: `reconciled:no_account:${reason}` },
+      });
+      return;
+    }
+
+    const encryptionKey = this.configService.get<string>('encryption.key') || '';
+    let accessToken = this.configService.get<string>('yelp.apiKey') || '';
+    try {
+      const creds: any = EncryptionUtil.decryptObject(savedAccount.credentialsJson, encryptionKey);
+      if (creds?.accessToken) accessToken = creds.accessToken;
+    } catch {
+      // fall through with api key
+    }
+
+    let events: any[] = [];
+    try {
+      const yelpAdapter = this.platformFactory.getAdapter('yelp') as any;
+      events = await yelpAdapter.getLeadEvents({ accessToken }, leadId);
+    } catch (err: any) {
+      await this.bumpReconcileAttempts(row.id, leadId, businessId, reason, attempts + 1);
+      this.logger.warn(`[FollowUpScheduler] Reconcile fetch still failing lead=${leadId} attempts=${attempts + 1}: ${err.message}`);
+      return;
+    }
+
+    if (!Array.isArray(events) || events.length === 0) {
+      await this.bumpReconcileAttempts(row.id, leadId, businessId, reason, attempts + 1);
+      return;
+    }
+
+    const sorted = events
+      .slice()
+      .sort((a: any, b: any) => new Date(b.time_created).getTime() - new Date(a.time_created).getTime());
+    const latest = sorted[0];
+    const outcome = latest?.user_type === 'BIZ' ? 'echo' : 'customer';
+
+    await this.prisma.webhookEvent.update({
+      where: { id: row.id },
+      data: { processingError: `reconciled:${outcome}:${reason}` },
+    });
+    this.logger.log(`[FollowUpScheduler] Yelp event reconciled lead=${leadId} outcome=${outcome} (after ${attempts + 1} attempt(s))`);
+  }
+
+  private async bumpReconcileAttempts(
+    eventRowId: string,
+    leadId: string,
+    businessId: string,
+    reason: string,
+    nextAttempts: number,
+  ): Promise<void> {
+    await this.prisma.webhookEvent.update({
+      where: { id: eventRowId },
+      data: { processingError: `reconcile:yelp:${leadId}:${businessId}:${reason}:attempts=${nextAttempts}` },
+    });
+  }
+
   private async processEnrollment(enrollment: any, now: Date): Promise<void> {
     // Idempotency: re-check status
     const fresh = await this.prisma.followUpEnrollment.findUnique({
@@ -374,18 +500,33 @@ export class FollowUpSchedulerService implements OnModuleInit {
       }
     }
 
-    // Check if customer has replied SINCE the enrollment was created
-    // Don't use awaitingCustomerReply — it may be false if the business hasn't
-    // sent the first message yet. Instead, check if there's a customer message
-    // after the enrollment was created.
+    // Check if customer has replied SINCE the enrollment was created.
+    // Two signals, OR-ed together (defense in depth for providers that may
+    // fail to persist a Message row):
+    //   1. Message.sender='customer' newer than enrollment.createdAt
+    //   2. Lead.lastCustomerActivityAt newer than enrollment.createdAt
+    // We deliberately do NOT use ThreadContext.awaitingCustomerReply — it
+    // can be false if the business hasn't sent the first message yet.
     const customerRepliedSinceEnrollment = await this.prisma.message.findFirst({
       where: {
         conversationId: enrollment.conversationId,
         sender: 'customer',
         sentAt: { gt: enrollment.createdAt },
       },
+      select: { id: true },
     });
-    if (customerRepliedSinceEnrollment) {
+    let leadActivitySinceEnrollment = false;
+    if (!customerRepliedSinceEnrollment && enrollment.leadId) {
+      const leadActivity = await this.prisma.lead.findUnique({
+        where: { id: enrollment.leadId },
+        select: { lastCustomerActivityAt: true },
+      });
+      leadActivitySinceEnrollment = !!(
+        leadActivity?.lastCustomerActivityAt &&
+        leadActivity.lastCustomerActivityAt > enrollment.createdAt
+      );
+    }
+    if (customerRepliedSinceEnrollment || leadActivitySinceEnrollment) {
       await this.engineService.stopEnrollment(enrollment.id, 'customer_replied');
       return;
     }
