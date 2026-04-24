@@ -1143,8 +1143,7 @@ export class WebhooksService {
         // configured fromPhone doesn't match the inbound toNumber (ghost events).
         if (accountId) {
           try {
-            // Only forward when the customer texted a bot number (TenantPhoneNumber).
-            // Messages to BYO/OpenPhone or other numbers are NOT forwarded.
+            // Only forward when the customer texted a dedicated TenantPhoneNumber.
             const acctUser = await this.prisma.savedAccount.findUnique({
               where: { id: accountId },
               select: { userId: true },
@@ -1256,12 +1255,11 @@ export class WebhooksService {
         this.logger.warn(`Failed to handle customer reply rules: ${err.message}`);
       }
 
-      // Forward SMS to agent only when the customer texted the bot number (dedicated number).
+      // Forward SMS to agent only when the customer texted a dedicated TenantPhoneNumber.
       // Skip forwarding when:
       // - Purpose indicates this is NOT a customer-originating message (sms_forwarding, agent_notification, etc.)
       // - toNumber doesn't match a dedicated bot number for this account — LeadBridge only forwards
-      //   messages that arrive on numbers it controls (TenantPhoneNumber). Messages to BYO/OpenPhone
-      //   numbers or other numbers are NOT forwarded (the agent receives those natively).
+      //   messages that arrive on numbers it controls (TenantPhoneNumber).
       const noForwardPurposes = new Set(['sms_forwarding', 'agent_notification', 'agent_guidance', 'icc_forward']);
       if (conversationPurpose && noForwardPurposes.has(conversationPurpose)) {
         this.logger.log(
@@ -1273,8 +1271,7 @@ export class WebhooksService {
             where: { userId: lead.userId, businessId: lead.businessId || undefined },
           });
           if (fwdAccount) {
-            // Only forward when the customer texted a bot number (TenantPhoneNumber) owned by this user.
-            // This prevents forwarding messages that arrived on BYO/OpenPhone or unrelated numbers.
+            // Only forward when the customer texted a dedicated TenantPhoneNumber owned by this user.
             const normToNumber = toNumber?.replace(/\D/g, '').slice(-10);
             const botPhone = normToNumber
               ? await this.prisma.tenantPhoneNumber.findFirst({

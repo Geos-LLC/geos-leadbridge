@@ -221,7 +221,6 @@ export interface NotificationSettings {
   enabled: boolean;
   destinationPhone: string | null;
   sigcoreApiKey: string | null; // Masked in response
-  sigcoreFromPhone: string | null;
   sigcoreWorkspaceId: string | null;
   sigcoreConnected: boolean;
   sigcoreProvisioned: boolean;

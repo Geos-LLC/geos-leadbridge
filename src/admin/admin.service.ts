@@ -569,26 +569,13 @@ export class AdminService {
           savedAccount = sa;
           const ns = await this.prisma.notificationSettings.findUnique({
             where: { savedAccountId: phone.savedAccountId },
-            select: { sigcoreProvider: true, sigcoreFromPhone: true, senderMode: true },
+            select: { senderMode: true },
           });
           notificationSettings = ns;
         }
-        // Check if this phone exists in the pool to determine its origin provider
-        let originProvider: string | null = null;
-        const poolEntry = await this.prisma.phonePool.findUnique({
-          where: { phoneNumber: phone.phoneNumber },
-          select: { provider: true },
-        });
-        originProvider = poolEntry?.provider || null;
-
-        // Phone number's origin provider (from pool/Sigcore) takes precedence.
-        // notificationSettings.sigcoreProvider is the tenant's routing config, not where the number is hosted.
-        // All TenantPhoneNumbers provisioned via Sigcore are Twilio numbers.
-        const resolvedProvider = originProvider || (phone.sigcoreAllocationId ? 'twilio' : null) || null;
 
         const { user: usr, ...rest } = phone;
 
-        // Compute tenant display name: user account name first, then GBP business name
         const tenantName = usr?.name || savedAccount?.businessName || null;
         return {
           ...rest,
@@ -596,8 +583,6 @@ export class AdminService {
           savedAccount,
           tenantName,
           notificationSettings: {
-            sigcoreProvider: resolvedProvider,
-            sigcoreFromPhone: notificationSettings?.sigcoreFromPhone || null,
             senderMode: notificationSettings?.senderMode || null,
           },
         };

@@ -68,7 +68,6 @@ const mockSettings = {
   savedAccountId: ACCOUNT_ID,
   enabled: true,
   sigcoreApiKey: 'sk-test-key',
-  sigcoreFromPhone: '+15550000001',
   sigcoreWorkspaceId: 'ws-1',
   destinationPhone: '+15550000002',
   template: 'New lead: {{customerName}}',

@@ -766,8 +766,8 @@ export class ThumbtackController {
     if (!account.webhookId) connectionIssues.push('No webhook registered — tap Reconnect to fix');
 
     // Check notification health based on what actually matters for SMS delivery.
-    // Mirror the actual sending fallback chain in sendNotificationWithRule:
-    //   fromPhone: dedicated TenantPhoneNumber (primary) → rule.fromPhone → settings.sigcoreFromPhone → pool phone
+    // Mirror the actual sending chain in sendNotificationWithRule:
+    //   fromPhone: dedicated TenantPhoneNumber via resolveBotPhone → rule.fromPhone
     //   toPhone:   rule.toPhone → settings.destinationPhone
     const notificationIssues: string[] = [];
     const allNewLeadRules = (notifSettings?.notificationRules || []).filter((r: any) => r.triggerType === 'new_lead');
@@ -777,12 +777,8 @@ export class ThumbtackController {
     } else if (enabledNewLeadRules.length === 0) {
       notificationIssues.push('Lead alert rule exists but is disabled — toggle it on in Lead Alerts');
     } else {
-      // Check if at least ONE enabled rule can successfully fire.
-      const settingsFromPhone = notifSettings?.sigcoreFromPhone;
       const settingsDestPhone = notifSettings?.destinationPhone;
 
-      // Check for dedicated number (primary fromPhone source in sendNotificationWithRule)
-      // Look for phone linked to this account first, then any active phone for the user
       const dedicatedPhone = await this.prisma.tenantPhoneNumber.findFirst({
         where: { userId: account.userId, status: 'ACTIVE', OR: [{ savedAccountId: account.id }, { savedAccountId: null }] },
         select: { phoneNumber: true },
@@ -793,29 +789,17 @@ export class ThumbtackController {
 
       const hasWorkingRule = enabledNewLeadRules.some((r: any) => {
         const hasTo = r.sendToCustomer || r.toPhone || settingsDestPhone;
-        const hasFrom = dedicatedPhone?.phoneNumber || r.fromPhone || settingsFromPhone;
+        const hasFrom = dedicatedPhone?.phoneNumber || r.fromPhone;
         return hasTo && hasFrom;
       });
 
       if (!hasWorkingRule) {
         const anyHasTo = enabledNewLeadRules.some((r: any) => r.sendToCustomer || r.toPhone || settingsDestPhone);
-        const anyHasFrom = dedicatedPhone?.phoneNumber || enabledNewLeadRules.some((r: any) => r.fromPhone || settingsFromPhone);
+        const anyHasFrom = dedicatedPhone?.phoneNumber || enabledNewLeadRules.some((r: any) => r.fromPhone);
 
         if (!anyHasFrom) {
-          // Last fallback: check for admin-assigned pool phone
-          const poolAssignment = await this.prisma.phonePoolAssignment.findFirst({
-            where: { userId: account.userId, phonePool: { status: { not: 'RELEASED' } } },
-            include: { phonePool: { select: { phoneNumber: true } } },
-            orderBy: { assignedAt: 'desc' },
-          });
-          if (poolAssignment?.phonePool?.phoneNumber) {
-            if (!anyHasTo) {
-              notificationIssues.push('Lead alert rule is missing a destination phone number');
-            }
-          } else {
-            if (!anyHasTo) notificationIssues.push('Lead alert rule is missing a destination phone number');
-            notificationIssues.push('Lead alert rule is missing a sender phone number');
-          }
+          if (!anyHasTo) notificationIssues.push('Lead alert rule is missing a destination phone number');
+          notificationIssues.push('Lead alert rule is missing a sender phone number');
         } else {
           notificationIssues.push('Lead alert rule is missing a destination phone number');
         }
@@ -829,7 +813,7 @@ export class ThumbtackController {
 
     // Diagnostic log — track exactly what the health check finds
     console.log(`[Health] account=${account.businessName} (${id}) | ` +
-      `settings=${!!notifSettings} enabled=${notifSettings?.enabled} sigcoreFromPhone=${!!notifSettings?.sigcoreFromPhone} destPhone=${!!notifSettings?.destinationPhone} | ` +
+      `settings=${!!notifSettings} enabled=${notifSettings?.enabled} destPhone=${!!notifSettings?.destinationPhone} | ` +
       `allRules=${notifSettings?.notificationRules?.length || 0} newLeadAll=${allNewLeadRules.length} newLeadEnabled=${enabledNewLeadRules.length} | ` +
       `rules=${JSON.stringify(allNewLeadRules.map((r: any) => ({ name: r.name, enabled: r.enabled, fromPhone: !!r.fromPhone, toPhone: !!r.toPhone, sendToCustomer: r.sendToCustomer })))} | ` +
       `connIssues=${JSON.stringify(connectionIssues)} notifIssues=${JSON.stringify(notificationIssues)}`);

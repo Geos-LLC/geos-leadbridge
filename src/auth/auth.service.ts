@@ -8,7 +8,6 @@ import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../common/utils/prisma.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { SigcoreService } from '../sigcore/sigcore.service';
-import { AdminPhonePoolService } from '../admin/admin-phone-pool.service';
 import * as crypto from 'crypto';
 import emailjs from '@emailjs/nodejs';
 
@@ -20,7 +19,6 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private sigcoreService: SigcoreService,
-    private adminPhonePoolService: AdminPhonePoolService,
   ) {}
 
   /**
@@ -61,19 +59,6 @@ export class AuthService {
         trialUsed: false,
       },
     });
-
-    // Auto-assign phone from admin pool (round-robin with area code preference)
-    try {
-      const assigned = await this.adminPhonePoolService.autoAssign(user.id);
-      if (assigned) {
-        this.logger.log(`Auto-assigned pool phone ${assigned.phoneNumber} to new user ${user.id}`);
-      } else {
-        this.logger.log(`No pool phones available for user ${user.id} - they can connect later`);
-      }
-    } catch (error) {
-      this.logger.error(`Pool auto-assign failed for user ${user.id}:`, error.message);
-      // Don't fail registration - user can connect manually later
-    }
 
     // Register in Sigcore business identity model (non-blocking)
     this.sigcoreService.registerBusinessIdentity(user.id).catch(e => {
