@@ -568,4 +568,27 @@ export class NotificationsController {
     const result = await this.notificationsService.cancelTenantPhoneNumber(user.id, id);
     return result;
   }
+
+  @Post('tenant-phones/:id/assign')
+  async assignTenantPhone(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body() body: { savedAccountId: string | null },
+  ) {
+    const result = await this.notificationsService.assignTenantPhoneNumber(
+      user.id,
+      id,
+      body.savedAccountId ?? null,
+    );
+    return result;
+  }
+
+  @Post('tenant-phones/:id/restore')
+  async restoreTenantPhone(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    const result = await this.notificationsService.restoreTenantPhoneNumber(user.id, id);
+    return result;
+  }
 }

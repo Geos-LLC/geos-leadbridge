@@ -394,6 +394,12 @@ export function Services() {
   const [dpSearchError, setDpSearchError] = useState<string | null>(null);
   const [dpSmsConsent, setDpSmsConsent] = useState(false);
   const [dpPhonePrice, setDpPhonePrice] = useState<number | null>(null);
+  const [dpGracePeriodDays, setDpGracePeriodDays] = useState<number>(30);
+  // Tenant-phone management (release / restore / reassign)
+  const [releasingPhoneId, setReleasingPhoneId] = useState<string | null>(null);
+  const [restoringPhoneId, setRestoringPhoneId] = useState<string | null>(null);
+  const [assigningPhoneId, setAssigningPhoneId] = useState<string | null>(null);
+  const [releaseConfirmPhone, setReleaseConfirmPhone] = useState<TenantPhoneNumber | null>(null);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Template editor modal state
   const [templateEditor, setTemplateEditor] = useState<{
@@ -715,10 +721,17 @@ export function Services() {
       ]);
 
       const ccs = ccRes.settings;
-      const activeTenantPhones = tenantPhonesRes.success ? tenantPhonesRes.data.filter(tp => tp.status === 'ACTIVE') : [];
-      setTenantPhones(activeTenantPhones);
-      // Bot number defaults to first dedicated (tenant) phone — never pool
-      const defaultBotNumber = activeTenantPhones[0]?.phoneNumber || '';
+      const visibleTenantPhones = tenantPhonesRes.success
+        ? tenantPhonesRes.data
+            .filter(tp => tp.status === 'ACTIVE' || tp.status === 'GRACE_PERIOD')
+            .sort((a, b) => {
+              if (a.status === b.status) return 0;
+              return a.status === 'ACTIVE' ? -1 : 1;
+            })
+        : [];
+      setTenantPhones(visibleTenantPhones);
+      // Bot number defaults to first ACTIVE dedicated (tenant) phone — never pool, never grace period
+      const defaultBotNumber = visibleTenantPhones.find(tp => tp.status === 'ACTIVE')?.phoneNumber || '';
       if (ccs) {
         setCcEnabled(ccs.enabled);
         setCcMode(ccs.mode);
@@ -896,7 +909,7 @@ export function Services() {
       // Persist to module-level cache so returning to this page is instant
       _svcCache.set(accountId, {
         autoReplyRules: allAutoReplies, leadAlertRule: leadAlert, templates: allTemplates,
-        poolPhones: poolRes.phoneNumbers, tenantPhones: activeTenantPhones, ctOwnPhoneNumbers: [],
+        poolPhones: poolRes.phoneNumbers, tenantPhones: visibleTenantPhones, ctOwnPhoneNumbers: [],
         ccEnabled: ccs?.enabled ?? false, ccMode: (ccs?.mode || 'AGENT_FIRST') as CallConnectMode,
         ccAgentStrategy: (ccs?.agentStrategy || 'owner') as AgentStrategy,
         ccAgentPhone: agentPhoneDefault, ccMaxAttempts: ccs?.maxAgentAttempts ?? 2,
@@ -1467,7 +1480,12 @@ export function Services() {
   function openDedicatedModal() {
     setShowDedicatedModal(true);
     setShowPhoneSetupModal(false);
-    notificationsApi.getPhonePricing().then(r => { if (r.success) setDpPhonePrice(r.data.priceMonthly); }).catch(() => {});
+    notificationsApi.getPhonePricing().then(r => {
+      if (r.success) {
+        setDpPhonePrice(r.data.priceMonthly);
+        setDpGracePeriodDays(r.data.gracePeriodDays ?? 30);
+      }
+    }).catch(() => {});
   }
 
   async function handleOpConnect() {
@@ -1505,6 +1523,76 @@ export function Services() {
       setDpSearchError(err.response?.data?.message || err.message || 'Search failed');
     } finally {
       setDpSearchLoading(false);
+    }
+  }
+
+  async function handleReleasePhone(phoneId: string) {
+    setReleasingPhoneId(phoneId);
+    try {
+      const result = await notificationsApi.cancelTenantPhone(phoneId);
+      if (result.success) {
+        const refreshed = await notificationsApi.listTenantPhones();
+        if (refreshed.success) {
+          const next = refreshed.data
+            .filter(tp => tp.status === 'ACTIVE' || tp.status === 'GRACE_PERIOD')
+            .sort((a, b) => (a.status === b.status ? 0 : a.status === 'ACTIVE' ? -1 : 1));
+          setTenantPhones(next);
+        }
+        setReleaseConfirmPhone(null);
+        showSuccess('Number scheduled for release');
+      } else {
+        setError(result.error || 'Failed to release number');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'Failed to release number');
+    } finally {
+      setReleasingPhoneId(null);
+    }
+  }
+
+  async function handleRestorePhone(phoneId: string) {
+    setRestoringPhoneId(phoneId);
+    try {
+      const result = await notificationsApi.restoreTenantPhone(phoneId);
+      if (result.success) {
+        const refreshed = await notificationsApi.listTenantPhones();
+        if (refreshed.success) {
+          const next = refreshed.data
+            .filter(tp => tp.status === 'ACTIVE' || tp.status === 'GRACE_PERIOD')
+            .sort((a, b) => (a.status === b.status ? 0 : a.status === 'ACTIVE' ? -1 : 1));
+          setTenantPhones(next);
+        }
+        showSuccess('Number restored');
+      } else {
+        setError(result.error || 'Failed to restore number');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'Failed to restore number');
+    } finally {
+      setRestoringPhoneId(null);
+    }
+  }
+
+  async function handleAssignPhone(phoneId: string, savedAccountId: string | null) {
+    setAssigningPhoneId(phoneId);
+    try {
+      const result = await notificationsApi.assignTenantPhone(phoneId, savedAccountId);
+      if (result.success) {
+        const refreshed = await notificationsApi.listTenantPhones();
+        if (refreshed.success) {
+          const next = refreshed.data
+            .filter(tp => tp.status === 'ACTIVE' || tp.status === 'GRACE_PERIOD')
+            .sort((a, b) => (a.status === b.status ? 0 : a.status === 'ACTIVE' ? -1 : 1));
+          setTenantPhones(next);
+        }
+        showSuccess('Assignment updated · only affects new conversations');
+      } else {
+        setError(result.error || 'Failed to reassign');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'Failed to reassign');
+    } finally {
+      setAssigningPhoneId(null);
     }
   }
 
@@ -1915,10 +2003,10 @@ export function Services() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div data-tour="business-phone">
                 <div className="flex items-center gap-2 mb-1">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">📱 Your Business Phone</label>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">📱 Business Phone</label>
                   <TierBadge tier="respond" />
                 </div>
-                <p className="text-[11px] text-slate-400 mb-2">Lead notifications and alerts are sent to this number.</p>
+                <p className="text-[11px] text-slate-400 mb-2">Used for alerts only. Lead notifications are sent here.</p>
                 {editingAgentPhone ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1984,25 +2072,111 @@ export function Services() {
               </div>
             </div>
 
-            {/* Row 2 — Engage tier: LeadBridge Number + Test Number & buttons. Shown only once the number is acquired. */}
+            {/* Row 2 — Engage tier: LeadBridge Numbers list + Test Number. Shown only once at least one number is acquired. */}
             {tenantPhones.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-4">
                 <div data-tour="bot-number">
                   <div className="flex items-center gap-2 mb-1">
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🤖 LeadBridge Number</label>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🤖 LeadBridge Numbers</label>
                     <TierBadge tier="engage" />
                   </div>
-                  <p className="text-[11px] text-slate-400 mb-2">Customers receive texts and calls from this number.</p>
-                  <div className="w-full rounded-xl p-3 text-sm font-medium bg-blue-50/30 border-2 border-blue-200 text-blue-700">
-                    {`${tenantPhones[0].phoneNumber}${tenantPhones[0].friendlyName && tenantPhones[0].friendlyName !== tenantPhones[0].phoneNumber ? ` — ${tenantPhones[0].friendlyName}` : ''}`}
+                  <p className="text-[11px] text-slate-400 mb-2">Used for texting and calling leads.</p>
+                  <div className="space-y-2">
+                    {tenantPhones.map(phone => {
+                      const isGrace = phone.status === 'GRACE_PERIOD';
+                      const isReleasing = releasingPhoneId === phone.id;
+                      const isRestoring = restoringPhoneId === phone.id;
+                      const isAssigning = assigningPhoneId === phone.id;
+                      let daysLeft: number | null = null;
+                      if (isGrace && phone.gracePeriodEndsAt) {
+                        const diffMs = new Date(phone.gracePeriodEndsAt).getTime() - Date.now();
+                        daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+                      }
+                      return (
+                        <div
+                          key={phone.id}
+                          className={`rounded-xl border p-3 ${
+                            isGrace ? 'border-amber-200 bg-amber-50/40' : 'border-blue-200 bg-blue-50/30'
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex-1 min-w-[180px]">
+                              <div className={`font-mono text-sm font-semibold ${isGrace ? 'text-amber-800' : 'text-blue-700'}`}>
+                                {phone.phoneNumber}
+                                {phone.friendlyName && phone.friendlyName !== phone.phoneNumber && (
+                                  <span className="ml-2 text-xs font-normal text-slate-500">— {phone.friendlyName}</span>
+                                )}
+                              </div>
+                              {isGrace && (
+                                <div className="mt-1 flex items-center gap-1 text-[11px] text-amber-700">
+                                  <Clock size={11} />
+                                  Releases in {daysLeft} day{daysLeft === 1 ? '' : 's'} · billing already stopped
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <label className="text-[11px] text-slate-500 whitespace-nowrap">Assigned to:</label>
+                              <select
+                                value={phone.savedAccountId || ''}
+                                onChange={e => handleAssignPhone(phone.id, e.target.value || null)}
+                                disabled={isGrace || isAssigning}
+                                className="px-2 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400 max-w-[180px]"
+                              >
+                                <option value="">Unassigned (shared)</option>
+                                {accounts.map(acc => (
+                                  <option key={acc.id} value={acc.id}>
+                                    {acc.platform === 'yelp' ? '🔴 ' : '🔵 '}{acc.businessName}
+                                  </option>
+                                ))}
+                              </select>
+                              {isGrace ? (
+                                <button
+                                  onClick={() => handleRestorePhone(phone.id)}
+                                  disabled={isRestoring}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 disabled:opacity-50 transition-colors whitespace-nowrap"
+                                >
+                                  {isRestoring ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                                  {isRestoring ? 'Restoring…' : 'Restore'}
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => setReleaseConfirmPhone(phone)}
+                                  disabled={isReleasing}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-600 bg-red-50 border border-red-100 rounded-lg hover:bg-red-100 disabled:opacity-50 transition-colors whitespace-nowrap"
+                                >
+                                  {isReleasing ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                                  {isReleasing ? 'Releasing…' : 'Release'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          {isAssigning && (
+                            <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1">
+                              <Loader2 size={10} className="animate-spin" /> Updating assignment…
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <p className="text-[11px] text-slate-400 flex items-center gap-1 pl-1">
+                      <AlertCircle size={11} /> Changing assignment only affects new conversations.
+                    </p>
                   </div>
+                  <button
+                    onClick={openDedicatedModal}
+                    className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-dashed border-blue-300 rounded-xl hover:bg-blue-100 transition-colors"
+                  >
+                    <Phone size={12} />
+                    + Buy another number {dpPhonePrice != null ? `— $${dpPhonePrice.toFixed(0)}/mo` : ''}
+                  </button>
                 </div>
+
                 <div data-tour="test-number">
                   <div className="flex items-center gap-2 mb-1">
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🧪 Test Number</label>
                     <TierBadge tier="engage" />
                   </div>
-                  <p className="text-[11px] text-slate-400 mb-2">Used to test SMS and calls from your LeadBridge Number.</p>
+                  <p className="text-[11px] text-slate-400 mb-2">Used to test SMS and calls from the LeadBridge Number assigned to this account.</p>
                   <input
                     type="tel"
                     value={ccTestPhone}
@@ -4048,8 +4222,19 @@ export function Services() {
             <button onClick={() => setShowDedicatedModal(false)} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors">
               <X className="w-5 h-5" />
             </button>
-            <h3 className="text-xl font-bold text-slate-900 mb-2">Get a LeadBridge Number</h3>
-            <p className="text-sm text-slate-500 mb-5 leading-relaxed">Search for an available number by area code or city, then purchase it for your account.</p>
+            <h3 className="text-xl font-bold text-slate-900 mb-2">
+              {tenantPhones.length > 0 ? 'Buy another LeadBridge Number' : 'Get your LeadBridge Number'}
+            </h3>
+            <p className="text-sm text-slate-500 mb-4 leading-relaxed">
+              {tenantPhones.length > 0
+                ? 'Additional numbers are useful for separate communication per business or multi-location setup.'
+                : 'Search for an available number by area code or city, then pick it for your account.'}
+            </p>
+            <div className={`rounded-xl p-3 mb-4 text-xs leading-relaxed ${tenantPhones.length > 0 ? 'bg-blue-50/60 border border-blue-100 text-blue-800' : 'bg-emerald-50/60 border border-emerald-100 text-emerald-800'}`}>
+              {tenantPhones.length > 0
+                ? (<><span className="font-semibold">${dpPhonePrice != null ? dpPhonePrice.toFixed(0) : '—'}/mo</span> add-on, billed on top of your current plan.</>)
+                : (<><span className="font-semibold">Included with your plan.</span> No extra charge for your first number.</>)}
+            </div>
 
             {dpSearchError && (
               <div className="mb-4 bg-red-50 border border-red-100 rounded-xl p-3 flex items-center gap-2 text-red-600 text-sm">
@@ -4112,24 +4297,67 @@ export function Services() {
             {/* Available numbers grid */}
             {dpAvailableNumbers.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
-                {dpAvailableNumbers.map(num => (
-                  <div key={num.phoneNumber} className="bg-slate-50 rounded-xl border border-slate-200 p-3 flex flex-col gap-2 hover:border-blue-200 transition-all">
-                    <div>
-                      <div className="font-bold text-slate-900 font-mono text-sm">{num.phoneNumber}</div>
-                      <div className="text-xs text-slate-500">{[num.locality, num.region].filter(Boolean).join(', ') || 'US'}</div>
-                      {dpPhonePrice != null && <div className="text-xs text-slate-400">${dpPhonePrice.toFixed(2)}/mo</div>}
+                {dpAvailableNumbers.map(num => {
+                  const isAdditional = tenantPhones.length > 0;
+                  return (
+                    <div key={num.phoneNumber} className="bg-slate-50 rounded-xl border border-slate-200 p-3 flex flex-col gap-2 hover:border-blue-200 transition-all">
+                      <div>
+                        <div className="font-bold text-slate-900 font-mono text-sm">{num.phoneNumber}</div>
+                        <div className="text-xs text-slate-500">{[num.locality, num.region].filter(Boolean).join(', ') || 'US'}</div>
+                        {isAdditional
+                          ? (dpPhonePrice != null && <div className="text-xs text-slate-400">${dpPhonePrice.toFixed(2)}/mo (add-on)</div>)
+                          : <div className="text-xs text-emerald-600 font-medium">Included with your plan</div>}
+                      </div>
+                      <button
+                        onClick={() => handleDpPurchase(num.phoneNumber)}
+                        disabled={dpPurchasingNumber !== null || !dpSmsConsent}
+                        className="w-full px-3 py-2 bg-blue-600 text-white rounded-lg font-semibold text-xs hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
+                      >
+                        {dpPurchasingNumber === num.phoneNumber ? <><Loader2 size={12} className="animate-spin" /> Getting...</> : 'Get this number'}
+                      </button>
                     </div>
-                    <button
-                      onClick={() => handleDpPurchase(num.phoneNumber)}
-                      disabled={dpPurchasingNumber !== null || !dpSmsConsent}
-                      className="w-full px-3 py-2 bg-blue-600 text-white rounded-lg font-semibold text-xs hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
-                    >
-                      {dpPurchasingNumber === num.phoneNumber ? <><Loader2 size={12} className="animate-spin" /> Getting...</> : 'Get this number'}
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Release confirmation modal */}
+      {releaseConfirmPhone && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setReleaseConfirmPhone(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Release this number?</h3>
+                <p className="text-xs font-mono text-slate-500 mt-0.5">{releaseConfirmPhone.phoneNumber}</p>
+              </div>
+            </div>
+            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 mb-4 text-xs text-amber-800 leading-relaxed space-y-1">
+              <p>• Billing stops immediately.</p>
+              <p>• The number stays active for <span className="font-semibold">{dpGracePeriodDays} days</span> so you can restore it.</p>
+              <p>• After that, the number is released and <span className="font-semibold">cannot be recovered</span>.</p>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setReleaseConfirmPhone(null)}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleReleasePhone(releaseConfirmPhone.id)}
+                disabled={releasingPhoneId === releaseConfirmPhone.id}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+              >
+                {releasingPhoneId === releaseConfirmPhone.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                Release number
+              </button>
+            </div>
           </div>
         </div>
       )}

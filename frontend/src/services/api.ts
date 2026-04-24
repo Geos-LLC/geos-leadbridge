@@ -821,6 +821,14 @@ export const notificationsApi = {
     const { data } = await api.post(`/v1/notifications/tenant-phones/${tenantPhoneId}/cancel`);
     return data;
   },
+  assignTenantPhone: async (tenantPhoneId: string, savedAccountId: string | null): Promise<{ success: boolean; tenantPhone?: TenantPhoneNumber; error?: string }> => {
+    const { data } = await api.post(`/v1/notifications/tenant-phones/${tenantPhoneId}/assign`, { savedAccountId });
+    return data;
+  },
+  restoreTenantPhone: async (tenantPhoneId: string): Promise<{ success: boolean; tenantPhone?: TenantPhoneNumber; error?: string }> => {
+    const { data } = await api.post(`/v1/notifications/tenant-phones/${tenantPhoneId}/restore`);
+    return data;
+  },
   // Customer Texting
   getCustomerTextingSettings: async (savedAccountId: string): Promise<{ success: boolean; enabled: boolean; autoReplyTemplate: string }> => {
     const { data } = await api.get(`/v1/notifications/customer-texting/${savedAccountId}`);

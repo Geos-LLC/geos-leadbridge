@@ -3011,14 +3011,21 @@ export class NotificationsService {
     const config = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
     const stripePriceId = config?.stripePriceId;
 
-    // 3. Add to Stripe subscription (if user has one and pricing is configured)
+    // 3. Determine if this is the user's first active number.
+    //    First number is included with the plan (no Stripe add-on).
+    //    Additional numbers get a per-number Stripe subscription item.
+    const existingCount = await this.prisma.tenantPhoneNumber.count({
+      where: { userId, status: { in: ['ACTIVE', 'GRACE_PERIOD'] } },
+    });
+    const isIncludedNumber = existingCount === 0;
+
     let stripeSubItemId: string | null = null;
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { stripeSubscriptionId: true, stripeCustomerId: true, email: true },
     });
 
-    if (stripePriceId && user?.stripeSubscriptionId) {
+    if (!isIncludedNumber && stripePriceId && user?.stripeSubscriptionId) {
       try {
         const Stripe = (await import('stripe')).default;
         const stripe = new Stripe(this.configService.get<string>('STRIPE_SECRET_KEY')!, {
@@ -3030,10 +3037,12 @@ export class NotificationsService {
           quantity: 1,
         });
         stripeSubItemId = subItem.id;
-        this.logger.log(`[purchaseTenantPhone] Created Stripe sub item: ${stripeSubItemId}`);
+        this.logger.log(`[purchaseTenantPhone] Created Stripe sub item: ${stripeSubItemId} (additional number)`);
       } catch (err) {
         this.logger.warn(`[purchaseTenantPhone] Stripe billing failed (number still provisioned): ${err.message}`);
       }
+    } else if (isIncludedNumber) {
+      this.logger.log(`[purchaseTenantPhone] First number — included with plan, no Stripe add-on`);
     }
 
     // 4. Extract area code from phone number
@@ -3185,5 +3194,127 @@ export class NotificationsService {
       this.logger.log(`[processGracePeriodExpirations] Released ${released} expired numbers`);
     }
     return released;
+  }
+
+  async assignTenantPhoneNumber(
+    userId: string,
+    tenantPhoneId: string,
+    savedAccountId: string | null,
+  ): Promise<{ success: boolean; tenantPhone?: any; error?: string }> {
+    const tenantPhone = await this.prisma.tenantPhoneNumber.findUnique({
+      where: { id: tenantPhoneId },
+    });
+
+    if (!tenantPhone || tenantPhone.userId !== userId) {
+      return { success: false, error: 'Phone number not found' };
+    }
+
+    if (tenantPhone.status === 'RELEASED') {
+      return { success: false, error: 'Cannot reassign a released number' };
+    }
+
+    if (savedAccountId) {
+      const target = await this.prisma.savedAccount.findFirst({
+        where: { id: savedAccountId, userId },
+        select: { id: true },
+      });
+      if (!target) {
+        return { success: false, error: 'Target account not found' };
+      }
+    }
+
+    const previousAccountId = tenantPhone.savedAccountId;
+
+    if (previousAccountId && previousAccountId !== savedAccountId) {
+      const prevSettings = await this.prisma.notificationSettings.findUnique({
+        where: { savedAccountId: previousAccountId },
+      });
+      if (prevSettings?.sigcoreFromPhone === tenantPhone.phoneNumber) {
+        await this.prisma.notificationSettings.update({
+          where: { savedAccountId: previousAccountId },
+          data: { sigcoreFromPhone: null },
+        });
+      }
+    }
+
+    const updated = await this.prisma.tenantPhoneNumber.update({
+      where: { id: tenantPhoneId },
+      data: { savedAccountId },
+    });
+
+    if (savedAccountId) {
+      await this.prisma.notificationSettings.upsert({
+        where: { savedAccountId },
+        update: { sigcoreFromPhone: tenantPhone.phoneNumber },
+        create: { savedAccountId, sigcoreFromPhone: tenantPhone.phoneNumber },
+      });
+    }
+
+    this.logger.log(`[assignTenantPhone] ${tenantPhone.phoneNumber} → account=${savedAccountId ?? 'unassigned'}`);
+    return { success: true, tenantPhone: updated };
+  }
+
+  async restoreTenantPhoneNumber(
+    userId: string,
+    tenantPhoneId: string,
+  ): Promise<{ success: boolean; tenantPhone?: any; error?: string }> {
+    const tenantPhone = await this.prisma.tenantPhoneNumber.findUnique({
+      where: { id: tenantPhoneId },
+    });
+
+    if (!tenantPhone || tenantPhone.userId !== userId) {
+      return { success: false, error: 'Phone number not found' };
+    }
+
+    if (tenantPhone.status !== 'GRACE_PERIOD') {
+      return { success: false, error: 'Phone number is not in grace period' };
+    }
+
+    const activeCount = await this.prisma.tenantPhoneNumber.count({
+      where: { userId, status: 'ACTIVE' },
+    });
+    const wouldBeAdditional = activeCount > 0;
+
+    let newSubItemId: string | null = null;
+    if (wouldBeAdditional) {
+      const config = await this.prisma.adminConfig.findUnique({ where: { id: 'global' } });
+      const stripePriceId = config?.stripePriceId;
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { stripeSubscriptionId: true },
+      });
+
+      if (stripePriceId && user?.stripeSubscriptionId) {
+        try {
+          const Stripe = (await import('stripe')).default;
+          const stripe = new Stripe(this.configService.get<string>('STRIPE_SECRET_KEY')!, {
+            apiVersion: '2026-01-28.clover',
+          });
+          const subItem = await stripe.subscriptionItems.create({
+            subscription: user.stripeSubscriptionId,
+            price: stripePriceId,
+            quantity: 1,
+          });
+          newSubItemId = subItem.id;
+          this.logger.log(`[restoreTenantPhone] Recreated Stripe sub item: ${newSubItemId}`);
+        } catch (err) {
+          this.logger.warn(`[restoreTenantPhone] Stripe re-bill failed: ${err.message}`);
+          return { success: false, error: 'Failed to restore billing — please contact support' };
+        }
+      }
+    }
+
+    const updated = await this.prisma.tenantPhoneNumber.update({
+      where: { id: tenantPhoneId },
+      data: {
+        status: 'ACTIVE',
+        stripeSubItemId: newSubItemId,
+        cancelledAt: null,
+        gracePeriodEndsAt: null,
+      },
+    });
+
+    this.logger.log(`[restoreTenantPhone] ${tenantPhone.phoneNumber} → ACTIVE`);
+    return { success: true, tenantPhone: updated };
   }
 }
