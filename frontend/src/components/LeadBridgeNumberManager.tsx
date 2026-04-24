@@ -44,7 +44,9 @@ export function LeadBridgeNumberManager({ accounts, onError, onSuccess }: Props)
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await loadPhones();
+      try {
+        await loadPhones();
+      } catch { /* still render the empty state */ }
       try {
         const r = await notificationsApi.getPhonePricing();
         if (r.success) {
