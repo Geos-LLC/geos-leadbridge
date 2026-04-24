@@ -15,7 +15,7 @@ import type {
   CallConnectMode, AgentStrategy, SigcorePhoneNumber,
 } from '../types';
 import { TemplateEditorModal, AUTO_REPLY_VARIABLES, SMS_VARIABLES } from '../components/TemplateEditorModal';
-import ServicePricingForm from '../components/ServicePricingForm';
+import ServicePricingForm, { DEFAULT_CLEANING_PRICING } from '../components/ServicePricingForm';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
 import OnboardingTour, { ONBOARDING_STORAGE_KEY } from '../components/OnboardingTour';
@@ -2224,16 +2224,17 @@ export function Services() {
                                 <span className="font-semibold">Inherited pricing.</span> This account has no pricing of its own — the AI uses pricing from another of your accounts. Click <span className="font-semibold">Edit pricing</span> to customize for this account.
                               </div>
                             )}
+                            {!pricingPreview && !pricingPreviewLoading && !pricingPreviewInherited && (
+                              <div className="mb-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-[11px] text-slate-600">
+                                <span className="font-semibold">Default pricing shown.</span> Click <button className="text-blue-600 font-semibold" onClick={() => { setPricingModalTab('edit'); setShowPricingModal(true); }}>Edit pricing</button> to customize rates for this account.
+                              </div>
+                            )}
                             {pricingPreviewLoading ? (
                               <div className="flex items-center gap-2 text-xs text-slate-400 py-3">
                                 <Loader2 size={12} className="animate-spin" /> Loading pricing...
                               </div>
-                            ) : !pricingPreview ? (
-                              <div className="text-xs text-slate-500 py-2">
-                                No pricing configured. Click <button className="text-blue-600 font-semibold" onClick={() => { setPricingModalTab('edit'); setShowPricingModal(true); }}>Edit pricing</button> to set it up.
-                              </div>
                             ) : (() => {
-                              const p = pricingPreview;
+                              const p = pricingPreview || DEFAULT_CLEANING_PRICING;
                               const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
                               const hasTable = p.priceTable?.length > 0 && enabledTypes.length > 0;
                               return (
@@ -4072,15 +4073,17 @@ export function Services() {
                 <div className="flex items-center gap-2 text-sm text-slate-400 py-8 justify-center">
                   <Loader2 size={16} className="animate-spin" /> Loading pricing...
                 </div>
-              ) : !pricingPreview ? (
-                <div className="text-sm text-slate-500 py-8 text-center">
-                  No pricing configured yet. Switch to <button className="text-blue-600 font-semibold" onClick={() => setPricingModalTab('edit')}>Edit</button> to set it up.
-                </div>
               ) : (() => {
-                const p = pricingPreview;
+                const p = pricingPreview || DEFAULT_CLEANING_PRICING;
                 const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
+                const isDefault = !pricingPreview && !pricingPreviewInherited;
                 return (
                   <div className="space-y-6 text-sm">
+                    {isDefault && (
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600 leading-relaxed">
+                        <span className="font-semibold">Default pricing shown.</span> Switch to <button className="underline font-semibold" onClick={() => setPricingModalTab('edit')}>Edit</button> to customize rates for this account.
+                      </div>
+                    )}
                     {pricingPreviewInherited && (
                       <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-xs text-amber-800 leading-relaxed">
                         <span className="font-semibold">Inherited pricing.</span> This account has no pricing of its own, so the AI will use the pricing from another one of your accounts. Switch to <button className="underline font-semibold" onClick={() => setPricingModalTab('edit')}>Edit</button> to set pricing specifically for this account.

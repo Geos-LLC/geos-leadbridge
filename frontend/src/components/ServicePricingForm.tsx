@@ -3,7 +3,7 @@ import { Plus, Trash2, Save, Loader2, ChevronDown, ChevronRight } from 'lucide-r
 import { usersApi } from '../services/api';
 
 // Default cleaning pricing based on Spotless Homes structure
-const DEFAULT_CLEANING_PRICING = {
+export const DEFAULT_CLEANING_PRICING = {
   serviceType: 'cleaning',
   cleaningTypes: [
     { key: 'regular', label: 'Regular Cleaning', enabled: true },
