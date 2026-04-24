@@ -16,11 +16,16 @@ import OnboardingStep2Modal from './OnboardingStep2Modal';
 
 function BrandMark({ size = 26 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className="shrink-0">
-      <rect x="1" y="1" width="22" height="22" rx="6" fill="var(--lb-ink-1)" />
-      <circle cx="7" cy="15" r="2.2" fill="var(--lb-accent)" />
-      <circle cx="17" cy="15" r="2.2" fill="var(--lb-accent)" />
-      <path d="M5 15 Q 12 5, 19 15" stroke="var(--lb-accent)" strokeWidth="1.8" strokeLinecap="round" fill="none" />
+    <svg width={size} height={size} viewBox="0 0 256 256" fill="none" className="shrink-0" style={{ borderRadius: size * 0.25 }}>
+      <rect width="256" height="256" rx="48" fill="var(--lb-accent)" />
+      <path
+        d="M160 64L96 128H128L96 192L160 128H128L160 64Z"
+        fill="white"
+        stroke="white"
+        strokeWidth="8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -84,16 +89,16 @@ export function Layout() {
   const businessName = (user as any)?.businessName || user?.name || 'Leadbridge';
   const connectedCount = savedAccounts?.length ?? 0;
 
-  // Shared nav-item renderer — dense, active state uses ink-10 bg + accent-colored icon
+  // Shared nav-item renderer — rounded-pill active state with accent-tint + accent text
   const renderNavItem = (item: { icon: React.ReactNode; label: string; path: string }) => (
     <NavLink
       key={item.path}
       to={item.path}
       className={({ isActive }) =>
-        `group flex items-center gap-2.5 px-2.5 py-[7px] rounded-md transition-colors mb-[1px] ` +
+        `group flex items-center gap-2.5 px-3 py-[8px] rounded-full transition-colors mb-[2px] ` +
         (isActive
-          ? 'bg-[var(--lb-ink-10)] text-[var(--lb-ink-1)] font-semibold'
-          : 'text-[var(--lb-ink-4)] hover:bg-[var(--lb-ink-10)]/60 font-medium')
+          ? 'bg-[var(--lb-accent-tint)] text-[var(--lb-accent)] font-bold'
+          : 'text-[var(--lb-ink-4)] hover:bg-[var(--lb-ink-10)] font-medium')
       }
       onClick={() => setMobileMenuOpen(false)}
       style={{ fontSize: 13 }}
@@ -152,16 +157,17 @@ export function Layout() {
               marginBottom: 4,
             }}
           >
-            <BrandMark size={22} />
+            <BrandMark size={24} />
             <div style={{ lineHeight: 1.1 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--lb-ink-1)' }}>Leadbridge</div>
+              <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--lb-ink-1)' }}>LeadBridge</div>
               <div
                 style={{
-                  fontSize: 10,
+                  fontSize: 9,
                   fontFamily: 'var(--lb-font-mono)',
                   color: 'var(--lb-ink-5)',
                   textTransform: 'uppercase',
-                  letterSpacing: 0.06,
+                  letterSpacing: 0.12,
+                  marginTop: 2,
                 }}
               >
                 {user?.role === 'ADMIN' ? 'Admin' : 'Pro'}
@@ -171,30 +177,31 @@ export function Layout() {
 
           {/* Account selector */}
           <button
-            className="flex items-center gap-[9px] w-full text-left"
+            className="flex items-center gap-[10px] w-full text-left"
             style={{
-              padding: '8px 10px',
-              margin: '6px 0',
-              background: 'var(--lb-ink-10)',
-              border: '1px solid var(--lb-line-soft)',
-              borderRadius: 'var(--lb-radius)',
+              padding: '10px 12px',
+              margin: '8px 0',
+              background: 'var(--lb-surface)',
+              border: '1px solid var(--lb-line)',
+              borderRadius: 12,
               cursor: 'pointer',
+              boxShadow: 'var(--lb-shadow-sm)',
             }}
             onClick={() => navigate('/settings')}
             title="Account settings"
           >
             <div
               style={{
-                width: 22,
-                height: 22,
-                borderRadius: 4,
-                background: 'oklch(0.9 0.1 145)',
+                width: 24,
+                height: 24,
+                borderRadius: 6,
+                background: 'var(--lb-success-tint)',
                 color: '#0c4a2b',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontSize: 11,
-                fontWeight: 700,
+                fontWeight: 800,
                 flexShrink: 0,
               }}
             >
@@ -203,7 +210,7 @@ export function Layout() {
             <div className="flex-1 min-w-0">
               <div
                 className="truncate"
-                style={{ fontSize: 12, fontWeight: 500, color: 'var(--lb-ink-1)' }}
+                style={{ fontSize: 12, fontWeight: 700, color: 'var(--lb-ink-1)' }}
               >
                 {businessName}
               </div>
@@ -258,15 +265,16 @@ export function Layout() {
                   width: 26,
                   height: 26,
                   borderRadius: 99,
-                  background: 'oklch(0.92 0.04 200)',
-                  color: 'oklch(0.35 0.1 200)',
+                  background: 'var(--lb-accent-tint)',
+                  color: 'var(--lb-accent)',
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   fontSize: 11,
-                  fontWeight: 600,
+                  fontWeight: 700,
                   letterSpacing: 0.03,
                   flexShrink: 0,
+                  border: '1px solid var(--lb-accent-line)',
                 }}
               >
                 {initials}
@@ -324,13 +332,13 @@ export function Layout() {
                   </button>
                   <RouterLink to="/" className="flex items-center gap-2 lg:hidden hover:opacity-80 transition-opacity">
                     <BrandMark size={22} />
-                    <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--lb-ink-1)' }}>
-                      Leadbridge
+                    <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--lb-ink-1)' }}>
+                      LeadBridge
                     </span>
                   </RouterLink>
                   <h1
                     className="hidden lg:block"
-                    style={{ fontSize: 20, fontWeight: 600, color: 'var(--lb-ink-1)', letterSpacing: '-0.01em', margin: 0 }}
+                    style={{ fontSize: 22, fontWeight: 800, color: 'var(--lb-ink-1)', letterSpacing: '-0.025em', margin: 0 }}
                   >
                     {getPageName()}
                   </h1>
@@ -359,8 +367,8 @@ export function Layout() {
                 </button>
                 <RouterLink to="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
                   <BrandMark size={20} />
-                  <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--lb-ink-1)' }}>
-                    Leadbridge
+                  <span style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--lb-ink-1)' }}>
+                    LeadBridge
                   </span>
                 </RouterLink>
               </div>
@@ -374,8 +382,8 @@ export function Layout() {
             <div
               style={{
                 padding: '10px 24px',
-                background: hasCriticalIssues ? 'oklch(0.96 0.04 27)' : 'oklch(0.96 0.05 75)',
-                borderBottom: `1px solid ${hasCriticalIssues ? 'oklch(0.88 0.08 27)' : 'oklch(0.88 0.1 75)'}`,
+                background: hasCriticalIssues ? 'var(--lb-danger-tint)' : 'var(--lb-warn-tint)',
+                borderBottom: `1px solid ${hasCriticalIssues ? 'var(--lb-danger-tint)' : 'var(--lb-warn-tint)'}`,
               }}
             >
               <div className="flex items-center gap-3">
@@ -387,7 +395,7 @@ export function Layout() {
                   style={{
                     fontSize: 13,
                     fontWeight: 600,
-                    color: hasCriticalIssues ? '#7a1a14' : '#5e3b0a',
+                    color: hasCriticalIssues ? '#991b1b' : '#92400e',
                   }}
                 >
                   {systemHealth!.issues.length === 1

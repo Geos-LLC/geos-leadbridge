@@ -5,14 +5,14 @@ type Status = 'new' | 'replied' | 'quoted' | 'won' | 'lost' | 'warning' | 'error
 interface PillSpec { label: string; fg: string; bg: string; dot: string; }
 
 const MAP: Record<Status, PillSpec> = {
-  new:     { label: 'New',     fg: '#0c4a2b',        bg: 'oklch(0.95 0.04 150)', dot: 'var(--lb-success)' },
-  replied: { label: 'Replied', fg: '#183d63',        bg: 'oklch(0.95 0.03 235)', dot: 'var(--lb-info)' },
-  quoted:  { label: 'Quoted',  fg: '#5e3b0a',        bg: 'oklch(0.95 0.04 75)',  dot: 'var(--lb-warn)' },
-  won:     { label: 'Booked',  fg: '#0c4a2b',        bg: 'oklch(0.95 0.04 150)', dot: 'var(--lb-success)' },
-  lost:    { label: 'Lost',    fg: 'var(--lb-ink-5)', bg: 'var(--lb-ink-10)',    dot: 'var(--lb-ink-6)' },
-  warning: { label: 'Warning', fg: '#5e3b0a',        bg: 'oklch(0.95 0.04 75)',  dot: 'var(--lb-warn)' },
-  error:   { label: 'Error',   fg: '#7a1a14',        bg: 'oklch(0.96 0.04 27)',  dot: 'var(--lb-danger)' },
-  neutral: { label: '—',       fg: 'var(--lb-ink-5)', bg: 'var(--lb-ink-10)',    dot: 'var(--lb-ink-6)' },
+  new:     { label: 'New',     fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
+  replied: { label: 'Replied', fg: '#1e40af',        bg: 'var(--lb-accent-tint)',  dot: 'var(--lb-accent)' },
+  quoted:  { label: 'Quoted',  fg: '#92400e',        bg: 'var(--lb-warn-tint)',    dot: 'var(--lb-warn)' },
+  won:     { label: 'Booked',  fg: '#15803d',        bg: 'var(--lb-success-tint)', dot: 'var(--lb-success)' },
+  lost:    { label: 'Lost',    fg: 'var(--lb-ink-5)', bg: 'var(--lb-ink-10)',       dot: 'var(--lb-ink-6)' },
+  warning: { label: 'Warning', fg: '#92400e',        bg: 'var(--lb-warn-tint)',    dot: 'var(--lb-warn)' },
+  error:   { label: 'Error',   fg: '#991b1b',        bg: 'var(--lb-danger-tint)',  dot: 'var(--lb-danger)' },
+  neutral: { label: '—',       fg: 'var(--lb-ink-5)', bg: 'var(--lb-ink-10)',       dot: 'var(--lb-ink-6)' },
 };
 
 interface StatusPillProps {
