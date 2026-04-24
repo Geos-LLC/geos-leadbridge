@@ -1542,10 +1542,11 @@ export function Messages() {
                       style={{
                         width: 34, height: 34,
                         borderRadius: 99,
-                        background: 'oklch(0.92 0.04 200)',
-                        color: 'oklch(0.35 0.1 200)',
+                        background: 'var(--lb-accent-tint)',
+                        color: 'var(--lb-accent)',
+                        border: '1px solid var(--lb-accent-line)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 12, fontWeight: 600, letterSpacing: 0.03,
+                        fontSize: 12, fontWeight: 700, letterSpacing: 0.03,
                       }}
                     >
                       {(lead.customerName || '?').split(' ').slice(0, 2).map(s => s[0]).join('').toUpperCase()}

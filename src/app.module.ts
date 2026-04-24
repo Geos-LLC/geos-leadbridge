@@ -36,6 +36,7 @@ import { TrialModule } from './trial/trial.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { ImpersonationGuard, ImpersonationInterceptor } from './common/guards/impersonation.guard';
 import { PrismaModule } from './common/utils/prisma.module';
+import { CacheModule } from './common/cache/cache.module';
 
 @Module({
   imports: [
@@ -43,9 +44,12 @@ import { PrismaModule } from './common/utils/prisma.module';
       isGlobal: true,
       load: [configuration],
     }),
-    EventEmitterModule.forRoot(),
+    // Wildcards are required for dynamic event names like `lead.created.${userId}`.
+    // `.` is the delimiter. Existing exact-match listeners (e.g. 'trial.ended') are unaffected.
+    EventEmitterModule.forRoot({ wildcard: true, delimiter: '.' }),
     ScheduleModule.forRoot(),
     PrismaModule,
+    CacheModule,
     TrialModule,
     AuthModule,
     PlatformsModule,

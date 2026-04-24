@@ -11,7 +11,7 @@ export function PageHeader({ title, subtitle, actions, tabs }: PageHeaderProps) 
   return (
     <div
       style={{
-        padding: '20px 28px 0',
+        padding: '22px 28px 0',
         borderBottom: '1px solid var(--lb-line)',
         background: 'var(--lb-surface)',
       }}
@@ -29,16 +29,17 @@ export function PageHeader({ title, subtitle, actions, tabs }: PageHeaderProps) 
           <h1
             style={{
               margin: 0,
-              fontSize: 20,
-              fontWeight: 600,
+              fontSize: 22,
+              fontWeight: 800,
               color: 'var(--lb-ink-1)',
-              letterSpacing: '-0.01em',
+              letterSpacing: '-0.025em',
+              fontFamily: 'var(--lb-font-sans)',
             }}
           >
             {title}
           </h1>
           {subtitle && (
-            <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--lb-ink-5)' }}>
+            <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--lb-ink-4)' }}>
               {subtitle}
             </p>
           )}

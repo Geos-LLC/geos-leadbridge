@@ -98,37 +98,39 @@ export class FollowUpEngineController {
     @CurrentUser() user: any,
     @Param('conversationId') conversationId: string,
   ) {
-    const enrollment = await this.prisma.followUpEnrollment.findFirst({
-      where: { conversationId, status: 'active' },
-      include: { sequenceTemplate: true },
-    });
+    const startedAt = Date.now();
 
-    // Debug: also check ANY enrollment for this conversation
-    const anyEnrollment = !enrollment ? await this.prisma.followUpEnrollment.findFirst({
-      where: { conversationId },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, status: true, stoppedReason: true, currentStepIndex: true, nextStepDueAt: true },
-    }) : null;
-
-    // Check if this lead even has an enrollment via leadId
-    const leadForDebug = await this.prisma.lead.findFirst({
-      where: { threadId: conversationId },
-      select: { id: true, customerName: true },
-    });
-    const enrollmentViaLead = leadForDebug ? await this.prisma.followUpEnrollment.findFirst({
-      where: { leadId: leadForDebug.id },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, status: true, conversationId: true, stoppedReason: true },
-    }) : null;
-
-    this.logger.log(`[enrollment-info] convId=${conversationId}, lead=${leadForDebug?.customerName || 'none'}, activeEnrollment=${!!enrollment}, anyEnrollment=${anyEnrollment ? `${anyEnrollment.status}/${anyEnrollment.stoppedReason}` : 'none'}, viaLead=${enrollmentViaLead ? `${enrollmentViaLead.status} convId=${enrollmentViaLead.conversationId}` : 'none'}`);
-
-    if (!enrollment) {
-      // Still return AI conversation status + last enrollment info
-      const lead = await this.prisma.lead.findFirst({
+    // Round 1: enrollment + lead are independent — fetch together.
+    const [enrollment, lead] = await Promise.all([
+      this.prisma.followUpEnrollment.findFirst({
+        where: { conversationId, status: 'active' },
+        include: { sequenceTemplate: true },
+      }),
+      this.prisma.lead.findFirst({
         where: { threadId: conversationId },
         select: { businessId: true, userId: true },
-      });
+      }),
+    ]);
+    const afterRound1 = Date.now();
+
+    const savedAccountPromise = lead?.businessId
+      ? this.prisma.savedAccount.findFirst({
+          where: { userId: lead.userId, businessId: lead.businessId },
+          select: { aiConversationEnabled: true, followUpMode: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true, followUpTimezone: true, followUpSettingsJson: true },
+        })
+      : Promise.resolve(null);
+
+    if (!enrollment) {
+      // Round 2: savedAccount + lastEnrollment.
+      const [acct, lastEnrollment] = await Promise.all([
+        savedAccountPromise,
+        this.prisma.followUpEnrollment.findFirst({
+          where: { conversationId },
+          orderBy: { createdAt: 'desc' },
+          select: { status: true, stoppedReason: true, completedAt: true, currentStepIndex: true },
+        }),
+      ]);
+
       let aiConversationOn = false;
       let followUpMode: string | null = null;
       let aiAvailability: string | null = null;
@@ -136,34 +138,26 @@ export class FollowUpEngineController {
       let aiActiveHoursEnd: string | null = null;
       let aiTimezone: string | null = null;
       let aiExtraWindows: any[] | null = null;
-      if (lead?.businessId) {
-        const acct = await this.prisma.savedAccount.findFirst({
-          where: { userId: lead.userId, businessId: lead.businessId },
-          select: { aiConversationEnabled: true, followUpMode: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true, followUpTimezone: true, followUpSettingsJson: true },
-        });
-        aiConversationOn = acct?.aiConversationEnabled ?? false;
-        followUpMode = acct?.followUpMode || null;
-        aiActiveHoursStart = acct?.followUpActiveHoursStart || null;
-        aiActiveHoursEnd = acct?.followUpActiveHoursEnd || null;
-        aiTimezone = acct?.followUpTimezone || null;
-        if (acct?.followUpSettingsJson) {
+      if (acct) {
+        aiConversationOn = acct.aiConversationEnabled ?? false;
+        followUpMode = acct.followUpMode || null;
+        aiActiveHoursStart = acct.followUpActiveHoursStart || null;
+        aiActiveHoursEnd = acct.followUpActiveHoursEnd || null;
+        aiTimezone = acct.followUpTimezone || null;
+        if (acct.followUpSettingsJson) {
           try {
             const s = JSON.parse(acct.followUpSettingsJson);
             aiAvailability = s.followUpAvailability || null;
             if (s.fuExtraWindows) aiExtraWindows = s.fuExtraWindows;
           } catch {}
         }
-        // Infer availability from data: if activeHoursStart is set, it's active_hours; otherwise always
         if (!aiAvailability) {
           aiAvailability = aiActiveHoursStart ? 'active_hours' : 'always';
         }
       }
-      // Find the most recent non-active enrollment for context
-      const lastEnrollment = await this.prisma.followUpEnrollment.findFirst({
-        where: { conversationId },
-        orderBy: { createdAt: 'desc' },
-        select: { status: true, stoppedReason: true, completedAt: true, currentStepIndex: true },
-      });
+
+      this.logger.log(`[enrollment-info] convId=${conversationId} branch=no-enrollment r1=${afterRound1 - startedAt}ms total=${Date.now() - startedAt}ms`);
+
       return {
         success: true,
         enrollment: null,
@@ -183,9 +177,52 @@ export class FollowUpEngineController {
       };
     }
 
-    // Load steps: prefer user-configured, fall back to template
+    const currentStep = enrollment.currentStepIndex;
+
+    // Round 2: savedAccount + pendingSuggestion + sentCount.
+    const [acct, pendingSuggestion, sentCount] = await Promise.all([
+      savedAccountPromise,
+      this.prisma.followUpStepExecution.findFirst({
+        where: { enrollmentId: enrollment.id, stepIndex: currentStep, status: 'suggested' },
+        select: { id: true, generatedMessage: true, strategyUsed: true },
+      }),
+      this.prisma.followUpStepExecution.count({
+        where: { enrollmentId: enrollment.id, status: 'sent' },
+      }),
+    ]);
+
+    let aiConversationOn = false;
+    let aiAvailability: string = 'always';
+    let aiActiveHoursStart: string | null = null;
+    let aiActiveHoursEnd: string | null = null;
+    let aiTimezone: string | null = null;
+    let aiExtraWindows: any[] | null = null;
+    let userSteps: SequenceStep[] | null = null;
+    if (acct) {
+      aiConversationOn = acct.aiConversationEnabled ?? false;
+      aiActiveHoursStart = acct.followUpActiveHoursStart || null;
+      aiActiveHoursEnd = acct.followUpActiveHoursEnd || null;
+      aiTimezone = acct.followUpTimezone || null;
+      if (acct.followUpSettingsJson) {
+        try {
+          const s = JSON.parse(acct.followUpSettingsJson);
+          aiAvailability = s.followUpAvailability || (aiActiveHoursStart ? 'active_hours' : 'always');
+          if (s.fuExtraWindows) aiExtraWindows = s.fuExtraWindows;
+          const uiSteps = s.followUpSteps || s.followUpSmartSteps || s.followUpCustomSteps;
+          if (Array.isArray(uiSteps) && uiSteps.length > 0) {
+            userSteps = uiSteps.map((step: any, i: number) => ({
+              stepOrder: i,
+              delayMinutes: this.parseDelay(step.delay),
+              objective: 'follow_up',
+              messageTemplate: step.message || null,
+            }));
+          }
+        } catch {}
+      }
+    }
+
+    // Prefer user-configured steps, fall back to template.
     let steps: SequenceStep[] = [];
-    const userSteps = await this.getUserConfiguredSteps(conversationId);
     if (userSteps && userSteps.length > 0) {
       steps = userSteps;
     } else {
@@ -194,59 +231,19 @@ export class FollowUpEngineController {
     }
 
     const totalSteps = steps.length;
-    const currentStep = enrollment.currentStepIndex;
     const nextStep = steps[currentStep];
 
-    // Get the next message preview
     let nextMessagePreview: string | null = null;
     let nextMessageMode: 'template' | 'ai' = 'ai';
     if (nextStep?.messageTemplate) {
       nextMessagePreview = nextStep.messageTemplate;
       nextMessageMode = 'template';
     }
-
-    // Check for an existing suggested execution (already generated)
-    const pendingSuggestion = await this.prisma.followUpStepExecution.findFirst({
-      where: { enrollmentId: enrollment.id, stepIndex: currentStep, status: 'suggested' },
-      select: { id: true, generatedMessage: true, strategyUsed: true },
-    });
     if (pendingSuggestion?.generatedMessage) {
       nextMessagePreview = pendingSuggestion.generatedMessage;
     }
 
-    // Count sent steps
-    const sentCount = await this.prisma.followUpStepExecution.count({
-      where: { enrollmentId: enrollment.id, status: 'sent' },
-    });
-
-    // Get account AI conversation status + availability
-    const lead = await this.prisma.lead.findFirst({
-      where: { threadId: conversationId },
-      select: { businessId: true, userId: true },
-    });
-    let aiConversationOn = false;
-    let aiAvailability: string = 'always';
-    let aiActiveHoursStart: string | null = null;
-    let aiActiveHoursEnd: string | null = null;
-    let aiTimezone: string | null = null;
-    let aiExtraWindows: any[] | null = null;
-    if (lead?.businessId) {
-      const acct = await this.prisma.savedAccount.findFirst({
-        where: { userId: lead.userId, businessId: lead.businessId },
-        select: { aiConversationEnabled: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true, followUpTimezone: true, followUpSettingsJson: true },
-      });
-      aiConversationOn = acct?.aiConversationEnabled ?? false;
-      aiActiveHoursStart = acct?.followUpActiveHoursStart || null;
-      aiActiveHoursEnd = acct?.followUpActiveHoursEnd || null;
-      aiTimezone = acct?.followUpTimezone || null;
-      if (acct?.followUpSettingsJson) {
-        try {
-          const s = JSON.parse(acct.followUpSettingsJson);
-          aiAvailability = s.followUpAvailability || (aiActiveHoursStart ? 'active_hours' : 'always');
-          if (s.fuExtraWindows) aiExtraWindows = s.fuExtraWindows;
-        } catch {}
-      }
-    }
+    this.logger.log(`[enrollment-info] convId=${conversationId} branch=active enrollmentId=${enrollment.id} r1=${afterRound1 - startedAt}ms total=${Date.now() - startedAt}ms`);
 
     return {
       success: true,

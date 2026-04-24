@@ -16,6 +16,50 @@ import { ConversationContextService } from '../conversation-context/conversation
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { TrialService } from '../trial/trial.service';
+import { LeadCacheService } from '../common/cache/lead-cache.service';
+import { CacheService } from '../common/cache/cache.service';
+import { CacheKeys } from '../common/cache/cache-keys';
+
+const LEAD_LIST_TTL_SECONDS = 30;
+const LEAD_DETAIL_TTL_SECONDS = 60;
+const LEAD_MESSAGES_TTL_SECONDS = 300; // 5 min — DB is authoritative; invalidated on every inbound/outbound write
+
+/**
+ * Strict whitelist of cache-eligible filter shapes for the leads list.
+ *
+ * Exported for direct unit testing — the function has no LeadsService-specific
+ * dependencies and exercising it through the full service constructor is overkill.
+ *
+ * Returns true only when `filters` matches one of the two supported shapes:
+ *   1. undefined / `{}` / all fields empty  → key `leads:user:{userId}`
+ *   2. `{ businessId: string }` only         → key `leads:user:{userId}:biz:{businessId}`
+ *
+ * ANY other key (`platform`, `status`, `limit`, or a future field) → false.
+ * Filter keys are WHITELISTED: adding a new field to the filter type will
+ * automatically bypass the cache instead of silently poisoning an existing key.
+ */
+export function isCacheableLeadFilter(
+  filters?: { platform?: string; status?: string; businessId?: string; limit?: number } & Record<string, unknown>,
+): boolean {
+  if (!filters) return true;
+
+  const ALLOWED_KEYS = new Set(['businessId']);
+  const setKeys = Object.entries(filters)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key]) => key);
+
+  for (const key of setKeys) {
+    if (!ALLOWED_KEYS.has(key)) return false;
+  }
+
+  // businessId, when set, must be a non-empty string — defensive against `0`,
+  // `false`, or other truthy-but-invalid inputs.
+  if (setKeys.includes('businessId') && typeof filters.businessId !== 'string') {
+    return false;
+  }
+
+  return true;
+}
 
 @Injectable()
 export class LeadsService {
@@ -31,6 +75,8 @@ export class LeadsService {
     @Optional() @Inject(FollowUpEngineService) private followUpEngine: FollowUpEngineService | null,
     @Optional() @Inject(CrmWebhookService) private crmWebhookService: CrmWebhookService | null,
     private trialService: TrialService,
+    private leadCache: LeadCacheService,
+    private cache: CacheService,
   ) {}
 
   /**
@@ -111,18 +157,25 @@ export class LeadsService {
    * Get a single lead by ID
    */
   async getLead(userId: string, leadId: string): Promise<NormalizedLead> {
-    const lead = await this.prisma.lead.findFirst({
-      where: {
-        id: leadId,
-        userId,
+    return this.cache.getOrSet<NormalizedLead>(
+      // Key is scoped to userId to prevent cross-tenant leakage of cached leads.
+      CacheKeys.leadDetail(userId, leadId),
+      LEAD_DETAIL_TTL_SECONDS,
+      async () => {
+        const lead = await this.prisma.lead.findFirst({
+          where: {
+            id: leadId,
+            userId,
+          },
+        });
+
+        if (!lead) {
+          throw new NotFoundException('Lead not found');
+        }
+
+        return this.convertToNormalizedLead(lead);
       },
-    });
-
-    if (!lead) {
-      throw new NotFoundException('Lead not found');
-    }
-
-    return this.convertToNormalizedLead(lead);
+    );
   }
 
   /**
@@ -133,67 +186,140 @@ export class LeadsService {
     userId: string,
     filters?: { platform?: string; status?: string; businessId?: string; limit?: number },
   ) {
-    const queryOptions: any = {
-      where: {
-        userId,
-        ...(filters?.platform && { platform: filters.platform }),
-        ...(filters?.status && { status: filters.status }),
-        ...(filters?.businessId && { businessId: filters.businessId }),
-      },
-      include: {
-        conversation: {
-          select: {
-            lastMessageAt: true,
+    // STRICT cache eligibility — the filter object must exactly match one of
+    // the two supported shapes. This protects against a future field being
+    // added to the filter type: if someone later adds e.g. `dateRange`, it
+    // will automatically bypass the cache instead of silently poisoning the
+    // no-filter key.
+    const isCacheable = this.isCacheableLeadFilter(filters);
+
+    const loader = async () => {
+      const queryOptions: any = {
+        where: {
+          userId,
+          ...(filters?.platform && { platform: filters.platform }),
+          ...(filters?.status && { status: filters.status }),
+          ...(filters?.businessId && { businessId: filters.businessId }),
+        },
+        include: {
+          conversation: {
+            select: {
+              lastMessageAt: true,
+            },
           },
         },
-      },
-      orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: 'desc' },
+      };
+
+      // Only apply limit if explicitly specified
+      // Note: We don't use a default limit to allow date filtering across all leads
+      if (filters?.limit) {
+        queryOptions.take = filters.limit;
+      }
+
+      const leads = await this.prisma.lead.findMany(queryOptions);
+
+      return leads.map((lead) => this.convertToNormalizedLead(lead));
     };
 
-    // Only apply limit if explicitly specified
-    // Note: We don't use a default limit to allow date filtering across all leads
-    if (filters?.limit) {
-      queryOptions.take = filters.limit;
-    }
+    if (!isCacheable) return loader();
 
-    const leads = await this.prisma.lead.findMany(queryOptions);
+    return this.cache.getOrSet<NormalizedLead[]>(
+      CacheKeys.leadsList(userId, filters?.businessId),
+      LEAD_LIST_TTL_SECONDS,
+      loader,
+    );
+  }
 
-    return leads.map((lead) => this.convertToNormalizedLead(lead));
+  /** See `isCacheableLeadFilter` standalone export below. */
+  private isCacheableLeadFilter(
+    filters?: { platform?: string; status?: string; businessId?: string; limit?: number },
+  ): boolean {
+    return isCacheableLeadFilter(filters);
   }
 
   /**
-   * Get messages for a lead/negotiation
-   * All messages come from the database (stored via webhooks)
-   * No API fallback needed - webhooks handle all connected accounts
+   * Get messages for a lead/negotiation.
+   *
+   * Wrapped in Redis (5-min TTL, userId-scoped key). Cache is invalidated on:
+   *   - outbound send (`sendMessage`, `sendQuote`)
+   *   - inbound SMS (event listener `onSmsInbound`)
+   *   - Yelp NEW_EVENT webhook (explicit `invalidateLeadMessages` in webhooks.service)
+   *   - resync / refetch paths
+   *
+   * Keeps the existing read strategy: Yelp → live Yelp API (authoritative for
+   * customer replies; the webhook path records to ThreadContext but does NOT
+   * persist Message rows), Thumbtack/SMS → local DB (webhook-persisted).
    */
   async getMessages(userId: string, leadId: string): Promise<any[]> {
-    console.log(`[LeadsService] getMessages called - userId: ${userId}, leadId: ${leadId}`);
+    const t0 = Date.now();
+    const shortLead = leadId.slice(0, 8);
+    let wasCacheHit = true; // flipped to false inside the loader
 
-    const lead = await this.getLead(userId, leadId);
-    console.log(`[LeadsService] Found lead - externalRequestId: ${lead.externalRequestId}, platform: ${lead.platform}, businessId: ${lead.businessId}`);
+    const result = await this.cache.getOrSet<any[]>(
+      CacheKeys.leadMessages(userId, leadId),
+      LEAD_MESSAGES_TTL_SECONDS,
+      async () => {
+        wasCacheHit = false;
+        const loaderT0 = Date.now();
 
-    const negotiationId = lead.externalRequestId;
+        // Single combined query: fetch lead + its conversation + all messages in one DB
+        // round-trip. Previously this was 3 sequential queries (getLead cache miss →
+        // findLead DB, conversation.findUnique, message.findMany) which at ~150ms
+        // Railway→Supabase cross-region RTT meant ~450ms of pure wire time. One
+        // `include` collapses it to a single round-trip, roughly 3× faster on cold click.
+        const tDbStart = Date.now();
+        const leadWithMessages = await this.prisma.lead.findFirst({
+          where: { id: leadId, userId },
+          include: {
+            conversation: {
+              include: {
+                messages: { orderBy: { sentAt: 'asc' } },
+              },
+            },
+          },
+        });
+        const tDbEnd = Date.now();
 
-    // For Yelp leads, fetch from Yelp API first, fallback to local DB
-    if (lead.platform === 'yelp') {
-      const yelpMessages = await this.getYelpMessages(userId, lead);
-      if (yelpMessages.length > 0) return yelpMessages;
-      // Fallback: if API returned nothing (token error), use locally synced messages
-      if (lead.threadId) {
-        const localMsgs = await this.getLocalMessages(userId, 'yelp', lead.externalRequestId);
-        if (localMsgs.length > 0) {
-          console.log(`[LeadsService] Yelp API returned 0 messages, using ${localMsgs.length} from local DB`);
-          return localMsgs;
+        if (!leadWithMessages) {
+          this.logger.log(`[getMessages] MISS lead=${shortLead} NOT_FOUND db=${tDbEnd - tDbStart}ms`);
+          throw new NotFoundException('Lead not found');
         }
-      }
-      return [];
+
+        let messages: any[];
+        let source: string;
+        const dbMessages = leadWithMessages.conversation?.messages || [];
+
+        if (dbMessages.length > 0) {
+          messages = dbMessages.map(msg => this.formatMessageRow(msg));
+          source = `db-combined(${tDbEnd - tDbStart}ms)`;
+        } else if (leadWithMessages.platform === 'yelp') {
+          // DB empty — fall back to live Yelp API (historical lead never webhook-synced,
+          // or brand-new thread whose first message hasn't landed yet).
+          const tYelpStart = Date.now();
+          const yelpMessages = await this.getYelpMessages(userId, leadWithMessages);
+          const tYelpEnd = Date.now();
+          messages = yelpMessages;
+          source = `yelp-api-fallback(db-${tDbEnd - tDbStart}ms-empty,api-${tYelpEnd - tYelpStart}ms)`;
+        } else {
+          messages = [];
+          source = `db-combined(${tDbEnd - tDbStart}ms)-empty`;
+        }
+
+        this.logger.log(
+          `[getMessages] MISS lead=${shortLead} platform=${leadWithMessages.platform} source=${source} loader-total=${Date.now() - loaderT0}ms count=${messages.length}`,
+        );
+        return messages;
+      },
+    );
+
+    const totalMs = Date.now() - t0;
+    if (wasCacheHit) {
+      this.logger.log(`[getMessages] HIT  lead=${shortLead} total=${totalMs}ms count=${result.length}`);
+    } else {
+      this.logger.log(`[getMessages] DONE lead=${shortLead} total=${totalMs}ms (see MISS line above)`);
     }
-
-    // Get messages from database (stored via webhooks)
-    const messages = await this.getLocalMessages(userId, lead.platform, negotiationId);
-    console.log(`[LeadsService] Found ${messages.length} messages in database for negotiation ${negotiationId}`);
-
-    return messages;
+    return result;
   }
 
   private async getYelpMessages(userId: string, lead: any): Promise<any[]> {
@@ -407,7 +533,9 @@ export class LeadsService {
   }
 
   /**
-   * Get messages from local database (stored via webhooks)
+   * Get messages from local database (stored via webhooks).
+   * Kept for callers outside getMessages (e.g. legacy fallbacks). Uses two
+   * round-trips — prefer the combined query inside `getMessages` for hot paths.
    */
   private async getLocalMessages(userId: string, platform: string, negotiationId: string): Promise<any[]> {
     // Find conversation by negotiationId (stored as externalThreadId)
@@ -431,32 +559,32 @@ export class LeadsService {
       orderBy: { sentAt: 'asc' },
     });
 
-    // Convert to the format expected by frontend
-    return messages.map(msg => {
-      // Parse rawJson to get attachments and other data
-      let raw: Record<string, any> = {};
-      try {
-        raw = msg.rawJson ? JSON.parse(msg.rawJson) : {};
-      } catch (_e) {
-        // Ignore parse errors
-      }
+    return messages.map(msg => this.formatMessageRow(msg));
+  }
 
-      return {
-        id: msg.id,
-        conversationId: msg.conversationId,
-        platform: msg.platform,
-        externalMessageId: msg.externalMessageId,
-        sender: msg.sender,
-        senderType: (msg as any).senderType || null,
-        content: msg.content,
-        isRead: msg.isRead,
-        sentAt: msg.sentAt.toISOString(),
-        deliveredAt: msg.deliveredAt?.toISOString(),
-        notificationLogId: (msg as any).notificationLogId || null,
-        attachments: raw.attachments || [],
-        raw,
-      };
-    });
+  /** Shape a raw Message row for the frontend contract. */
+  private formatMessageRow(msg: any) {
+    let raw: Record<string, any> = {};
+    try {
+      raw = msg.rawJson ? JSON.parse(msg.rawJson) : {};
+    } catch (_e) {
+      // Ignore parse errors
+    }
+    return {
+      id: msg.id,
+      conversationId: msg.conversationId,
+      platform: msg.platform,
+      externalMessageId: msg.externalMessageId,
+      sender: msg.sender,
+      senderType: msg.senderType || null,
+      content: msg.content,
+      isRead: msg.isRead,
+      sentAt: msg.sentAt.toISOString(),
+      deliveredAt: msg.deliveredAt?.toISOString(),
+      notificationLogId: msg.notificationLogId || null,
+      attachments: raw.attachments || [],
+      raw,
+    };
   }
 
   /**
@@ -726,6 +854,11 @@ export class LeadsService {
       console.error('[LeadsService] Failed to store sent message locally:', err.message);
     }
 
+    // Outbound send changes: Message row, Conversation.lastMessageAt, and possibly
+    // Lead.threadId. Invalidate the list (order shifts by lastMessageAt), the
+    // detail, and the messages thread.
+    await this.leadCache.invalidateLeadMessagesAndList(userId, leadId);
+
     return sentMessage;
   }
 
@@ -766,6 +899,7 @@ export class LeadsService {
       where: { id: leadId },
       data: { status: 'quoted' },
     });
+    await this.leadCache.invalidateLeadAndList(userId, leadId);
 
     return quote;
   }
@@ -785,6 +919,8 @@ export class LeadsService {
     if (lead.count === 0) {
       throw new NotFoundException('Lead not found');
     }
+
+    await this.leadCache.invalidateLeadAndList(userId, leadId);
 
     return this.getLead(userId, leadId);
   }
@@ -849,6 +985,7 @@ export class LeadsService {
             updatedAt: new Date(),
           },
         });
+        await this.leadCache.invalidateLeadAndList(userId, leadId);
         console.log(`[LeadsService] Updated lead status: ${lead.status} -> ${freshLead.status}`);
       }
 
@@ -920,7 +1057,7 @@ export class LeadsService {
    * Also imports and stores all messages for the negotiation
    * @param accountId - Optional saved account ID to associate the lead with the correct business
    */
-  async importThumbtackNegotiation(userId: string, negotiationId: string, accountId?: string): Promise<{ lead: NormalizedLead; isNew: boolean }> {
+  async importThumbtackNegotiation(userId: string, negotiationId: string, accountId?: string, opts?: { skipCacheInvalidate?: boolean }): Promise<{ lead: NormalizedLead; isNew: boolean }> {
     console.log(`[LeadsService] importThumbtackNegotiation - userId: ${userId}, negotiationId: ${negotiationId}, accountId: ${accountId}`);
 
     // If accountId provided, verify it belongs to this user and get the businessId and credentials
@@ -1093,6 +1230,13 @@ export class LeadsService {
       await this.analyticsService.invalidateCache(userId);
     }
 
+    // Bulk caller (`importThumbtackNegotiations`) sets skipCacheInvalidate and
+    // calls `invalidateLeadList(userId)` once after the loop — cheaper than
+    // N delPatterns for large imports.
+    if (!opts?.skipCacheInvalidate) {
+      await this.leadCache.invalidateLeadAndList(userId, storedLead.id);
+    }
+
     return { lead: this.convertToNormalizedLead(storedLead), isNew };
   }
 
@@ -1261,6 +1405,7 @@ export class LeadsService {
 
     if (Object.keys(updateData).length > 0) {
       await this.prisma.lead.update({ where: { id: lead.id }, data: updateData });
+      await this.leadCache.invalidateLeadAndList(userId, lead.id);
     }
 
     // Mark as no longer needing scrape
@@ -1284,12 +1429,18 @@ export class LeadsService {
 
     for (const negotiationId of negotiationIds) {
       try {
-        await this.importThumbtackNegotiation(userId, negotiationId, accountId);
+        await this.importThumbtackNegotiation(userId, negotiationId, accountId, { skipCacheInvalidate: true });
         results.imported++;
       } catch (error) {
         results.failed++;
         results.errors.push(`${negotiationId}: ${error.message}`);
       }
+    }
+
+    // One list-level invalidation for the whole batch. Do NOT invalidate each
+    // lead detail — cold-miss is acceptable; the list is the hot path.
+    if (results.imported > 0) {
+      await this.leadCache.invalidateLeadList(userId);
     }
 
     return results;
@@ -1407,6 +1558,7 @@ export class LeadsService {
     });
 
     this.logger.log(`Refetched lead ${leadId}: ${lead.customerName} → ${freshLead.customerName}`);
+    await this.leadCache.invalidateLeadAndList(userId, leadId);
     return { updated: true, customerName: freshLead.customerName };
   }
 
@@ -1541,6 +1693,10 @@ export class LeadsService {
       importedCount = messageCount;
     }
 
+    if (cleanedCount > 0 || importedCount > 0 || statusUpdated) {
+      await this.leadCache.invalidateLeadMessagesAndList(userId, leadId);
+    }
+
     return { cleaned: cleanedCount, imported: importedCount, statusUpdated };
   }
 
@@ -1639,6 +1795,9 @@ export class LeadsService {
     }
 
     console.log(`[LeadsService] Migration complete - updated: ${updated}, skipped: ${skipped}, errors: ${errors.length}`);
+    if (updated > 0) {
+      await this.leadCache.invalidateLeadList(userId);
+    }
     return { updated, skipped, errors };
   }
 
