@@ -263,49 +263,51 @@ export class LeadsService {
         wasCacheHit = false;
         const loaderT0 = Date.now();
 
-        const lead = await this.getLead(userId, leadId);
-        const negotiationId = lead.externalRequestId;
-        const tAfterLead = Date.now();
+        // Single combined query: fetch lead + its conversation + all messages in one DB
+        // round-trip. Previously this was 3 sequential queries (getLead cache miss →
+        // findLead DB, conversation.findUnique, message.findMany) which at ~150ms
+        // Railway→Supabase cross-region RTT meant ~450ms of pure wire time. One
+        // `include` collapses it to a single round-trip, roughly 3× faster on cold click.
+        const tDbStart = Date.now();
+        const leadWithMessages = await this.prisma.lead.findFirst({
+          where: { id: leadId, userId },
+          include: {
+            conversation: {
+              include: {
+                messages: { orderBy: { sentAt: 'asc' } },
+              },
+            },
+          },
+        });
+        const tDbEnd = Date.now();
+
+        if (!leadWithMessages) {
+          this.logger.log(`[getMessages] MISS lead=${shortLead} NOT_FOUND db=${tDbEnd - tDbStart}ms`);
+          throw new NotFoundException('Lead not found');
+        }
 
         let messages: any[];
         let source: string;
+        const dbMessages = leadWithMessages.conversation?.messages || [];
 
-        if (lead.platform === 'yelp') {
-          // DB-first: webhook now persists both inbound customer messages
-          // (handleYelpNewEventInner) and outbound pro messages (sendMessage
-          // + Yelp message-backfill), so for webhook-synced leads the DB is
-          // authoritative. This eliminates the ~1.5s Yelp API call on every
-          // fresh click. Fall back to the live Yelp API only when DB is empty
-          // (historical lead that never webhook-synced, or a brand-new lead
-          // whose first message hasn't landed yet).
-          if (lead.threadId) {
-            const tDbStart = Date.now();
-            const localMsgs = await this.getLocalMessages(userId, 'yelp', lead.externalRequestId);
-            const tDbEnd = Date.now();
-            if (localMsgs.length > 0) {
-              messages = localMsgs;
-              source = `db(yelp-${tDbEnd - tDbStart}ms)`;
-            } else {
-              const tYelpStart = Date.now();
-              const yelpMessages = await this.getYelpMessages(userId, lead);
-              const tYelpEnd = Date.now();
-              messages = yelpMessages;
-              source = `yelp-api-fallback(db-${tDbEnd - tDbStart}ms-empty,api-${tYelpEnd - tYelpStart}ms)`;
-            }
-          } else {
-            const tYelpStart = Date.now();
-            const yelpMessages = await this.getYelpMessages(userId, lead);
-            const tYelpEnd = Date.now();
-            messages = yelpMessages;
-            source = `yelp-api-fallback(no-thread,api-${tYelpEnd - tYelpStart}ms)`;
-          }
+        if (dbMessages.length > 0) {
+          messages = dbMessages.map(msg => this.formatMessageRow(msg));
+          source = `db-combined(${tDbEnd - tDbStart}ms)`;
+        } else if (leadWithMessages.platform === 'yelp') {
+          // DB empty — fall back to live Yelp API (historical lead never webhook-synced,
+          // or brand-new thread whose first message hasn't landed yet).
+          const tYelpStart = Date.now();
+          const yelpMessages = await this.getYelpMessages(userId, leadWithMessages);
+          const tYelpEnd = Date.now();
+          messages = yelpMessages;
+          source = `yelp-api-fallback(db-${tDbEnd - tDbStart}ms-empty,api-${tYelpEnd - tYelpStart}ms)`;
         } else {
-          messages = await this.getLocalMessages(userId, lead.platform, negotiationId);
-          source = `db(${lead.platform})`;
+          messages = [];
+          source = `db-combined(${tDbEnd - tDbStart}ms)-empty`;
         }
 
         this.logger.log(
-          `[getMessages] MISS lead=${shortLead} platform=${lead.platform} source=${source} getLead=${tAfterLead - loaderT0}ms loader-total=${Date.now() - loaderT0}ms count=${messages.length}`,
+          `[getMessages] MISS lead=${shortLead} platform=${leadWithMessages.platform} source=${source} loader-total=${Date.now() - loaderT0}ms count=${messages.length}`,
         );
         return messages;
       },
@@ -526,7 +528,9 @@ export class LeadsService {
   }
 
   /**
-   * Get messages from local database (stored via webhooks)
+   * Get messages from local database (stored via webhooks).
+   * Kept for callers outside getMessages (e.g. legacy fallbacks). Uses two
+   * round-trips — prefer the combined query inside `getMessages` for hot paths.
    */
   private async getLocalMessages(userId: string, platform: string, negotiationId: string): Promise<any[]> {
     // Find conversation by negotiationId (stored as externalThreadId)
@@ -550,32 +554,32 @@ export class LeadsService {
       orderBy: { sentAt: 'asc' },
     });
 
-    // Convert to the format expected by frontend
-    return messages.map(msg => {
-      // Parse rawJson to get attachments and other data
-      let raw: Record<string, any> = {};
-      try {
-        raw = msg.rawJson ? JSON.parse(msg.rawJson) : {};
-      } catch (_e) {
-        // Ignore parse errors
-      }
+    return messages.map(msg => this.formatMessageRow(msg));
+  }
 
-      return {
-        id: msg.id,
-        conversationId: msg.conversationId,
-        platform: msg.platform,
-        externalMessageId: msg.externalMessageId,
-        sender: msg.sender,
-        senderType: (msg as any).senderType || null,
-        content: msg.content,
-        isRead: msg.isRead,
-        sentAt: msg.sentAt.toISOString(),
-        deliveredAt: msg.deliveredAt?.toISOString(),
-        notificationLogId: (msg as any).notificationLogId || null,
-        attachments: raw.attachments || [],
-        raw,
-      };
-    });
+  /** Shape a raw Message row for the frontend contract. */
+  private formatMessageRow(msg: any) {
+    let raw: Record<string, any> = {};
+    try {
+      raw = msg.rawJson ? JSON.parse(msg.rawJson) : {};
+    } catch (_e) {
+      // Ignore parse errors
+    }
+    return {
+      id: msg.id,
+      conversationId: msg.conversationId,
+      platform: msg.platform,
+      externalMessageId: msg.externalMessageId,
+      sender: msg.sender,
+      senderType: msg.senderType || null,
+      content: msg.content,
+      isRead: msg.isRead,
+      sentAt: msg.sentAt.toISOString(),
+      deliveredAt: msg.deliveredAt?.toISOString(),
+      notificationLogId: msg.notificationLogId || null,
+      attachments: raw.attachments || [],
+      raw,
+    };
   }
 
   /**
