@@ -13,7 +13,6 @@
 | `CallConnectStatus` | `CREATED`, `CALLING_AGENT`, `AGENT_ANSWERED`, `AGENT_ACCEPTED`, `CALLING_LEAD`, `BRIDGED`, `VOICEMAIL_DROP`, `ENDED`, `FAILED`, `CANCELED`, `RINGING_AGENT` *(legacy)*, `RINGING_LEAD` *(legacy)*, `CANCELLED` *(legacy)* |
 | `SubscriptionTier` | `STARTER`, `PRO`, `ENTERPRISE` |
 | `SubscriptionStatus` | `ACTIVE`, `PAST_DUE`, `CANCELLED`, `TRIALING`, `INCOMPLETE` |
-| `PhonePoolStatus` | `AVAILABLE`, `ASSIGNED`, `RESERVED`, `RELEASED` |
 | `TenantPhoneStatus` | `ACTIVE`, `GRACE_PERIOD`, `RELEASED` |
 
 ---
@@ -243,13 +242,10 @@
 | `savedAccountId` | `savedAccountId` | string? UNIQUE FK→saved_accounts | null = user-level default |
 | `userId` | `userId` | string? FK→users | |
 | `enabled` | `enabled` | bool | default false |
-| `destinationPhone` | `destinationPhone` | string? | Alert destination |
-| `senderMode` | `senderMode` | string | `shared` \| `dedicated` \| `openphone` |
+| `destinationPhone` | `destinationPhone` | string? | Business phone (alert destination + forwarding target) |
+| `senderMode` | `senderMode` | string | Legacy; always effectively `dedicated` now |
 | `callioApiKey` | `sigcoreApiKey` | string? | Encrypted Sigcore API key |
-| `callioFromPhone` | `sigcoreFromPhone` | string? | BYO phone number selected in UI |
 | `callioWorkspaceId` | `sigcoreWorkspaceId` | string? | Sigcore workspace ID |
-| `callioWebhookId` | `sigcoreWebhookId` | string? | Delivery status webhook ID |
-| `sigcoreProvider` | `sigcoreProvider` | string? | `openphone` \| `twilio` |
 | `sigcore_tenant_id` | `sigcoreTenantId` | string? | Sigcore Tenant UUID |
 | `sigcore_provisioned_at` | `sigcoreProvisionedAt` | datetime? | When tenant was provisioned |
 | `template` | `template` | text | Default alert SMS template |
@@ -258,11 +254,13 @@
 | `quietHoursTimezone` | `quietHoursTimezone` | string? | default `America/New_York` |
 | `requirePhone` | `requirePhone` | bool | default true |
 | `customerTextingEnabled` | `customerTextingEnabled` | bool | default false |
-| `inboundSmsWebhookId` | `inboundSmsWebhookId` | string? | Inbound SMS webhook ID |
+| `inboundSmsWebhookId` | `inboundSmsWebhookId` | string? | Inbound SMS webhook subscription ID |
 | `smsForwardingNumber` | `smsForwardingNumber` | string? | Forward inbound SMS to (E.164) |
 | `callForwardingNumber` | `callForwardingNumber` | string? | Forward inbound calls to (E.164) |
 | `createdAt` | `createdAt` | datetime | |
 | `updatedAt` | `updatedAt` | datetime | |
+
+> **Dropped 2026-04-24** (PR #106): `callioFromPhone` (sigcoreFromPhone), `callioWebhookId` (sigcoreWebhookId — delivery-status webhook), `sigcoreProvider`. Fromphone now resolved at send time from `tenant_phone_numbers` via `resolveBotPhone`. **Note**: `call_connect_settings.sigcoreWebhookId` is a *different* column on a *different* table — it's live (call-connect event webhook) and kept.
 
 ---
 
@@ -316,7 +314,7 @@
 | `leadId` | `leadId` | string? | |
 | `toPhone` | `toPhone` | string | |
 | `fromPhone` | `fromPhone` | string? | |
-| `provider` | `provider` | string? | `twilio` \| `openphone` |
+| `provider` | `provider` | string? | `twilio` (historical rows may have `openphone`) |
 | `callioMessageId` | `sigcoreMessageId` | string? | Sigcore message ID |
 | `callioConversationId` | `sigcoreConversationId` | string? | Sigcore conversation ID |
 | `status` | `status` | string | `pending` \| `queued` \| `sent` \| `delivered` \| `failed` |
@@ -352,39 +350,6 @@
 | `targetUserId` | string? | |
 | `details` | json? | |
 | `createdAt` | datetime | |
-
----
-
-### `phone_pool`
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | uuid PK | |
-| `phoneNumber` | string UNIQUE | E.164 |
-| `provider` | string | `twilio` \| `openphone`, default `twilio` |
-| `areaCode` | string? | |
-| `state` | string? | US state abbreviation |
-| `friendlyName` | string? | |
-| `sigcoreAllocationId` | string? | |
-| `status` | PhonePoolStatus | default `AVAILABLE` |
-| `assignedToUserId` | string? FK→users | Legacy |
-| `assignedAt` | datetime? | Legacy |
-| `provisionedAt` | datetime | |
-| `releasedAt` | datetime? | |
-| `smsApproved` | bool | A2P 10DLC approved, default true |
-| `smsCapable` | bool | default false |
-| `voiceCapable` | bool | default false |
-| `createdAt` | datetime | |
-| `updatedAt` | datetime | |
-
----
-
-### `phone_pool_assignments`
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | uuid PK | |
-| `phonePoolId` | string FK→phone_pool | |
-| `userId` | string FK→users | |
-| `assignedAt` | datetime | |
 
 ---
 
@@ -545,8 +510,6 @@ users
  │    └── call_connect_settings (1:1)
  ├── message_templates (1:N)
  ├── automation_rules (1:N)
- ├── phone_pool (1:N legacy)
- ├── phone_pool_assignments (1:N) → phone_pool
  ├── tenant_phone_numbers (1:N)
  └── subscription_history (1:N)
 
@@ -559,10 +522,13 @@ leads
 
 ---
 
-## Phone Number Types (Quick Reference)
+## Phone Number Roles (Quick Reference)
 
-| Type | Table | Scope | SMS | Calls |
-|------|-------|-------|-----|-------|
-| **Pool** | `phone_pool` + `phone_pool_assignments` | Shared (platform key) | Alerts only | ❌ |
-| **BYO / OpenPhone** | `notification_settings.callioFromPhone` | Per-tenant (tenant key) | ✅ Alerts + Customer | ❌ |
-| **Dedicated** | `tenant_phone_numbers` | Per-tenant (tenant key) | ✅ All | ✅ CC only |
+LeadBridge uses exactly **two** phone numbers per tenant. See `PHONE_NUMBER_SPEC.md` for full detail.
+
+| Role | Table / Field | Purpose |
+|------|---------------|---------|
+| **Business** (internal destination) | `users.businessPhone` (source of truth), mirrored to `notification_settings.destinationPhone` + `call_connect_settings.agentPhoneE164` | Receives new-lead alerts; target of call-connect bridge; optional target of SMS forwarding. Never shown to customers. |
+| **Dedicated** (customer-facing) | `tenant_phone_numbers` (status=`ACTIVE`) | Outbound customer SMS, inbound customer SMS/calls. Resolved at send time via `resolveBotPhone`. Tenant Sigcore API key always used. |
+
+> **Removed 2026-04-24** (PRs #104, #105, #106): pool numbers (`phone_pool`, `phone_pool_assignments`, `PhonePoolStatus` enum) and BYO/OpenPhone routing (`notification_settings.callioFromPhone`, `sigcoreProvider`, `callioWebhookId`). Production had 0 pool rows and 0 OpenPhone tenants.
