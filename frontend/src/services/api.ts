@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog, NotificationRule, SubscriptionDetails, AdminUser, AdminUserDetails, AdminStats, AdminLog, PhonePoolEntry, PhonePoolStats, AvailablePhoneNumber } from '../types';
+import type { AuthResponse, Lead, Business, Platform, SavedAccount, MessageTemplate, BulkMessagePreview, BulkSendResult, AutomationRule, PendingAutomatedMessage, NotificationSettings, NotificationLog, NotificationRule, SubscriptionDetails, AdminUser, AdminUserDetails, AdminStats, AdminLog, AvailablePhoneNumber } from '../types';
 import { notify } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 
@@ -1140,71 +1140,7 @@ export const adminApi = {
     const { data } = await api.get('/v1/admin/notification-logs', { params });
     return data;
   },
-  // Phone Pool
-  getPhonePool: async (params?: { status?: string; areaCode?: string; search?: string; offset?: number; limit?: number }): Promise<{ phones: PhonePoolEntry[]; total: number; offset: number; limit: number }> => {
-    const queryParams = new URLSearchParams();
-    if (params?.status) queryParams.append('status', params.status);
-    if (params?.areaCode) queryParams.append('areaCode', params.areaCode);
-    if (params?.search) queryParams.append('search', params.search);
-    if (params?.offset !== undefined) queryParams.append('offset', params.offset.toString());
-    if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString());
-
-    const { data } = await api.get(`/v1/admin/phone-pool?${queryParams.toString()}`);
-    return data.data;
-  },
-  getPhonePoolStats: async (): Promise<PhonePoolStats> => {
-    const { data } = await api.get('/v1/admin/phone-pool/stats');
-    return data.data;
-  },
-  getPoolConfig: async (): Promise<{ configured: boolean }> => {
-    const { data } = await api.get('/v1/admin/phone-pool/config');
-    return data.data;
-  },
-  connectPoolProvider: async (provider: 'openphone' | 'twilio', credentials: {
-    apiKey?: string;
-    accountSid?: string;
-    authToken?: string;
-    phoneNumber?: string;
-  }): Promise<{ success: boolean; data?: any; error?: string }> => {
-    const { data } = await api.post('/v1/admin/phone-pool/connect-provider', { provider, credentials });
-    return data;
-  },
-  disconnectPoolProvider: async (provider: 'openphone' | 'twilio'): Promise<{ success: boolean; error?: string }> => {
-    const { data } = await api.post('/v1/admin/phone-pool/disconnect-provider', { provider });
-    return data;
-  },
-  syncPoolNumbers: async (): Promise<{ success: boolean; data: { results: { provider: string; synced: number; errors: string[] }[]; released: number } }> => {
-    const { data } = await api.post('/v1/admin/phone-pool/sync');
-    return data;
-  },
-  setupDeliveryWebhook: async (): Promise<{ success: boolean; data?: { webhookId?: string }; error?: string }> => {
-    const { data } = await api.post('/v1/admin/phone-pool/setup-webhook');
-    return data;
-  },
-  assignPhone: async (phonePoolId: string, userId: string): Promise<PhonePoolEntry> => {
-    const { data } = await api.post(`/v1/admin/phone-pool/${phonePoolId}/assign/${userId}`);
-    return data.data;
-  },
-  assignPhoneToAll: async (phonePoolId: string): Promise<PhonePoolEntry> => {
-    const { data } = await api.post(`/v1/admin/phone-pool/${phonePoolId}/assign-all`);
-    return data.data;
-  },
-  unassignPhone: async (phonePoolId: string, userId: string): Promise<PhonePoolEntry> => {
-    const { data } = await api.post(`/v1/admin/phone-pool/${phonePoolId}/unassign/${userId}`);
-    return data.data;
-  },
-  releasePhone: async (phonePoolId: string): Promise<void> => {
-    await api.delete(`/v1/admin/phone-pool/${phonePoolId}`);
-  },
-  updateSmsApproved: async (phonePoolId: string, smsApproved: boolean): Promise<PhonePoolEntry> => {
-    const { data } = await api.patch(`/v1/admin/phone-pool/${phonePoolId}/sms-approved`, { smsApproved });
-    return data.data;
-  },
-  getPhonePoolUsers: async (search?: string): Promise<{ data: { id: string; email: string; name: string | null }[] }> => {
-    const params = search ? `?search=${encodeURIComponent(search)}` : '';
-    const { data } = await api.get(`/v1/admin/phone-pool/users${params}`);
-    return data;
-  },
+  // Global admin config (test data, phone pricing, A2P messaging service)
   getAdminConfig: async (): Promise<{ id: string; testData: Record<string, string>; yelpTestData?: Record<string, string> }> => {
     const { data } = await api.get('/v1/admin/phone-pool/admin-config');
     return data.data;
@@ -1272,20 +1208,8 @@ export const adminApi = {
     const { data } = await api.get(`/v1/admin/tenant-numbers?${qp.toString()}`);
     return data.data;
   },
-  convertPoolToTenant: async (poolId: string, userId: string): Promise<any> => {
-    const { data } = await api.post(`/v1/admin/phone-pool/${poolId}/convert-to-tenant`, { userId });
-    return data.data;
-  },
-  convertTenantToPool: async (tenantPhoneId: string): Promise<any> => {
-    const { data } = await api.post(`/v1/admin/phone-pool/convert-tenant-to-pool/${tenantPhoneId}`);
-    return data.data;
-  },
   reassignTenantPhone: async (tenantPhoneId: string, userId: string): Promise<any> => {
     const { data } = await api.patch(`/v1/admin/phone-pool/tenant/${tenantPhoneId}/reassign`, { userId });
-    return data.data;
-  },
-  getOpenPhoneNumbers: async (): Promise<{ phoneNumber: string; friendlyName?: string; provider: string; userName: string | null; userEmail: string; accountName: string }[]> => {
-    const { data } = await api.get('/v1/admin/phone-pool/openphone-numbers');
     return data.data;
   },
 };
