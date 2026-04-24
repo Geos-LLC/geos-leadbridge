@@ -252,28 +252,63 @@ export class LeadsService {
    * persist Message rows), Thumbtack/SMS → local DB (webhook-persisted).
    */
   async getMessages(userId: string, leadId: string): Promise<any[]> {
-    return this.cache.getOrSet<any[]>(
+    const t0 = Date.now();
+    const shortLead = leadId.slice(0, 8);
+    let wasCacheHit = true; // flipped to false inside the loader
+
+    const result = await this.cache.getOrSet<any[]>(
       CacheKeys.leadMessages(userId, leadId),
       LEAD_MESSAGES_TTL_SECONDS,
       async () => {
+        wasCacheHit = false;
+        const loaderT0 = Date.now();
+
         const lead = await this.getLead(userId, leadId);
         const negotiationId = lead.externalRequestId;
+        const tAfterLead = Date.now();
+
+        let messages: any[];
+        let source: string;
 
         if (lead.platform === 'yelp') {
+          const tYelpStart = Date.now();
           const yelpMessages = await this.getYelpMessages(userId, lead);
-          if (yelpMessages.length > 0) return yelpMessages;
-          // Fallback: if Yelp API returned nothing (token error / archived), use locally synced.
-          if (lead.threadId) {
+          const tYelpEnd = Date.now();
+          if (yelpMessages.length > 0) {
+            messages = yelpMessages;
+            source = `yelp-api(${tYelpEnd - tYelpStart}ms)`;
+          } else if (lead.threadId) {
             const localMsgs = await this.getLocalMessages(userId, 'yelp', lead.externalRequestId);
-            if (localMsgs.length > 0) return localMsgs;
+            if (localMsgs.length > 0) {
+              messages = localMsgs;
+              source = `db-fallback(yelp-api-${tYelpEnd - tYelpStart}ms-empty)`;
+            } else {
+              messages = [];
+              source = `empty(yelp-api-${tYelpEnd - tYelpStart}ms)`;
+            }
+          } else {
+            messages = [];
+            source = `empty(no-thread)`;
           }
-          return [];
+        } else {
+          messages = await this.getLocalMessages(userId, lead.platform, negotiationId);
+          source = `db(${lead.platform})`;
         }
 
-        // Webhook-based platforms (Thumbtack, SMS) — always DB.
-        return this.getLocalMessages(userId, lead.platform, negotiationId);
+        this.logger.log(
+          `[getMessages] MISS lead=${shortLead} platform=${lead.platform} source=${source} getLead=${tAfterLead - loaderT0}ms loader-total=${Date.now() - loaderT0}ms count=${messages.length}`,
+        );
+        return messages;
       },
     );
+
+    const totalMs = Date.now() - t0;
+    if (wasCacheHit) {
+      this.logger.log(`[getMessages] HIT  lead=${shortLead} total=${totalMs}ms count=${result.length}`);
+    } else {
+      this.logger.log(`[getMessages] DONE lead=${shortLead} total=${totalMs}ms (see MISS line above)`);
+    }
+    return result;
   }
 
   private async getYelpMessages(userId: string, lead: any): Promise<any[]> {
