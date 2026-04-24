@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Check, Loader2, Star, Plus } from 'lucide-react';
 import { billingApi, notificationsApi } from '../services/api';
 import { notify } from '../store/notificationStore';
+import { useAuthStore } from '../store/authStore';
 import type { SubscriptionDetails } from '../types';
 
 type TierId = 'STARTER' | 'PRO' | 'ENTERPRISE';
@@ -77,6 +78,11 @@ export default function Pricing() {
   const [loading, setLoading] = useState<string | null>(null);
   const [subscription, setSubscription] = useState<SubscriptionDetails | null>(null);
   const [extraNumberPrice, setExtraNumberPrice] = useState<number | null>(null);
+  const isAuthenticated = useAuthStore(s => s.isAuthenticated);
+
+  const handleBuyExtraNumber = () => {
+    navigate(isAuthenticated ? '/settings' : '/register?intent=extra_number');
+  };
 
   useEffect(() => {
     const loadSubscription = async () => {
@@ -238,8 +244,14 @@ export default function Pricing() {
               Separate communication per business · Multi-location setup · Team routing{' '}
               <span className="text-slate-400">(coming soon)</span>
             </p>
-            <p className="text-xs text-slate-400 mt-1">Your first number is included with Engage and Convert plans. Add more from Settings.</p>
+            <p className="text-xs text-slate-400 mt-1">Your first number is included with Engage and Convert plans.</p>
           </div>
+          <button
+            onClick={handleBuyExtraNumber}
+            className="shrink-0 px-5 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 whitespace-nowrap"
+          >
+            {isAuthenticated ? 'Manage numbers' : 'Get started'}
+          </button>
         </div>
       </section>
 
