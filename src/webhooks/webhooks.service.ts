@@ -1696,6 +1696,8 @@ export class WebhooksService {
       // MUST run BEFORE handleCustomerReply — echo would kill follow-up enrollments.
       let isCustomerMessage = true;
       let latestCustomerMessage = leadData.message || '';
+      let latestCustomerEventId: string | null = null;
+      let latestCustomerSentAt: Date | null = null;
       try {
         const yelpAdapter = this.platformFactory.getAdapter('yelp') as any;
         const events = await yelpAdapter.getLeadEvents({ accessToken }, leadId);
@@ -1707,7 +1709,7 @@ export class WebhooksService {
             isCustomerMessage = false;
             this.logger.log(`Yelp NEW_EVENT for ${leadId} — latest event is BIZ (our own message), skipping customer reply handling`);
           }
-          // Extract the latest CONSUMER TEXT message for re-engagement alerts
+          // Extract the latest CONSUMER TEXT message for re-engagement alerts + DB persistence.
           const latestConsumer = sorted.find((e: any) => e.user_type === 'CONSUMER' && e.event_type === 'TEXT');
           if (latestConsumer) {
             const content = latestConsumer.event_content;
@@ -1715,6 +1717,8 @@ export class WebhooksService {
               ? content
               : (content?.text || content?.fallback_text || latestConsumer.text || '');
             if (extracted) latestCustomerMessage = extracted;
+            latestCustomerEventId = latestConsumer.id || null;
+            latestCustomerSentAt = latestConsumer.time_created ? new Date(latestConsumer.time_created) : null;
           }
         }
       } catch {
@@ -1735,12 +1739,38 @@ export class WebhooksService {
       if (conversation) {
         await this.prisma.conversation.update({
           where: { id: conversation.id },
-          data: { lastMessageAt: new Date() },
+          data: { lastMessageAt: latestCustomerSentAt || new Date() },
         }).catch(() => {});
       }
 
+      // Persist the customer message to the Message table so reads can be served
+      // from the local DB (getLocalMessages) instead of a live Yelp API call.
+      // Without this, every GET /messages click hits Yelp API for 1.5s+. With it,
+      // reads are a ~50ms DB hit, then cached in Redis on first read.
+      if (conversation && latestCustomerMessage) {
+        const externalMessageId = latestCustomerEventId || `yelp-inbound-${leadId}-${(latestCustomerSentAt || new Date()).getTime()}`;
+        try {
+          await this.prisma.message.upsert({
+            where: { platform_externalMessageId: { platform: 'yelp', externalMessageId } },
+            create: {
+              conversationId: conversation.id,
+              userId,
+              platform: 'yelp',
+              externalMessageId,
+              sender: 'customer',
+              content: latestCustomerMessage,
+              isRead: false,
+              sentAt: latestCustomerSentAt || new Date(),
+            },
+            update: {},
+          });
+        } catch (err: any) {
+          this.logger.warn(`Failed to persist Yelp customer message for lead ${leadId}: ${err.message}`);
+        }
+      }
+
       // Invalidate the cached messages thread for this lead so the next fetch
-      // re-hits the Yelp API and includes the new customer reply.
+      // picks up the just-persisted customer reply.
       await this.leadCache.invalidateLeadMessagesAndList(userId, lead.id);
 
       // Stop follow-up enrollments
