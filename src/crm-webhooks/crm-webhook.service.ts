@@ -6,7 +6,7 @@
  * HMAC-SHA256 signed, 1 retry on failure, never breaks core webhook processing.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/utils/prisma.service';
 import * as crypto from 'crypto';
 
@@ -295,7 +295,7 @@ export class CrmWebhookService {
     const sub = await this.prisma.crmWebhookSubscription.findFirst({
       where: { id: subscriptionId, userId, direction: 'outbound' },
     });
-    if (!sub) return { success: false, error: 'Outbound subscription not found' };
+    if (!sub) throw new NotFoundException('Subscription not found');
 
     const testPayload: CrmEventPayload = {
       event_id: `evt_test_${crypto.randomUUID()}`,

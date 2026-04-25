@@ -5,7 +5,7 @@
  * Used by ServiceFlow (and future CRMs) to register for real-time events.
  */
 
-import { Controller, Get, Post, Delete, Param, Body, UseGuards, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Body, UseGuards, Logger, NotFoundException } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PrismaService } from '../common/utils/prisma.service';
@@ -103,7 +103,7 @@ export class CrmWebhookController {
     const sub = await this.prisma.crmWebhookSubscription.findFirst({
       where: { id, userId: user.id },
     });
-    if (!sub) return { success: false, error: 'Subscription not found' };
+    if (!sub) throw new NotFoundException('Subscription not found');
 
     await this.prisma.crmWebhookSubscription.delete({ where: { id } });
     this.logger.log(`[CrmWebhook] Subscription deleted: ${sub.name}`);

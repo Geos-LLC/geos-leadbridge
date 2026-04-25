@@ -19,6 +19,8 @@ import {
   Res,
   UseGuards,
   Logger,
+  NotFoundException,
+  BadRequestException,
   Query,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
@@ -140,20 +142,24 @@ export class ServiceFlowInboundController {
   @UseGuards(JwtAuthGuard)
   @Post('events/:id/replay')
   async replay(@CurrentUser() user: any, @Param('id') id: string) {
-    const event = await this.prisma.sfInboundEvent.findUnique({ where: { id } });
-    if (!event || event.userId !== user.id) {
-      return { success: false, error: 'event not found' };
-    }
+    // Cross-tenant access (event belongs to another user OR doesn't exist) returns
+    // NotFoundException so the response is 404, not a 200 with success:false.
+    const event = await this.prisma.sfInboundEvent.findFirst({
+      where: { id, userId: user.id },
+    });
+    if (!event) throw new NotFoundException('event not found');
     if (!['deferred', 'unmapped_status', 'dry_run'].includes(event.status)) {
-      return { success: false, error: `cannot replay event in status ${event.status}` };
+      throw new BadRequestException(`cannot replay event in status ${event.status}`);
     }
     if (!event.sfSubscriptionId) {
-      return { success: false, error: 'no subscription context' };
+      throw new BadRequestException('no subscription context');
     }
-    const sub = await this.prisma.crmWebhookSubscription.findUnique({
-      where: { id: event.sfSubscriptionId },
+    // The subscription is the tenant's own SF inbound subscription — re-verify
+    // ownership defensively rather than trusting a foreign event row.
+    const sub = await this.prisma.crmWebhookSubscription.findFirst({
+      where: { id: event.sfSubscriptionId, userId: user.id },
     });
-    if (!sub) return { success: false, error: 'subscription missing' };
+    if (!sub) throw new NotFoundException('subscription missing');
 
     const outcome = await this.sfInbound.process(event.payloadJson as any, sub);
     return { success: true, outcome };

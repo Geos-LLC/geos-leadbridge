@@ -306,13 +306,11 @@ describe('CrmWebhookService', () => {
       expect(sentBody.lead.id).toBe('test');
     });
 
-    it('returns error when subscription not found', async () => {
+    it('throws NotFoundException when subscription not found (Phase 1B: 404 instead of soft-fail)', async () => {
+      const { NotFoundException } = require('@nestjs/common');
       prisma.crmWebhookSubscription.findFirst.mockResolvedValue(null);
 
-      const result = await service.sendTestEvent('nonexistent', USER_ID);
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('not found');
+      await expect(service.sendTestEvent('nonexistent', USER_ID)).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('returns error details on delivery failure', async () => {
