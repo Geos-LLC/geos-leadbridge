@@ -737,14 +737,47 @@ export function Messages() {
     setSmsLogs([]);
     setTimelineEvents([]);
     markLeadAsSeen(lead);
-    try {
-      let { messages: apiMessages } = await leadsApi.getMessages(lead.id);
 
+    // Initial-request injection — used by both the messages-only first paint and
+    // the merged paint after SMS logs land. Closure over `lead` keeps the rule
+    // identical between the two passes (single source of truth).
+    const injectInitialRequest = (timeline: TimelineEvent[]): TimelineEvent[] => {
+      if (!lead.message) return timeline;
+      const firstMsgContent = lead.message.trim();
+      if (firstMsgContent.length === 0) return timeline;
+      const firstMsgWords = firstMsgContent.substring(0, 80);
+      const alreadyInTimeline = timeline.some(e =>
+        e.direction === 'inbound' && e.content && (
+          e.content.includes(firstMsgWords) || firstMsgContent.includes(e.content.trim().substring(0, 80))
+        ),
+      );
+      if (alreadyInTimeline) return timeline;
+      const initialEvent: TimelineEvent = {
+        id: 'initial-request',
+        channel: 'platform',
+        direction: 'inbound',
+        content: firstMsgContent,
+        timestamp: new Date(lead.createdAt),
+        sender: 'customer',
+      };
+      return [initialEvent, ...timeline];
+    };
+
+    try {
+      const { messages: apiMessages } = await leadsApi.getMessages(lead.id);
+
+      // Fire-and-forget auto-resync when DB is empty. Previously this awaited
+      // resyncMessages + a second getMessages before rendering, blocking the
+      // first paint by ~1 RTT for the (rare, post-PR #99) empty-DB case. SSE
+      // pushes new messages live, but we also re-call loadMessagesForLead on
+      // resync completion to handle providers whose resync writes flow only
+      // through the API path (not SSE). Force-refresh bypasses the 2-min
+      // in-memory cache so the user sees the freshly-synced thread.
       if (apiMessages.length === 0) {
-        console.log('[Messages] No messages found, auto-syncing from Thumbtack...');
-        await leadsApi.resyncMessages(lead.id);
-        const result = await leadsApi.getMessages(lead.id);
-        apiMessages = result.messages;
+        console.log('[Messages] No messages found, auto-syncing in background...');
+        leadsApi.resyncMessages(lead.id)
+          .then(() => loadMessagesForLead(lead, true))
+          .catch(err => console.warn('[Messages] Background resync failed:', err));
       }
 
       const convertedMessages: LocalMessage[] = apiMessages.map((msg) => {
@@ -764,12 +797,20 @@ export function Messages() {
       });
       setMessages(convertedMessages);
 
-      // Auto-detect phone from customer messages and save to lead if missing
+      // Lazy-render: paint a messages-only timeline immediately so the
+      // conversation is visible to the user. SMS logs merge in async below.
+      const messagesOnlyTimeline = injectInitialRequest(
+        mergeTimeline(convertedMessages, [], lead.customerPhone),
+      );
+      setTimelineEvents(messagesOnlyTimeline);
+      setLoadingMessages(false);
+
+      // Auto-detect phone from customer messages and save to lead if missing.
+      // Already async-fire-and-forget via `.then()`, kept as-is.
       if (!lead.customerPhone) {
         const phoneRegex = /(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/;
         for (const msg of convertedMessages) {
           if (msg.sender === 'customer' && msg.content) {
-            // Strip HTML tags first
             const text = msg.content.replace(/<[^>]+>/g, '');
             const match = text.match(phoneRegex);
             if (match) {
@@ -786,59 +827,36 @@ export function Messages() {
         }
       }
 
-      let leadSmsLogs: NotificationLog[] = [];
-      try {
-        const { logs } = await notificationsApi.getLogsByLead(lead.id);
-        leadSmsLogs = logs;
-        setSmsLogs(logs);
-      } catch (err) {
-        console.warn('[Messages] Failed to load SMS logs for lead:', err);
-      }
+      // Fetch SMS logs in background, then merge into the timeline + compute
+      // summary + cache the final state. On error, keep the messages-only
+      // timeline visible and skip caching so the next click retries.
+      notificationsApi.getLogsByLead(lead.id)
+        .then(({ logs: leadSmsLogs }) => {
+          setSmsLogs(leadSmsLogs);
 
-      let timeline = mergeTimeline(convertedMessages, leadSmsLogs, lead.customerPhone);
-
-      // Inject lead's initial request as the first message if not already in the timeline.
-      // Use overlap check: if any existing inbound message contains the lead message
-      // content (or vice versa), skip — Yelp raw messages include boilerplate that
-      // gets stripped from lead.message, so exact match fails.
-      if (lead.message) {
-        const firstMsgContent = lead.message.trim();
-        if (firstMsgContent.length > 0) {
-          const firstMsgWords = firstMsgContent.substring(0, 80);
-          const alreadyInTimeline = timeline.some(e =>
-            e.direction === 'inbound' && e.content && (
-              e.content.includes(firstMsgWords) || firstMsgContent.includes(e.content.trim().substring(0, 80))
-            ),
+          const mergedTimeline = injectInitialRequest(
+            mergeTimeline(convertedMessages, leadSmsLogs, lead.customerPhone),
           );
-          if (!alreadyInTimeline) {
-            const initialEvent: TimelineEvent = {
-              id: 'initial-request',
-              channel: 'platform',
-              direction: 'inbound',
-              content: firstMsgContent,
-              timestamp: new Date(lead.createdAt),
-              sender: 'customer',
-            };
-            timeline = [initialEvent, ...timeline];
-          }
-        }
-      }
-      setTimelineEvents(timeline);
+          setTimelineEvents(mergedTimeline);
 
-      const customerSmslogs = leadSmsLogs.filter(log => {
-        if (!lead.customerPhone || !log.toPhone) return false;
-        const normalizedCustomerPhone = lead.customerPhone.replace(/\D/g, '');
-        const normalizedToPhone = log.toPhone.replace(/\D/g, '');
-        return normalizedToPhone === normalizedCustomerPhone;
-      });
-      const summary = computeSummary(convertedMessages, customerSmslogs);
-      setCommSummary(summary);
+          const customerSmslogs = leadSmsLogs.filter(log => {
+            if (!lead.customerPhone || !log.toPhone) return false;
+            const normalizedCustomerPhone = lead.customerPhone.replace(/\D/g, '');
+            const normalizedToPhone = log.toPhone.replace(/\D/g, '');
+            return normalizedToPhone === normalizedCustomerPhone;
+          });
+          const summary = computeSummary(convertedMessages, customerSmslogs);
+          setCommSummary(summary);
 
-      // Store in cache
-      messageCache.current[lead.id] = { timeline, summary, cachedAt: Date.now() };
+          // Cache the FINAL merged state — partial states aren't cached so the
+          // next click retries the SMS fetch on failure (matches old behavior).
+          messageCache.current[lead.id] = { timeline: mergedTimeline, summary, cachedAt: Date.now() };
+        })
+        .catch(err => {
+          console.warn('[Messages] Failed to load SMS logs for lead:', err);
+        });
     } catch (err) {
       console.error('[Messages] Failed to load messages:', err);
-    } finally {
       setLoadingMessages(false);
     }
   };
