@@ -78,6 +78,15 @@ export class YelpIntegrationsController {
         where: { platform_externalRequestId: { platform: 'yelp', externalRequestId: leadId } },
       });
       if (existing) {
+        // The (platform, externalRequestId) pair is globally unique, so an
+        // existing row could belong to a different tenant if two LeadBridge
+        // users connected the same Yelp business. Refuse to mutate another
+        // tenant's lead — silently skip (don't leak existence by erroring).
+        if (existing.userId !== user.id) {
+          this.logger.warn(`[Yelp Import] Skipping lead ${leadId}: existing row owned by another user`);
+          skipped++;
+          continue;
+        }
         // Check if anything changed
         const newName = leadNames?.[leadId];
         const newCategory = leadCategories?.[leadId];

@@ -149,6 +149,11 @@ export class PlatformsController {
   /**
    * Diagnostic endpoint - show recent webhook events received
    * Useful for debugging which events are being received from Thumbtack
+   *
+   * Scope: only returns events whose payload `businessID` matches one of the
+   * caller's saved accounts. Previously returned every tenant's events with
+   * an `isYourAccount: false` flag — that leaked business/negotiation/message
+   * IDs across tenants.
    */
   @Get('webhooks/recent')
   async getRecentWebhookEvents(@CurrentUser() user: any) {
@@ -158,54 +163,58 @@ export class PlatformsController {
     });
     const businessIds = savedAccounts.map(a => a.businessId);
 
-    // Get recent webhook events (last 50)
+    if (businessIds.length === 0) {
+      return {
+        totalEvents: 0,
+        byEventType: {},
+        yourBusinessIds: [],
+        recentEvents: [],
+      };
+    }
+
+    // Pull a wider window from the system-wide log, then filter in-memory to
+    // only the caller's businesses. We cap the input at 500 and the output at
+    // 20 so this stays bounded for users with high-volume tenants.
     const events = await this.prisma.webhookEvent.findMany({
       where: { platform: 'thumbtack' },
       orderBy: { receivedAt: 'desc' },
-      take: 50,
+      take: 500,
     });
 
-    // Parse and summarize events
-    const summary = events.map(e => {
+    const ownEvents: any[] = [];
+    for (const e of events) {
       try {
         const payload = JSON.parse(e.payload);
         const businessId = payload?.data?.business?.businessID;
-        return {
+        if (!businessId || !businessIds.includes(businessId)) continue;
+        ownEvents.push({
           id: e.id,
           eventType: e.eventType,
           businessId,
           negotiationId: payload?.data?.negotiationID,
           messageId: payload?.data?.messageID,
-          isYourAccount: businessIds.includes(businessId),
           receivedAt: e.receivedAt,
           processed: e.processed,
           error: e.processingError,
-        };
+        });
       } catch {
-        return {
-          id: e.id,
-          eventType: e.eventType,
-          receivedAt: e.receivedAt,
-          processed: e.processed,
-          error: e.processingError,
-        };
+        // Unparseable payload — skip rather than leaking the row.
       }
-    });
+    }
 
     // Group by event type for quick overview
-    const byEventType = summary.reduce((acc: any, e) => {
+    const byEventType = ownEvents.reduce((acc: any, e) => {
       const type = e.eventType || 'unknown';
-      if (!acc[type]) acc[type] = { count: 0, yourAccount: 0 };
+      if (!acc[type]) acc[type] = { count: 0 };
       acc[type].count++;
-      if (e.isYourAccount) acc[type].yourAccount++;
       return acc;
     }, {});
 
     return {
-      totalEvents: events.length,
+      totalEvents: ownEvents.length,
       byEventType,
       yourBusinessIds: businessIds,
-      recentEvents: summary.slice(0, 20),
+      recentEvents: ownEvents.slice(0, 20),
     };
   }
 
