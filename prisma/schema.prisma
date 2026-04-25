@@ -1326,3 +1326,42 @@ model LeadStatusAuditLog {
   @@index([conflict])
   @@map("lead_status_audit_log")
 }
+
+// ==========================================
+// Phase 2 — Data Access Log
+//
+// Security-relevant access events. Captures: admin/support reads of customer
+// data, impersonated reads/writes, sensitive tenant writes, exports, and
+// account/security actions. Does NOT log every normal tenant read.
+//
+// Strict allowed-fields policy: never store message bodies, full customer PII,
+// tokens, secrets, webhook payloads, AI prompts/responses. The AuditService
+// applies sanitization to free-text fields (`reason`) and rejects
+// any payload-shaped input. No relations to User — audit rows must outlive
+// user deletion as a forensic record.
+//
+// Default retention: 180 days (enforced by a future cleanup cron, not this PR).
+// ==========================================
+
+model DataAccessLog {
+  id           String   @id @default(uuid())
+  actorUserId  String // Who performed the action (impersonator's id when impersonation is in play)
+  actorRole    String // 'USER' | 'ADMIN' | 'SYSTEM'
+  tenantId     String // Whose data was touched
+  action       String // 'read' | 'list' | 'create' | 'update' | 'delete' | 'export'
+  resourceType String? // 'Lead' | 'Conversation' | 'Message' | 'NotificationSettings' | 'CallConnectSettings' | 'MessageTemplate' | 'CrmWebhookSubscription' | 'Platform' | etc.
+  resourceId   String?
+  accessType   String // 'tenant_self' | 'impersonation_read' | 'impersonation_write' | 'admin_read' | 'support_read' | 'export'
+  reason       String? // Optional support-grant reason; sanitized (phone/email masked) before persist
+  route        String? // HTTP path or domain action label
+  method       String? // HTTP method
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  @@index([actorUserId, createdAt])
+  @@index([tenantId, createdAt])
+  @@index([resourceType, resourceId])
+  @@index([accessType, createdAt])
+  @@map("data_access_logs")
+}

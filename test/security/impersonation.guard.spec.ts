@@ -9,6 +9,7 @@
 
 import { ExecutionContext } from '@nestjs/common';
 import { ImpersonationGuard } from '../../src/common/guards/impersonation.guard';
+import { AuditService } from '../../src/common/audit/audit.service';
 
 function buildContext(method: string, headers: Record<string, string>, user: any): ExecutionContext {
   const request = {
@@ -45,7 +46,11 @@ describe('ImpersonationGuard — audit logging', () => {
   beforeEach(() => {
     prisma = { user: { findUnique: jest.fn().mockResolvedValue(target) } };
     reflector = { getAllAndOverride: jest.fn().mockReturnValue(false) };
-    guard = new ImpersonationGuard(prisma, reflector);
+    // Phase 2: guard now also depends on AuditService. Stub its persist so the
+    // logger-line tests below remain pure unit tests focused on the human log.
+    const auditPrisma = { dataAccessLog: { create: jest.fn().mockResolvedValue({ id: 'a1' }) } } as any;
+    const auditService = new AuditService(auditPrisma);
+    guard = new ImpersonationGuard(prisma, reflector, auditService);
     // Silence and spy on the NestJS logger
     logSpy = jest.spyOn((guard as any).logger, 'log').mockImplementation(() => undefined);
   });
