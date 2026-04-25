@@ -67,13 +67,15 @@ export class ImpersonationGuard implements CanActivate {
       hasOwnNumber: targetUser.hasOwnNumber,
     };
 
-    // Log only for mutating requests to reduce noise (page loads fire 10+ parallel GETs)
-    const method = request.method?.toUpperCase();
-    if (method && method !== 'GET') {
-      this.logger.log(
-        `Admin ${request.impersonator.email} impersonating ${targetUser.email} (${targetUser.id}) [${method} ${request.url}]`,
-      );
-    }
+    // Log every impersonated request — including GETs. Reads of customer data
+    // are sensitive and must leave an audit trail (see SECURITY_CONTROL_DATA.md
+    // Phase 0). Full audit logging to DataAccessLog lands in a later phase;
+    // for now this surfaces on the application logger → Loki.
+    const method = request.method?.toUpperCase() || 'UNKNOWN';
+    const kind = method === 'GET' || method === 'HEAD' ? 'read' : 'write';
+    this.logger.log(
+      `Impersonation ${kind}: admin ${request.impersonator.email} as ${targetUser.email} (${targetUser.id}) [${method} ${request.url}]`,
+    );
 
     return true;
   }

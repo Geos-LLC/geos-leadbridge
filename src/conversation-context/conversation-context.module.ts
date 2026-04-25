@@ -12,11 +12,12 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
+import { TenancyModule } from '../common/tenancy/tenancy.module';
 import { ConversationContextService } from './conversation-context.service';
 import { ConversationContextController } from './conversation-context.controller';
 
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, TenancyModule],
   providers: [ConversationContextService, PrismaService],
   controllers: [ConversationContextController],
   exports: [ConversationContextService],

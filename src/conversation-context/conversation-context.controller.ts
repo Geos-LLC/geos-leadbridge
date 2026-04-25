@@ -3,26 +3,35 @@
  *
  * API endpoints for thread context inspection and management.
  * Used by frontend debug panel and admin tools.
+ *
+ * Every `:conversationId` route validates ownership via TenancyService
+ * before reaching the service layer — see SECURITY_CONTROL_DATA.md Phase 0.
  */
 
 import { Controller, Get, Post, Param, Query, Body, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { TenancyService } from '../common/tenancy/tenancy.service';
 import { ConversationContextService } from './conversation-context.service';
 
 @Controller('v1/conversation-context')
 @UseGuards(JwtAuthGuard)
 export class ConversationContextController {
-  constructor(private readonly contextService: ConversationContextService) {}
+  constructor(
+    private readonly contextService: ConversationContextService,
+    private readonly tenancyService: TenancyService,
+  ) {}
 
   /**
    * Get full thread context for a conversation (AI-ready).
    */
   @Get(':conversationId')
   async getContext(
+    @CurrentUser() user: any,
     @Param('conversationId') conversationId: string,
     @Query('recentMessages') recentMessages?: string,
   ) {
+    await this.tenancyService.requireConversationAccess(conversationId, user.id);
     const limit = recentMessages ? parseInt(recentMessages, 10) : 10;
     const context = await this.contextService.getContext(conversationId, limit);
     return { success: true, context };
@@ -32,7 +41,11 @@ export class ConversationContextController {
    * Get quick thread state (no messages loaded).
    */
   @Get(':conversationId/state')
-  async getState(@Param('conversationId') conversationId: string) {
+  async getState(
+    @CurrentUser() user: any,
+    @Param('conversationId') conversationId: string,
+  ) {
+    await this.tenancyService.requireConversationAccess(conversationId, user.id);
     const state = await this.contextService.getThreadState(conversationId);
     return { success: true, state };
   }
@@ -41,7 +54,11 @@ export class ConversationContextController {
    * Get AI-ready built context (summary + state + recent messages).
    */
   @Get(':conversationId/ai-context')
-  async getAiContext(@Param('conversationId') conversationId: string) {
+  async getAiContext(
+    @CurrentUser() user: any,
+    @Param('conversationId') conversationId: string,
+  ) {
+    await this.tenancyService.requireConversationAccess(conversationId, user.id);
     const context = await this.contextService.buildContext(conversationId);
     return { success: true, context };
   }
@@ -65,9 +82,11 @@ export class ConversationContextController {
    */
   @Post(':conversationId/stage')
   async updateStage(
+    @CurrentUser() user: any,
     @Param('conversationId') conversationId: string,
     @Body('stage') stage: string,
   ) {
+    await this.tenancyService.requireConversationAccess(conversationId, user.id);
     await this.contextService.updateStage(conversationId, stage);
     return { success: true };
   }
@@ -77,10 +96,12 @@ export class ConversationContextController {
    */
   @Post(':conversationId/strategy')
   async updateStrategy(
+    @CurrentUser() user: any,
     @Param('conversationId') conversationId: string,
     @Body('activeStrategy') activeStrategy: string,
     @Body('suggestedStrategy') suggestedStrategy?: string,
   ) {
+    await this.tenancyService.requireConversationAccess(conversationId, user.id);
     await this.contextService.updateStrategy(conversationId, activeStrategy, suggestedStrategy);
     return { success: true };
   }
@@ -89,7 +110,11 @@ export class ConversationContextController {
    * Suggest best strategy for a conversation based on thread state.
    */
   @Get(':conversationId/suggest-strategy')
-  async suggestStrategy(@Param('conversationId') conversationId: string) {
+  async suggestStrategy(
+    @CurrentUser() user: any,
+    @Param('conversationId') conversationId: string,
+  ) {
+    await this.tenancyService.requireConversationAccess(conversationId, user.id);
     const suggestion = await this.contextService.suggestStrategy(conversationId);
     if (!suggestion) return { success: false, error: 'No thread context found' };
     return { success: true, ...suggestion };
@@ -99,7 +124,11 @@ export class ConversationContextController {
    * Force summary regeneration for a thread.
    */
   @Post(':conversationId/regenerate-summary')
-  async regenerateSummary(@Param('conversationId') conversationId: string) {
+  async regenerateSummary(
+    @CurrentUser() user: any,
+    @Param('conversationId') conversationId: string,
+  ) {
+    await this.tenancyService.requireConversationAccess(conversationId, user.id);
     await this.contextService.forceSummaryUpdate(conversationId);
     const ctx = await this.contextService.getContext(conversationId);
     return { success: true, summary: ctx?.summary || null };

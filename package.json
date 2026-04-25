@@ -14,7 +14,7 @@
     "prisma:studio": "prisma studio",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "jest --testPathPatterns=src"
+    "test": "jest"
   },
   "keywords": [
     "thumbtack",
@@ -79,7 +79,11 @@
       "json",
       "ts"
     ],
-    "rootDir": "src",
+    "rootDir": ".",
+    "roots": [
+      "<rootDir>/src",
+      "<rootDir>/test"
+    ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": [
@@ -90,12 +94,12 @@
       ]
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "src/**/*.(t|j)s"
     ],
-    "coverageDirectory": "../coverage",
+    "coverageDirectory": "coverage",
     "testEnvironment": "node",
     "moduleNameMapper": {
-      "@/(.*)": "<rootDir>/$1"
+      "@/(.*)": "<rootDir>/src/$1"
     }
   }
 }
