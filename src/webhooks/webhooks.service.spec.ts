@@ -131,3 +131,172 @@ describe('WebhooksService — Yelp echo classification (Phase A)', () => {
     });
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * Sigcore inbound SMS — P2002-tolerant fan-out persistence
+ * ------------------------------------------------------------------ */
+
+function buildSmsHarness(opts: {
+  ensureMessagePersisted: jest.Mock;
+} = { ensureMessagePersisted: jest.fn() }) {
+  const svc = Object.create(WebhooksService.prototype);
+  svc.logger = new Logger('WebhooksServiceTest');
+  svc._recentInboundSmsIds = new Set<string>();
+
+  const lead = {
+    id: 'lead-1',
+    userId: 'user-1',
+    threadId: 'conv-1',
+    customerName: 'Customer',
+    customerPhone: '+15551234567',
+    businessId: 'biz-1',
+    category: 'cleaning',
+    city: 'Tampa',
+    state: 'FL',
+    postcode: '33601',
+    conversation: { id: 'conv-1' },
+  };
+
+  svc.prisma = {
+    webhookEvent: {
+      create: jest.fn().mockResolvedValue({ id: 'wh-1' }),
+      update: jest.fn().mockResolvedValue({}),
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
+    lead: {
+      findFirst: jest.fn().mockResolvedValue(lead),
+      update: jest.fn().mockResolvedValue({}),
+    },
+    conversation: {
+      create: jest.fn().mockResolvedValue({ id: 'conv-1' }),
+      update: jest.fn().mockResolvedValue({}),
+    },
+    savedAccount: {
+      findFirst: jest.fn().mockResolvedValue({ id: 'acct-1', platform: 'sms', businessName: 'Biz', userId: 'user-1' }),
+      findUnique: jest.fn().mockResolvedValue({ id: 'acct-1', platform: 'sms', businessName: 'Biz', userId: 'user-1', businessId: 'biz-1' }),
+    },
+    notificationSettings: {
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
+    tenantPhoneNumber: {
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
+  };
+
+  svc.conversationContextService = {
+    ensureMessagePersisted: opts.ensureMessagePersisted,
+    recordMessage: jest.fn().mockResolvedValue(undefined),
+  };
+
+  svc.notificationsService = {
+    handleCustomerReply: jest.fn().mockResolvedValue(undefined),
+    forwardInboundSms: jest.fn().mockResolvedValue(undefined),
+    sendAgentGuidanceSms: jest.fn().mockResolvedValue(undefined),
+  };
+
+  svc.eventEmitter = { emit: jest.fn() };
+  svc.configService = { get: jest.fn().mockReturnValue('') };
+
+  return svc;
+}
+
+function smsParams(messageId: string, accountId: string) {
+  return {
+    eventType: 'message.inbound',
+    timestamp: '2026-04-25T13:51:39.469Z',
+    signature: 'sig',
+    accountId,
+    payload: {
+      event: 'message.inbound',
+      data: {
+        messageId,
+        conversationId: 'sigcore-conv-1',
+        direction: 'in',
+        channel: 'sms',
+        body: 'Okay',
+        fromNumber: '+15555550147',
+        toNumber: '+15555550100',
+      },
+    },
+    rawBody: '{}',
+  };
+}
+
+describe('WebhooksService.handleInboundSms — P2002-tolerant persistence', () => {
+  it('first fan-out arm persists the Message and runs side-effects once', async () => {
+    const ensureMessagePersisted = jest.fn().mockResolvedValue({ id: 'msg-1', created: true });
+    const svc = buildSmsHarness({ ensureMessagePersisted });
+
+    await svc.handleInboundSms(smsParams('sigcore-msg-A', 'tenant-A'));
+
+    expect(ensureMessagePersisted).toHaveBeenCalledTimes(1);
+    expect(ensureMessagePersisted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platform: 'sms',
+        externalMessageId: 'sigcore-msg-A',
+        sender: 'customer',
+        leadId: 'lead-1',
+      }),
+    );
+    expect(svc.prisma.conversation.update).toHaveBeenCalledTimes(1);
+    expect(svc.notificationsService.handleCustomerReply).toHaveBeenCalledTimes(1);
+    expect(svc.eventEmitter.emit).toHaveBeenCalledWith(
+      'sms.inbound.user-1',
+      expect.objectContaining({ leadId: 'lead-1' }),
+    );
+  });
+
+  it('duplicate fan-out arm (created=false) skips conversation update + notifications + SSE', async () => {
+    const ensureMessagePersisted = jest.fn().mockResolvedValue({ id: 'msg-1', created: false });
+    const svc = buildSmsHarness({ ensureMessagePersisted });
+
+    await svc.handleInboundSms(smsParams('sigcore-msg-A', 'tenant-B'));
+
+    expect(ensureMessagePersisted).toHaveBeenCalledTimes(1);
+    // Side-effects MUST be skipped — first arm already ran them
+    expect(svc.prisma.conversation.update).not.toHaveBeenCalled();
+    expect(svc.notificationsService.handleCustomerReply).not.toHaveBeenCalled();
+    expect(svc.notificationsService.forwardInboundSms).not.toHaveBeenCalled();
+    expect(svc.eventEmitter.emit).not.toHaveBeenCalled();
+    // Webhook event still marked processed (not as error)
+    const updates = (svc.prisma.webhookEvent.update.mock.calls as any[]).map(c => c[0]);
+    expect(updates.some(u => u.data?.processed === true && !u.data?.processingError)).toBe(true);
+  });
+
+  it('does not throw or log P2002 when same messageId arrives across the fan-out', async () => {
+    // First arm: row created. Second arm: row already exists (P2002 swallowed inside ensureMessagePersisted).
+    const ensureMessagePersisted = jest
+      .fn()
+      .mockResolvedValueOnce({ id: 'msg-1', created: true })
+      .mockResolvedValueOnce({ id: 'msg-1', created: false });
+
+    const svc = buildSmsHarness({ ensureMessagePersisted });
+    const errorSpy = jest.spyOn(svc.logger, 'error');
+
+    await svc.handleInboundSms(smsParams('sigcore-msg-X', 'tenant-A'));
+    await svc.handleInboundSms(smsParams('sigcore-msg-X', 'tenant-B'));
+
+    expect(ensureMessagePersisted).toHaveBeenCalledTimes(2);
+    expect(errorSpy).not.toHaveBeenCalled();
+    // Side-effects fire once (only first arm)
+    expect(svc.prisma.conversation.update).toHaveBeenCalledTimes(1);
+    expect(svc.notificationsService.handleCustomerReply).toHaveBeenCalledTimes(1);
+    expect(svc.eventEmitter.emit).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes synthetic externalMessageId when payload has no messageId (no dedup possible)', async () => {
+    const ensureMessagePersisted = jest.fn().mockResolvedValue({ id: 'msg-1', created: true });
+    const svc = buildSmsHarness({ ensureMessagePersisted });
+
+    const params = smsParams('', 'tenant-A');
+    delete (params.payload.data as any).messageId;
+
+    await svc.handleInboundSms(params);
+
+    expect(ensureMessagePersisted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalMessageId: expect.stringMatching(/^inbound-\d+$/),
+      }),
+    );
+  });
+});
