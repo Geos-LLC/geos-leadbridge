@@ -366,20 +366,25 @@ export class NotificationsService {
     leadId: string,
     limit: number = 50,
   ): Promise<NotificationLogResponse[]> {
-    // Verify the lead belongs to the user
-    const lead = await this.prisma.lead.findFirst({
-      where: { id: leadId, userId },
-    });
+    // Run ownership check in parallel with the log fetch. Both are independent
+    // round-trips and combined sequentially they doubled the endpoint latency.
+    // Project to `id` only — the Lead row carries a heavy `rawJson` text column
+    // we don't need just to verify ownership.
+    const [lead, logs] = await Promise.all([
+      this.prisma.lead.findFirst({
+        where: { id: leadId, userId },
+        select: { id: true },
+      }),
+      this.prisma.notificationLog.findMany({
+        where: { leadId },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      }),
+    ]);
 
     if (!lead) {
       throw new NotFoundException('Lead not found');
     }
-
-    const logs = await this.prisma.notificationLog.findMany({
-      where: { leadId },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-    });
 
     return logs.map(this.formatLog);
   }
