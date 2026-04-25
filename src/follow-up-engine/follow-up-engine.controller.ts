@@ -10,6 +10,7 @@ import { Controller, Get, Post, Param, Body, Query, UseGuards, Inject, forwardRe
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PrismaService } from '../common/utils/prisma.service';
+import { TenancyService } from '../common/tenancy/tenancy.service';
 import { LeadsService } from '../leads/leads.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { FollowUpEngineService } from './follow-up-engine.service';
@@ -24,6 +25,7 @@ export class FollowUpEngineController {
   constructor(
     private readonly engineService: FollowUpEngineService,
     private readonly prisma: PrismaService,
+    private readonly tenancyService: TenancyService,
     @Inject(forwardRef(() => LeadsService))
     private readonly leadsService: LeadsService,
     private readonly conversationContext: ConversationContextService,
@@ -77,7 +79,8 @@ export class FollowUpEngineController {
    * Get enrollment details with step executions.
    */
   @Get('enrollments/:id')
-  async getEnrollment(@Param('id') id: string) {
+  async getEnrollment(@CurrentUser() user: any, @Param('id') id: string) {
+    await this.tenancyService.requireEnrollmentAccess(id, user.id);
     const enrollment = await this.prisma.followUpEnrollment.findUnique({
       where: { id },
       include: {
@@ -410,7 +413,12 @@ export class FollowUpEngineController {
    * Stop an enrollment.
    */
   @Post('enrollments/:id/stop')
-  async stop(@Param('id') id: string, @Body('reason') reason?: string) {
+  async stop(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body('reason') reason?: string,
+  ) {
+    await this.tenancyService.requireEnrollmentAccess(id, user.id);
     await this.engineService.stopEnrollment(id, reason || 'manual');
     return { success: true };
   }
@@ -419,7 +427,8 @@ export class FollowUpEngineController {
    * Pause an enrollment.
    */
   @Post('enrollments/:id/pause')
-  async pause(@Param('id') id: string) {
+  async pause(@CurrentUser() user: any, @Param('id') id: string) {
+    await this.tenancyService.requireEnrollmentAccess(id, user.id);
     await this.engineService.pauseEnrollment(id);
     return { success: true };
   }
@@ -428,7 +437,8 @@ export class FollowUpEngineController {
    * Resume a paused enrollment.
    */
   @Post('enrollments/:id/resume')
-  async resume(@Param('id') id: string) {
+  async resume(@CurrentUser() user: any, @Param('id') id: string) {
+    await this.tenancyService.requireEnrollmentAccess(id, user.id);
     await this.engineService.resumeEnrollment(id);
     return { success: true };
   }

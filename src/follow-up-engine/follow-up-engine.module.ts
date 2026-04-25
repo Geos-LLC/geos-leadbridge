@@ -9,6 +9,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
+import { TenancyModule } from '../common/tenancy/tenancy.module';
 import { ConversationContextModule } from '../conversation-context/conversation-context.module';
 import { LeadsModule } from '../leads/leads.module';
 import { PlatformsModule } from '../platforms/platforms.module';
@@ -22,6 +23,7 @@ import { FollowUpEngineController } from './follow-up-engine.controller';
 @Module({
   imports: [
     ConfigModule,
+    TenancyModule,
     ConversationContextModule,
     PlatformsModule,
     forwardRef(() => LeadsModule),
