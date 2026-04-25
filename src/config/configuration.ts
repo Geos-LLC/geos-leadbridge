@@ -57,4 +57,15 @@ export default () => ({
     // Env-scoped key prefix — lets staging and prod safely share one Redis instance.
     keyPrefix: `lb:v1:${process.env.NODE_ENV || 'development'}:`,
   },
+
+  // Feature flags reserved for the DB-first / hot-window cache rollout.
+  // Each flips an independent later-phase code path. All default false so this
+  // PR is a no-op behavior-wise; later phases gate their changes on these.
+  features: {
+    // Phase 1.1 — extend handleYelpNewEventInner to persist every event from
+    // the classifier fetch (today: only the latest customer message lands).
+    yelpWebhookPersistFullThread: process.env.FEATURE_YELP_WEBHOOK_PERSIST_FULL_THREAD === 'true',
+    // Phase 4 — server-driven prewarm endpoint called from the Messages page.
+    messagesPrewarm: process.env.FEATURE_MESSAGES_PREWARM === 'true',
+  },
 });

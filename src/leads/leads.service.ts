@@ -24,6 +24,12 @@ const LEAD_LIST_TTL_SECONDS = 30;
 const LEAD_DETAIL_TTL_SECONDS = 60;
 const LEAD_MESSAGES_TTL_SECONDS = 300; // 5 min — DB is authoritative; invalidated on every inbound/outbound write
 
+// Phase 0 reservation for the DB-first / hot-window cache rollout. Exported for
+// later phases (recurring sync, prewarm) to consume; not wired into this file
+// yet so behavior is unchanged.
+export const LEAD_MESSAGES_HOT_TTL_SECONDS = 600; // 10 min — recently opened conversation
+export const LEAD_MESSAGES_WARM_TTL_SECONDS = 1800; // 30 min — active 7d / unread / follow-up-enrolled
+
 /**
  * Strict whitelist of cache-eligible filter shapes for the leads list.
  *
