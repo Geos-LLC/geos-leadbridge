@@ -46,6 +46,31 @@ export class TenancyService {
   }
 
   /**
+   * Verify that a LeadCallConnect session belongs to the given user.
+   * Ownership is inherited through Lead.userId.
+   */
+  async requireCallConnectSessionAccess(sigcoreSessionId: string, userId: string): Promise<void> {
+    const row = await this.prisma.leadCallConnect.findFirst({
+      where: { sigcoreSessionId, lead: { userId } },
+      select: { id: true },
+    });
+    if (!row) throw new NotFoundException('Session not found');
+  }
+
+  /**
+   * Verify that a SystemErrorLog row belongs to the given user. The SystemErrorLog
+   * table has nullable userId (system-level errors with no owner), so we explicitly
+   * require a non-null match to prevent users from resolving system rows.
+   */
+  async requireSystemErrorAccess(errorId: string, userId: string): Promise<void> {
+    const row = await this.prisma.systemErrorLog.findFirst({
+      where: { id: errorId, userId },
+      select: { id: true },
+    });
+    if (!row) throw new NotFoundException('Error log not found');
+  }
+
+  /**
    * Generic ownership check for Prisma models with a top-level `userId` column.
    * Callers must pass a model name that exists on the Prisma client and that
    * has a `userId` scalar — e.g. 'lead', 'savedAccount', 'platform',
@@ -59,7 +84,10 @@ export class TenancyService {
       | 'platform'
       | 'messageTemplate'
       | 'notificationSettings'
-      | 'crmWebhookSubscription',
+      | 'crmWebhookSubscription'
+      | 'automationRule'
+      | 'callConnectSettings'
+      | 'tenantPhoneNumber',
     recordId: string,
     userId: string,
   ): Promise<void> {
