@@ -17,6 +17,7 @@ import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.serv
 import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { LeadCacheService } from '../common/cache/lead-cache.service';
+import { extractYelpEventContent, isDisplayableYelpEvent, yelpEventSender } from '../platforms/yelp/yelp-event-content.util';
 
 @Injectable()
 export class WebhooksService {
@@ -1474,6 +1475,12 @@ export class WebhooksService {
     latestCustomerEventId: string | null;
     latestCustomerSentAt: Date | null;
     rawEvent: any | null;
+    /**
+     * Full event list from the same fetch the classifier uses. Empty when the
+     * fetch failed or returned nothing. Exposed so the full-thread persist
+     * path can reuse this fetch instead of issuing another API call.
+     */
+    events: any[];
   }> {
     let events: any[] = [];
     try {
@@ -1487,6 +1494,7 @@ export class WebhooksService {
         latestCustomerEventId: null,
         latestCustomerSentAt: null,
         rawEvent: null,
+        events: [],
       };
     }
 
@@ -1500,6 +1508,7 @@ export class WebhooksService {
         latestCustomerEventId: null,
         latestCustomerSentAt: null,
         rawEvent: null,
+        events: [],
       };
     }
 
@@ -1530,6 +1539,7 @@ export class WebhooksService {
         latestCustomerEventId,
         latestCustomerSentAt,
         rawEvent: latest,
+        events,
       };
     }
 
@@ -1540,6 +1550,7 @@ export class WebhooksService {
       latestCustomerEventId,
       latestCustomerSentAt,
       rawEvent: latestConsumer ?? latest,
+      events,
     };
   }
 
@@ -1850,6 +1861,49 @@ export class WebhooksService {
       // Invalidate the cached messages thread for this lead so the next fetch
       // picks up the just-persisted customer reply.
       await this.leadCache.invalidateLeadMessagesAndList(userId, lead.id);
+
+      // Phase 1.1 — full-thread persistence behind FEATURE_YELP_WEBHOOK_PERSIST_FULL_THREAD.
+      // The single-message persist above only stores the latest customer reply.
+      // When enabled, also persist every other displayable event from the SAME
+      // fetch the classifier already issued (no extra API call). Idempotent via
+      // (platform, externalMessageId). Default: false — flip on per the cache plan.
+      if (
+        this.configService.get<boolean>('features.yelpWebhookPersistFullThread') &&
+        lead.threadId &&
+        Array.isArray(classification.events) &&
+        classification.events.length > 0
+      ) {
+        let persisted = 0;
+        for (const ev of classification.events) {
+          if (!ev?.id || !isDisplayableYelpEvent(ev)) continue;
+          const content = extractYelpEventContent(ev);
+          if (!content) continue;
+          const sender = yelpEventSender(ev);
+          const sentAt = ev.time_created ? new Date(ev.time_created) : new Date();
+          try {
+            const result = await this.conversationContextService.ensureMessagePersisted({
+              conversationId: lead.threadId,
+              leadId: lead.id,
+              userId,
+              platform: 'yelp',
+              externalMessageId: ev.id,
+              sender,
+              senderType: sender === 'customer' ? 'customer' : undefined,
+              content,
+              sentAt,
+              rawJson: JSON.stringify(ev),
+            });
+            if (result?.created) persisted++;
+          } catch (err: any) {
+            this.logger.warn(`[yelp_full_thread_persist] failed eventId=${ev.id} lead=${leadId}: ${err.message}`);
+          }
+        }
+        if (persisted > 0) {
+          this.logger.log(`[yelp_full_thread_persist] lead=${leadId} persisted=${persisted}`);
+          // Re-invalidate so the cache picks up the historical rows we just added.
+          await this.leadCache.invalidateLeadMessagesAndList(userId, lead.id);
+        }
+      }
 
       // Stop follow-up enrollments
       if (lead.threadId) {
