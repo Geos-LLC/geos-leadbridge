@@ -662,6 +662,11 @@ export class WebhooksService {
 
     this.logger.log('Message stored successfully', { messageId, conversationId: conversation.id });
 
+    // Invalidate cached messages thread + list/detail for this lead so the next
+    // fetch picks up the just-persisted message. Without this, an inbound TT
+    // message on an existing lead waits on TTL expiry before showing up.
+    await this.leadCache.invalidateLeadMessagesAndList(userId, lead.id);
+
     // Update thread context (conversation intelligence layer)
     try {
       await this.conversationContextService.recordMessage({
