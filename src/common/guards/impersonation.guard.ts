@@ -13,6 +13,7 @@ import { Injectable, CanActivate, ExecutionContext, Logger, NestInterceptor, Cal
 import { Reflector } from '@nestjs/core';
 import { Observable } from 'rxjs';
 import { PrismaService } from '../utils/prisma.service';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class ImpersonationGuard implements CanActivate {
@@ -21,6 +22,7 @@ export class ImpersonationGuard implements CanActivate {
   constructor(
     private prisma: PrismaService,
     private reflector: Reflector,
+    private auditService: AuditService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -67,14 +69,34 @@ export class ImpersonationGuard implements CanActivate {
       hasOwnNumber: targetUser.hasOwnNumber,
     };
 
-    // Log every impersonated request — including GETs. Reads of customer data
-    // are sensitive and must leave an audit trail (see SECURITY_CONTROL_DATA.md
-    // Phase 0). Full audit logging to DataAccessLog lands in a later phase;
-    // for now this surfaces on the application logger → Loki.
+    // Phase 2: persist every impersonated request to DataAccessLog.
+    // Reads (GET/HEAD) get accessType=impersonation_read; everything else
+    // gets impersonation_write. The action mirrors the HTTP method for now;
+    // a future phase will derive resourceType/resourceId from route params.
     const method = request.method?.toUpperCase() || 'UNKNOWN';
-    const kind = method === 'GET' || method === 'HEAD' ? 'read' : 'write';
+    const isRead = method === 'GET' || method === 'HEAD';
+    const accessType = isRead ? 'impersonation_read' : 'impersonation_write';
+    const action = isRead ? 'read' : (method === 'DELETE' ? 'delete' : method === 'POST' ? 'create' : 'update');
+
+    const meta = AuditService.extractRequestMeta(request);
+
+    // Fire-and-forget — AuditService swallows its own errors. We still keep
+    // the application-logger line so Loki retains a low-latency human-readable
+    // trail alongside the structured DB row.
+    this.auditService.logAccess({
+      actorUserId: request.impersonator.id,
+      actorRole: request.impersonator.role || 'ADMIN',
+      tenantId: targetUser.id,
+      action,
+      accessType,
+      route: request.url,
+      method,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+    }).catch(err => this.logger.warn(`[Audit] impersonation log failed: ${err?.message}`));
+
     this.logger.log(
-      `Impersonation ${kind}: admin ${request.impersonator.email} as ${targetUser.email} (${targetUser.id}) [${method} ${request.url}]`,
+      `Impersonation ${isRead ? 'read' : 'write'}: admin ${request.impersonator.email} as ${targetUser.email} (${targetUser.id}) [${method} ${request.url}]`,
     );
 
     return true;

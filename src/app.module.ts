@@ -37,6 +37,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { ImpersonationGuard, ImpersonationInterceptor } from './common/guards/impersonation.guard';
 import { PrismaModule } from './common/utils/prisma.module';
 import { CacheModule } from './common/cache/cache.module';
+import { AuditModule } from './common/audit/audit.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { CacheModule } from './common/cache/cache.module';
     ScheduleModule.forRoot(),
     PrismaModule,
     CacheModule,
+    AuditModule,
     TrialModule,
     AuthModule,
     PlatformsModule,
