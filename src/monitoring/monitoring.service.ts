@@ -9,7 +9,7 @@
  * Error logging is deduped by (category, accountId, platform, code).
  */
 
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../common/utils/prisma.service';
@@ -562,9 +562,13 @@ export class MonitoringService implements OnModuleInit {
   // Error Log Queries (existing)
   // ==========================================
 
-  async getRecentErrors(options?: { limit?: number; onlyUnresolved?: boolean; category?: string }) {
+  async getRecentErrors(
+    userId: string,
+    options?: { limit?: number; onlyUnresolved?: boolean; category?: string },
+  ) {
     return this.prisma.systemErrorLog.findMany({
       where: {
+        userId,
         ...(options?.onlyUnresolved && { resolved: false }),
         ...(options?.category && { category: options.category }),
       },
@@ -573,19 +577,38 @@ export class MonitoringService implements OnModuleInit {
     });
   }
 
-  async resolveError(id: string): Promise<void> {
-    await this.prisma.systemErrorLog.update({ where: { id }, data: { resolved: true } });
+  async resolveError(userId: string, id: string): Promise<void> {
+    // updateMany with userId in the filter — silently no-ops on cross-tenant ID,
+    // which we surface as NotFoundException so the caller gets a 404, not a 200.
+    const result = await this.prisma.systemErrorLog.updateMany({
+      where: { id, userId },
+      data: { resolved: true },
+    });
+    if (result.count === 0) {
+      throw new NotFoundException('Error log not found');
+    }
   }
 
-  async resolveAllByCategory(category: string): Promise<number> {
-    const result = await this.prisma.systemErrorLog.updateMany({ where: { category, resolved: false }, data: { resolved: true } });
+  async resolveAllByCategory(userId: string, category: string): Promise<number> {
+    const result = await this.prisma.systemErrorLog.updateMany({
+      where: { userId, category, resolved: false },
+      data: { resolved: true },
+    });
     return result.count;
   }
 
-  async getErrorSummary(): Promise<{ totalUnresolved: number; byCategory: Record<string, number>; last24h: number }> {
+  async getErrorSummary(
+    userId: string,
+  ): Promise<{ totalUnresolved: number; byCategory: Record<string, number>; last24h: number }> {
     const [errors, last24hCount] = await Promise.all([
-      this.prisma.systemErrorLog.groupBy({ by: ['category'], where: { resolved: false }, _count: { id: true } }),
-      this.prisma.systemErrorLog.count({ where: { createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } } }),
+      this.prisma.systemErrorLog.groupBy({
+        by: ['category'],
+        where: { userId, resolved: false },
+        _count: { id: true },
+      }),
+      this.prisma.systemErrorLog.count({
+        where: { userId, createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+      }),
     ]);
     const byCategory: Record<string, number> = {};
     let totalUnresolved = 0;
@@ -595,11 +618,12 @@ export class MonitoringService implements OnModuleInit {
 
   /**
    * Deduplicate historical error logs — collapse duplicates, keep latest per fingerprint.
+   * Scoped to a single tenant; only touches rows whose `userId` matches the caller.
    */
-  async deduplicateErrors(): Promise<number> {
+  async deduplicateErrors(userId: string): Promise<number> {
     const groups = await this.prisma.systemErrorLog.groupBy({
       by: ['category', 'accountId'],
-      where: { resolved: false, accountId: { not: null } },
+      where: { userId, resolved: false, accountId: { not: null } },
       _count: { id: true },
       having: { id: { _count: { gt: 1 } } },
     });
@@ -608,7 +632,7 @@ export class MonitoringService implements OnModuleInit {
     for (const group of groups) {
       if (!group.accountId) continue;
       const rows = await this.prisma.systemErrorLog.findMany({
-        where: { category: group.category, accountId: group.accountId, resolved: false },
+        where: { userId, category: group.category, accountId: group.accountId, resolved: false },
         orderBy: { createdAt: 'desc' },
       });
       // Keep the latest, resolve the rest

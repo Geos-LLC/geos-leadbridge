@@ -2104,12 +2104,19 @@ export class NotificationsService {
    * Search available Twilio phone numbers via Sigcore (workspace key)
    */
   async searchSigcoreAvailableNumbers(
-    _userId: string,
+    userId: string,
     savedAccountId: string,
     country: string = 'US',
     areaCode?: string,
     locality?: string,
   ): Promise<any[]> {
+    // Verify the saved account belongs to the caller before exposing the Sigcore tenant.
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+      select: { id: true },
+    });
+    if (!account) throw new NotFoundException('Saved account not found');
+
     const settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
       select: { sigcoreTenantId: true },
@@ -2134,11 +2141,18 @@ export class NotificationsService {
    * Purchase a Twilio phone number for a tenant via Sigcore (workspace key)
    */
   async purchaseSigcorePhoneNumber(
-    _userId: string,
+    userId: string,
     savedAccountId: string,
     phoneNumber: string,
     friendlyName?: string,
   ): Promise<{ phoneNumber: string; allocationId: string }> {
+    // Verify the saved account belongs to the caller before purchasing on its Sigcore tenant.
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: savedAccountId, userId },
+      select: { id: true },
+    });
+    if (!account) throw new NotFoundException('Saved account not found');
+
     const settings = await this.prisma.notificationSettings.findUnique({
       where: { savedAccountId },
       select: { sigcoreTenantId: true },
