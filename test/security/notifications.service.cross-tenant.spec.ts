@@ -36,7 +36,13 @@ function buildPrisma(ownerUserId: string) {
 function makeService(prisma: any): NotificationsService {
   // ConfigService stub returning the minimum the tested paths need.
   const configService = { get: jest.fn().mockReturnValue('') } as any;
-  return new NotificationsService(prisma, configService);
+  // Cache stub — no-op getOrSet (delegates to loader) + no-op del.
+  // The cross-tenant tests don't exercise cached paths; this just satisfies DI.
+  const cache = {
+    getOrSet: jest.fn(async (_k: string, _ttl: number, loader: () => Promise<any>) => loader()),
+    del: jest.fn().mockResolvedValue(undefined),
+  } as any;
+  return new NotificationsService(prisma, configService, cache);
 }
 
 describe('NotificationsService — cross-tenant Sigcore access', () => {

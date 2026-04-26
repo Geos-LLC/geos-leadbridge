@@ -27,6 +27,12 @@ export const CacheKeys = {
   leadDetail: (userId: string, leadId: string) => `lead:user:${userId}:${leadId}`,
   leadMessages: (userId: string, leadId: string) => `lead-messages:user:${userId}:${leadId}`,
 
+  // Notification logs scoped to one lead. Same userId-in-key invariant as
+  // leadMessages — getLogsByLead enforces ownership via Prisma but a
+  // tenant-agnostic key would risk leaking cached results across users.
+  notificationLogsByLead: (userId: string, leadId: string) =>
+    `notification-logs:user:${userId}:${leadId}`,
+
   // Admin: wipe everything we know about a user (saved-accounts + leads + me).
   userAllPattern: (userId: string) => [
     `me:user:${userId}`,
