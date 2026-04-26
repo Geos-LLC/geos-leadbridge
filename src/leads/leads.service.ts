@@ -308,13 +308,16 @@ export class LeadsService {
         wasCacheHit = false;
         const loaderT0 = Date.now();
 
-        // Single combined query: fetch lead + its conversation + all messages in one DB
-        // round-trip. Previously this was 3 sequential queries (getLead cache miss →
-        // findLead DB, conversation.findUnique, message.findMany) which at ~150ms
-        // Railway→Supabase cross-region RTT meant ~450ms of pure wire time. One
-        // `include` collapses it to a single round-trip, roughly 3× faster on cold click.
+        // Single SQL statement: fetch lead + its conversation + all messages in one
+        // DB round-trip via Prisma's relationLoadStrategy='join'. Without this opt-in,
+        // Prisma's default findFirst({include:…}) emits 3 separate SELECTs (lead +
+        // conversation + messages) — each its own round-trip. On Railway us-east4 →
+        // Supabase us-west-2 (~200ms RTT) that compounds to ~600ms. Joining collapses
+        // to one statement, ~200ms wire time. Server-side compute is sub-ms either way
+        // (verified via EXPLAIN ANALYZE: messages bitmap heap scan + index sort = 0.1ms).
         const tDbStart = Date.now();
         const leadWithMessages = await this.prisma.lead.findFirst({
+          relationLoadStrategy: 'join',
           where: { id: leadId, userId },
           include: {
             conversation: {
