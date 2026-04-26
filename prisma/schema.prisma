@@ -2,8 +2,12 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
-  output   = "../generated/prisma"
+  provider        = "prisma-client-js"
+  output          = "../generated/prisma"
+  // relationJoins enables `relationLoadStrategy: 'join'` — opt-in per query.
+  // Default strategy is unchanged; only queries that explicitly request 'join'
+  // collapse multi-statement includes into a single SQL statement.
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {
