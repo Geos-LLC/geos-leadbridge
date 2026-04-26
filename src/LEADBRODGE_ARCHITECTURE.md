@@ -12,10 +12,10 @@ analytics	Metrics, conversion tracking, caching
 sigcore	HTTP client to Sigcore telephony API
 templates	Message template CRUD
 integrations	Chrome extension data (budgets, lead collection)
-conversation-sync	BYO phone (OpenPhone) conversation sync
+conversation-sync	Read-only OpenPhone conversation sync for AI analysis (not a routing path)
 stripe	Subscription billing
 users	Profile, phone sync
-admin	User mgmt, phone pool, subscription controls
+admin	User mgmt, tenant number reassignment, pricing + A2P config
 common	Guards (JWT, Impersonation, FeatureGate), decorators, Prisma
 Frontend (React/Vite) — 21 pages, 20 components, 3 Zustand stores
 Layer	Key Items
@@ -33,10 +33,10 @@ Result: metric mismatches like "1 lead today, 0 in Lead Activity"
 Sigcore broadcasts message.inbound to ALL workspace subscriptions (fix committed but pattern exists elsewhere)
 LeadBridge handleInboundSms processes for ALL accounts that receive the webhook
 The "isOwner" check was too permissive (just fixed) but similar patterns may exist in other handlers
-3. Phone number identity is fragmented across 4+ tables
-User.businessPhone, NotificationSettings.destinationPhone, CallConnectSettings.agentPhoneE164, NotificationRule.toPhone — all should be the same phone
-NotificationSettings.sigcoreFromPhone vs TenantPhoneNumber.phoneNumber vs PhonePool.phoneNumber — 3 types with different routing rules
-Sync logic is scattered across call-connect.service, notifications.service, users.service
+3. Business-phone identity is still mirrored across 3 tables
+User.businessPhone is the source of truth, mirrored into NotificationSettings.destinationPhone, CallConnectSettings.agentPhoneE164, and NotificationRule.toPhone at save time (syncBusinessPhoneToAccounts).
+Customer-facing routing was consolidated 2026-04-24 (PRs #104–#106): TenantPhoneNumber is now the only source of truth for the dedicated number, resolved via resolveBotPhone. Pool/BYO/OpenPhone routing removed.
+Sync logic for business phone still lives in users.service (syncBusinessPhoneToAccounts) — could be collapsed to a single "read User.businessPhone at send time" model.
 4. No request-level account context
 Backend doesn't know "which account is the user looking at" — each endpoint either takes accountId as a param or doesn't scope at all
 Frontend passes accountId inconsistently (some endpoints get it, Dashboard stats don't)

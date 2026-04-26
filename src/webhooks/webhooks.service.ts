@@ -1212,19 +1212,42 @@ export class WebhooksService {
         });
       }
 
-      // Store as Message record
-      const message = await this.prisma.message.create({
-        data: {
-          conversationId,
-          userId: lead.userId,
-          platform: 'sms',
-          externalMessageId: messageId || `inbound-${Date.now()}`,
-          sender: 'customer',
-          content: body,
-          isRead: false,
-          sentAt: new Date(),
-        },
+      // Store as Message record. Sigcore fans the same webhook out to ~17
+      // tenant accounts; only the first arm to reach the unique
+      // `(platform, externalMessageId)` index wins. ensureMessagePersisted
+      // catches the resulting P2002 and returns the existing row instead of
+      // throwing — so the previous Prisma error storm in webhook_events.
+      // processingError is gone. See docs/SIGCORE_FAN_OUT_TENANT_ROUTING.md
+      // for the upstream fix that should eliminate the fan-out itself.
+      const sentAt = new Date();
+      const externalMessageId = messageId || `inbound-${Date.now()}`;
+      const persisted = await this.conversationContextService.ensureMessagePersisted({
+        conversationId,
+        leadId: lead.id,
+        userId: lead.userId,
+        platform: 'sms',
+        externalMessageId,
+        sender: 'customer',
+        senderType: 'customer',
+        content: body,
+        sentAt,
       });
+
+      // Duplicate fan-out arm: another tenant's invocation already persisted
+      // this message and ran the side-effects below. Skip them to avoid
+      // multiplying unreadCount, customer-reply notifications, and SSE events.
+      if (!persisted.created) {
+        this.logger.log(
+          `[handleInboundSms] Duplicate Sigcore fan-out for messageId=${externalMessageId} (account=${accountId}) — skipping side-effects`,
+        );
+        await this.prisma.webhookEvent.update({
+          where: { id: event.id },
+          data: { processed: true, processedAt: new Date() },
+        });
+        return;
+      }
+
+      const message = { id: persisted.id, sentAt };
 
       // Update conversation
       await this.prisma.conversation.update({

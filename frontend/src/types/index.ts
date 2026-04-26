@@ -400,45 +400,6 @@ export interface AdminLog {
   };
 }
 
-// Phone Pool (Admin)
-export interface PhonePoolAssignment {
-  id: string;
-  phonePoolId: string;
-  userId: string;
-  assignedAt: string;
-  user: {
-    id: string;
-    email: string;
-    name: string | null;
-  };
-}
-
-export interface PhonePoolEntry {
-  id: string;
-  phoneNumber: string;
-  provider: string;
-  areaCode: string | null;
-  state: string | null;
-  friendlyName: string | null;
-  sigcoreAllocationId: string | null;
-  status: 'AVAILABLE' | 'ASSIGNED' | 'RESERVED' | 'RELEASED';
-  smsApproved: boolean;
-  smsCapable: boolean;
-  voiceCapable: boolean;
-  assignments?: PhonePoolAssignment[];
-  provisionedAt: string;
-  createdAt: string;
-}
-
-export interface PhonePoolStats {
-  total: number;
-  available: number;
-  assigned: number;
-  reserved: number;
-  released: number;
-  byAreaCode: { areaCode: string; count: number }[];
-}
-
 // Unified Timeline (Messages page)
 export type TimelineChannel = 'platform' | 'sms' | 'call' | 'automation';
 

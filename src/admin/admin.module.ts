@@ -5,6 +5,8 @@ import { AdminService } from './admin.service';
 import { AdminPhonePoolController } from './admin-phone-pool.controller';
 import { AdminPhonePoolService } from './admin-phone-pool.service';
 import { YelpBackfillService } from './yelp-backfill.service';
+import { SigcoreWebhookMigrationController } from './sigcore-webhook-migration.controller';
+import { SigcoreWebhookMigrationService } from './sigcore-webhook-migration.service';
 import { StripeModule } from '../stripe/stripe.module';
 import { SigcoreModule } from '../sigcore/sigcore.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -21,8 +23,8 @@ import { PlatformsModule } from '../platforms/platforms.module';
     // forwardRef: PlatformsModule already uses forwardRef for LeadsModule, so this side stays defensive too.
     forwardRef(() => PlatformsModule),
   ],
-  controllers: [AdminController, AdminPhonePoolController],
-  providers: [AdminService, AdminPhonePoolService, YelpBackfillService],
-  exports: [AdminService, AdminPhonePoolService],
+  controllers: [AdminController, AdminPhonePoolController, SigcoreWebhookMigrationController],
+  providers: [AdminService, AdminPhonePoolService, YelpBackfillService, SigcoreWebhookMigrationService],
+  exports: [AdminService, AdminPhonePoolService, SigcoreWebhookMigrationService],
 })
 export class AdminModule {}
