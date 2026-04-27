@@ -88,7 +88,14 @@ describe('NotificationsService', () => {
   beforeEach(() => {
     prisma = buildPrismaMock();
     const config = buildConfigMock();
-    service = new NotificationsService(prisma, config);
+    // Cache is opt-out by default — getLogsByLead is the only method that
+    // touches it, and the existing tests don't exercise that path. Mocked
+    // as a no-op so the constructor satisfies its DI contract.
+    const cache: any = {
+      getOrSet: jest.fn(async (_k: string, _ttl: number, loader: () => Promise<any>) => loader()),
+      del: jest.fn().mockResolvedValue(undefined),
+    };
+    service = new NotificationsService(prisma, config, cache);
 
     // Spy on private sendViaSigcore to avoid real HTTP calls
     jest.spyOn(service as any, 'sendViaSigcore').mockResolvedValue(mockSigcoreResult);

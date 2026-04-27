@@ -19,6 +19,7 @@ import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
 import { LeadCacheService } from '../common/cache/lead-cache.service';
 import { PrismaService } from '../common/utils/prisma.service';
+import { YelpBackfillService, BackfillDryRunInput } from './yelp-backfill.service';
 
 @Controller('v1/admin')
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -28,6 +29,7 @@ export class AdminController {
     private readonly cache: CacheService,
     private readonly leadCache: LeadCacheService,
     private readonly prisma: PrismaService,
+    private readonly yelpBackfill: YelpBackfillService,
   ) {}
 
   @Get('users')
@@ -221,5 +223,21 @@ export class AdminController {
     }
     await this.leadCache.invalidateLeadMessagesAndList(lead.userId, leadId);
     return { success: true, leadId, userId: lead.userId };
+  }
+
+  // ==========================================================================
+  // Yelp backfill — dry-run only in this PR (cache plan Phase 2 prep).
+  // The write path is deliberately not implemented here; dryRun=false → 400.
+  // ==========================================================================
+
+  /**
+   * POST /v1/admin/backfill/yelp
+   * Body: BackfillDryRunInput. Returns a per-lead breakdown of what the
+   * webhook full-thread persist would create, without writing anything.
+   */
+  @Post('backfill/yelp')
+  async backfillYelp(@Body() body: BackfillDryRunInput) {
+    const result = await this.yelpBackfill.dryRun(body || {});
+    return { success: true, data: result };
   }
 }

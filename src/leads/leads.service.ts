@@ -19,10 +19,17 @@ import { TrialService } from '../trial/trial.service';
 import { LeadCacheService } from '../common/cache/lead-cache.service';
 import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
+import { extractYelpEventContent, isDisplayableYelpEvent, yelpEventSender } from '../platforms/yelp/yelp-event-content.util';
 
 const LEAD_LIST_TTL_SECONDS = 30;
 const LEAD_DETAIL_TTL_SECONDS = 60;
 const LEAD_MESSAGES_TTL_SECONDS = 300; // 5 min — DB is authoritative; invalidated on every inbound/outbound write
+
+// Phase 0 reservation for the DB-first / hot-window cache rollout. Exported for
+// later phases (recurring sync, prewarm) to consume; not wired into this file
+// yet so behavior is unchanged.
+export const LEAD_MESSAGES_HOT_TTL_SECONDS = 600; // 10 min — recently opened conversation
+export const LEAD_MESSAGES_WARM_TTL_SECONDS = 1800; // 30 min — active 7d / unread / follow-up-enrolled
 
 /**
  * Strict whitelist of cache-eligible filter shapes for the leads list.
@@ -366,47 +373,20 @@ export class LeadsService {
       });
 
       // Convert Yelp events to message format expected by frontend.
-      // Include TEXT + structured events (quotes, estimates). Skip RAQ_SUBMIT (duplicates lead data).
-      const displayEvents = events.filter((e: any) => e.event_type !== 'RAQ_SUBMIT' && e.event_type !== 'CONSUMER_PHONE_NUMBER_OPT_IN_EVENT' && e.event_type !== 'CONSUMER_PHONE_NUMBER_OPT_OUT_EVENT');
-      const messages = displayEvents.map((e: any) => {
-        let content = e.event_content?.text || e.event_content?.fallback_text || e.text || '';
-
-        // Format structured events (price estimates, quotes, invoices)
-        if (!content && e.event_content) {
-          const ec = e.event_content;
-          const parts: string[] = [];
-          if (ec.price_estimate || ec.price_range) {
-            parts.push(`Price Estimate: ${ec.price_estimate || ec.price_range}`);
-          }
-          if (ec.low_estimate || ec.high_estimate) {
-            parts.push(`$${ec.low_estimate} - $${ec.high_estimate}`);
-          }
-          if (ec.availability) {
-            parts.push(`Availability: ${ec.availability}`);
-          }
-          if (ec.message) {
-            parts.push(ec.message);
-          }
-          if (parts.length > 0) content = parts.join('\n');
-        }
-
-        // Fallback: show event type if no content extracted
-        if (!content && e.event_type !== 'TEXT') {
-          content = `[${e.event_type}]`;
-        }
-
-        return {
-          id: e.id,
-          conversationId: lead.externalRequestId,
-          platform: 'yelp',
-          externalMessageId: e.id,
-          sender: e.user_type === 'CONSUMER' ? 'customer' : 'pro',
-          senderType: null as string | null, // Will be enriched from local DB below
-          content,
-          isRead: true,
-          sentAt: e.time_created,
-        };
-      }).filter((m: any) => m.content);
+      // Display filter + content extraction live in yelp-event-content.util so the
+      // webhook write path produces identical content (no drift).
+      const displayEvents = events.filter(isDisplayableYelpEvent);
+      const messages = displayEvents.map((e: any) => ({
+        id: e.id,
+        conversationId: lead.externalRequestId,
+        platform: 'yelp',
+        externalMessageId: e.id,
+        sender: yelpEventSender(e),
+        senderType: null as string | null, // Will be enriched from local DB below
+        content: extractYelpEventContent(e),
+        isRead: true,
+        sentAt: e.time_created,
+      })).filter((m: any) => m.content);
 
       // Enrich with senderType from local Message records (AI vs user distinction)
       if (lead.threadId) {

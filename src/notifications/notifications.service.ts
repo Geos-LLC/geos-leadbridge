@@ -6,6 +6,15 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
+import { CacheService } from '../common/cache/cache.service';
+import { CacheKeys } from '../common/cache/cache-keys';
+
+// Short TTL: SMS/notification logs are write-mostly via webhook + outbound paths.
+// 60s is enough to absorb the burst of frontend re-fetches (Messages tab tab-back,
+// SSE-triggered refreshes) while still showing freshly-created logs within a
+// reasonable window. Explicit invalidation runs after every leadId-scoped log
+// create so the only stale window is for cross-tenant background writes.
+const LEAD_NOTIFICATION_LOGS_TTL_SECONDS = 60;
 
 export interface UpdateNotificationSettingsDto {
   enabled?: boolean;
@@ -177,6 +186,7 @@ export class NotificationsService {
   constructor(
     private prisma: PrismaService,
     private configService: ConfigService,
+    private cache: CacheService,
   ) {
     this.appSigcoreApiKey = this.configService.get<string>('SIGCORE_API_KEY', '');
   }
@@ -358,30 +368,90 @@ export class NotificationsService {
   }
 
   /**
-   * Get notification logs for a specific lead across all accounts
-   * Used by the unified timeline in Messages page
+   * Get notification logs for a specific lead across all accounts.
+   * Used by the unified timeline in Messages page.
+   *
+   * Cached at `notification-logs:user:{userId}:{leadId}` with a short TTL
+   * so a tab-back / SSE refresh / re-render doesn't re-issue the
+   * (cross-region) Promise.all on every click. Invalidated on every
+   * leadId-scoped notificationLog.create — see sendAdHocSms and
+   * sendNotificationWithRule.
    */
   async getLogsByLead(
     userId: string,
     leadId: string,
     limit: number = 50,
   ): Promise<NotificationLogResponse[]> {
-    // Verify the lead belongs to the user
-    const lead = await this.prisma.lead.findFirst({
-      where: { id: leadId, userId },
-    });
+    const t0 = Date.now();
+    const shortLead = leadId.slice(0, 8);
+    let wasCacheHit = true; // flipped to false inside the loader
 
-    if (!lead) {
-      throw new NotFoundException('Lead not found');
+    const result = await this.cache.getOrSet<NotificationLogResponse[]>(
+      CacheKeys.notificationLogsByLead(userId, leadId),
+      LEAD_NOTIFICATION_LOGS_TTL_SECONDS,
+      async () => {
+        wasCacheHit = false;
+        const loaderT0 = Date.now();
+
+        // Run ownership check in parallel with the log fetch — both are
+        // independent round-trips and combined sequentially they doubled the
+        // endpoint latency. Project to the bare minimum on each side:
+        //  - lead: just `id` (the Lead row has a heavy rawJson text column)
+        //  - logs: only fields formatLog uses (drops the wide `metadata`
+        //    @db.Text column and three sigcore-* / settings-id columns the
+        //    response shape never returns)
+        const tDbStart = Date.now();
+        const [lead, logs] = await Promise.all([
+          this.prisma.lead.findFirst({
+            where: { id: leadId, userId },
+            select: { id: true },
+          }),
+          this.prisma.notificationLog.findMany({
+            where: { leadId },
+            orderBy: { createdAt: 'desc' },
+            take: limit,
+            select: {
+              id: true,
+              leadId: true,
+              notificationRuleId: true,
+              ruleName: true,
+              toPhone: true,
+              fromPhone: true,
+              provider: true,
+              status: true,
+              error: true,
+              messageBody: true,
+              createdAt: true,
+              sentAt: true,
+              deliveredAt: true,
+            },
+          }),
+        ]);
+        const tDbEnd = Date.now();
+
+        if (!lead) {
+          this.logger.log(`[getLogsByLead] MISS lead=${shortLead} NOT_FOUND db=${tDbEnd - tDbStart}ms`);
+          throw new NotFoundException('Lead not found');
+        }
+
+        const tFormatStart = Date.now();
+        const formatted = logs.map(this.formatLog);
+        const tFormatEnd = Date.now();
+
+        this.logger.log(
+          `[getLogsByLead] MISS lead=${shortLead} db=${tDbEnd - tDbStart}ms format=${tFormatEnd - tFormatStart}ms loader-total=${Date.now() - loaderT0}ms count=${formatted.length}`,
+        );
+        return formatted;
+      },
+    );
+
+    const totalMs = Date.now() - t0;
+    if (wasCacheHit) {
+      this.logger.log(`[getLogsByLead] HIT  lead=${shortLead} total=${totalMs}ms count=${result.length}`);
+    } else {
+      this.logger.log(`[getLogsByLead] DONE lead=${shortLead} total=${totalMs}ms (see MISS line above)`);
     }
-
-    const logs = await this.prisma.notificationLog.findMany({
-      where: { leadId },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-    });
-
-    return logs.map(this.formatLog);
+    return result;
   }
 
   /**
@@ -459,6 +529,10 @@ export class NotificationsService {
         metadata: JSON.stringify({ userId, savedAccountId, manual: true }),
       },
     });
+
+    // Invalidate the per-lead notification-logs cache so the next getLogsByLead
+    // call picks up this row immediately rather than waiting on the 60s TTL.
+    await this.cache.del(CacheKeys.notificationLogsByLead(userId, leadId));
 
     // 5. Send via Sigcore
     try {
@@ -1224,6 +1298,10 @@ export class NotificationsService {
         metadata: JSON.stringify({ userId, savedAccountId, ruleId }),
       },
     });
+
+    // Invalidate the per-lead notification-logs cache so the next getLogsByLead
+    // call sees this row immediately rather than waiting on the 60s TTL.
+    await this.cache.del(CacheKeys.notificationLogsByLead(userId, leadId));
 
     // Send via Sigcore
     try {

@@ -27,6 +27,19 @@ export const CacheKeys = {
   leadDetail: (userId: string, leadId: string) => `lead:user:${userId}:${leadId}`,
   leadMessages: (userId: string, leadId: string) => `lead-messages:user:${userId}:${leadId}`,
 
+  // Notification logs scoped to one lead. Same userId-in-key invariant as
+  // leadMessages — getLogsByLead enforces ownership via Prisma but a
+  // tenant-agnostic key would risk leaking cached results across users.
+  notificationLogsByLead: (userId: string, leadId: string) =>
+    `notification-logs:user:${userId}:${leadId}`,
+
+  // JwtStrategy.validate caches the per-request user lookup here.
+  // Cache value: minimal AuthUser shape (id, email, name, role, subscription*,
+  // hasOwnNumber) — never the full User row. TTL ~120s keeps role/subscription
+  // staleness bounded; explicit invalidation runs on user delete + subscription
+  // change. Key includes userId; never share across users.
+  authUser: (userId: string) => `auth:user:${userId}`,
+
   // Admin: wipe everything we know about a user (saved-accounts + leads + me).
   userAllPattern: (userId: string) => [
     `me:user:${userId}`,

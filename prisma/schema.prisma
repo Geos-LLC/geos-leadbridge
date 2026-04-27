@@ -284,6 +284,11 @@ model Conversation {
   unreadCount      Int      @default(0)
   status           String   @default("active") // "active" | "archived" | "closed"
   metadataJson     String?  @db.Text
+  // Backfill bookkeeping — populated by future recurring sync (cache plan Phase 2/3).
+  // Lets the sync pick "needs backfill" deterministically without per-row Message.count
+  // queries. Null = never backfilled. Otherwise: "in_progress" | "complete" | "failed".
+  backfillStatus   String?
+  lastBackfilledAt DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -298,6 +303,7 @@ model Conversation {
   @@index([userId])
   @@index([platform])
   @@index([lastMessageAt])
+  @@index([backfillStatus])
   @@map("conversations")
 }
 
