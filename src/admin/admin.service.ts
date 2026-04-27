@@ -5,6 +5,8 @@ import { TrialService } from '../trial/trial.service';
 import { ListUsersDto } from './dto/list-users.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { SubscriptionTier, SubscriptionStatus } from '../../generated/prisma';
+import { CacheService } from '../common/cache/cache.service';
+import { CacheKeys } from '../common/cache/cache-keys';
 
 @Injectable()
 export class AdminService {
@@ -14,6 +16,7 @@ export class AdminService {
     private prisma: PrismaService,
     private stripeService: StripeService,
     private trialService: TrialService,
+    private cache: CacheService,
   ) {}
 
   /**
@@ -212,6 +215,10 @@ export class AdminService {
       },
     });
 
+    // Invalidate JwtStrategy auth cache so the new subscription/hasOwnNumber
+    // values are reflected on the next request rather than waiting on TTL.
+    await this.cache.del(CacheKeys.authUser(userId));
+
     // Log admin action
     await this.logAdminAction(adminId, 'UPDATE_USER_SUBSCRIPTION', userId, dto);
 
@@ -248,6 +255,10 @@ export class AdminService {
 
     // Delete user (cascade will handle related records)
     await this.prisma.user.delete({ where: { id: userId } });
+
+    // SECURITY: invalidate the auth cache immediately so the deleted user's
+    // still-valid JWT can't be used to make authed requests for up to TTL.
+    await this.cache.del(CacheKeys.authUser(userId));
 
     // Log admin action
     await this.logAdminAction(adminId, 'DELETE_USER', userId, {

@@ -33,6 +33,13 @@ export const CacheKeys = {
   notificationLogsByLead: (userId: string, leadId: string) =>
     `notification-logs:user:${userId}:${leadId}`,
 
+  // JwtStrategy.validate caches the per-request user lookup here.
+  // Cache value: minimal AuthUser shape (id, email, name, role, subscription*,
+  // hasOwnNumber) — never the full User row. TTL ~120s keeps role/subscription
+  // staleness bounded; explicit invalidation runs on user delete + subscription
+  // change. Key includes userId; never share across users.
+  authUser: (userId: string) => `auth:user:${userId}`,
+
   // Admin: wipe everything we know about a user (saved-accounts + leads + me).
   userAllPattern: (userId: string) => [
     `me:user:${userId}`,
