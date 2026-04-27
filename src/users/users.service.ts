@@ -295,6 +295,10 @@ export class UsersService {
     // Delete user — cascade handles all related records
     await this.prisma.user.delete({ where: { id: userId } });
 
+    // SECURITY: invalidate the JwtStrategy auth cache so the still-valid JWT
+    // can't be used to make authed requests up to the TTL after self-delete.
+    await this.cache.del(CacheKeys.authUser(userId));
+
     this.logger.log(`[deleteOwnAccount] User ${user.email} deleted their account`);
     return { success: true };
   }
