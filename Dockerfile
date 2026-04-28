@@ -54,6 +54,11 @@ COPY --from=builder /app/dist ./dist
 # Copy compiled frontend
 COPY --from=builder /app/frontend/dist ./frontend/dist
 
+# Copy boot scripts. railway.json's startCommand is
+# `sh scripts/start-with-migrations.sh`; the script must exist in the
+# production image for that startCommand to resolve it.
+COPY scripts ./scripts
+
 EXPOSE 3000
 
 # Run Prisma migrations then start the server
