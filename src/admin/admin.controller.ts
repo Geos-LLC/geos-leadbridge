@@ -20,6 +20,9 @@ import { CacheKeys } from '../common/cache/cache-keys';
 import { LeadCacheService } from '../common/cache/lead-cache.service';
 import { PrismaService } from '../common/utils/prisma.service';
 import { YelpBackfillService, BackfillDryRunInput } from './yelp-backfill.service';
+import { AuditService } from '../common/audit/audit.service';
+import { RequiresSupportGrant } from './support-grants/decorators/requires-support-grant.decorator';
+import { PLATFORM_BULK_TENANT_ID } from './support-grants/support-grants.service';
 
 @Controller('v1/admin')
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -30,6 +33,7 @@ export class AdminController {
     private readonly leadCache: LeadCacheService,
     private readonly prisma: PrismaService,
     private readonly yelpBackfill: YelpBackfillService,
+    private readonly auditService: AuditService,
   ) {}
 
   @Get('users')
@@ -42,7 +46,21 @@ export class AdminController {
   }
 
   @Get('users/:userId')
-  async getUserDetails(@Param('userId') userId: string) {
+  @RequiresSupportGrant('user:read')
+  async getUserDetails(@Req() req: any, @Param('userId') userId: string) {
+    const grant = req.supportGrant;
+    await this.auditService.logAccess({
+      actorUserId: req.user.id,
+      actorRole: 'ADMIN',
+      tenantId: userId,
+      action: 'read',
+      resourceType: 'User',
+      resourceId: userId,
+      accessType: 'support_read',
+      reason: grant?.reason ?? null,
+      route: req.url,
+      method: req.method,
+    });
     const result = await this.adminService.getUserDetails(userId);
     return {
       success: true,
@@ -137,7 +155,21 @@ export class AdminController {
   }
 
   @Get('notification-logs')
-  async getNotificationLogs(@Query() query: { limit?: number }) {
+  @RequiresSupportGrant('notifications:read')
+  async getNotificationLogs(@Req() req: any, @Query() query: { limit?: number }) {
+    const grant = req.supportGrant;
+    await this.auditService.logAccess({
+      actorUserId: req.user.id,
+      actorRole: 'ADMIN',
+      tenantId: PLATFORM_BULK_TENANT_ID,
+      action: 'list',
+      resourceType: 'NotificationLog',
+      resourceId: 'bulk',
+      accessType: 'support_read',
+      reason: grant?.reason ?? null,
+      route: req.url,
+      method: req.method,
+    });
     const result = await this.adminService.getNotificationLogs(query);
     return {
       success: true,
@@ -146,12 +178,27 @@ export class AdminController {
   }
 
   @Get('tenant-numbers')
+  @RequiresSupportGrant('phones:read')
   async getTenantNumbers(
+    @Req() req: any,
     @Query('search') search?: string,
     @Query('status') status?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
+    const grant = req.supportGrant;
+    await this.auditService.logAccess({
+      actorUserId: req.user.id,
+      actorRole: 'ADMIN',
+      tenantId: PLATFORM_BULK_TENANT_ID,
+      action: 'list',
+      resourceType: 'TenantPhoneNumber',
+      resourceId: 'bulk',
+      accessType: 'support_read',
+      reason: grant?.reason ?? null,
+      route: req.url,
+      method: req.method,
+    });
     const result = await this.adminService.getTenantNumbers({
       search,
       status,
@@ -162,11 +209,26 @@ export class AdminController {
   }
 
   @Get('tenant-errors')
+  @RequiresSupportGrant('errors:read')
   async getTenantErrorFeed(
+    @Req() req: any,
     @Query('status') status?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
+    const grant = req.supportGrant;
+    await this.auditService.logAccess({
+      actorUserId: req.user.id,
+      actorRole: 'ADMIN',
+      tenantId: PLATFORM_BULK_TENANT_ID,
+      action: 'list',
+      resourceType: 'SystemErrorLog',
+      resourceId: 'bulk',
+      accessType: 'support_read',
+      reason: grant?.reason ?? null,
+      route: req.url,
+      method: req.method,
+    });
     const result = await this.adminService.getTenantErrorFeed({
       status,
       limit: limit ? parseInt(limit, 10) : 50,

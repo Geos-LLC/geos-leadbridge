@@ -1371,3 +1371,35 @@ model DataAccessLog {
   @@index([accessType, createdAt])
   @@map("data_access_logs")
 }
+
+// ==========================================
+// Phase 3 — Support Grant
+//
+// Time-bound, scope-limited authorization for ADMIN reads of customer-data
+// endpoints. The mere `ADMIN` role is no longer sufficient; the admin must
+// also hold an unexpired SupportGrant whose `scopes` include the required
+// permission and whose `tenantId` matches the targeted tenant (or is the
+// platform-wide sentinel `__platform__`).
+//
+// No relations to User: the row must outlive admin/tenant deletion as a
+// forensic record. Pairs with `data_access_logs` rows where
+// accessType = 'support_read' for full who/what/why audit chain.
+//
+// Default duration on create: 60 minutes. Hard cap: 7 days (enforced at
+// service layer, not schema). Indexed on (adminUserId, expiresAt) and
+// (tenantId, expiresAt) so guard checks are O(log n) lookups.
+// ==========================================
+
+model SupportGrant {
+  id          String   @id @default(cuid())
+  adminUserId String // Admin user issuing/holding the grant
+  tenantId    String // Target tenant; '__platform__' for cross-tenant bulk endpoints
+  scopes      String[] // e.g. ['user:read', 'notifications:read']
+  reason      String   @db.Text // Audit context — propagated to DataAccessLog.reason
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([adminUserId, expiresAt])
+  @@index([tenantId, expiresAt])
+  @@map("support_grants")
+}

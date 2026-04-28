@@ -7,6 +7,7 @@ import { AdminPhonePoolService } from './admin-phone-pool.service';
 import { YelpBackfillService } from './yelp-backfill.service';
 import { SigcoreWebhookMigrationController } from './sigcore-webhook-migration.controller';
 import { SigcoreWebhookMigrationService } from './sigcore-webhook-migration.service';
+import { SupportGrantsModule } from './support-grants/support-grants.module';
 import { StripeModule } from '../stripe/stripe.module';
 import { SigcoreModule } from '../sigcore/sigcore.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -20,6 +21,7 @@ import { PlatformsModule } from '../platforms/platforms.module';
     SigcoreModule,
     NotificationsModule,
     TrialModule,
+    SupportGrantsModule,
     // forwardRef: PlatformsModule already uses forwardRef for LeadsModule, so this side stays defensive too.
     forwardRef(() => PlatformsModule),
   ],
