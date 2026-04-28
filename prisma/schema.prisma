@@ -226,7 +226,14 @@ model Lead {
   city              String?
   state             String?
   category          String? // Service category
-  status            String    @default("new") // "new" | "contacted" | "quoted" | "booked" | "lost"
+  // Canonical LB pipeline status. See src/leads/canonical-status.ts.
+  // Pipeline: new -> contacted -> engaged -> quoted -> booked -> scheduled -> in_progress -> completed
+  // Terminals: lost, cancelled, no_show, archived
+  status            String    @default("new")
+  // Set when status='lost'. Values: 'opt_out' | 'hired_someone' | 'no_response' | 'manual'
+  lostReason        String?
+  // When this lead becomes a re-engage candidate (e.g. lost+hired_someone -> +75d).
+  reengageAt        DateTime?
   thumbtackStatus   String? // Job status from Thumbtack UI (e.g. "Hired", "Not hired")
   platformStatus    String? // Generic platform-native status (Yelp Done/Closed/Hired, etc.)
   platformStatusAt  DateTime? // When platform status was last observed
@@ -267,6 +274,7 @@ model Lead {
   @@index([sfJobId])
   @@index([statusSource])
   @@index([lastCustomerActivityAt])
+  @@index([reengageAt])
   @@map("leads")
 }
 
@@ -1314,13 +1322,21 @@ model SfInboundEvent {
 model LeadStatusAuditLog {
   id            String   @id @default(uuid())
   leadId        String
+  // Activity discriminator. Defaults to status_changed; future activity types
+  // (note_added, message_sent, etc.) can reuse the table without schema churn.
+  activityType  String   @default("status_changed")
   oldStatus     String?
   newStatus     String
   source        String // 'service_flow'|'platform_sync'|'manual'|'lb_automation'
-  sourceEventId String? // e.g. SfInboundEvent.eventId
+  sourceEventId String? // e.g. SfInboundEvent.eventId, Message.id
   actorType     String? // 'account_owner'|'team_member'|'system'|'operator'
   actorId       String?
   actorName     String?
+  // Reason for the transition. For lost: 'opt_out'|'hired_someone'|'no_response'|'manual'.
+  // For other transitions: short freeform note (e.g. 'customer_replied').
+  reason        String?
+  // Future-proof escape hatch for non-status activity payloads.
+  metadata      Json?
   conflict      Boolean  @default(false) // true for discrepancy-audit rows
   conflictNote  String?
   occurredAt    DateTime
@@ -1329,6 +1345,7 @@ model LeadStatusAuditLog {
   lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@index([leadId, occurredAt])
+  @@index([leadId, activityType, occurredAt])
   @@index([conflict])
   @@map("lead_status_audit_log")
 }
