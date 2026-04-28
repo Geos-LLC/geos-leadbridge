@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # LeadBridge — Railway boot script
 #
 # Runs Prisma migrations BEFORE the API starts. Uses DIRECT_URL (port 5432)
@@ -6,17 +6,12 @@
 # DATABASE_URL) doesn't support Prisma's migrate engine. The runtime API is
 # left to use DATABASE_URL unchanged.
 #
-# POSIX sh, not bash — the Railway NIXPACKS production image ships dash but
-# not bash, so the shebang and the railway.json startCommand both reference
-# `sh`. We use `set -eu` (no `pipefail`, which is bash-only and not POSIX);
-# this script has no pipes anyway.
-#
 # Failure semantics: any non-zero exit short-circuits boot. Railway's
 # restartPolicyType=ON_FAILURE will retry, but the API will NOT start with
 # unapplied migrations on the database — that's the whole point of this
 # script. Logs go to stdout so Railway's deploy log captures them.
 
-set -eu
+set -euo pipefail
 
 echo "[startup] LeadBridge boot starting..."
 
