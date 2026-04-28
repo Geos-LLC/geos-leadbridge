@@ -2042,7 +2042,29 @@ export class WebhooksService {
       }
     })();
 
-    await Promise.all([automationPromise, smsPromise]);
+    // Instant Call — fires only when customer phone is available.
+    // triggerForLead silently returns when customerPhone is null, so it's
+    // safe to call for every Yelp lead even though many won't have a phone.
+    const callPromise = (async () => {
+      try {
+        await this.callConnectService.triggerForLead({
+          userId,
+          savedAccountId: savedAccount.id,
+          businessId: businessId ?? null,
+          leadId: lead.id,
+          customerPhone: leadData.customerPhone ?? null,
+          customerName: leadData.customerName,
+          accountName: savedAccount.businessName ?? null,
+          category: leadData.category ?? null,
+          location: [leadData.city, leadData.state].filter(Boolean).join(', ') || null,
+          leadSummary: `${leadData.customerName} — ${leadData.category || 'Service'} — ${[leadData.city, leadData.state].filter(Boolean).join(', ')}`,
+        });
+      } catch (err: any) {
+        this.logger.error(`Yelp call-connect trigger failed: ${err.message}`);
+      }
+    })();
+
+    await Promise.all([automationPromise, smsPromise, callPromise]);
 
     // Evaluate thread for follow-up enrollment (after auto-reply fires)
     if (lead.threadId) {

@@ -1619,6 +1619,8 @@ export function Services() {
 
   // --- Render ---
 
+  const selectedAccountIsYelp = accounts.find(a => a.id === selectedAccountId)?.platform === 'yelp';
+
   if (loading && accounts.length === 0) {
     return (
       <div className="p-6 lg:p-10">
@@ -2544,6 +2546,14 @@ export function Services() {
                   </label>
                 </div>
                 <div className={`px-5 py-4 space-y-4${!ctEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+                  {selectedAccountIsYelp && (
+                    <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-[11px] text-amber-800">
+                      <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                      <span>
+                        <span className="font-semibold">Yelp accounts:</span> Yelp leads don't always include a phone number. Instant Text only fires when the customer has shared their phone (via Yelp's phone opt-in). Otherwise it's silently skipped.
+                      </span>
+                    </div>
+                  )}
                   {/* Auto-reply template */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Auto-Reply Message</label>
@@ -2621,6 +2631,14 @@ export function Services() {
                   </label>
                 </div>
                 <div className={`px-5 py-4 space-y-4${!ccEnabled ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+                  {selectedAccountIsYelp && (
+                    <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-[11px] text-amber-800">
+                      <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                      <span>
+                        <span className="font-semibold">Yelp accounts:</span> Yelp leads don't always include a phone number. Instant Call only fires when the customer has shared their phone (via Yelp's phone opt-in). Otherwise it's silently skipped.
+                      </span>
+                    </div>
+                  )}
                   {/* Connection Mode */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Connection Mode</label>
