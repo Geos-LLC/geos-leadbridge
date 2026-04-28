@@ -51,6 +51,7 @@
     "openai": "^6.32.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
+    "prisma": "^6.19.1",
     "stripe": "^20.3.0"
   },
   "devDependencies": {
@@ -66,7 +67,6 @@
     "eslint": "^9.39.2",
     "globals": "^17.3.0",
     "jest": "^30.3.0",
-    "prisma": "^6.19.1",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
