@@ -1964,10 +1964,24 @@ export function Messages() {
                           : 'text-slate-500'
                       }`}>
                         <span>
-                          {event.timestamp.toLocaleTimeString('en-US', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
+                          {(() => {
+                            const now = new Date();
+                            const isSameDay =
+                              event.timestamp.getFullYear() === now.getFullYear() &&
+                              event.timestamp.getMonth() === now.getMonth() &&
+                              event.timestamp.getDate() === now.getDate();
+                            const time = event.timestamp.toLocaleTimeString('en-US', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            });
+                            if (isSameDay) return time;
+                            const datePart = event.timestamp.toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              ...(event.timestamp.getFullYear() !== now.getFullYear() && { year: 'numeric' }),
+                            });
+                            return `${datePart}, ${time}`;
+                          })()}
                         </span>
                         {event.channel === 'sms' && event.smsStatus && (
                           <span className={`font-semibold ${
