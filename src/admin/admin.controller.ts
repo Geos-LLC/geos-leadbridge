@@ -37,7 +37,21 @@ export class AdminController {
   ) {}
 
   @Get('users')
-  async listUsers(@Query() query: ListUsersDto) {
+  @RequiresSupportGrant('user:list')
+  async listUsers(@Req() req: any, @Query() query: ListUsersDto) {
+    const grant = req.supportGrant;
+    await this.auditService.logAccess({
+      actorUserId: req.user.id,
+      actorRole: 'ADMIN',
+      tenantId: PLATFORM_BULK_TENANT_ID,
+      action: 'list',
+      resourceType: 'User',
+      resourceId: 'bulk',
+      accessType: 'support_read',
+      reason: grant?.reason ?? null,
+      route: req.url,
+      method: req.method,
+    });
     const result = await this.adminService.listUsers(query);
     return {
       success: true,
@@ -69,6 +83,7 @@ export class AdminController {
   }
 
   @Patch('users/:userId/subscription')
+  @RequiresSupportGrant('user:write')
   async updateUserSubscription(
     @Req() req: any,
     @Param('userId') userId: string,
@@ -87,6 +102,7 @@ export class AdminController {
   }
 
   @Post('users/:userId/cancel-subscription')
+  @RequiresSupportGrant('user:write')
   async cancelUserSubscription(
     @Req() req: any,
     @Param('userId') userId: string,
@@ -106,6 +122,7 @@ export class AdminController {
   }
 
   @Patch('users/:userId/trial-leads')
+  @RequiresSupportGrant('user:write')
   async updateTrialLeads(
     @Req() req: any,
     @Param('userId') userId: string,
@@ -120,6 +137,7 @@ export class AdminController {
   }
 
   @Post('trials/reset-all')
+  @RequiresSupportGrant('trials:reset')
   async resetAllTrials(@Req() req: any) {
     const adminId = req.user.id;
     const result = await this.adminService.resetAllTrials(adminId);
@@ -127,6 +145,7 @@ export class AdminController {
   }
 
   @Delete('users/:userId')
+  @RequiresSupportGrant('user:delete')
   async deleteUser(@Req() req: any, @Param('userId') userId: string) {
     const adminId = req.user.id;
     const result = await this.adminService.deleteUser(adminId, userId);
@@ -260,6 +279,7 @@ export class AdminController {
    * TTL out or can be invalidated individually via invalidate-lead.
    */
   @Post('cache/invalidate-user/:userId')
+  @RequiresSupportGrant('cache:invalidate')
   async invalidateUserCache(@Param('userId') userId: string) {
     await Promise.all([
       this.cache.del(CacheKeys.me(userId)),
@@ -275,6 +295,7 @@ export class AdminController {
    * Looks up userId from the DB — the endpoint caller does not need to know it.
    */
   @Post('cache/invalidate-lead/:leadId')
+  @RequiresSupportGrant('cache:invalidate')
   async invalidateLeadCache(@Param('leadId') leadId: string) {
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
@@ -298,6 +319,7 @@ export class AdminController {
    * webhook full-thread persist would create, without writing anything.
    */
   @Post('backfill/yelp')
+  @RequiresSupportGrant('backfill:yelp')
   async backfillYelp(@Body() body: BackfillDryRunInput) {
     const result = await this.yelpBackfill.dryRun(body || {});
     return { success: true, data: result };
