@@ -13,6 +13,7 @@ import { CallConnectModule } from '../call-connect/call-connect.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { ConversationContextModule } from '../conversation-context/conversation-context.module';
 import { FollowUpEngineModule } from '../follow-up-engine/follow-up-engine.module';
+import { LeadsModule } from '../leads/leads.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { FollowUpEngineModule } from '../follow-up-engine/follow-up-engine.modul
     forwardRef(() => AutomationModule),
     forwardRef(() => NotificationsModule),
     forwardRef(() => CallConnectModule),
+    forwardRef(() => LeadsModule),
   ],
   controllers: [WebhooksController],
   providers: [WebhooksService],

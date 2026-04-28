@@ -19,9 +19,17 @@
  * conflictNote. The frontend lists unresolved conflicts and shows a modal.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Prisma } from '../../generated/prisma';
 import { PrismaService } from '../common/utils/prisma.service';
+import {
+  AUTOMATION_TERMINAL,
+  HARD_TERMINAL,
+  isCanonicalStatus,
+  isPipelineDowngrade,
+} from './canonical-status';
 
 export type StatusSource =
   | 'service_flow'
@@ -30,6 +38,21 @@ export type StatusSource =
   | 'lb_automation';
 
 export type ConflictKind = 'sf_push_needed' | 'platform_nudge_needed';
+
+/**
+ * Reasons writeStatus may return applied=false. Each maps to a guard in
+ * writeStatus(). Callers can use this to log/diagnose silent skips without
+ * inspecting log lines.
+ */
+export type WriteSkipReason =
+  | 'no_change'
+  | 'invalid_status'
+  | 'hard_terminal'
+  | 'sf_protected'
+  | 'automation_terminal'
+  | 'pipeline_downgrade'
+  | 'duplicate'
+  | 'stale_event';
 
 export interface ConflictInfo {
   kind: ConflictKind;
@@ -54,6 +77,27 @@ export interface WriteStatusInput {
   actorId?: string | null;
   actorName?: string | null;
   sourceEventId?: string | null;
+  /**
+   * Reason for the transition. Persisted on the audit row. For lost
+   * transitions this typically mirrors lostReason; for non-lost transitions
+   * it's a freeform note like 'customer_replied' or 'price_quoted'.
+   */
+  reason?: string | null;
+  /**
+   * Reason the lead was lost. Persisted on `Lead.lostReason` AND mirrored
+   * onto the audit row's `reason` field when `reason` is not provided.
+   * Cleared automatically when transitioning out of `lost`.
+   *   'opt_out' | 'hired_someone' | 'no_response' | 'manual'
+   */
+  lostReason?: string | null;
+  /**
+   * When this lead becomes a re-engage candidate. Pass `null` to clear,
+   * `Date` to set, omit to leave unchanged. Cleared automatically when
+   * transitioning out of `lost`.
+   */
+  reengageAt?: Date | null;
+  /** Free-form metadata persisted on the audit row. */
+  metadata?: Record<string, any> | null;
   /** Additional updates that should be written in the same transaction (e.g. sfJobId, sfLastEventAt). */
   extraLeadUpdates?: Record<string, any>;
 }
@@ -66,6 +110,8 @@ export interface WriteStatusResult {
   platformStatus: string | null;
   conflict: ConflictInfo | null;
   auditLogId: string | null;
+  /** Set when applied=false, identifying which guard rejected the write. */
+  skipReason?: WriteSkipReason;
 }
 
 /**
@@ -101,11 +147,28 @@ export class LeadStatusService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventEmitter2,
+    private readonly config: ConfigService,
   ) {}
 
   /**
-   * Write a status for a lead, enforcing the conflict rules and producing
-   * an audit log + (if applicable) a conflict SSE event.
+   * Write a status for a lead. Routes through 8 guards (see WriteSkipReason)
+   * before mutating, then writes Lead.status + audit log + (manual writes
+   * only) a conflict SSE event.
+   *
+   * Guard order:
+   *   1. same-status no-op
+   *   2. canonical validation
+   *   3. hard-terminal (blocks all sources)
+   *   4. SF_STATUS_WINS protection (lb_automation only)
+   *   5. automation-terminal (lb_automation only)
+   *   6. pipeline-downgrade
+   *   7. dedup by (leadId, source, sourceEventId)
+   *   8. stale-event (occurredAt < lead.statusUpdatedAt)
+   *
+   * Manual override rule:
+   *   manual writes are allowed against SF-linked leads, but produce a
+   *   `sf_push_needed` conflict on the audit row so operators are prompted
+   *   to push the change to SF.
    */
   async writeStatus(input: WriteStatusInput): Promise<WriteStatusResult> {
     const lead = await this.prisma.lead.findUnique({
@@ -121,6 +184,8 @@ export class LeadStatusService {
         statusSource: true,
         sfJobId: true,
         thumbtackStatus: true,
+        lostReason: true,
+        reengageAt: true,
       },
     });
     if (!lead) {
@@ -133,10 +198,6 @@ export class LeadStatusService {
       return this.applyPlatformSync(lead, input, occurredAt);
     }
 
-    // lb_automation uses the same write path as manual but without conflict
-    // detection (automation never prompts operators for confirmation).
-
-    // All other sources write to Lead.status
     if (!input.newStatus) {
       throw new Error(`newStatus is required when source=${input.source}`);
     }
@@ -144,21 +205,108 @@ export class LeadStatusService {
     const newStatus = input.newStatus;
     const oldStatus = lead.status;
 
-    if (newStatus === oldStatus && input.source !== 'manual') {
-      // No-op for non-manual sources; manual still goes through so conflict
-      // detection runs (user may have clicked to force-acknowledge).
-      return {
-        leadId: lead.id,
-        applied: false,
-        status: oldStatus,
-        platformStatus: lead.platformStatus,
-        conflict: null,
-        auditLogId: null,
-      };
+    // ── Guard 1: same-status no-op ────────────────────────────────────────
+    // No audit row, no SSE — keeps the activity timeline noise-free when
+    // a webhook retry / extension re-sync hands us the same status.
+    if (newStatus === oldStatus) {
+      return this.skipped(lead, 'no_change');
     }
 
-    // Write lead.status transactionally with the audit row so we can flag
-    // conflict=true atomically.
+    // ── Guard 2: canonical validation ─────────────────────────────────────
+    if (!isCanonicalStatus(newStatus)) {
+      throw new BadRequestException(
+        `Invalid status "${newStatus}". Must be one of the canonical set; see canonical-status.ts.`,
+      );
+    }
+
+    // ── Guard 3: hard-terminal blocks all sources ─────────────────────────
+    if (HARD_TERMINAL.has(oldStatus)) {
+      this.logger.warn(
+        `[LeadStatus] hard_terminal — blocked ${input.source} write ${oldStatus}→${newStatus} on lead ${lead.id}`,
+      );
+      return this.skipped(lead, 'hard_terminal');
+    }
+
+    // ── Guard 4: SF_STATUS_WINS protection (lb_automation only) ───────────
+    // Manual is intentionally allowed; it produces a sf_push_needed conflict
+    // below so the operator pushes to SF.
+    const sfWins = this.config.get<string>('SF_STATUS_WINS', 'false') === 'true';
+    if (sfWins && lead.sfJobId && input.source === 'lb_automation') {
+      this.logger.log(
+        `[LeadStatus] sf_protected — blocked lb_automation write on SF-linked lead ${lead.id} (sfJobId=${lead.sfJobId})`,
+      );
+      return this.skipped(lead, 'sf_protected');
+    }
+
+    // ── Guard 5: automation-terminal (lb_automation only) ─────────────────
+    // Manual + SF can still transition out of these (e.g. operator marks
+    // a `lost` lead as `engaged` after a re-engagement reply).
+    if (AUTOMATION_TERMINAL.has(oldStatus) && input.source === 'lb_automation') {
+      this.logger.log(
+        `[LeadStatus] automation_terminal — blocked lb_automation write ${oldStatus}→${newStatus} on lead ${lead.id}`,
+      );
+      return this.skipped(lead, 'automation_terminal');
+    }
+
+    // ── Guard 6: pipeline-downgrade ───────────────────────────────────────
+    // Off-pipeline transitions (anything involving a terminal) are exempt
+    // because terminals are not in PIPELINE_ORDER.
+    if (isPipelineDowngrade(oldStatus, newStatus)) {
+      this.logger.log(
+        `[LeadStatus] pipeline_downgrade — blocked ${input.source} write ${oldStatus}→${newStatus} on lead ${lead.id}`,
+      );
+      return this.skipped(lead, 'pipeline_downgrade');
+    }
+
+    // ── Guard 7: dedup by sourceEventId ───────────────────────────────────
+    // Skipped when sourceEventId is null (operator clicks have no event id).
+    if (input.sourceEventId) {
+      const dup = await this.prisma.leadStatusAuditLog.findFirst({
+        where: {
+          leadId: lead.id,
+          source: input.source,
+          sourceEventId: input.sourceEventId,
+        },
+        select: { id: true },
+      });
+      if (dup) {
+        this.logger.log(
+          `[LeadStatus] duplicate — already saw (${input.source}, ${input.sourceEventId}) on lead ${lead.id}`,
+        );
+        return this.skipped(lead, 'duplicate');
+      }
+    }
+
+    // ── Guard 8: stale-event (occurredAt < lead.statusUpdatedAt) ──────────
+    // Prevents an old webhook retry from overwriting a newer state.
+    if (lead.statusUpdatedAt && occurredAt < lead.statusUpdatedAt) {
+      this.logger.warn(
+        `[LeadStatus] stale_event — ${input.source} occurredAt=${occurredAt.toISOString()} < lead.statusUpdatedAt=${lead.statusUpdatedAt.toISOString()} on lead ${lead.id}`,
+      );
+      return this.skipped(lead, 'stale_event');
+    }
+
+    // ── All guards passed; apply the write ────────────────────────────────
+    // Compute lostReason / reengageAt projections:
+    //   - transitioning INTO 'lost' → set from input (or default 'manual')
+    //   - transitioning OUT of 'lost' → clear both columns
+    //   - all other transitions → leave both columns untouched
+    let lostReasonUpdate: { lostReason: string | null } | undefined;
+    let reengageAtUpdate: { reengageAt: Date | null } | undefined;
+    if (newStatus === 'lost') {
+      lostReasonUpdate = {
+        lostReason: input.lostReason ?? (input.source === 'manual' ? 'manual' : null),
+      };
+      if (input.reengageAt !== undefined) {
+        reengageAtUpdate = { reengageAt: input.reengageAt };
+      }
+    } else if (oldStatus === 'lost') {
+      lostReasonUpdate = { lostReason: null };
+      reengageAtUpdate = { reengageAt: null };
+    }
+
+    const auditReason = input.reason ?? input.lostReason ?? null;
+
     const { conflict, auditLogId } = await this.prisma.$transaction(async (tx) => {
       await tx.lead.update({
         where: { id: lead.id },
@@ -166,24 +314,24 @@ export class LeadStatusService {
           status: newStatus,
           statusSource: input.source,
           statusUpdatedAt: occurredAt,
+          ...(lostReasonUpdate || {}),
+          ...(reengageAtUpdate || {}),
           ...(input.extraLeadUpdates || {}),
         },
       });
 
-      // Conflict detection only fires for manual writes (per §2.3 rules).
+      // Conflict detection: manual writes only.
       let conflictInfo: ConflictInfo | null = null;
       let conflictFlag = false;
       let conflictNote: string | null = null;
       let conflictKind: ConflictKind | null = null;
 
       if (input.source === 'manual') {
-        // Rule: SF integrated + manual write → conflict (operator must confirm push).
         if (lead.sfJobId) {
           conflictFlag = true;
           conflictKind = 'sf_push_needed';
           conflictNote = `Manual status change to "${newStatus}" — push to Service Flow (job ${lead.sfJobId}).`;
         } else {
-          // Rule: platform status diverges → conflict (operator must update on platform).
           const platVal = lead.platformStatus || lead.thumbtackStatus;
           if (platVal && !statusesAreConsistent(newStatus, platVal)) {
             conflictFlag = true;
@@ -196,6 +344,7 @@ export class LeadStatusService {
       const audit = await tx.leadStatusAuditLog.create({
         data: {
           leadId: lead.id,
+          activityType: 'status_changed',
           oldStatus,
           newStatus,
           source: input.source,
@@ -203,6 +352,8 @@ export class LeadStatusService {
           actorType: input.actorType ?? null,
           actorId: input.actorId ?? null,
           actorName: input.actorName ?? null,
+          reason: auditReason,
+          metadata: input.metadata ?? Prisma.JsonNull,
           conflict: conflictFlag,
           conflictNote,
           occurredAt,
@@ -226,7 +377,6 @@ export class LeadStatusService {
     });
 
     if (conflict) {
-      // Notify the frontend via SSE — Messages / Leads page can react.
       this.events.emit(`lead.status.conflict.${lead.userId}`, {
         leadId: lead.id,
         userId: lead.userId,
@@ -251,22 +401,73 @@ export class LeadStatusService {
     };
   }
 
+  /** Build a skip result without mutating anything. */
+  private skipped(
+    lead: { id: string; status: string; platformStatus: string | null },
+    reason: WriteSkipReason,
+  ): WriteStatusResult {
+    return {
+      leadId: lead.id,
+      applied: false,
+      status: lead.status,
+      platformStatus: lead.platformStatus,
+      conflict: null,
+      auditLogId: null,
+      skipReason: reason,
+    };
+  }
+
   /**
-   * Apply a platform-sync update. Platform signal is "source of truth" per
-   * the user's model (rule #3): platform → LB silent overwrite.
-   *   - Lead.platformStatus ← input.platformStatus (raw platform-native value)
-   *   - Lead.status         ← input.newStatus (canonical, if provided)
+   * Apply a platform-sync update. Platform signal is the source of truth for
+   * the platform-native column; the canonical Lead.status is also updated
+   * unless SF_STATUS_WINS is on AND the lead is SF-mapped (SF owns the
+   * canonical status in that mode — platformStatus still flows through).
    *
-   * Never flags as a conflict. Manual writes are the only source that can
-   * create a conflict (against an already-set platformStatus).
+   *   - Lead.platformStatus ← input.platformStatus (always when changed)
+   *   - Lead.status         ← input.newStatus (subject to SF protection,
+   *                           same-value skip, downgrade guard)
+   *
+   * Never flags a conflict. Conflicts only arise from manual writes.
    */
   private async applyPlatformSync(
-    lead: { id: string; platform: string; status: string; platformStatus: string | null; thumbtackStatus: string | null },
+    lead: {
+      id: string;
+      platform: string;
+      status: string;
+      platformStatus: string | null;
+      thumbtackStatus: string | null;
+      sfJobId: string | null;
+      statusUpdatedAt: Date | null;
+    },
     input: WriteStatusInput,
     occurredAt: Date,
   ): Promise<WriteStatusResult> {
     if (!input.platformStatus && !input.newStatus) {
       throw new Error(`platformStatus or newStatus is required for source=platform_sync`);
+    }
+
+    // Stale-event guard: drop platform_sync writes that pre-date the last
+    // accepted status transition (out-of-order webhook retries).
+    if (lead.statusUpdatedAt && occurredAt < lead.statusUpdatedAt) {
+      this.logger.warn(
+        `[LeadStatus] stale_event — platform_sync occurredAt=${occurredAt.toISOString()} < lead.statusUpdatedAt=${lead.statusUpdatedAt.toISOString()} on lead ${lead.id}`,
+      );
+      return this.skipped(lead, 'stale_event');
+    }
+
+    // Dedup: if we already saw this exact (source, sourceEventId), skip.
+    if (input.sourceEventId) {
+      const dup = await this.prisma.leadStatusAuditLog.findFirst({
+        where: {
+          leadId: lead.id,
+          source: 'platform_sync',
+          sourceEventId: input.sourceEventId,
+        },
+        select: { id: true },
+      });
+      if (dup) {
+        return this.skipped(lead, 'duplicate');
+      }
     }
 
     const oldPlatform = lead.platformStatus || lead.thumbtackStatus;
@@ -281,38 +482,49 @@ export class LeadStatusService {
         data.thumbtackStatus = input.platformStatus;
       }
     }
+
+    // Lead.status write: gated by canonical validation, downgrade guard,
+    // hard-terminal, and SF protection (SF wins for SF-mapped leads).
+    let lbStatusBlocked: WriteSkipReason | null = null;
     if (input.newStatus && input.newStatus !== oldLbStatus) {
-      data.status = input.newStatus;
-      data.statusSource = 'platform_sync';
-      data.statusUpdatedAt = occurredAt;
+      const sfWins = this.config.get<string>('SF_STATUS_WINS', 'false') === 'true';
+      if (!isCanonicalStatus(input.newStatus)) {
+        lbStatusBlocked = 'invalid_status';
+      } else if (HARD_TERMINAL.has(oldLbStatus)) {
+        lbStatusBlocked = 'hard_terminal';
+      } else if (sfWins && lead.sfJobId) {
+        // SF owns the canonical status when integrated; platformStatus still flows.
+        lbStatusBlocked = 'sf_protected';
+      } else if (isPipelineDowngrade(oldLbStatus, input.newStatus)) {
+        lbStatusBlocked = 'pipeline_downgrade';
+      } else {
+        data.status = input.newStatus;
+        data.statusSource = 'platform_sync';
+        data.statusUpdatedAt = occurredAt;
+      }
     }
 
     if (Object.keys(data).length === 0) {
-      // Nothing changed.
-      return {
-        leadId: lead.id,
-        applied: false,
-        status: oldLbStatus,
-        platformStatus: oldPlatform ?? null,
-        conflict: null,
-        auditLogId: null,
-      };
+      // Nothing to write — newStatus blocked AND platformStatus unchanged.
+      const skipReason = lbStatusBlocked ?? 'no_change';
+      return this.skipped(lead, skipReason);
     }
 
     await this.prisma.lead.update({ where: { id: lead.id }, data });
 
-    // Audit row records whichever field actually changed (prefer lb status
-    // transition; fall back to platform status transition).
     const audit = await this.prisma.leadStatusAuditLog.create({
       data: {
         leadId: lead.id,
-        oldStatus: input.newStatus ? oldLbStatus : oldPlatform ?? null,
-        newStatus: input.newStatus ?? input.platformStatus!,
+        activityType: 'status_changed',
+        oldStatus: data.status ? oldLbStatus : oldPlatform ?? null,
+        newStatus: data.status ?? input.platformStatus!,
         source: 'platform_sync',
         sourceEventId: input.sourceEventId ?? null,
         actorType: input.actorType ?? null,
         actorId: input.actorId ?? null,
         actorName: input.actorName ?? null,
+        reason: input.reason ?? null,
+        metadata: input.metadata ?? Prisma.JsonNull,
         conflict: false,
         conflictNote: null,
         occurredAt,
@@ -323,6 +535,7 @@ export class LeadStatusService {
       `[LeadStatus] platform_sync on ${lead.platform} lead ${lead.id} → ${JSON.stringify({
         status: input.newStatus,
         platformStatus: input.platformStatus,
+        lbStatusBlocked,
       })}`,
     );
 

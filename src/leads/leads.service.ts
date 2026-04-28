@@ -15,6 +15,7 @@ import { AnalyticsService } from '../analytics/analytics.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
+import { LeadStatusService } from './lead-status.service';
 import { TrialService } from '../trial/trial.service';
 import { LeadCacheService } from '../common/cache/lead-cache.service';
 import { CacheService } from '../common/cache/cache.service';
@@ -84,6 +85,7 @@ export class LeadsService {
     private trialService: TrialService,
     private leadCache: LeadCacheService,
     private cache: CacheService,
+    private leadStatusService: LeadStatusService,
   ) {}
 
   /**
@@ -874,10 +876,15 @@ export class LeadsService {
       description,
     });
 
-    // Update lead status to quoted
-    await this.prisma.lead.update({
-      where: { id: leadId },
-      data: { status: 'quoted' },
+    // Update lead status to quoted via the central service so the transition
+    // is audit-logged and goes through the canonical guard set.
+    await this.leadStatusService.writeStatus({
+      leadId,
+      source: 'lb_automation',
+      newStatus: 'quoted',
+      reason: 'price_quoted',
+      sourceEventId: `quote_${quote?.id ?? leadId}_${Date.now()}`,
+      actorType: 'system',
     });
     await this.leadCache.invalidateLeadAndList(userId, leadId);
 

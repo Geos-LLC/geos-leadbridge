@@ -17,6 +17,7 @@ import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.serv
 import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { LeadCacheService } from '../common/cache/lead-cache.service';
+import { LeadStatusService } from '../leads/lead-status.service';
 import { extractYelpEventContent, isDisplayableYelpEvent, yelpEventSender } from '../platforms/yelp/yelp-event-content.util';
 
 @Injectable()
@@ -45,6 +46,7 @@ export class WebhooksService {
     private followUpEngine: FollowUpEngineService,
     private crmWebhookService: CrmWebhookService,
     private leadCache: LeadCacheService,
+    private leadStatusService: LeadStatusService,
   ) {
     // Clean up expired cache entries every minute
     setInterval(() => this.cleanupProcessingCache(), 60 * 1000);
@@ -847,7 +849,14 @@ export class WebhooksService {
   }
 
   /**
-   * Handle status change webhook
+   * Handle status change webhook (legacy `request.status.changed` event).
+   *
+   * Routes through LeadStatusService so the transition is audit-logged and
+   * passes the canonical guard set. The platform's raw value is stored on
+   * `Lead.platformStatus`; the canonical `Lead.status` only updates if the
+   * raw value happens to match the canonical set (otherwise the central
+   * service rejects with `invalid_status` and Lead.platformStatus is the
+   * only column written).
    */
   private async handleStatusChange(platform: string, payload: any): Promise<void> {
     this.logger.log('Lead status changed', {
@@ -856,15 +865,22 @@ export class WebhooksService {
       status: payload.status,
     });
 
-    // Update lead status in database
-    await this.prisma.lead.updateMany({
-      where: {
-        platform,
-        externalRequestId: payload.request_id,
-      },
-      data: {
-        status: payload.status,
-      },
+    const lead = await this.prisma.lead.findUnique({
+      where: { platform_externalRequestId: { platform, externalRequestId: payload.request_id } },
+      select: { id: true },
+    });
+    if (!lead) {
+      this.logger.warn(`[handleStatusChange] No lead for ${platform}/${payload.request_id}`);
+      return;
+    }
+
+    await this.leadStatusService.writeStatus({
+      leadId: lead.id,
+      source: 'platform_sync',
+      platformStatus: payload.status,
+      newStatus: payload.status, // accepted only if canonical
+      sourceEventId: payload.event_id ?? `${platform}_status_${payload.request_id}_${payload.status}`,
+      actorType: 'platform_webhook',
     });
   }
 
