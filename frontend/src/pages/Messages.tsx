@@ -1974,7 +1974,7 @@ export function Messages() {
                               hour: '2-digit',
                               minute: '2-digit',
                             });
-                            if (isSameDay) return time;
+                            if (isSameDay) return `Today, ${time}`;
                             const datePart = event.timestamp.toLocaleDateString('en-US', {
                               month: 'short',
                               day: 'numeric',
