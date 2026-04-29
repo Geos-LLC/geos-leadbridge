@@ -309,7 +309,8 @@ export class WebhooksService {
     // Parse original createdAt from Thumbtack data
     const originalCreatedAt = data.createdAt ? new Date(data.createdAt) : new Date();
 
-    // Run lead upsert + savedAccount lookup in parallel — they're independent
+    // Run lead upsert + savedAccount lookup in parallel — they're independent.
+    // lb-status-guard: allow inbound webhook lead-creation — INSERT default, not a status transition. Refactor tracked separately.
     const [lead, savedAccounts] = await Promise.all([
       this.prisma.lead.upsert({
         where: {
@@ -548,6 +549,7 @@ export class WebhooksService {
     const customer = data.customer || {};
     const customerName = customer.displayName || customer.name || `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown';
 
+    // lb-status-guard: allow inbound webhook lead-creation — INSERT default, not a status transition. Refactor tracked separately.
     const lead = await this.prisma.lead.upsert({
       where: {
         platform_externalRequestId: {
@@ -1787,6 +1789,7 @@ export class WebhooksService {
       update: {},
     });
 
+    // lb-status-guard: allow Yelp webhook lead-creation — INSERT default, not a status transition. Refactor tracked separately.
     const lead = await this.prisma.lead.upsert({
       where: { platform_externalRequestId: { platform: 'yelp', externalRequestId: leadId } },
       create: {

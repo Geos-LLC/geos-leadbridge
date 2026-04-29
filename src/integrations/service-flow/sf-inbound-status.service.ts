@@ -13,6 +13,7 @@ import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../common/utils/prisma.service';
 import { FollowUpEngineService } from '../../follow-up-engine/follow-up-engine.service';
+import { LeadStatusService } from '../../leads/lead-status.service';
 import {
   LbPipelineStatus,
   mapSfStatus,
@@ -73,6 +74,8 @@ export class SfInboundStatusService {
     private readonly config: ConfigService,
     @Inject(forwardRef(() => FollowUpEngineService))
     private readonly followUpEngine: FollowUpEngineService,
+    @Inject(forwardRef(() => LeadStatusService))
+    private readonly leadStatus: LeadStatusService,
   ) {}
 
   /**
@@ -289,32 +292,37 @@ export class SfInboundStatusService {
       return { httpStatus: 200, result: 'dry_run', eventId: payload.event_id, leadId: lead.id };
     }
 
-    // ------------------------ Transactional write ------------------------
+    // ------------------------ Transactional write via LeadStatusService ----
+    // LeadStatusService.writeStatus is the single write path for Lead.status.
+    // It handles canonical validation, terminal/downgrade guards, dedup by
+    // (source, sourceEventId), out-of-order rejection (statusUpdatedAt), and
+    // emits the audit log row. extraLeadUpdates carries the SF-only columns
+    // we still need to set (sfJobId, sfJobMappedAt, sfLastEventAt) inside
+    // the same transaction.
     const oldStatus = lead.status;
-
-    const updateResult = await this.prisma.lead.updateMany({
-      where: {
-        id: lead.id,
-        // Guard against out-of-order writes: only apply if newer than
-        // the last write OR if last write was also SF.
-        OR: [
-          { statusUpdatedAt: null },
-          { statusUpdatedAt: { lt: occurredAt } },
-          { statusSource: 'service_flow' },
-        ],
-      },
-      data: {
-        status: canonical,
+    const writeResult = await this.leadStatus.writeStatus({
+      leadId: lead.id,
+      newStatus: canonical,
+      source: 'service_flow',
+      occurredAt,
+      sourceEventId: payload.event_id,
+      actorType: payload.actor?.type ?? null,
+      actorId: payload.actor?.id ?? null,
+      actorName: payload.actor?.display_name ?? null,
+      extraLeadUpdates: {
         sfJobId: lead.sfJobId || payload.sf_job_id,
         sfJobMappedAt: lead.sfJobMappedAt || new Date(),
-        statusSource: 'service_flow',
-        statusUpdatedAt: occurredAt,
         sfLastEventAt: occurredAt,
       },
     });
 
-    if (updateResult.count === 0) {
-      // Another writer beat us with a newer timestamp
+    if (!writeResult.applied) {
+      // The guard chain rejected the write. Map the skip reason to our
+      // outbound contract: stale_event/duplicate → 'stale' (200, idempotent);
+      // anything else → 'noop'.
+      const skip = writeResult.skipReason;
+      const result: ProcessResult =
+        skip === 'stale_event' || skip === 'duplicate' ? 'stale' : 'noop';
       await this.recordEvent({
         eventId: payload.event_id,
         eventType: payload.event_type,
@@ -323,27 +331,12 @@ export class SfInboundStatusService {
         leadId: lead.id,
         userId: subscription.userId,
         sfSubscriptionId: subscription.id,
-        status: 'stale',
-        result: 'lost_race_to_newer_write',
+        status: result,
+        result: `lead_status_skip:${skip ?? 'unknown'}`,
         payloadJson: payload,
       });
-      return { httpStatus: 200, result: 'stale', eventId: payload.event_id, leadId: lead.id };
+      return { httpStatus: 200, result, eventId: payload.event_id, leadId: lead.id };
     }
-
-    // Audit log
-    await this.prisma.leadStatusAuditLog.create({
-      data: {
-        leadId: lead.id,
-        oldStatus,
-        newStatus: canonical,
-        source: 'service_flow',
-        sourceEventId: payload.event_id,
-        actorType: payload.actor?.type,
-        actorId: payload.actor?.id,
-        actorName: payload.actor?.display_name,
-        occurredAt,
-      },
-    });
 
     // Inbound event record (applied)
     await this.recordEvent({

@@ -1,0 +1,16 @@
+name: Code Guards
+
+on:
+  pull_request:
+    branches: [staging, main]
+  push:
+    branches: [staging, main]
+
+jobs:
+  lead-status-guard:
+    name: Lead.status write guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run lead-status-guard
+        run: node scripts/check-lead-status-writes.js

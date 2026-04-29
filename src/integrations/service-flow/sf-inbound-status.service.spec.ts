@@ -66,6 +66,21 @@ function buildEngine() {
   } as any;
 }
 
+function buildLeadStatus() {
+  // Default behavior: every writeStatus call applies. Individual tests
+  // override .mockResolvedValueOnce(...) to simulate skip outcomes.
+  return {
+    writeStatus: jest.fn().mockImplementation(async (input: any) => ({
+      leadId: input.leadId,
+      applied: true,
+      status: input.newStatus,
+      platformStatus: null,
+      conflict: null,
+      auditLogId: 'audit-' + crypto.randomUUID(),
+    })),
+  } as any;
+}
+
 function sign(timestamp: string, body: string, secret: string): string {
   return crypto.createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');
 }
@@ -99,12 +114,14 @@ function okLead(overrides: Partial<any> = {}) {
 describe('SfInboundStatusService', () => {
   let prisma: ReturnType<typeof buildPrismaMock>;
   let engine: ReturnType<typeof buildEngine>;
+  let leadStatus: ReturnType<typeof buildLeadStatus>;
   let service: SfInboundStatusService;
 
   beforeEach(() => {
     prisma = buildPrismaMock();
     engine = buildEngine();
-    service = new SfInboundStatusService(prisma, buildConfig(), engine);
+    leadStatus = buildLeadStatus();
+    service = new SfInboundStatusService(prisma, buildConfig(), engine, leadStatus);
   });
 
   // --------------------------------------------------------------
@@ -191,7 +208,7 @@ describe('SfInboundStatusService', () => {
     });
 
     it('returns 400 when SF_INBOUND_WEBHOOK_ENABLED=false', async () => {
-      service = new SfInboundStatusService(prisma, buildConfig({ SF_INBOUND_WEBHOOK_ENABLED: 'false' }), engine);
+      service = new SfInboundStatusService(prisma, buildConfig({ SF_INBOUND_WEBHOOK_ENABLED: 'false' }), engine, leadStatus);
       const r = await service.ingest('{}', {});
       expect(r.httpStatus).toBe(400);
     });
@@ -266,7 +283,7 @@ describe('SfInboundStatusService', () => {
         { id: SUB_ID, userId: USER_ID },
       );
       expect(r.result).toBe('stale');
-      expect(prisma.lead.updateMany).not.toHaveBeenCalled();
+      expect(leadStatus.writeStatus).not.toHaveBeenCalled();
     });
   });
 
@@ -288,7 +305,7 @@ describe('SfInboundStatusService', () => {
         { id: SUB_ID, userId: USER_ID },
       );
       expect(r.result).toBe('noop');
-      expect(prisma.lead.updateMany).not.toHaveBeenCalled();
+      expect(leadStatus.writeStatus).not.toHaveBeenCalled();
     });
   });
 
@@ -298,6 +315,7 @@ describe('SfInboundStatusService', () => {
         prisma,
         buildConfig({ SF_INBOUND_WEBHOOK_DRY_RUN: 'true' }),
         engine,
+        leadStatus,
       );
     });
 
@@ -305,7 +323,7 @@ describe('SfInboundStatusService', () => {
       prisma.lead.findFirst.mockResolvedValue(okLead());
       const r = await service.process(basePayload(), { id: SUB_ID, userId: USER_ID });
       expect(r.result).toBe('dry_run');
-      expect(prisma.lead.updateMany).not.toHaveBeenCalled();
+      expect(leadStatus.writeStatus).not.toHaveBeenCalled();
       expect(prisma.sfInboundEvent.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ status: 'dry_run' }),
@@ -315,31 +333,29 @@ describe('SfInboundStatusService', () => {
   });
 
   describe('process — write + reaction', () => {
-    it('writes Lead.status + audit log + records event (applied)', async () => {
+    it('writes Lead.status via LeadStatusService + records inbound event (applied)', async () => {
       prisma.lead.findFirst.mockResolvedValue(okLead({ status: 'contacted' }));
-      prisma.lead.updateMany.mockResolvedValue({ count: 1 });
 
       const r = await service.process(basePayload({ status: { new: 'completed' } }), {
         id: SUB_ID, userId: USER_ID,
       });
 
       expect(r.result).toBe('applied');
-      expect(prisma.lead.updateMany).toHaveBeenCalledWith({
-        where: expect.objectContaining({ id: LEAD_ID }),
-        data: expect.objectContaining({
-          status: 'completed',
-          statusSource: 'service_flow',
-          sfJobId: JOB_ID,
-        }),
-      });
-      expect(prisma.leadStatusAuditLog.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
+      // LeadStatusService.writeStatus is now the single write path. It owns
+      // the audit log row and the conditional update — we just verify the
+      // contract we hand to it.
+      expect(leadStatus.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({
           leadId: LEAD_ID,
-          oldStatus: 'contacted',
           newStatus: 'completed',
           source: 'service_flow',
+          sourceEventId: expect.stringMatching(/^evt-/),
+          extraLeadUpdates: expect.objectContaining({
+            sfJobId: JOB_ID,
+            sfLastEventAt: expect.any(Date),
+          }),
         }),
-      });
+      );
       expect(prisma.sfInboundEvent.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ status: 'applied' }),
@@ -347,12 +363,63 @@ describe('SfInboundStatusService', () => {
       );
     });
 
-    it('returns stale when conditional updateMany count=0 (lost race)', async () => {
+    it('returns stale when LeadStatusService rejects with skipReason=stale_event', async () => {
       prisma.lead.findFirst.mockResolvedValue(okLead());
-      prisma.lead.updateMany.mockResolvedValue({ count: 0 });
+      leadStatus.writeStatus.mockResolvedValueOnce({
+        leadId: LEAD_ID,
+        applied: false,
+        status: 'contacted',
+        platformStatus: null,
+        conflict: null,
+        auditLogId: null,
+        skipReason: 'stale_event',
+      });
 
       const r = await service.process(basePayload(), { id: SUB_ID, userId: USER_ID });
+
       expect(r.result).toBe('stale');
+      expect(prisma.sfInboundEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'stale',
+            result: 'lead_status_skip:stale_event',
+          }),
+        }),
+      );
+    });
+
+    it('returns stale when LeadStatusService rejects with skipReason=duplicate', async () => {
+      prisma.lead.findFirst.mockResolvedValue(okLead());
+      leadStatus.writeStatus.mockResolvedValueOnce({
+        leadId: LEAD_ID,
+        applied: false,
+        status: 'contacted',
+        platformStatus: null,
+        conflict: null,
+        auditLogId: null,
+        skipReason: 'duplicate',
+      });
+
+      const r = await service.process(basePayload(), { id: SUB_ID, userId: USER_ID });
+
+      expect(r.result).toBe('stale');
+    });
+
+    it('returns noop for other LeadStatusService skip reasons (hard_terminal, etc.)', async () => {
+      prisma.lead.findFirst.mockResolvedValue(okLead());
+      leadStatus.writeStatus.mockResolvedValueOnce({
+        leadId: LEAD_ID,
+        applied: false,
+        status: 'contacted',
+        platformStatus: null,
+        conflict: null,
+        auditLogId: null,
+        skipReason: 'hard_terminal',
+      });
+
+      const r = await service.process(basePayload(), { id: SUB_ID, userId: USER_ID });
+
+      expect(r.result).toBe('noop');
     });
 
     it('terminal status → stops active follow-up enrollments', async () => {

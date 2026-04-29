@@ -966,6 +966,7 @@ export class LeadsService {
 
       // Update local database with fresh status
       if (freshLead.status !== lead.status) {
+        // lb-status-guard: allow legacy syncLeadStatus refetch path — pre-LeadStatusService. TODO: route through writeStatus(source='platform_sync') when refactoring this method.
         await this.prisma.lead.update({
           where: { id: leadId },
           data: {
@@ -991,6 +992,7 @@ export class LeadsService {
    * Uses the original createdAt from the platform (Thumbtack) if available
    */
   private async upsertLead(userId: string, lead: NormalizedLead): Promise<void> {
+    // lb-status-guard: allow upsertLead — INSERT default, not a status transition. Refactor tracked separately.
     await this.prisma.lead.upsert({
       where: {
         platform_externalRequestId: {
@@ -1555,6 +1557,7 @@ export class LeadsService {
     const freshLead = await adapter.getLead(credentials, lead.externalRequestId);
     this.logger.log(`Refetch result: name=${freshLead.customerName}, category=${freshLead.category}, msg=${(freshLead.message || '').substring(0, 50)}`);
 
+    // lb-status-guard: allow refetchLead — legacy bulk refresh path. TODO: split status into writeStatus(source='platform_sync') when refactoring this method.
     await this.prisma.lead.update({
       where: { id: leadId },
       data: {
@@ -1683,6 +1686,7 @@ export class LeadsService {
           console.log(`[LeadsService] Fresh lead status from Thumbtack: ${freshLead.status}`);
 
           if (freshLead.status && freshLead.status !== lead.status) {
+            // lb-status-guard: allow legacy resyncMessages status update — pre-LeadStatusService. TODO: route through writeStatus(source='platform_sync') when refactoring.
             await this.prisma.lead.update({
               where: { id: leadId },
               data: {

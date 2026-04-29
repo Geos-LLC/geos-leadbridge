@@ -1041,6 +1041,7 @@ export class CallConnectService {
     // Create (or reuse) a persistent test lead for this tenant so the LeadCallConnect FK is satisfied.
     if (sessionId) {
       const testExternalId = `cc-test-${savedAccountId}`;
+      // lb-status-guard: allow synthetic call-connect test lead — initial INSERT default, not a status transition
       const testLead = await this.prisma.lead.upsert({
         where: { platform_externalRequestId: { platform: 'test', externalRequestId: testExternalId } },
         create: {
