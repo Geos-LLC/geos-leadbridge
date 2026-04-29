@@ -16,6 +16,7 @@ import { ConversationContextService } from '../conversation-context/conversation
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { LeadStatusService } from './lead-status.service';
+import { mapThumbtackToLbStatus } from '../integrations/thumbtack-status-map';
 import { TrialService } from '../trial/trial.service';
 import { LeadCacheService } from '../common/cache/lead-cache.service';
 import { CacheService } from '../common/cache/cache.service';
@@ -1198,15 +1199,41 @@ export class LeadsService {
     }
 
     // Copy thumbtackStatus from the extension-collected ThumbtackLeadId record
+    // through LeadStatusService. Single writeStatus call carries both fields;
+    // applyPlatformSync owns the SF_STATUS_WINS / completed-lock / pipeline-
+    // downgrade guards and returns skipReason so we can log greppably.
     const collectedLead = await this.prisma.thumbtackLeadId.findFirst({
       where: { userId, thumbtackId: negotiationId },
     });
-    if (collectedLead?.thumbtackStatus && collectedLead.thumbtackStatus !== storedLead.thumbtackStatus) {
-      await this.prisma.lead.update({
-        where: { id: storedLead.id },
-        data: { thumbtackStatus: collectedLead.thumbtackStatus },
-      });
-      console.log(`[LeadsService] Copied thumbtackStatus "${collectedLead.thumbtackStatus}" to lead`);
+    const rawScraped = collectedLead?.thumbtackStatus;
+    if (rawScraped) {
+      const platformChanged =
+        (storedLead.platformStatus ?? storedLead.thumbtackStatus) !== rawScraped;
+      const mapped = mapThumbtackToLbStatus(rawScraped);
+      const canonicalChanged = mapped !== null && mapped !== storedLead.status;
+
+      if (platformChanged || canonicalChanged) {
+        const normalized = (mapped ?? rawScraped)
+          .toLowerCase()
+          .trim()
+          .replace(/\s+/g, '_');
+        const sourceEventId = `tt_import_${storedLead.id}_${normalized}`;
+
+        const result = await this.leadStatusService.writeStatus({
+          leadId: storedLead.id,
+          source: 'platform_sync',
+          platformStatus: platformChanged ? rawScraped : undefined,
+          newStatus: canonicalChanged ? mapped! : undefined,
+          actorType: 'extension',
+          sourceEventId,
+        });
+
+        if (result.skipReason) {
+          console.log(
+            `[LeadsService] TT import status sync lead=${storedLead.id} skipReason=${result.skipReason}`,
+          );
+        }
+      }
     }
 
     // Also import messages for this negotiation using account-specific credentials if available

@@ -1,10 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional, forwardRef } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { PrismaService } from '../common/utils/prisma.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { LeadsService } from '../leads/leads.service';
+import { LeadStatusService } from '../leads/lead-status.service';
+import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { BudgetSnapshotDto } from './dto/budget-snapshot.dto';
 import { CollectLeadsDto } from './dto/collect-leads.dto';
+import { mapThumbtackToLbStatus, isRelevantThumbtackSignal } from './thumbtack-status-map';
 
 @Injectable()
 export class IntegrationsService {
@@ -14,6 +17,10 @@ export class IntegrationsService {
     private prisma: PrismaService,
     private analyticsService: AnalyticsService,
     private leadsService: LeadsService,
+    private readonly leadStatusService: LeadStatusService,
+    @Optional()
+    @Inject(forwardRef(() => FollowUpEngineService))
+    private readonly followUpEngine: FollowUpEngineService | null,
   ) {}
 
   /**
@@ -135,6 +142,12 @@ export class IntegrationsService {
         });
         newCount++;
       }
+
+      // Propagate status changes to the real Lead row through LeadStatusService
+      // so audit log + FSM + follow-up engine all fire — same path as Yelp.
+      if (status) {
+        await this.syncStatusToLead(userId, thumbtackId, status);
+      }
     }
 
     this.logger.log(
@@ -150,6 +163,120 @@ export class IntegrationsService {
       collectedAt: new Date().toISOString(),
       metadata: dto.metadata || {},
     };
+  }
+
+  /**
+   * Propagate a Thumbtack-extension scraped status to the canonical Lead row.
+   *
+   * Mirrors the post-39ac863 Yelp flow: a single writeStatus call carries both
+   * the raw platformStatus and the mapped canonical newStatus.
+   * LeadStatusService.applyPlatformSync is the authoritative gate — it owns
+   * SF_STATUS_WINS, the completed-lock, the pipeline-downgrade guard, and dedup.
+   * The returned skipReason tells us which (if any) guard fired so we can log
+   * it greppably in Loki (skipReason=sf_protected / pipeline_downgrade /
+   * duplicate / hard_terminal / invalid_status / stale_event).
+   *
+   * No-ops silently when no Lead row exists yet (Chrome extension scrapes can
+   * arrive before the user has imported the negotiation via the Thumbtack API).
+   */
+  private async syncStatusToLead(
+    userId: string,
+    thumbtackId: string,
+    rawStatus: string,
+  ): Promise<void> {
+    let lead;
+    try {
+      lead = await this.prisma.lead.findUnique({
+        where: {
+          platform_externalRequestId: {
+            platform: 'thumbtack',
+            externalRequestId: thumbtackId,
+          },
+        },
+        select: {
+          id: true,
+          userId: true,
+          status: true,
+          platformStatus: true,
+          thumbtackStatus: true,
+          threadId: true,
+        },
+      });
+    } catch (err: any) {
+      this.logger.warn(
+        `[TT Status Sync] Lead lookup failed for ${thumbtackId}: ${err.message}`,
+      );
+      return;
+    }
+
+    if (!lead) return;
+
+    // Cross-tenant safety: the (platform, externalRequestId) pair is globally
+    // unique, but the row could belong to another tenant. Don't mutate it.
+    if (lead.userId !== userId) {
+      this.logger.warn(
+        `[TT Status Sync] Skipping ${thumbtackId}: Lead row owned by another user`,
+      );
+      return;
+    }
+
+    const mapped = mapThumbtackToLbStatus(rawStatus);
+    const platformStatusChanged =
+      (lead.platformStatus ?? lead.thumbtackStatus) !== rawStatus;
+    const canonicalChanged = mapped !== null && mapped !== lead.status;
+
+    if (!platformStatusChanged && !canonicalChanged) return;
+
+    // Stable, deterministic source event ID — feeds the dedup guard inside
+    // applyPlatformSync, so a re-sent scrape batch produces no duplicate audit.
+    const normalized = (mapped ?? rawStatus)
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, '_');
+    const sourceEventId = `tt_scrape_${thumbtackId}_${normalized}`;
+
+    const result = await this.leadStatusService.writeStatus({
+      leadId: lead.id,
+      source: 'platform_sync',
+      platformStatus: platformStatusChanged ? rawStatus : undefined,
+      newStatus: canonicalChanged ? mapped! : undefined,
+      actorType: 'extension',
+      sourceEventId,
+    });
+
+    const touched: string[] = [];
+    if (platformStatusChanged && result.platformStatus === rawStatus) {
+      touched.push('platformStatus');
+    }
+    if (canonicalChanged && result.status === mapped) {
+      touched.push('status');
+    }
+    const skipReason = result.skipReason;
+    this.logger.log(
+      `[TT Status Sync] lead=${thumbtackId} touched=${touched.join(',') || '(none)'}${skipReason ? ` skipReason=${skipReason}` : ''}`,
+    );
+
+    if (
+      platformStatusChanged &&
+      lead.threadId &&
+      this.followUpEngine &&
+      isRelevantThumbtackSignal(rawStatus)
+    ) {
+      this.followUpEngine
+        .handlePlatformSignal(lead.threadId, rawStatus)
+        .then((action) => {
+          if (action !== 'no_change' && action !== 'no_enrollment') {
+            this.logger.log(
+              `[TT Status Sync] Platform signal "${rawStatus}" on lead ${thumbtackId} → ${action}`,
+            );
+          }
+        })
+        .catch((err) =>
+          this.logger.warn(
+            `[TT Status Sync] handlePlatformSignal failed: ${err.message}`,
+          ),
+        );
+    }
   }
 
   /**
