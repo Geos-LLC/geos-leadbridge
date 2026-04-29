@@ -145,6 +145,32 @@ function statusesAreConsistent(lb: string, platform: string): boolean {
 export class LeadStatusService {
   private readonly logger = new Logger(LeadStatusService.name);
 
+  /**
+   * Whether SF holds canonical-status authority for this lead's owning user.
+   *
+   * Resolution order:
+   *   1. If `SF_STATUS_WINS_USER_IDS` (csv) is non-empty → SF authority is
+   *      active *only* for users in that list. Empty fallback to global is
+   *      intentional: an explicit allowlist overrides the global flag so a
+   *      partial rollout cannot be widened by accidentally leaving the global
+   *      switch on.
+   *   2. If the allowlist is empty → fall back to global `SF_STATUS_WINS`.
+   *
+   * Returns `false` for any non-SF-linked lead at the call site (callers gate
+   * on `lead.sfJobId` before invoking this).
+   */
+  private isSfAuthorityActive(userId: string): boolean {
+    const csv = this.config.get<string>('SF_STATUS_WINS_USER_IDS', '') ?? '';
+    const scoped = csv
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (scoped.length > 0) {
+      return scoped.includes(userId);
+    }
+    return this.config.get<string>('SF_STATUS_WINS', 'false') === 'true';
+  }
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventEmitter2,
@@ -231,10 +257,12 @@ export class LeadStatusService {
     // ── Guard 4: SF_STATUS_WINS protection (lb_automation only) ───────────
     // Manual is intentionally allowed; it produces a sf_push_needed conflict
     // below so the operator pushes to SF.
-    const sfWins = this.config.get<string>('SF_STATUS_WINS', 'false') === 'true';
-    if (sfWins && lead.sfJobId && input.source === 'lb_automation') {
+    // Authority can be globally enabled (SF_STATUS_WINS=true) or scoped to a
+    // csv allowlist (SF_STATUS_WINS_USER_IDS). See isSfAuthorityActive().
+    const sfActive = lead.sfJobId ? this.isSfAuthorityActive(lead.userId) : false;
+    if (sfActive && input.source === 'lb_automation') {
       this.logger.log(
-        `[LeadStatus] sf_protected — blocked lb_automation write on SF-linked lead ${lead.id} (sfJobId=${lead.sfJobId})`,
+        `[LeadStatus] sf_protected — blocked lb_automation write on SF-linked lead ${lead.id} (sfJobId=${lead.sfJobId}, userId=${lead.userId})`,
       );
       return this.skipped(lead, 'sf_protected');
     }
@@ -433,6 +461,7 @@ export class LeadStatusService {
   private async applyPlatformSync(
     lead: {
       id: string;
+      userId: string;
       platform: string;
       status: string;
       platformStatus: string | null;
@@ -488,12 +517,12 @@ export class LeadStatusService {
     // hard-terminal, completed-lock, and SF protection.
     let lbStatusBlocked: WriteSkipReason | null = null;
     if (input.newStatus && input.newStatus !== oldLbStatus) {
-      const sfWins = this.config.get<string>('SF_STATUS_WINS', 'false') === 'true';
+      const sfActive = lead.sfJobId ? this.isSfAuthorityActive(lead.userId) : false;
       if (!isCanonicalStatus(input.newStatus)) {
         lbStatusBlocked = 'invalid_status';
       } else if (HARD_TERMINAL.has(oldLbStatus)) {
         lbStatusBlocked = 'hard_terminal';
-      } else if (sfWins && lead.sfJobId) {
+      } else if (sfActive) {
         // SF owns the canonical status when integrated; platformStatus still flows.
         lbStatusBlocked = 'sf_protected';
       } else if (oldLbStatus === 'completed') {
