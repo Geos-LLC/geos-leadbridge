@@ -26,6 +26,7 @@ import {
 import { Request, Response } from 'express';
 import * as crypto from 'crypto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../common/utils/prisma.service';
 import { SfInboundStatusService } from './sf-inbound-status.service';
@@ -41,7 +42,13 @@ export class ServiceFlowInboundController {
 
   /**
    * Inbound webhook from Service Flow. Signature-verified.
+   *
+   * @Public() bypasses the global JwtAuthGuard — this endpoint authenticates
+   * via HMAC headers (X-SF-Signature + X-SF-Timestamp + X-SF-Subscription-Id)
+   * inside SfInboundStatusService.ingest, not via the JWT bearer scheme used
+   * by the rest of the API.
    */
+  @Public()
   @Post('job-status')
   async receive(
     @Req() req: Request,
