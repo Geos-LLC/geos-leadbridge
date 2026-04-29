@@ -17,6 +17,7 @@ import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.serv
 import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { LeadStatusService } from './lead-status.service';
 import { mapThumbtackToLbStatus } from '../integrations/thumbtack-status-map';
+import { mapYelpToLbStatus } from '../integrations/yelp-status-map';
 import { TrialService } from '../trial/trial.service';
 import { LeadCacheService } from '../common/cache/lead-cache.service';
 import { CacheService } from '../common/cache/cache.service';
@@ -68,6 +69,20 @@ export function isCacheableLeadFilter(
   }
 
   return true;
+}
+
+/**
+ * Map a platform-native status string to the LB canonical pipeline value. Returns
+ * `null` for raw values that have no canonical equivalent (e.g. Thumbtack Partner
+ * API "Open"/"Picked" — the granular UI states are extension-scraped separately).
+ * Callers pair this with `LeadStatusService.writeStatus({ source: 'platform_sync' })`,
+ * which writes platformStatus unconditionally and only updates Lead.status when
+ * a canonical value is supplied.
+ */
+function mapPlatformRawToLb(platform: string, raw: string): string | null {
+  if (platform === 'thumbtack') return mapThumbtackToLbStatus(raw);
+  if (platform === 'yelp') return mapYelpToLbStatus(raw);
+  return null;
 }
 
 @Injectable()
@@ -964,18 +979,24 @@ export class LeadsService {
       const freshLead = await adapter.getLead(credentials, lead.externalRequestId);
       console.log(`[LeadsService] Fresh lead status from Thumbtack: ${freshLead.status}`);
 
-      // Update local database with fresh status
-      if (freshLead.status !== lead.status) {
-        // lb-status-guard: allow legacy syncLeadStatus refetch path — pre-LeadStatusService. TODO: route through writeStatus(source='platform_sync') when refactoring this method.
-        await this.prisma.lead.update({
-          where: { id: leadId },
-          data: {
-            status: freshLead.status,
-            updatedAt: new Date(),
-          },
+      // Sync platform-native + canonical status through LeadStatusService so
+      // every transition is audit-logged and gated by SF_STATUS_WINS / canonical
+      // / dedup / stale-event guards.
+      if (freshLead.status) {
+        const mapped = mapPlatformRawToLb(lead.platform, freshLead.status);
+        const result = await this.leadStatusService.writeStatus({
+          leadId,
+          source: 'platform_sync',
+          platformStatus: freshLead.status,
+          newStatus: mapped ?? undefined,
+          actorType: 'platform_api',
         });
-        await this.leadCache.invalidateLeadAndList(userId, leadId);
-        console.log(`[LeadsService] Updated lead status: ${lead.status} -> ${freshLead.status}`);
+        if (result.applied) {
+          await this.leadCache.invalidateLeadAndList(userId, leadId);
+          console.log(`[LeadsService] Updated lead status via platform_sync: ${lead.status} -> ${result.status}`);
+        } else if (result.skipReason && result.skipReason !== 'no_change') {
+          console.log(`[LeadsService] syncLeadStatus skipReason=${result.skipReason} for lead ${leadId}`);
+        }
       }
 
       return this.getLead(userId, leadId);
@@ -992,8 +1013,11 @@ export class LeadsService {
    * Uses the original createdAt from the platform (Thumbtack) if available
    */
   private async upsertLead(userId: string, lead: NormalizedLead): Promise<void> {
-    // lb-status-guard: allow upsertLead — INSERT default, not a status transition. Refactor tracked separately.
-    await this.prisma.lead.upsert({
+    // Lead.status is intentionally NOT set in this upsert. New rows default to
+    // "new" via the Prisma schema; canonical status writes flow through
+    // LeadStatusService.writeStatus below so every transition is audit-logged
+    // and gated by SF_STATUS_WINS / canonical / dedup / stale-event guards.
+    const stored = await this.prisma.lead.upsert({
       where: {
         platform_externalRequestId: {
           platform: lead.platform,
@@ -1014,7 +1038,7 @@ export class LeadsService {
         city: lead.city,
         state: lead.state,
         category: lead.category,
-        status: lead.status,
+        // status omitted — Prisma schema default 'new'; routed via writeStatus below.
         // threadId intentionally NOT set - it's a FK to Conversation table
         rawJson: JSON.stringify(lead.raw),
         // Use original createdAt from platform if available
@@ -1032,13 +1056,25 @@ export class LeadsService {
         city: lead.city,
         state: lead.state,
         category: lead.category,
-        status: lead.status,
+        // status omitted — routed via writeStatus below.
         // threadId intentionally NOT updated - it's a FK to Conversation table
         rawJson: JSON.stringify(lead.raw),
         // Update createdAt to use original platform date (in case it was imported with wrong date before)
         createdAt: lead.createdAt || undefined,
       },
+      select: { id: true },
     });
+
+    if (lead.status) {
+      const mapped = mapPlatformRawToLb(lead.platform, lead.status);
+      await this.leadStatusService.writeStatus({
+        leadId: stored.id,
+        source: 'platform_sync',
+        platformStatus: lead.status,
+        newStatus: mapped ?? undefined,
+        actorType: 'platform_api',
+      });
+    }
   }
 
   /**
@@ -1557,7 +1593,9 @@ export class LeadsService {
     const freshLead = await adapter.getLead(credentials, lead.externalRequestId);
     this.logger.log(`Refetch result: name=${freshLead.customerName}, category=${freshLead.category}, msg=${(freshLead.message || '').substring(0, 50)}`);
 
-    // lb-status-guard: allow refetchLead — legacy bulk refresh path. TODO: split status into writeStatus(source='platform_sync') when refactoring this method.
+    // Non-status fields go through a plain update; status is routed below
+    // through LeadStatusService so SF_STATUS_WINS / canonical / dedup guards
+    // apply consistently.
     await this.prisma.lead.update({
       where: { id: leadId },
       data: {
@@ -1569,10 +1607,20 @@ export class LeadsService {
         city: freshLead.city || lead.city || undefined,
         state: freshLead.state || lead.state || undefined,
         postcode: freshLead.postcode || lead.postcode || undefined,
-        status: freshLead.status || lead.status || undefined,
         rawJson: JSON.stringify(freshLead.raw || {}),
       },
     });
+
+    if (freshLead.status) {
+      const mapped = mapPlatformRawToLb(lead.platform, freshLead.status);
+      await this.leadStatusService.writeStatus({
+        leadId,
+        source: 'platform_sync',
+        platformStatus: freshLead.status,
+        newStatus: mapped ?? undefined,
+        actorType: 'platform_api',
+      });
+    }
 
     this.logger.log(`Refetched lead ${leadId}: ${lead.customerName} → ${freshLead.customerName}`);
     await this.leadCache.invalidateLeadAndList(userId, leadId);
@@ -1685,17 +1733,21 @@ export class LeadsService {
           const freshLead = await adapter.getLead(accountCredentials, lead.externalRequestId);
           console.log(`[LeadsService] Fresh lead status from Thumbtack: ${freshLead.status}`);
 
-          if (freshLead.status && freshLead.status !== lead.status) {
-            // lb-status-guard: allow legacy resyncMessages status update — pre-LeadStatusService. TODO: route through writeStatus(source='platform_sync') when refactoring.
-            await this.prisma.lead.update({
-              where: { id: leadId },
-              data: {
-                status: freshLead.status,
-                updatedAt: new Date(),
-              },
+          if (freshLead.status) {
+            const mapped = mapPlatformRawToLb(lead.platform, freshLead.status);
+            const result = await this.leadStatusService.writeStatus({
+              leadId,
+              source: 'platform_sync',
+              platformStatus: freshLead.status,
+              newStatus: mapped ?? undefined,
+              actorType: 'platform_api',
             });
-            console.log(`[LeadsService] Updated lead status: ${lead.status} -> ${freshLead.status}`);
-            statusUpdated = true;
+            if (result.applied) {
+              console.log(`[LeadsService] Updated lead status via platform_sync: ${lead.status} -> ${result.status}`);
+              statusUpdated = true;
+            } else if (result.skipReason && result.skipReason !== 'no_change') {
+              console.log(`[LeadsService] resyncMessages skipReason=${result.skipReason} for lead ${leadId}`);
+            }
           }
         }
       } catch (error) {
