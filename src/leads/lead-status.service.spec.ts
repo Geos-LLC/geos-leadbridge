@@ -632,6 +632,135 @@ describe('LeadStatusService', () => {
     });
   });
 
+  describe('platform_sync downgrade guard', () => {
+    it('completed + Yelp Active(contacted) → canonical NOT overwritten, platformStatus still updates, skipReason=pipeline_downgrade', async () => {
+      const prisma = buildPrismaMock({
+        platform: 'yelp',
+        status: 'completed',
+        platformStatus: 'Done',
+      });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        platformStatus: 'Active',
+        newStatus: 'contacted',
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.skipReason).toBe('pipeline_downgrade');
+      expect(prisma._state.lead.status).toBe('completed'); // canonical preserved
+      expect(prisma._state.lead.platformStatus).toBe('Active'); // raw updated
+    });
+
+    it('booked + Yelp Active(contacted) → canonical NOT overwritten, platformStatus updates, skipReason=pipeline_downgrade', async () => {
+      const prisma = buildPrismaMock({
+        platform: 'yelp',
+        status: 'booked',
+        platformStatus: 'Hired',
+      });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        platformStatus: 'Active',
+        newStatus: 'contacted',
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.skipReason).toBe('pipeline_downgrade');
+      expect(prisma._state.lead.status).toBe('booked');
+      expect(prisma._state.lead.platformStatus).toBe('Active');
+    });
+
+    it('quoted + Active(contacted) → canonical NOT overwritten', async () => {
+      const prisma = buildPrismaMock({ status: 'quoted', platformStatus: null });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        platformStatus: 'Active',
+        newStatus: 'contacted',
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.skipReason).toBe('pipeline_downgrade');
+      expect(prisma._state.lead.status).toBe('quoted');
+    });
+
+    it('scheduled + Active(contacted) → canonical NOT overwritten', async () => {
+      const prisma = buildPrismaMock({ status: 'scheduled', platformStatus: null });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        platformStatus: 'Active',
+        newStatus: 'contacted',
+      });
+
+      expect(res.skipReason).toBe('pipeline_downgrade');
+      expect(prisma._state.lead.status).toBe('scheduled');
+    });
+
+    it('completed-lock: completed + Yelp Closed(lost) → canonical NOT overwritten (completed locks against terminals too)', async () => {
+      const prisma = buildPrismaMock({
+        platform: 'yelp',
+        status: 'completed',
+        platformStatus: 'Done',
+      });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        platformStatus: 'Closed',
+        newStatus: 'lost',
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.skipReason).toBe('pipeline_downgrade');
+      expect(prisma._state.lead.status).toBe('completed');
+      expect(prisma._state.lead.platformStatus).toBe('Closed');
+    });
+
+    it('forward progression: contacted + Yelp Hired(booked) → canonical updated, no skipReason', async () => {
+      const prisma = buildPrismaMock({ status: 'contacted', platformStatus: 'Active' });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        platformStatus: 'Hired',
+        newStatus: 'booked',
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.skipReason).toBeUndefined();
+      expect(prisma._state.lead.status).toBe('booked');
+      expect(prisma._state.lead.platformStatus).toBe('Hired');
+    });
+
+    it('terminal exit from active pipeline: contacted + Yelp Not hired(lost) → canonical=lost (terminals exempt from downgrade)', async () => {
+      const prisma = buildPrismaMock({ status: 'contacted', platformStatus: 'Active' });
+      const svc = new LeadStatusService(prisma, buildEvents(), buildConfig());
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        platformStatus: 'Not hired',
+        newStatus: 'lost',
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.skipReason).toBeUndefined();
+      expect(prisma._state.lead.status).toBe('lost');
+    });
+  });
+
   describe('resolveConflict', () => {
     it('flips conflict=false on the audit row', async () => {
       const prisma = buildPrismaMock();

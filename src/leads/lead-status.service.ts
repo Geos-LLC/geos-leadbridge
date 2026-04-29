@@ -485,7 +485,7 @@ export class LeadStatusService {
     }
 
     // Lead.status write: gated by canonical validation, downgrade guard,
-    // hard-terminal, and SF protection (SF wins for SF-mapped leads).
+    // hard-terminal, completed-lock, and SF protection.
     let lbStatusBlocked: WriteSkipReason | null = null;
     if (input.newStatus && input.newStatus !== oldLbStatus) {
       const sfWins = this.config.get<string>('SF_STATUS_WINS', 'false') === 'true';
@@ -496,6 +496,12 @@ export class LeadStatusService {
       } else if (sfWins && lead.sfJobId) {
         // SF owns the canonical status when integrated; platformStatus still flows.
         lbStatusBlocked = 'sf_protected';
+      } else if (oldLbStatus === 'completed') {
+        // Completed is a hard floor for platform_sync — once completed, the
+        // platform cannot move the canonical status (forward to a non-existent
+        // higher rank, backward to active pipeline, or sideways into terminals
+        // like `lost`/`cancelled`). Manual + SF override paths are unaffected.
+        lbStatusBlocked = 'pipeline_downgrade';
       } else if (isPipelineDowngrade(oldLbStatus, input.newStatus)) {
         lbStatusBlocked = 'pipeline_downgrade';
       } else {
@@ -532,13 +538,18 @@ export class LeadStatusService {
       },
     });
 
-    this.logger.log(
-      `[LeadStatus] platform_sync on ${lead.platform} lead ${lead.id} → ${JSON.stringify({
-        status: input.newStatus,
-        platformStatus: input.platformStatus,
-        lbStatusBlocked,
-      })}`,
-    );
+    if (lbStatusBlocked) {
+      // Partial-skip: platformStatus was written but canonical Lead.status
+      // was held back by a guard. Log greppably so operators can confirm the
+      // guard fired (search Loki for `skipReason=pipeline_downgrade` etc.).
+      this.logger.log(
+        `[LeadStatus] platform_sync skipReason=${lbStatusBlocked} lead=${lead.id} platform=${lead.platform} attempted=${input.newStatus} current=${oldLbStatus} platformStatus=${input.platformStatus ?? 'null'}`,
+      );
+    } else {
+      this.logger.log(
+        `[LeadStatus] platform_sync applied lead=${lead.id} platform=${lead.platform} status=${input.newStatus ?? oldLbStatus} platformStatus=${input.platformStatus ?? oldPlatform ?? 'null'}`,
+      );
+    }
 
     return {
       leadId: lead.id,
@@ -547,6 +558,7 @@ export class LeadStatusService {
       platformStatus: data.platformStatus ?? oldPlatform ?? null,
       conflict: null,
       auditLogId: audit.id,
+      skipReason: lbStatusBlocked ?? undefined,
     };
   }
 

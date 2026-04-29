@@ -1,10 +1,12 @@
 /**
  * YelpIntegrationsController.collectLeads — status sync tests.
  *
- * Covers the contract from the Yelp status sync fix: every status change goes
- * through LeadStatusService.writeStatus({ source: 'platform_sync', ... }).
- * platformStatus is always the raw Yelp text; Lead.status is the mapped
- * canonical value, gated by the SF_STATUS_WINS guard.
+ * The controller hands the raw Yelp text + mapped LB canonical status to
+ * LeadStatusService.writeStatus in a single call. Authoritative gating
+ * (SF_STATUS_WINS, downgrade, dedup, completed-lock) lives inside the
+ * service; the controller only forwards. These tests verify the call shape,
+ * the no-change short-circuit, and that downstream re-engagement
+ * (handlePlatformSignal) still fires.
  */
 
 jest.mock('../common/utils/encryption.util', () => ({
@@ -25,6 +27,7 @@ const THREAD_ID = 'thread-1';
 function buildController(opts: {
   existingLead: any;
   sfStatusWins?: boolean;
+  writeStatusResult?: any;
 }) {
   const prisma: any = {
     savedAccount: {
@@ -58,15 +61,17 @@ function buildController(opts: {
     }),
   };
 
+  const defaultResult = {
+    leadId: LEAD_PK,
+    applied: true,
+    status: opts.existingLead?.status ?? 'new',
+    platformStatus: null,
+    conflict: null,
+    auditLogId: 'audit-1',
+  };
+
   const leadStatusService: any = {
-    writeStatus: jest.fn().mockResolvedValue({
-      leadId: LEAD_PK,
-      applied: true,
-      status: opts.existingLead?.status ?? 'new',
-      platformStatus: null,
-      conflict: null,
-      auditLogId: 'audit-1',
-    }),
+    writeStatus: jest.fn().mockResolvedValue(opts.writeStatusResult ?? defaultResult),
   };
 
   const followUpEngine: any = {
@@ -112,7 +117,7 @@ const FAKE_USER = { id: USER_ID };
 
 describe('YelpIntegrationsController.collectLeads — status sync', () => {
   describe('mapped Yelp statuses', () => {
-    it('Yelp Hired → writes platformStatus=Hired AND Lead.status=booked', async () => {
+    it('Yelp Hired → single writeStatus call with platformStatus=Hired AND newStatus=booked', async () => {
       const { controller, leadStatusService } = buildController({
         existingLead: leadFixture(),
       });
@@ -122,26 +127,18 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
         leadStatuses: { [LEAD_ID]: 'Hired' },
       });
 
-      const calls = leadStatusService.writeStatus.mock.calls.map((c: any[]) => c[0]);
-      // First call: platformStatus write with raw Yelp text
-      expect(calls).toContainEqual(
+      expect(leadStatusService.writeStatus).toHaveBeenCalledTimes(1);
+      expect(leadStatusService.writeStatus).toHaveBeenCalledWith(
         expect.objectContaining({
           leadId: LEAD_PK,
           source: 'platform_sync',
           platformStatus: 'Hired',
-        }),
-      );
-      // Second call: canonical LB status write
-      expect(calls).toContainEqual(
-        expect.objectContaining({
-          leadId: LEAD_PK,
-          source: 'platform_sync',
           newStatus: 'booked',
         }),
       );
     });
 
-    it('Yelp Done → Lead.status=completed', async () => {
+    it('Yelp Done → newStatus=completed', async () => {
       const { controller, leadStatusService } = buildController({
         existingLead: leadFixture(),
       });
@@ -151,14 +148,12 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
         leadStatuses: { [LEAD_ID]: 'Done' },
       });
 
-      const newStatusCalls = leadStatusService.writeStatus.mock.calls
-        .map((c: any[]) => c[0])
-        .filter((arg: any) => arg.newStatus !== undefined);
-      expect(newStatusCalls).toHaveLength(1);
-      expect(newStatusCalls[0].newStatus).toBe('completed');
+      expect(leadStatusService.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ newStatus: 'completed', platformStatus: 'Done' }),
+      );
     });
 
-    it('Yelp Not hired → Lead.status=lost', async () => {
+    it('Yelp Not hired → newStatus=lost', async () => {
       const { controller, leadStatusService } = buildController({
         existingLead: leadFixture(),
       });
@@ -168,14 +163,12 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
         leadStatuses: { [LEAD_ID]: 'Not hired' },
       });
 
-      const newStatusCalls = leadStatusService.writeStatus.mock.calls
-        .map((c: any[]) => c[0])
-        .filter((arg: any) => arg.newStatus !== undefined);
-      expect(newStatusCalls).toHaveLength(1);
-      expect(newStatusCalls[0].newStatus).toBe('lost');
+      expect(leadStatusService.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ newStatus: 'lost', platformStatus: 'Not hired' }),
+      );
     });
 
-    it('Yelp Active → Lead.status=contacted', async () => {
+    it('Yelp Active → newStatus=contacted', async () => {
       const { controller, leadStatusService } = buildController({
         existingLead: leadFixture(),
       });
@@ -185,14 +178,12 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
         leadStatuses: { [LEAD_ID]: 'Active' },
       });
 
-      const newStatusCalls = leadStatusService.writeStatus.mock.calls
-        .map((c: any[]) => c[0])
-        .filter((arg: any) => arg.newStatus !== undefined);
-      expect(newStatusCalls).toHaveLength(1);
-      expect(newStatusCalls[0].newStatus).toBe('contacted');
+      expect(leadStatusService.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ newStatus: 'contacted', platformStatus: 'Active' }),
+      );
     });
 
-    it('Yelp Closed → Lead.status=lost (synonym for Not hired)', async () => {
+    it('Yelp Closed → newStatus=lost (synonym for Not hired)', async () => {
       const { controller, leadStatusService } = buildController({
         existingLead: leadFixture(),
       });
@@ -202,13 +193,12 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
         leadStatuses: { [LEAD_ID]: 'Closed' },
       });
 
-      const newStatusCalls = leadStatusService.writeStatus.mock.calls
-        .map((c: any[]) => c[0])
-        .filter((arg: any) => arg.newStatus !== undefined);
-      expect(newStatusCalls[0].newStatus).toBe('lost');
+      expect(leadStatusService.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ newStatus: 'lost', platformStatus: 'Closed' }),
+      );
     });
 
-    it('Yelp Archived → Lead.status=archived', async () => {
+    it('Yelp Archived → newStatus=archived', async () => {
       const { controller, leadStatusService } = buildController({
         existingLead: leadFixture(),
       });
@@ -218,18 +208,29 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
         leadStatuses: { [LEAD_ID]: 'Archived' },
       });
 
-      const newStatusCalls = leadStatusService.writeStatus.mock.calls
-        .map((c: any[]) => c[0])
-        .filter((arg: any) => arg.newStatus !== undefined);
-      expect(newStatusCalls[0].newStatus).toBe('archived');
+      expect(leadStatusService.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ newStatus: 'archived', platformStatus: 'Archived' }),
+      );
     });
   });
 
-  describe('SF protection guard', () => {
-    it('skips Lead.status write when SF_STATUS_WINS=true and lead has sfJobId', async () => {
+  describe('SF protection — controller forwards both fields, service decides', () => {
+    it('controller passes both fields even when sfJobId set + SF_STATUS_WINS=true', async () => {
+      // The controller no longer second-guesses the service; it always
+      // forwards both platformStatus and newStatus. The service is the one
+      // that returns skipReason='sf_protected' and skips the canonical write.
       const { controller, leadStatusService } = buildController({
         existingLead: leadFixture({ sfJobId: 'sfjob-99' }),
         sfStatusWins: true,
+        writeStatusResult: {
+          leadId: LEAD_PK,
+          applied: true,
+          status: 'new', // canonical NOT updated
+          platformStatus: 'Hired',
+          conflict: null,
+          auditLogId: 'audit-1',
+          skipReason: 'sf_protected',
+        },
       });
 
       await controller.collectLeads(FAKE_USER, {
@@ -237,31 +238,17 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
         leadStatuses: { [LEAD_ID]: 'Hired' },
       });
 
-      const calls = leadStatusService.writeStatus.mock.calls.map((c: any[]) => c[0]);
-      // platformStatus must still be written
-      expect(calls.some((a: any) => a.platformStatus === 'Hired')).toBe(true);
-      // canonical Lead.status must NOT be written
-      expect(calls.some((a: any) => a.newStatus === 'booked')).toBe(false);
-    });
-
-    it('still writes Lead.status when SF_STATUS_WINS=false even if sfJobId set', async () => {
-      const { controller, leadStatusService } = buildController({
-        existingLead: leadFixture({ sfJobId: 'sfjob-99' }),
-        sfStatusWins: false,
-      });
-
-      await controller.collectLeads(FAKE_USER, {
-        ...COLLECT_BODY_BASE,
-        leadStatuses: { [LEAD_ID]: 'Hired' },
-      });
-
-      const calls = leadStatusService.writeStatus.mock.calls.map((c: any[]) => c[0]);
-      expect(calls.some((a: any) => a.newStatus === 'booked')).toBe(true);
+      expect(leadStatusService.writeStatus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          platformStatus: 'Hired',
+          newStatus: 'booked',
+        }),
+      );
     });
   });
 
   describe('unmapped Yelp values', () => {
-    it('writes platformStatus only — no Lead.status write — for unknown raw status', async () => {
+    it('writes platformStatus only — newStatus is undefined for unknown raw status', async () => {
       const { controller, leadStatusService } = buildController({
         existingLead: leadFixture(),
       });
@@ -271,9 +258,9 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
         leadStatuses: { [LEAD_ID]: 'Inquired' }, // not in mapping table
       });
 
-      const calls = leadStatusService.writeStatus.mock.calls.map((c: any[]) => c[0]);
-      expect(calls.some((a: any) => a.platformStatus === 'Inquired')).toBe(true);
-      expect(calls.some((a: any) => a.newStatus !== undefined)).toBe(false);
+      const arg = leadStatusService.writeStatus.mock.calls[0][0];
+      expect(arg.platformStatus).toBe('Inquired');
+      expect(arg.newStatus).toBeUndefined();
     });
   });
 

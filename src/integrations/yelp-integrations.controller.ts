@@ -15,7 +15,7 @@ import { PlatformFactory } from '../platforms/platform.factory';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { ConfigService } from '@nestjs/config';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
-import { LeadStatusService } from '../leads/lead-status.service';
+import { LeadStatusService, WriteStatusResult } from '../leads/lead-status.service';
 import { mapYelpToLbStatus } from './yelp-status-map';
 
 @Controller('v1/integrations/yelp')
@@ -100,17 +100,9 @@ export class YelpIntegrationsController {
 
         const nameChanged = newName && existing.customerName !== newName && (existing.customerName === 'Unknown' || newName !== 'Unknown');
         const statusChanged = newStatus !== null && existing.status !== newStatus;
-        // Platform-native status lives in its own column. Post-rollout plan:
-        // SF writes Lead.status, platform writes Lead.platformStatus. During
-        // rollout (SF_STATUS_WINS=false) we still write both for backward compat.
         const platformStatusChanged = newStatusRaw && existing.platformStatus !== newStatusRaw;
         const categoryChanged = newCategory && existing.category !== newCategory && !existing.category;
         const locationChanged = newLocation && !existing.city;
-
-        const sfWins = this.configService.get<string>('SF_STATUS_WINS', 'false') === 'true';
-        // If SF is the authority and this lead is SF-mapped, do NOT overwrite lead.status
-        // from platform. Platform still writes platformStatus.
-        const skipLeadStatusWrite = sfWins && existing.sfJobId !== null && existing.sfJobId !== undefined;
 
         if (nameChanged || statusChanged || categoryChanged || locationChanged || platformStatusChanged) {
           // Non-status updates go in a direct write.
@@ -126,26 +118,19 @@ export class YelpIntegrationsController {
             await this.prisma.lead.update({ where: { id: existing.id }, data: nonStatusUpdates });
           }
 
-          // Status writes go through LeadStatusService so they land in the
-          // audit log and (manual writes only) trigger conflict detection.
-          // Platform sync never conflicts — it silently updates platformStatus.
-          if (platformStatusChanged) {
-            await this.leadStatusService.writeStatus({
+          // Single writeStatus call carries both the raw platformStatus and
+          // the mapped canonical newStatus. LeadStatusService.applyPlatformSync
+          // is the authoritative gate: it enforces SF_STATUS_WINS, the
+          // pipeline-downgrade guard, the completed-lock, and dedup. The
+          // returned skipReason tells us which (if any) guard fired so we can
+          // log it greppably.
+          let writeResult: WriteStatusResult | null = null;
+          if (platformStatusChanged || statusChanged) {
+            writeResult = await this.leadStatusService.writeStatus({
               leadId: existing.id,
               source: 'platform_sync',
-              platformStatus: newStatusRaw,
-              actorType: 'extension',
-              sourceEventId: `yelp_scrape_${Date.now()}`,
-            });
-          }
-          // Pre-SF-rollout: also copy platform status into Lead.status for
-          // non-SF-mapped leads (legacy behavior). Post-rollout this branch
-          // is short-circuited by skipLeadStatusWrite.
-          if (statusChanged && !skipLeadStatusWrite) {
-            await this.leadStatusService.writeStatus({
-              leadId: existing.id,
-              source: 'platform_sync',
-              newStatus,
+              platformStatus: platformStatusChanged ? newStatusRaw : undefined,
+              newStatus: statusChanged ? newStatus : undefined,
               actorType: 'extension',
               sourceEventId: `yelp_scrape_${Date.now()}`,
             });
@@ -179,9 +164,12 @@ export class YelpIntegrationsController {
           imported++;
           const touched: string[] = [];
           if (Object.keys(nonStatusUpdates).length > 0) touched.push(...Object.keys(nonStatusUpdates));
-          if (platformStatusChanged) touched.push('platformStatus');
-          if (statusChanged && !skipLeadStatusWrite) touched.push('status');
-          this.logger.log(`[Yelp Import] Updated lead ${leadId}: ${touched.join(', ')}`);
+          if (writeResult?.platformStatus === newStatusRaw && platformStatusChanged) touched.push('platformStatus');
+          if (writeResult?.status === newStatus && statusChanged) touched.push('status');
+          const reason = writeResult?.skipReason;
+          this.logger.log(
+            `[Yelp Import] Updated lead ${leadId}: ${touched.join(', ') || '(no fields written)'}${reason ? ` skipReason=${reason}` : ''}`,
+          );
         } else {
           skipped++;
         }
