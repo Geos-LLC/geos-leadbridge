@@ -4,15 +4,80 @@
  */
 
 import { Injectable, NotFoundException, OnModuleInit, Inject, forwardRef, Logger } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { PrismaService } from '../common/utils/prisma.service';
 import { TemplatesService } from '../templates/templates.service';
 import { LeadsService } from '../leads/leads.service';
+import { LeadStatusService } from '../leads/lead-status.service';
 import { ConfigService } from '@nestjs/config';
 import { AiService } from '../ai/ai.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { TrialService } from '../trial/trial.service';
 import { buildPriceRangeInstruction } from '../ai/price-range';
+
+/**
+ * Customer-reply phrase sets used by both:
+ *   - the AI Conversation skip checks below in handleCustomerReply
+ *   - the canonical Lead.status transition (detectCustomerReplyTransition)
+ *
+ * Exported for unit testing.
+ */
+export const OPT_OUT_PHRASES: readonly string[] = [
+  'stop',
+  'unsubscribe',
+  "don't contact",
+  'do not contact',
+  'leave me alone',
+  'remove me',
+];
+
+export const HIRED_SOMEONE_PHRASES: readonly string[] = [
+  'already hired',
+  'booked another',
+  'found someone',
+  'went with someone',
+  'already have someone',
+  'no longer need',
+  'not interested',
+];
+
+export const AGREED_PHRASES: readonly string[] = [
+  'sounds good',
+  "let's do it",
+  "i'll take it",
+  'book it',
+  'schedule it',
+  "let's go",
+  'perfect, when',
+  'great, when',
+  'yes please',
+  "i'm in",
+];
+
+export type CustomerReplyTransition =
+  | { kind: 'opt_out' }
+  | { kind: 'hired_someone' }
+  | { kind: 'agreed' }
+  | { kind: 'engaged' };
+
+/**
+ * Pure: classifies a customer reply for the canonical Lead.status transition.
+ * Priority: opt_out > hired_someone > agreed > engaged (default).
+ *
+ * Always returns a transition (default 'engaged') so the call site can always
+ * attempt writeStatus and rely on its no-downgrade / same-status / terminal
+ * guards to silently skip when the lead is already past `contacted`.
+ */
+export function detectCustomerReplyTransition(message: string): CustomerReplyTransition {
+  const m = (message || '').toLowerCase();
+  if (OPT_OUT_PHRASES.some((p) => m.includes(p))) return { kind: 'opt_out' };
+  if (HIRED_SOMEONE_PHRASES.some((p) => m.includes(p))) return { kind: 'hired_someone' };
+  if (AGREED_PHRASES.some((p) => m.includes(p))) return { kind: 'agreed' };
+  return { kind: 'engaged' };
+}
+
+const REENGAGE_DAYS_AFTER_HIRED_SOMEONE = 75;
 
 export type ReplyMode = 'custom' | 'price' | 'auto';
 
@@ -73,6 +138,12 @@ export interface AutomationTriggerContext {
 export interface CustomerReplyContext extends AutomationTriggerContext {
   isFirstCustomerReply: boolean;
   isSecondCustomerMessage?: boolean; // True when this is the 2nd customer message (first actual reply)
+  /**
+   * Optional stable identifier for the inbound customer message. Used as
+   * the sourceEventId for canonical-status transitions so retries dedupe.
+   * Falls back to a content-derived hash when absent.
+   */
+  messageId?: string;
 }
 
 @Injectable()
@@ -90,6 +161,8 @@ export class AutomationService implements OnModuleInit {
     private monitoring: MonitoringService,
     private conversationContext: ConversationContextService,
     private trialService: TrialService,
+    @Inject(forwardRef(() => LeadStatusService))
+    private leadStatusService: LeadStatusService,
   ) {}
 
   /**
@@ -461,6 +534,15 @@ export class AutomationService implements OnModuleInit {
       return;
     }
 
+    // ── Canonical status transition ───────────────────────────────────────
+    // Fires on every customer reply, independent of whether automation rules
+    // or AI Conversation handle the response. The LeadStatusService guards
+    // (no-downgrade / same-status / terminal / SF-protect / dedup) decide
+    // whether the write actually applies.
+    await this.applyCustomerReplyStatusTransition(context).catch((err) => {
+      this.logger.warn(`[AUTOMATION] status transition failed for lead ${context.leadId}: ${err.message}`);
+    });
+
     // Find saved account by businessId (any platform — Thumbtack, Yelp, etc.)
     const savedAccount = await this.prisma.savedAccount.findFirst({
       where: {
@@ -589,6 +671,79 @@ export class AutomationService implements OnModuleInit {
       };
 
       await this.scheduleAutomatedMessage(syntheticRule, enrichedContext);
+    }
+  }
+
+  /**
+   * Run the canonical Lead.status transition triggered by a customer reply.
+   * Returns the writeStatus result so callers (and tests) can inspect what
+   * happened. Errors are surfaced — callers should wrap if they want best-effort
+   * semantics.
+   *
+   * Decision table (handled by detectCustomerReplyTransition):
+   *   opt-out phrase           -> lost   (lostReason='opt_out')
+   *   hired-someone phrase     -> lost   (lostReason='hired_someone',
+   *                                       reengageAt=now+75d)
+   *   agreed phrase            -> booked
+   *   anything else            -> engaged
+   *                              (no-downgrade guard silently skips when the
+   *                              lead is already past contacted)
+   */
+  private async applyCustomerReplyStatusTransition(context: CustomerReplyContext) {
+    if (!context.leadId || !context.customerMessage) return;
+
+    const transition = detectCustomerReplyTransition(context.customerMessage);
+    const sourceEventId = context.messageId
+      ? `reply_${context.messageId}_${transition.kind}`
+      : `reply_${context.leadId}_${transition.kind}_${createHash('sha256')
+          .update(context.customerMessage)
+          .digest('hex')
+          .slice(0, 16)}`;
+
+    const base = {
+      leadId: context.leadId,
+      source: 'lb_automation' as const,
+      sourceEventId,
+      actorType: 'system' as const,
+    };
+
+    switch (transition.kind) {
+      case 'opt_out':
+        return this.leadStatusService.writeStatus({
+          ...base,
+          newStatus: 'lost',
+          lostReason: 'opt_out',
+          reason: 'opt_out',
+        });
+
+      case 'hired_someone': {
+        const reengageAt = new Date(
+          Date.now() + REENGAGE_DAYS_AFTER_HIRED_SOMEONE * 24 * 60 * 60 * 1000,
+        );
+        return this.leadStatusService.writeStatus({
+          ...base,
+          newStatus: 'lost',
+          lostReason: 'hired_someone',
+          reason: 'hired_someone',
+          reengageAt,
+        });
+      }
+
+      case 'agreed':
+        return this.leadStatusService.writeStatus({
+          ...base,
+          newStatus: 'booked',
+          reason: 'price_agreed',
+        });
+
+      case 'engaged':
+        // No-downgrade guard handles the case where the lead is already past
+        // contacted (engaged/quoted/booked/etc.) — writeStatus will silently skip.
+        return this.leadStatusService.writeStatus({
+          ...base,
+          newStatus: 'engaged',
+          reason: 'customer_replied',
+        });
     }
   }
 

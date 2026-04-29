@@ -57,7 +57,7 @@ function makeService(prisma: any): AutomationService {
   // Cast to any — only the methods exercised here need to be functional.
   return new AutomationService(
     prisma,
-    {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+    {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
   );
 }
 
