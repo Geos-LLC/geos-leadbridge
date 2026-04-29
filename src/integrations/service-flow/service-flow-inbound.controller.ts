@@ -65,11 +65,28 @@ export class ServiceFlowInboundController {
       rawBuf?.toString('utf8') ??
       (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
 
-    const outcome = await this.sfInbound.ingest(rawBody, {
-      signature,
-      timestamp,
-      subscriptionId,
-    });
+    let outcome;
+    try {
+      outcome = await this.sfInbound.ingest(rawBody, {
+        signature,
+        timestamp,
+        subscriptionId,
+      });
+    } catch (err: any) {
+      // LoghubLogger does JSON.stringify on non-string error args, which strips
+      // Error.message and Error.stack (both non-enumerable). Pass strings so
+      // diagnostic info actually reaches Loki.
+      const code = err?.code ?? 'unknown';
+      const msg = (err?.message ?? String(err)).slice(0, 1500);
+      const stack = (err?.stack ?? '').split('\n').slice(0, 6).join(' | ');
+      const meta = err?.meta ? JSON.stringify(err.meta).slice(0, 500) : 'none';
+      this.logger.error(
+        `[SfInbound] ingest threw ${err?.name ?? 'Error'} code=${code} subId=${subscriptionId} msg=${msg}`,
+      );
+      this.logger.error(`[SfInbound] meta=${meta}`);
+      this.logger.error(`[SfInbound] stack=${stack}`);
+      throw err;
+    }
 
     return res.status(outcome.httpStatus).json({
       status: outcome.httpStatus === 200 ? 'accepted' : 'rejected',
