@@ -9,6 +9,12 @@ describe('thumbtack-status-map', () => {
       expect(mapThumbtackToLbStatus('Active')).toBe('contacted');
     });
 
+    it('maps Thumbtack Not scheduled yet → contacted', () => {
+      expect(mapThumbtackToLbStatus('Not scheduled yet')).toBe('contacted');
+      expect(mapThumbtackToLbStatus('NOT SCHEDULED YET')).toBe('contacted');
+      expect(mapThumbtackToLbStatus('  not scheduled yet  ')).toBe('contacted');
+    });
+
     it('maps Thumbtack Hired → booked', () => {
       expect(mapThumbtackToLbStatus('Hired')).toBe('booked');
     });
@@ -51,8 +57,9 @@ describe('thumbtack-status-map', () => {
   });
 
   describe('isRelevantThumbtackSignal', () => {
-    it('returns true for the seven engagement-relevant statuses', () => {
+    it('returns true for the engagement-relevant statuses', () => {
       expect(isRelevantThumbtackSignal('Active')).toBe(true);
+      expect(isRelevantThumbtackSignal('Not scheduled yet')).toBe(true);
       expect(isRelevantThumbtackSignal('Hired')).toBe(true);
       expect(isRelevantThumbtackSignal('Scheduled')).toBe(true);
       expect(isRelevantThumbtackSignal('Done')).toBe(true);

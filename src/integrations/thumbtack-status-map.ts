@@ -6,15 +6,16 @@
  * raw value is preserved separately on Lead.platformStatus (and the legacy
  * Lead.thumbtackStatus column, kept in sync by LeadStatusService.applyPlatformSync).
  *
- * | Thumbtack raw | LB canonical |
- * |---------------|--------------|
- * | Active        | contacted    |
- * | Hired         | booked       |
- * | Scheduled     | scheduled    |
- * | Done          | completed    |
- * | Not hired     | lost         |
- * | Closed        | lost         |
- * | Archived      | archived     |
+ * | Thumbtack raw      | LB canonical |
+ * |--------------------|--------------|
+ * | Active             | contacted    |
+ * | Not scheduled yet  | contacted    |
+ * | Hired              | booked       |
+ * | Scheduled          | scheduled    |
+ * | Done               | completed    |
+ * | Not hired          | lost         |
+ * | Closed             | lost         |
+ * | Archived           | archived     |
  *
  * Unknown / empty values return null — callers must still update
  * platformStatus but must NOT touch Lead.status.
@@ -36,6 +37,7 @@ export function mapThumbtackToLbStatus(
 
   switch (lower) {
     case 'active':
+    case 'not scheduled yet':
       return 'contacted';
     case 'hired':
       return 'booked';
@@ -44,7 +46,6 @@ export function mapThumbtackToLbStatus(
     case 'done':
       return 'completed';
     case 'not hired':
-      return 'lost';
     case 'closed':
       return 'lost';
     case 'archived':
@@ -58,7 +59,7 @@ export function mapThumbtackToLbStatus(
  * Thumbtack raw statuses that should fan out to FollowUpEngine.handlePlatformSignal.
  * Keep in sync with the regex used at the call site.
  */
-const RELEVANT_SIGNAL = /^(active|hired|scheduled|done|not hired|closed|archived)$/i;
+const RELEVANT_SIGNAL = /^(active|not scheduled yet|hired|scheduled|done|not hired|closed|archived)$/i;
 
 export function isRelevantThumbtackSignal(raw: string | null | undefined): boolean {
   if (!raw) return false;
