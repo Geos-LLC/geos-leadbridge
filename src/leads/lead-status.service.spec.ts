@@ -286,6 +286,166 @@ describe('LeadStatusService', () => {
     });
   });
 
+  describe('guard 4: SF_STATUS_WINS_USER_IDS scoped rollout', () => {
+    // When the csv allowlist is non-empty, it overrides the global flag —
+    // an explicit allowlist must not be widened by SF_STATUS_WINS=true.
+    it('scoped allowlist blocks lb_automation for listed user', async () => {
+      const prisma = buildPrismaMock({ sfJobId: 'sf_42', status: 'new', userId: USER_ID });
+      const svc = new LeadStatusService(
+        prisma,
+        buildEvents(),
+        buildConfig({ SF_STATUS_WINS: 'false', SF_STATUS_WINS_USER_IDS: USER_ID }),
+      );
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'lb_automation',
+        newStatus: 'engaged',
+      });
+
+      expect(res.applied).toBe(false);
+      expect(res.skipReason).toBe('sf_protected');
+    });
+
+    it('scoped allowlist blocks platform_sync canonical write for listed user (platformStatus still flows)', async () => {
+      const prisma = buildPrismaMock({
+        sfJobId: 'sf_42',
+        status: 'in_progress',
+        platform: 'thumbtack',
+        platformStatus: null,
+        userId: USER_ID,
+      });
+      const svc = new LeadStatusService(
+        prisma,
+        buildEvents(),
+        buildConfig({ SF_STATUS_WINS: 'false', SF_STATUS_WINS_USER_IDS: USER_ID }),
+      );
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'platform_sync',
+        newStatus: 'completed',
+        platformStatus: 'Done',
+      });
+
+      // platformStatus row was written; canonical Lead.status update was held back.
+      expect(res.applied).toBe(true);
+      expect(res.skipReason).toBe('sf_protected');
+      expect(res.platformStatus).toBe('Done');
+      expect(res.status).toBe('in_progress'); // unchanged
+      expect(prisma._state.lead.status).toBe('in_progress');
+      expect(prisma._state.lead.platformStatus).toBe('Done');
+    });
+
+    it('non-scoped user behaves unchanged (lb_automation proceeds, even global=false)', async () => {
+      const prisma = buildPrismaMock({ sfJobId: 'sf_42', status: 'new', userId: 'other-user' });
+      const svc = new LeadStatusService(
+        prisma,
+        buildEvents(),
+        buildConfig({ SF_STATUS_WINS: 'false', SF_STATUS_WINS_USER_IDS: USER_ID }),
+      );
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'lb_automation',
+        newStatus: 'engaged',
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.status).toBe('engaged');
+    });
+
+    it('non-scoped user is NOT widened by global SF_STATUS_WINS=true (allowlist is authoritative)', async () => {
+      const prisma = buildPrismaMock({ sfJobId: 'sf_42', status: 'new', userId: 'other-user' });
+      const svc = new LeadStatusService(
+        prisma,
+        buildEvents(),
+        buildConfig({ SF_STATUS_WINS: 'true', SF_STATUS_WINS_USER_IDS: USER_ID }),
+      );
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'lb_automation',
+        newStatus: 'engaged',
+      });
+
+      expect(res.applied).toBe(true);
+    });
+
+    it('service_flow still writes when scoped user is the lead owner', async () => {
+      const prisma = buildPrismaMock({ sfJobId: 'sf_42', status: 'new', userId: USER_ID });
+      const svc = new LeadStatusService(
+        prisma,
+        buildEvents(),
+        buildConfig({ SF_STATUS_WINS_USER_IDS: USER_ID }),
+      );
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'service_flow',
+        newStatus: 'in_progress',
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.status).toBe('in_progress');
+    });
+
+    it('manual still writes for scoped SF-linked lead but flags sf_push_needed conflict', async () => {
+      const prisma = buildPrismaMock({ sfJobId: 'sf_42', status: 'new', userId: USER_ID });
+      const events = buildEvents();
+      const svc = new LeadStatusService(
+        prisma,
+        events,
+        buildConfig({ SF_STATUS_WINS_USER_IDS: USER_ID }),
+      );
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'manual',
+        newStatus: 'scheduled',
+      });
+
+      expect(res.applied).toBe(true);
+      expect(res.conflict?.kind).toBe('sf_push_needed');
+      expect(events.emit).toHaveBeenCalled();
+    });
+
+    it('does not block lb_automation on non-SF-linked leads even when user is scoped', async () => {
+      const prisma = buildPrismaMock({ sfJobId: null, status: 'new', userId: USER_ID });
+      const svc = new LeadStatusService(
+        prisma,
+        buildEvents(),
+        buildConfig({ SF_STATUS_WINS_USER_IDS: USER_ID }),
+      );
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'lb_automation',
+        newStatus: 'engaged',
+      });
+
+      expect(res.applied).toBe(true);
+    });
+
+    it('csv parsing tolerates whitespace and trailing commas', async () => {
+      const prisma = buildPrismaMock({ sfJobId: 'sf_42', status: 'new', userId: USER_ID });
+      const svc = new LeadStatusService(
+        prisma,
+        buildEvents(),
+        buildConfig({ SF_STATUS_WINS_USER_IDS: ` ${USER_ID} , other-user ,` }),
+      );
+
+      const res = await svc.writeStatus({
+        leadId: LEAD_ID,
+        source: 'lb_automation',
+        newStatus: 'engaged',
+      });
+
+      expect(res.applied).toBe(false);
+      expect(res.skipReason).toBe('sf_protected');
+    });
+  });
+
   describe('guard 5: automation-terminal', () => {
     it('blocks lb_automation when oldStatus=lost', async () => {
       const prisma = buildPrismaMock({ status: 'lost' });
