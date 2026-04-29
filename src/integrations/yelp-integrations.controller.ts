@@ -16,6 +16,7 @@ import { EncryptionUtil } from '../common/utils/encryption.util';
 import { ConfigService } from '@nestjs/config';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { LeadStatusService } from '../leads/lead-status.service';
+import { mapYelpToLbStatus } from './yelp-status-map';
 
 @Controller('v1/integrations/yelp')
 @UseGuards(JwtAuthGuard)
@@ -91,11 +92,14 @@ export class YelpIntegrationsController {
         const newName = leadNames?.[leadId];
         const newCategory = leadCategories?.[leadId];
         const newStatusRaw = leadStatuses?.[leadId];
-        const newStatus = newStatusRaw?.toLowerCase();
+        // Translate Yelp's vocabulary into LB canonical pipeline values. Raw
+        // Yelp text is preserved on Lead.platformStatus regardless. Unknown
+        // values return null and skip the Lead.status write.
+        const newStatus = mapYelpToLbStatus(newStatusRaw);
         const newLocation = leadLocations?.[leadId];
 
         const nameChanged = newName && existing.customerName !== newName && (existing.customerName === 'Unknown' || newName !== 'Unknown');
-        const statusChanged = newStatus && existing.status !== newStatus;
+        const statusChanged = newStatus !== null && existing.status !== newStatus;
         // Platform-native status lives in its own column. Post-rollout plan:
         // SF writes Lead.status, platform writes Lead.platformStatus. During
         // rollout (SF_STATUS_WINS=false) we still write both for backward compat.

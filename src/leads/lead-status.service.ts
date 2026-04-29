@@ -124,6 +124,7 @@ const CONSISTENT_PAIRS: Array<{ lb: string; platform: string }> = [
   { lb: 'completed', platform: 'job complete' },
   { lb: 'completed', platform: 'done' },
   { lb: 'in_progress', platform: 'hired' },
+  { lb: 'booked', platform: 'hired' },
   { lb: 'scheduled', platform: 'scheduled' },
   { lb: 'scheduled', platform: 'job scheduled' },
   { lb: 'lost', platform: 'not hired' },
