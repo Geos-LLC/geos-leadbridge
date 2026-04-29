@@ -33,6 +33,8 @@ import { useAuthStore } from '../store/authStore';
 import AdminNoAccountsState from '../components/AdminNoAccountsState';
 import NoAccountsOverlay from '../components/NoAccountsOverlay';
 import { PlatformBadge, StatusPill } from '../components/ui';
+import { displayLabel, displayPillKind, STATUS_FILTER_OPTIONS, matchesGroupFilter, type StatusGroupId } from '../lib/leadStatus';
+import { LeadActivityTimeline } from '../components/LeadActivityTimeline';
 import type { Lead, MessageTemplate, BulkMessagePreview, NotificationLog, TimelineEvent, TimelineChannel, CommunicationSummary } from '../types';
 
 interface LocalMessage {
@@ -229,6 +231,8 @@ export function Messages() {
   const accountFilter = searchParams.get('account') || localStorage.getItem('lb_last_account_filter') || 'all';
   // Get date filter from URL params, default to 'all' (no filter)
   const dateFilter = searchParams.get('date') || 'all';
+  // Status group filter — keys match StatusGroupId in lib/leadStatus.ts.
+  const statusFilter = (searchParams.get('status') || 'all') as 'all' | StatusGroupId;
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Message cache: stores loaded timeline + summary per lead ID to avoid re-fetching
   const messageCache = useRef<Record<string, { timeline: TimelineEvent[]; summary: CommunicationSummary; cachedAt: number }>>({});
@@ -395,6 +399,16 @@ export function Messages() {
       searchParams.delete('date');
     } else {
       searchParams.set('date', value);
+    }
+    setSearchParams(searchParams);
+  };
+
+  // Update status filter in URL
+  const setStatusFilter = (value: 'all' | StatusGroupId) => {
+    if (value === 'all') {
+      searchParams.delete('status');
+    } else {
+      searchParams.set('status', value);
     }
     setSearchParams(searchParams);
   };
@@ -1281,12 +1295,15 @@ export function Messages() {
       const leadMonth = leadDate.getMonth();
       matchesDate = leadYear === parsedDateFilter.year && leadMonth === parsedDateFilter.month;
     }
+    // Status group filter
+    const matchesStatus =
+      statusFilter === 'all' || matchesGroupFilter(lead.status, statusFilter);
     // Name search (case-insensitive)
     const matchesSearch = !searchQuery.trim() ||
       lead.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       lead.category?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       lead.message?.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesAccount && matchesDate && matchesSearch;
+    return matchesAccount && matchesDate && matchesStatus && matchesSearch;
   });
 
   if (loading) {
@@ -1494,6 +1511,26 @@ export function Messages() {
           </div>
         </div>
 
+        {/* Status Filter */}
+        <div className="px-4 py-2 border-b border-slate-100">
+          <div className="relative">
+            <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'all' | StatusGroupId)}
+              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="all">All Statuses</option>
+              {STATUS_FILTER_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+          </div>
+        </div>
+
         <div className="flex-1 overflow-y-auto">
           {filteredLeads.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -1508,13 +1545,8 @@ export function Messages() {
               const isUpdated = hasNewUpdates(lead, lastSeenTimestamps);
               const isChecked = selectedLeadIds.has(lead.id);
               const isSelected = selectedLead?.id === lead.id;
-              const rawStatus = (lead.status || '').toLowerCase();
-              const statusKind: 'new' | 'replied' | 'quoted' | 'won' | 'lost' | 'neutral' =
-                rawStatus === 'new' ? 'new' :
-                rawStatus === 'contacted' ? 'replied' :
-                rawStatus === 'quoted' ? 'quoted' :
-                rawStatus === 'booked' ? 'won' :
-                rawStatus === 'lost' ? 'lost' : 'neutral';
+              const statusKind = displayPillKind(lead.status);
+              const statusLabel = displayLabel(lead.status);
               return (
                 <div
                   key={lead.id}
@@ -1637,7 +1669,7 @@ export function Messages() {
                       {lead.message?.slice(0, 80)}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                      <StatusPill status={statusKind} label={lead.status} />
+                      <StatusPill status={statusKind} label={statusLabel} />
                     </div>
                   </div>
                 </div>
@@ -2288,6 +2320,9 @@ export function Messages() {
             )}
           </div>
           <div className="p-4 space-y-6">
+            {/* Lead Activity Timeline — every status transition that touched this lead */}
+            <LeadActivityTimeline leadId={selectedLead.id} />
+
             {/* Lead Cost */}
             {selectedLead.raw?.leadPrice && (
               <div>

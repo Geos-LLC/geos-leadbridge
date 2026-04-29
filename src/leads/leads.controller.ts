@@ -195,6 +195,69 @@ export class LeadsController {
   }
 
   /**
+   * Lead Activity timeline — every status transition that touched this lead.
+   *
+   * Reads from LeadStatusAuditLog. Tenant-scoped: 404-equivalent (empty
+   * activity[] + success=false) when the lead doesn't belong to the caller,
+   * matching the listStatusConflicts shape so the frontend can use one
+   * common error path.
+   *
+   * `limit` defaults to 50 and is hard-capped at 200 so a malicious caller
+   * can't sweep the whole audit table for one lead.
+   */
+  @Get(':id/activity')
+  async getLeadActivity(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Query('limit') limitRaw?: string,
+  ) {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id, userId: user.id },
+      select: { id: true },
+    });
+    if (!lead) return { success: false, error: 'Lead not found', activity: [] };
+
+    const parsed = limitRaw ? parseInt(limitRaw, 10) : 50;
+    const limit = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 200) : 50;
+
+    const rows = await this.prisma.leadStatusAuditLog.findMany({
+      where: { leadId: id },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        activityType: true,
+        oldStatus: true,
+        newStatus: true,
+        source: true,
+        reason: true,
+        metadata: true,
+        actorType: true,
+        actorName: true,
+        occurredAt: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      success: true,
+      activity: rows.map((r) => ({
+        id: r.id,
+        type: r.activityType,
+        fromStatus: r.oldStatus,
+        toStatus: r.newStatus,
+        source: r.source,
+        reason: r.reason,
+        metadata: r.metadata,
+        actorType: r.actorType,
+        actorName: r.actorName,
+        occurredAt: r.occurredAt,
+        createdAt: r.createdAt,
+      })),
+    };
+  }
+
+  /**
    * Resolve a status conflict (operator clicked "Keep mine" / "Accept upstream"
    * / "Pushed to SF" in the modal). resolveNote records the operator's choice.
    */

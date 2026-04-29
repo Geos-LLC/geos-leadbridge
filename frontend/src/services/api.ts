@@ -443,7 +443,39 @@ export const leadsApi = {
     );
     return data;
   },
+  /**
+   * Lead Activity timeline. Returns the audit log rows describing every
+   * status transition that touched the lead. `limit` is hard-capped server-side at 200.
+   */
+  getActivity: async (
+    leadId: string,
+    limit?: number,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    activity: LeadActivityEntry[];
+  }> => {
+    const { data } = await api.get(`/v1/leads/${leadId}/activity`, {
+      params: limit ? { limit } : undefined,
+    });
+    return data;
+  },
 };
+
+/** A single Lead Activity row as returned by GET /v1/leads/:id/activity. */
+export interface LeadActivityEntry {
+  id: string;
+  type: string;
+  fromStatus: string | null;
+  toStatus: string;
+  source: 'service_flow' | 'platform_sync' | 'manual' | 'lb_automation';
+  reason: string | null;
+  metadata: Record<string, any> | null;
+  actorType: string | null;
+  actorName: string | null;
+  occurredAt: string;
+  createdAt: string;
+}
 
 /**
  * Status-conflict payload emitted by the backend when a manual status change
