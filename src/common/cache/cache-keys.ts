@@ -17,9 +17,15 @@ export const CacheKeys = {
 
   // Leads. The list key is partitioned by optional businessId filter; `leadsListPattern`
   // covers all variants for a user so invalidation is a single `delPattern` call.
+  //
+  // The `v2:` prefix was introduced with the account-boundary fix
+  // (hotfix/account-boundary-lead-filtering). Pre-fix, `leads:user:{userId}`
+  // could hold a cross-account list because callers omitted businessId. Bumping
+  // the prefix once guarantees no v1 cached list survives the deploy. Old keys
+  // age out within their 30s TTL.
   leadsList: (userId: string, businessId?: string) =>
-    businessId ? `leads:user:${userId}:biz:${businessId}` : `leads:user:${userId}`,
-  leadsListPattern: (userId: string) => `leads:user:${userId}*`,
+    businessId ? `leads:v2:user:${userId}:biz:${businessId}` : `leads:v2:user:${userId}`,
+  leadsListPattern: (userId: string) => `leads:v2:user:${userId}*`,
   // Lead detail + messages keys include userId to prevent cross-tenant leakage:
   // if two users ever share a leadId (they don't today, but the Prisma `findFirst`
   // filter is { id, userId } — skipping that check with a tenant-agnostic key
@@ -44,6 +50,6 @@ export const CacheKeys = {
   userAllPattern: (userId: string) => [
     `me:user:${userId}`,
     `saved-accounts:user:${userId}*`,
-    `leads:user:${userId}*`,
+    `leads:v2:user:${userId}*`,
   ],
 } as const;

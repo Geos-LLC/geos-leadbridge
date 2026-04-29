@@ -29,6 +29,11 @@ import { PlatformFactory } from '../platform.factory';
 import { LeadsService } from '../../leads/leads.service';
 import { PlatformName } from '../../common/interfaces/platform.interface';
 import { PrismaService } from '../../common/utils/prisma.service';
+import {
+  parseAccountScope,
+  ACCOUNT_BOUNDARY_WARNING_HEADER,
+  ACCOUNT_BOUNDARY_WARNING_VALUE_MISSING,
+} from '../../common/account-scope/account-scope.util';
 
 @Controller('v1/thumbtack')
 @UseGuards(JwtAuthGuard)
@@ -415,35 +420,73 @@ export class ThumbtackController {
   // Leads (delivered via webhooks)
   // ==========================================
 
+  /**
+   * Despite living under `/v1/thumbtack`, this endpoint serves the unified inbox
+   * (Thumbtack + Yelp merged). It is the primary leads-list call from the
+   * frontend Messages page.
+   *
+   * Account-scope contract:
+   *   ?businessId=<id>   → only leads for that saved account (one platform)
+   *   ?scope=all         → unified across all of the user's accounts (legacy behavior)
+   *   neither            → during transition, behaves as scope=all but emits a
+   *                        warning header + log so we can find unmigrated callers.
+   *   both               → 400 (handled by parseAccountScope)
+   */
   @Get('leads')
   async getLeads(
     @CurrentUser() user: any,
+    @Res({ passthrough: true }) res: Response,
     @Query('limit') limit?: number,
     @Query('since') since?: string,
+    @Query('businessId') businessId?: string,
+    @Query('scope') scope?: string,
   ) {
-    const options: any = {};
+    const accountScope = parseAccountScope({ businessId, scope });
 
-    if (limit) {
-      options.limit = parseInt(limit.toString(), 10);
+    const options: { limit?: number; since?: Date; businessId?: string; scope?: 'all' } = {};
+    if (limit) options.limit = parseInt(limit.toString(), 10);
+    if (since) options.since = new Date(since);
+
+    if (accountScope.kind === 'account') {
+      // Resolve businessId → savedAccount to discover which platform owns it.
+      // A businessId is unique within a platform; calling the wrong adapter
+      // would return zero leads or, worse, leak across platforms in some
+      // future code path. Fail loud if the businessId doesn't belong to this
+      // user — better than silently returning [].
+      const account = await this.prisma.savedAccount.findFirst({
+        where: { userId: user.id, businessId: accountScope.businessId },
+        select: { platform: true, businessId: true },
+      });
+      if (!account) {
+        throw new BadRequestException(
+          `businessId '${accountScope.businessId}' is not a saved account for this user`,
+        );
+      }
+      const leads = await this.leadsService.getLeads(user.id, account.platform, {
+        ...options,
+        businessId: account.businessId!,
+      });
+      return { count: leads.length, leads };
     }
 
-    if (since) {
-      options.since = new Date(since);
+    // Unified scope (explicit or transition).
+    if (accountScope.warn) {
+      res.setHeader(ACCOUNT_BOUNDARY_WARNING_HEADER, ACCOUNT_BOUNDARY_WARNING_VALUE_MISSING);
+      console.warn(
+        `[account-boundary] /v1/thumbtack/leads called without businessId or scope=all (userId=${user.id}) — defaulting to all accounts. Update the caller to pass businessId or scope=all.`,
+      );
     }
 
-    // Fetch leads from all webhook-based platforms (Thumbtack + Yelp)
+    const unifiedOptions = { ...options, scope: 'all' as const };
     const [thumbtackLeads, yelpLeads] = await Promise.all([
-      this.leadsService.getLeads(user.id, PlatformName.THUMBTACK, options),
-      this.leadsService.getLeads(user.id, PlatformName.YELP, options).catch(() => []),
+      this.leadsService.getLeads(user.id, PlatformName.THUMBTACK, unifiedOptions),
+      this.leadsService.getLeads(user.id, PlatformName.YELP, unifiedOptions).catch(() => []),
     ]);
     const leads = [...thumbtackLeads, ...yelpLeads].sort((a, b) =>
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
 
-    return {
-      count: leads.length,
-      leads,
-    };
+    return { count: leads.length, leads };
   }
 
   @Get('leads/:id')

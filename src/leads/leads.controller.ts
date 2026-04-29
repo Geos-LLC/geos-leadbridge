@@ -14,7 +14,9 @@ import {
   UseGuards,
   Sse,
   MessageEvent,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { PrismaService } from '../common/utils/prisma.service';
 import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { JwtSseAuthGuard } from '../common/guards/jwt-sse-auth.guard';
@@ -25,6 +27,11 @@ import { LeadStatusService } from './lead-status.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Observable, fromEvent, merge, interval } from 'rxjs';
 import { map } from 'rxjs/operators';
+import {
+  parseAccountScope,
+  ACCOUNT_BOUNDARY_WARNING_HEADER,
+  ACCOUNT_BOUNDARY_WARNING_VALUE_MISSING,
+} from '../common/account-scope/account-scope.util';
 
 @Controller('v1/leads')
 @UseGuards(JwtSseAuthGuard)
@@ -78,28 +85,45 @@ export class LeadsController {
   }
 
   /**
-   * Get all leads from all connected platforms
+   * Get leads for the user.
+   *
+   * Account-scope contract (see `src/common/account-scope/account-scope.util.ts`):
+   *   ?businessId=<id>  → scope to one saved account (preferred)
+   *   ?scope=all        → explicit unified across all accounts
+   *   neither           → transition: returns all + warning header
+   *   both              → 400
+   *
+   * `?platform=` may be combined with either: it filters the result to one
+   * platform AFTER the account scope is applied. Pre-fix the platform branch
+   * silently dropped `businessId`; that bug is fixed here by always running
+   * through `getCachedLeads` with the full filter shape.
    */
   @Get()
   async getAllLeads(
     @CurrentUser() user: any,
+    @Res({ passthrough: true }) res: Response,
     @Query('platform') platform?: string,
     @Query('status') status?: string,
     @Query('limit') limit?: number,
     @Query('businessId') businessId?: string,
+    @Query('scope') scope?: string,
   ) {
-    if (platform) {
-      // Get leads from specific platform
-      return this.leadsService.getLeads(user.id, platform);
+    const accountScope = parseAccountScope({ businessId, scope });
+
+    if (accountScope.kind === 'all' && accountScope.warn) {
+      res.setHeader(ACCOUNT_BOUNDARY_WARNING_HEADER, ACCOUNT_BOUNDARY_WARNING_VALUE_MISSING);
+      console.warn(
+        `[account-boundary] GET /v1/leads called without businessId or scope=all (userId=${user.id}) — defaulting to all accounts.`,
+      );
     }
 
     // Get cached leads from database with filters.
-    // Service caches `{ userId, businessId? }` shape with 30s TTL. Other filter
-    // shapes bypass the cache and hit the DB directly.
+    // The service partitions cache keys by businessId (cache-keys.ts) so
+    // per-account responses can never bleed into the unified cache slot.
     const leads = await this.leadsService.getCachedLeads(user.id, {
       platform,
       status,
-      businessId,
+      businessId: accountScope.kind === 'account' ? accountScope.businessId : undefined,
       limit: limit ? parseInt(limit.toString(), 10) : undefined,
     });
 

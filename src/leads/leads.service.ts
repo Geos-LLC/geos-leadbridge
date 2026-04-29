@@ -119,26 +119,30 @@ export class LeadsService {
   }
 
   /**
-   * Get leads for a user from a specific platform
-   * For Thumbtack: leads come via webhooks, so we query the local database
-   * For other platforms: may fetch from API and store locally
+   * Get leads for a user from a specific platform.
    *
-   * Returns ALL leads for the user across all connected accounts.
-   * Frontend handles filtering by businessId if needed.
+   * Account-scope contract (see `src/common/account-scope/account-scope.util.ts`):
+   *   - `options.businessId` set    → filter by (userId, platform, businessId)
+   *   - `options.scope === 'all'`   → unified across all of the user's accounts
+   *   - both omitted (legacy)       → unified, but caller is expected to be in
+   *     transition mode (controller emits a warning header). Internal callers
+   *     should always pass one of the two.
    */
-  async getLeads(userId: string, platformName: string, options?: any): Promise<NormalizedLead[]> {
-    console.log(`[LeadsService] getLeads called - userId: ${userId}, platform: ${platformName}, options:`, options);
+  async getLeads(
+    userId: string,
+    platformName: string,
+    options?: { businessId?: string; scope?: 'all'; limit?: number; since?: Date } & Record<string, any>,
+  ): Promise<NormalizedLead[]> {
+    const { businessId, scope, limit } = options || {};
+    const isUnified = scope === 'all' || (!businessId && !scope);
 
     // For webhook-based platforms (Thumbtack, Yelp), query local database
     if (platformName === 'thumbtack' || platformName === 'yelp') {
-      // Return ALL leads for the user (no businessId filter)
-      // Frontend filters by businessId if needed for account switching
       const leads = await this.getCachedLeads(userId, {
         platform: platformName,
-        // No businessId filter - return all accounts' leads
-        limit: options?.limit,
+        businessId: isUnified ? undefined : businessId,
+        limit,
       });
-      console.log(`[LeadsService] Found ${leads.length} leads for user ${userId} (all accounts)`);
       return leads;
     }
 
@@ -157,9 +161,17 @@ export class LeadsService {
   }
 
   /**
-   * Get all leads for a user from all connected platforms
+   * Get all leads for a user from all connected platforms.
+   *
+   * Account-scope contract: `options.businessId` is forwarded to each per-platform
+   * `getLeads` call. Because a Thumbtack businessId can never match a Yelp lead's
+   * businessId column, passing `businessId` here naturally narrows the result to
+   * the one platform that owns that account — no extra platform filter needed.
    */
-  async getAllLeads(userId: string, options?: any): Promise<NormalizedLead[]> {
+  async getAllLeads(
+    userId: string,
+    options?: { businessId?: string; scope?: 'all'; limit?: number } & Record<string, any>,
+  ): Promise<NormalizedLead[]> {
     const platforms = await this.platformService.getUserPlatforms(userId);
     const connectedPlatforms = platforms.filter((p) => p.connected);
 

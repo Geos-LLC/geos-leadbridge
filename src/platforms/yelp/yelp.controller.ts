@@ -27,6 +27,11 @@ import { YelpAdapter } from './yelp.adapter';
 import { PlatformName } from '../../common/interfaces/platform.interface';
 import { EncryptionUtil } from '../../common/utils/encryption.util';
 import { TrialService } from '../../trial/trial.service';
+import {
+  parseAccountScope,
+  ACCOUNT_BOUNDARY_WARNING_HEADER,
+  ACCOUNT_BOUNDARY_WARNING_VALUE_MISSING,
+} from '../../common/account-scope/account-scope.util';
 
 @Controller('v1/yelp')
 @UseGuards(JwtAuthGuard)
@@ -436,10 +441,53 @@ export class YelpController {
     };
   }
 
+  /**
+   * Yelp leads list — diagnostic endpoint, used by ops dashboards.
+   *
+   * Account-scope contract:
+   *   ?businessId=<yelpBusinessId>  → only that account's leads
+   *   ?scope=all                    → all of the user's Yelp leads
+   *   neither                       → transition: returns all + warning header
+   *   both                          → 400
+   *
+   * Pre-fix this returned every Yelp lead under the user across all Yelp
+   * businesses they had connected.
+   */
   @Get('leads')
-  async getLeads(@CurrentUser() user: any) {
+  async getLeads(
+    @CurrentUser() user: any,
+    @Res({ passthrough: true }) res: Response,
+    @Query('businessId') businessId?: string,
+    @Query('scope') scope?: string,
+  ) {
+    const accountScope = parseAccountScope({ businessId, scope });
+
+    const where: { userId: string; platform: string; businessId?: string } = {
+      userId: user.id,
+      platform: PlatformName.YELP,
+    };
+
+    if (accountScope.kind === 'account') {
+      // Verify the businessId is one of this user's Yelp accounts before querying.
+      const account = await this.prisma.savedAccount.findFirst({
+        where: { userId: user.id, platform: PlatformName.YELP, businessId: accountScope.businessId },
+        select: { id: true },
+      });
+      if (!account) {
+        throw new BadRequestException(
+          `businessId '${accountScope.businessId}' is not a Yelp saved account for this user`,
+        );
+      }
+      where.businessId = accountScope.businessId;
+    } else if (accountScope.warn) {
+      res.setHeader(ACCOUNT_BOUNDARY_WARNING_HEADER, ACCOUNT_BOUNDARY_WARNING_VALUE_MISSING);
+      this.logger.warn(
+        `[account-boundary] /v1/yelp/leads called without businessId or scope=all (userId=${user.id}) — defaulting to all Yelp accounts.`,
+      );
+    }
+
     const leads = await this.prisma.lead.findMany({
-      where: { userId: user.id, platform: PlatformName.YELP },
+      where,
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
