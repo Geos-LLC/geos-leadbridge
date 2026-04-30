@@ -8,7 +8,7 @@
  */
 
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { BadRequestException, MessageEvent } from '@nestjs/common';
+import { BadRequestException, Logger, MessageEvent } from '@nestjs/common';
 import { firstValueFrom, Subject } from 'rxjs';
 import { take, toArray, takeUntil, tap } from 'rxjs/operators';
 import { LeadsController } from './leads.controller';
@@ -207,8 +207,10 @@ describe('LeadsController.leadEvents — account-scope filter', () => {
   });
 
   describe('transition mode (no businessId, no scope)', () => {
-    it('streams every event AND emits a structured warning log', async () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    it('streams every event AND emits a structured warning log via Nest Logger', async () => {
+      // Spy on the Nest Logger prototype so the warning ends up in Loki via
+      // the loghub-client transport in production (console.warn would not).
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
       const { controller, eventEmitter } = buildController();
 
       const events = await collect(
