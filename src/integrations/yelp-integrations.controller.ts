@@ -194,8 +194,14 @@ export class YelpIntegrationsController {
           update: { lastMessageAt: new Date() },
         });
 
-        // Create lead
-        await this.prisma.lead.create({
+        // Create lead with the canonical default 'new'. The scraped raw status
+        // (if any) flows through LeadStatusService.writeStatus below — that's
+        // the single write path that produces an audit row, applies the
+        // SF_STATUS_WINS guard, and canonicalizes via mapYelpToLbStatus.
+        // leadData.status from the adapter is intentionally ignored here: it
+        // can be a raw Yelp value ('Active', 'Hired', etc.) and writing it
+        // directly would bypass the canonical pipeline.
+        const created = await this.prisma.lead.create({
           data: {
             userId: user.id,
             platform: 'yelp',
@@ -210,10 +216,19 @@ export class YelpIntegrationsController {
             state: leadData.state,
             postcode: leadData.postcode,
             category: leadData.category || leadCategories?.[leadId],
-            status: leadData.status || 'new',
+            status: 'new',
             rawJson: JSON.stringify(leadData.raw || {}),
           },
         });
+
+        // Persist the scraped status (preferred) or the adapter status through
+        // the canonical write path. Unknown raw values resolve to undefined
+        // canonical, so applyPlatformSync writes only platformStatus —
+        // Lead.status stays on schema default 'new'.
+        const rawForCreate = leadStatuses?.[leadId] ?? leadData.status;
+        if (rawForCreate) {
+          await this.applyScrapedStatusToCreatedLead(created.id, leadId, rawForCreate);
+        }
 
         imported++;
         this.logger.log(`[Yelp Import] Imported lead ${leadId}: ${leadData.customerName}`);
@@ -241,7 +256,11 @@ export class YelpIntegrationsController {
             update: { customerName: scrapedName !== 'Unknown' ? scrapedName : undefined },
           });
 
-          await this.prisma.lead.create({
+          // Same canonical-default + writeStatus pattern as the API-success
+          // path. Previous code wrote leadStatuses[leadId].toLowerCase()
+          // directly into Lead.status which produced non-canonical raw values
+          // ('active' / 'done' / etc.) bypassing audit + SF guard.
+          const created = await this.prisma.lead.create({
             data: {
               userId: user.id,
               platform: 'yelp',
@@ -254,10 +273,15 @@ export class YelpIntegrationsController {
               city: leadLocations?.[leadId]?.split(',')[0]?.trim(),
               state: leadLocations?.[leadId]?.split(',')[1]?.trim()?.split(' ')[0],
               postcode: leadLocations?.[leadId]?.match(/\d{5}/)?.[0],
-              status: leadStatuses?.[leadId]?.toLowerCase() || 'new',
+              status: 'new',
               rawJson: JSON.stringify({ scraped: true, source: 'extension', location: leadLocations?.[leadId], date: leadDates?.[leadId] }),
             },
           });
+
+          const rawForFallback = leadStatuses?.[leadId];
+          if (rawForFallback) {
+            await this.applyScrapedStatusToCreatedLead(created.id, leadId, rawForFallback);
+          }
           imported++;
         } catch (createErr: any) {
           failed++;
@@ -268,6 +292,40 @@ export class YelpIntegrationsController {
 
     this.logger.log(`[Yelp Import] Done: ${imported} imported, ${skipped} skipped, ${failed} failed`);
     return { ok: true, imported, skipped, failed, total: leadIds.length };
+  }
+
+  /**
+   * Persist a scraped Yelp status onto a freshly-created lead through the
+   * canonical write path. Always writes platformStatus; only writes
+   * Lead.status when mapYelpToLbStatus returns a known canonical value.
+   * applyPlatformSync owns the SF_STATUS_WINS / completed-lock / pipeline-
+   * downgrade guards and produces a LeadStatusAuditLog row. Failures here
+   * never bubble up — the lead row was already created, so we degrade
+   * gracefully rather than fail the whole import.
+   */
+  private async applyScrapedStatusToCreatedLead(
+    leadPk: string,
+    yelpLeadId: string,
+    rawStatus: string,
+  ): Promise<void> {
+    const trimmed = rawStatus.trim();
+    if (!trimmed) return;
+    const canonical = mapYelpToLbStatus(trimmed);
+    const sourceEventId = `yelp_scrape_create_${yelpLeadId}_${trimmed.toLowerCase().replace(/\s+/g, '_')}`;
+    try {
+      await this.leadStatusService.writeStatus({
+        leadId: leadPk,
+        source: 'platform_sync',
+        newStatus: canonical ?? undefined,
+        platformStatus: trimmed,
+        actorType: 'extension',
+        sourceEventId,
+      });
+    } catch (err: any) {
+      this.logger.warn(
+        `[Yelp Import] applyScrapedStatusToCreatedLead failed lead=${leadPk} yelpId=${yelpLeadId} raw="${trimmed}": ${err?.message ?? err}`,
+      );
+    }
   }
 
   /**

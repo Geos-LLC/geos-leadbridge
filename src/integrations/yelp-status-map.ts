@@ -6,24 +6,34 @@
  * is preserved separately on Lead.platformStatus so we never lose what the
  * platform actually said.
  *
- * | Yelp raw    | LB canonical |
- * |-------------|--------------|
- * | Active      | contacted    |
- * | Hired       | booked       |
- * | Not hired   | lost         |
- * | Done        | completed    |
- * | Closed      | lost         |
- * | Archived    | archived     |
+ * | Yelp raw                    | LB canonical |
+ * |-----------------------------|--------------|
+ * | Active                      | contacted    |
+ * | Quoted                      | quoted       |
+ * | Hired / Booked              | booked       |
+ * | Scheduled                   | scheduled    |
+ * | In progress                 | in_progress  |
+ * | Done                        | completed    |
+ * | Not hired                   | lost         |
+ * | Closed                      | lost         |
+ * | Cancelled / Canceled        | cancelled    |
+ * | Archived                    | archived     |
  *
  * Unknown values return null — callers must still update platformStatus but
- * must NOT touch Lead.status.
+ * must NOT touch Lead.status. Keep this map narrow rather than guessing —
+ * silent canonical writes for unverified raw values would corrupt downstream
+ * filters / automation.
  */
 
 export type YelpLbStatus =
   | 'contacted'
+  | 'quoted'
   | 'booked'
-  | 'lost'
+  | 'scheduled'
+  | 'in_progress'
   | 'completed'
+  | 'lost'
+  | 'cancelled'
   | 'archived';
 
 export function mapYelpToLbStatus(raw: string | null | undefined): YelpLbStatus | null {
@@ -33,14 +43,23 @@ export function mapYelpToLbStatus(raw: string | null | undefined): YelpLbStatus 
   switch (lower) {
     case 'active':
       return 'contacted';
+    case 'quoted':
+      return 'quoted';
     case 'hired':
+    case 'booked':
       return 'booked';
-    case 'not hired':
-      return 'lost';
+    case 'scheduled':
+      return 'scheduled';
+    case 'in progress':
+      return 'in_progress';
     case 'done':
       return 'completed';
+    case 'not hired':
     case 'closed':
       return 'lost';
+    case 'cancelled':
+    case 'canceled':
+      return 'cancelled';
     case 'archived':
       return 'archived';
     default:
