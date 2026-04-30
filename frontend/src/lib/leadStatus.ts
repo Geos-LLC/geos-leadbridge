@@ -43,9 +43,16 @@ export const STATUS_GROUPS: readonly StatusGroup[] = [
 /**
  * Display-only mapping for legacy/non-canonical raw values that may still
  * sit on old leads. Never written back to the DB; purely for badge display
- * and filter matching.
+ * and filter matching. Keys are lowercase + trimmed; the normalize() helper
+ * matches case-insensitively.
+ *
+ * Pre-canonical writers used 'Open' / 'active' for the active-pipeline state
+ * (see webhooks.service.ts pre-2026-04-30); both fold into 'new' so they show
+ * up under the Active filter alongside the canonical statuses.
  */
 export const LEGACY_DISPLAY_MAP: Readonly<Record<string, string>> = {
+  open: 'new',
+  active: 'new',
   hired: 'scheduled',
   done: 'completed',
   'not hired': 'lost',

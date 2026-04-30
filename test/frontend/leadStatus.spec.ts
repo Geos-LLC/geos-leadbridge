@@ -102,6 +102,16 @@ describe('LEGACY_DISPLAY_MAP', () => {
     expect(LEGACY_DISPLAY_MAP.closed).toBe('lost');
     expect(displayLabel('closed')).toBe('No hire');
   });
+
+  // Legacy values written by pre-canonical creators (webhooks.service.ts upsert
+  // path used 'Open' for new leads, conversation creators used 'active'). Both
+  // belong in the Active group alongside 'new'.
+  it('maps open / active -> new -> "Active"', () => {
+    expect(LEGACY_DISPLAY_MAP.open).toBe('new');
+    expect(LEGACY_DISPLAY_MAP.active).toBe('new');
+    expect(displayLabel('Open')).toBe('Active');
+    expect(displayLabel('active')).toBe('Active');
+  });
 });
 
 describe('displayLabel', () => {
@@ -151,6 +161,62 @@ describe('matchesGroupFilter', () => {
     expect(matchesGroupFilter('hired', 'scheduled')).toBe(true);
     // 'done' is legacy for completed -> Done
     expect(matchesGroupFilter('done', 'done')).toBe(true);
+  });
+
+  // Per-group coverage — the dropdown sets statusFilter to one of these group
+  // ids and the Messages page filters in-memory via this predicate. Each test
+  // mirrors the spec for that group from src/leads/canonical-status.ts.
+  describe('per group, all members included', () => {
+    it('Active includes new/contacted/engaged/quoted (canonical) + open/active (legacy)', () => {
+      ['new', 'contacted', 'engaged', 'quoted', 'open', 'active', 'Open'].forEach((s) =>
+        expect(matchesGroupFilter(s, 'active')).toBe(true),
+      );
+      // Cross-group leads must be filtered out.
+      ['booked', 'completed', 'lost', 'archived'].forEach((s) =>
+        expect(matchesGroupFilter(s, 'active')).toBe(false),
+      );
+    });
+
+    it('Scheduled includes booked/scheduled (canonical) + hired (legacy)', () => {
+      ['booked', 'scheduled', 'hired', 'Hired'].forEach((s) =>
+        expect(matchesGroupFilter(s, 'scheduled')).toBe(true),
+      );
+      ['new', 'in_progress', 'completed', 'lost'].forEach((s) =>
+        expect(matchesGroupFilter(s, 'scheduled')).toBe(false),
+      );
+    });
+
+    it('Job in progress only includes in_progress', () => {
+      expect(matchesGroupFilter('in_progress', 'in_progress')).toBe(true);
+      ['booked', 'scheduled', 'completed'].forEach((s) =>
+        expect(matchesGroupFilter(s, 'in_progress')).toBe(false),
+      );
+    });
+
+    it('Done includes completed (canonical) + done (legacy)', () => {
+      ['completed', 'done', 'Done'].forEach((s) =>
+        expect(matchesGroupFilter(s, 'done')).toBe(true),
+      );
+      ['in_progress', 'booked', 'lost'].forEach((s) =>
+        expect(matchesGroupFilter(s, 'done')).toBe(false),
+      );
+    });
+
+    it('No hire includes lost/cancelled/no_show (canonical) + not hired/closed (legacy)', () => {
+      ['lost', 'cancelled', 'no_show', 'not hired', 'Not Hired', 'not_hired', 'closed'].forEach(
+        (s) => expect(matchesGroupFilter(s, 'no_hire')).toBe(true),
+      );
+      ['new', 'engaged', 'completed', 'archived'].forEach((s) =>
+        expect(matchesGroupFilter(s, 'no_hire')).toBe(false),
+      );
+    });
+
+    it('Archived only includes archived', () => {
+      expect(matchesGroupFilter('archived', 'archived')).toBe(true);
+      ['lost', 'completed', 'cancelled'].forEach((s) =>
+        expect(matchesGroupFilter(s, 'archived')).toBe(false),
+      );
+    });
   });
 });
 

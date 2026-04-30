@@ -565,7 +565,9 @@ export class WebhooksService {
         customerName,
         customerPhone: customer.phone,
         message: data.text || '',
-        status: 'Open', // Default to Open for new leads created from message
+        // Canonical default. Legacy 'Open' rows still on old leads are folded
+        // into the Active group via LEGACY_DISPLAY_MAP on the frontend.
+        status: 'new',
         rawJson: JSON.stringify(data),
       },
       update: {
