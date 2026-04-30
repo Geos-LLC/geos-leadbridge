@@ -1295,10 +1295,13 @@ export function Messages() {
     lead.businessId && savedAccountIds.has(lead.businessId)
   );
 
-  // Get unique accounts from leads for filter dropdown
-  const accountsInLeads = savedAccounts.filter(account =>
-    leadsFromSavedAccounts.some(lead => lead.businessId === account.businessId)
-  );
+  // Account selector options. Always source from savedAccounts directly so the
+  // dropdown stays stable when an account is selected — pre-PR #142 the inbox
+  // loaded leads from every account so this list was implicitly "all", but now
+  // the backend scopes the lead list and `leadsFromSavedAccounts` shrinks to a
+  // single account when filtered. Sourcing from the currently-loaded leads
+  // would collapse the dropdown to one option.
+  const accountsInLeads = savedAccounts;
 
   // Generate month options from actual leads data
   const monthOptions = getMonthOptionsFromLeads(leadsFromSavedAccounts);
@@ -1497,13 +1500,21 @@ export function Messages() {
                 onChange={(e) => setAccountFilter(e.target.value)}
                 className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="all">All Accounts ({leadsFromSavedAccounts.length})</option>
+                {/* "All Accounts" count is only meaningful when the inbox is currently
+                    showing all accounts. When scoped to one account, the count next to
+                    "All Accounts" would only reflect that one account's loaded leads,
+                    so we hide it. Same logic for individual accounts: counts only show
+                    when accountFilter==='all' OR the option matches the active filter. */}
+                <option value="all">
+                  All Accounts{accountFilter === 'all' ? ` (${leadsFromSavedAccounts.length})` : ''}
+                </option>
                 {accountsInLeads.map((account) => {
-                  const count = leadsFromSavedAccounts.filter(l => l.businessId === account.businessId).length;
                   const dot = account.platform === 'yelp' ? '\uD83D\uDD34' : '\uD83D\uDD35';
+                  const showCount = accountFilter === 'all' || account.businessId === accountFilter;
+                  const count = leadsFromSavedAccounts.filter(l => l.businessId === account.businessId).length;
                   return (
                     <option key={account.id} value={account.businessId}>
-                      {dot} {account.businessName} ({count})
+                      {dot} {account.businessName}{showCount ? ` (${count})` : ''}
                     </option>
                   );
                 })}
