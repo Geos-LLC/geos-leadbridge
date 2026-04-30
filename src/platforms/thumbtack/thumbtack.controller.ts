@@ -18,6 +18,7 @@ import {
   HttpException,
   HttpStatus,
   Header,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
@@ -38,6 +39,7 @@ import {
 @Controller('v1/thumbtack')
 @UseGuards(JwtAuthGuard)
 export class ThumbtackController {
+  private readonly logger = new Logger(ThumbtackController.name);
   private readonly frontendUrl: string;
 
   constructor(
@@ -472,7 +474,7 @@ export class ThumbtackController {
     // Unified scope (explicit or transition).
     if (accountScope.warn) {
       res.setHeader(ACCOUNT_BOUNDARY_WARNING_HEADER, ACCOUNT_BOUNDARY_WARNING_VALUE_MISSING);
-      console.warn(
+      this.logger.warn(
         `[account-boundary] /v1/thumbtack/leads called without businessId or scope=all (userId=${user.id}) — defaulting to all accounts. Update the caller to pass businessId or scope=all.`,
       );
     }
