@@ -142,8 +142,17 @@ api.interceptors.response.use(
     const silentPatterns = [/\/negotiations\/[^/]+\/import$/];
     const isSilent = silentPatterns.some(p => p.test(url));
 
+    // SupportGrant-guarded admin endpoints render a SupportAccessRequired
+    // banner inline. The guard returns 404 with message "Resource not found"
+    // (NotFoundException) — same shape as a real 404, so we match on the URL
+    // prefix to scope the suppression.
+    const isSupportGuardDenial =
+      error.response?.status === 404 &&
+      /\/v1\/admin\//.test(url) &&
+      (error.response?.data as any)?.message === 'Resource not found';
+
     // Show toast notification for other errors
-    const errorDetails = !isSilent ? getErrorDetails(error) : null;
+    const errorDetails = (!isSilent && !isSupportGuardDenial) ? getErrorDetails(error) : null;
     if (errorDetails) {
       notify.error(errorDetails.title, errorDetails.message);
     }
@@ -151,6 +160,13 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// SupportGrant denial detector — share with components so they can swap in the
+// SupportAccessRequired UI instead of the empty-state.
+export function isSupportAccessDenied(err: any): boolean {
+  return err?.response?.status === 404 &&
+    err?.response?.data?.message === 'Resource not found';
+}
 
 // Auth
 export const authApi = {
@@ -1260,6 +1276,29 @@ export const adminApi = {
   reassignTenantPhone: async (tenantPhoneId: string, userId: string): Promise<any> => {
     const { data } = await api.patch(`/v1/admin/phone-pool/tenant/${tenantPhoneId}/reassign`, { userId });
     return data.data;
+  },
+};
+
+// SupportGrant — admins issue grants to themselves so they can access guarded
+// admin endpoints. Backend route: POST /v1/me/support-grants. Required scope is
+// per-endpoint (e.g. 'user:list', 'phones:read', 'notifications:read').
+export interface SupportGrantResponse {
+  id: string;
+  tenantId: string;
+  scopes: string[];
+  reason: string;
+  expiresAt: string;
+  createdAt: string;
+}
+export const supportGrantsApi = {
+  createSelf: async (input: {
+    tenantId: string;
+    scopes: string[];
+    reason: string;
+    durationMinutes?: number;
+  }): Promise<SupportGrantResponse> => {
+    const { data } = await api.post('/v1/me/support-grants', input);
+    return data.grant;
   },
 };
 
