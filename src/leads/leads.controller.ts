@@ -15,6 +15,7 @@ import {
   Sse,
   MessageEvent,
   Res,
+  Logger,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { PrismaService } from '../common/utils/prisma.service';
@@ -41,6 +42,8 @@ import {
 @Controller('v1/leads')
 @UseGuards(JwtSseAuthGuard)
 export class LeadsController {
+  private readonly logger = new Logger(LeadsController.name);
+
   constructor(
     private leadsService: LeadsService,
     private leadStatusService: LeadStatusService,
@@ -86,7 +89,7 @@ export class LeadsController {
     if (parsed.kind === 'all' && parsed.warn) {
       // SSE has no per-response headers we can set after streaming starts, so
       // log only. Frontend should be migrated to pass ?businessId or ?scope=all.
-      console.warn(
+      this.logger.warn(
         `[account-boundary] /v1/leads/events subscribed without businessId or scope=all (userId=${userId}) — streaming all accounts.`,
       );
     }
@@ -171,7 +174,7 @@ export class LeadsController {
 
     if (accountScope.kind === 'all' && accountScope.warn) {
       res.setHeader(ACCOUNT_BOUNDARY_WARNING_HEADER, ACCOUNT_BOUNDARY_WARNING_VALUE_MISSING);
-      console.warn(
+      this.logger.warn(
         `[account-boundary] GET /v1/leads called without businessId or scope=all (userId=${user.id}) — defaulting to all accounts.`,
       );
     }
