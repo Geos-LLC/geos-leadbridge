@@ -90,6 +90,16 @@ export class NormalizedLead {
   @IsDate()
   lastMessageAt?: Date; // Timestamp of last message in conversation
 
+  // Most recent message on the lead's conversation. Used by the Messages
+  // sidebar so the preview shows the latest reply instead of the original
+  // lead body. Optional — leads created before any conversation activity
+  // (or with no linked thread) will be undefined.
+  lastMessage?: {
+    content: string;
+    sender: string; // 'pro' | 'customer' | 'system'
+    sentAt: Date;
+  };
+
   raw?: any; // Original platform payload for debugging
 }
 

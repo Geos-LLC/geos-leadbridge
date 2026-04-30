@@ -242,6 +242,14 @@ export class LeadsService {
           conversation: {
             select: {
               lastMessageAt: true,
+              // Latest message on the conversation. Cache invalidates whenever
+              // a webhook stores a new message (see invalidateLeadMessagesAndList),
+              // so this stays fresh without extra plumbing.
+              messages: {
+                orderBy: { sentAt: 'desc' },
+                take: 1,
+                select: { content: true, sender: true, sentAt: true },
+              },
             },
           },
         },
@@ -1138,6 +1146,35 @@ export class LeadsService {
     const isNew = !existingLead;
     console.log(`[LeadsService] Lead ${isNew ? 'is new' : 'already exists in DB'}${existingLead ? ` (owner: ${existingLead.userId})` : ''}`);
 
+    // Cross-account guard: if the lead is already in our DB under a businessId
+    // that doesn't match the operator-selected SavedAccount, skip the Partner
+    // API fetch entirely. Hitting `/negotiations/:id` with the wrong account's
+    // token would 403 and look like a generic failure to the operator, even
+    // though we already have the lead. Mark the ThumbtackLeadId row
+    // imported=true so it stops appearing in "pending from extension" and
+    // throw a typed error so the controller can surface a soft-success.
+    if (
+      existingLead &&
+      targetBusinessId &&
+      existingLead.businessId &&
+      existingLead.businessId !== targetBusinessId
+    ) {
+      const owner = await this.prisma.savedAccount.findFirst({
+        where: { userId, platform: 'thumbtack', businessId: existingLead.businessId },
+        select: { businessName: true },
+      });
+      await this.prisma.thumbtackLeadId.updateMany({
+        where: { userId, thumbtackId: negotiationId },
+        data: { imported: true, importedAt: new Date(), needsRefetch: false },
+      });
+      const ownerLabel = owner?.businessName ? `"${owner.businessName}"` : 'another connected Thumbtack account';
+      const e: any = new Error(`THUMBTACK_OTHER_ACCOUNT: This lead is already imported under ${ownerLabel}.`);
+      e.code = 'THUMBTACK_OTHER_ACCOUNT';
+      e.ownerBusinessId = existingLead.businessId;
+      e.ownerBusinessName = owner?.businessName ?? null;
+      throw e;
+    }
+
     // Use account-specific credentials if available, otherwise fall back to platform credentials
     let credentials: { accessToken: string; refreshToken?: string };
     if (accountCredentials) {
@@ -1153,6 +1190,18 @@ export class LeadsService {
       lead = await adapter.getLead(credentials, negotiationId);
       console.log(`[LeadsService] Fetched lead from Thumbtack:`, JSON.stringify(lead));
     } catch (err: any) {
+      // Wrong-scope (403): the token is valid but the negotiation belongs to
+      // a different business. Mark the ThumbtackLeadId row imported=true so we
+      // don't keep retrying and re-spamming /negotiations/:id with 403s, then
+      // re-throw so the caller (controller / batch import) can record it.
+      if (err?.code === 'THUMBTACK_WRONG_SCOPE') {
+        await this.prisma.thumbtackLeadId.updateMany({
+          where: { userId, thumbtackId: negotiationId },
+          data: { imported: true, importedAt: new Date(), needsRefetch: false },
+        });
+        throw err;
+      }
+
       const errMsg = err.message?.toLowerCase() || '';
       // Check if it's a token/auth error - re-throw with the message from adapter
       if (errMsg.includes('login required') || errMsg.includes('session') ||
@@ -1482,20 +1531,48 @@ export class LeadsService {
   }
 
   /**
-   * Import multiple Thumbtack negotiations
+   * Import multiple Thumbtack negotiations.
+   *
+   * Distinguishes three outcomes:
+   *  - imported: lead row created or updated.
+   *  - skipped:  THUMBTACK_OTHER_ACCOUNT (already in our DB under a different
+   *              SavedAccount) or THUMBTACK_WRONG_SCOPE (Partner API 403 — lead
+   *              belongs to a business not associated with the chosen token).
+   *              Already marked imported=true on the ThumbtackLeadId row by the
+   *              singular call so they stop appearing as pending.
+   *  - failed:   anything else (auth required, unknown errors, etc.).
    */
   async importThumbtackNegotiations(
     userId: string,
     negotiationIds: string[],
     accountId?: string,
-  ): Promise<{ imported: number; failed: number; errors: string[] }> {
-    const results = { imported: 0, failed: 0, errors: [] as string[] };
+  ): Promise<{
+    imported: number;
+    failed: number;
+    errors: string[];
+    skipped: Array<{ id: string; reason: string; ownerBusinessName: string | null; message: string }>;
+  }> {
+    const results = {
+      imported: 0,
+      failed: 0,
+      errors: [] as string[],
+      skipped: [] as Array<{ id: string; reason: string; ownerBusinessName: string | null; message: string }>,
+    };
 
     for (const negotiationId of negotiationIds) {
       try {
         await this.importThumbtackNegotiation(userId, negotiationId, accountId, { skipCacheInvalidate: true });
         results.imported++;
-      } catch (error) {
+      } catch (error: any) {
+        if (error?.code === 'THUMBTACK_OTHER_ACCOUNT' || error?.code === 'THUMBTACK_WRONG_SCOPE') {
+          results.skipped.push({
+            id: negotiationId,
+            reason: error.code,
+            ownerBusinessName: error.ownerBusinessName ?? null,
+            message: error.message,
+          });
+          continue;
+        }
         results.failed++;
         results.errors.push(`${negotiationId}: ${error.message}`);
       }
@@ -1517,6 +1594,14 @@ export class LeadsService {
     // Get lastMessageAt from conversation if available, otherwise use lead's createdAt
     const lastMessageAt = lead.conversation?.lastMessageAt || lead.createdAt;
 
+    // Latest message on the conversation, when the include shape provides it.
+    // getCachedLeads requests this (take:1, sentAt desc); single-lead reads
+    // (getLead → cache.getOrSet) currently don't, so guard the access.
+    const latestMsg = lead.conversation?.messages?.[0];
+    const lastMessage = latestMsg
+      ? { content: latestMsg.content, sender: latestMsg.sender, sentAt: latestMsg.sentAt }
+      : undefined;
+
     return {
       id: lead.id,
       platform: lead.platform,
@@ -1537,6 +1622,7 @@ export class LeadsService {
       createdAt: lead.createdAt,
       updatedAt: lead.updatedAt,
       lastMessageAt: lastMessageAt, // Include lastMessageAt for sorting and display
+      lastMessage,
       raw: lead.rawJson ? JSON.parse(lead.rawJson) : undefined,
     };
   }

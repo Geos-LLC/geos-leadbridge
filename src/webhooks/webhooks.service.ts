@@ -18,6 +18,7 @@ import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { LeadCacheService } from '../common/cache/lead-cache.service';
 import { LeadStatusService } from '../leads/lead-status.service';
+import { mapThumbtackToLbStatus } from '../integrations/thumbtack-status-map';
 import { extractYelpEventContent, isDisplayableYelpEvent, yelpEventSender } from '../platforms/yelp/yelp-event-content.util';
 
 @Injectable()
@@ -310,7 +311,15 @@ export class WebhooksService {
     const originalCreatedAt = data.createdAt ? new Date(data.createdAt) : new Date();
 
     // Run lead upsert + savedAccount lookup in parallel — they're independent.
-    // lb-status-guard: allow inbound webhook lead-creation — INSERT default, not a status transition. Refactor tracked separately.
+    // The upsert intentionally does NOT set Lead.status:
+    //   - On create the schema default 'new' applies (canonical).
+    //   - On update we must not clobber a canonical state already written by
+    //     the extension scrape / SF / operator with the raw Partner API value.
+    // The LeadStatusService.writeStatus call below records the Partner API
+    // value on Lead.platformStatus and lifts Lead.status when the raw value
+    // has a canonical equivalent (mapThumbtackToLbStatus). This routes through
+    // the canonical guard set, produces an audit row, and respects the SF
+    // authority guard for sf-linked leads.
     const [lead, savedAccounts] = await Promise.all([
       this.prisma.lead.upsert({
         where: {
@@ -331,7 +340,6 @@ export class WebhooksService {
           city: location.city,
           state: location.state,
           category: request.category?.name,
-          status: data.status || 'Open',
           rawJson: JSON.stringify(data),
           createdAt: originalCreatedAt,
         },
@@ -339,7 +347,6 @@ export class WebhooksService {
           customerName,
           customerPhone: customer.phone,
           message: request.description || '',
-          status: data.status || 'Open',
           rawJson: JSON.stringify(data),
           createdAt: originalCreatedAt,
         },
@@ -351,6 +358,33 @@ export class WebhooksService {
     ]);
 
     this.logger.log(`[timing] lead upsert + savedAccount: +${Date.now() - _ncStart}ms, negotiation: ${negotiationId}`);
+
+    // Persist the Partner API status through the canonical write path.
+    // Partner API states (Open / Picked / Canceled) have no entry in
+    // mapThumbtackToLbStatus, so canonical resolves to null and writeStatus
+    // updates only Lead.platformStatus — Lead.status keeps the schema default
+    // ('new' on create) or whatever canonical value is already there. When a
+    // mapping does exist (e.g. 'Hired' / 'Scheduled'), Lead.status is lifted
+    // through the standard guards.
+    const rawPartnerStatus = typeof data.status === 'string' ? data.status.trim() : '';
+    if (rawPartnerStatus) {
+      const canonical = mapThumbtackToLbStatus(rawPartnerStatus);
+      try {
+        await this.leadStatusService.writeStatus({
+          leadId: lead.id,
+          source: 'platform_sync',
+          newStatus: canonical ?? undefined,
+          platformStatus: rawPartnerStatus,
+          occurredAt: originalCreatedAt,
+          actorType: 'platform_webhook',
+          sourceEventId: `tt_partner_${negotiationId}_${rawPartnerStatus.toLowerCase().replace(/\s+/g, '_')}`,
+        });
+      } catch (err: any) {
+        this.logger.warn(
+          `[lead-status] tt partner-api writeStatus failed neg=${negotiationId} raw=${rawPartnerStatus}: ${err?.message ?? err}`,
+        );
+      }
+    }
 
     // Emit SSE event for real-time frontend updates (sync, instant)
     this.eventEmitter.emit(`lead.created.${userId}`, lead);
@@ -565,7 +599,9 @@ export class WebhooksService {
         customerName,
         customerPhone: customer.phone,
         message: data.text || '',
-        status: 'Open', // Default to Open for new leads created from message
+        // Canonical default. Legacy 'Open' rows still on old leads are folded
+        // into the Active group via LEGACY_DISPLAY_MAP on the frontend.
+        status: 'new',
         rawJson: JSON.stringify(data),
       },
       update: {

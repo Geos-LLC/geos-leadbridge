@@ -597,6 +597,23 @@ export class ThumbtackController {
         };
       }
 
+      // Cross-account skips: already-imported under a different SavedAccount
+      // (DB hit, no API call) or Partner API 403 (token can't fetch this lead).
+      // The leads.service has already marked the ThumbtackLeadId row
+      // imported=true so it stops appearing as pending. Surface a soft-success
+      // shape so the operator UI can render "skipped, belongs to other account"
+      // instead of "failed".
+      if (err?.code === 'THUMBTACK_OTHER_ACCOUNT' || err?.code === 'THUMBTACK_WRONG_SCOPE') {
+        console.log(`[ThumbtackController] ${err.code} — skipping ${negotiationId}`);
+        return {
+          success: false,
+          skipped: true,
+          reason: err.code === 'THUMBTACK_OTHER_ACCOUNT' ? 'other_account' : 'wrong_scope',
+          message: err.message,
+          ownerBusinessName: err.ownerBusinessName ?? null,
+        };
+      }
+
       if (errMsg.includes('login required') ||
           errMsg.includes('session expired') ||
           errMsg.includes('reconnect') ||
