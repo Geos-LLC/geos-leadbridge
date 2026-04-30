@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { MessageSquare, RefreshCw, Loader2, CheckCircle, AlertCircle, Send, ChevronDown, Phone, Clock } from 'lucide-react';
-import { adminApi } from '../services/api';
+import { adminApi, isSupportAccessDenied } from '../services/api';
+import { SupportAccessRequired } from '../components/SupportAccessRequired';
 import type { NotificationLog } from '../types';
 
 function formatPhone(phone: string): string {
@@ -53,6 +54,7 @@ export function SmsHistory() {
   const [accountFilter, setAccountFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [accessDenied, setAccessDenied] = useState(false);
 
   useEffect(() => {
     loadLogs();
@@ -64,8 +66,15 @@ export function SmsHistory() {
       const data = await adminApi.getNotificationLogs(200);
       setLogs(data.logs);
       _smsLogsCache = data.logs;
-    } catch (err) {
-      console.error('Failed to load SMS logs:', err);
+      setAccessDenied(false);
+    } catch (err: any) {
+      if (isSupportAccessDenied(err)) {
+        setAccessDenied(true);
+        setLogs([]);
+        _smsLogsCache = null;
+      } else {
+        console.error('Failed to load SMS logs:', err);
+      }
     } finally {
       setLoading(false);
     }
@@ -171,6 +180,13 @@ export function SmsHistory() {
       </section>
 
       {/* Messages */}
+      {accessDenied ? (
+        <SupportAccessRequired
+          scope="notifications:read"
+          sectionLabel="SMS notification logs"
+          onGranted={loadLogs}
+        />
+      ) : (
       <section className="bg-white rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
         {loading && logs.length === 0 ? (
           <div className="flex items-center justify-center py-16">
@@ -296,6 +312,7 @@ export function SmsHistory() {
           </>
         )}
       </section>
+      )}
     </div>
   );
 }

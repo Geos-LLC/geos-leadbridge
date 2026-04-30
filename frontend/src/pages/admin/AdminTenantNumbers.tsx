@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import {
   Smartphone, Search, Loader2, RefreshCw, UserPlus, X, ShieldCheck,
 } from 'lucide-react';
-import { adminApi } from '../../services/api';
+import { adminApi, isSupportAccessDenied } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
+import { SupportAccessRequired } from '../../components/SupportAccessRequired';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,10 @@ export default function AdminTenantNumbers() {
   const [tenantStatusFilter, setTenantStatusFilter] = useState('');
   const [tenantOffset, setTenantOffset] = useState(0);
   const tenantLimit = 50;
+
+  // SupportGrant gate — true when /v1/admin/tenant-numbers returns the
+  // SupportGrantGuard 404. Cleared on successful (re)load.
+  const [tenantAccessDenied, setTenantAccessDenied] = useState(false);
 
   // Twilio health
   const [twilioHealth, setTwilioHealth] = useState<{
@@ -117,8 +122,15 @@ export default function AdminTenantNumbers() {
       });
       setTenantPhones(result.phones);
       setTenantTotal(result.total);
-    } catch {
-      notify.error('Error', 'Failed to load tenant numbers');
+      setTenantAccessDenied(false);
+    } catch (err: any) {
+      if (isSupportAccessDenied(err)) {
+        setTenantAccessDenied(true);
+        setTenantPhones([]);
+        setTenantTotal(0);
+      } else {
+        notify.error('Error', 'Failed to load tenant numbers');
+      }
     } finally {
       setTenantLoading(false);
     }
@@ -350,6 +362,13 @@ export default function AdminTenantNumbers() {
         </div>
 
         {/* Table */}
+        {tenantAccessDenied ? (
+          <SupportAccessRequired
+            scope="phones:read"
+            sectionLabel="tenant phone numbers"
+            onGranted={loadTenantData}
+          />
+        ) : (
         <div className="rounded-2xl md:rounded-3xl bg-white border border-slate-100 shadow-sm overflow-hidden">
           {tenantPhones.length === 0 ? (
             <div className="text-center py-12">
@@ -422,6 +441,7 @@ export default function AdminTenantNumbers() {
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* Reassign Modal */}
