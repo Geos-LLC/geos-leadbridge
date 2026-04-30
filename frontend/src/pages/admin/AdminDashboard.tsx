@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Users, DollarSign, Activity, TrendingDown, Eye, Trash2, Plus, Minus, ChevronRight, Loader2, Building2, Save, AlertTriangle, CheckCircle, RefreshCw } from 'lucide-react';
-import { adminApi, monitoringApi } from '../../services/api';
+import { adminApi, monitoringApi, isSupportAccessDenied } from '../../services/api';
 import { notify } from '../../store/notificationStore';
 import { useAuthStore } from '../../store/authStore';
+import { SupportAccessRequired } from '../../components/SupportAccessRequired';
 import type { AdminUser, AdminStats } from '../../types';
 
 const tierNames: Record<string, string> = {
@@ -77,6 +78,10 @@ export default function AdminDashboard() {
   const [errorsLoading, setErrorsLoading] = useState(false);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
 
+  // SupportGrant gate state — true when /v1/admin/users returns the
+  // SupportGrantGuard 404. Cleared on successful (re)load.
+  const [usersAccessDenied, setUsersAccessDenied] = useState(false);
+
   useEffect(() => {
     if (user?.role !== 'ADMIN') {
       notify.error('Access Denied', 'You must be an admin to access this page');
@@ -91,18 +96,29 @@ export default function AdminDashboard() {
   }, [user, offset, tierFilter, search]);
 
   const loadData = async () => {
+    setLoading(true);
+    // Stats has no SupportGrant requirement; load it independently so a 404 on
+    // /v1/admin/users (missing grant) doesn't blank the rest of the dashboard.
     try {
-      setLoading(true);
-      const [statsData, usersData] = await Promise.all([
-        adminApi.getStats(),
-        adminApi.listUsers({ search, tier: tierFilter || undefined, offset, limit }),
-      ]);
+      const statsData = await adminApi.getStats();
       setStats(statsData);
+    } catch (error: any) {
+      console.error('Failed to load admin stats:', error);
+    }
+    try {
+      const usersData = await adminApi.listUsers({ search, tier: tierFilter || undefined, offset, limit });
       setUsers(usersData.users);
       setTotal(usersData.total);
+      setUsersAccessDenied(false);
     } catch (error: any) {
-      console.error('Failed to load admin data:', error);
-      notify.error('Error', 'Failed to load admin dashboard');
+      if (isSupportAccessDenied(error)) {
+        setUsersAccessDenied(true);
+        setUsers([]);
+        setTotal(0);
+      } else {
+        console.error('Failed to load admin users:', error);
+        notify.error('Error', 'Failed to load admin dashboard');
+      }
     } finally {
       setLoading(false);
     }
@@ -366,6 +382,14 @@ export default function AdminDashboard() {
           </div>
         </div>
 
+        {usersAccessDenied ? (
+          <SupportAccessRequired
+            scope="user:list"
+            sectionLabel="the user list"
+            onGranted={loadData}
+          />
+        ) : (
+        <>
         {/* Mobile: Card list */}
         <div className="md:hidden space-y-2">
           {users.map((u) => {
@@ -542,6 +566,8 @@ export default function AdminDashboard() {
               Next
             </button>
           </div>
+        )}
+        </>
         )}
       </section>
 
