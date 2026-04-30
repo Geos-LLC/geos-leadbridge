@@ -123,7 +123,9 @@ export function useDashboardData(selectedAccountId: string | null) {
           ? notificationsApi.getRules(selectedAccountId).catch(() => ({ success: false, count: 0, rules: [] as NotificationRule[] }))
           : notificationsApi.getAllRules().catch(() => ({ success: false, count: 0, rules: [] as NotificationRule[] })),
         notificationsApi.getAllLogs(200).catch(() => ({ success: false, count: 0, logs: [] as NotificationLog[] })),
-        leadsApi.getLeads().catch(() => ({ leads: [] as Lead[], count: 0 })),
+        leadsApi
+          .getLeads(businessId ? { businessId } : { scope: 'all' })
+          .catch(() => ({ leads: [] as Lead[], count: 0 })),
       ]);
 
       // Derive System Health

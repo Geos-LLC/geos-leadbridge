@@ -487,10 +487,21 @@ export function Messages() {
       };
     }
 
-    // EventSource doesn't support custom headers, so pass token as query parameter
-    // Use absolute URL to bypass Vercel's SPA catch-all rewrite and connect directly to the API server
+    // EventSource doesn't support custom headers, so pass token as query parameter.
+    // Use absolute URL to bypass Vercel's SPA catch-all rewrite and connect directly to the API server.
+    //
+    // Account-scope query params match the backend contract introduced in PR #138:
+    //   - accountFilter === 'all' → scope=all (unified stream across all the user's accounts)
+    //   - otherwise              → businessId=<id> (server filters events for one account)
+    // The mount useEffect re-runs when accountFilter changes, which closes this
+    // EventSource and reopens it with the new scope.
     const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
-    const eventSource = new EventSource(`${API_BASE}/v1/leads/events?token=${encodeURIComponent(token)}`);
+    const scopeParam = accountFilter === 'all'
+      ? 'scope=all'
+      : `businessId=${encodeURIComponent(accountFilter)}`;
+    const eventSource = new EventSource(
+      `${API_BASE}/v1/leads/events?token=${encodeURIComponent(token)}&${scopeParam}`,
+    );
 
     eventSource.onmessage = (event) => {
       try {
@@ -577,7 +588,13 @@ export function Messages() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       eventSource.close();
     };
-  }, []);
+    // accountFilter is a dep so switching accounts refetches the lead list AND
+    // reconnects the SSE under the new scope. Other deps are intentionally
+    // omitted (loadLeads/loadSavedAccounts/loadTemplatesForSingleMessage are
+    // stable closures over component state and don't need to retrigger this
+    // effect on every render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountFilter]);
 
   // Refresh current conversation messages when tab becomes visible
   useEffect(() => {
@@ -686,8 +703,11 @@ export function Messages() {
     if (!_messagesLoaded && leads.length === 0) setLoading(true);
     console.log('[Messages] Loading leads...');
     try {
-      // Load all leads (no limit) to support date filtering across full history
-      const { leads: loadedLeads } = await leadsApi.getLeads();
+      // Load all leads (no limit) to support date filtering across full history.
+      // Account-scope: accountFilter === 'all' → unified, else → that businessId only.
+      const { leads: loadedLeads } = await leadsApi.getLeads(
+        accountFilter === 'all' ? { scope: 'all' } : { businessId: accountFilter },
+      );
       // Sort leads by lastMessageAt descending (most recent message first)
       // Fall back to createdAt if lastMessageAt is not available
       const sortedLeads = [...loadedLeads].sort((a, b) => {
@@ -715,7 +735,9 @@ export function Messages() {
   // Background refresh - doesn't show loading state, just updates data silently
   const loadLeadsBackground = async () => {
     try {
-      const { leads: loadedLeads } = await leadsApi.getLeads();
+      const { leads: loadedLeads } = await leadsApi.getLeads(
+        accountFilter === 'all' ? { scope: 'all' } : { businessId: accountFilter },
+      );
       const sortedLeads = [...loadedLeads].sort((a, b) => {
         const aTime = a.lastMessageAt || a.createdAt;
         const bTime = b.lastMessageAt || b.createdAt;
@@ -1273,10 +1295,13 @@ export function Messages() {
     lead.businessId && savedAccountIds.has(lead.businessId)
   );
 
-  // Get unique accounts from leads for filter dropdown
-  const accountsInLeads = savedAccounts.filter(account =>
-    leadsFromSavedAccounts.some(lead => lead.businessId === account.businessId)
-  );
+  // Account selector options. Always source from savedAccounts directly so the
+  // dropdown stays stable when an account is selected — pre-PR #142 the inbox
+  // loaded leads from every account so this list was implicitly "all", but now
+  // the backend scopes the lead list and `leadsFromSavedAccounts` shrinks to a
+  // single account when filtered. Sourcing from the currently-loaded leads
+  // would collapse the dropdown to one option.
+  const accountsInLeads = savedAccounts;
 
   // Generate month options from actual leads data
   const monthOptions = getMonthOptionsFromLeads(leadsFromSavedAccounts);
@@ -1475,13 +1500,21 @@ export function Messages() {
                 onChange={(e) => setAccountFilter(e.target.value)}
                 className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="all">All Accounts ({leadsFromSavedAccounts.length})</option>
+                {/* "All Accounts" count is only meaningful when the inbox is currently
+                    showing all accounts. When scoped to one account, the count next to
+                    "All Accounts" would only reflect that one account's loaded leads,
+                    so we hide it. Same logic for individual accounts: counts only show
+                    when accountFilter==='all' OR the option matches the active filter. */}
+                <option value="all">
+                  All Accounts{accountFilter === 'all' ? ` (${leadsFromSavedAccounts.length})` : ''}
+                </option>
                 {accountsInLeads.map((account) => {
-                  const count = leadsFromSavedAccounts.filter(l => l.businessId === account.businessId).length;
                   const dot = account.platform === 'yelp' ? '\uD83D\uDD34' : '\uD83D\uDD35';
+                  const showCount = accountFilter === 'all' || account.businessId === accountFilter;
+                  const count = leadsFromSavedAccounts.filter(l => l.businessId === account.businessId).length;
                   return (
                     <option key={account.id} value={account.businessId}>
-                      {dot} {account.businessName} ({count})
+                      {dot} {account.businessName}{showCount ? ` (${count})` : ''}
                     </option>
                   );
                 })}

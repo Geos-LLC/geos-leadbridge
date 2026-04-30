@@ -380,9 +380,26 @@ export interface ApiMessage {
 
 // Leads
 export const leadsApi = {
-  getLeads: async (limit?: number): Promise<{ leads: Lead[]; count: number }> => {
-    const params = limit ? { limit } : {};
-    const { data } = await api.get('/v1/thumbtack/leads', { params });
+  /**
+   * Fetch leads. Account-scope is REQUIRED:
+   *   - businessId: scope to one saved account (per-account inbox view)
+   *   - scope: 'all' for the unified all-accounts view
+   * Both at once is rejected by the backend with 400. Omitting both still works
+   * during the transition window but the backend logs a warning and returns the
+   * X-LeadBridge-Boundary-Warning header. Callers should always pass one or
+   * the other so we can flip the backend to strict mode without breaking the UI.
+   */
+  getLeads: async (params?: {
+    limit?: number;
+    businessId?: string;
+    scope?: 'all';
+  }): Promise<{ leads: Lead[]; count: number }> => {
+    const query = new URLSearchParams();
+    if (params?.limit) query.append('limit', params.limit.toString());
+    if (params?.businessId) query.append('businessId', params.businessId);
+    if (params?.scope) query.append('scope', params.scope);
+    const qs = query.toString();
+    const { data } = await api.get(`/v1/thumbtack/leads${qs ? `?${qs}` : ''}`);
     return data;
   },
   getLead: async (id: string): Promise<Lead> => {
