@@ -242,6 +242,14 @@ export class LeadsService {
           conversation: {
             select: {
               lastMessageAt: true,
+              // Latest message on the conversation. Cache invalidates whenever
+              // a webhook stores a new message (see invalidateLeadMessagesAndList),
+              // so this stays fresh without extra plumbing.
+              messages: {
+                orderBy: { sentAt: 'desc' },
+                take: 1,
+                select: { content: true, sender: true, sentAt: true },
+              },
             },
           },
         },
@@ -1517,6 +1525,14 @@ export class LeadsService {
     // Get lastMessageAt from conversation if available, otherwise use lead's createdAt
     const lastMessageAt = lead.conversation?.lastMessageAt || lead.createdAt;
 
+    // Latest message on the conversation, when the include shape provides it.
+    // getCachedLeads requests this (take:1, sentAt desc); single-lead reads
+    // (getLead → cache.getOrSet) currently don't, so guard the access.
+    const latestMsg = lead.conversation?.messages?.[0];
+    const lastMessage = latestMsg
+      ? { content: latestMsg.content, sender: latestMsg.sender, sentAt: latestMsg.sentAt }
+      : undefined;
+
     return {
       id: lead.id,
       platform: lead.platform,
@@ -1537,6 +1553,7 @@ export class LeadsService {
       createdAt: lead.createdAt,
       updatedAt: lead.updatedAt,
       lastMessageAt: lastMessageAt, // Include lastMessageAt for sorting and display
+      lastMessage,
       raw: lead.rawJson ? JSON.parse(lead.rawJson) : undefined,
     };
   }

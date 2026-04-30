@@ -184,6 +184,21 @@ const LB_PIPELINE_STATUSES: Array<{ value: string; label: string; tone: string }
   { value: 'archived',    label: 'Archived',    tone: 'bg-slate-100 text-slate-500' },
 ];
 
+/**
+ * Tone classes per UI status group, used by the detail-header pill so legacy
+ * raw values fold into the same colour as the canonical group. Keys match
+ * displayPillKind() output in lib/leadStatus.ts.
+ */
+const STATUS_GROUP_TONE: Record<string, string> = {
+  active:      'bg-blue-100 text-blue-700',
+  scheduled:   'bg-purple-100 text-purple-700',
+  in_progress: 'bg-amber-100 text-amber-700',
+  done:        'bg-emerald-100 text-emerald-700',
+  no_hire:     'bg-red-100 text-red-700',
+  archived:    'bg-slate-100 text-slate-500',
+  neutral:     'bg-slate-100 text-slate-600',
+};
+
 function computeSummary(
   platformMessages: LocalMessage[],
   smsLogs: NotificationLog[],
@@ -1699,7 +1714,10 @@ export function Messages() {
                         textOverflow: 'ellipsis',
                       }}
                     >
-                      {lead.message?.slice(0, 80)}
+                      {/* Prefer the latest conversation message (newest customer/pro reply)
+                          over the original lead body. Falls back to lead.message for
+                          leads with no conversation activity yet. */}
+                      {(lead.lastMessage?.content || lead.message)?.slice(0, 80)}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
                       <StatusPill status={statusKind} label={statusLabel} />
@@ -1748,22 +1766,23 @@ export function Messages() {
                       </span>
                       {/* Editable lead status pill — click to open dropdown of LB
                           canonical statuses. Manual writes may surface a conflict
-                          modal if SF is integrated or platform status disagrees. */}
+                          modal if SF is integrated or platform status disagrees.
+                          Label/tone come from displayLabel/displayPillKind so legacy
+                          raw values (Open / Picked / Canceled / Yelp 'active', etc.)
+                          fold into their group instead of falling through to
+                          thumbtackStatus — which would render the platform-native
+                          string twice next to the TT/Yelp pill below. */}
                       <div className="relative">
                         <button
                           type="button"
                           disabled={savingStatus}
                           onClick={() => setStatusEditorOpen(o => !o)}
                           className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase hover:ring-2 hover:ring-offset-1 hover:ring-blue-400 transition ${
-                            LB_PIPELINE_STATUSES.find(s => s.value === (selectedLead.status || '').toLowerCase())?.tone
-                            || 'bg-slate-100 text-slate-600'
+                            STATUS_GROUP_TONE[displayPillKind(selectedLead.status)] || 'bg-slate-100 text-slate-600'
                           }`}
                           title="Click to change status"
                         >
-                          {LB_PIPELINE_STATUSES.find(s => s.value === (selectedLead.status || '').toLowerCase())?.label
-                            || selectedLead.thumbtackStatus
-                            || selectedLead.status
-                            || 'unknown'}
+                          {displayLabel(selectedLead.status)}
                           {savingStatus && '…'}
                         </button>
                         {statusEditorOpen && (

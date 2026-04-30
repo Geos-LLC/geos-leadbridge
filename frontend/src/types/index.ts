@@ -60,6 +60,13 @@ export interface Lead {
   createdAt: string;
   updatedAt: string;
   lastMessageAt?: string; // Timestamp of last message in conversation
+  // Most recent message on the conversation. Used by the Messages sidebar
+  // preview so it shows the latest reply instead of the original lead body.
+  lastMessage?: {
+    content: string;
+    sender: string; // 'pro' | 'customer' | 'system'
+    sentAt: string;
+  };
   raw?: any;
 }
 
