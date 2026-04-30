@@ -438,6 +438,86 @@ export class IntegrationsService {
   }
 
   /**
+   * Pre-flight partition for the bulk import paths. Splits collected
+   * thumbtackIds into three buckets so we never call the Partner API for IDs
+   * we already have or for IDs that belong to a different SavedAccount than
+   * the one the operator picked.
+   *
+   * Returns:
+   *   - alreadyImported: lead row exists under the operator-selected
+   *                      SavedAccount's businessId (or no specific account
+   *                      was chosen). Mark imported=true and skip.
+   *   - otherAccount:    lead row exists under a *different* businessId.
+   *                      Skip with the owning account's businessName so the
+   *                      UI can tell the operator where it actually lives.
+   *   - toImport:        no Lead row anywhere — a real Partner API fetch is
+   *                      needed.
+   */
+  private async partitionCollectedIds(
+    userId: string,
+    thumbtackIds: string[],
+    savedAccountId?: string,
+  ): Promise<{
+    alreadyImported: string[];
+    otherAccount: Array<{ id: string; businessId: string; businessName: string | null }>;
+    toImport: string[];
+  }> {
+    let currentBusinessId: string | null = null;
+    if (savedAccountId) {
+      const sa = await this.prisma.savedAccount.findFirst({
+        where: { id: savedAccountId, userId },
+        select: { businessId: true },
+      });
+      currentBusinessId = sa?.businessId ?? null;
+    }
+
+    const existingLeads = await this.prisma.lead.findMany({
+      where: { platform: 'thumbtack', externalRequestId: { in: thumbtackIds }, userId },
+      select: { externalRequestId: true, businessId: true },
+    });
+    const byThumbtackId = new Map(existingLeads.map((l) => [l.externalRequestId, l]));
+
+    // Resolve businessName for the cross-account messages in one round-trip.
+    const otherBusinessIds = Array.from(
+      new Set(
+        existingLeads
+          .map((l) => l.businessId)
+          .filter((b): b is string => !!b && (currentBusinessId ? b !== currentBusinessId : false)),
+      ),
+    );
+    const accounts = otherBusinessIds.length
+      ? await this.prisma.savedAccount.findMany({
+          where: { userId, platform: 'thumbtack', businessId: { in: otherBusinessIds } },
+          select: { businessId: true, businessName: true },
+        })
+      : [];
+    const businessIdToName = new Map(accounts.map((a) => [a.businessId, a.businessName]));
+
+    const alreadyImported: string[] = [];
+    const otherAccount: Array<{ id: string; businessId: string; businessName: string | null }> = [];
+    const toImport: string[] = [];
+
+    for (const id of thumbtackIds) {
+      const existing = byThumbtackId.get(id);
+      if (!existing) {
+        toImport.push(id);
+        continue;
+      }
+      if (currentBusinessId && existing.businessId && existing.businessId !== currentBusinessId) {
+        otherAccount.push({
+          id,
+          businessId: existing.businessId,
+          businessName: businessIdToName.get(existing.businessId) ?? null,
+        });
+      } else {
+        alreadyImported.push(id);
+      }
+    }
+
+    return { alreadyImported, otherAccount, toImport };
+  }
+
+  /**
    * Re-import only the leads that are marked imported=true in ThumbtackLeadId
    * but have NO matching Lead record — i.e. truly skipped/failed imports.
    * Also returns the count of missing leads for UI display.
@@ -452,29 +532,54 @@ export class IntegrationsService {
     });
 
     if (collected.length === 0) {
-      return { ok: true, missingCount: 0, total: 0, imported: 0, failed: 0, errors: [] };
+      return {
+        ok: true, missingCount: 0, total: 0, imported: 0, failed: 0,
+        skipped: { alreadyImported: 0, otherAccount: [] as any[], wrongScope: [] as any[] },
+        errors: [],
+      };
     }
 
     const allIds = collected.map((l) => l.thumbtackId);
+    const partitioned = await this.partitionCollectedIds(userId, allIds, savedAccountId);
 
-    // Find which thumbtackIds have no corresponding Lead record
-    const existingLeads = await this.prisma.lead.findMany({
-      where: { platform: 'thumbtack', externalRequestId: { in: allIds } },
-      select: { externalRequestId: true },
-    });
-    const existingSet = new Set(existingLeads.map((l) => l.externalRequestId));
-    const missingIds = allIds.filter((id) => !existingSet.has(id));
+    this.logger.log(
+      `[reimportFailed] user=${userId} account=${savedAccountId ?? 'all'} total=${allIds.length} ` +
+      `alreadyImported=${partitioned.alreadyImported.length} ` +
+      `otherAccount=${partitioned.otherAccount.length} toImport=${partitioned.toImport.length}`,
+    );
 
-    this.logger.log(`[reimportFailed] user=${userId}: ${allIds.length} collected, ${missingIds.length} missing Lead records`);
-
-    if (missingIds.length === 0) {
-      return { ok: true, missingCount: 0, total: 0, imported: 0, failed: 0, errors: [] };
+    // Mark already-existing rows imported=true so they stop showing as pending.
+    const flagAsImported = [
+      ...partitioned.alreadyImported,
+      ...partitioned.otherAccount.map((o) => o.id),
+    ];
+    if (flagAsImported.length > 0) {
+      await this.prisma.thumbtackLeadId.updateMany({
+        where: { userId, thumbtackId: { in: flagAsImported } },
+        data: { imported: true, importedAt: new Date(), needsRefetch: false },
+      });
     }
 
-    const results = await this.leadsService.importThumbtackNegotiations(userId, missingIds, savedAccountId);
+    if (partitioned.toImport.length === 0) {
+      return {
+        ok: true, missingCount: 0, total: allIds.length, imported: 0, failed: 0,
+        skipped: {
+          alreadyImported: partitioned.alreadyImported.length,
+          otherAccount: partitioned.otherAccount,
+          wrongScope: [],
+        },
+        errors: [],
+      };
+    }
 
-    const failedSet = new Set(results.errors.map((e: string) => e.split(':')[0]));
-    const successIds = missingIds.filter((id) => !failedSet.has(id));
+    const results = await this.leadsService.importThumbtackNegotiations(
+      userId, partitioned.toImport, savedAccountId,
+    );
+
+    // Successfully-imported IDs from the API path also get the imported flag.
+    const failedIds = new Set(results.errors.map((e: string) => e.split(':')[0]));
+    const skippedIds = new Set(results.skipped.map((s) => s.id));
+    const successIds = partitioned.toImport.filter((id) => !failedIds.has(id) && !skippedIds.has(id));
     if (successIds.length > 0) {
       await this.prisma.thumbtackLeadId.updateMany({
         where: { userId, thumbtackId: { in: successIds } },
@@ -484,10 +589,15 @@ export class IntegrationsService {
 
     return {
       ok: true,
-      missingCount: missingIds.length,
-      total: missingIds.length,
+      missingCount: partitioned.toImport.length,
+      total: allIds.length,
       imported: results.imported,
       failed: results.failed,
+      skipped: {
+        alreadyImported: partitioned.alreadyImported.length,
+        otherAccount: partitioned.otherAccount,
+        wrongScope: results.skipped.filter((s) => s.reason === 'THUMBTACK_WRONG_SCOPE'),
+      },
       errors: results.errors,
     };
   }
@@ -507,18 +617,56 @@ export class IntegrationsService {
     });
 
     if (collected.length === 0) {
-      return { ok: true, total: 0, imported: 0, failed: 0, errors: [] };
+      return {
+        ok: true, total: 0, imported: 0, failed: 0,
+        skipped: { alreadyImported: 0, otherAccount: [] as any[], wrongScope: [] as any[] },
+        errors: [],
+      };
     }
 
     const thumbtackIds = collected.map((l) => l.thumbtackId);
-    this.logger.log(`[reimportLeads] Re-importing ${thumbtackIds.length} leads for user ${userId}`);
+    const partitioned = await this.partitionCollectedIds(userId, thumbtackIds, savedAccountId);
 
-    const results = await this.leadsService.importThumbtackNegotiations(userId, thumbtackIds, savedAccountId);
+    this.logger.log(
+      `[reimportLeads] user=${userId} account=${savedAccountId ?? 'all'} total=${thumbtackIds.length} ` +
+      `alreadyImported=${partitioned.alreadyImported.length} ` +
+      `otherAccount=${partitioned.otherAccount.length} toImport=${partitioned.toImport.length}`,
+    );
 
-    // Mark successfully-imported ones (all that didn't fail) as imported
+    // Mark already-existing rows imported=true so they stop showing as pending.
+    const flagAsImported = [
+      ...partitioned.alreadyImported,
+      ...partitioned.otherAccount.map((o) => o.id),
+    ];
+    if (flagAsImported.length > 0) {
+      await this.prisma.thumbtackLeadId.updateMany({
+        where: { userId, thumbtackId: { in: flagAsImported } },
+        data: { imported: true, importedAt: new Date(), needsRefetch: false },
+      });
+    }
+
+    if (partitioned.toImport.length === 0) {
+      return {
+        ok: true, total: thumbtackIds.length, imported: 0, failed: 0,
+        skipped: {
+          alreadyImported: partitioned.alreadyImported.length,
+          otherAccount: partitioned.otherAccount,
+          wrongScope: [],
+        },
+        errors: [],
+      };
+    }
+
+    const results = await this.leadsService.importThumbtackNegotiations(
+      userId, partitioned.toImport, savedAccountId,
+    );
+
+    // Mark successfully-imported ones as imported. The singular call has
+    // already flagged THUMBTACK_WRONG_SCOPE rows so we only need to touch
+    // pure successes here.
     const failedIds = new Set(results.errors.map((e: string) => e.split(':')[0]));
-    const successIds = thumbtackIds.filter((id) => !failedIds.has(id));
-
+    const skippedIds = new Set(results.skipped.map((s) => s.id));
+    const successIds = partitioned.toImport.filter((id) => !failedIds.has(id) && !skippedIds.has(id));
     if (successIds.length > 0) {
       await this.prisma.thumbtackLeadId.updateMany({
         where: { userId, thumbtackId: { in: successIds } },
@@ -531,6 +679,11 @@ export class IntegrationsService {
       total: thumbtackIds.length,
       imported: results.imported,
       failed: results.failed,
+      skipped: {
+        alreadyImported: partitioned.alreadyImported.length,
+        otherAccount: partitioned.otherAccount,
+        wrongScope: results.skipped.filter((s) => s.reason === 'THUMBTACK_WRONG_SCOPE'),
+      },
       errors: results.errors,
     };
   }

@@ -445,18 +445,34 @@ export default function SettingsPage() {
 
     const results: typeof importResults = [];
     const successIds: string[] = [];
+    const skippedOtherAccount: Array<{ id: string; ownerBusinessName: string | null }> = [];
+    const skippedWrongScope: string[] = [];
 
     for (const id of extensionPendingIds) {
       let attempts = 0;
       let lastErr: any;
-      let imported = false;
+      let done = false;
 
-      while (attempts < 3 && !imported) {
+      while (attempts < 3 && !done) {
         try {
           const result = await leadsApi.importNegotiation(id, importAccountId);
-          results.push({ id, success: true, isNew: result.isNew });
-          successIds.push(id);
-          imported = true;
+          // Soft-success skip: lead already lives under another connected
+          // SavedAccount, or Partner API 403'd because the negotiation isn't
+          // in this token's scope. Backend has already marked the row
+          // imported=true so it stops appearing as pending.
+          if ((result as any).skipped) {
+            const reason = (result as any).reason as string | undefined;
+            if (reason === 'other_account') {
+              skippedOtherAccount.push({ id, ownerBusinessName: (result as any).ownerBusinessName ?? null });
+            } else if (reason === 'wrong_scope') {
+              skippedWrongScope.push(id);
+            }
+            results.push({ id, success: false, error: (result as any).message || 'Skipped' });
+          } else {
+            results.push({ id, success: true, isNew: (result as any).isNew });
+            successIds.push(id);
+          }
+          done = true;
         } catch (err: any) {
           lastErr = err;
           // Only retry on network errors (no response from server), not on 4xx/5xx
@@ -470,7 +486,7 @@ export default function SettingsPage() {
         }
       }
 
-      if (!imported) {
+      if (!done) {
         const errorMsg = lastErr?.response?.data?.message || lastErr?.response?.data?.error || lastErr?.message || 'Failed to import';
         results.push({ id, success: false, error: errorMsg });
       }
@@ -504,13 +520,21 @@ export default function SettingsPage() {
     });
 
     const newCount = results.filter(r => r.success && r.isNew).length;
-    const failCount = results.filter(r => !r.success).length;
-    if (newCount > 0 && failCount === 0) {
+    const skippedCount = skippedOtherAccount.length + skippedWrongScope.length;
+    const realFailCount = results.filter(r => !r.success).length - skippedCount;
+    const skipDetail = skippedOtherAccount.length > 0
+      ? ` (${skippedOtherAccount.length} already in ${[...new Set(skippedOtherAccount.map(s => s.ownerBusinessName).filter(Boolean))].join(', ') || 'another account'})`
+      : '';
+    if (newCount > 0 && realFailCount === 0 && skippedCount === 0) {
       notify.success('Import Complete', `Imported ${newCount} lead(s) from extension`);
-    } else if (failCount > 0 && newCount > 0) {
-      notify.warning('Import Partial', `${newCount} imported, ${failCount} failed`);
-    } else if (failCount > 0) {
-      setImportError(`Failed to import all ${failCount} negotiation(s)`);
+    } else if (newCount > 0 && realFailCount === 0 && skippedCount > 0) {
+      notify.success('Import Complete', `Imported ${newCount} lead(s); skipped ${skippedCount}${skipDetail}`);
+    } else if (skippedCount > 0 && realFailCount === 0 && newCount === 0) {
+      notify.success('Already Imported', `${skippedCount} lead(s) already exist${skipDetail} — nothing new to import`);
+    } else if (realFailCount > 0 && newCount > 0) {
+      notify.warning('Import Partial', `${newCount} imported, ${realFailCount} failed, ${skippedCount} skipped${skipDetail}`);
+    } else if (realFailCount > 0) {
+      setImportError(`Failed to import ${realFailCount} negotiation(s)${skippedCount > 0 ? ` (${skippedCount} skipped${skipDetail})` : ''}`);
     }
   };
 

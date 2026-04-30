@@ -283,26 +283,46 @@ export class ThumbtackAdapter implements IPlatformAdapter {
    * Note: You must know the negotiationID (from webhook) to fetch details
    */
   async getLead(credentials: PlatformCredentials, negotiationId: string): Promise<NormalizedLead> {
+    const endpoint = `/negotiations/${negotiationId}`;
     try {
       // GET /v4/negotiations/{negotiationID}
-      const response = await this.httpClient.get(`/negotiations/${negotiationId}`, {
+      const response = await this.httpClient.get(endpoint, {
         headers: { Authorization: `Bearer ${credentials.accessToken}` },
       });
 
       return this.normalizeNegotiation(response.data);
-    } catch (error) {
-      this.logger.error('Error fetching negotiation:', error.response?.data || error.message);
-
-      // Check for auth errors (401, token expired, etc.)
+    } catch (error: any) {
       const status = error.response?.status;
       const responseData = error.response?.data;
       const detail = responseData?.detail || '';
+      const bodyPreview = responseData ? JSON.stringify(responseData).slice(0, 500) : 'none';
 
-      // Log for debugging
-      this.logger.error(`Auth check - status: ${status}, title: ${responseData?.title}, detail: ${detail}`);
+      // Single, structured log line — previous "Error fetching negotiation:"
+      // emitted an empty body when error.response.data was undefined and
+      // error.message empty, which made log triage impossible.
+      this.logger.error(
+        `[thumbtack.getLead] FAILED endpoint=${endpoint} negotiationId=${negotiationId} ` +
+        `status=${status ?? 'no-response'} title=${responseData?.title ?? 'none'} ` +
+        `body=${bodyPreview} message=${error.message ?? 'none'}`,
+      );
 
       if (status === 404 && detail.includes('service deleted')) {
         throw new Error(`THUMBTACK_SERVICE_DELETED:${detail}`);
+      }
+
+      // 403 from /negotiations/:id means the token is valid (otherwise /businesses
+      // would also fail) but this specific negotiation is outside the token's
+      // scope — typically because the lead belongs to a business connected under
+      // a different SavedAccount. Distinct from 401 so callers can mark the
+      // ThumbtackLeadId row imported=true and stop retrying instead of bouncing
+      // the operator back to Thumbtack OAuth.
+      if (status === 403) {
+        const e: any = new Error(
+          'THUMBTACK_WRONG_SCOPE: This lead belongs to a different connected Thumbtack account.',
+        );
+        e.code = 'THUMBTACK_WRONG_SCOPE';
+        e.status = 403;
+        throw e;
       }
 
       if (status === 401 ||
