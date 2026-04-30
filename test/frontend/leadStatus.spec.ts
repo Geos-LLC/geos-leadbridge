@@ -112,6 +112,18 @@ describe('LEGACY_DISPLAY_MAP', () => {
     expect(displayLabel('Open')).toBe('Active');
     expect(displayLabel('active')).toBe('Active');
   });
+
+  // Thumbtack Partner API initial states — the inbox-scraping extension lands
+  // canonical values later, but until then leads sit on these raw strings.
+  it('maps picked -> new -> "Active" (Thumbtack Partner API)', () => {
+    expect(LEGACY_DISPLAY_MAP.picked).toBe('new');
+    expect(displayLabel('Picked')).toBe('Active');
+  });
+
+  it('maps canceled (American) -> cancelled -> "No hire"', () => {
+    expect(LEGACY_DISPLAY_MAP.canceled).toBe('cancelled');
+    expect(displayLabel('Canceled')).toBe('No hire');
+  });
 });
 
 describe('displayLabel', () => {
@@ -167,9 +179,9 @@ describe('matchesGroupFilter', () => {
   // ids and the Messages page filters in-memory via this predicate. Each test
   // mirrors the spec for that group from src/leads/canonical-status.ts.
   describe('per group, all members included', () => {
-    it('Active includes new/contacted/engaged/quoted (canonical) + open/active (legacy)', () => {
-      ['new', 'contacted', 'engaged', 'quoted', 'open', 'active', 'Open'].forEach((s) =>
-        expect(matchesGroupFilter(s, 'active')).toBe(true),
+    it('Active includes new/contacted/engaged/quoted (canonical) + open/active/picked (legacy)', () => {
+      ['new', 'contacted', 'engaged', 'quoted', 'open', 'active', 'Open', 'picked', 'Picked'].forEach(
+        (s) => expect(matchesGroupFilter(s, 'active')).toBe(true),
       );
       // Cross-group leads must be filtered out.
       ['booked', 'completed', 'lost', 'archived'].forEach((s) =>
@@ -202,10 +214,12 @@ describe('matchesGroupFilter', () => {
       );
     });
 
-    it('No hire includes lost/cancelled/no_show (canonical) + not hired/closed (legacy)', () => {
-      ['lost', 'cancelled', 'no_show', 'not hired', 'Not Hired', 'not_hired', 'closed'].forEach(
-        (s) => expect(matchesGroupFilter(s, 'no_hire')).toBe(true),
-      );
+    it('No hire includes lost/cancelled/no_show (canonical) + not hired/closed/canceled (legacy)', () => {
+      [
+        'lost', 'cancelled', 'no_show',
+        'not hired', 'Not Hired', 'not_hired', 'closed',
+        'canceled', 'Canceled',
+      ].forEach((s) => expect(matchesGroupFilter(s, 'no_hire')).toBe(true));
       ['new', 'engaged', 'completed', 'archived'].forEach((s) =>
         expect(matchesGroupFilter(s, 'no_hire')).toBe(false),
       );

@@ -47,12 +47,20 @@ export const STATUS_GROUPS: readonly StatusGroup[] = [
  * matches case-insensitively.
  *
  * Pre-canonical writers used 'Open' / 'active' for the active-pipeline state
- * (see webhooks.service.ts pre-2026-04-30); both fold into 'new' so they show
- * up under the Active filter alongside the canonical statuses.
+ * (see webhooks.service.ts pre-2026-04-30) — both fold into 'new'.
+ *
+ * Thumbtack Partner API also writes 'Open' / 'Picked' / 'Canceled' as initial
+ * Lead.status until the inbox-scraping Chrome extension lands a canonical value
+ * (see thumbtack-status-map.ts comment: "the granular UI states are
+ * extension-scraped separately"). 'Picked' folds to 'new' so the lead surfaces
+ * under Active until a real signal comes in; 'canceled' (American spelling)
+ * folds to canonical 'cancelled' (No hire).
  */
 export const LEGACY_DISPLAY_MAP: Readonly<Record<string, string>> = {
   open: 'new',
   active: 'new',
+  picked: 'new',
+  canceled: 'cancelled',
   hired: 'scheduled',
   done: 'completed',
   'not hired': 'lost',
