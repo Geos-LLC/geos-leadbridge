@@ -25,13 +25,18 @@ import { Public } from '../common/decorators/public.decorator';
 import { LeadsService } from './leads.service';
 import { LeadStatusService } from './lead-status.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Observable, fromEvent, merge, interval } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { Observable, fromEvent, merge, interval, from } from 'rxjs';
+import { map, mergeMap, filter as rxFilter } from 'rxjs/operators';
 import {
   parseAccountScope,
   ACCOUNT_BOUNDARY_WARNING_HEADER,
   ACCOUNT_BOUNDARY_WARNING_VALUE_MISSING,
 } from '../common/account-scope/account-scope.util';
+import {
+  SseAccountScope,
+  SseBusinessIdResolver,
+  passesAccountFilter,
+} from './sse-account-filter';
 
 @Controller('v1/leads')
 @UseGuards(JwtSseAuthGuard)
@@ -45,42 +50,96 @@ export class LeadsController {
   ) {}
 
   /**
-   * Server-Sent Events endpoint for real-time lead updates
-   * More efficient than polling for infrequent updates
-   * @Public() skips the global JwtAuthGuard so JwtSseAuthGuard can read the token from the query param
-   * (EventSource API does not support custom headers, so token must be passed as ?token=)
+   * Server-Sent Events endpoint for real-time lead updates.
+   *
+   * @Public() skips the global JwtAuthGuard so JwtSseAuthGuard can read the
+   * token from the `?token=` query param (EventSource API has no header support).
+   *
+   * Account-scope contract (see `parseAccountScope`):
+   *   ?businessId=<id>  → only events whose owning businessId === <id>
+   *   ?scope=all        → unified stream across all of the user's accounts
+   *   neither           → transition: stream all events; emit a warning log so
+   *                        unmigrated callers are observable
+   *   both              → 400
+   *
+   * For account-scoped streams, every event's owning businessId is resolved
+   * via `SseBusinessIdResolver`. Resolution either reads the payload directly
+   * or does one Prisma `Lead.findFirst({ id, userId })` lookup, cached for the
+   * connection lifetime. Events whose businessId cannot be resolved
+   * (e.g. `sms.status` payloads carrying only `messageId`) are dropped from
+   * account-scoped streams — they still pass through `?scope=all`.
    */
   @Public()
   @Sse('events')
-  leadEvents(@CurrentUser() user: any): Observable<MessageEvent> {
+  leadEvents(
+    @CurrentUser() user: any,
+    @Query('businessId') businessId?: string,
+    @Query('scope') scope?: string,
+  ): Observable<MessageEvent> {
     const userId = user.id;
+    const parsed = parseAccountScope({ businessId, scope });
+    const accountScope: SseAccountScope =
+      parsed.kind === 'account'
+        ? { kind: 'account', businessId: parsed.businessId }
+        : { kind: 'all' };
 
-    // Listen for lead events, SMS events, and send keepalive heartbeat
-    // Heartbeat every 30s prevents Railway's HTTP/2 proxy from killing the connection
+    if (parsed.kind === 'all' && parsed.warn) {
+      // SSE has no per-response headers we can set after streaming starts, so
+      // log only. Frontend should be migrated to pass ?businessId or ?scope=all.
+      console.warn(
+        `[account-boundary] /v1/leads/events subscribed without businessId or scope=all (userId=${userId}) — streaming all accounts.`,
+      );
+    }
+
+    // Per-connection resolver. The cache is captured in the closure for this
+    // single SSE call — a new subscribe builds a fresh map.
+    const resolver = new SseBusinessIdResolver(this.prisma, userId);
+
+    /**
+     * Wraps a per-event-name observable with the account-scope filter and the
+     * SSE envelope. For `scope=all` we skip resolution entirely (cheap pass-
+     * through). For account scope we mergeMap into resolution + filter.
+     */
+    const scopedStream = (
+      eventName: string,
+      shape: (payload: any) => any,
+    ): Observable<MessageEvent> => {
+      const source = fromEvent(this.eventEmitter, eventName);
+      if (accountScope.kind === 'all') {
+        return source.pipe(map((payload) => ({ data: shape(payload) })));
+      }
+      return source.pipe(
+        mergeMap((payload) =>
+          from(
+            resolver.resolve(payload).then((resolved) => ({
+              pass: passesAccountFilter(accountScope, resolved),
+              payload,
+            })),
+          ),
+        ),
+        rxFilter((x) => x.pass),
+        map(({ payload }) => ({ data: shape(payload) })),
+      );
+    };
+
+    // Heartbeat every 30s prevents Railway's HTTP/2 proxy from killing the connection.
     return merge(
       interval(30000).pipe(
         map(() => ({ data: { type: 'heartbeat' } })),
       ),
-      fromEvent(this.eventEmitter, `lead.created.${userId}`).pipe(
-        map((lead) => ({
-          data: { type: 'lead.created', lead },
-        })),
-      ),
-      fromEvent(this.eventEmitter, `sms.inbound.${userId}`).pipe(
-        map((payload) => ({
-          data: { type: 'sms.inbound', ...(payload as any) },
-        })),
-      ),
-      fromEvent(this.eventEmitter, `sms.status.${userId}`).pipe(
-        map((payload) => ({
-          data: { type: 'sms.status', ...(payload as any) },
-        })),
-      ),
-      fromEvent(this.eventEmitter, `lead.status.conflict.${userId}`).pipe(
-        map((payload) => ({
-          data: { type: 'lead.status.conflict', ...(payload as any) },
-        })),
-      ),
+      scopedStream(`lead.created.${userId}`, (lead) => ({ type: 'lead.created', lead })),
+      scopedStream(`sms.inbound.${userId}`, (payload) => ({
+        type: 'sms.inbound',
+        ...(payload as any),
+      })),
+      scopedStream(`sms.status.${userId}`, (payload) => ({
+        type: 'sms.status',
+        ...(payload as any),
+      })),
+      scopedStream(`lead.status.conflict.${userId}`, (payload) => ({
+        type: 'lead.status.conflict',
+        ...(payload as any),
+      })),
     );
   }
 
