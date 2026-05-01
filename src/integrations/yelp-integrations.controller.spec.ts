@@ -441,6 +441,118 @@ describe('YelpIntegrationsController.collectLeads — status sync', () => {
     });
   });
 
+  // Cross-account guard mirrors the THUMBTACK_OTHER_ACCOUNT pattern shipped in
+  // 8ba4735 / e1a10f4. Same user, but the lead's existing row lives under a
+  // different Yelp SavedAccount — silently re-attributing under the operator-
+  // selected account would corrupt downstream filters / analytics.
+  describe('cross-account guard (same user, different businessId)', () => {
+    it('skips with otherAccount when existing lead belongs to a different Yelp business under same user', async () => {
+      const OTHER_BUSINESS_ID = 'biz-jacksonville';
+      const { controller, prisma, leadStatusService } = buildController({
+        existingLead: leadFixture({ businessId: OTHER_BUSINESS_ID }),
+      });
+      // Override the savedAccount findFirst sequence: first call resolves the
+      // current SavedAccount (Tampa, biz-1); second call resolves the owning
+      // SavedAccount for the message ("Spotless Homes Jacksonville").
+      prisma.savedAccount.findFirst
+        .mockResolvedValueOnce({
+          id: ACCOUNT_ID,
+          userId: USER_ID,
+          platform: 'yelp',
+          businessId: BUSINESS_ID, // 'biz-1' = Tampa
+          credentialsJson: 'encrypted-blob',
+        })
+        .mockResolvedValueOnce({ businessName: 'Spotless Homes Jacksonville' });
+
+      const result: any = await controller.collectLeads(FAKE_USER, {
+        ...COLLECT_BODY_BASE,
+        leadStatuses: { [LEAD_ID]: 'Hired' },
+      });
+
+      // Existing lead is NOT mutated — neither prisma.lead.update nor
+      // writeStatus fire when the cross-account guard catches it.
+      expect(prisma.lead.update).not.toHaveBeenCalled();
+      expect(leadStatusService.writeStatus).not.toHaveBeenCalled();
+
+      // Structured skip surfaces the owning SavedAccount.
+      expect(result.skipped).toBe(1);
+      expect(result.skippedDetails.otherAccount).toEqual([
+        {
+          id: LEAD_ID,
+          businessId: OTHER_BUSINESS_ID,
+          businessName: 'Spotless Homes Jacksonville',
+        },
+      ]);
+      expect(result.skippedDetails.wrongScope).toEqual([]);
+    });
+
+    it('does not engage the guard when existing.businessId matches the operator-selected account', async () => {
+      const { controller, leadStatusService } = buildController({
+        existingLead: leadFixture({ businessId: BUSINESS_ID }),
+      });
+
+      await controller.collectLeads(FAKE_USER, {
+        ...COLLECT_BODY_BASE,
+        leadStatuses: { [LEAD_ID]: 'Hired' },
+      });
+
+      // Same-account update path runs as normal — writeStatus fires.
+      expect(leadStatusService.writeStatus).toHaveBeenCalled();
+    });
+  });
+
+  describe('wrong-scope detection on Yelp API 403', () => {
+    it('skips with wrongScope and does NOT fall through to fallback-create when API returns 403', async () => {
+      const yelpForbidden: any = new Error('Request failed with status code 403');
+      yelpForbidden.response = {
+        status: 403,
+        data: { error: { code: 'NOT_AUTHORIZED', description: 'Lead not in your scope' } },
+      };
+      const { controller, prisma, leadStatusService } = buildController({
+        existingLead: null,
+        apiGetLead: { kind: 'throw', error: yelpForbidden },
+      });
+
+      const result: any = await controller.collectLeads(FAKE_USER, {
+        ...COLLECT_BODY_BASE,
+        leadStatuses: { [LEAD_ID]: 'Hired' },
+      });
+
+      // No fallback create — we don't own this lead.
+      expect(prisma.lead.create).not.toHaveBeenCalled();
+      expect(leadStatusService.writeStatus).not.toHaveBeenCalled();
+
+      expect(result.imported).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect(result.skippedDetails.wrongScope).toEqual([
+        {
+          id: LEAD_ID,
+          message: 'This lead belongs to a different connected Yelp account.',
+        },
+      ]);
+      expect(result.skippedDetails.otherAccount).toEqual([]);
+    });
+
+    it('still falls through to fallback-create on 401 (token expired, not wrong scope)', async () => {
+      const tokenExpired: any = new Error('Request failed with status code 401');
+      tokenExpired.response = { status: 401 };
+      const { controller, prisma, leadStatusService } = buildController({
+        existingLead: null,
+        apiGetLead: { kind: 'throw', error: tokenExpired },
+      });
+
+      await controller.collectLeads(FAKE_USER, {
+        ...COLLECT_BODY_BASE,
+        leadStatuses: { [LEAD_ID]: 'Hired' },
+      });
+
+      // 401 = token problem, not scope problem. Existing fallback-create
+      // path still runs so the operator at least has a row to reconnect from.
+      expect(prisma.lead.create).toHaveBeenCalledTimes(1);
+      expect(leadStatusService.writeStatus).toHaveBeenCalled();
+    });
+  });
+
   describe('new lead creation — API-success path', () => {
     it('Active → lead created with canonical "new", writeStatus carries raw → canonical', async () => {
       const { controller, prisma, leadStatusService } = buildController({

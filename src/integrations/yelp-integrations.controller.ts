@@ -72,6 +72,15 @@ export class YelpIntegrationsController {
     let imported = 0;
     let skipped = 0;
     let failed = 0;
+    // Structured skip reasons returned alongside the aggregate `skipped` count
+    // so the operator UI can surface what actually happened (which leads
+    // belong to a different connected Yelp account, which were rejected by
+    // Yelp's API for scope reasons). Mirror of the `skipped` payload added
+    // in the Thumbtack reimport flow.
+    const skippedOtherAccount: Array<{ id: string; businessId: string | null; businessName: string | null }> = [];
+    const skippedWrongScope: Array<{ id: string; message: string }> = [];
+
+    const currentBusinessId = businessId || account.businessId || null;
 
     for (const leadId of leadIds) {
       // Check if already exists
@@ -85,6 +94,37 @@ export class YelpIntegrationsController {
         // tenant's lead — silently skip (don't leak existence by erroring).
         if (existing.userId !== user.id) {
           this.logger.warn(`[Yelp Import] Skipping lead ${leadId}: existing row owned by another user`);
+          skipped++;
+          continue;
+        }
+
+        // Cross-account guard within the same user. Operator picked
+        // savedAccount X but this lead's existing row lives under businessId
+        // Y. Updating it under X's import context would silently re-attribute
+        // the lead — and downstream filters / analytics would assume the
+        // wrong account. Skip and surface the owning account so the operator
+        // knows where to look.
+        if (
+          existing.businessId &&
+          currentBusinessId &&
+          existing.businessId !== currentBusinessId
+        ) {
+          const ownerAccount = await this.prisma.savedAccount.findFirst({
+            where: { userId: user.id, platform: 'yelp', businessId: existing.businessId },
+            select: { businessName: true },
+          });
+          this.logger.log(
+            `[Yelp Import] other_account_skip leadId=${leadId} ` +
+              `existingBusinessId=${existing.businessId} ` +
+              `currentBusinessId=${currentBusinessId} ` +
+              `accountId=${savedAccountId} ` +
+              `owner=${ownerAccount?.businessName ?? 'unknown'}`,
+          );
+          skippedOtherAccount.push({
+            id: leadId,
+            businessId: existing.businessId,
+            businessName: ownerAccount?.businessName ?? null,
+          });
           skipped++;
           continue;
         }
@@ -233,8 +273,31 @@ export class YelpIntegrationsController {
         imported++;
         this.logger.log(`[Yelp Import] Imported lead ${leadId}: ${leadData.customerName}`);
       } catch (err: any) {
+        const status = err.response?.status ?? (err.message?.match(/\b(\d{3})\b/)?.[1]
+          ? Number(err.message.match(/\b(\d{3})\b/)[1])
+          : undefined);
+
+        // 403 means the Yelp token is valid but doesn't have access to this
+        // specific lead — typically because the lead belongs to a Yelp
+        // business connected under a different SavedAccount. Don't fall
+        // through to the fallback-create path: we don't own this lead and
+        // creating a row from the scraped metadata would re-attribute it
+        // to the wrong account. Skip and surface as wrongScope, no retry.
+        if (status === 403) {
+          this.logger.warn(
+            `[Yelp Import] wrong_scope leadId=${leadId} accountId=${savedAccountId} ` +
+              `businessId=${currentBusinessId} status=403 message=${err.message ?? 'none'}`,
+          );
+          skippedWrongScope.push({
+            id: leadId,
+            message: 'This lead belongs to a different connected Yelp account.',
+          });
+          skipped++;
+          continue;
+        }
+
         // If API fails, create minimal lead from scraped metadata
-        const is401 = err.message?.includes('401') || err.response?.status === 401;
+        const is401 = status === 401 || err.message?.includes('401');
         if (is401) {
           this.logger.warn(`[Yelp Import] 401 for lead ${leadId} — creating from scraped data`);
         } else {
@@ -290,8 +353,26 @@ export class YelpIntegrationsController {
       }
     }
 
-    this.logger.log(`[Yelp Import] Done: ${imported} imported, ${skipped} skipped, ${failed} failed`);
-    return { ok: true, imported, skipped, failed, total: leadIds.length };
+    this.logger.log(
+      `[Yelp Import] Done: ${imported} imported, ${skipped} skipped ` +
+        `(otherAccount=${skippedOtherAccount.length} wrongScope=${skippedWrongScope.length}), ${failed} failed`,
+    );
+    // Top-level `skipped` stays a number for backwards compatibility with
+    // existing extension consumers; `skippedDetails` carries the structured
+    // breakdown so the operator UI can render "X already in <other account>"
+    // / "Y belong to a different connected Yelp account" partial-success
+    // messages instead of an opaque skipped count.
+    return {
+      ok: true,
+      imported,
+      skipped,
+      skippedDetails: {
+        otherAccount: skippedOtherAccount,
+        wrongScope: skippedWrongScope,
+      },
+      failed,
+      total: leadIds.length,
+    };
   }
 
   /**
