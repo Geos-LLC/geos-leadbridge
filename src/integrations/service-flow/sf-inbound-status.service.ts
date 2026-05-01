@@ -101,16 +101,19 @@ export class SfInboundStatusService {
     const ts = this.pickHeader(headers.timestamp);
 
     if (!subId || !sig || !ts) {
+      this.logger.warn(`[SfInbound] event_id=null lead_id=null result=unauthorized error=missing_headers`);
       return { httpStatus: 401, result: 'unauthorized', eventId: 'n/a', error: 'missing headers' };
     }
 
     // Timestamp drift check
     const tsNum = parseInt(ts, 10);
     if (!Number.isFinite(tsNum)) {
+      this.logger.warn(`[SfInbound] event_id=null lead_id=null result=unauthorized error=invalid_timestamp`);
       return { httpStatus: 401, result: 'unauthorized', eventId: 'n/a', error: 'invalid timestamp' };
     }
     const nowSec = Math.floor(Date.now() / 1000);
     if (Math.abs(nowSec - tsNum) > SIGNATURE_SKEW_SECONDS) {
+      this.logger.warn(`[SfInbound] event_id=null lead_id=null result=unauthorized error=timestamp_drift`);
       return { httpStatus: 401, result: 'unauthorized', eventId: 'n/a', error: 'timestamp drift' };
     }
 
@@ -118,6 +121,7 @@ export class SfInboundStatusService {
       where: { id: subId },
     });
     if (!subscription || !subscription.isActive || subscription.direction !== 'inbound') {
+      this.logger.warn(`[SfInbound] event_id=null lead_id=null result=noop error=subscription_not_found sub_id=${subId}`);
       return { httpStatus: 404, result: 'noop', eventId: 'n/a', error: 'subscription not found' };
     }
 
@@ -125,14 +129,15 @@ export class SfInboundStatusService {
     // Normalize the caller's signature: accept both `sha256=<hex>` and raw hex.
     const receivedHex = sig.startsWith('sha256=') ? sig.slice('sha256='.length) : sig;
     if (!this.timingSafeEqual(expected, receivedHex)) {
-      // Log but don't expose details in response
-      this.logger.warn(`[SfInbound] Signature mismatch for subscription ${subId}`);
+      const unauthEventId = 'unauth_' + crypto.randomUUID();
+      this.logger.warn(`[SfInbound] event_id=${unauthEventId} lead_id=null result=unauthorized error=signature_mismatch sub_id=${subId}`);
       await this.recordEvent({
-        eventId: 'unauth_' + crypto.randomUUID(),
+        eventId: unauthEventId,
         eventType: 'unknown',
         occurredAt: new Date(),
         status: 'unauthorized',
         result: 'signature_mismatch',
+        processingError: 'signature_mismatch',
         payloadJson: { rawBodyLength: rawBody.length, subscriptionId: subId },
         userId: subscription.userId,
       });
@@ -144,12 +149,30 @@ export class SfInboundStatusService {
     try {
       payload = JSON.parse(rawBody);
     } catch {
+      this.logger.warn(`[SfInbound] event_id=null lead_id=null result=noop error=invalid_json sub_id=${subId}`);
       return { httpStatus: 400, result: 'noop', eventId: 'n/a', error: 'invalid json' };
     }
 
     const missing = this.validatePayload(payload);
     if (missing) {
-      return { httpStatus: 400, result: 'noop', eventId: payload?.event_id || 'n/a', error: `missing ${missing}` };
+      const eventId = payload?.event_id || 'n/a';
+      this.logger.warn(`[SfInbound] event_id=${eventId} lead_id=null result=noop error=missing_${missing}`);
+      // Persist a row so the failure is queryable, not just log-only.
+      if (payload?.event_id) {
+        await this.recordEvent({
+          eventId: payload.event_id,
+          eventType: payload.event_type || 'unknown',
+          occurredAt: payload.occurred_at ? new Date(payload.occurred_at) : new Date(),
+          sfJobId: payload.sf_job_id,
+          sfSubscriptionId: subscription.id,
+          userId: subscription.userId,
+          status: 'noop',
+          result: `validation_failed:${missing}`,
+          processingError: `missing_${missing}`,
+          payloadJson: payload,
+        });
+      }
+      return { httpStatus: 400, result: 'noop', eventId, error: `missing ${missing}` };
     }
 
     // ------------------------ Idempotency ------------------------
@@ -208,6 +231,7 @@ export class SfInboundStatusService {
         result: 'lead_not_found',
         payloadJson: payload,
       });
+      this.logger.log(`[SfInbound] event_id=${payload.event_id} lead_id=null result=deferred error=lead_not_found sf_job_id=${payload.sf_job_id}`);
       return { httpStatus: 200, result: 'deferred', eventId: payload.event_id, leadId: null };
     }
 
@@ -231,6 +255,7 @@ export class SfInboundStatusService {
         result: 'older_than_last_sf_event',
         payloadJson: payload,
       });
+      this.logger.log(`[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=stale error=older_than_last_sf_event`);
       return { httpStatus: 200, result: 'stale', eventId: payload.event_id, leadId: lead.id };
     }
 
@@ -247,8 +272,10 @@ export class SfInboundStatusService {
         sfSubscriptionId: subscription.id,
         status: 'unmapped_status',
         result: `unknown_sf_status:${payload.status.new}`,
+        processingError: `unmapped_status:${payload.status.new}`,
         payloadJson: payload,
       });
+      this.logger.warn(`[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=unmapped_status error=unknown_sf_status:${payload.status.new}`);
       return {
         httpStatus: 422,
         result: 'unmapped_status',
@@ -272,6 +299,7 @@ export class SfInboundStatusService {
         result: 'status_unchanged',
         payloadJson: payload,
       });
+      this.logger.log(`[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=noop error=null`);
       return { httpStatus: 200, result: 'noop', eventId: payload.event_id, leadId: lead.id };
     }
 
@@ -289,6 +317,7 @@ export class SfInboundStatusService {
         result: `would_apply:${canonical}`,
         payloadJson: payload,
       });
+      this.logger.log(`[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=dry_run error=null would_apply=${canonical}`);
       return { httpStatus: 200, result: 'dry_run', eventId: payload.event_id, leadId: lead.id };
     }
 
@@ -335,6 +364,7 @@ export class SfInboundStatusService {
         result: `lead_status_skip:${skip ?? 'unknown'}`,
         payloadJson: payload,
       });
+      this.logger.log(`[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=${result} error=lead_status_skip:${skip ?? 'unknown'}`);
       return { httpStatus: 200, result, eventId: payload.event_id, leadId: lead.id };
     }
 
@@ -361,7 +391,7 @@ export class SfInboundStatusService {
     }
 
     this.logger.log(
-      `[SfInbound] Applied ${oldStatus} → ${canonical} for lead ${lead.id} (sfJob=${payload.sf_job_id})`,
+      `[SfInbound] event_id=${payload.event_id} lead_id=${lead.id} result=applied error=null status=${canonical} old_status=${oldStatus} sf_job_id=${payload.sf_job_id}`,
     );
 
     return { httpStatus: 200, result: 'applied', eventId: payload.event_id, leadId: lead.id };
@@ -408,6 +438,9 @@ export class SfInboundStatusService {
     occurredAt: Date;
     status: ProcessResult | 'unauthorized';
     result?: string | null;
+    /** Populated when ingest threw, validation failed, signature mismatched,
+     *  or status was unmappable. Surfaces in /v1/integrations/health. */
+    processingError?: string | null;
     payloadJson: any;
     userId?: string | null;
     leadId?: string | null;
@@ -422,6 +455,7 @@ export class SfInboundStatusService {
           occurredAt: args.occurredAt,
           status: args.status,
           result: args.result ?? null,
+          processingError: args.processingError ?? null,
           payloadJson: args.payloadJson ?? {},
           userId: args.userId ?? null,
           leadId: args.leadId ?? null,
@@ -430,7 +464,9 @@ export class SfInboundStatusService {
         },
       });
     } catch (err: any) {
-      this.logger.warn(`[SfInbound] Failed to persist event ${args.eventId}: ${err.message}`);
+      this.logger.warn(
+        `[SfInbound] event_id=${args.eventId} lead_id=${args.leadId ?? 'null'} result=persist_failed error=${(err?.message ?? 'unknown').replace(/\s+/g, ' ').slice(0, 200)}`,
+      );
     }
   }
 

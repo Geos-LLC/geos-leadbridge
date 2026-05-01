@@ -1309,6 +1309,9 @@ model SfInboundEvent {
   receivedAt       DateTime @default(now())
   status           String // 'applied'|'noop'|'deferred'|'stale'|'unmapped_status'|'unauthorized'|'dry_run'
   result           String?
+  // Populated when ingest threw, validation failed, signature mismatched,
+  // or status was unmappable. Surfaces in /v1/integrations/health failed count.
+  processingError  String?
   payloadJson      Json
 
   lead Lead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
@@ -1317,6 +1320,27 @@ model SfInboundEvent {
   @@index([status, receivedAt])
   @@index([sfJobId])
   @@map("sf_inbound_events")
+}
+
+// LB → external CRM outbound delivery audit. One row per (subscription, event_id)
+// attempt cluster — attempts increments on each retry, state moves
+// pending → sent | failed. event_id is the same id sent in the payload, so it
+// links to the receiver's inbound event row + LB's LeadStatusAuditLog.sourceEventId.
+model CrmWebhookDelivery {
+  id             String    @id @default(uuid())
+  subscriptionId String
+  eventType      String
+  eventId        String
+  attempts       Int       @default(0)
+  state          String // 'pending' | 'sent' | 'failed'
+  lastStatusCode Int?
+  lastError      String?
+  deliveredAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([eventId])
+  @@map("crm_webhook_deliveries")
 }
 
 model LeadStatusAuditLog {

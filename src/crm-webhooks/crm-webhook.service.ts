@@ -92,6 +92,13 @@ export interface CrmEventContext {
   messageSenderType?: 'user' | 'ai' | 'customer' | null;
   previousStatus?: string | null;
   raw?: any;
+  /**
+   * Optional caller-supplied event id. When present it becomes the
+   * payload.event_id sent to the receiver AND CrmWebhookDelivery.eventId,
+   * so a single id traces LB write → outbound delivery → SF inbound →
+   * downstream audit log. When absent, a fresh evt_<uuid> is generated.
+   */
+  eventId?: string;
 }
 
 @Injectable()
@@ -117,7 +124,9 @@ export class CrmWebhookService {
           select: { statusSource: true },
         });
         if (lead?.statusSource === 'service_flow') {
-          this.logger.debug(`[CrmWebhook] Suppressing lead.status_changed for ${context.leadId} — source is service_flow (loop guard)`);
+          this.logger.debug(
+            `[CrmWebhook] event_id=null sub_id=null attempt=0 status_code=null result=loop_suppressed event_type=${eventType} lead_id=${context.leadId}`,
+          );
           return;
         }
       }
@@ -139,7 +148,9 @@ export class CrmWebhookService {
         matching.map(sub => this.sendWebhook(sub, payload)),
       );
     } catch (err: any) {
-      this.logger.error(`[CrmWebhook] emit failed for ${eventType}: ${err.message}`);
+      this.logger.error(
+        `[CrmWebhook] event_id=null sub_id=null attempt=0 status_code=null result=failed event_type=${eventType} error=${this.sanitizeError(err?.message)}`,
+      );
       // Never rethrow — must not break core processing
     }
   }
@@ -178,7 +189,7 @@ export class CrmWebhookService {
     }
 
     return {
-      event_id: `evt_${crypto.randomUUID()}`,
+      event_id: ctx.eventId || `evt_${crypto.randomUUID()}`,
       event_type: eventType,
       occurred_at: new Date().toISOString(),
 
@@ -244,7 +255,8 @@ export class CrmWebhookService {
 
   /**
    * Send webhook to a subscription endpoint with HMAC-SHA256 signature.
-   * Retries once on failure.
+   * Persists a CrmWebhookDelivery row keyed by payload.event_id; updates
+   * attempts/state/lastStatusCode/lastError after each attempt. Retries once.
    */
   private async sendWebhook(subscription: any, payload: CrmEventPayload): Promise<void> {
     const body = JSON.stringify(payload);
@@ -258,24 +270,103 @@ export class CrmWebhookService {
       'X-LB-Event': payload.event_type,
     };
 
+    // Create the delivery row up front. attempts increments per attempt.
+    let deliveryId: string | null = null;
+    try {
+      const row = await this.prisma.crmWebhookDelivery.create({
+        data: {
+          subscriptionId: subscription.id,
+          eventType: payload.event_type,
+          eventId: payload.event_id,
+          attempts: 0,
+          state: 'pending',
+        },
+        select: { id: true },
+      });
+      deliveryId = row.id;
+    } catch (err: any) {
+      // Persistence failure must never break delivery — log and continue.
+      this.logger.warn(
+        `[CrmWebhook] event_id=${payload.event_id} sub_id=${subscription.id} attempt=0 status_code=null result=persist_failed error=${this.sanitizeError(err?.message)}`,
+      );
+    }
+
+    const axios = require('axios');
+
     // Attempt 1
     try {
-      const axios = require('axios');
-      await axios.post(subscription.webhookUrl, body, { headers, timeout: 10000 });
-      this.logger.log(`[CrmWebhook] Delivered ${payload.event_type} to ${subscription.name}`);
+      const res = await axios.post(subscription.webhookUrl, body, { headers, timeout: 10000 });
+      await this.recordDelivery(deliveryId, {
+        attempts: 1,
+        state: 'sent',
+        lastStatusCode: res?.status ?? 200,
+        deliveredAt: new Date(),
+      });
+      this.logger.log(
+        `[CrmWebhook] event_id=${payload.event_id} sub_id=${subscription.id} attempt=1 status_code=${res?.status ?? 200} result=success`,
+      );
       return;
     } catch (err: any) {
-      this.logger.warn(`[CrmWebhook] Attempt 1 failed for ${subscription.name}: ${err.message}`);
+      const status = err?.response?.status ?? null;
+      await this.recordDelivery(deliveryId, {
+        attempts: 1,
+        state: 'pending',
+        lastStatusCode: status,
+        lastError: this.sanitizeError(err?.message),
+      });
+      this.logger.warn(
+        `[CrmWebhook] event_id=${payload.event_id} sub_id=${subscription.id} attempt=1 status_code=${status ?? 'null'} result=failed error=${this.sanitizeError(err?.message)}`,
+      );
     }
 
     // Attempt 2 (retry)
     try {
-      const axios = require('axios');
-      await axios.post(subscription.webhookUrl, body, { headers, timeout: 15000 });
-      this.logger.log(`[CrmWebhook] Delivered ${payload.event_type} to ${subscription.name} (retry)`);
+      const res = await axios.post(subscription.webhookUrl, body, { headers, timeout: 15000 });
+      await this.recordDelivery(deliveryId, {
+        attempts: 2,
+        state: 'sent',
+        lastStatusCode: res?.status ?? 200,
+        deliveredAt: new Date(),
+      });
+      this.logger.log(
+        `[CrmWebhook] event_id=${payload.event_id} sub_id=${subscription.id} attempt=2 status_code=${res?.status ?? 200} result=success`,
+      );
     } catch (err: any) {
-      this.logger.error(`[CrmWebhook] Failed to deliver ${payload.event_type} to ${subscription.name} after retry: ${err.message}`);
+      const status = err?.response?.status ?? null;
+      await this.recordDelivery(deliveryId, {
+        attempts: 2,
+        state: 'failed',
+        lastStatusCode: status,
+        lastError: this.sanitizeError(err?.message),
+      });
+      this.logger.error(
+        `[CrmWebhook] event_id=${payload.event_id} sub_id=${subscription.id} attempt=2 status_code=${status ?? 'null'} result=failed error=${this.sanitizeError(err?.message)}`,
+      );
     }
+  }
+
+  private async recordDelivery(
+    id: string | null,
+    patch: {
+      attempts?: number;
+      state?: 'pending' | 'sent' | 'failed';
+      lastStatusCode?: number | null;
+      lastError?: string | null;
+      deliveredAt?: Date;
+    },
+  ): Promise<void> {
+    if (!id) return;
+    try {
+      await this.prisma.crmWebhookDelivery.update({ where: { id }, data: patch });
+    } catch {
+      // best-effort
+    }
+  }
+
+  private sanitizeError(msg: string | undefined | null): string {
+    if (!msg) return 'unknown';
+    // Strip newlines/spaces so the k=v log line stays parseable.
+    return String(msg).replace(/\s+/g, ' ').slice(0, 300);
   }
 
   /**

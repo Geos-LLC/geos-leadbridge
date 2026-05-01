@@ -30,6 +30,7 @@ import { TeamsModule } from './teams/teams.module';
 import { CrmWebhookModule } from './crm-webhooks/crm-webhook.module';
 import { ServiceFlowModule } from './integrations/service-flow/service-flow.module';
 import { HealthModule } from './health/health.module';
+import { IntegrationsHealthModule } from './integrations/health/integrations-health.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { TrialModule } from './trial/trial.module';
@@ -75,6 +76,7 @@ import { AuditModule } from './common/audit/audit.module';
     CrmWebhookModule,
     ServiceFlowModule,
     HealthModule,
+    IntegrationsHealthModule,
     MonitoringModule,
     OnboardingModule,
   ],

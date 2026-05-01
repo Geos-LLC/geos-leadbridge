@@ -19,11 +19,12 @@
  * conflictNote. The frontend lists unresolved conflicts and shows a modal.
  */
 
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '../../generated/prisma';
 import { PrismaService } from '../common/utils/prisma.service';
+import { IntegrationMetricsService } from '../integrations/health/integration-metrics.service';
 import {
   AUTOMATION_TERMINAL,
   HARD_TERMINAL,
@@ -175,7 +176,28 @@ export class LeadStatusService {
     private readonly prisma: PrismaService,
     private readonly events: EventEmitter2,
     private readonly config: ConfigService,
+    // Optional so existing unit tests that instantiate `new LeadStatusService(prisma, events, config)`
+    // continue to compile without churn. In production DI always wires it.
+    @Optional() private readonly metrics: IntegrationMetricsService | null = null,
   ) {}
+
+  /**
+   * Standard k=v skip log. Loki-friendly — every guard rejection emits the
+   * same shape so dashboards/alerts can filter on `skip_reason=`.
+   */
+  private logSkip(
+    input: WriteStatusInput,
+    leadId: string,
+    oldStatus: string,
+    newStatus: string,
+    skipReason: WriteSkipReason,
+    platformStatus: string | null,
+    level: 'log' | 'warn' = 'log',
+  ): void {
+    const line = `[LeadStatus] event_id=${input.sourceEventId ?? 'null'} lead_id=${leadId} source=${input.source} result=skipped skip_reason=${skipReason} status=${oldStatus} platform_status=${platformStatus ?? 'null'} attempted=${newStatus}`;
+    if (level === 'warn') this.logger.warn(line);
+    else this.logger.log(line);
+  }
 
   /**
    * Write a status for a lead. Routes through 8 guards (see WriteSkipReason)
@@ -248,9 +270,7 @@ export class LeadStatusService {
 
     // ── Guard 3: hard-terminal blocks all sources ─────────────────────────
     if (HARD_TERMINAL.has(oldStatus)) {
-      this.logger.warn(
-        `[LeadStatus] hard_terminal — blocked ${input.source} write ${oldStatus}→${newStatus} on lead ${lead.id}`,
-      );
+      this.logSkip(input, lead.id, oldStatus, newStatus, 'hard_terminal', null, 'warn');
       return this.skipped(lead, 'hard_terminal');
     }
 
@@ -261,9 +281,8 @@ export class LeadStatusService {
     // csv allowlist (SF_STATUS_WINS_USER_IDS). See isSfAuthorityActive().
     const sfActive = lead.sfJobId ? this.isSfAuthorityActive(lead.userId) : false;
     if (sfActive && input.source === 'lb_automation') {
-      this.logger.log(
-        `[LeadStatus] sf_protected — blocked lb_automation write on SF-linked lead ${lead.id} (sfJobId=${lead.sfJobId}, userId=${lead.userId})`,
-      );
+      this.metrics?.recordSkip('sf_protected');
+      this.logSkip(input, lead.id, oldStatus, newStatus, 'sf_protected', lead.platformStatus);
       return this.skipped(lead, 'sf_protected');
     }
 
@@ -271,9 +290,7 @@ export class LeadStatusService {
     // Manual + SF can still transition out of these (e.g. operator marks
     // a `lost` lead as `engaged` after a re-engagement reply).
     if (AUTOMATION_TERMINAL.has(oldStatus) && input.source === 'lb_automation') {
-      this.logger.log(
-        `[LeadStatus] automation_terminal — blocked lb_automation write ${oldStatus}→${newStatus} on lead ${lead.id}`,
-      );
+      this.logSkip(input, lead.id, oldStatus, newStatus, 'automation_terminal', lead.platformStatus);
       return this.skipped(lead, 'automation_terminal');
     }
 
@@ -281,9 +298,8 @@ export class LeadStatusService {
     // Off-pipeline transitions (anything involving a terminal) are exempt
     // because terminals are not in PIPELINE_ORDER.
     if (isPipelineDowngrade(oldStatus, newStatus)) {
-      this.logger.log(
-        `[LeadStatus] pipeline_downgrade — blocked ${input.source} write ${oldStatus}→${newStatus} on lead ${lead.id}`,
-      );
+      this.metrics?.recordSkip('pipeline_downgrade');
+      this.logSkip(input, lead.id, oldStatus, newStatus, 'pipeline_downgrade', lead.platformStatus);
       return this.skipped(lead, 'pipeline_downgrade');
     }
 
@@ -299,9 +315,7 @@ export class LeadStatusService {
         select: { id: true },
       });
       if (dup) {
-        this.logger.log(
-          `[LeadStatus] duplicate — already saw (${input.source}, ${input.sourceEventId}) on lead ${lead.id}`,
-        );
+        this.logSkip(input, lead.id, oldStatus, newStatus, 'duplicate', lead.platformStatus);
         return this.skipped(lead, 'duplicate');
       }
     }
@@ -309,9 +323,7 @@ export class LeadStatusService {
     // ── Guard 8: stale-event (occurredAt < lead.statusUpdatedAt) ──────────
     // Prevents an old webhook retry from overwriting a newer state.
     if (lead.statusUpdatedAt && occurredAt < lead.statusUpdatedAt) {
-      this.logger.warn(
-        `[LeadStatus] stale_event — ${input.source} occurredAt=${occurredAt.toISOString()} < lead.statusUpdatedAt=${lead.statusUpdatedAt.toISOString()} on lead ${lead.id}`,
-      );
+      this.logSkip(input, lead.id, oldStatus, newStatus, 'stale_event', lead.platformStatus, 'warn');
       return this.skipped(lead, 'stale_event');
     }
 
@@ -412,12 +424,12 @@ export class LeadStatusService {
         conflict,
       });
       this.logger.warn(
-        `[LeadStatus] Conflict on lead ${lead.id}: ${conflict.kind} — ${conflict.note}`,
+        `[LeadStatus] event_id=${input.sourceEventId ?? 'null'} lead_id=${lead.id} source=${input.source} result=conflict skip_reason=null status=${newStatus} platform_status=${lead.platformStatus ?? 'null'} kind=${conflict.kind}`,
       );
     }
 
     this.logger.log(
-      `[LeadStatus] ${input.source} wrote ${oldStatus}→${newStatus} on lead ${lead.id}${conflict ? ' (CONFLICT)' : ''}`,
+      `[LeadStatus] event_id=${input.sourceEventId ?? 'null'} lead_id=${lead.id} source=${input.source} result=${conflict ? 'applied_with_conflict' : 'applied'} skip_reason=null status=${newStatus} platform_status=${lead.platformStatus ?? 'null'} old_status=${oldStatus}`,
     );
 
     return {
@@ -480,7 +492,7 @@ export class LeadStatusService {
     // accepted status transition (out-of-order webhook retries).
     if (lead.statusUpdatedAt && occurredAt < lead.statusUpdatedAt) {
       this.logger.warn(
-        `[LeadStatus] stale_event — platform_sync occurredAt=${occurredAt.toISOString()} < lead.statusUpdatedAt=${lead.statusUpdatedAt.toISOString()} on lead ${lead.id}`,
+        `[LeadStatus] event_id=${input.sourceEventId ?? 'null'} lead_id=${lead.id} source=platform_sync result=skipped skip_reason=stale_event status=${lead.status} platform_status=${input.platformStatus ?? lead.platformStatus ?? 'null'} occurred_at=${occurredAt.toISOString()} status_updated_at=${lead.statusUpdatedAt.toISOString()}`,
       );
       return this.skipped(lead, 'stale_event');
     }
@@ -569,14 +581,15 @@ export class LeadStatusService {
 
     if (lbStatusBlocked) {
       // Partial-skip: platformStatus was written but canonical Lead.status
-      // was held back by a guard. Log greppably so operators can confirm the
-      // guard fired (search Loki for `skipReason=pipeline_downgrade` etc.).
+      // was held back by a guard. Counter feeds /v1/integrations/health.
+      if (lbStatusBlocked === 'sf_protected') this.metrics?.recordSkip('sf_protected');
+      if (lbStatusBlocked === 'pipeline_downgrade') this.metrics?.recordSkip('pipeline_downgrade');
       this.logger.log(
-        `[LeadStatus] platform_sync skipReason=${lbStatusBlocked} lead=${lead.id} platform=${lead.platform} attempted=${input.newStatus} current=${oldLbStatus} platformStatus=${input.platformStatus ?? 'null'}`,
+        `[LeadStatus] event_id=${input.sourceEventId ?? 'null'} lead_id=${lead.id} source=platform_sync result=partial_skip skip_reason=${lbStatusBlocked} status=${oldLbStatus} platform_status=${input.platformStatus ?? oldPlatform ?? 'null'} attempted=${input.newStatus ?? 'null'} platform=${lead.platform}`,
       );
     } else {
       this.logger.log(
-        `[LeadStatus] platform_sync applied lead=${lead.id} platform=${lead.platform} status=${input.newStatus ?? oldLbStatus} platformStatus=${input.platformStatus ?? oldPlatform ?? 'null'}`,
+        `[LeadStatus] event_id=${input.sourceEventId ?? 'null'} lead_id=${lead.id} source=platform_sync result=applied skip_reason=null status=${input.newStatus ?? oldLbStatus} platform_status=${input.platformStatus ?? oldPlatform ?? 'null'} platform=${lead.platform}`,
       );
     }
 
