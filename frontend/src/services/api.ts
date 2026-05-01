@@ -1597,23 +1597,26 @@ export const integrationsApi = {
     return data;
   },
   // Persist a budget snapshot. Used for both Thumbtack (weekly, via Chrome ext)
-  // and Yelp (monthly, manually entered). For Yelp, pass period:'monthly' which
-  // routes through snapshotType='budget_monthly' — kept distinct from the TT
-  // 'budget' snapshots so they never overwrite each other.
+  // and Yelp (monthly, manually entered, per calendar month).
+  // For Yelp, pass cadence:'monthly' which routes through snapshotType='budget_monthly'.
+  // Optional periodMonth ('YYYY-MM') tags the snapshot to a specific calendar month
+  // so each month gets its own independent history.
   saveBudgetSnapshot: async (params: {
     savedAccountId: string;
     provider: 'thumbtack' | 'yelp';
     amount: number;
-    period: 'weekly' | 'monthly';
+    cadence: 'weekly' | 'monthly';
+    periodMonth?: string;
     currency?: string;
   }): Promise<{ ok: boolean; snapshotId: string }> => {
     const { data } = await api.post('/integrations/thumbtack/snapshots/budget', {
       savedAccountId: params.savedAccountId,
       provider: params.provider,
-      snapshotType: params.period === 'monthly' ? 'budget_monthly' : 'budget',
+      snapshotType: params.cadence === 'monthly' ? 'budget_monthly' : 'budget',
       capturedAt: new Date().toISOString(),
       source: 'manual',
       budget: { weekly: params.amount, currency: params.currency || 'USD' },
+      ...(params.periodMonth ? { scope: { period: params.periodMonth } } : {}),
     });
     return data;
   },

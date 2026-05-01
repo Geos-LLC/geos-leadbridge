@@ -26,6 +26,12 @@ class ScopeDto {
   @IsOptional()
   @IsString()
   location?: string;
+
+  // Calendar period the snapshot applies to, formatted as 'YYYY-MM'.
+  // Used for Yelp monthly budgets so each month has its own history.
+  @IsOptional()
+  @IsString()
+  period?: string;
 }
 
 class BudgetDto {
