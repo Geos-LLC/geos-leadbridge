@@ -9,10 +9,11 @@
  * Error logging is deduped by (category, accountId, platform, code).
  */
 
-import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../common/utils/prisma.service';
+import { PipelineIntegrityService } from './pipeline-integrity.service';
 
 export interface CaptureErrorOptions {
   category: 'automation' | 'token_refresh' | 'webhook' | 'notification' | 'yelp' | 'other';
@@ -44,6 +45,10 @@ export class MonitoringService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    // Optional so existing direct-instantiation patterns (live-* scripts,
+    // pipeline-health.service.spec) don't have to wire it. Production DI
+    // always populates it.
+    @Optional() private readonly pipelineIntegrity: PipelineIntegrityService | null = null,
   ) {}
 
   /**
@@ -98,6 +103,19 @@ export class MonitoringService implements OnModuleInit {
             category: options.category,
             userId: options.userId,
             code: options.code,
+            accountId: null,
+            resolved: false,
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+      } else if (options.code) {
+        // System-level dedup: neither userId nor accountId is set. Used by the
+        // weekly pipeline integrity cron (code='pipeline_integrity_failed').
+        existing = await this.prisma.systemErrorLog.findFirst({
+          where: {
+            category: options.category,
+            code: options.code,
+            userId: null,
             accountId: null,
             resolved: false,
           },
@@ -268,6 +286,112 @@ export class MonitoringService implements OnModuleInit {
     } finally {
       await this.prisma.$queryRawUnsafe('SELECT pg_advisory_unlock(7003)').catch(() => {});
     }
+  }
+
+  // ==========================================
+  // Weekly Pipeline Integrity Check (Phase 5)
+  //
+  // Runs the same 5 checks as scripts/integrity-check-pipeline.js. On failure,
+  // creates a SystemErrorLog row with code='pipeline_integrity_failed' that
+  // dedups via captureError's system-level branch (no userId, no accountId).
+  //
+  // Cron expression '0 3 * * 0' = Sunday 03:00 UTC. Advisory lock 7004 prevents
+  // staging+production double-execution against the shared DB.
+  //
+  // Read-only — never mutates leads, never auto-fixes, never triggers backfills.
+  // ==========================================
+
+  @Cron('0 3 * * 0')
+  async weeklyPipelineIntegrityCheck(): Promise<void> {
+    if (!this.pipelineIntegrity) {
+      this.logger.warn('[PipelineIntegrity] service not wired — cron skipped');
+      return;
+    }
+
+    const lockResult = await this.prisma
+      .$queryRawUnsafe<any[]>('SELECT pg_try_advisory_lock(7004) AS locked')
+      .catch(() => [{ locked: false }]);
+    if (!lockResult?.[0]?.locked) {
+      this.logger.debug('[PipelineIntegrity] Another instance holds the lock — skipping');
+      return;
+    }
+
+    try {
+      const result = await this.pipelineIntegrity.runChecks();
+
+      if (result.ok) {
+        this.logger.log('[PipelineIntegrity] result=ok failed_count=0 summary="all 5 checks passed"');
+        return;
+      }
+
+      // Single k=v line so Loki/dashboards can filter on result=failed.
+      const failedCheckNames = result.results
+        .filter((r) => r.severity === 'fail')
+        .map((r) => `${r.check}:${r.count}`)
+        .join(',');
+      this.logger.error(
+        `[PipelineIntegrity] result=failed failed_count=${result.failedCount} checks=${failedCheckNames}`,
+      );
+
+      await this.captureError({
+        category: 'webhook',
+        code: 'pipeline_integrity_failed',
+        severity: 'error',
+        message: result.summary,
+        context: {
+          failedCount: result.failedCount,
+          results: result.results.map((r) => ({
+            check: r.check,
+            count: r.count,
+            severity: r.severity,
+            sample: r.sample,
+          })),
+          ranAt: new Date().toISOString(),
+        },
+      });
+    } catch (err: any) {
+      this.logger.error(
+        `[PipelineIntegrity] result=error error=${(err?.message ?? 'unknown').replace(/\s+/g, ' ').slice(0, 300)}`,
+      );
+    } finally {
+      await this.prisma.$queryRawUnsafe('SELECT pg_advisory_unlock(7004)').catch(() => {});
+    }
+  }
+
+  /**
+   * Manual trigger for the integrity check — invoked from admin endpoint or
+   * scripts. Bypasses the cron's advisory lock so a human can always run it
+   * on demand.
+   */
+  async runPipelineIntegrityCheck(): Promise<{ ok: boolean; failedCount: number; summary: string }> {
+    if (!this.pipelineIntegrity) {
+      throw new Error('PipelineIntegrityService not available');
+    }
+    const result = await this.pipelineIntegrity.runChecks();
+    if (result.ok) {
+      this.logger.log('[PipelineIntegrity] result=ok failed_count=0 summary="all 5 checks passed" trigger=manual');
+    } else {
+      const failedCheckNames = result.results
+        .filter((r) => r.severity === 'fail')
+        .map((r) => `${r.check}:${r.count}`)
+        .join(',');
+      this.logger.error(
+        `[PipelineIntegrity] result=failed failed_count=${result.failedCount} checks=${failedCheckNames} trigger=manual`,
+      );
+      await this.captureError({
+        category: 'webhook',
+        code: 'pipeline_integrity_failed',
+        severity: 'error',
+        message: result.summary,
+        context: {
+          failedCount: result.failedCount,
+          results: result.results.map((r) => ({ check: r.check, count: r.count, severity: r.severity, sample: r.sample })),
+          ranAt: new Date().toISOString(),
+          trigger: 'manual',
+        },
+      });
+    }
+    return { ok: result.ok, failedCount: result.failedCount, summary: result.summary };
   }
 
   /**

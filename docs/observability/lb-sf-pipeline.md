@@ -272,6 +272,24 @@ broken (e.g. loop guard suppressing everything).
 **Action:** Check `system_error_logs` for the same userId for related
 issues; verify the user's accounts are still active.
 
+### `pipeline_integrity_failed` — severity `error`
+
+**What:** The weekly integrity cron (`0 3 * * 0` UTC, advisory lock 7004)
+detected drift in one or more of its five checks. Row is system-level
+(`userId IS NULL`, `accountId IS NULL`) and dedups against itself.
+**Cause:** Legacy `Lead.status` resurfaced; SF-linked lead written by a
+non-SF source; inbound processing errors or outbound 5xx/failures in the
+last 24h.
+**Where to look:**
+- The row's `context` (JSON) holds the per-check breakdown including
+  sample rows.
+- Loki: `{service_name="leadbridge-api"} |= "[PipelineIntegrity]"`
+- Manual re-run any time: `DATABASE_URL=$DIRECT_URL node scripts/integrity-check-pipeline.js`
+**Action:** The cron is read-only — it never auto-fixes data. Triage by
+the failed-check name in the message; for `lead_status_not_canonical` rerun
+`scripts/backfill-canonical-status.ts` with `DRY_RUN=true` first to scope
+the fix.
+
 ---
 
 ## 7. Manual integrity check
@@ -288,9 +306,35 @@ Five checks:
 4. `sf_inbound_events.processingError` last 24h
 5. `crm_webhook_deliveries` failed/5xx last 24h
 
-Exit codes: 0 clean / 1 drift or errors / 2 script error. Designed to be cron-able later if it proves stable.
+Exit codes: 0 clean / 1 drift or errors / 2 script error.
 
 Canonical status set lives in [`src/leads/canonical-status.ts`](../../src/leads/canonical-status.ts) — keep the script's hardcoded list in sync.
+
+### Weekly cron (Phase 5)
+
+Same checks as the script, run from inside the Nest process.
+
+- **Schedule:** `0 3 * * 0` UTC (Sunday 03:00 UTC)
+- **Service:** `MonitoringService.weeklyPipelineIntegrityCheck()`
+  → `PipelineIntegrityService.runChecks()`
+- **Lock:** advisory `7004` (separate from the hourly cron's `7003`)
+- **Logs:**
+  - Clean: `[PipelineIntegrity] result=ok failed_count=0 summary="all 5 checks passed"`
+  - Failed: `[PipelineIntegrity] result=failed failed_count=N checks=name1:count,name2:count`
+- **On failure:** writes `SystemErrorLog{ category:'webhook', code:'pipeline_integrity_failed' }`
+  with the per-check breakdown in `context` JSON. Dedups via the
+  system-level captureError branch (no userId, no accountId).
+- **Read-only:** never mutates leads, never auto-fixes, never triggers backfills.
+
+To trigger manually outside the cron schedule:
+
+```bash
+# Via the script
+DATABASE_URL=$DIRECT_URL node scripts/integrity-check-pipeline.js
+
+# Via the service (creates SystemErrorLog row on failure, same path as the cron)
+DATABASE_URL=$DIRECT_URL npx ts-node scripts/verify-pipeline-integrity-cron.ts
+```
 
 ---
 
