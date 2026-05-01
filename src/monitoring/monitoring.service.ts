@@ -70,9 +70,19 @@ export class MonitoringService implements OnModuleInit {
     try {
       const severity = options.severity ?? 'error';
 
-      // Dedup: if an unresolved error with the same fingerprint exists, update instead of insert
+      // Dedup: collapse a recurring unresolved error into a single row.
+      //
+      // Two dedup keys, in priority order:
+      //   1. accountId+category+platform+code  — original per-account fingerprint
+      //   2. userId+category+code              — for pipeline-level alerts
+      //                                          (no accountId, but per-user)
+      //
+      // Without (2), the hourly Phase 2 pipeline cron creates a fresh row on
+      // every run for the same condition (e.g. sf_inbound_stalled), flooding
+      // SystemErrorLog. With (2) it updates the existing row instead.
+      let existing: any = null;
       if (options.accountId) {
-        const existing = await this.prisma.systemErrorLog.findFirst({
+        existing = await this.prisma.systemErrorLog.findFirst({
           where: {
             category: options.category,
             accountId: options.accountId,
@@ -82,15 +92,28 @@ export class MonitoringService implements OnModuleInit {
           },
           orderBy: { createdAt: 'desc' },
         });
+      } else if (options.userId && options.code) {
+        existing = await this.prisma.systemErrorLog.findFirst({
+          where: {
+            category: options.category,
+            userId: options.userId,
+            code: options.code,
+            accountId: null,
+            resolved: false,
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
 
-        if (existing) {
-          await this.prisma.systemErrorLog.update({
-            where: { id: existing.id },
-            data: { message: options.message },
-          });
-          this.logger.debug(`[Monitoring] Deduped error for ${options.category}/${options.accountId}/${options.code || '-'}`);
-          return;
-        }
+      if (existing) {
+        await this.prisma.systemErrorLog.update({
+          where: { id: existing.id },
+          data: { message: options.message },
+        });
+        this.logger.debug(
+          `[Monitoring] Deduped error category=${options.category} code=${options.code || '-'} accountId=${options.accountId || 'null'} userId=${options.userId || 'null'}`,
+        );
+        return;
       }
 
       await this.prisma.systemErrorLog.create({
@@ -131,6 +154,11 @@ export class MonitoringService implements OnModuleInit {
     }
 
     try {
+      // Pipeline health checks run BEFORE the per-account work and BEFORE the
+      // no-accounts short-circuit, so SF↔LB pipeline alerts fire on a fresh
+      // staging tenant with zero saved accounts too.
+      await this.runPipelineHealthChecks();
+
       const accounts = await this.prisma.savedAccount.findMany({
         select: {
           id: true, userId: true, platform: true, businessId: true, businessName: true,
@@ -335,6 +363,201 @@ export class MonitoringService implements OnModuleInit {
     }
 
     return issues;
+  }
+
+  // ==========================================
+  // LB ↔ SF Pipeline Health (Phase 2)
+  //
+  // Reads the Phase 1 observability tables (sf_inbound_events.processingError,
+  // crm_webhook_deliveries.{state,lastStatusCode}, CrmWebhookSubscription
+  // lastEventAt) and raises SystemErrorLog incidents for failure conditions.
+  //
+  // Each check emits a `[PipelineHealth] check=... result=ok|warn|error count=...`
+  // log line so dashboards/alerts can filter on the line shape.
+  // ==========================================
+
+  /** Pipeline-level health checks. Called from systemHealthCheck under the same advisory lock. */
+  async runPipelineHealthChecks(): Promise<{
+    inboundErrors: number;
+    outboundFailures: number;
+    crm5xx: number;
+    staleSubscriptions: number;
+  }> {
+    const since = new Date(Date.now() - 60 * 60 * 1000);
+    const [inboundErrors, outboundFailures, crm5xx, staleSubscriptions] = await Promise.all([
+      this.checkInboundProcessingErrors(since),
+      this.checkOutboundFailures(since),
+      this.checkOutbound5xx(since),
+      this.checkStaleTraffic(),
+    ]);
+    return { inboundErrors, outboundFailures, crm5xx, staleSubscriptions };
+  }
+
+  /** Any sf_inbound_events.processingError in last 1h → captureError per affected user. */
+  private async checkInboundProcessingErrors(since: Date): Promise<number> {
+    const rows = await this.prisma.sfInboundEvent.findMany({
+      where: { processingError: { not: null }, receivedAt: { gte: since } },
+      select: { userId: true, processingError: true, eventId: true },
+    });
+    if (rows.length === 0) {
+      this.logger.log('[PipelineHealth] check=sf_inbound_processing_error result=ok count=0');
+      return 0;
+    }
+    const byUser = new Map<string | null, { count: number; sample: string }>();
+    for (const r of rows) {
+      const key = r.userId ?? null;
+      const cur = byUser.get(key) ?? { count: 0, sample: r.processingError ?? 'unknown' };
+      cur.count += 1;
+      byUser.set(key, cur);
+    }
+    for (const [userId, agg] of byUser) {
+      await this.captureError({
+        category: 'webhook',
+        code: 'sf_inbound_processing_error',
+        severity: 'error',
+        userId: userId ?? undefined,
+        message: `${agg.count} SF inbound processing error(s) in last 1h. Sample: ${agg.sample.slice(0, 200)}`,
+      });
+    }
+    this.logger.error(`[PipelineHealth] check=sf_inbound_processing_error result=error count=${rows.length}`);
+    return rows.length;
+  }
+
+  /** crm_webhook_deliveries.state='failed' in last 1h → captureError per affected subscription user. */
+  private async checkOutboundFailures(since: Date): Promise<number> {
+    const failed = await this.prisma.crmWebhookDelivery.findMany({
+      where: { state: 'failed', createdAt: { gte: since } },
+      select: { subscriptionId: true, lastError: true, eventId: true },
+    });
+    if (failed.length === 0) {
+      this.logger.log('[PipelineHealth] check=crm_outbound_failed result=ok count=0');
+      return 0;
+    }
+    await this.captureErrorsForDeliveries({
+      rows: failed.map(r => ({ subscriptionId: r.subscriptionId, sample: r.lastError ?? 'no_error_text' })),
+      code: 'crm_outbound_failed',
+      messagePrefix: 'CRM webhook delivery failed',
+    });
+    this.logger.error(`[PipelineHealth] check=crm_outbound_failed result=error count=${failed.length}`);
+    return failed.length;
+  }
+
+  /** crm_webhook_deliveries.lastStatusCode>=500 in last 1h → captureError per affected subscription user. */
+  private async checkOutbound5xx(since: Date): Promise<number> {
+    const fivexx = await this.prisma.crmWebhookDelivery.findMany({
+      where: { lastStatusCode: { gte: 500 }, createdAt: { gte: since } },
+      select: { subscriptionId: true, lastStatusCode: true, eventId: true },
+    });
+    if (fivexx.length === 0) {
+      this.logger.log('[PipelineHealth] check=crm_outbound_5xx result=ok count=0');
+      return 0;
+    }
+    await this.captureErrorsForDeliveries({
+      rows: fivexx.map(r => ({ subscriptionId: r.subscriptionId, sample: `status_code=${r.lastStatusCode}` })),
+      code: 'crm_outbound_5xx',
+      messagePrefix: 'CRM webhook receiver returned 5xx',
+    });
+    this.logger.error(`[PipelineHealth] check=crm_outbound_5xx result=error count=${fivexx.length}`);
+    return fivexx.length;
+  }
+
+  /**
+   * Stale traffic: an active subscription (inbound or outbound) that previously
+   * carried traffic but hasn't seen any in >24h.
+   *
+   *  - Inbound: subscription.lastEventAt set AND last SfInboundEvent.receivedAt
+   *    for that subscription >24h ago.
+   *  - Outbound: any CrmWebhookDelivery exists for subscription AND latest
+   *    successful delivery (state='sent') >24h ago.
+   *
+   * "Previous traffic" gate prevents alerts on freshly-registered subscriptions
+   * that simply haven't received their first event yet.
+   */
+  private async checkStaleTraffic(): Promise<number> {
+    const stalenessCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const subs = await this.prisma.crmWebhookSubscription.findMany({
+      where: { isActive: true },
+      select: { id: true, userId: true, name: true, direction: true, lastEventAt: true },
+    });
+
+    let alerted = 0;
+    for (const sub of subs) {
+      if (sub.direction === 'inbound') {
+        // Previous traffic gate: lastEventAt must be set.
+        if (!sub.lastEventAt) continue;
+        if (sub.lastEventAt >= stalenessCutoff) continue;
+        const last = await this.prisma.sfInboundEvent.findFirst({
+          where: { sfSubscriptionId: sub.id },
+          orderBy: { receivedAt: 'desc' },
+          select: { receivedAt: true },
+        });
+        if (!last) continue; // no events ever — already gated above, defensive
+        if (last.receivedAt >= stalenessCutoff) continue;
+        await this.captureError({
+          category: 'webhook',
+          code: 'sf_inbound_stalled',
+          severity: 'warning',
+          userId: sub.userId,
+          message: `SF inbound subscription "${sub.name}" has not received an event in >24h (last: ${last.receivedAt.toISOString()})`,
+        });
+        alerted++;
+      } else if (sub.direction === 'outbound') {
+        // Previous traffic gate: at least one delivery row must exist.
+        const everSent = await this.prisma.crmWebhookDelivery.findFirst({
+          where: { subscriptionId: sub.id, state: 'sent' },
+          orderBy: { deliveredAt: 'desc' },
+          select: { deliveredAt: true },
+        });
+        if (!everSent || !everSent.deliveredAt) continue;
+        if (everSent.deliveredAt >= stalenessCutoff) continue;
+        await this.captureError({
+          category: 'webhook',
+          code: 'crm_outbound_stalled',
+          severity: 'warning',
+          userId: sub.userId,
+          message: `CRM outbound subscription "${sub.name}" has not delivered a webhook in >24h (last: ${everSent.deliveredAt.toISOString()})`,
+        });
+        alerted++;
+      }
+    }
+
+    if (alerted === 0) {
+      this.logger.log('[PipelineHealth] check=stale_traffic result=ok count=0');
+    } else {
+      this.logger.warn(`[PipelineHealth] check=stale_traffic result=warn count=${alerted}`);
+    }
+    return alerted;
+  }
+
+  /** Group failed/5xx delivery rows by subscriptionId, look up userId, captureError once per user. */
+  private async captureErrorsForDeliveries(opts: {
+    rows: Array<{ subscriptionId: string; sample: string }>;
+    code: string;
+    messagePrefix: string;
+  }): Promise<void> {
+    const bySub = new Map<string, { count: number; sample: string }>();
+    for (const r of opts.rows) {
+      const cur = bySub.get(r.subscriptionId) ?? { count: 0, sample: r.sample };
+      cur.count += 1;
+      bySub.set(r.subscriptionId, cur);
+    }
+    const subIds = Array.from(bySub.keys());
+    if (subIds.length === 0) return;
+    const subs = await this.prisma.crmWebhookSubscription.findMany({
+      where: { id: { in: subIds } },
+      select: { id: true, userId: true, name: true },
+    });
+    for (const sub of subs) {
+      const agg = bySub.get(sub.id);
+      if (!agg) continue;
+      await this.captureError({
+        category: 'webhook',
+        code: opts.code,
+        severity: 'error',
+        userId: sub.userId,
+        message: `${opts.messagePrefix} on subscription "${sub.name}" — ${agg.count} occurrence(s) in last 1h. Sample: ${agg.sample.slice(0, 200)}`,
+      });
+    }
   }
 
   // ==========================================

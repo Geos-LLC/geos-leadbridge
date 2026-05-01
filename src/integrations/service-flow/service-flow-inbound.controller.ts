@@ -66,25 +66,56 @@ export class ServiceFlowInboundController {
       (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
 
     let outcome;
+    let parsedEventId: string | null = null;
     try {
+      // Pre-parse event_id so we can persist a processingError row when ingest
+      // throws downstream — without this, exceptions are log-only and the
+      // failed count in /v1/integrations/health stays at zero.
+      try {
+        const parsed = JSON.parse(rawBody);
+        if (parsed && typeof parsed.event_id === 'string') parsedEventId = parsed.event_id;
+      } catch {
+        // body wasn't valid JSON; ingest will reject it cleanly
+      }
+
       outcome = await this.sfInbound.ingest(rawBody, {
         signature,
         timestamp,
         subscriptionId,
       });
     } catch (err: any) {
-      // LoghubLogger does JSON.stringify on non-string error args, which strips
-      // Error.message and Error.stack (both non-enumerable). Pass strings so
-      // diagnostic info actually reaches Loki.
       const code = err?.code ?? 'unknown';
-      const msg = (err?.message ?? String(err)).slice(0, 1500);
+      const msgRaw = (err?.message ?? String(err)).slice(0, 300).replace(/\s+/g, ' ');
       const stack = (err?.stack ?? '').split('\n').slice(0, 6).join(' | ');
       const meta = err?.meta ? JSON.stringify(err.meta).slice(0, 500) : 'none';
+
+      // Standardised k=v line so dashboards/alerts pick this up.
       this.logger.error(
-        `[SfInbound] ingest threw ${err?.name ?? 'Error'} code=${code} subId=${subscriptionId} msg=${msg}`,
+        `[SfInbound] event_id=${parsedEventId ?? 'null'} lead_id=null result=exception error=${msgRaw} code=${code} sub_id=${subscriptionId ?? 'null'}`,
       );
-      this.logger.error(`[SfInbound] meta=${meta}`);
-      this.logger.error(`[SfInbound] stack=${stack}`);
+      this.logger.error(`[SfInbound] event_id=${parsedEventId ?? 'null'} meta=${meta}`);
+      this.logger.error(`[SfInbound] event_id=${parsedEventId ?? 'null'} stack=${stack}`);
+
+      // Best-effort: persist a row so the failed count is queryable.
+      if (parsedEventId) {
+        try {
+          await this.prisma.sfInboundEvent.create({
+            data: {
+              eventId: parsedEventId,
+              eventType: 'unknown',
+              occurredAt: new Date(),
+              status: 'noop',
+              result: `exception:${code}`,
+              processingError: msgRaw,
+              payloadJson: { error: msgRaw, code },
+              sfSubscriptionId: subscriptionId ?? null,
+            },
+          });
+        } catch {
+          // unique constraint on eventId means a partial record may already
+          // exist; nothing actionable to do here.
+        }
+      }
       throw err;
     }
 
