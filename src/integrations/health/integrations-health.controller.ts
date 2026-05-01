@@ -91,6 +91,13 @@ export class IntegrationsHealthController {
         '5xx': crm5xxCount,
         failures: crmFailureCount,
       },
+      // Phase 2: convenience block clients can poll without re-deriving from
+      // countsLast1h + crm. Same numbers, exposed under their alert names.
+      alertsLast1h: {
+        inboundErrors: failedCount,
+        outboundFailures: crmFailureCount,
+        crm5xx: crm5xxCount,
+      },
       dlq: 0,
     };
   }
