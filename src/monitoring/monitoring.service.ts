@@ -70,9 +70,19 @@ export class MonitoringService implements OnModuleInit {
     try {
       const severity = options.severity ?? 'error';
 
-      // Dedup: if an unresolved error with the same fingerprint exists, update instead of insert
+      // Dedup: collapse a recurring unresolved error into a single row.
+      //
+      // Two dedup keys, in priority order:
+      //   1. accountId+category+platform+code  — original per-account fingerprint
+      //   2. userId+category+code              — for pipeline-level alerts
+      //                                          (no accountId, but per-user)
+      //
+      // Without (2), the hourly Phase 2 pipeline cron creates a fresh row on
+      // every run for the same condition (e.g. sf_inbound_stalled), flooding
+      // SystemErrorLog. With (2) it updates the existing row instead.
+      let existing: any = null;
       if (options.accountId) {
-        const existing = await this.prisma.systemErrorLog.findFirst({
+        existing = await this.prisma.systemErrorLog.findFirst({
           where: {
             category: options.category,
             accountId: options.accountId,
@@ -82,15 +92,28 @@ export class MonitoringService implements OnModuleInit {
           },
           orderBy: { createdAt: 'desc' },
         });
+      } else if (options.userId && options.code) {
+        existing = await this.prisma.systemErrorLog.findFirst({
+          where: {
+            category: options.category,
+            userId: options.userId,
+            code: options.code,
+            accountId: null,
+            resolved: false,
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
 
-        if (existing) {
-          await this.prisma.systemErrorLog.update({
-            where: { id: existing.id },
-            data: { message: options.message },
-          });
-          this.logger.debug(`[Monitoring] Deduped error for ${options.category}/${options.accountId}/${options.code || '-'}`);
-          return;
-        }
+      if (existing) {
+        await this.prisma.systemErrorLog.update({
+          where: { id: existing.id },
+          data: { message: options.message },
+        });
+        this.logger.debug(
+          `[Monitoring] Deduped error category=${options.category} code=${options.code || '-'} accountId=${options.accountId || 'null'} userId=${options.userId || 'null'}`,
+        );
+        return;
       }
 
       await this.prisma.systemErrorLog.create({

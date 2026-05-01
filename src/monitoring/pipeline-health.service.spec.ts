@@ -261,6 +261,45 @@ describe('MonitoringService.runPipelineHealthChecks', () => {
     });
   });
 
+  describe('dedup (no accountId, userId+code path)', () => {
+    it('updates the existing unresolved row instead of creating a new one on a second run', async () => {
+      // Track rows in a tiny in-memory store so findFirst matches what create() emits.
+      const rows: any[] = [];
+      const prisma = buildPrismaMock({
+        inboundErrors: [{ userId: 'user-A', processingError: 'oops', eventId: 'evt-1' }],
+      });
+      prisma.systemErrorLog.findFirst = jest.fn().mockImplementation(async (args: any) => {
+        const w = args?.where ?? {};
+        return rows.find(r =>
+          r.category === w.category &&
+          r.userId === w.userId &&
+          r.code === w.code &&
+          r.accountId == null &&
+          r.resolved === false,
+        ) ?? null;
+      });
+      prisma.systemErrorLog.create = jest.fn().mockImplementation(async ({ data }: any) => {
+        const row = { id: 'err-' + rows.length, resolved: false, ...data };
+        rows.push(row);
+        return row;
+      });
+      prisma.systemErrorLog.update = jest.fn().mockImplementation(async (args: any) => {
+        const r = rows.find(x => x.id === args.where.id);
+        if (r) Object.assign(r, args.data);
+        return r;
+      });
+      const svc = buildSvc(prisma);
+
+      await svc.runPipelineHealthChecks();
+      await svc.runPipelineHealthChecks();
+
+      // After two cron runs with the same condition, only one row exists.
+      expect(rows).toHaveLength(1);
+      expect(prisma.systemErrorLog.create).toHaveBeenCalledTimes(1);
+      expect(prisma.systemErrorLog.update).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('healthy state', () => {
     it('produces zero captureError calls when everything is fine', async () => {
       const prisma = buildPrismaMock({
