@@ -36,7 +36,13 @@ export type StatusSource =
   | 'service_flow'
   | 'platform_sync'
   | 'manual'
-  | 'lb_automation';
+  | 'lb_automation'
+  // One-off canonical-status backfill (Phase 4). Flows through writeStatus's
+  // main path: dedup by (leadId, source, sourceEventId) makes re-runs no-ops,
+  // canonical-validation guard rejects bad mappings, audit row is created.
+  // Does NOT trigger conflict detection (manual-only) or SF protection
+  // (lb_automation-only). Callers must still skip SF-linked leads themselves.
+  | 'backfill';
 
 export type ConflictKind = 'sf_push_needed' | 'platform_nudge_needed';
 
