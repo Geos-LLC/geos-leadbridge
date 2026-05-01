@@ -15,20 +15,33 @@ describe('thumbtack-status-map', () => {
       expect(mapThumbtackToLbStatus('  not scheduled yet  ')).toBe('contacted');
     });
 
-    it('maps Thumbtack Hired → booked', () => {
+    it('maps Thumbtack Hired (and Job hired) → booked', () => {
       expect(mapThumbtackToLbStatus('Hired')).toBe('booked');
+      expect(mapThumbtackToLbStatus('Job hired')).toBe('booked');
     });
 
-    it('maps Thumbtack Scheduled → scheduled', () => {
+    it('maps Thumbtack Scheduled (and Job Scheduled) → scheduled', () => {
       expect(mapThumbtackToLbStatus('Scheduled')).toBe('scheduled');
+      expect(mapThumbtackToLbStatus('Job Scheduled')).toBe('scheduled');
     });
 
-    it('maps Thumbtack Done → completed', () => {
+    it('maps Thumbtack In progress / Job in progress → in_progress', () => {
+      expect(mapThumbtackToLbStatus('In progress')).toBe('in_progress');
+      expect(mapThumbtackToLbStatus('Job in progress')).toBe('in_progress');
+    });
+
+    it('maps Thumbtack Done (and Job done) → completed', () => {
       expect(mapThumbtackToLbStatus('Done')).toBe('completed');
+      expect(mapThumbtackToLbStatus('Job done')).toBe('completed');
     });
 
-    it('maps Thumbtack Not hired → lost', () => {
+    // Production audit logs showed the Thumbtack pro inbox rendering "No hire"
+    // (one word) — the map previously only handled "Not hired" so the canonical
+    // status never updated, leaving leads stuck on legacy 'Open'.
+    it('maps Thumbtack Not hired / No hire → lost', () => {
       expect(mapThumbtackToLbStatus('Not hired')).toBe('lost');
+      expect(mapThumbtackToLbStatus('No hire')).toBe('lost');
+      expect(mapThumbtackToLbStatus('NO HIRE')).toBe('lost');
     });
 
     it('maps Thumbtack Closed → lost', () => {
@@ -58,14 +71,17 @@ describe('thumbtack-status-map', () => {
 
   describe('isRelevantThumbtackSignal', () => {
     it('returns true for the engagement-relevant statuses', () => {
-      expect(isRelevantThumbtackSignal('Active')).toBe(true);
-      expect(isRelevantThumbtackSignal('Not scheduled yet')).toBe(true);
-      expect(isRelevantThumbtackSignal('Hired')).toBe(true);
-      expect(isRelevantThumbtackSignal('Scheduled')).toBe(true);
-      expect(isRelevantThumbtackSignal('Done')).toBe(true);
-      expect(isRelevantThumbtackSignal('Not hired')).toBe(true);
-      expect(isRelevantThumbtackSignal('Closed')).toBe(true);
-      expect(isRelevantThumbtackSignal('Archived')).toBe(true);
+      [
+        'Active',
+        'Not scheduled yet',
+        'Hired', 'Job hired',
+        'Scheduled', 'Job Scheduled',
+        'In progress', 'Job in progress',
+        'Done', 'Job done',
+        'Not hired', 'No hire',
+        'Closed',
+        'Archived',
+      ].forEach((s) => expect(isRelevantThumbtackSignal(s)).toBe(true));
     });
 
     it('is case-insensitive', () => {
