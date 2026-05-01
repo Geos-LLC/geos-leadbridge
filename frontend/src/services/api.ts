@@ -1513,7 +1513,7 @@ export const integrationsApi = {
       lastActivityAt: string | null;
     }>;
     total: number;
-    accounts?: Array<{ id: string; businessName: string }>;
+    accounts?: Array<{ id: string; businessName: string; emailHint: string | null }>;
   }> => {
     const params = new URLSearchParams();
     if (filters?.pending) params.append('pending', 'true');
