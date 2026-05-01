@@ -30,8 +30,8 @@ export class AnalyticsService {
 
   constructor(private prisma: PrismaService) {}
 
-  private buildCacheKey(userId: string, businessId?: string): string {
-    return `${userId}::${businessId ?? '__all__'}`;
+  private buildCacheKey(userId: string, businessId?: string, platform?: string): string {
+    return `${userId}::${businessId ?? '__all__'}::${platform ?? '__any__'}`;
   }
 
   // Basic analytics - Fast metrics only (categories, total leads, engagement)
@@ -48,6 +48,7 @@ export class AnalyticsService {
     const baseWhere = {
       userId,
       ...(query.businessId && { businessId: query.businessId }),
+      ...(query.platform && { platform: query.platform }),
       ...dateFilter,
     };
 
@@ -62,7 +63,11 @@ export class AnalyticsService {
           ? this.getBusinessInfo(userId, query.businessId)
           : null,
         this.prisma.lead.findFirst({
-          where: { userId, ...(query.businessId && { businessId: query.businessId }) },
+          where: {
+            userId,
+            ...(query.businessId && { businessId: query.businessId }),
+            ...(query.platform && { platform: query.platform }),
+          },
           orderBy: { createdAt: 'desc' },
           select: { createdAt: true },
         }),
@@ -105,7 +110,7 @@ export class AnalyticsService {
     const canCache = !query.startDate && !query.endDate;
 
     if (canCache) {
-      const key = this.buildCacheKey(userId, query.businessId);
+      const key = this.buildCacheKey(userId, query.businessId, query.platform);
       const cached = await this.prisma.analyticsCache.findUnique({ where: { cacheKey: key } });
       if (cached) {
         const ageMs = Date.now() - cached.calculatedAt.getTime();
@@ -120,7 +125,7 @@ export class AnalyticsService {
     const data = await this.computeAnalytics(userId, query);
 
     if (canCache) {
-      const key = this.buildCacheKey(userId, query.businessId);
+      const key = this.buildCacheKey(userId, query.businessId, query.platform);
       const record = await this.prisma.analyticsCache.upsert({
         where:  { cacheKey: key },
         create: { cacheKey: key, userId, data: data as any },
@@ -137,7 +142,7 @@ export class AnalyticsService {
     query: AnalyticsQueryDto,
   ): Promise<{ data: AnalyticsResponseDto; calculatedAt: Date }> {
     const data = await this.computeAnalytics(userId, query);
-    const key = this.buildCacheKey(userId, query.businessId);
+    const key = this.buildCacheKey(userId, query.businessId, query.platform);
     const record = await this.prisma.analyticsCache.upsert({
       where:  { cacheKey: key },
       create: { cacheKey: key, userId, data: data as any },
@@ -186,6 +191,7 @@ export class AnalyticsService {
          AND tli."userId"      = l."userId"
         WHERE l."userId" = $1
           AND ($2::text IS NULL OR l."businessId" = $2::text)
+          AND ($5::text IS NULL OR l."platform" = $5::text)
       ),
       lead_dates AS (
         SELECT
@@ -261,6 +267,7 @@ export class AnalyticsService {
       dto.businessId ?? null,
       dto.startDate ? new Date(dto.startDate) : null,
       dto.endDate   ? new Date(dto.endDate)   : null,
+      dto.platform ?? null,
     );
 
     // Normalize display labels: merge similar statuses into canonical buckets.
@@ -353,6 +360,7 @@ export class AnalyticsService {
     const baseWhere = {
       userId,
       ...(query.businessId && { businessId: query.businessId }),
+      ...(query.platform && { platform: query.platform }),
       ...dateFilter,
     };
 
@@ -373,6 +381,7 @@ export class AnalyticsService {
       locations,
       zipCodes,
       roomStats,
+      avgLeadPrice,
       lastLead,
     ] = await Promise.all([
       this.timed('categoryDistribution', () => this.getCategoryDistribution(baseWhere)),
@@ -392,8 +401,13 @@ export class AnalyticsService {
       this.timed('locationDistribution', () => this.getLocationDistribution(baseWhere)),
       this.timed('zipCodeDistribution', () => this.getZipCodeDistribution(baseWhere)),
       this.timed('roomStats', () => this.getRoomStats(baseWhere)),
+      this.timed('averageLeadPrice', () => this.getAverageLeadPrice(userId, query)),
       this.prisma.lead.findFirst({
-        where: { userId, ...(query.businessId && { businessId: query.businessId }) },
+        where: {
+          userId,
+          ...(query.businessId && { businessId: query.businessId }),
+          ...(query.platform && { platform: query.platform }),
+        },
         orderBy: { createdAt: 'desc' },
         select: { createdAt: true },
       }),
@@ -417,6 +431,7 @@ export class AnalyticsService {
       locationDistribution: locations,
       zipCodeDistribution: zipCodes,
       roomStats,
+      averageLeadPrice: avgLeadPrice,
       dateRange: {
         start: query.startDate || 'all-time',
         end: query.endDate || 'now',
@@ -463,6 +478,7 @@ export class AnalyticsService {
        FROM leads l
        WHERE l."userId" = $1
          AND ($2::text IS NULL OR l."businessId" = $2::text)
+         AND ($3::text IS NULL OR l."platform" = $3::text)
          AND (
            (l."thumbtackStatus" IS NOT NULL AND TRIM(l."thumbtackStatus") <> '')
            OR (l."status" IS NOT NULL AND LOWER(l."status") NOT IN ('new', '') AND TRIM(l."status") <> '')
@@ -471,6 +487,7 @@ export class AnalyticsService {
        ORDER BY cnt DESC`,
       userId,
       where.businessId ?? null,
+      where.platform ?? null,
     );
 
     if (rows.length === 0) {
@@ -838,6 +855,43 @@ export class AnalyticsService {
 
   private async getTotalLeads(where: any): Promise<number> {
     return this.prisma.lead.count({ where });
+  }
+
+  // Average Thumbtack lead price (cost the pro paid per lead).
+  // Pulled from rawJson.leadPrice — only meaningful for Thumbtack leads.
+  // Skipped when caller filters to platform='yelp' (Yelp doesn't bill per-lead).
+  private async getAverageLeadPrice(
+    userId: string,
+    query: AnalyticsQueryDto,
+  ): Promise<{ value: number | null; count: number }> {
+    if (query.platform === 'yelp') {
+      return { value: null, count: 0 };
+    }
+
+    const rows = await this.prisma.$queryRawUnsafe<Array<{ avg_price: string | null; cnt: bigint }>>(
+      `SELECT
+         AVG(NULLIF(LTRIM(l."rawJson"::jsonb->>'leadPrice', '$'), '')::numeric) AS avg_price,
+         COUNT(NULLIF(LTRIM(l."rawJson"::jsonb->>'leadPrice', '$'), '')::numeric)::bigint AS cnt
+       FROM leads l
+       WHERE l."userId" = $1
+         AND l."platform" = 'thumbtack'
+         AND ($2::text IS NULL OR l."businessId" = $2::text)
+         AND ($3::timestamptz IS NULL OR l."createdAt" >= $3::timestamptz)
+         AND ($4::timestamptz IS NULL OR l."createdAt" <= $4::timestamptz)
+         AND l."rawJson" IS NOT NULL
+         AND l."rawJson" <> ''
+         AND l."rawJson"::jsonb->>'leadPrice' IS NOT NULL`,
+      userId,
+      query.businessId ?? null,
+      query.startDate ? new Date(query.startDate) : null,
+      query.endDate ? new Date(query.endDate) : null,
+    );
+
+    const row = rows[0];
+    return {
+      value: row?.avg_price != null ? parseFloat(row.avg_price) : null,
+      count: row?.cnt != null ? Number(row.cnt) : 0,
+    };
   }
 
   private async getBusinessInfo(userId: string, businessId: string) {

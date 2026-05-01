@@ -32,12 +32,16 @@ export class IntegrationsService {
     const snapshotId = crypto.randomUUID();
 
     const result = await this.prisma.$transaction(async (tx) => {
-      // Close the previous active snapshot (effective_to IS NULL)
+      // Close the previous active snapshot (effective_to IS NULL).
+      // Scope by savedAccountId when provided so multi-account budgets don't
+      // close each other; legacy callers without savedAccountId keep the
+      // old per-user behavior.
       const previous = await tx.thumbtackSettingsSnapshot.findFirst({
         where: {
           userId,
           snapshotType: dto.snapshotType || 'budget',
           effectiveTo: null,
+          ...(dto.savedAccountId ? { savedAccountId: dto.savedAccountId } : {}),
         },
         orderBy: { effectiveFrom: 'desc' },
       });

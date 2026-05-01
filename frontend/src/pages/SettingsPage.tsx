@@ -111,9 +111,14 @@ export default function SettingsPage() {
     onConfirm: () => void;
   } | null>(null);
 
-  // Budget snapshots
-  const [budgetSnapshots, setBudgetSnapshots] = useState<Array<{ id: string; weeklyBudget: string; currency: string; capturedAt: string; effectiveFrom: string; effectiveTo: string | null; active: boolean; scopeCategory: string | null; scopeLocation: string | null }>>([]);
+  // Budget snapshots (per importAccountId — TT weekly + Yelp monthly).
+  const [budgetSnapshots, setBudgetSnapshots] = useState<Array<{ id: string; weeklyBudget: string; currency: string; capturedAt: string; effectiveFrom: string; effectiveTo: string | null; active: boolean; scopeCategory: string | null; scopeLocation: string | null; snapshotType: string }>>([]);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
+
+  // Yelp monthly-budget editor modal
+  const [yelpBudgetEditing, setYelpBudgetEditing] = useState<{ accountId: string; accountName: string } | null>(null);
+  const [yelpBudgetInput, setYelpBudgetInput] = useState('');
+  const [yelpBudgetSaving, setYelpBudgetSaving] = useState(false);
 
   // Delete account
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -1445,6 +1450,38 @@ export default function SettingsPage() {
                           )}
                         </div>
                       )}
+
+                      {/* Monthly Budget — manual entry (Yelp doesn't expose a budget API). */}
+                      {importAccountId && (() => {
+                        const yelpMonthly = budgetSnapshots.find(s => s.snapshotType === 'budget_monthly');
+                        const acc = accounts.find(a => a.id === importAccountId);
+                        return (
+                          <div className="flex items-center justify-between px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                            <div className="flex items-center gap-1.5">
+                              <DollarSign size={13} className="text-slate-400" />
+                              <span className="font-semibold text-slate-700">Monthly Budget:</span>
+                              {yelpMonthly ? (
+                                <span className="text-slate-900 ml-1">
+                                  <span className="font-bold">${Number(yelpMonthly.weeklyBudget).toFixed(0)}</span>
+                                  <span className="text-slate-400">/{yelpMonthly.currency}/mo</span>
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 ml-1">Not set</span>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => {
+                                if (!acc) return;
+                                setYelpBudgetInput(yelpMonthly ? String(Number(yelpMonthly.weeklyBudget)) : '');
+                                setYelpBudgetEditing({ accountId: acc.id, accountName: acc.businessName });
+                              }}
+                              className="text-red-600 hover:text-red-700 font-semibold hover:underline inline-flex items-center gap-1"
+                            >
+                              {yelpMonthly ? <><Pencil size={12} /> Edit</> : <><DollarSign size={12} /> Add Budget</>}
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -2268,6 +2305,89 @@ export default function SettingsPage() {
                   </tbody>
                 </table>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Yelp Monthly Budget — manual entry modal */}
+      {yelpBudgetEditing && (
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => !yelpBudgetSaving && setYelpBudgetEditing(null)}
+        >
+          <div
+            className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Set Monthly Budget</h3>
+                <p className="text-xs text-slate-500 mt-0.5 truncate">{yelpBudgetEditing.accountName}</p>
+              </div>
+              <button
+                disabled={yelpBudgetSaving}
+                onClick={() => setYelpBudgetEditing(null)}
+                className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all disabled:opacity-40"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <label className="block text-xs font-semibold text-slate-600 mb-2">Monthly Yelp budget (USD)</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-semibold">$</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="1"
+                placeholder="0"
+                value={yelpBudgetInput}
+                onChange={e => setYelpBudgetInput(e.target.value)}
+                disabled={yelpBudgetSaving}
+                className="w-full pl-7 pr-3 py-2.5 border border-slate-200 rounded-xl text-base font-medium focus:ring-2 focus:ring-red-100 focus:border-red-300 disabled:opacity-50"
+                autoFocus
+              />
+            </div>
+            <p className="text-[11px] text-slate-400 mt-2">
+              Yelp doesn't expose budgets via API — enter the value you set in your Yelp Ads dashboard.
+            </p>
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                disabled={yelpBudgetSaving}
+                onClick={() => setYelpBudgetEditing(null)}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={yelpBudgetSaving || yelpBudgetInput.trim() === '' || Number(yelpBudgetInput) < 0 || Number.isNaN(Number(yelpBudgetInput))}
+                onClick={async () => {
+                  const amount = Number(yelpBudgetInput);
+                  if (Number.isNaN(amount) || amount < 0) return;
+                  setYelpBudgetSaving(true);
+                  try {
+                    await integrationsApi.saveBudgetSnapshot({
+                      savedAccountId: yelpBudgetEditing.accountId,
+                      provider: 'yelp',
+                      amount,
+                      period: 'monthly',
+                    });
+                    const res = await integrationsApi.getBudgetSnapshots(yelpBudgetEditing.accountId);
+                    setBudgetSnapshots(res.snapshots || []);
+                    notify.success('Budget saved', `Monthly budget set to $${amount.toFixed(0)}`);
+                    setYelpBudgetEditing(null);
+                  } catch (err: any) {
+                    notify.error('Save failed', err?.message || 'Could not save budget');
+                  } finally {
+                    setYelpBudgetSaving(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 inline-flex items-center gap-2 disabled:opacity-40"
+              >
+                {yelpBudgetSaving && <Loader2 size={14} className="animate-spin" />}
+                Save Budget
+              </button>
             </div>
           </div>
         </div>

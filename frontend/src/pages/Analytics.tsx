@@ -49,7 +49,12 @@ export function Analytics() {
   const [tsData, setTsData] = useState<TimeSeriesPoint[]>([]);
   const [tsLoading, setTsLoading] = useState(false);
 
-  // Filters from URL params
+  // Filters from URL params.
+  // businessId values:
+  //   'all'             — every account
+  //   'all_thumbtack'   — all Thumbtack accounts
+  //   'all_yelp'        — all Yelp accounts
+  //   <real businessId> — single account
   const businessId = searchParams.get('businessId') || 'all';
   const timeRange = searchParams.get('range') || 'all';
   const customStart = searchParams.get('startDate') || '';
@@ -134,8 +139,10 @@ export function Analytics() {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      const params: { businessId?: string } = {};
-      if (businessId !== 'all') params.businessId = businessId;
+      const params: { businessId?: string; platform?: 'thumbtack' | 'yelp' } = {};
+      if (businessId === 'all_thumbtack') params.platform = 'thumbtack';
+      else if (businessId === 'all_yelp') params.platform = 'yelp';
+      else if (businessId !== 'all') params.businessId = businessId;
       const { data: fullData, calculatedAt: ts } = await analyticsApi.refreshAnalytics(params);
       setAnalytics(fullData);
       setCalculatedAt(ts);
@@ -160,7 +167,11 @@ export function Analytics() {
   const buildQueryParams = () => {
     const params: any = {};
 
-    if (businessId !== 'all') {
+    if (businessId === 'all_thumbtack') {
+      params.platform = 'thumbtack';
+    } else if (businessId === 'all_yelp') {
+      params.platform = 'yelp';
+    } else if (businessId !== 'all') {
       params.businessId = businessId;
     }
 
@@ -349,6 +360,12 @@ export function Analytics() {
               }}
             >
               <option value="all">All Accounts</option>
+              {savedAccounts.some((a) => a.platform === 'thumbtack') && (
+                <option value="all_thumbtack">{'\uD83D\uDD35 '}All Thumbtack</option>
+              )}
+              {savedAccounts.some((a) => a.platform === 'yelp') && (
+                <option value="all_yelp">{'\uD83D\uDD34 '}All Yelp</option>
+              )}
               {savedAccounts.map((account) => (
                 <option key={account.id} value={account.businessId}>
                   {account.platform === 'yelp' ? '\uD83D\uDD34 ' : '\uD83D\uDD35 '}{account.businessName}
@@ -635,39 +652,57 @@ export function Analytics() {
 
       {displayData ? (
         <>
-          {/* Summary KPIs — single bordered row */}
-          <div
-            className="grid grid-cols-2 md:grid-cols-4"
-            style={{
-              background: 'var(--lb-surface)',
-              border: '1px solid var(--lb-line)',
-              borderRadius: 'var(--lb-radius-lg)',
-            }}
-          >
-            <Kpi
-              label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Total leads</span>}
-              value={displayData.totalLeads}
-              loading={isUpdating}
-            />
-            <Kpi
-              label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Clock size={12} /> Avg connection</span>}
-              value={displayData.connectionTime ? formatDuration(displayData.connectionTime.averageMinutes) : '—'}
-              loading={isUpdating}
-            />
-            <Kpi
-              label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><MessageSquare size={12} /> Msgs/lead</span>}
-              value={displayData.messagesPerLead ? displayData.messagesPerLead.average.toFixed(1) : '—'}
-              loading={isUpdating}
-            />
-            <Kpi
-              label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Engagement</span>}
-              value={`${displayData.customerEngagement?.engagementRate?.toFixed(1) ?? 0}%`}
-              delta="active"
-              deltaDir="up"
-              loading={isUpdating}
-              muted
-            />
-          </div>
+          {/* Summary KPIs — single bordered row.
+              Adds an Avg Lead Price column when Thumbtack data is in scope
+              (always, except when filter is 'all_yelp' which forces value=null). */}
+          {(() => {
+            const showLeadPrice = displayData.averageLeadPrice != null && businessId !== 'all_yelp';
+            return (
+              <div
+                className={`grid grid-cols-2 ${showLeadPrice ? 'md:grid-cols-5' : 'md:grid-cols-4'}`}
+                style={{
+                  background: 'var(--lb-surface)',
+                  border: '1px solid var(--lb-line)',
+                  borderRadius: 'var(--lb-radius-lg)',
+                }}
+              >
+                <Kpi
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Total leads</span>}
+                  value={displayData.totalLeads}
+                  loading={isUpdating}
+                />
+                <Kpi
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Clock size={12} /> Avg connection</span>}
+                  value={displayData.connectionTime ? formatDuration(displayData.connectionTime.averageMinutes) : '—'}
+                  loading={isUpdating}
+                />
+                <Kpi
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><MessageSquare size={12} /> Msgs/lead</span>}
+                  value={displayData.messagesPerLead ? displayData.messagesPerLead.average.toFixed(1) : '—'}
+                  loading={isUpdating}
+                />
+                <Kpi
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Engagement</span>}
+                  value={`${displayData.customerEngagement?.engagementRate?.toFixed(1) ?? 0}%`}
+                  delta="active"
+                  deltaDir="up"
+                  loading={isUpdating}
+                  muted
+                />
+                {showLeadPrice && (
+                  <Kpi
+                    label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><BarChart3 size={12} /> Avg lead price (TT)</span>}
+                    value={
+                      displayData.averageLeadPrice?.value != null
+                        ? `$${displayData.averageLeadPrice.value.toFixed(2)}`
+                        : '—'
+                    }
+                    loading={isUpdating}
+                  />
+                )}
+              </div>
+            );
+          })()}
 
           {/* Charts Section */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
