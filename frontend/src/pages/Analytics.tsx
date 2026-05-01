@@ -616,8 +616,8 @@ export function Analytics() {
                   {!tsData.some(r => r.avgBudget != null) && (
                     <p className="text-xs text-slate-400 mb-3">No lead price data available — lead prices are captured from Thumbtack webhooks.</p>
                   )}
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={tsData} margin={{ top: 5, right: 68, left: 0, bottom: 5 }}>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={tsData} margin={{ top: 24, right: 68, left: 0, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                       <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
                       <YAxis width={48} tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
@@ -629,14 +629,28 @@ export function Analytics() {
                         }}
                       />
                       <Bar dataKey="avgBudget" name="Avg Lead Cost" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={48}>
+                        {/* Avg lead cost — centered inside the bar */}
+                        <LabelList
+                          dataKey="avgBudget"
+                          content={(props: any) => {
+                            const { x, y, width, height, value } = props;
+                            if (value == null || height < 18) return null;
+                            return (
+                              <text x={x + width / 2} y={y + height / 2 + 4} textAnchor="middle" fontSize={10} fill="white" fontWeight={700}>
+                                ${Number(value).toFixed(2)}
+                              </text>
+                            );
+                          }}
+                        />
+                        {/* Total spend — above the bar */}
                         <LabelList
                           dataKey="totalBudget"
                           content={(props: any) => {
-                            const { x, y, width, height, value } = props;
-                            if (!value || height < 18) return null;
+                            const { x, y, width, value } = props;
+                            if (value == null) return null;
                             return (
-                              <text x={x + width / 2} y={y + height / 2 + 4} textAnchor="middle" fontSize={10} fill="white" fontWeight={700}>
-                                ${Number(value).toFixed(0)}
+                              <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={11} fill="#475569" fontWeight={700}>
+                                ${Number(value).toLocaleString('en-US', { maximumFractionDigits: 0 })}
                               </text>
                             );
                           }}
