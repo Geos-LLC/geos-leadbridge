@@ -306,13 +306,13 @@ export class IntegrationsService {
 
     // Collect distinct savedAccountIds from leads for filter dropdown
     const accountIds = [...new Set(leads.map((l) => l.savedAccountId).filter(Boolean))] as string[];
-    let referencedAccounts: { id: string; businessName: string }[] = [];
+    let referencedAccounts: { id: string; businessName: string; emailHint: string | null }[] = [];
     if (accountIds.length > 0) {
       const accs = await this.prisma.savedAccount.findMany({
         where: { id: { in: accountIds } },
-        select: { id: true, businessName: true },
+        select: { id: true, businessName: true, emailHint: true },
       });
-      referencedAccounts = accs.map((a) => ({ id: a.id, businessName: a.businessName }));
+      referencedAccounts = accs.map((a) => ({ id: a.id, businessName: a.businessName, emailHint: a.emailHint ?? null }));
     }
 
     return {

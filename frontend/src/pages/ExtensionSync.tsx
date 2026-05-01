@@ -71,7 +71,7 @@ export function ExtensionSync() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<LeadFilter>('all');
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null);
-  const [accounts, setAccounts] = useState<{ id: string; businessName: string }[]>([]);
+  const [accounts, setAccounts] = useState<{ id: string; businessName: string; emailHint: string | null }[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
   const [actionLoading, setActionLoading] = useState(false);
   const [actionResult, setActionResult] = useState<string | null>(null);
@@ -210,7 +210,7 @@ export function ExtensionSync() {
                 onClick={() => {
                   const acc = accounts.find((a) => a.id === selectedAccountId);
                   document.dispatchEvent(new CustomEvent('leadbridge-launch', {
-                    detail: { action: 'collect-leads', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: null },
+                    detail: { action: 'collect-leads', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: acc?.emailHint || null },
                   }));
                 }}
                 className="px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-2"
@@ -222,7 +222,7 @@ export function ExtensionSync() {
                 onClick={() => {
                   const acc = accounts.find((a) => a.id === selectedAccountId);
                   document.dispatchEvent(new CustomEvent('leadbridge-launch', {
-                    detail: { action: 'sync-budget', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: null },
+                    detail: { action: 'sync-budget', accountId: acc?.id || null, accountName: acc?.businessName || null, emailHint: acc?.emailHint || null },
                   }));
                 }}
                 className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-2"
