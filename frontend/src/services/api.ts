@@ -957,6 +957,8 @@ export interface AnalyticsData {
   zipCodeDistribution?: ServiceDetailDistribution[];
   roomStats?: RoomStatsMetric;
 
+  averageLeadPrice?: { value: number | null; count: number };
+
   dateRange: {
     start: string;
     end: string;
@@ -979,14 +981,18 @@ export interface TimeSeriesPoint {
 }
 
 // Analytics API
+export type AnalyticsPlatform = 'thumbtack' | 'yelp';
+
 export const analyticsApi = {
   getBasicAnalytics: async (params: {
     businessId?: string;
+    platform?: AnalyticsPlatform;
     startDate?: string;
     endDate?: string;
   }): Promise<{ success: boolean; data: Partial<AnalyticsData> }> => {
     const queryParams = new URLSearchParams();
     if (params.businessId) queryParams.append('businessId', params.businessId);
+    if (params.platform) queryParams.append('platform', params.platform);
     if (params.startDate) queryParams.append('startDate', params.startDate);
     if (params.endDate) queryParams.append('endDate', params.endDate);
 
@@ -996,11 +1002,13 @@ export const analyticsApi = {
 
   getAnalytics: async (params: {
     businessId?: string;
+    platform?: AnalyticsPlatform;
     startDate?: string;
     endDate?: string;
   }): Promise<{ success: boolean; data: AnalyticsData; calculatedAt: string | null }> => {
     const queryParams = new URLSearchParams();
     if (params.businessId) queryParams.append('businessId', params.businessId);
+    if (params.platform) queryParams.append('platform', params.platform);
     if (params.startDate) queryParams.append('startDate', params.startDate);
     if (params.endDate) queryParams.append('endDate', params.endDate);
 
@@ -1010,9 +1018,11 @@ export const analyticsApi = {
 
   refreshAnalytics: async (params: {
     businessId?: string;
+    platform?: AnalyticsPlatform;
   }): Promise<{ success: boolean; data: AnalyticsData; calculatedAt: string }> => {
     const queryParams = new URLSearchParams();
     if (params.businessId) queryParams.append('businessId', params.businessId);
+    if (params.platform) queryParams.append('platform', params.platform);
 
     const { data } = await api.post(`/v1/analytics/refresh?${queryParams.toString()}`);
     return data;
@@ -1021,12 +1031,14 @@ export const analyticsApi = {
   getTimeSeries: async (params: {
     period?: 'day' | 'week' | 'month' | 'year';
     businessId?: string;
+    platform?: AnalyticsPlatform;
     startDate?: string;
     endDate?: string;
   }): Promise<{ success: boolean; data: TimeSeriesPoint[] }> => {
     const queryParams = new URLSearchParams();
     if (params.period) queryParams.append('period', params.period);
     if (params.businessId) queryParams.append('businessId', params.businessId);
+    if (params.platform) queryParams.append('platform', params.platform);
     if (params.startDate) queryParams.append('startDate', params.startDate);
     if (params.endDate) queryParams.append('endDate', params.endDate);
 
@@ -1582,6 +1594,27 @@ export const integrationsApi = {
   },
   deleteBudgetSnapshots: async (): Promise<{ ok: boolean; deletedCount: number }> => {
     const { data } = await api.delete('/integrations/thumbtack/snapshots');
+    return data;
+  },
+  // Persist a budget snapshot. Used for both Thumbtack (weekly, via Chrome ext)
+  // and Yelp (monthly, manually entered). For Yelp, pass period:'monthly' which
+  // routes through snapshotType='budget_monthly' — kept distinct from the TT
+  // 'budget' snapshots so they never overwrite each other.
+  saveBudgetSnapshot: async (params: {
+    savedAccountId: string;
+    provider: 'thumbtack' | 'yelp';
+    amount: number;
+    period: 'weekly' | 'monthly';
+    currency?: string;
+  }): Promise<{ ok: boolean; snapshotId: string }> => {
+    const { data } = await api.post('/integrations/thumbtack/snapshots/budget', {
+      savedAccountId: params.savedAccountId,
+      provider: params.provider,
+      snapshotType: params.period === 'monthly' ? 'budget_monthly' : 'budget',
+      capturedAt: new Date().toISOString(),
+      source: 'manual',
+      budget: { weekly: params.amount, currency: params.currency || 'USD' },
+    });
     return data;
   },
   importNegotiationBatch: async (negotiationIds: string[], accountId?: string): Promise<{

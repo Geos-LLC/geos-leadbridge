@@ -46,6 +46,11 @@ export interface RoomStatsMetric {
   minBathrooms: number;
 }
 
+export interface AverageLeadPriceMetric {
+  value: number | null;
+  count: number;
+}
+
 export class AnalyticsResponseDto {
   categoryDistribution: CategoryDistribution[];
   connectionTime: ConnectionTimeMetric;
@@ -68,6 +73,10 @@ export class AnalyticsResponseDto {
   locationDistribution?: ServiceDetailDistribution[];
   zipCodeDistribution?: ServiceDetailDistribution[];
   roomStats?: RoomStatsMetric;
+
+  // Average Thumbtack lead price (cost-per-lead from rawJson.leadPrice).
+  // Null when filtering to platform='yelp'.
+  averageLeadPrice?: AverageLeadPriceMetric;
 
   dateRange: {
     start: string;
