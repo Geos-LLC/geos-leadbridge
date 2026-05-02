@@ -1,63 +1,47 @@
 /**
  * Account-scope parsing for list endpoints.
  *
- * Backend rule (see `docs/ACCOUNT_BOUNDARY.md` and the hotfix PR notes):
+ * Backend rule:
  *
- *   tenant boundary  = userId    (always enforced by JwtAuthGuard / Prisma where: { userId })
- *   account boundary = businessId (THIS module — must filter list endpoints)
+ *   tenant boundary   = userId    (always enforced by JwtAuthGuard / Prisma where: { userId })
+ *   account boundary  = businessId (THIS module — must filter list endpoints)
  *   platform boundary = platform   (filter on the same table column)
  *
  * Per-account list endpoints accept either:
  *   ?businessId=<id>   → scope to one saved account
  *   ?scope=all         → explicit unified view across all of the user's accounts
  *
- * `businessId` and `scope=all` together → 400 (caller is confused).
+ * Anything else throws `BadRequestException`:
+ *   - businessId AND scope=all together  → mutually exclusive
+ *   - scope set to anything other than 'all'
+ *   - businessId === 'all' (ambiguous with scope=all)
+ *   - **neither set** — strict-mode is the default; the frontend MUST pick a scope
  *
- * Missing both → during the **transition window** this resolves to `{ kind: 'all',
- * warn: true }` so the existing UI keeps working while frontend code is updated
- * to always pass one of the two. After the transition window, callers should
- * flip `strict: true` in `parseAccountScope` to make missing scope a hard 400.
- *
- * The transition behavior is observable: the resolved value carries `warn: true`
- * which the controller turns into a `X-LeadBridge-Boundary-Warning` header and
- * a structured warning log. Both make it easy to grep and migrate every caller
- * before flipping to strict mode.
+ * History: a transition mode previously allowed missing both and treated it as
+ * unified, emitting a `X-LeadBridge-Boundary-Warning: missing-business-id`
+ * header and a structured warn log so unmigrated callers were observable.
+ * After a 24h+ Loki soak showed only stale-tab decay (last warning 35h before
+ * the cleanup), the transition surface was removed. See PRs #136-#144 for the
+ * full migration sequence.
  */
 import { BadRequestException } from '@nestjs/common';
 
 export type AccountScope =
   | { kind: 'account'; businessId: string }
-  | { kind: 'all'; warn: boolean };
+  | { kind: 'all' };
 
 export interface AccountScopeQuery {
   businessId?: string | null;
   scope?: string | null;
 }
 
-export interface ParseAccountScopeOptions {
-  /**
-   * When true, missing `businessId` AND missing `scope=all` throws BadRequestException.
-   * When false (transition default), missing both resolves to `{ kind: 'all', warn: true }`.
-   */
-  strict?: boolean;
-}
-
 const SCOPE_ALL_VALUES = new Set(['all']);
 
 /**
  * Returns a discriminated AccountScope describing the requested view, or throws
- * BadRequestException for malformed combinations.
- *
- * Throws on:
- *   - businessId AND scope set together (mutually exclusive)
- *   - scope set to anything other than 'all'
- *   - businessId is the literal string 'all' (ambiguous — caller must use scope=all)
- *   - missing both, when `strict: true`
+ * BadRequestException for any malformed or missing-scope query.
  */
-export function parseAccountScope(
-  query: AccountScopeQuery,
-  options: ParseAccountScopeOptions = {},
-): AccountScope {
+export function parseAccountScope(query: AccountScopeQuery): AccountScope {
   const businessIdRaw = typeof query.businessId === 'string' ? query.businessId.trim() : '';
   const scopeRaw = typeof query.scope === 'string' ? query.scope.trim().toLowerCase() : '';
 
@@ -76,7 +60,7 @@ export function parseAccountScope(
         `unsupported scope value '${scopeRaw}' — only 'all' is accepted`,
       );
     }
-    return { kind: 'all', warn: false };
+    return { kind: 'all' };
   }
 
   if (hasBusinessId) {
@@ -89,18 +73,8 @@ export function parseAccountScope(
     return { kind: 'account', businessId: businessIdRaw };
   }
 
-  // Neither was provided.
-  if (options.strict) {
-    throw new BadRequestException(
-      'businessId or scope=all is required for this list endpoint',
-    );
-  }
-  return { kind: 'all', warn: true };
+  // Neither was provided — strict-mode is the default now.
+  throw new BadRequestException(
+    'businessId or scope=all is required for this list endpoint',
+  );
 }
-
-/**
- * Header name used to surface transition-mode warnings to the frontend.
- * Frontend should log/track occurrences and update callers to pass an explicit scope.
- */
-export const ACCOUNT_BOUNDARY_WARNING_HEADER = 'X-LeadBridge-Boundary-Warning';
-export const ACCOUNT_BOUNDARY_WARNING_VALUE_MISSING = 'missing-business-id';
