@@ -652,18 +652,29 @@ export class MonitoringService implements OnModuleInit {
 
   /**
    * Stale traffic: an active subscription (inbound or outbound) that previously
-   * carried traffic but hasn't seen any in >24h.
+   * carried traffic but hasn't seen any recently.
    *
-   *  - Inbound: subscription.lastEventAt set AND last SfInboundEvent.receivedAt
-   *    for that subscription >24h ago.
+   *  - Inbound: any sf_inbound_event with processingError=NULL in the last 24h
+   *    proves the pipeline is alive (accepted noops count). Only when zero such
+   *    healthy rows exist AND the historical lastEventAt is >72h old do we warn.
+   *    Threshold widened from 24h → 72h because real SF traffic is naturally
+   *    sparse (multi-day gaps between status changes are normal); the prior
+   *    24h cutoff false-fired on quiet accounts.
    *  - Outbound: any CrmWebhookDelivery exists for subscription AND latest
    *    successful delivery (state='sent') >24h ago.
    *
    * "Previous traffic" gate prevents alerts on freshly-registered subscriptions
    * that simply haven't received their first event yet.
+   *
+   * On a healthy inbound result we also auto-resolve any unresolved
+   * sf_inbound_stalled SystemErrorLog row for the user — captureError never
+   * resolves on its own, so without this the row would persist forever after
+   * a transient stall clears.
    */
   private async checkStaleTraffic(): Promise<number> {
-    const stalenessCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const inboundStaleCutoff = new Date(Date.now() - 72 * 60 * 60 * 1000);
+    const inboundHealthyCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const outboundStaleCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const subs = await this.prisma.crmWebhookSubscription.findMany({
       where: { isActive: true },
       select: { id: true, userId: true, name: true, direction: true, lastEventAt: true },
@@ -672,22 +683,42 @@ export class MonitoringService implements OnModuleInit {
     let alerted = 0;
     for (const sub of subs) {
       if (sub.direction === 'inbound') {
-        // Previous traffic gate: lastEventAt must be set.
+        // Health gate: any clean inbound event in last 24h means the pipeline is
+        // demonstrably alive. processingError=NULL is the "accepted by handler"
+        // marker — accepted noop/skip results count as healthy; only rows with a
+        // real internal error fail the gate (those have their own dedicated
+        // alert via checkInboundProcessingErrors). Match by subscriptionId, with
+        // userId as a fallback for legacy rows written before sfSubscriptionId
+        // was populated.
+        const recentClean = await this.prisma.sfInboundEvent.findFirst({
+          where: {
+            OR: [{ sfSubscriptionId: sub.id }, { userId: sub.userId }],
+            receivedAt: { gte: inboundHealthyCutoff },
+            processingError: null,
+          },
+          select: { receivedAt: true },
+        });
+        if (recentClean) {
+          await this.resolveInboundStalledFor(sub.userId);
+          continue;
+        }
+
+        // Previous-traffic gate: don't warn on a fresh subscription with no history.
         if (!sub.lastEventAt) continue;
-        if (sub.lastEventAt >= stalenessCutoff) continue;
+        if (sub.lastEventAt >= inboundStaleCutoff) continue;
         const last = await this.prisma.sfInboundEvent.findFirst({
           where: { sfSubscriptionId: sub.id },
           orderBy: { receivedAt: 'desc' },
           select: { receivedAt: true },
         });
-        if (!last) continue; // no events ever — already gated above, defensive
-        if (last.receivedAt >= stalenessCutoff) continue;
+        if (!last) continue;
+        if (last.receivedAt >= inboundStaleCutoff) continue;
         await this.captureError({
           category: 'webhook',
           code: 'sf_inbound_stalled',
           severity: 'warning',
           userId: sub.userId,
-          message: `SF inbound subscription "${sub.name}" has not received an event in >24h (last: ${last.receivedAt.toISOString()})`,
+          message: `SF inbound subscription "${sub.name}" has not received an event in >72h (last: ${last.receivedAt.toISOString()})`,
         });
         alerted++;
       } else if (sub.direction === 'outbound') {
@@ -698,7 +729,7 @@ export class MonitoringService implements OnModuleInit {
           select: { deliveredAt: true },
         });
         if (!everSent || !everSent.deliveredAt) continue;
-        if (everSent.deliveredAt >= stalenessCutoff) continue;
+        if (everSent.deliveredAt >= outboundStaleCutoff) continue;
         await this.captureError({
           category: 'webhook',
           code: 'crm_outbound_stalled',
@@ -716,6 +747,22 @@ export class MonitoringService implements OnModuleInit {
       this.logger.warn(`[PipelineHealth] check=stale_traffic result=warn count=${alerted}`);
     }
     return alerted;
+  }
+
+  /**
+   * Clear any unresolved sf_inbound_stalled rows for a user once we've observed
+   * recent healthy traffic. captureError only updates messages, never resolves,
+   * so without this hook a transient stall would leave a permanent UI alert.
+   */
+  private async resolveInboundStalledFor(userId: string): Promise<void> {
+    try {
+      await this.prisma.systemErrorLog.updateMany({
+        where: { userId, code: 'sf_inbound_stalled', resolved: false },
+        data: { resolved: true },
+      });
+    } catch {
+      /* fire-and-forget — never break the health check loop */
+    }
   }
 
   /** Group failed/5xx delivery rows by subscriptionId, look up userId, captureError once per user. */

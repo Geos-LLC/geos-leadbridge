@@ -16,19 +16,44 @@ import { MonitoringService } from './monitoring.service';
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
+type InboundEventFixture = {
+  sfSubscriptionId?: string | null;
+  userId?: string | null;
+  receivedAt: Date;
+  processingError?: string | null;
+};
+
 function buildPrismaMock(state: {
   inboundErrors?: any[];
   failedDeliveries?: any[];
   fivexxDeliveries?: any[];
   subscriptions?: any[];
   inboundLast?: Record<string, Date>; // subscriptionId → last receivedAt
+  inboundEvents?: InboundEventFixture[]; // backing rows for the health-gate query
   outboundLastSent?: Record<string, Date | null>; // subscriptionId → last deliveredAt
 } = {}) {
+  const events: InboundEventFixture[] = state.inboundEvents ?? [];
   return {
     sfInboundEvent: {
       findMany: jest.fn().mockResolvedValue(state.inboundErrors ?? []),
       findFirst: jest.fn().mockImplementation(async (args: any) => {
-        const subId = args?.where?.sfSubscriptionId;
+        const w = args?.where ?? {};
+        // Health-gate query shape: OR + receivedAt.gte + processingError filter.
+        if (Array.isArray(w.OR)) {
+          const subId = w.OR[0]?.sfSubscriptionId;
+          const userId = w.OR[1]?.userId;
+          const sinceTs = w.receivedAt?.gte instanceof Date ? w.receivedAt.gte.getTime() : 0;
+          const wantNullErr = w.processingError === null;
+          const match = events.find(e => {
+            if (subId && e.sfSubscriptionId !== subId && (!userId || e.userId !== userId)) return false;
+            if (sinceTs && e.receivedAt.getTime() < sinceTs) return false;
+            if (wantNullErr && e.processingError != null) return false;
+            return true;
+          });
+          return match ? { receivedAt: match.receivedAt } : null;
+        }
+        // Legacy "last received" lookup keyed solely on subscriptionId.
+        const subId = w.sfSubscriptionId;
         if (!subId) return null;
         const ts = state.inboundLast?.[subId];
         return ts ? { receivedAt: ts } : null;
@@ -65,6 +90,7 @@ function buildPrismaMock(state: {
       findFirst: jest.fn().mockResolvedValue(null), // no dedup hits — every captureError creates a new row
       create: jest.fn().mockImplementation(async ({ data }: any) => ({ id: 'err-' + Math.random(), ...data })),
       update: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
   };
 }
@@ -194,8 +220,8 @@ describe('MonitoringService.runPipelineHealthChecks', () => {
       expect(result.staleSubscriptions).toBe(0);
     });
 
-    it('alerts when an active inbound subscription with prior traffic has not seen events in >24h', async () => {
-      const longAgo = new Date(Date.now() - 2 * DAY_MS);
+    it('alerts when an active inbound subscription with prior traffic has not seen events in >72h', async () => {
+      const longAgo = new Date(Date.now() - 4 * DAY_MS);
       const prisma = buildPrismaMock({
         subscriptions: [
           {
@@ -217,6 +243,160 @@ describe('MonitoringService.runPipelineHealthChecks', () => {
       expect(stale[0].data.userId).toBe('user-A');
       expect(stale[0].data.severity).toBe('warning');
       expect(stale[0].data.message).toMatch(/SF Inbound/);
+      expect(stale[0].data.message).toMatch(/>72h/);
+    });
+
+    it('does NOT alert when last lastEventAt is between 24h and 72h (inside extended threshold)', async () => {
+      const fortyEightHoursAgo = new Date(Date.now() - 48 * HOUR_MS);
+      const prisma = buildPrismaMock({
+        subscriptions: [
+          {
+            id: 'sub-1', userId: 'user-A', name: 'SF Inbound',
+            direction: 'inbound', isActive: true, lastEventAt: fortyEightHoursAgo,
+          },
+        ],
+        inboundLast: { 'sub-1': fortyEightHoursAgo },
+      });
+      const svc = buildSvc(prisma);
+
+      const result = await svc.runPipelineHealthChecks();
+
+      expect(result.staleSubscriptions).toBe(0);
+    });
+
+    it('does NOT alert when a recent accepted noop event exists (processingError=NULL)', async () => {
+      const longAgoLastEvent = new Date(Date.now() - 4 * DAY_MS);
+      const recent = new Date(Date.now() - 2 * HOUR_MS);
+      const prisma = buildPrismaMock({
+        subscriptions: [
+          {
+            id: 'sub-1', userId: 'user-A', name: 'SF Inbound',
+            direction: 'inbound', isActive: true, lastEventAt: longAgoLastEvent,
+          },
+        ],
+        inboundLast: { 'sub-1': longAgoLastEvent },
+        // Noop result — handler ran cleanly, no processingError.
+        inboundEvents: [
+          { sfSubscriptionId: 'sub-1', userId: 'user-A', receivedAt: recent, processingError: null },
+        ],
+      });
+      const svc = buildSvc(prisma);
+
+      const result = await svc.runPipelineHealthChecks();
+
+      expect(result.staleSubscriptions).toBe(0);
+      const stale = prisma.systemErrorLog.create.mock.calls.find(
+        (c: any) => c[0].data.code === 'sf_inbound_stalled',
+      );
+      expect(stale).toBeUndefined();
+      // And it auto-resolves any stuck row from a prior stall.
+      expect(prisma.systemErrorLog.updateMany).toHaveBeenCalledWith({
+        where: { userId: 'user-A', code: 'sf_inbound_stalled', resolved: false },
+        data: { resolved: true },
+      });
+    });
+
+    it('does NOT alert when a recent applied event exists (processingError=NULL)', async () => {
+      const longAgoLastEvent = new Date(Date.now() - 5 * DAY_MS);
+      const recent = new Date(Date.now() - 30 * 60 * 1000);
+      const prisma = buildPrismaMock({
+        subscriptions: [
+          {
+            id: 'sub-1', userId: 'user-A', name: 'SF Inbound',
+            direction: 'inbound', isActive: true, lastEventAt: longAgoLastEvent,
+          },
+        ],
+        inboundLast: { 'sub-1': longAgoLastEvent },
+        inboundEvents: [
+          // applied = real status change written by handler; processingError still null.
+          { sfSubscriptionId: 'sub-1', userId: 'user-A', receivedAt: recent, processingError: null },
+        ],
+      });
+      const svc = buildSvc(prisma);
+
+      const result = await svc.runPipelineHealthChecks();
+
+      expect(result.staleSubscriptions).toBe(0);
+    });
+
+    it('STILL alerts when only old events exist and none in the last 24h', async () => {
+      const fourDaysAgo = new Date(Date.now() - 4 * DAY_MS);
+      const prisma = buildPrismaMock({
+        subscriptions: [
+          {
+            id: 'sub-1', userId: 'user-A', name: 'SF Inbound',
+            direction: 'inbound', isActive: true, lastEventAt: fourDaysAgo,
+          },
+        ],
+        inboundLast: { 'sub-1': fourDaysAgo },
+        inboundEvents: [
+          // Only an old healthy event — outside the 24h health window.
+          { sfSubscriptionId: 'sub-1', userId: 'user-A', receivedAt: fourDaysAgo, processingError: null },
+        ],
+      });
+      const svc = buildSvc(prisma);
+
+      const result = await svc.runPipelineHealthChecks();
+
+      expect(result.staleSubscriptions).toBe(1);
+      const stale = prisma.systemErrorLog.create.mock.calls.find(
+        (c: any) => c[0].data.code === 'sf_inbound_stalled',
+      );
+      expect(stale).toBeDefined();
+      expect(stale[0].data.userId).toBe('user-A');
+    });
+
+    it('STILL alerts when the only recent event has processingError set (failure does not count as healthy)', async () => {
+      const fourDaysAgo = new Date(Date.now() - 4 * DAY_MS);
+      const recentBroken = new Date(Date.now() - 30 * 60 * 1000);
+      const prisma = buildPrismaMock({
+        subscriptions: [
+          {
+            id: 'sub-1', userId: 'user-A', name: 'SF Inbound',
+            direction: 'inbound', isActive: true, lastEventAt: fourDaysAgo,
+          },
+        ],
+        inboundLast: { 'sub-1': fourDaysAgo },
+        inboundEvents: [
+          // Recent but failed — handler choked, processingError populated.
+          { sfSubscriptionId: 'sub-1', userId: 'user-A', receivedAt: recentBroken, processingError: 'unmapped_status:foo' },
+        ],
+      });
+      const svc = buildSvc(prisma);
+
+      const result = await svc.runPipelineHealthChecks();
+
+      expect(result.staleSubscriptions).toBe(1);
+      const stale = prisma.systemErrorLog.create.mock.calls.find(
+        (c: any) => c[0].data.code === 'sf_inbound_stalled',
+      );
+      expect(stale).toBeDefined();
+    });
+
+    it('STILL warns when there are zero inbound events but lastEventAt is older than 72h (active subscription with prior history)', async () => {
+      const longAgo = new Date(Date.now() - 5 * DAY_MS);
+      const prisma = buildPrismaMock({
+        subscriptions: [
+          {
+            id: 'sub-1', userId: 'user-A', name: 'SF Inbound',
+            direction: 'inbound', isActive: true, lastEventAt: longAgo,
+          },
+        ],
+        // Note: legacy lookup keyed on subscriptionId still returns longAgo,
+        // but inboundEvents (the health gate) is empty.
+        inboundLast: { 'sub-1': longAgo },
+        inboundEvents: [],
+      });
+      const svc = buildSvc(prisma);
+
+      const result = await svc.runPipelineHealthChecks();
+
+      expect(result.staleSubscriptions).toBe(1);
+      const stale = prisma.systemErrorLog.create.mock.calls.find(
+        (c: any) => c[0].data.code === 'sf_inbound_stalled',
+      );
+      expect(stale).toBeDefined();
+      expect(stale[0].data.severity).toBe('warning');
     });
 
     it('alerts when an active outbound subscription with prior traffic has not delivered in >24h', async () => {
