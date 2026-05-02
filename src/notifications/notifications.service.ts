@@ -2191,6 +2191,20 @@ export class NotificationsService {
       return { webhookId: NotificationsService.cachedDeliveryStatusWebhookId, action: 'cached' };
     }
 
+    // Ownership guard: staging and production LeadBridge share the same
+    // Sigcore workspace, which means there's exactly ONE workspace-level
+    // delivery-status sub for both environments. If staging tried to manage
+    // it, every staging boot would patch the URL away from the production
+    // host and silently break production's delivery tracking. Gate the
+    // create/patch path behind an explicit opt-in env var (set on production
+    // only). Read-only callers (PipelineIntegrityService) don't go through
+    // this method, so they're unaffected.
+    const isOwner = this.configService.get<string>('SIGCORE_DELIVERY_WEBHOOK_OWNER') === 'true';
+    if (!isOwner) {
+      this.logger.log('[setupDeliveryStatusWebhook] SIGCORE_DELIVERY_WEBHOOK_OWNER!=true — skipping (this env does not own the workspace sub)');
+      return { webhookId: null, action: 'skipped' };
+    }
+
     const workspaceKey = this.configService.get<string>('SIGCORE_API_KEY');
     if (!workspaceKey) {
       this.logger.warn('[setupDeliveryStatusWebhook] No SIGCORE_API_KEY (workspace key) configured — skipping registration');
