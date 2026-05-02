@@ -47,6 +47,10 @@ function jsonResponse(body: any, status = 200): Response {
 
 describe('NotificationsService.setupDeliveryStatusWebhook', () => {
   const baseEnv = {
+    // SIGCORE_DELIVERY_WEBHOOK_OWNER must be 'true' for the create/patch path
+    // to run. This is the env-level guard that keeps staging from patching the
+    // shared workspace sub away from the prod URL.
+    SIGCORE_DELIVERY_WEBHOOK_OWNER: 'true',
     SIGCORE_API_KEY: 'sc_test_workspace_key',
     SIGCORE_API_URL: SIGCORE_BASE,
     BACKEND_PUBLIC_URL: 'https://api.example.com',
@@ -213,13 +217,52 @@ describe('NotificationsService.setupDeliveryStatusWebhook', () => {
   });
 
   it('skips registration when SIGCORE_API_KEY is not configured (no throw)', async () => {
-    // Don't set SIGCORE_API_KEY.
-    const svc = buildHarness({ BACKEND_PUBLIC_URL: 'https://api.example.com' });
+    // Owner is set, but no SIGCORE_API_KEY. Should still skip cleanly.
+    const svc = buildHarness({
+      SIGCORE_DELIVERY_WEBHOOK_OWNER: 'true',
+      BACKEND_PUBLIC_URL: 'https://api.example.com',
+    });
 
     const result = await svc.setupDeliveryStatusWebhook();
 
     expect(result.action).toBe('skipped');
     expect(result.webhookId).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('skips registration when SIGCORE_DELIVERY_WEBHOOK_OWNER is not "true" (the staging-safety guard)', async () => {
+    // Staging and production share the same Sigcore workspace, which means
+    // the workspace-level sub is shared too. Without this guard, every
+    // staging boot that hits a tenant action would PATCH the workspace sub
+    // URL away from the production host and silently break production. Test
+    // confirms that without the explicit owner opt-in, the create/patch path
+    // is never taken — even when SIGCORE_API_KEY is fully configured.
+    const svc = buildHarness({
+      SIGCORE_API_KEY: 'sc_test_workspace_key',
+      SIGCORE_API_URL: SIGCORE_BASE,
+      BACKEND_PUBLIC_URL: 'https://api.example.com',
+      // SIGCORE_DELIVERY_WEBHOOK_OWNER intentionally absent.
+    });
+
+    const result = await svc.setupDeliveryStatusWebhook();
+
+    expect(result.action).toBe('skipped');
+    expect(result.webhookId).toBeNull();
+    // No Sigcore traffic — list, patch, and create are all skipped.
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('also skips when owner var is set to anything other than literal "true"', async () => {
+    const svc = buildHarness({
+      SIGCORE_DELIVERY_WEBHOOK_OWNER: '1', // truthy but not 'true' — must not match
+      SIGCORE_API_KEY: 'sc_test_workspace_key',
+      SIGCORE_API_URL: SIGCORE_BASE,
+      BACKEND_PUBLIC_URL: 'https://api.example.com',
+    });
+
+    const result = await svc.setupDeliveryStatusWebhook();
+
+    expect(result.action).toBe('skipped');
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
