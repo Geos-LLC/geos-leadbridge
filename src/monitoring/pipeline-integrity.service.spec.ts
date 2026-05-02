@@ -79,12 +79,14 @@ function buildPrismaMock(state: {
   return mock;
 }
 
-function buildConfig() {
-  return { get: (_k: string, def?: any) => def } as any;
+function buildConfig(overrides: Record<string, any> = {}) {
+  return {
+    get: (k: string, def?: any) => (k in overrides ? overrides[k] : def),
+  } as any;
 }
 
-function buildSvc(prisma: any) {
-  const config = buildConfig();
+function buildSvc(prisma: any, configOverrides: Record<string, any> = {}) {
+  const config = buildConfig(configOverrides);
   // PipelineIntegrityService now reads SIGCORE_API_KEY for the webhook health
   // check. The test config returns undefined for it, so the check skips
   // silently (no Sigcore call, severity='ok'). That keeps existing tests
@@ -176,6 +178,62 @@ describe('PipelineIntegrityService.runChecks', () => {
     expect(result.ok).toBe(true);
     const linkCheck = result.results.find((r) => r.check === 'sf_link_missing');
     expect(linkCheck?.severity).toBe('ok');
+  });
+
+  it('skips sigcore_webhook_health when SIGCORE_WEBHOOK_HEALTH_OWNER does not match this host', async () => {
+    // Gate use case: staging Sigcore subscription points at the production LB
+    // host. Setting SIGCORE_WEBHOOK_HEALTH_OWNER to that production host on
+    // every LB instance means staging skips the check (its expected URL host
+    // is the staging host) while production runs it.
+    const prisma = buildPrismaMock();
+    const { integrity } = buildSvc(prisma, {
+      // SIGCORE_API_KEY must be set so we get past the early-return guard and
+      // reach the owner gate.
+      SIGCORE_API_KEY: 'sc_test',
+      // This instance resolves to staging:
+      APP_BASE_URL: 'https://thumbtack-bridge-staging.up.railway.app',
+      // …but the owner is the production host.
+      SIGCORE_WEBHOOK_HEALTH_OWNER: 'thumbtack-bridge-production.up.railway.app',
+    });
+
+    const result = await integrity.runChecks();
+
+    expect(result.ok).toBe(true);
+    const wh = result.results.find((r) => r.check === 'sigcore_webhook_health');
+    expect(wh?.severity).toBe('ok');
+    expect(wh?.count).toBe(0);
+    // Skip path returns empty problems — we did not reach the Sigcore HTTP call.
+    expect(wh?.sample).toEqual([]);
+  });
+
+  it('runs sigcore_webhook_health when SIGCORE_WEBHOOK_HEALTH_OWNER matches this host (reaches Sigcore call)', async () => {
+    // When the owner matches, the gate falls through and we reach the Sigcore
+    // HTTP call. Test asserts the gate doesn't short-circuit by stubbing fetch
+    // to return an empty subscription list — which makes the check fail with
+    // workspace_delivery_sub_missing, proving the call was attempted.
+    const prisma = buildPrismaMock();
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [] }),
+    }) as any;
+
+    try {
+      const { integrity } = buildSvc(prisma, {
+        SIGCORE_API_KEY: 'sc_test',
+        APP_BASE_URL: 'https://thumbtack-bridge-production.up.railway.app',
+        SIGCORE_WEBHOOK_HEALTH_OWNER: 'thumbtack-bridge-production.up.railway.app',
+      });
+
+      const result = await integrity.runChecks();
+
+      const wh = result.results.find((r) => r.check === 'sigcore_webhook_health');
+      expect(wh?.severity).toBe('fail');
+      expect(wh?.count).toBe(1);
+      expect(wh?.sample?.[0]).toMatchObject({ problem: 'workspace_delivery_sub_missing' });
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 });
 
