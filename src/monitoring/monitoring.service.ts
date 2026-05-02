@@ -289,6 +289,71 @@ export class MonitoringService implements OnModuleInit {
   }
 
   // ==========================================
+  // Hourly stale-pending NotificationLog resolution
+  //
+  // Background: outbound SMS NotificationLog rows are created with
+  // status='pending' and promoted to 'sent' / 'delivered' / 'failed' by
+  // Sigcore's delivery-status webhook (see WebhooksService.handleSigcoreDelivery
+  // Status). When a row stays 'pending' for hours, either the webhook never
+  // fired (Sigcore-side issue, fixed 2026-05-01) or the message ID stored
+  // doesn't match anything Sigcore knows about (orphaned tenant, deleted
+  // message). Either way, leaving the UI label as "⌛ Pending" indefinitely is
+  // misleading — the SMS almost certainly went through, we just can't prove it.
+  //
+  // Soft-resolution rule:
+  //   status='pending' AND createdAt < NOW() - STALE_PENDING_HOURS  →  status='unknown'
+  //
+  // The UI renders 'unknown' as "Sent (delivery not confirmed)" — honest about
+  // the gap without falsely claiming delivery.
+  //
+  // Cron expression '15 */1 * * *' = 15 past every hour (offset from the :00 token
+  // refresh and :10 health check). Advisory lock 7005.
+  // ==========================================
+
+  @Cron('15 */1 * * *')
+  async resolveStalePendingNotificationLogs(): Promise<void> {
+    const lockResult = await this.prisma
+      .$queryRawUnsafe<any[]>('SELECT pg_try_advisory_lock(7005) AS locked')
+      .catch(() => [{ locked: false }]);
+    if (!lockResult?.[0]?.locked) {
+      this.logger.debug('[StalePending] Another instance holds the lock — skipping');
+      return;
+    }
+
+    try {
+      const result = await this.prisma.$queryRawUnsafe<Array<{ count: number }>>(
+        `WITH updated AS (
+           UPDATE notification_logs
+              SET status = 'unknown'
+            WHERE status = 'pending'
+              AND "createdAt" < NOW() - INTERVAL '${MonitoringService.STALE_PENDING_HOURS} hours'
+            RETURNING id
+         )
+         SELECT COUNT(*)::int AS count FROM updated`,
+      );
+      const updatedCount = result?.[0]?.count ?? 0;
+
+      // Single-line k=v log so Loki dashboards can filter on
+      // result=stale_pending_resolved updated=N.
+      this.logger.log(
+        `[StalePending] result=stale_pending_resolved updated=${updatedCount} threshold_hours=${MonitoringService.STALE_PENDING_HOURS}`,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `[StalePending] result=error error=${(err?.message ?? 'unknown').replace(/\s+/g, ' ').slice(0, 300)}`,
+      );
+    } finally {
+      await this.prisma.$queryRawUnsafe('SELECT pg_advisory_unlock(7005)').catch(() => {});
+    }
+  }
+
+  // Threshold for the stale-pending resolver. Picked to be longer than any
+  // realistic Twilio delivery callback (typically <60s, with the worst-case
+  // carrier failure-and-retry path completing in ~minutes), so an
+  // 'unknown'-marked row truly represents "we never heard back."
+  private static readonly STALE_PENDING_HOURS = 6;
+
+  // ==========================================
   // Weekly Pipeline Integrity Check (Phase 5)
   //
   // Runs the same 5 checks as scripts/integrity-check-pipeline.js. On failure,
@@ -320,7 +385,7 @@ export class MonitoringService implements OnModuleInit {
       const result = await this.pipelineIntegrity.runChecks();
 
       if (result.ok) {
-        this.logger.log('[PipelineIntegrity] result=ok failed_count=0 summary="all 5 checks passed"');
+        this.logger.log(`[PipelineIntegrity] result=ok failed_count=0 summary="all ${result.results.length} checks passed"`);
         return;
       }
 
@@ -369,7 +434,7 @@ export class MonitoringService implements OnModuleInit {
     }
     const result = await this.pipelineIntegrity.runChecks();
     if (result.ok) {
-      this.logger.log('[PipelineIntegrity] result=ok failed_count=0 summary="all 5 checks passed" trigger=manual');
+      this.logger.log(`[PipelineIntegrity] result=ok failed_count=0 summary="all ${result.results.length} checks passed" trigger=manual`);
     } else {
       const failedCheckNames = result.results
         .filter((r) => r.severity === 'fail')

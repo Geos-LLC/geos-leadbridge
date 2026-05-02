@@ -8,6 +8,10 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
+import {
+  buildDeliveryStatusWebhookUrl,
+  buildInboundSmsWebhookUrl,
+} from './sigcore-webhook-url';
 
 // Short TTL: SMS/notification logs are write-mostly via webhook + outbound paths.
 // 60s is enough to absorb the burst of frontend re-fetches (Messages tab tab-back,
@@ -2145,8 +2149,149 @@ export class NotificationsService {
       this.logger.warn(`[ensureSigcoreTenantProvisioned] Failed to register inbound SMS webhook: ${err.message}`);
     }
 
+    // Ensure the workspace-level delivery-status webhook is registered with the
+    // current backend URL. This is idempotent — it lists existing subs and
+    // patches/creates as needed. Cheap to run on every provision because it's
+    // gated by an in-process cache (see setupDeliveryStatusWebhook).
+    try {
+      await this.setupDeliveryStatusWebhook();
+    } catch (err: any) {
+      this.logger.warn(`[ensureSigcoreTenantProvisioned] Failed to ensure delivery-status webhook: ${err.message}`);
+    }
+
     return { apiKey: data.apiKey, tenantId: data.tenantId };
   }
+
+  /**
+   * Ensure the workspace-level Sigcore delivery-status webhook subscription
+   * is registered against the current BACKEND_PUBLIC_URL.
+   *
+   * The subscription is workspace-scoped (no tenantId) and shared across every
+   * LeadBridge tenant — Sigcore fans out delivery events to it for every
+   * outbound SMS in the workspace. There must be exactly one such subscription
+   * with name='LeadBridge Delivery Notifications' and the correct URL/events.
+   *
+   * Idempotency:
+   *   - Successful runs cache for {@link DELIVERY_STATUS_WEBHOOK_CACHE_MS} so
+   *     repeated provisions don't hammer Sigcore.
+   *   - When uncached, lists subs and reconciles by name:
+   *       found + URL/events match → no-op, fast-path
+   *       found + URL/events differ → PATCH
+   *       not found                 → POST
+   *
+   * Uses the workspace-level SIGCORE_API_KEY (not a tenant key) because the
+   * subscription is workspace-scoped.
+   */
+  async setupDeliveryStatusWebhook(): Promise<{ webhookId: string | null; action: 'cached' | 'noop' | 'patched' | 'created' | 'skipped' }> {
+    const now = Date.now();
+    if (
+      NotificationsService.deliveryStatusWebhookCachedAt > 0 &&
+      now - NotificationsService.deliveryStatusWebhookCachedAt < NotificationsService.DELIVERY_STATUS_WEBHOOK_CACHE_MS
+    ) {
+      return { webhookId: NotificationsService.cachedDeliveryStatusWebhookId, action: 'cached' };
+    }
+
+    const workspaceKey = this.configService.get<string>('SIGCORE_API_KEY');
+    if (!workspaceKey) {
+      this.logger.warn('[setupDeliveryStatusWebhook] No SIGCORE_API_KEY (workspace key) configured — skipping registration');
+      return { webhookId: null, action: 'skipped' };
+    }
+
+    const expectedUrl = buildDeliveryStatusWebhookUrl(this.configService);
+    const expectedEvents = new Set(['message.sent', 'message.delivered', 'message.failed']);
+    const expectedName = 'LeadBridge Delivery Notifications';
+    const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
+    const subscriptionsEndpoint = `${sigcoreUrl}/v1/webhook-subscriptions`;
+
+    // Step 1 — list existing subs in the workspace
+    const listResp = await fetch(subscriptionsEndpoint, {
+      headers: { 'x-api-key': workspaceKey },
+    });
+    if (!listResp.ok) {
+      throw new Error(`List subscriptions failed: ${listResp.status}`);
+    }
+    const listJson: any = await listResp.json();
+    const subs: any[] = listJson.data ?? listJson ?? [];
+
+    // Match by name. There should only be one workspace-level
+    // delivery-notifications sub; if duplicates appear, we patch the first and
+    // log a warning so it can be cleaned up out-of-band.
+    const matches = subs.filter((s) => s.name === expectedName && !s.tenantId);
+    if (matches.length > 1) {
+      this.logger.warn(
+        `[setupDeliveryStatusWebhook] Found ${matches.length} workspace-level "${expectedName}" subs — using first (${matches[0]?.id}). Clean up extras manually.`,
+      );
+    }
+
+    const existing = matches[0];
+
+    // Step 2 — fast-path: existing sub already correct
+    if (existing) {
+      const existingEvents = new Set<string>(existing.events ?? []);
+      const eventsMatch =
+        existingEvents.size === expectedEvents.size &&
+        Array.from(expectedEvents).every((e) => existingEvents.has(e));
+      const urlMatch = existing.webhookUrl === expectedUrl;
+
+      if (eventsMatch && urlMatch && existing.status === 'active') {
+        NotificationsService.cachedDeliveryStatusWebhookId = existing.id;
+        NotificationsService.deliveryStatusWebhookCachedAt = now;
+        return { webhookId: existing.id, action: 'noop' };
+      }
+
+      // Step 3 — PATCH stale config
+      const patchBody: Record<string, unknown> = {};
+      if (!urlMatch) patchBody.webhookUrl = expectedUrl;
+      if (!eventsMatch) patchBody.events = Array.from(expectedEvents);
+      if (existing.status !== 'active') patchBody.status = 'active';
+
+      const patchResp = await fetch(`${subscriptionsEndpoint}/${existing.id}`, {
+        method: 'PATCH',
+        headers: { 'x-api-key': workspaceKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify(patchBody),
+      });
+      if (!patchResp.ok) {
+        const text = await patchResp.text().catch(() => '');
+        throw new Error(`PATCH subscription ${existing.id} failed: ${patchResp.status} ${text}`);
+      }
+      this.logger.log(
+        `[setupDeliveryStatusWebhook] Patched workspace delivery-status sub ${existing.id} → ${JSON.stringify(patchBody)}`,
+      );
+      NotificationsService.cachedDeliveryStatusWebhookId = existing.id;
+      NotificationsService.deliveryStatusWebhookCachedAt = now;
+      return { webhookId: existing.id, action: 'patched' };
+    }
+
+    // Step 4 — no existing sub: create one
+    const createResp = await fetch(subscriptionsEndpoint, {
+      method: 'POST',
+      headers: { 'x-api-key': workspaceKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: expectedName,
+        webhookUrl: expectedUrl,
+        events: Array.from(expectedEvents),
+      }),
+    });
+    if (!createResp.ok) {
+      const text = await createResp.text().catch(() => '');
+      throw new Error(`Create subscription failed: ${createResp.status} ${text}`);
+    }
+    const createJson: any = await createResp.json();
+    const created = createJson.data ?? createJson;
+    const webhookId = created?.id ?? null;
+    this.logger.log(`[setupDeliveryStatusWebhook] Created workspace delivery-status sub ${webhookId} → ${expectedUrl}`);
+
+    NotificationsService.cachedDeliveryStatusWebhookId = webhookId;
+    NotificationsService.deliveryStatusWebhookCachedAt = now;
+    return { webhookId, action: 'created' };
+  }
+
+  // Workspace-level state — the delivery-status webhook is shared across
+  // every tenant, so we cache the verification result process-wide rather than
+  // hitting Sigcore on every provision.
+  private static readonly DELIVERY_STATUS_WEBHOOK_CACHE_MS = 5 * 60 * 1000;
+  private static deliveryStatusWebhookCachedAt = 0;
+  private static cachedDeliveryStatusWebhookId: string | null = null;
 
   /**
    * Ensure inbound SMS webhook subscription exists for this account.
@@ -2161,8 +2306,7 @@ export class NotificationsService {
     if (!apiKey || !ns) return;
     if (ns.inboundSmsWebhookId) return; // already registered
 
-    const appBaseUrl = this.configService.get<string>('APP_BASE_URL', 'https://www.leadbridge360.com');
-    const webhookUrl = `${appBaseUrl}/api/webhooks/sigcore/inbound-sms?accountId=${savedAccountId}`;
+    const webhookUrl = buildInboundSmsWebhookUrl(this.configService, savedAccountId);
 
     const result = await this.createSigcoreWebhook(apiKey, webhookUrl, {
       name: 'LeadBridge Inbound SMS',
