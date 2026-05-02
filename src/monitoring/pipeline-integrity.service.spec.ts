@@ -503,83 +503,201 @@ describe('PipelineIntegrityService.runChecks — sigcore_webhook_health', () => 
 // ===========================================================================
 
 describe('MonitoringService.resolveStalePendingNotificationLogs', () => {
-  function buildSvcForResolver(updateCount: number) {
-    let unlockCalls = 0;
+  // Build a Prisma mock that replays the new xact-lock pattern:
+  //   prisma.$transaction(async tx => {
+  //     const rows = await tx.$queryRaw`SELECT pg_try_advisory_xact_lock(7005) AS locked`;
+  //     ...
+  //   })
+  function buildSvcForResolver(opts: {
+    updateCount?: number;
+    lockHeldByOther?: boolean;
+    updateThrows?: boolean;
+  }) {
     let updateSql = '';
-    const prisma: any = {
-      $queryRawUnsafe: jest.fn().mockImplementation(async (sql: string) => {
-        if (sql.includes('pg_try_advisory_lock(7005)')) return [{ locked: true }];
-        if (sql.includes('pg_advisory_unlock(7005)')) {
-          unlockCalls++;
-          return [];
-        }
-        if (sql.includes('UPDATE notification_logs')) {
-          updateSql = sql;
-          return [{ count: updateCount }];
-        }
+    const lockQueries: string[] = [];
+    const unlockQueries: string[] = [];
+
+    const prisma: any = {};
+    prisma.$queryRaw = jest.fn().mockImplementation(async (strings: TemplateStringsArray, ..._values: any[]) => {
+      const sql = strings.join(' ');
+      if (/pg_try_advisory_xact_lock/.test(sql)) {
+        lockQueries.push(sql);
+        return [{ locked: !opts.lockHeldByOther }];
+      }
+      if (/pg_advisory_unlock/.test(sql)) {
+        unlockQueries.push(sql);
+      }
+      return [];
+    });
+    prisma.$queryRawUnsafe = jest.fn().mockImplementation(async (sql: string) => {
+      if (/pg_advisory_unlock/.test(sql)) {
+        unlockQueries.push(sql);
         return [];
-      }),
-    };
+      }
+      if (sql.includes('UPDATE notification_logs')) {
+        if (opts.updateThrows) throw new Error('simulated DB outage');
+        updateSql = sql;
+        return [{ count: opts.updateCount ?? 0 }];
+      }
+      return [];
+    });
+    // $transaction passes the same mock as `tx`; if the callback throws we
+    // surface the throw so the cron's outer try/catch is exercised — that's
+    // the rollback path. The xact lock would auto-release at rollback in the
+    // real DB; here we just verify no manual unlock query was issued.
+    prisma.$transaction = jest.fn().mockImplementation(async (fn: any, _opts?: any) => fn(prisma));
+
     const config = { get: (_k: string, def?: any) => def } as any;
     const integrity = new PipelineIntegrityService(prisma, config);
     const svc = new MonitoringService(prisma, config, integrity);
-    return { svc, prisma, getUnlockCalls: () => unlockCalls, getUpdateSql: () => updateSql };
+    return {
+      svc,
+      prisma,
+      getUpdateSql: () => updateSql,
+      getLockQueries: () => lockQueries,
+      getUnlockQueries: () => unlockQueries,
+    };
   }
 
-  it('runs the UPDATE to mark stale-pending rows as unknown', async () => {
-    const { svc, prisma, getUpdateSql } = buildSvcForResolver(327);
+  it('acquires the xact lock and runs the UPDATE when no other instance holds it', async () => {
+    const { svc, prisma, getUpdateSql, getLockQueries, getUnlockQueries } = buildSvcForResolver({
+      updateCount: 327,
+    });
 
     await svc.resolveStalePendingNotificationLogs();
 
-    // Asserts the SQL preserves the soft-resolution rule documented at the
-    // method definition: pending → unknown, gated by createdAt + INTERVAL.
+    // 1. Transaction was opened and the lock acquired via the xact-scoped form.
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    const lockQueries = getLockQueries();
+    expect(lockQueries).toHaveLength(1);
+    expect(lockQueries[0]).toMatch(/pg_try_advisory_xact_lock/);
+
+    // 2. UPDATE actually ran with the documented soft-resolution rule.
     const sql = getUpdateSql();
     expect(sql).toContain("status = 'unknown'");
     expect(sql).toContain("status = 'pending'");
     expect(sql).toMatch(/INTERVAL '6 hours'/);
-    expect(prisma.$queryRawUnsafe).toHaveBeenCalled();
+
+    // 3. No manual unlock — the lock auto-releases at transaction commit.
+    expect(getUnlockQueries()).toHaveLength(0);
   });
 
-  it('always releases the advisory lock, even if the update query throws', async () => {
-    let unlockCalls = 0;
-    const prisma: any = {
-      $queryRawUnsafe: jest.fn().mockImplementation(async (sql: string) => {
-        if (sql.includes('pg_try_advisory_lock(7005)')) return [{ locked: true }];
-        if (sql.includes('pg_advisory_unlock(7005)')) {
-          unlockCalls++;
-          return [];
-        }
-        if (sql.includes('UPDATE notification_logs')) {
-          throw new Error('simulated DB outage');
-        }
-        return [];
-      }),
-    };
-    const config = { get: (_k: string, def?: any) => def } as any;
-    const integrity = new PipelineIntegrityService(prisma, config);
-    const svc = new MonitoringService(prisma, config, integrity);
+  it('rolls the transaction back when the update throws — no manual unlock needed', async () => {
+    const { svc, prisma, getUnlockQueries } = buildSvcForResolver({ updateThrows: true });
 
     // Cron methods log-and-swallow errors so the harness never crashes.
     await expect(svc.resolveStalePendingNotificationLogs()).resolves.toBeUndefined();
-    expect(unlockCalls).toBe(1);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    // Auto-release on rollback: no explicit pg_advisory_unlock query was ever issued.
+    expect(getUnlockQueries()).toHaveLength(0);
   });
 
-  it('skips when another instance holds the advisory lock', async () => {
-    const prisma: any = {
-      $queryRawUnsafe: jest.fn().mockImplementation(async (sql: string) => {
-        if (sql.includes('pg_try_advisory_lock(7005)')) return [{ locked: false }];
-        return [];
-      }),
-    };
-    const config = { get: (_k: string, def?: any) => def } as any;
-    const integrity = new PipelineIntegrityService(prisma, config);
-    const svc = new MonitoringService(prisma, config, integrity);
+  it('skips when another instance holds the xact lock', async () => {
+    const { svc, prisma, getUpdateSql, getUnlockQueries } = buildSvcForResolver({ lockHeldByOther: true });
 
     await svc.resolveStalePendingNotificationLogs();
 
-    // No UPDATE issued, no unlock attempted.
-    const calls = (prisma.$queryRawUnsafe as jest.Mock).mock.calls.map((c) => c[0] as string);
-    expect(calls.find((s) => s.includes('UPDATE notification_logs'))).toBeUndefined();
-    expect(calls.find((s) => s.includes('pg_advisory_unlock'))).toBeUndefined();
+    // The transaction is opened (to attempt the lock) but the work callback
+    // never runs and no UPDATE is issued.
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(getUpdateSql()).toBe('');
+    // And of course no unlock — there's nothing to unlock manually anyway.
+    expect(getUnlockQueries()).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// Cron lock contract — the new pattern is uniform across systemHealthCheck (7003),
+// resolveStalePendingNotificationLogs (7005), and weeklyPipelineIntegrityCheck
+// (7004). Verify the four invariants the spec calls out:
+//   1. lock acquired → callback runs
+//   2. lock not acquired → callback is skipped
+//   3. callback throws → transaction rolls back; no manual unlock needed
+//   4. no `pg_advisory_unlock` call exists anywhere in the service source
+// ===========================================================================
+
+describe('MonitoringService cron-lock contract', () => {
+  function buildHarness(opts: { lockHeldByOther?: boolean; workThrows?: boolean }) {
+    const calls = {
+      lockQueries: [] as string[],
+      unlockQueries: [] as string[],
+      transactionCalls: 0,
+      updateRan: false,
+    };
+    const prisma: any = {};
+    prisma.$queryRaw = jest.fn().mockImplementation(async (strings: TemplateStringsArray) => {
+      const sql = strings.join(' ');
+      if (/pg_try_advisory_xact_lock/.test(sql)) {
+        calls.lockQueries.push(sql);
+        return [{ locked: !opts.lockHeldByOther }];
+      }
+      if (/pg_advisory_unlock/.test(sql)) calls.unlockQueries.push(sql);
+      return [];
+    });
+    prisma.$queryRawUnsafe = jest.fn().mockImplementation(async (sql: string) => {
+      if (/pg_advisory_unlock/.test(sql)) {
+        calls.unlockQueries.push(sql);
+        return [];
+      }
+      if (sql.includes('UPDATE notification_logs')) {
+        if (opts.workThrows) throw new Error('boom');
+        calls.updateRan = true;
+        return [{ count: 5 }];
+      }
+      return [];
+    });
+    prisma.$transaction = jest.fn().mockImplementation(async (fn: any) => {
+      calls.transactionCalls++;
+      return fn(prisma);
+    });
+    const config = { get: (_k: string, def?: any) => def } as any;
+    const integrity = new PipelineIntegrityService(prisma, config);
+    const svc = new MonitoringService(prisma, config, integrity);
+    return { svc, prisma, calls };
+  }
+
+  it('1. lock acquired → checks run', async () => {
+    const { svc, calls } = buildHarness({});
+    await svc.resolveStalePendingNotificationLogs();
+    expect(calls.transactionCalls).toBe(1);
+    expect(calls.lockQueries[0]).toMatch(/pg_try_advisory_xact_lock\([\s\S]*?\) AS locked/);
+    expect(calls.updateRan).toBe(true);
+  });
+
+  it('2. lock not acquired → skips without doing the work', async () => {
+    const { svc, calls } = buildHarness({ lockHeldByOther: true });
+    await svc.resolveStalePendingNotificationLogs();
+    expect(calls.transactionCalls).toBe(1);
+    expect(calls.lockQueries).toHaveLength(1);
+    expect(calls.updateRan).toBe(false);
+  });
+
+  it('3. work throws → transaction rolls back / lock auto-releases (no manual unlock)', async () => {
+    const { svc, calls } = buildHarness({ workThrows: true });
+    // Cron swallows the error.
+    await expect(svc.resolveStalePendingNotificationLogs()).resolves.toBeUndefined();
+    expect(calls.transactionCalls).toBe(1);
+    // The work attempt happened (we entered the callback) but the explicit
+    // unlock path is never traversed — Postgres auto-releases on rollback.
+    expect(calls.unlockQueries).toHaveLength(0);
+  });
+
+  it('4. no explicit pg_advisory_unlock call remains in monitoring.service.ts source', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(
+      path.resolve(__dirname, 'monitoring.service.ts'),
+      'utf8',
+    );
+    // Strip block + line comments so we only inspect executable code. The
+    // comment block on the helper deliberately mentions the old function name
+    // to explain why we replaced it.
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    expect(code).not.toMatch(/pg_advisory_unlock/);
+    // The session-scoped form should also be gone — only the xact-scoped
+    // variant survives.
+    expect(code).not.toMatch(/pg_try_advisory_lock\b/);
+    expect(code).toMatch(/pg_try_advisory_xact_lock/);
   });
 });

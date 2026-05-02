@@ -38,6 +38,14 @@ export interface SystemHealthIssue {
   lastDetectedAt: Date;
 }
 
+/**
+ * A Prisma client or transaction client. Both expose the same model accessors
+ * (e.g. `.systemErrorLog.create`, `.savedAccount.findMany`), so any read/write
+ * helper that takes this type can be invoked either standalone (against
+ * `this.prisma`) or inside a `$transaction(async tx => ...)` callback.
+ */
+type Db = PrismaService | Parameters<Parameters<PrismaService['$transaction']>[0]>[0];
+
 @Injectable()
 export class MonitoringService implements OnModuleInit {
   private readonly logger = new Logger(MonitoringService.name);
@@ -50,6 +58,51 @@ export class MonitoringService implements OnModuleInit {
     // always populates it.
     @Optional() private readonly pipelineIntegrity: PipelineIntegrityService | null = null,
   ) {}
+
+  // ==========================================
+  // Cron Locking
+  //
+  // Prior implementation used pg_try_advisory_lock(N) — session-scoped — but
+  // we run Prisma over Supavisor in transaction-pooling mode, where the
+  // physical connection that acquired the lock can be returned to the pool
+  // before our `pg_advisory_unlock(N)` query lands; the unlock then runs on
+  // a different connection and silently no-ops, leaving the lock orphaned and
+  // every subsequent cron tick logging "Another instance holds the lock".
+  //
+  // pg_try_advisory_xact_lock(N) is bound to the current transaction — the
+  // database releases it automatically on COMMIT or ROLLBACK regardless of
+  // which connection eventually does the cleanup, so the orphan path is
+  // structurally impossible. The body of the cron runs inside the same
+  // transaction so the lock is held for its full duration.
+  // ==========================================
+
+  /**
+   * Run `work` inside a transaction guarded by a transaction-scoped advisory
+   * lock. If the lock is already held by another instance, the callback never
+   * runs and the helper returns `{ skipped: true }`. Errors propagate from
+   * `work` and roll the transaction back, releasing the lock automatically —
+   * no `pg_advisory_unlock` is ever needed.
+   */
+  private async withCronLock<T>(
+    lockKey: number,
+    label: string,
+    work: (tx: Db) => Promise<T>,
+    options?: { timeoutMs?: number },
+  ): Promise<T | { skipped: true }> {
+    return this.prisma.$transaction(
+      async tx => {
+        const rows = await tx.$queryRaw<Array<{ locked: boolean }>>`
+          SELECT pg_try_advisory_xact_lock(${lockKey}) AS locked
+        `;
+        if (!rows?.[0]?.locked) {
+          this.logger.debug(`[${label}] Another instance holds the lock — skipping`);
+          return { skipped: true } as { skipped: true };
+        }
+        return work(tx);
+      },
+      { timeout: options?.timeoutMs ?? 120_000, maxWait: 5_000 },
+    );
+  }
 
   /**
    * Run health check on startup to populate AccountHealthStatus immediately.
@@ -70,8 +123,12 @@ export class MonitoringService implements OnModuleInit {
   /**
    * Capture an error: dedup by fingerprint, store in DB.
    * Fire-and-forget safe — never throws.
+   *
+   * `db` defaults to the standalone client. Cron callers that hold a
+   * transaction-scoped advisory lock pass their `tx` so the row write happens
+   * on the same connection that holds the lock.
    */
-  async captureError(options: CaptureErrorOptions): Promise<void> {
+  async captureError(options: CaptureErrorOptions, db: Db = this.prisma): Promise<void> {
     try {
       const severity = options.severity ?? 'error';
 
@@ -87,7 +144,7 @@ export class MonitoringService implements OnModuleInit {
       // SystemErrorLog. With (2) it updates the existing row instead.
       let existing: any = null;
       if (options.accountId) {
-        existing = await this.prisma.systemErrorLog.findFirst({
+        existing = await db.systemErrorLog.findFirst({
           where: {
             category: options.category,
             accountId: options.accountId,
@@ -98,7 +155,7 @@ export class MonitoringService implements OnModuleInit {
           orderBy: { createdAt: 'desc' },
         });
       } else if (options.userId && options.code) {
-        existing = await this.prisma.systemErrorLog.findFirst({
+        existing = await db.systemErrorLog.findFirst({
           where: {
             category: options.category,
             userId: options.userId,
@@ -111,7 +168,7 @@ export class MonitoringService implements OnModuleInit {
       } else if (options.code) {
         // System-level dedup: neither userId nor accountId is set. Used by the
         // weekly pipeline integrity cron (code='pipeline_integrity_failed').
-        existing = await this.prisma.systemErrorLog.findFirst({
+        existing = await db.systemErrorLog.findFirst({
           where: {
             category: options.category,
             code: options.code,
@@ -124,7 +181,7 @@ export class MonitoringService implements OnModuleInit {
       }
 
       if (existing) {
-        await this.prisma.systemErrorLog.update({
+        await db.systemErrorLog.update({
           where: { id: existing.id },
           data: { message: options.message },
         });
@@ -134,7 +191,7 @@ export class MonitoringService implements OnModuleInit {
         return;
       }
 
-      await this.prisma.systemErrorLog.create({
+      await db.systemErrorLog.create({
         data: {
           category: options.category,
           code: options.code,
@@ -164,110 +221,119 @@ export class MonitoringService implements OnModuleInit {
    */
   @Cron('10 */1 * * *')
   async systemHealthCheck(): Promise<void> {
-    // Advisory lock 7003 — prevent staging+production double-checking
-    const lockResult = await this.prisma.$queryRawUnsafe<any[]>('SELECT pg_try_advisory_lock(7003) AS locked').catch(() => [{ locked: false }]);
-    if (!lockResult?.[0]?.locked) {
-      this.logger.debug('[HealthCheck] Another instance holds the lock — skipping');
-      return;
-    }
-
     try {
-      // Pipeline health checks run BEFORE the per-account work and BEFORE the
-      // no-accounts short-circuit, so SF↔LB pipeline alerts fire on a fresh
-      // staging tenant with zero saved accounts too.
-      await this.runPipelineHealthChecks();
+      const outcome = await this.withCronLock(7003, 'HealthCheck', async tx => {
+        // Pipeline health checks run BEFORE the per-account work and BEFORE
+        // the no-accounts short-circuit, so SF↔LB pipeline alerts fire on a
+        // fresh staging tenant with zero saved accounts too.
+        await this.runPipelineHealthChecks(tx);
 
-      const accounts = await this.prisma.savedAccount.findMany({
-        select: {
-          id: true, userId: true, platform: true, businessId: true, businessName: true,
-          webhookId: true, credentialsJson: true,
-        },
-      });
+        const accounts = await tx.savedAccount.findMany({
+          select: {
+            id: true, userId: true, platform: true, businessId: true, businessName: true,
+            webhookId: true, credentialsJson: true,
+          },
+        });
 
-      if (accounts.length === 0) return;
+        if (accounts.length === 0) {
+          return { accountCount: 0, newIssues: [], recoveries: [] };
+        }
 
-      const now = new Date();
-      const newIssues: { userId: string; issue: SystemHealthIssue }[] = [];
+        const now = new Date();
+        const newIssues: { userId: string; issue: SystemHealthIssue }[] = [];
+        const recoveries: { userId: string; accountName: string; platform: string; issueCode: string }[] = [];
 
-      for (const account of accounts) {
-        const issues = await this.checkAccountHealth(account);
+        for (const account of accounts) {
+          const issues = await this.checkAccountHealth(account, tx);
 
-        // Upsert each issue into AccountHealthStatus
-        for (const issue of issues) {
-          const existing = await this.prisma.accountHealthStatus.findUnique({
-            where: { accountId_issueCode: { accountId: account.id, issueCode: issue.issueCode } },
-          });
+          for (const issue of issues) {
+            const existing = await tx.accountHealthStatus.findUnique({
+              where: { accountId_issueCode: { accountId: account.id, issueCode: issue.issueCode } },
+            });
 
-          if (existing) {
-            if (!existing.isActive) {
-              // Reopen resolved issue
-              await this.prisma.accountHealthStatus.update({
-                where: { id: existing.id },
+            if (existing) {
+              if (!existing.isActive) {
+                await tx.accountHealthStatus.update({
+                  where: { id: existing.id },
+                  data: {
+                    isActive: true,
+                    status: issue.status,
+                    issueMessage: issue.message,
+                    lastDetectedAt: now,
+                    lastCheckedAt: now,
+                    resolvedAt: null,
+                    firstDetectedAt: now,
+                    notificationCount: 0,
+                    lastNotifiedAt: null,
+                  },
+                });
+                newIssues.push({ userId: account.userId, issue });
+              } else {
+                await tx.accountHealthStatus.update({
+                  where: { id: existing.id },
+                  data: { lastDetectedAt: now, lastCheckedAt: now, issueMessage: issue.message },
+                });
+              }
+            } else {
+              await tx.accountHealthStatus.create({
                 data: {
-                  isActive: true,
+                  userId: account.userId,
+                  accountId: account.id,
+                  platform: account.platform,
                   status: issue.status,
+                  issueCode: issue.issueCode,
                   issueMessage: issue.message,
+                  isActive: true,
+                  firstDetectedAt: now,
                   lastDetectedAt: now,
                   lastCheckedAt: now,
-                  resolvedAt: null,
-                  firstDetectedAt: now,
-                  notificationCount: 0,
-                  lastNotifiedAt: null,
                 },
               });
               newIssues.push({ userId: account.userId, issue });
-            } else {
-              // Still active — update detection time
-              await this.prisma.accountHealthStatus.update({
-                where: { id: existing.id },
-                data: { lastDetectedAt: now, lastCheckedAt: now, issueMessage: issue.message },
+            }
+          }
+
+          const activeIssues = await tx.accountHealthStatus.findMany({
+            where: { accountId: account.id, isActive: true },
+          });
+          const currentIssueCodes = new Set(issues.map(i => i.issueCode));
+          for (const active of activeIssues) {
+            if (!currentIssueCodes.has(active.issueCode)) {
+              await tx.accountHealthStatus.update({
+                where: { id: active.id },
+                data: { isActive: false, resolvedAt: now, lastCheckedAt: now },
+              });
+              // Defer recovery email until the transaction commits — we don't
+              // hold an open DB connection (and the advisory lock with it)
+              // across SendGrid network calls.
+              recoveries.push({
+                userId: account.userId,
+                accountName: account.businessName || account.businessId,
+                platform: account.platform,
+                issueCode: active.issueCode,
               });
             }
-          } else {
-            // New issue
-            await this.prisma.accountHealthStatus.create({
-              data: {
-                userId: account.userId,
-                accountId: account.id,
-                platform: account.platform,
-                status: issue.status,
-                issueCode: issue.issueCode,
-                issueMessage: issue.message,
-                isActive: true,
-                firstDetectedAt: now,
-                lastDetectedAt: now,
-                lastCheckedAt: now,
-              },
-            });
-            newIssues.push({ userId: account.userId, issue });
           }
         }
 
-        // Resolve issues that are no longer present
-        const activeIssues = await this.prisma.accountHealthStatus.findMany({
-          where: { accountId: account.id, isActive: true },
-        });
-        const currentIssueCodes = new Set(issues.map(i => i.issueCode));
-        for (const active of activeIssues) {
-          if (!currentIssueCodes.has(active.issueCode)) {
-            await this.prisma.accountHealthStatus.update({
-              where: { id: active.id },
-              data: { isActive: false, resolvedAt: now, lastCheckedAt: now },
-            });
-            // Send recovery notification
-            this.sendRecoveryEmail(account.userId, {
-              accountName: account.businessName || account.businessId,
-              platform: account.platform,
-              issueCode: active.issueCode,
-            }).catch(() => {});
-          }
-        }
+        return { accountCount: accounts.length, newIssues, recoveries };
+      });
+
+      if ('skipped' in outcome) return;
+
+      // Email I/O happens after the transaction commits — keeps SendGrid
+      // network latency out of the lock window.
+      for (const r of outcome.recoveries) {
+        this.sendRecoveryEmail(r.userId, {
+          accountName: r.accountName,
+          platform: r.platform,
+          issueCode: r.issueCode,
+        }).catch(() => {});
       }
 
-      // Send grouped alerts for new issues (per user)
-      if (newIssues.length > 0) {
+      if (outcome.newIssues.length > 0) {
         const byUser = new Map<string, SystemHealthIssue[]>();
-        for (const { userId, issue } of newIssues) {
+        for (const { userId, issue } of outcome.newIssues) {
           const arr = byUser.get(userId) || [];
           arr.push(issue);
           byUser.set(userId, arr);
@@ -277,14 +343,11 @@ export class MonitoringService implements OnModuleInit {
         }
       }
 
-      // Send reminders for issues unresolved 24h+ (every 48h)
       await this.sendReminders();
 
-      this.logger.log(`[HealthCheck] Complete — ${accounts.length} accounts, ${newIssues.length} new issues`);
+      this.logger.log(`[HealthCheck] Complete — ${outcome.accountCount} accounts, ${outcome.newIssues.length} new issues`);
     } catch (err: any) {
       this.logger.error(`[HealthCheck] Cron error: ${err.message}`);
-    } finally {
-      await this.prisma.$queryRawUnsafe('SELECT pg_advisory_unlock(7003)').catch(() => {});
     }
   }
 
@@ -312,38 +375,32 @@ export class MonitoringService implements OnModuleInit {
 
   @Cron('15 */1 * * *')
   async resolveStalePendingNotificationLogs(): Promise<void> {
-    const lockResult = await this.prisma
-      .$queryRawUnsafe<any[]>('SELECT pg_try_advisory_lock(7005) AS locked')
-      .catch(() => [{ locked: false }]);
-    if (!lockResult?.[0]?.locked) {
-      this.logger.debug('[StalePending] Another instance holds the lock — skipping');
-      return;
-    }
-
     try {
-      const result = await this.prisma.$queryRawUnsafe<Array<{ count: number }>>(
-        `WITH updated AS (
-           UPDATE notification_logs
-              SET status = 'unknown'
-            WHERE status = 'pending'
-              AND "createdAt" < NOW() - INTERVAL '${MonitoringService.STALE_PENDING_HOURS} hours'
-            RETURNING id
-         )
-         SELECT COUNT(*)::int AS count FROM updated`,
-      );
-      const updatedCount = result?.[0]?.count ?? 0;
+      const outcome = await this.withCronLock(7005, 'StalePending', async tx => {
+        const result = await tx.$queryRawUnsafe<Array<{ count: number }>>(
+          `WITH updated AS (
+             UPDATE notification_logs
+                SET status = 'unknown'
+              WHERE status = 'pending'
+                AND "createdAt" < NOW() - INTERVAL '${MonitoringService.STALE_PENDING_HOURS} hours'
+              RETURNING id
+           )
+           SELECT COUNT(*)::int AS count FROM updated`,
+        );
+        return { updatedCount: result?.[0]?.count ?? 0 };
+      });
+
+      if ('skipped' in outcome) return;
 
       // Single-line k=v log so Loki dashboards can filter on
       // result=stale_pending_resolved updated=N.
       this.logger.log(
-        `[StalePending] result=stale_pending_resolved updated=${updatedCount} threshold_hours=${MonitoringService.STALE_PENDING_HOURS}`,
+        `[StalePending] result=stale_pending_resolved updated=${outcome.updatedCount} threshold_hours=${MonitoringService.STALE_PENDING_HOURS}`,
       );
     } catch (err: any) {
       this.logger.error(
         `[StalePending] result=error error=${(err?.message ?? 'unknown').replace(/\s+/g, ' ').slice(0, 300)}`,
       );
-    } finally {
-      await this.prisma.$queryRawUnsafe('SELECT pg_advisory_unlock(7005)').catch(() => {});
     }
   }
 
@@ -373,53 +430,66 @@ export class MonitoringService implements OnModuleInit {
       return;
     }
 
-    const lockResult = await this.prisma
-      .$queryRawUnsafe<any[]>('SELECT pg_try_advisory_lock(7004) AS locked')
-      .catch(() => [{ locked: false }]);
-    if (!lockResult?.[0]?.locked) {
-      this.logger.debug('[PipelineIntegrity] Another instance holds the lock — skipping');
-      return;
-    }
-
     try {
-      const result = await this.pipelineIntegrity.runChecks();
+      const outcome = await this.withCronLock(
+        7004,
+        'PipelineIntegrity',
+        async tx => {
+          // PipelineIntegrityService runs its own queries against this.prisma
+          // (read-only checks against the broader schema). They land on
+          // separate pooler connections — that's fine. The xact lock is held
+          // by THIS transaction's connection for the lifetime of the callback,
+          // which is what enforces single-runner exclusion.
+          const result = await this.pipelineIntegrity!.runChecks();
 
-      if (result.ok) {
-        this.logger.log(`[PipelineIntegrity] result=ok failed_count=0 summary="all ${result.results.length} checks passed"`);
+          if (result.ok) {
+            return { kind: 'ok' as const, length: result.results.length };
+          }
+
+          await this.captureError(
+            {
+              category: 'webhook',
+              code: 'pipeline_integrity_failed',
+              severity: 'error',
+              message: result.summary,
+              context: {
+                failedCount: result.failedCount,
+                results: result.results.map(r => ({
+                  check: r.check,
+                  count: r.count,
+                  severity: r.severity,
+                  sample: r.sample,
+                })),
+                ranAt: new Date().toISOString(),
+              },
+            },
+            tx,
+          );
+
+          return { kind: 'failed' as const, result };
+        },
+        // Integrity checks are heavier than the hourly health check.
+        { timeoutMs: 600_000 },
+      );
+
+      if ('skipped' in outcome) return;
+
+      if (outcome.kind === 'ok') {
+        this.logger.log(`[PipelineIntegrity] result=ok failed_count=0 summary="all ${outcome.length} checks passed"`);
         return;
       }
 
-      // Single k=v line so Loki/dashboards can filter on result=failed.
-      const failedCheckNames = result.results
-        .filter((r) => r.severity === 'fail')
-        .map((r) => `${r.check}:${r.count}`)
+      const failedCheckNames = outcome.result.results
+        .filter(r => r.severity === 'fail')
+        .map(r => `${r.check}:${r.count}`)
         .join(',');
       this.logger.error(
-        `[PipelineIntegrity] result=failed failed_count=${result.failedCount} checks=${failedCheckNames}`,
+        `[PipelineIntegrity] result=failed failed_count=${outcome.result.failedCount} checks=${failedCheckNames}`,
       );
-
-      await this.captureError({
-        category: 'webhook',
-        code: 'pipeline_integrity_failed',
-        severity: 'error',
-        message: result.summary,
-        context: {
-          failedCount: result.failedCount,
-          results: result.results.map((r) => ({
-            check: r.check,
-            count: r.count,
-            severity: r.severity,
-            sample: r.sample,
-          })),
-          ranAt: new Date().toISOString(),
-        },
-      });
     } catch (err: any) {
       this.logger.error(
         `[PipelineIntegrity] result=error error=${(err?.message ?? 'unknown').replace(/\s+/g, ' ').slice(0, 300)}`,
       );
-    } finally {
-      await this.prisma.$queryRawUnsafe('SELECT pg_advisory_unlock(7004)').catch(() => {});
     }
   }
 
@@ -462,12 +532,12 @@ export class MonitoringService implements OnModuleInit {
   /**
    * Check a single account's health. Returns detected issues.
    */
-  private async checkAccountHealth(account: any): Promise<SystemHealthIssue[]> {
+  private async checkAccountHealth(account: any, db: Db = this.prisma): Promise<SystemHealthIssue[]> {
     const issues: SystemHealthIssue[] = [];
     const now = new Date();
 
     // 1. Token expired — check unresolved auth/refresh errors
-    const tokenErrors = await this.prisma.systemErrorLog.findFirst({
+    const tokenErrors = await db.systemErrorLog.findFirst({
       where: {
         resolved: false,
         OR: [
@@ -515,7 +585,7 @@ export class MonitoringService implements OnModuleInit {
     }
 
     // 3. Automation failures — 3+ in last hour
-    const automationFailCount = await this.prisma.systemErrorLog.count({
+    const automationFailCount = await db.systemErrorLog.count({
       where: {
         accountId: account.id,
         category: 'automation',
@@ -533,14 +603,14 @@ export class MonitoringService implements OnModuleInit {
     }
 
     // 4. Notifications disabled — only flag if account has notification settings configured
-    const notifSettings = await this.prisma.notificationSettings.findUnique({
+    const notifSettings = await db.notificationSettings.findUnique({
       where: { savedAccountId: account.id },
       select: { enabled: true, notificationRules: { where: { triggerType: 'new_lead', enabled: true }, select: { id: true } } },
     });
     // Only flag if settings exist but all new_lead rules are disabled (user configured then turned off)
     if (notifSettings && notifSettings.enabled && notifSettings.notificationRules.length === 0) {
       // Check if there were ever any rules (user configured then disabled)
-      const anyRules = await this.prisma.notificationRule.count({ where: { notificationSettingsId: account.id } }).catch(() => 0);
+      const anyRules = await db.notificationRule.count({ where: { notificationSettingsId: account.id } }).catch(() => 0);
       if (anyRules > 0) {
         issues.push({
           accountId: account.id, accountName: account.businessName || account.businessId,
@@ -566,7 +636,7 @@ export class MonitoringService implements OnModuleInit {
   // ==========================================
 
   /** Pipeline-level health checks. Called from systemHealthCheck under the same advisory lock. */
-  async runPipelineHealthChecks(): Promise<{
+  async runPipelineHealthChecks(db: Db = this.prisma): Promise<{
     inboundErrors: number;
     outboundFailures: number;
     crm5xx: number;
@@ -574,17 +644,17 @@ export class MonitoringService implements OnModuleInit {
   }> {
     const since = new Date(Date.now() - 60 * 60 * 1000);
     const [inboundErrors, outboundFailures, crm5xx, staleSubscriptions] = await Promise.all([
-      this.checkInboundProcessingErrors(since),
-      this.checkOutboundFailures(since),
-      this.checkOutbound5xx(since),
-      this.checkStaleTraffic(),
+      this.checkInboundProcessingErrors(since, db),
+      this.checkOutboundFailures(since, db),
+      this.checkOutbound5xx(since, db),
+      this.checkStaleTraffic(db),
     ]);
     return { inboundErrors, outboundFailures, crm5xx, staleSubscriptions };
   }
 
   /** Any sf_inbound_events.processingError in last 1h → captureError per affected user. */
-  private async checkInboundProcessingErrors(since: Date): Promise<number> {
-    const rows = await this.prisma.sfInboundEvent.findMany({
+  private async checkInboundProcessingErrors(since: Date, db: Db = this.prisma): Promise<number> {
+    const rows = await db.sfInboundEvent.findMany({
       where: { processingError: { not: null }, receivedAt: { gte: since } },
       select: { userId: true, processingError: true, eventId: true },
     });
@@ -600,21 +670,24 @@ export class MonitoringService implements OnModuleInit {
       byUser.set(key, cur);
     }
     for (const [userId, agg] of byUser) {
-      await this.captureError({
-        category: 'webhook',
-        code: 'sf_inbound_processing_error',
-        severity: 'error',
-        userId: userId ?? undefined,
-        message: `${agg.count} SF inbound processing error(s) in last 1h. Sample: ${agg.sample.slice(0, 200)}`,
-      });
+      await this.captureError(
+        {
+          category: 'webhook',
+          code: 'sf_inbound_processing_error',
+          severity: 'error',
+          userId: userId ?? undefined,
+          message: `${agg.count} SF inbound processing error(s) in last 1h. Sample: ${agg.sample.slice(0, 200)}`,
+        },
+        db,
+      );
     }
     this.logger.error(`[PipelineHealth] check=sf_inbound_processing_error result=error count=${rows.length}`);
     return rows.length;
   }
 
   /** crm_webhook_deliveries.state='failed' in last 1h → captureError per affected subscription user. */
-  private async checkOutboundFailures(since: Date): Promise<number> {
-    const failed = await this.prisma.crmWebhookDelivery.findMany({
+  private async checkOutboundFailures(since: Date, db: Db = this.prisma): Promise<number> {
+    const failed = await db.crmWebhookDelivery.findMany({
       where: { state: 'failed', createdAt: { gte: since } },
       select: { subscriptionId: true, lastError: true, eventId: true },
     });
@@ -626,14 +699,14 @@ export class MonitoringService implements OnModuleInit {
       rows: failed.map(r => ({ subscriptionId: r.subscriptionId, sample: r.lastError ?? 'no_error_text' })),
       code: 'crm_outbound_failed',
       messagePrefix: 'CRM webhook delivery failed',
-    });
+    }, db);
     this.logger.error(`[PipelineHealth] check=crm_outbound_failed result=error count=${failed.length}`);
     return failed.length;
   }
 
   /** crm_webhook_deliveries.lastStatusCode>=500 in last 1h → captureError per affected subscription user. */
-  private async checkOutbound5xx(since: Date): Promise<number> {
-    const fivexx = await this.prisma.crmWebhookDelivery.findMany({
+  private async checkOutbound5xx(since: Date, db: Db = this.prisma): Promise<number> {
+    const fivexx = await db.crmWebhookDelivery.findMany({
       where: { lastStatusCode: { gte: 500 }, createdAt: { gte: since } },
       select: { subscriptionId: true, lastStatusCode: true, eventId: true },
     });
@@ -645,7 +718,7 @@ export class MonitoringService implements OnModuleInit {
       rows: fivexx.map(r => ({ subscriptionId: r.subscriptionId, sample: `status_code=${r.lastStatusCode}` })),
       code: 'crm_outbound_5xx',
       messagePrefix: 'CRM webhook receiver returned 5xx',
-    });
+    }, db);
     this.logger.error(`[PipelineHealth] check=crm_outbound_5xx result=error count=${fivexx.length}`);
     return fivexx.length;
   }
@@ -671,11 +744,11 @@ export class MonitoringService implements OnModuleInit {
    * resolves on its own, so without this the row would persist forever after
    * a transient stall clears.
    */
-  private async checkStaleTraffic(): Promise<number> {
+  private async checkStaleTraffic(db: Db = this.prisma): Promise<number> {
     const inboundStaleCutoff = new Date(Date.now() - 72 * 60 * 60 * 1000);
     const inboundHealthyCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const outboundStaleCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const subs = await this.prisma.crmWebhookSubscription.findMany({
+    const subs = await db.crmWebhookSubscription.findMany({
       where: { isActive: true },
       select: { id: true, userId: true, name: true, direction: true, lastEventAt: true },
     });
@@ -690,7 +763,7 @@ export class MonitoringService implements OnModuleInit {
         // alert via checkInboundProcessingErrors). Match by subscriptionId, with
         // userId as a fallback for legacy rows written before sfSubscriptionId
         // was populated.
-        const recentClean = await this.prisma.sfInboundEvent.findFirst({
+        const recentClean = await db.sfInboundEvent.findFirst({
           where: {
             OR: [{ sfSubscriptionId: sub.id }, { userId: sub.userId }],
             receivedAt: { gte: inboundHealthyCutoff },
@@ -699,44 +772,50 @@ export class MonitoringService implements OnModuleInit {
           select: { receivedAt: true },
         });
         if (recentClean) {
-          await this.resolveInboundStalledFor(sub.userId);
+          await this.resolveInboundStalledFor(sub.userId, db);
           continue;
         }
 
         // Previous-traffic gate: don't warn on a fresh subscription with no history.
         if (!sub.lastEventAt) continue;
         if (sub.lastEventAt >= inboundStaleCutoff) continue;
-        const last = await this.prisma.sfInboundEvent.findFirst({
+        const last = await db.sfInboundEvent.findFirst({
           where: { sfSubscriptionId: sub.id },
           orderBy: { receivedAt: 'desc' },
           select: { receivedAt: true },
         });
         if (!last) continue;
         if (last.receivedAt >= inboundStaleCutoff) continue;
-        await this.captureError({
-          category: 'webhook',
-          code: 'sf_inbound_stalled',
-          severity: 'warning',
-          userId: sub.userId,
-          message: `SF inbound subscription "${sub.name}" has not received an event in >72h (last: ${last.receivedAt.toISOString()})`,
-        });
+        await this.captureError(
+          {
+            category: 'webhook',
+            code: 'sf_inbound_stalled',
+            severity: 'warning',
+            userId: sub.userId,
+            message: `SF inbound subscription "${sub.name}" has not received an event in >72h (last: ${last.receivedAt.toISOString()})`,
+          },
+          db,
+        );
         alerted++;
       } else if (sub.direction === 'outbound') {
         // Previous traffic gate: at least one delivery row must exist.
-        const everSent = await this.prisma.crmWebhookDelivery.findFirst({
+        const everSent = await db.crmWebhookDelivery.findFirst({
           where: { subscriptionId: sub.id, state: 'sent' },
           orderBy: { deliveredAt: 'desc' },
           select: { deliveredAt: true },
         });
         if (!everSent || !everSent.deliveredAt) continue;
         if (everSent.deliveredAt >= outboundStaleCutoff) continue;
-        await this.captureError({
-          category: 'webhook',
-          code: 'crm_outbound_stalled',
-          severity: 'warning',
-          userId: sub.userId,
-          message: `CRM outbound subscription "${sub.name}" has not delivered a webhook in >24h (last: ${everSent.deliveredAt.toISOString()})`,
-        });
+        await this.captureError(
+          {
+            category: 'webhook',
+            code: 'crm_outbound_stalled',
+            severity: 'warning',
+            userId: sub.userId,
+            message: `CRM outbound subscription "${sub.name}" has not delivered a webhook in >24h (last: ${everSent.deliveredAt.toISOString()})`,
+          },
+          db,
+        );
         alerted++;
       }
     }
@@ -754,9 +833,9 @@ export class MonitoringService implements OnModuleInit {
    * recent healthy traffic. captureError only updates messages, never resolves,
    * so without this hook a transient stall would leave a permanent UI alert.
    */
-  private async resolveInboundStalledFor(userId: string): Promise<void> {
+  private async resolveInboundStalledFor(userId: string, db: Db = this.prisma): Promise<void> {
     try {
-      await this.prisma.systemErrorLog.updateMany({
+      await db.systemErrorLog.updateMany({
         where: { userId, code: 'sf_inbound_stalled', resolved: false },
         data: { resolved: true },
       });
@@ -766,11 +845,14 @@ export class MonitoringService implements OnModuleInit {
   }
 
   /** Group failed/5xx delivery rows by subscriptionId, look up userId, captureError once per user. */
-  private async captureErrorsForDeliveries(opts: {
-    rows: Array<{ subscriptionId: string; sample: string }>;
-    code: string;
-    messagePrefix: string;
-  }): Promise<void> {
+  private async captureErrorsForDeliveries(
+    opts: {
+      rows: Array<{ subscriptionId: string; sample: string }>;
+      code: string;
+      messagePrefix: string;
+    },
+    db: Db = this.prisma,
+  ): Promise<void> {
     const bySub = new Map<string, { count: number; sample: string }>();
     for (const r of opts.rows) {
       const cur = bySub.get(r.subscriptionId) ?? { count: 0, sample: r.sample };
@@ -779,20 +861,23 @@ export class MonitoringService implements OnModuleInit {
     }
     const subIds = Array.from(bySub.keys());
     if (subIds.length === 0) return;
-    const subs = await this.prisma.crmWebhookSubscription.findMany({
+    const subs = await db.crmWebhookSubscription.findMany({
       where: { id: { in: subIds } },
       select: { id: true, userId: true, name: true },
     });
     for (const sub of subs) {
       const agg = bySub.get(sub.id);
       if (!agg) continue;
-      await this.captureError({
-        category: 'webhook',
-        code: opts.code,
-        severity: 'error',
-        userId: sub.userId,
-        message: `${opts.messagePrefix} on subscription "${sub.name}" — ${agg.count} occurrence(s) in last 1h. Sample: ${agg.sample.slice(0, 200)}`,
-      });
+      await this.captureError(
+        {
+          category: 'webhook',
+          code: opts.code,
+          severity: 'error',
+          userId: sub.userId,
+          message: `${opts.messagePrefix} on subscription "${sub.name}" — ${agg.count} occurrence(s) in last 1h. Sample: ${agg.sample.slice(0, 200)}`,
+        },
+        db,
+      );
     }
   }
 
