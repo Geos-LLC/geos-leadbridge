@@ -9,6 +9,10 @@ import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../common/utils/prisma.service';
 import { firstValueFrom } from 'rxjs';
 import * as crypto from 'crypto';
+import {
+  buildInboundSmsWebhookUrl,
+  resolveSigcoreCallbackBaseUrl,
+} from '../notifications/sigcore-webhook-url';
 
 export interface SaveCallConnectSettingsDto {
   enabled?: boolean;
@@ -48,11 +52,11 @@ export class CallConnectService {
     // Strip trailing /api — we build full paths ourselves using /api/internal/...
     this.sigcoreApiUrl = rawUrl.replace(/\/api\/?$/, '');
 
-    const rawBaseUrl =
-      this.configService.get<string>('APP_BASE_URL') ||
-      this.configService.get<string>('FRONTEND_URL') ||
-      'https://www.leadbridge360.com';
-    this.appBaseUrl = rawBaseUrl.trim();
+    // Webhook callbacks must hit the backend (Railway) host, never the frontend
+    // (Vercel). resolveSigcoreCallbackBaseUrl prefers BACKEND_PUBLIC_URL, falls
+    // back through APP_BASE_URL / RAILWAY_PUBLIC_DOMAIN, and rejects frontend
+    // hosts outright. See sigcore-webhook-url.ts.
+    this.appBaseUrl = resolveSigcoreCallbackBaseUrl(this.configService);
   }
 
   // ─── Tier gating ────────────────────────────────────────────────────────────
@@ -478,6 +482,9 @@ export class CallConnectService {
     const headers = this.buildHeaders(apiKey);
     const subscriptionsUrl = `${this.sigcoreApiUrl}/api/webhooks/subscriptions`;
     const webhookUrl = `${this.appBaseUrl}/api/webhooks/sigcore/call-connect?accountId=${savedAccountId}`;
+    // Note: this.appBaseUrl is now set via resolveSigcoreCallbackBaseUrl in the
+    // constructor, so the frontend-host guard already fired at boot if config
+    // was wrong. Keeping the explicit URL build here for readability.
     const secret = settings?.sigcoreWebhookSecret || crypto.randomBytes(32).toString('hex');
 
     const CC_EVENTS = [
@@ -558,8 +565,7 @@ export class CallConnectService {
     });
     if (!ns?.sigcoreApiKey || ns.inboundSmsWebhookId) return; // already registered or no key
 
-    const appBaseUrl = this.configService.get<string>('APP_BASE_URL', 'https://www.leadbridge360.com');
-    const webhookUrl = `${appBaseUrl}/api/webhooks/sigcore/inbound-sms?accountId=${savedAccountId}`;
+    const webhookUrl = buildInboundSmsWebhookUrl(this.configService, savedAccountId);
     const sigcoreUrl = this.configService.get<string>('SIGCORE_API_URL', 'https://sigcore-production.up.railway.app/api');
 
     const resp = await fetch(`${sigcoreUrl}/v1/webhook-subscriptions`, {

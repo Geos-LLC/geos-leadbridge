@@ -33,6 +33,10 @@ function buildConfigMock() {
   return {
     get: jest.fn().mockImplementation((key: string, defaultVal?: any) => {
       if (key === 'SIGCORE_API_URL') return 'http://localhost:3002/api';
+      // CallConnectService now resolves its public callback URL via
+      // resolveSigcoreCallbackBaseUrl(), which throws if no valid backend URL
+      // is configured. Tests inject a backend host so the constructor passes.
+      if (key === 'BACKEND_PUBLIC_URL') return 'http://localhost:3000';
       return defaultVal ?? '';
     }),
   } as any as ConfigService;

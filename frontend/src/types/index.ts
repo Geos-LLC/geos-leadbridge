@@ -420,7 +420,9 @@ export interface TimelineEvent {
   senderType?: 'user' | 'ai' | null;
   externalId?: string;
   attachments?: { url: string; mimeType?: string; fileName?: string }[];
-  smsStatus?: 'pending' | 'queued' | 'sent' | 'delivered' | 'failed';
+  // 'unknown' is set by the hourly stale-pending resolver when a row stays
+  // 'pending' past the threshold (no Sigcore delivery callback ever arrived).
+  smsStatus?: 'pending' | 'queued' | 'sent' | 'delivered' | 'failed' | 'unknown';
   smsError?: string | null;
   toPhone?: string;
   fromPhone?: string | null;
