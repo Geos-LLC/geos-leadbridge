@@ -2068,16 +2068,21 @@ export function Messages() {
                           })()}
                         </span>
                         {event.channel === 'sms' && event.smsStatus && (
-                          <span className={`font-semibold ${
-                            event.smsStatus === 'delivered' ? 'text-green-600' :
-                            event.smsStatus === 'failed' ? 'text-red-600' :
-                            ''
-                          }`}>
+                          <span
+                            className={`font-semibold ${
+                              event.smsStatus === 'delivered' ? 'text-green-600' :
+                              event.smsStatus === 'failed' ? 'text-red-600' :
+                              event.smsStatus === 'unknown' ? 'text-slate-500' :
+                              ''
+                            }`}
+                            title={event.smsStatus === 'unknown' ? 'Sigcore never returned a delivery confirmation. The message was almost certainly delivered.' : undefined}
+                          >
                             {event.smsStatus === 'delivered' && '\u2713\u2713 Delivered'}
                             {event.smsStatus === 'sent' && '\u2713 Sent'}
                             {event.smsStatus === 'queued' && '\u231B Queued'}
                             {event.smsStatus === 'pending' && '\u231B Pending'}
                             {event.smsStatus === 'failed' && '\u2717 Failed'}
+                            {event.smsStatus === 'unknown' && '\u2713 Sent (delivery not confirmed)'}
                           </span>
                         )}
                         {event.channel === 'sms' && event.smsError && (
