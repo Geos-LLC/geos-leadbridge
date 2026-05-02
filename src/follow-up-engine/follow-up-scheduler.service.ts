@@ -12,7 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../common/utils/prisma.service';
-import { isSkipped, withCronLock } from '../common/utils/cron-lock';
+import { CronLockTx, isSkipped, withCronLock } from '../common/utils/cron-lock';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { LeadsService } from '../leads/leads.service';
 import { FollowUpEngineService } from './follow-up-engine.service';
@@ -157,20 +157,34 @@ export class FollowUpSchedulerService implements OnModuleInit {
   /**
    * Cron: every 60 seconds, find and process due follow-up enrollments.
    *
-   * Two layers of mutual exclusion:
-   *   1. Advisory lock 7001 (xact-scoped) — instance-level dedup so staging
-   *      and production don't both run a cycle against the same rows.
-   *   2. `processingUntil`/`processingToken` lease on each enrollment row —
-   *      authoritative per-enrollment claim, holds even if the advisory lock
-   *      releases mid-cycle (e.g. transaction rolled back).
+   * Two-phase design (refactored from a single long transaction):
    *
-   * Per-cycle processing can include external I/O (SMS/AI calls in
-   * processEnrollment) and a full batch of 20 enrollments can legitimately
-   * run several minutes. Set the transaction timeout to 10 minutes — well
-   * past observed worst-case batches (21:17:00 prod cycle of 9 enrollments
-   * tripped the original 5-minute ceiling). The minute-cron's `this.processing`
-   * flag prevents re-entry, so a long-running cycle just causes intervening
-   * ticks to no-op.
+   *   PHASE 1 — claim (inside short xact-locked transaction):
+   *     - acquire advisory lock 7001
+   *     - find due enrollments + dedupe duplicates by conversation
+   *     - atomically claim each canonical via processingUntil/processingToken
+   *     - commit (releases the lock; total runtime ~tens of ms)
+   *
+   *   PHASE 2 — process (outside transaction, no lock held):
+   *     - for each claimed enrollment, run processEnrollment which may do
+   *       external SMS/AI I/O for many seconds
+   *     - release the lease only if we still hold the token
+   *
+   * Why split: the prior design held the lock + transaction across all
+   * external I/O. Busy batches (8+ enrollments × multi-second SMS/AI calls)
+   * blew the Prisma transaction timeout — observed in prod soak as
+   * "Transaction already closed: timeout was 600000 ms" on the 21:33 cycle.
+   * Splitting the lock window from the work window also lets the other
+   * instance run its own claim phase concurrently against a disjoint set of
+   * enrollments instead of waiting an entire lock-holder cycle out.
+   *
+   * Mutual exclusion guarantees:
+   *   - Advisory lock 7001 prevents two instances from running the claim
+   *     phase at the exact same moment (orphan-proof via xact scope).
+   *   - The atomic UPDATE WHERE clause on `processingUntil` is the
+   *     authoritative per-enrollment serializer: even if two instances did
+   *     claim concurrently, only one update would match per row.
+   *   - 2-minute lease TTL auto-recovers from crashes during phase 2.
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async processFollowUps(): Promise<void> {
@@ -178,111 +192,143 @@ export class FollowUpSchedulerService implements OnModuleInit {
     this.processing = true;
 
     try {
-      const outcome = await withCronLock(
+      // Phase 1: short transaction guarded by xact lock — find + claim only.
+      // Tx timeout is generous for safety (10s) but the path is just DB
+      // queries, no I/O, so it should complete in tens of ms.
+      const claimOutcome = await withCronLock(
         this.prisma,
         this.logger,
         7001,
         'FollowUpScheduler',
-        async tx => {
-          const now = new Date();
-          const dueEnrollments = await tx.followUpEnrollment.findMany({
-            where: {
-              status: 'active',
-              nextStepDueAt: { lte: now },
-            },
-            take: 20,
-            include: {
-              sequenceTemplate: true,
-            },
-          });
-
-          if (dueEnrollments.length === 0) {
-            if (now.getMinutes() % 10 === 0 && now.getSeconds() < 60) {
-              this.logger.debug('[FollowUpScheduler] Cron alive — no due enrollments');
-            }
-            return;
-          }
-
-          this.logger.log(`[FollowUpScheduler] Processing ${dueEnrollments.length} due enrollments`);
-
-          // Defense-in-depth: group by conversationId, process ONE canonical
-          // enrollment per conversation per cycle. Even with the partial unique
-          // index, historical data or brief races could leave sibling active
-          // rows — stop them instead of letting each one fire its step.
-          const byConversation = new Map<string, typeof dueEnrollments>();
-          for (const e of dueEnrollments) {
-            const arr = byConversation.get(e.conversationId) ?? [];
-            arr.push(e);
-            byConversation.set(e.conversationId, arr);
-          }
-
-          for (const [conversationId, group] of byConversation) {
-            group.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-            const [canonical, ...duplicates] = group;
-
-            if (duplicates.length > 0) {
-              this.logger.warn(`[FollowUpScheduler] Found ${duplicates.length} duplicate active enrollments on conversation ${conversationId} — stopping duplicates, processing ${canonical.id}`);
-              await tx.followUpEnrollment.updateMany({
-                where: { id: { in: duplicates.map((d) => d.id) } },
-                data: {
-                  status: 'stopped',
-                  stoppedReason: 'duplicate_cleanup',
-                  completedAt: new Date(),
-                },
-              });
-              await tx.followUpStepExecution.updateMany({
-                where: {
-                  enrollmentId: { in: duplicates.map((d) => d.id) },
-                  status: { in: ['scheduled', 'suggested'] },
-                },
-                data: { status: 'cancelled' },
-              });
-            }
-
-            // Atomic claim — only one worker processes a given enrollment per
-            // lease window. Lease of 2 minutes auto-expires if processing crashes.
-            const token = randomUUID();
-            const leaseEnd = new Date(now.getTime() + 2 * 60_000);
-            const { count } = await tx.followUpEnrollment.updateMany({
-              where: {
-                id: canonical.id,
-                status: 'active',
-                OR: [
-                  { processingUntil: null },
-                  { processingUntil: { lt: now } },
-                ],
-              },
-              data: { processingUntil: leaseEnd, processingToken: token },
-            });
-            if (count === 0) {
-              this.logger.debug(`[FollowUpScheduler] Could not claim ${canonical.id} — another worker or already processed`);
-              continue;
-            }
-
-            try {
-              await this.processEnrollment(canonical, now);
-            } catch (err: any) {
-              this.logger.error(`[FollowUpScheduler] Error processing enrollment ${canonical.id}: ${err.message}`);
-            } finally {
-              // Release the lease only if WE still hold it (token match). A
-              // stale lease from a crashed previous run will be reclaimed by
-              // whoever gets there next.
-              await tx.followUpEnrollment.updateMany({
-                where: { id: canonical.id, processingToken: token },
-                data: { processingUntil: null, processingToken: null },
-              }).catch(() => {});
-            }
-          }
-        },
-        { timeoutMs: 600_000 },
+        tx => this.claimDueEnrollments(tx),
+        { timeoutMs: 10_000 },
       );
 
-      if (isSkipped(outcome)) return;
+      if (isSkipped(claimOutcome)) return;
+      const claims = claimOutcome;
+
+      if (claims.length === 0) {
+        const now = new Date();
+        if (now.getMinutes() % 10 === 0 && now.getSeconds() < 60) {
+          this.logger.debug('[FollowUpScheduler] Cron alive — no due enrollments');
+        }
+        return;
+      }
+
+      this.logger.log(`[FollowUpScheduler] Processing ${claims.length} claimed enrollments`);
+
+      // Phase 2: process each claim outside the lock and outside any
+      // transaction. Failures are isolated per-enrollment so one bad row
+      // never blocks the rest of the batch.
+      const now = new Date();
+      for (const { enrollment, token } of claims) {
+        try {
+          await this.processEnrollment(enrollment, now);
+        } catch (err: any) {
+          this.logger.error(`[FollowUpScheduler] Error processing enrollment ${enrollment.id}: ${err.message}`);
+        } finally {
+          // Release lease only if we still hold the token. If the 2-min lease
+          // TTL expired mid-process and another worker re-claimed, this
+          // updateMany matches zero rows and no-ops — that's the desired
+          // outcome (the new owner's lease shouldn't be cleared by us).
+          await this.prisma.followUpEnrollment
+            .updateMany({
+              where: { id: enrollment.id, processingToken: token },
+              data: { processingUntil: null, processingToken: null },
+            })
+            .catch(() => {});
+        }
+      }
     } catch (err: any) {
       this.logger.error(`[FollowUpScheduler] Cron error: ${err.message}`);
     } finally {
       this.processing = false;
     }
+  }
+
+  /**
+   * Phase-1 claim path. Pure DB work, no external I/O. Returns the list of
+   * enrollments this instance won, paired with the lease token used to claim
+   * them so phase 2 can release each lease only if it still holds it.
+   */
+  private async claimDueEnrollments(
+    tx: CronLockTx,
+  ): Promise<Array<{ enrollment: any; token: string }>> {
+    const now = new Date();
+    const dueEnrollments = await tx.followUpEnrollment.findMany({
+      where: {
+        status: 'active',
+        nextStepDueAt: { lte: now },
+      },
+      take: 20,
+      include: { sequenceTemplate: true },
+    });
+
+    if (dueEnrollments.length === 0) return [];
+
+    // Defense-in-depth: group by conversationId, claim ONE canonical
+    // enrollment per conversation per cycle. Even with the partial unique
+    // index, historical data or brief races could leave sibling active rows
+    // — stop them instead of letting each fire its step.
+    const byConversation = new Map<string, typeof dueEnrollments>();
+    for (const e of dueEnrollments) {
+      const arr = byConversation.get(e.conversationId) ?? [];
+      arr.push(e);
+      byConversation.set(e.conversationId, arr);
+    }
+
+    const claims: Array<{ enrollment: any; token: string }> = [];
+
+    for (const [conversationId, group] of byConversation) {
+      group.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      const [canonical, ...duplicates] = group;
+
+      if (duplicates.length > 0) {
+        this.logger.warn(
+          `[FollowUpScheduler] Found ${duplicates.length} duplicate active enrollments on conversation ${conversationId} — stopping duplicates, processing ${canonical.id}`,
+        );
+        await tx.followUpEnrollment.updateMany({
+          where: { id: { in: duplicates.map((d) => d.id) } },
+          data: {
+            status: 'stopped',
+            stoppedReason: 'duplicate_cleanup',
+            completedAt: new Date(),
+          },
+        });
+        await tx.followUpStepExecution.updateMany({
+          where: {
+            enrollmentId: { in: duplicates.map((d) => d.id) },
+            status: { in: ['scheduled', 'suggested'] },
+          },
+          data: { status: 'cancelled' },
+        });
+      }
+
+      // Atomic claim. The OR clause on processingUntil is what makes this
+      // race-safe: if a second instance somehow ran the same claim
+      // concurrently, only one UPDATE would match (the first sets
+      // processingUntil to a future time; the second sees that and gets
+      // count=0). 2-minute lease auto-expires for crash recovery.
+      const token = randomUUID();
+      const leaseEnd = new Date(now.getTime() + 2 * 60_000);
+      const { count } = await tx.followUpEnrollment.updateMany({
+        where: {
+          id: canonical.id,
+          status: 'active',
+          OR: [{ processingUntil: null }, { processingUntil: { lt: now } }],
+        },
+        data: { processingUntil: leaseEnd, processingToken: token },
+      });
+      if (count === 0) {
+        this.logger.debug(
+          `[FollowUpScheduler] Could not claim ${canonical.id} — another worker or already processed`,
+        );
+        continue;
+      }
+      claims.push({ enrollment: canonical, token });
+    }
+
+    return claims;
   }
 
   /**

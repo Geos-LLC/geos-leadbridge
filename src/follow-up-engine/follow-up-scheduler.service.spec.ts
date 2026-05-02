@@ -387,6 +387,182 @@ describe('FollowUpSchedulerService', () => {
     });
   });
 
+  // =========================================================================
+  // Two-phase claim-then-process design
+  //
+  // Phase 1: claimDueEnrollments runs inside a short xact-locked transaction.
+  // Phase 2: processEnrollment runs OUTSIDE the transaction so SMS/AI I/O
+  // doesn't hold the advisory lock or risk hitting a transaction timeout.
+  // =========================================================================
+  describe('processFollowUps (claim-then-process)', () => {
+    function makeEnrollment(id: string, conversationId: string, createdAt: Date) {
+      return {
+        id, conversationId, createdAt,
+        leadId: LEAD_ID, currentStepIndex: 0, status: 'active',
+        nextStepDueAt: new Date(), mode: 'auto_send', platform: 'yelp',
+        sequenceTemplate: { stepsJson: { steps: [{ delayMinutes: 2, objective: 'test' }] } },
+      };
+    }
+
+    it('1. claim phase makes no SMS/AI/external calls (only DB queries)', async () => {
+      // Sniff the things processEnrollment would touch — they must not be
+      // invoked while we're still inside the $transaction.
+      let processCalledDuringTx = false;
+      prisma.$transaction.mockImplementation(async (fn: any) => {
+        const result = await fn(prisma);
+        // After the callback returns but before the test continues, see if
+        // processEnrollment ran. It shouldn't have — it should only be called
+        // by the OUTSIDE-tx phase 2 loop.
+        processCalledDuringTx = (service as any).processEnrollment.mock?.calls?.length > 0;
+        return result;
+      });
+
+      const enrollment = makeEnrollment('claim-1', CONVERSATION_ID, new Date('2026-04-01'));
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
+      prisma.followUpEnrollment.findMany.mockResolvedValue([enrollment]);
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+
+      const processSpy = jest.spyOn(service as any, 'processEnrollment').mockResolvedValue(undefined);
+
+      await service.processFollowUps();
+
+      expect(processCalledDuringTx).toBe(false);
+      // It was still called — just AFTER the tx committed.
+      expect(processSpy).toHaveBeenCalledTimes(1);
+      processSpy.mockRestore();
+    });
+
+    it('2. claimed rows are processed after the claim transaction commits', async () => {
+      const txCommittedAt: number[] = [];
+      const processStartedAt: number[] = [];
+      prisma.$transaction.mockImplementation(async (fn: any) => {
+        const result = await fn(prisma);
+        txCommittedAt.push(Date.now());
+        return result;
+      });
+
+      const enrollment = makeEnrollment('claim-1', CONVERSATION_ID, new Date('2026-04-01'));
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
+      prisma.followUpEnrollment.findMany.mockResolvedValue([enrollment]);
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+
+      const processSpy = jest.spyOn(service as any, 'processEnrollment').mockImplementation(async () => {
+        processStartedAt.push(Date.now());
+      });
+
+      await service.processFollowUps();
+
+      expect(txCommittedAt).toHaveLength(1);
+      expect(processStartedAt).toHaveLength(1);
+      // Claim tx must end (commit) before processing starts.
+      expect(processStartedAt[0]).toBeGreaterThanOrEqual(txCommittedAt[0]);
+      processSpy.mockRestore();
+    });
+
+    it('3. concurrent claim attempts on the same enrollment — only one wins (atomic UPDATE)', async () => {
+      // Simulate two instances racing on the same row by toggling the
+      // claim updateMany to count=1 once, then count=0 thereafter (the
+      // real DB enforces this via the WHERE processingUntil-OR clause).
+      const enrollment = makeEnrollment('claim-1', CONVERSATION_ID, new Date('2026-04-01'));
+
+      // Instance A
+      const prismaA = buildPrismaMock();
+      prismaA.followUpEnrollment.findMany.mockResolvedValue([enrollment]);
+      prismaA.followUpEnrollment.updateMany.mockResolvedValueOnce({ count: 1 });
+      // Instance B
+      const prismaB = buildPrismaMock();
+      prismaB.followUpEnrollment.findMany.mockResolvedValue([enrollment]);
+      prismaB.followUpEnrollment.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      const claimsA = await (service as any).claimDueEnrollments.call(
+        { ...service, prisma: prismaA, logger: (service as any).logger },
+        prismaA,
+      );
+      const claimsB = await (service as any).claimDueEnrollments.call(
+        { ...service, prisma: prismaB, logger: (service as any).logger },
+        prismaB,
+      );
+
+      // Exactly one instance walks away with the claim.
+      expect(claimsA).toHaveLength(1);
+      expect(claimsB).toHaveLength(0);
+      expect(claimsA[0].enrollment.id).toBe('claim-1');
+    });
+
+    it('4. a failed enrollment does not block the rest of the batch', async () => {
+      const e1 = makeEnrollment('e1', 'conv-A', new Date('2026-04-01T10:00:00Z'));
+      const e2 = makeEnrollment('e2', 'conv-B', new Date('2026-04-01T10:01:00Z'));
+      const e3 = makeEnrollment('e3', 'conv-C', new Date('2026-04-01T10:02:00Z'));
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
+      prisma.followUpEnrollment.findMany.mockResolvedValue([e1, e2, e3]);
+      // Each conversation's atomic claim wins (we're not racing here).
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+
+      const processSpy = jest.spyOn(service as any, 'processEnrollment')
+        .mockImplementationOnce(async () => { throw new Error('e1 boom'); })
+        .mockResolvedValueOnce(undefined)  // e2
+        .mockResolvedValueOnce(undefined); // e3
+
+      await service.processFollowUps();
+
+      // All three were attempted despite e1 throwing.
+      expect(processSpy).toHaveBeenCalledTimes(3);
+      const ids = processSpy.mock.calls.map((c: any[]) => c[0].id).sort();
+      expect(ids).toEqual(['e1', 'e2', 'e3']);
+
+      // Lease release for each of the 3 enrollments — phase-2 finally branch
+      // runs even when processEnrollment threw.
+      const releaseCalls = (prisma.followUpEnrollment.updateMany.mock.calls as any[][]).filter(
+        c => c[0]?.where?.processingToken && c[0]?.data?.processingUntil === null,
+      );
+      expect(releaseCalls.length).toBe(3);
+      processSpy.mockRestore();
+    });
+
+    it('5. expired lease is reclaimable (claim WHERE matches processingUntil < now)', async () => {
+      // The claim updateMany WHERE clause must accept rows whose lease has
+      // expired. Verify the shape directly on the mock call.
+      const enrollment = makeEnrollment('claim-1', CONVERSATION_ID, new Date('2026-04-01'));
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
+      prisma.followUpEnrollment.findMany.mockResolvedValue([enrollment]);
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+      jest.spyOn(service as any, 'processEnrollment').mockResolvedValue(undefined);
+
+      await service.processFollowUps();
+
+      const claimCall = (prisma.followUpEnrollment.updateMany.mock.calls as any[][]).find(
+        c => c[0]?.data?.processingToken && c[0]?.data?.processingUntil instanceof Date,
+      );
+      expect(claimCall).toBeDefined();
+      // OR clause must include both null AND lt:now branches so an expired
+      // lease can be reclaimed by a later cycle.
+      expect(claimCall![0].where.OR).toEqual(
+        expect.arrayContaining([
+          { processingUntil: null },
+          { processingUntil: { lt: expect.any(Date) } },
+        ]),
+      );
+    });
+
+    it('6. claim-phase transaction is short — no 10-minute timeout configured', async () => {
+      // Verify the timeout passed to $transaction is bounded for the claim
+      // path. The work itself is just DB queries; anything longer than ~30s
+      // would reintroduce the long-tx-holds-lock anti-pattern.
+      let observedTimeout: number | undefined;
+      prisma.$transaction.mockImplementation(async (fn: any, opts?: any) => {
+        observedTimeout = opts?.timeout;
+        return fn(prisma);
+      });
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
+      prisma.followUpEnrollment.findMany.mockResolvedValue([]);
+
+      await service.processFollowUps();
+
+      expect(observedTimeout).toBeDefined();
+      expect(observedTimeout).toBeLessThanOrEqual(30_000);
+    });
+  });
+
   describe('reconcileYelpEvents', () => {
     it('skips when advisory lock 7003 is held by another instance', async () => {
       prisma.$queryRaw.mockResolvedValue([{ locked: false }]);
