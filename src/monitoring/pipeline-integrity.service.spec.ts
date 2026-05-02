@@ -683,21 +683,20 @@ describe('MonitoringService cron-lock contract', () => {
     expect(calls.unlockQueries).toHaveLength(0);
   });
 
-  it('4. no explicit pg_advisory_unlock call remains in monitoring.service.ts source', () => {
+  it('4. no explicit pg_advisory_unlock or session-scoped advisory lock remains in monitoring.service.ts source', () => {
     const fs = require('fs');
     const path = require('path');
     const src = fs.readFileSync(
       path.resolve(__dirname, 'monitoring.service.ts'),
       'utf8',
     );
-    // Strip block + line comments so we only inspect executable code. The
-    // comment block on the helper deliberately mentions the old function name
-    // to explain why we replaced it.
+    // Strip block + line comments so we only inspect executable code.
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
     expect(code).not.toMatch(/pg_advisory_unlock/);
-    // The session-scoped form should also be gone — only the xact-scoped
-    // variant survives.
     expect(code).not.toMatch(/pg_try_advisory_lock\b/);
-    expect(code).toMatch(/pg_try_advisory_xact_lock/);
+    // All cron mutual exclusion now goes through the shared helper. The
+    // raw pg_try_advisory_xact_lock query lives in cron-lock.ts (verified by
+    // its own spec); we only need to confirm MonitoringService delegates.
+    expect(code).toMatch(/withCronLock\s*\(/);
   });
 });

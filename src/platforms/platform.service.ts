@@ -7,6 +7,7 @@ import { Injectable, NotFoundException, BadRequestException, Logger, Inject, for
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../common/utils/prisma.service';
+import { withCronLock } from '../common/utils/cron-lock';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { PlatformFactory } from './platform.factory';
 import { PlatformCredentials } from '../common/interfaces/platform.interface';
@@ -130,16 +131,16 @@ export class PlatformService {
    */
   @Cron('0 */1 * * *') // every hour at :00
   async proactiveTokenRefresh(): Promise<void> {
-    // Advisory lock to prevent staging + production from refreshing simultaneously
-    // Lock ID 7002 = proactive token refresh
-    const lockResult = await this.prisma.$queryRawUnsafe<any[]>('SELECT pg_try_advisory_lock(7002) AS locked').catch(() => [{ locked: false }]);
-    if (!lockResult?.[0]?.locked) {
-      this.logger.debug('[ProactiveRefresh] Another instance holds the lock — skipping');
-      return;
-    }
-
-    try {
-    const accounts = await this.prisma.savedAccount.findMany({
+    // Lock 7002 = proactive token refresh. Per-account refresh path goes
+    // through this.serializedAccountRefresh which makes external OAuth API
+    // calls — generous timeout for a worst-case batch of accounts.
+    await withCronLock(
+      this.prisma,
+      this.logger,
+      7002,
+      'ProactiveRefresh',
+      async tx => {
+    const accounts = await tx.savedAccount.findMany({
       where: { credentialsJson: { not: null } },
       select: { id: true, platform: true, businessId: true, businessName: true, userId: true, credentialsJson: true },
     });
@@ -246,9 +247,9 @@ export class PlatformService {
     if (refreshed > 0 || failed > 0) {
       this.logger.log(`[ProactiveRefresh] Done: ${refreshed} refreshed, ${failed} failed, ${accounts.length} total accounts`);
     }
-    } finally {
-      await this.prisma.$queryRawUnsafe('SELECT pg_advisory_unlock(7002)').catch(() => {});
-    }
+      },
+      { timeoutMs: 600_000 },
+    );
   }
 
   /**

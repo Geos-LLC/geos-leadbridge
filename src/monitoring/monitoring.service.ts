@@ -13,6 +13,7 @@ import { Injectable, Logger, NotFoundException, OnModuleInit, Optional } from '@
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../common/utils/prisma.service';
+import { CronLockDb, isSkipped, withCronLock } from '../common/utils/cron-lock';
 import { PipelineIntegrityService } from './pipeline-integrity.service';
 
 export interface CaptureErrorOptions {
@@ -38,13 +39,8 @@ export interface SystemHealthIssue {
   lastDetectedAt: Date;
 }
 
-/**
- * A Prisma client or transaction client. Both expose the same model accessors
- * (e.g. `.systemErrorLog.create`, `.savedAccount.findMany`), so any read/write
- * helper that takes this type can be invoked either standalone (against
- * `this.prisma`) or inside a `$transaction(async tx => ...)` callback.
- */
-type Db = PrismaService | Parameters<Parameters<PrismaService['$transaction']>[0]>[0];
+// Local alias so existing helper signatures stay readable.
+type Db = CronLockDb;
 
 @Injectable()
 export class MonitoringService implements OnModuleInit {
@@ -58,51 +54,6 @@ export class MonitoringService implements OnModuleInit {
     // always populates it.
     @Optional() private readonly pipelineIntegrity: PipelineIntegrityService | null = null,
   ) {}
-
-  // ==========================================
-  // Cron Locking
-  //
-  // Prior implementation used pg_try_advisory_lock(N) — session-scoped — but
-  // we run Prisma over Supavisor in transaction-pooling mode, where the
-  // physical connection that acquired the lock can be returned to the pool
-  // before our `pg_advisory_unlock(N)` query lands; the unlock then runs on
-  // a different connection and silently no-ops, leaving the lock orphaned and
-  // every subsequent cron tick logging "Another instance holds the lock".
-  //
-  // pg_try_advisory_xact_lock(N) is bound to the current transaction — the
-  // database releases it automatically on COMMIT or ROLLBACK regardless of
-  // which connection eventually does the cleanup, so the orphan path is
-  // structurally impossible. The body of the cron runs inside the same
-  // transaction so the lock is held for its full duration.
-  // ==========================================
-
-  /**
-   * Run `work` inside a transaction guarded by a transaction-scoped advisory
-   * lock. If the lock is already held by another instance, the callback never
-   * runs and the helper returns `{ skipped: true }`. Errors propagate from
-   * `work` and roll the transaction back, releasing the lock automatically —
-   * no `pg_advisory_unlock` is ever needed.
-   */
-  private async withCronLock<T>(
-    lockKey: number,
-    label: string,
-    work: (tx: Db) => Promise<T>,
-    options?: { timeoutMs?: number },
-  ): Promise<T | { skipped: true }> {
-    return this.prisma.$transaction(
-      async tx => {
-        const rows = await tx.$queryRaw<Array<{ locked: boolean }>>`
-          SELECT pg_try_advisory_xact_lock(${lockKey}) AS locked
-        `;
-        if (!rows?.[0]?.locked) {
-          this.logger.debug(`[${label}] Another instance holds the lock — skipping`);
-          return { skipped: true } as { skipped: true };
-        }
-        return work(tx);
-      },
-      { timeout: options?.timeoutMs ?? 120_000, maxWait: 5_000 },
-    );
-  }
 
   /**
    * Run health check on startup to populate AccountHealthStatus immediately.
@@ -223,11 +174,7 @@ export class MonitoringService implements OnModuleInit {
   async systemHealthCheck(): Promise<void> {
     try {
       // Lock key 17003 — MonitoringService namespace (17000+).
-      // 7003 collides with FollowUpScheduler.reconcileYelpEvents, which still
-      // uses the session-scoped pattern and orphans locks through Supavisor.
-      // Bumping out of the colliding range keeps these crons unblocked even
-      // while the cross-service migration to xact locks is pending.
-      const outcome = await this.withCronLock(17003, 'HealthCheck', async tx => {
+      const outcome = await withCronLock(this.prisma, this.logger, 17003, 'HealthCheck', async tx => {
         // Pipeline health checks run BEFORE the per-account work and BEFORE
         // the no-accounts short-circuit, so SF↔LB pipeline alerts fire on a
         // fresh staging tenant with zero saved accounts too.
@@ -324,7 +271,7 @@ export class MonitoringService implements OnModuleInit {
         return { accountCount: accounts.length, newIssues, recoveries };
       });
 
-      if ('skipped' in outcome) return;
+      if (isSkipped(outcome)) return;
 
       // Email I/O happens after the transaction commits — keeps SendGrid
       // network latency out of the lock window.
@@ -381,10 +328,8 @@ export class MonitoringService implements OnModuleInit {
   @Cron('15 */1 * * *')
   async resolveStalePendingNotificationLogs(): Promise<void> {
     try {
-      // Lock key 17005 — MonitoringService namespace. (Bumped out of the
-      // 7000-range to avoid collisions with other services that still hold
-      // the session-scoped lock pattern; see comment on systemHealthCheck.)
-      const outcome = await this.withCronLock(17005, 'StalePending', async tx => {
+      // Lock key 17005 — MonitoringService namespace.
+      const outcome = await withCronLock(this.prisma, this.logger, 17005, 'StalePending', async tx => {
         const result = await tx.$queryRawUnsafe<Array<{ count: number }>>(
           `WITH updated AS (
              UPDATE notification_logs
@@ -398,7 +343,7 @@ export class MonitoringService implements OnModuleInit {
         return { updatedCount: result?.[0]?.count ?? 0 };
       });
 
-      if ('skipped' in outcome) return;
+      if (isSkipped(outcome)) return;
 
       // Single-line k=v log so Loki dashboards can filter on
       // result=stale_pending_resolved updated=N.
@@ -440,8 +385,9 @@ export class MonitoringService implements OnModuleInit {
 
     try {
       // Lock key 17004 — MonitoringService namespace.
-      // 7004 collides with TrialNotificationService.sweepExpiredTrials.
-      const outcome = await this.withCronLock(
+      const outcome = await withCronLock(
+        this.prisma,
+        this.logger,
         17004,
         'PipelineIntegrity',
         async tx => {
@@ -482,7 +428,7 @@ export class MonitoringService implements OnModuleInit {
         { timeoutMs: 600_000 },
       );
 
-      if ('skipped' in outcome) return;
+      if (isSkipped(outcome)) return;
 
       if (outcome.kind === 'ok') {
         this.logger.log(`[PipelineIntegrity] result=ok failed_count=0 summary="all ${outcome.length} checks passed"`);

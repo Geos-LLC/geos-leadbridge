@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../common/utils/prisma.service';
+import { withCronLock } from '../common/utils/cron-lock';
 import { NotificationsService } from '../notifications/notifications.service';
 import { TrialService, TRIAL_ENDED_EVENT } from './trial.service';
 import { TrialType } from '../../generated/prisma';
@@ -84,52 +85,55 @@ export class TrialNotificationService {
    */
   @Cron(CronExpression.EVERY_5_MINUTES)
   async sweepExpiredTrials(): Promise<void> {
-    // Postgres advisory lock 7004 = trial-notification sweeper (prevents
-    // staging+production from doubling up).
-    const lock = await this.prisma
-      .$queryRawUnsafe<any[]>('SELECT pg_try_advisory_lock(7004) AS locked')
-      .catch(() => [{ locked: false }]);
-    if (!lock?.[0]?.locked) return;
+    // Lock 7004 = trial-notification sweeper. Sweep loops over candidates
+    // calling markEnded + notify (which sends email + SMS), so allow up to
+    // 5 min for a worst-case backlog.
+    await withCronLock(
+      this.prisma,
+      this.logger,
+      7004,
+      'TrialSweep',
+      async tx => {
+        // Candidates: non-paid users with a trialType that haven't been
+        // notified. We then evaluate each via buildTrialView to decide if
+        // truly ended.
+        const candidates = await tx.user.findMany({
+          where: {
+            subscriptionTier: null,
+            trialType: { not: null },
+            trialEndNotifiedAt: null,
+          },
+          select: {
+            id: true,
+            subscriptionTier: true,
+            trialType: true,
+            trialEndDate: true,
+            trialEndedAt: true,
+            trialLeadsHandled: true,
+            trialLeadsLimit: true,
+          },
+        });
 
-    try {
-      // Candidates: non-paid users with a trialType that haven't been notified.
-      // We then evaluate each via buildTrialView to decide if truly ended.
-      const candidates = await this.prisma.user.findMany({
-        where: {
-          subscriptionTier: null,
-          trialType: { not: null },
-          trialEndNotifiedAt: null,
-        },
-        select: {
-          id: true,
-          subscriptionTier: true,
-          trialType: true,
-          trialEndDate: true,
-          trialEndedAt: true,
-          trialLeadsHandled: true,
-          trialLeadsLimit: true,
-        },
-      });
+        let notified = 0;
+        for (const c of candidates) {
+          const view = this.trialService.buildTrialView(c);
+          if (!view.isEnded) continue;
 
-      let notified = 0;
-      for (const c of candidates) {
-        const view = this.trialService.buildTrialView(c);
-        if (!view.isEnded) continue;
+          // markEnded + notify go through this.trialService / this.notify,
+          // which use the standalone PrismaService (not tx). That's intentional
+          // — those writes don't need to be atomic with the lock; the lock is
+          // only here to prevent staging+production from both running the sweep.
+          await this.trialService.markEnded(c.id);
+          await this.notify(c.id);
+          notified++;
+        }
 
-        // Make sure trialEndedAt is set (catches the time-only expiry path)
-        await this.trialService.markEnded(c.id);
-        await this.notify(c.id);
-        notified++;
-      }
-
-      if (notified > 0) {
-        this.logger.log(`[sweep] Notified ${notified} expired trial(s) of ${candidates.length} candidate(s)`);
-      }
-    } finally {
-      await this.prisma
-        .$queryRawUnsafe('SELECT pg_advisory_unlock(7004)')
-        .catch(() => {});
-    }
+        if (notified > 0) {
+          this.logger.log(`[sweep] Notified ${notified} expired trial(s) of ${candidates.length} candidate(s)`);
+        }
+      },
+      { timeoutMs: 300_000 },
+    );
   }
 
   private formatReason(

@@ -12,7 +12,11 @@ const CONVERSATION_ID = 'conv-1';
 const LEAD_ID = 'lead-1';
 
 function buildPrismaMock() {
-  return {
+  // The xact-lock helper uses $transaction(async tx => ...) and inside the
+  // callback runs `tx.$queryRaw\`SELECT pg_try_advisory_xact_lock(...) AS
+  // locked\``. The mock hands itself back as `tx` so individual tests can
+  // toggle lock state via `prisma.$queryRaw.mockResolvedValueOnce(...)`.
+  const mock: any = {
     followUpEnrollment: {
       findMany: jest.fn().mockResolvedValue([]),
       findFirst: jest.fn().mockResolvedValue(null),
@@ -45,8 +49,11 @@ function buildPrismaMock() {
       findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn().mockResolvedValue({}),
     },
-    $queryRawUnsafe: jest.fn().mockResolvedValue([{ locked: true }]),
-  } as any;
+    $queryRawUnsafe: jest.fn().mockResolvedValue([]),
+    $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
+  };
+  mock.$transaction = jest.fn().mockImplementation(async (fn: any, _opts?: any) => fn(mock));
+  return mock as any;
 }
 
 function buildEngineMock() {
@@ -301,7 +308,7 @@ describe('FollowUpSchedulerService', () => {
         { id: 'dup-2', conversationId: CONVERSATION_ID, createdAt: new Date('2026-04-01T09:00:00Z'), currentStepIndex: 0, status: 'active', nextStepDueAt: new Date(), mode: 'auto_send', leadId: LEAD_ID, platform: 'yelp', sequenceTemplate: { stepsJson: { steps: [{ delayMinutes: 2, objective: 'test' }] } } },
         { id: 'dup-3', conversationId: CONVERSATION_ID, createdAt: new Date('2026-04-01T11:00:00Z'), currentStepIndex: 2, status: 'active', nextStepDueAt: new Date(), mode: 'auto_send', leadId: LEAD_ID, platform: 'yelp', sequenceTemplate: { stepsJson: { steps: [{ delayMinutes: 2, objective: 'test' }] } } },
       ];
-      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: true }]);
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
       prisma.followUpEnrollment.findMany.mockResolvedValue(enrollments);
       // Claim succeeds for canonical
       prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
@@ -327,7 +334,7 @@ describe('FollowUpSchedulerService', () => {
 
     it('does not process an enrollment when atomic claim fails', async () => {
       const enrollment = { id: ENROLLMENT_ID, conversationId: CONVERSATION_ID, createdAt: new Date('2026-04-01'), currentStepIndex: 0, status: 'active', nextStepDueAt: new Date(), mode: 'auto_send', leadId: LEAD_ID, platform: 'yelp', sequenceTemplate: { stepsJson: { steps: [{ delayMinutes: 2, objective: 'test' }] } } };
-      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: true }]);
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
       prisma.followUpEnrollment.findMany.mockResolvedValue([enrollment]);
       // Claim returns count=0 — another worker already holds the lease
       prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 0 });
@@ -342,7 +349,7 @@ describe('FollowUpSchedulerService', () => {
 
     it('releases the lease only when the caller still holds the token', async () => {
       const enrollment = { id: ENROLLMENT_ID, conversationId: CONVERSATION_ID, createdAt: new Date('2026-04-01'), currentStepIndex: 0, status: 'active', nextStepDueAt: new Date(), mode: 'auto_send', leadId: LEAD_ID, platform: 'yelp', sequenceTemplate: { stepsJson: { steps: [{ delayMinutes: 2, objective: 'test' }] } } };
-      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: true }]);
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
       prisma.followUpEnrollment.findMany.mockResolvedValue([enrollment]);
       prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
 
@@ -361,7 +368,7 @@ describe('FollowUpSchedulerService', () => {
 
   describe('processFollowUps (advisory lock)', () => {
     it('skips when another instance holds the lock', async () => {
-      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: false }]);
+      prisma.$queryRaw.mockResolvedValue([{ locked: false }]);
       prisma.followUpEnrollment.findMany.mockResolvedValue([]);
 
       await service.processFollowUps();
@@ -371,7 +378,7 @@ describe('FollowUpSchedulerService', () => {
     });
 
     it('processes when lock is acquired', async () => {
-      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: true }]);
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
       prisma.followUpEnrollment.findMany.mockResolvedValue([]);
 
       await service.processFollowUps();
@@ -382,7 +389,7 @@ describe('FollowUpSchedulerService', () => {
 
   describe('reconcileYelpEvents', () => {
     it('skips when advisory lock 7003 is held by another instance', async () => {
-      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: false }]);
+      prisma.$queryRaw.mockResolvedValue([{ locked: false }]);
 
       await service.reconcileYelpEvents();
 
@@ -390,7 +397,7 @@ describe('FollowUpSchedulerService', () => {
     });
 
     it('marks reconciled:echo when retry classifies latest event as BIZ', async () => {
-      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: true }]);
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
       prisma.webhookEvent.findMany.mockResolvedValue([
         {
           id: 'evt-1',
@@ -416,7 +423,7 @@ describe('FollowUpSchedulerService', () => {
     });
 
     it('bumps attempts when retry fetch still fails', async () => {
-      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: true }]);
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
       prisma.webhookEvent.findMany.mockResolvedValue([
         {
           id: 'evt-2',
@@ -436,7 +443,7 @@ describe('FollowUpSchedulerService', () => {
     });
 
     it('caps at 5 attempts and marks reconciled:max_attempts', async () => {
-      prisma.$queryRawUnsafe.mockResolvedValue([{ locked: true }]);
+      prisma.$queryRaw.mockResolvedValue([{ locked: true }]);
       prisma.webhookEvent.findMany.mockResolvedValue([
         {
           id: 'evt-3',

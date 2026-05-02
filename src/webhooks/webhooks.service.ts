@@ -7,6 +7,7 @@ import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../common/utils/prisma.service';
+import { isSkipped, withCronLock } from '../common/utils/cron-lock';
 import { PlatformFactory } from '../platforms/platform.factory';
 import { AutomationService } from '../automation/automation.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -1671,46 +1672,54 @@ export class WebhooksService {
     if (eventId && this.isDuplicateWebhook('yelp.NEW_EVENT', eventId)) {
       return;
     }
-    // Cross-instance dedup via pg advisory lock on eventId hash.
-    // Only one instance acquires the lock — the other skips entirely.
-    // Lock is held for the duration of processing (released at end of method).
-    let lockKey: number | null = null;
-    if (eventId) {
-      // Stable 32-bit hash of the event id
-      let h = 5381;
-      for (let i = 0; i < eventId.length; i++) h = ((h << 5) + h + eventId.charCodeAt(i)) | 0;
-      lockKey = Math.abs(h) || 1;
-      const lockResult = await this.prisma.$queryRawUnsafe<any[]>(`SELECT pg_try_advisory_lock(${lockKey}) AS locked`);
-      const gotLock = lockResult?.[0]?.locked === true;
-      if (!gotLock) {
-        this.logger.log(`Skipping duplicate Yelp NEW_EVENT ${eventId} — another instance holds the lock`);
-        return;
-      }
-      // Also check if a recently-processed webhookEvent exists (the other instance
-      // may have finished and released the lock already).
-      const alreadyDone = await this.prisma.webhookEvent.findFirst({
-        where: {
-          platform: 'yelp',
-          processed: true,
-          processingError: null,
-          receivedAt: { gte: new Date(Date.now() - 60_000) },
-          payload: { contains: eventId },
-        },
-        select: { id: true },
-      });
-      if (alreadyDone) {
-        await this.prisma.$queryRawUnsafe(`SELECT pg_advisory_unlock(${lockKey})`).catch(() => {});
-        this.logger.log(`Skipping duplicate Yelp NEW_EVENT ${eventId} — already processed by another instance`);
-        return;
-      }
+
+    // Cross-instance dedup via xact-scoped advisory lock on eventId hash.
+    // Only one instance acquires the lock — the other skips entirely. The
+    // lock auto-releases when the transaction commits (success) or rolls back
+    // (handler threw), so no manual unlock is ever needed and orphans are
+    // structurally impossible through the Supavisor pooler.
+    if (!eventId) {
+      // No event id → no cross-instance dedup possible; proceed unguarded.
+      await this.handleYelpNewEventInner(businessId, data, leadId, eventId);
+      return;
     }
 
-    try {
-      await this.handleYelpNewEventInner(businessId, data, leadId, eventId);
-    } finally {
-      if (lockKey !== null) {
-        await this.prisma.$queryRawUnsafe(`SELECT pg_advisory_unlock(${lockKey})`).catch(() => {});
-      }
+    // Stable 32-bit hash of the event id, fits inside the bigint advisory key.
+    let h = 5381;
+    for (let i = 0; i < eventId.length; i++) h = ((h << 5) + h + eventId.charCodeAt(i)) | 0;
+    const lockKey = Math.abs(h) || 1;
+
+    const outcome = await withCronLock(
+      this.prisma,
+      this.logger,
+      lockKey,
+      `YelpEvent ${eventId}`,
+      async tx => {
+        // Recently-processed check: the other instance may have finished and
+        // released the lock already — short-circuit instead of redoing work.
+        const alreadyDone = await tx.webhookEvent.findFirst({
+          where: {
+            platform: 'yelp',
+            processed: true,
+            processingError: null,
+            receivedAt: { gte: new Date(Date.now() - 60_000) },
+            payload: { contains: eventId },
+          },
+          select: { id: true },
+        });
+        if (alreadyDone) return { alreadyDone: true } as const;
+        await this.handleYelpNewEventInner(businessId, data, leadId, eventId);
+        return { processed: true } as const;
+      },
+      { timeoutMs: 180_000 },
+    );
+
+    if (isSkipped(outcome)) {
+      this.logger.log(`Skipping duplicate Yelp NEW_EVENT ${eventId} — another instance holds the lock`);
+      return;
+    }
+    if ('alreadyDone' in outcome && outcome.alreadyDone) {
+      this.logger.log(`Skipping duplicate Yelp NEW_EVENT ${eventId} — already processed by another instance`);
     }
   }
 

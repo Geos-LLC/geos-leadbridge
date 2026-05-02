@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../common/utils/prisma.service';
+import { isSkipped, withCronLock } from '../common/utils/cron-lock';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { LeadsService } from '../leads/leads.service';
 import { FollowUpEngineService } from './follow-up-engine.service';
@@ -155,6 +156,17 @@ export class FollowUpSchedulerService implements OnModuleInit {
 
   /**
    * Cron: every 60 seconds, find and process due follow-up enrollments.
+   *
+   * Two layers of mutual exclusion:
+   *   1. Advisory lock 7001 (xact-scoped) — instance-level dedup so staging
+   *      and production don't both run a cycle against the same rows.
+   *   2. `processingUntil`/`processingToken` lease on each enrollment row —
+   *      authoritative per-enrollment claim, holds even if the advisory lock
+   *      releases mid-cycle (e.g. transaction rolled back).
+   *
+   * Per-cycle processing can include external I/O (SMS/AI calls in
+   * processEnrollment), so we extend the transaction timeout to 5 minutes —
+   * enough headroom for a full batch of 20 enrollments.
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async processFollowUps(): Promise<void> {
@@ -162,110 +174,109 @@ export class FollowUpSchedulerService implements OnModuleInit {
     this.processing = true;
 
     try {
-      // Use Postgres advisory lock to prevent staging + production from processing simultaneously
-      // Lock ID 7001 = follow-up scheduler
-      const lockResult = await this.prisma.$queryRawUnsafe<any[]>('SELECT pg_try_advisory_lock(7001) AS locked');
-      const gotLock = lockResult?.[0]?.locked === true;
-      if (!gotLock) {
-        this.logger.debug('[FollowUpScheduler] Another instance holds the lock — skipping this cycle');
-        return;
-      }
-
-      const now = new Date();
-      const dueEnrollments = await this.prisma.followUpEnrollment.findMany({
-        where: {
-          status: 'active',
-          nextStepDueAt: { lte: now },
-        },
-        take: 20,
-        include: {
-          sequenceTemplate: true,
-        },
-      });
-
-      if (dueEnrollments.length === 0) {
-        if (now.getMinutes() % 10 === 0 && now.getSeconds() < 60) {
-          this.logger.debug('[FollowUpScheduler] Cron alive — no due enrollments');
-        }
-        // Release lock before returning
-        await this.prisma.$queryRawUnsafe('SELECT pg_advisory_unlock(7001)').catch(() => {});
-        return;
-      }
-
-      this.logger.log(`[FollowUpScheduler] Processing ${dueEnrollments.length} due enrollments`);
-
-      // Defense-in-depth: group by conversationId, process ONE canonical enrollment
-      // per conversation per cycle. Even with the partial unique index, historical
-      // data or brief races could leave sibling active rows — stop them instead of
-      // letting each one fire its step.
-      const byConversation = new Map<string, typeof dueEnrollments>();
-      for (const e of dueEnrollments) {
-        const arr = byConversation.get(e.conversationId) ?? [];
-        arr.push(e);
-        byConversation.set(e.conversationId, arr);
-      }
-
-      for (const [conversationId, group] of byConversation) {
-        group.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-        const [canonical, ...duplicates] = group;
-
-        if (duplicates.length > 0) {
-          this.logger.warn(`[FollowUpScheduler] Found ${duplicates.length} duplicate active enrollments on conversation ${conversationId} — stopping duplicates, processing ${canonical.id}`);
-          await this.prisma.followUpEnrollment.updateMany({
-            where: { id: { in: duplicates.map((d) => d.id) } },
-            data: {
-              status: 'stopped',
-              stoppedReason: 'duplicate_cleanup',
-              completedAt: new Date(),
-            },
-          });
-          await this.prisma.followUpStepExecution.updateMany({
+      const outcome = await withCronLock(
+        this.prisma,
+        this.logger,
+        7001,
+        'FollowUpScheduler',
+        async tx => {
+          const now = new Date();
+          const dueEnrollments = await tx.followUpEnrollment.findMany({
             where: {
-              enrollmentId: { in: duplicates.map((d) => d.id) },
-              status: { in: ['scheduled', 'suggested'] },
+              status: 'active',
+              nextStepDueAt: { lte: now },
             },
-            data: { status: 'cancelled' },
+            take: 20,
+            include: {
+              sequenceTemplate: true,
+            },
           });
-        }
 
-        // Atomic claim — only one worker processes a given enrollment per lease window.
-        // Lease of 2 minutes auto-expires if processing crashes.
-        const token = randomUUID();
-        const leaseEnd = new Date(now.getTime() + 2 * 60_000);
-        const { count } = await this.prisma.followUpEnrollment.updateMany({
-          where: {
-            id: canonical.id,
-            status: 'active',
-            OR: [
-              { processingUntil: null },
-              { processingUntil: { lt: now } },
-            ],
-          },
-          data: { processingUntil: leaseEnd, processingToken: token },
-        });
-        if (count === 0) {
-          this.logger.debug(`[FollowUpScheduler] Could not claim ${canonical.id} — another worker or already processed`);
-          continue;
-        }
+          if (dueEnrollments.length === 0) {
+            if (now.getMinutes() % 10 === 0 && now.getSeconds() < 60) {
+              this.logger.debug('[FollowUpScheduler] Cron alive — no due enrollments');
+            }
+            return;
+          }
 
-        try {
-          await this.processEnrollment(canonical, now);
-        } catch (err: any) {
-          this.logger.error(`[FollowUpScheduler] Error processing enrollment ${canonical.id}: ${err.message}`);
-        } finally {
-          // Release the lease only if WE still hold it (token match). A stale lease
-          // from a crashed previous run will be reclaimed by whoever gets there next.
-          await this.prisma.followUpEnrollment.updateMany({
-            where: { id: canonical.id, processingToken: token },
-            data: { processingUntil: null, processingToken: null },
-          }).catch(() => {});
-        }
-      }
+          this.logger.log(`[FollowUpScheduler] Processing ${dueEnrollments.length} due enrollments`);
+
+          // Defense-in-depth: group by conversationId, process ONE canonical
+          // enrollment per conversation per cycle. Even with the partial unique
+          // index, historical data or brief races could leave sibling active
+          // rows — stop them instead of letting each one fire its step.
+          const byConversation = new Map<string, typeof dueEnrollments>();
+          for (const e of dueEnrollments) {
+            const arr = byConversation.get(e.conversationId) ?? [];
+            arr.push(e);
+            byConversation.set(e.conversationId, arr);
+          }
+
+          for (const [conversationId, group] of byConversation) {
+            group.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+            const [canonical, ...duplicates] = group;
+
+            if (duplicates.length > 0) {
+              this.logger.warn(`[FollowUpScheduler] Found ${duplicates.length} duplicate active enrollments on conversation ${conversationId} — stopping duplicates, processing ${canonical.id}`);
+              await tx.followUpEnrollment.updateMany({
+                where: { id: { in: duplicates.map((d) => d.id) } },
+                data: {
+                  status: 'stopped',
+                  stoppedReason: 'duplicate_cleanup',
+                  completedAt: new Date(),
+                },
+              });
+              await tx.followUpStepExecution.updateMany({
+                where: {
+                  enrollmentId: { in: duplicates.map((d) => d.id) },
+                  status: { in: ['scheduled', 'suggested'] },
+                },
+                data: { status: 'cancelled' },
+              });
+            }
+
+            // Atomic claim — only one worker processes a given enrollment per
+            // lease window. Lease of 2 minutes auto-expires if processing crashes.
+            const token = randomUUID();
+            const leaseEnd = new Date(now.getTime() + 2 * 60_000);
+            const { count } = await tx.followUpEnrollment.updateMany({
+              where: {
+                id: canonical.id,
+                status: 'active',
+                OR: [
+                  { processingUntil: null },
+                  { processingUntil: { lt: now } },
+                ],
+              },
+              data: { processingUntil: leaseEnd, processingToken: token },
+            });
+            if (count === 0) {
+              this.logger.debug(`[FollowUpScheduler] Could not claim ${canonical.id} — another worker or already processed`);
+              continue;
+            }
+
+            try {
+              await this.processEnrollment(canonical, now);
+            } catch (err: any) {
+              this.logger.error(`[FollowUpScheduler] Error processing enrollment ${canonical.id}: ${err.message}`);
+            } finally {
+              // Release the lease only if WE still hold it (token match). A
+              // stale lease from a crashed previous run will be reclaimed by
+              // whoever gets there next.
+              await tx.followUpEnrollment.updateMany({
+                where: { id: canonical.id, processingToken: token },
+                data: { processingUntil: null, processingToken: null },
+              }).catch(() => {});
+            }
+          }
+        },
+        { timeoutMs: 300_000 },
+      );
+
+      if (isSkipped(outcome)) return;
     } catch (err: any) {
       this.logger.error(`[FollowUpScheduler] Cron error: ${err.message}`);
     } finally {
-      // Always release advisory lock and processing flag
-      await this.prisma.$queryRawUnsafe('SELECT pg_advisory_unlock(7001)').catch(() => {});
       this.processing = false;
     }
   }
@@ -282,34 +293,35 @@ export class FollowUpSchedulerService implements OnModuleInit {
   async reconcileYelpEvents(): Promise<void> {
     if (!this.schedulerEnabled) return;
 
-    const lockResult = await this.prisma.$queryRawUnsafe<any[]>('SELECT pg_try_advisory_lock(7003) AS locked');
-    const gotLock = lockResult?.[0]?.locked === true;
-    if (!gotLock) return;
+    await withCronLock(
+      this.prisma,
+      this.logger,
+      7003,
+      'YelpReconcile',
+      async tx => {
+        const cutoff = new Date(Date.now() - 60 * 60 * 1000); // 1h window
+        const rows = await tx.webhookEvent.findMany({
+          where: {
+            platform: 'yelp',
+            processingError: { startsWith: 'reconcile:yelp:' },
+            receivedAt: { gte: cutoff },
+          },
+          take: 10,
+          orderBy: { receivedAt: 'asc' },
+        });
 
-    try {
-      const cutoff = new Date(Date.now() - 60 * 60 * 1000); // 1h window
-      const rows = await this.prisma.webhookEvent.findMany({
-        where: {
-          platform: 'yelp',
-          processingError: { startsWith: 'reconcile:yelp:' },
-          receivedAt: { gte: cutoff },
-        },
-        take: 10,
-        orderBy: { receivedAt: 'asc' },
-      });
+        if (rows.length === 0) return;
 
-      if (rows.length === 0) return;
+        this.logger.log(`[FollowUpScheduler] reconcileYelpEvents: processing ${rows.length} pending`);
 
-      this.logger.log(`[FollowUpScheduler] reconcileYelpEvents: processing ${rows.length} pending`);
-
-      for (const row of rows) {
-        await this.reconcileOneYelpEvent(row).catch(err =>
-          this.logger.warn(`[FollowUpScheduler] Reconcile failed for WebhookEvent ${row.id}: ${err.message}`),
-        );
-      }
-    } finally {
-      await this.prisma.$queryRawUnsafe('SELECT pg_advisory_unlock(7003)').catch(() => {});
-    }
+        for (const row of rows) {
+          await this.reconcileOneYelpEvent(row).catch(err =>
+            this.logger.warn(`[FollowUpScheduler] Reconcile failed for WebhookEvent ${row.id}: ${err.message}`),
+          );
+        }
+      },
+      { timeoutMs: 180_000 },
+    );
   }
 
   private async reconcileOneYelpEvent(row: { id: string; payload: string; processingError: string | null }): Promise<void> {
