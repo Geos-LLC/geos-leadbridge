@@ -5,22 +5,14 @@
  * silently dropped the `businessId` query param. The hotfix routes everything
  * through `getCachedLeads` with the full filter shape so businessId is always
  * honored when present.
+ *
+ * Strict-mode (post-cleanup): missing both businessId and scope=all → 400.
  */
 
 import { BadRequestException } from '@nestjs/common';
 import { LeadsController } from './leads.controller';
-import { ACCOUNT_BOUNDARY_WARNING_HEADER } from '../common/account-scope/account-scope.util';
 
 const USER = { id: 'user-1' };
-
-function makeRes() {
-  const headers: Record<string, string> = {};
-  return {
-    setHeader: (k: string, v: string) => { headers[k] = v; },
-    getHeader: (k: string) => headers[k],
-    headers,
-  } as any;
-}
 
 function buildController(opts: {
   cachedLeadsByFilter?: (filter: any) => any[];
@@ -53,7 +45,7 @@ describe('LeadsController.getAllLeads — account-scope', () => {
       cachedLeadsByFilter: () => [{ id: 't1', businessId: 'biz-A', platform: 'thumbtack' }],
     });
 
-    await controller.getAllLeads(USER, makeRes(), 'thumbtack', undefined, undefined, 'biz-A', undefined);
+    await controller.getAllLeads(USER, 'thumbtack', undefined, undefined, 'biz-A', undefined);
 
     expect(calls).toHaveLength(1);
     expect(calls[0].filter).toEqual({
@@ -67,44 +59,43 @@ describe('LeadsController.getAllLeads — account-scope', () => {
   it('businessId only → narrows by account regardless of platform', async () => {
     const { controller, calls } = buildController();
 
-    await controller.getAllLeads(USER, makeRes(), undefined, undefined, undefined, 'biz-A', undefined);
+    await controller.getAllLeads(USER, undefined, undefined, undefined, 'biz-A', undefined);
 
     expect(calls[0].filter.businessId).toBe('biz-A');
     expect(calls[0].filter.platform).toBeUndefined();
   });
 
-  it('scope=all → no businessId filter, no warning', async () => {
+  it('scope=all → no businessId filter', async () => {
     const { controller, calls } = buildController();
-    const res = makeRes();
 
-    await controller.getAllLeads(USER, res, undefined, undefined, undefined, undefined, 'all');
+    await controller.getAllLeads(USER, undefined, undefined, undefined, undefined, 'all');
 
     expect(calls[0].filter.businessId).toBeUndefined();
-    expect(res.getHeader(ACCOUNT_BOUNDARY_WARNING_HEADER)).toBeUndefined();
   });
 
   it('businessId + scope=all → 400', async () => {
     const { controller } = buildController();
 
     await expect(
-      controller.getAllLeads(USER, makeRes(), undefined, undefined, undefined, 'biz-A', 'all'),
+      controller.getAllLeads(USER, undefined, undefined, undefined, 'biz-A', 'all'),
     ).rejects.toThrow(BadRequestException);
   });
 
-  it('neither businessId nor scope → unified + warning header (transition)', async () => {
+  it('neither businessId nor scope → 400 (strict mode)', async () => {
     const { controller, calls } = buildController();
-    const res = makeRes();
 
-    await controller.getAllLeads(USER, res, undefined, undefined, undefined, undefined, undefined);
+    await expect(
+      controller.getAllLeads(USER, undefined, undefined, undefined, undefined, undefined),
+    ).rejects.toThrow(BadRequestException);
 
-    expect(calls[0].filter.businessId).toBeUndefined();
-    expect(res.getHeader(ACCOUNT_BOUNDARY_WARNING_HEADER)).toBe('missing-business-id');
+    // The DB layer must not be touched when scope parsing fails.
+    expect(calls).toHaveLength(0);
   });
 
   it('limit param is forwarded as a number', async () => {
     const { controller, calls } = buildController();
 
-    await controller.getAllLeads(USER, makeRes(), undefined, undefined, '50' as any, 'biz-A', undefined);
+    await controller.getAllLeads(USER, undefined, undefined, '50' as any, 'biz-A', undefined);
 
     expect(calls[0].filter.limit).toBe(50);
   });

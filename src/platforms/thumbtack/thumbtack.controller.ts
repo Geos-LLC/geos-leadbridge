@@ -18,7 +18,6 @@ import {
   HttpException,
   HttpStatus,
   Header,
-  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
@@ -30,16 +29,11 @@ import { PlatformFactory } from '../platform.factory';
 import { LeadsService } from '../../leads/leads.service';
 import { PlatformName } from '../../common/interfaces/platform.interface';
 import { PrismaService } from '../../common/utils/prisma.service';
-import {
-  parseAccountScope,
-  ACCOUNT_BOUNDARY_WARNING_HEADER,
-  ACCOUNT_BOUNDARY_WARNING_VALUE_MISSING,
-} from '../../common/account-scope/account-scope.util';
+import { parseAccountScope } from '../../common/account-scope/account-scope.util';
 
 @Controller('v1/thumbtack')
 @UseGuards(JwtAuthGuard)
 export class ThumbtackController {
-  private readonly logger = new Logger(ThumbtackController.name);
   private readonly frontendUrl: string;
 
   constructor(
@@ -430,14 +424,12 @@ export class ThumbtackController {
    * Account-scope contract:
    *   ?businessId=<id>   → only leads for that saved account (one platform)
    *   ?scope=all         → unified across all of the user's accounts (legacy behavior)
-   *   neither            → during transition, behaves as scope=all but emits a
-   *                        warning header + log so we can find unmigrated callers.
-   *   both               → 400 (handled by parseAccountScope)
+   *   neither            → 400
+   *   both               → 400
    */
   @Get('leads')
   async getLeads(
     @CurrentUser() user: any,
-    @Res({ passthrough: true }) res: Response,
     @Query('limit') limit?: number,
     @Query('since') since?: string,
     @Query('businessId') businessId?: string,
@@ -471,14 +463,7 @@ export class ThumbtackController {
       return { count: leads.length, leads };
     }
 
-    // Unified scope (explicit or transition).
-    if (accountScope.warn) {
-      res.setHeader(ACCOUNT_BOUNDARY_WARNING_HEADER, ACCOUNT_BOUNDARY_WARNING_VALUE_MISSING);
-      this.logger.warn(
-        `[account-boundary] /v1/thumbtack/leads called without businessId or scope=all (userId=${user.id}) — defaulting to all accounts. Update the caller to pass businessId or scope=all.`,
-      );
-    }
-
+    // Unified scope (explicit scope=all only — strict mode, no transition).
     const unifiedOptions = { ...options, scope: 'all' as const };
     const [thumbtackLeads, yelpLeads] = await Promise.all([
       this.leadsService.getLeads(user.id, PlatformName.THUMBTACK, unifiedOptions),

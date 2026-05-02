@@ -14,10 +14,7 @@ import {
   UseGuards,
   Sse,
   MessageEvent,
-  Res,
-  Logger,
 } from '@nestjs/common';
-import { Response } from 'express';
 import { PrismaService } from '../common/utils/prisma.service';
 import { CrmWebhookService } from '../crm-webhooks/crm-webhook.service';
 import { JwtSseAuthGuard } from '../common/guards/jwt-sse-auth.guard';
@@ -28,11 +25,7 @@ import { LeadStatusService } from './lead-status.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Observable, fromEvent, merge, interval, from } from 'rxjs';
 import { map, mergeMap, filter as rxFilter } from 'rxjs/operators';
-import {
-  parseAccountScope,
-  ACCOUNT_BOUNDARY_WARNING_HEADER,
-  ACCOUNT_BOUNDARY_WARNING_VALUE_MISSING,
-} from '../common/account-scope/account-scope.util';
+import { parseAccountScope } from '../common/account-scope/account-scope.util';
 import {
   SseAccountScope,
   SseBusinessIdResolver,
@@ -42,8 +35,6 @@ import {
 @Controller('v1/leads')
 @UseGuards(JwtSseAuthGuard)
 export class LeadsController {
-  private readonly logger = new Logger(LeadsController.name);
-
   constructor(
     private leadsService: LeadsService,
     private leadStatusService: LeadStatusService,
@@ -85,14 +76,6 @@ export class LeadsController {
       parsed.kind === 'account'
         ? { kind: 'account', businessId: parsed.businessId }
         : { kind: 'all' };
-
-    if (parsed.kind === 'all' && parsed.warn) {
-      // SSE has no per-response headers we can set after streaming starts, so
-      // log only. Frontend should be migrated to pass ?businessId or ?scope=all.
-      this.logger.warn(
-        `[account-boundary] /v1/leads/events subscribed without businessId or scope=all (userId=${userId}) — streaming all accounts.`,
-      );
-    }
 
     // Per-connection resolver. The cache is captured in the closure for this
     // single SSE call — a new subscribe builds a fresh map.
@@ -150,20 +133,17 @@ export class LeadsController {
    * Get leads for the user.
    *
    * Account-scope contract (see `src/common/account-scope/account-scope.util.ts`):
-   *   ?businessId=<id>  → scope to one saved account (preferred)
+   *   ?businessId=<id>  → scope to one saved account
    *   ?scope=all        → explicit unified across all accounts
-   *   neither           → transition: returns all + warning header
+   *   neither           → 400
    *   both              → 400
    *
    * `?platform=` may be combined with either: it filters the result to one
-   * platform AFTER the account scope is applied. Pre-fix the platform branch
-   * silently dropped `businessId`; that bug is fixed here by always running
-   * through `getCachedLeads` with the full filter shape.
+   * platform AFTER the account scope is applied.
    */
   @Get()
   async getAllLeads(
     @CurrentUser() user: any,
-    @Res({ passthrough: true }) res: Response,
     @Query('platform') platform?: string,
     @Query('status') status?: string,
     @Query('limit') limit?: number,
@@ -171,13 +151,6 @@ export class LeadsController {
     @Query('scope') scope?: string,
   ) {
     const accountScope = parseAccountScope({ businessId, scope });
-
-    if (accountScope.kind === 'all' && accountScope.warn) {
-      res.setHeader(ACCOUNT_BOUNDARY_WARNING_HEADER, ACCOUNT_BOUNDARY_WARNING_VALUE_MISSING);
-      this.logger.warn(
-        `[account-boundary] GET /v1/leads called without businessId or scope=all (userId=${user.id}) — defaulting to all accounts.`,
-      );
-    }
 
     // Get cached leads from database with filters.
     // The service partitions cache keys by businessId (cache-keys.ts) so

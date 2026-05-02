@@ -8,7 +8,7 @@
  */
 
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { BadRequestException, Logger, MessageEvent } from '@nestjs/common';
+import { BadRequestException, MessageEvent } from '@nestjs/common';
 import { firstValueFrom, Subject } from 'rxjs';
 import { take, toArray, takeUntil, tap } from 'rxjs/operators';
 import { LeadsController } from './leads.controller';
@@ -206,33 +206,18 @@ describe('LeadsController.leadEvents — account-scope filter', () => {
     });
   });
 
-  describe('transition mode (no businessId, no scope)', () => {
-    it('streams every event AND emits a structured warning log via Nest Logger', async () => {
-      // Spy on the Nest Logger prototype so the warning ends up in Loki via
-      // the loghub-client transport in production (console.warn would not).
-      const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
-      const { controller, eventEmitter } = buildController();
+  describe('strict-mode rejections', () => {
+    it('neither businessId nor scope → 400 (strict mode)', () => {
+      const { controller } = buildController();
 
-      const events = await collect(
-        controller,
-        eventEmitter,
-        {},
-        [
-          { name: `lead.created.${USER.id}`, payload: { id: 'l1', userId: USER.id, businessId: 'biz-A' } },
-          { name: `sms.status.${USER.id}`, payload: { messageId: 'msg-1', status: 'delivered' } },
-        ],
-        { expectedCount: 2 },
+      // NestJS turns this synchronous BadRequestException into an SSE
+      // `event: error` for the actual HTTP response, but at the handler-call
+      // level it surfaces as a thrown exception.
+      expect(() => controller.leadEvents(USER, undefined, undefined)).toThrow(
+        BadRequestException,
       );
-
-      expect(events).toHaveLength(2);
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-      expect(warnSpy.mock.calls[0][0]).toMatch(/account-boundary.*subscribed without businessId or scope=all/);
-
-      warnSpy.mockRestore();
     });
-  });
 
-  describe('mutual exclusion', () => {
     it('businessId AND scope=all → 400', () => {
       const { controller } = buildController();
 
