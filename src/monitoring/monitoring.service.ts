@@ -222,7 +222,12 @@ export class MonitoringService implements OnModuleInit {
   @Cron('10 */1 * * *')
   async systemHealthCheck(): Promise<void> {
     try {
-      const outcome = await this.withCronLock(7003, 'HealthCheck', async tx => {
+      // Lock key 17003 — MonitoringService namespace (17000+).
+      // 7003 collides with FollowUpScheduler.reconcileYelpEvents, which still
+      // uses the session-scoped pattern and orphans locks through Supavisor.
+      // Bumping out of the colliding range keeps these crons unblocked even
+      // while the cross-service migration to xact locks is pending.
+      const outcome = await this.withCronLock(17003, 'HealthCheck', async tx => {
         // Pipeline health checks run BEFORE the per-account work and BEFORE
         // the no-accounts short-circuit, so SF↔LB pipeline alerts fire on a
         // fresh staging tenant with zero saved accounts too.
@@ -376,7 +381,10 @@ export class MonitoringService implements OnModuleInit {
   @Cron('15 */1 * * *')
   async resolveStalePendingNotificationLogs(): Promise<void> {
     try {
-      const outcome = await this.withCronLock(7005, 'StalePending', async tx => {
+      // Lock key 17005 — MonitoringService namespace. (Bumped out of the
+      // 7000-range to avoid collisions with other services that still hold
+      // the session-scoped lock pattern; see comment on systemHealthCheck.)
+      const outcome = await this.withCronLock(17005, 'StalePending', async tx => {
         const result = await tx.$queryRawUnsafe<Array<{ count: number }>>(
           `WITH updated AS (
              UPDATE notification_logs
@@ -431,8 +439,10 @@ export class MonitoringService implements OnModuleInit {
     }
 
     try {
+      // Lock key 17004 — MonitoringService namespace.
+      // 7004 collides with TrialNotificationService.sweepExpiredTrials.
       const outcome = await this.withCronLock(
-        7004,
+        17004,
         'PipelineIntegrity',
         async tx => {
           // PipelineIntegrityService runs its own queries against this.prisma
