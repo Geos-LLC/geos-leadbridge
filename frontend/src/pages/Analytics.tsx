@@ -10,6 +10,7 @@ import {
   Users,
   RefreshCw,
   Loader2,
+  DollarSign,
 } from 'lucide-react';
 import {
   PieChart,
@@ -667,13 +668,16 @@ export function Analytics() {
       {displayData ? (
         <>
           {/* Summary KPIs — single bordered row.
-              Adds an Avg Lead Price column when Thumbtack data is in scope
-              (always, except when filter is 'all_yelp' which forces value=null). */}
+              Adds Avg Lead Price (Thumbtack-only, hidden on all_yelp) and
+              Avg Job Price (any platform, when there are won leads). */}
           {(() => {
             const showLeadPrice = displayData.averageLeadPrice != null && businessId !== 'all_yelp';
+            const showJobPrice = displayData.averageJobPrice?.value != null;
+            const extraCols = (showLeadPrice ? 1 : 0) + (showJobPrice ? 1 : 0);
+            const colClass = extraCols === 2 ? 'md:grid-cols-6' : extraCols === 1 ? 'md:grid-cols-5' : 'md:grid-cols-4';
             return (
               <div
-                className={`grid grid-cols-2 ${showLeadPrice ? 'md:grid-cols-5' : 'md:grid-cols-4'}`}
+                className={`grid grid-cols-2 ${colClass}`}
                 style={{
                   background: 'var(--lb-surface)',
                   border: '1px solid var(--lb-line)',
@@ -711,6 +715,13 @@ export function Analytics() {
                         ? `$${displayData.averageLeadPrice.value.toFixed(2)}`
                         : '—'
                     }
+                    loading={isUpdating}
+                  />
+                )}
+                {showJobPrice && (
+                  <Kpi
+                    label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><DollarSign size={12} /> Avg job price</span>}
+                    value={`$${displayData.averageJobPrice!.value!.toFixed(0)}`}
                     loading={isUpdating}
                   />
                 )}
