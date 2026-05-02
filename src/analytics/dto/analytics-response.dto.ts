@@ -78,6 +78,11 @@ export class AnalyticsResponseDto {
   // Null when filtering to platform='yelp'.
   averageLeadPrice?: AverageLeadPriceMetric;
 
+  // Average customer-stated budget across leads in a "won" terminal
+  // state (booked / hired / scheduled / completed / done) — proxy for
+  // actual job value since neither platform exposes a final-price field.
+  averageJobPrice?: AverageLeadPriceMetric;
+
   dateRange: {
     start: string;
     end: string;

@@ -382,6 +382,7 @@ export class AnalyticsService {
       zipCodes,
       roomStats,
       avgLeadPrice,
+      avgJobPrice,
       lastLead,
     ] = await Promise.all([
       this.timed('categoryDistribution', () => this.getCategoryDistribution(baseWhere)),
@@ -402,6 +403,7 @@ export class AnalyticsService {
       this.timed('zipCodeDistribution', () => this.getZipCodeDistribution(baseWhere)),
       this.timed('roomStats', () => this.getRoomStats(baseWhere)),
       this.timed('averageLeadPrice', () => this.getAverageLeadPrice(userId, query)),
+      this.timed('averageJobPrice', () => this.getAverageJobPrice(userId, query)),
       this.prisma.lead.findFirst({
         where: {
           userId,
@@ -432,6 +434,7 @@ export class AnalyticsService {
       zipCodeDistribution: zipCodes,
       roomStats,
       averageLeadPrice: avgLeadPrice,
+      averageJobPrice: avgJobPrice,
       dateRange: {
         start: query.startDate || 'all-time',
         end: query.endDate || 'now',
@@ -855,6 +858,49 @@ export class AnalyticsService {
 
   private async getTotalLeads(where: any): Promise<number> {
     return this.prisma.lead.count({ where });
+  }
+
+  // Average job price across leads in a "won" terminal state — booked /
+  // scheduled / hired / completed / done / closed (Yelp + Thumbtack vocab).
+  // Reads Lead.budget (customer-stated budget at request time) as the
+  // closest proxy for actual job value, since neither platform reliably
+  // exposes a final-price field.
+  private async getAverageJobPrice(
+    userId: string,
+    query: AnalyticsQueryDto,
+  ): Promise<{ value: number | null; count: number }> {
+    const wonStatuses = [
+      'hired', 'job scheduled', 'scheduled', 'job done',
+      'done', 'closed', 'completed', 'job complete', 'booked',
+    ];
+    const rows = await this.prisma.$queryRawUnsafe<Array<{ avg_price: string | null; cnt: bigint }>>(
+      `SELECT
+         AVG(l."budget")::text AS avg_price,
+         COUNT(l."budget")::bigint AS cnt
+       FROM leads l
+       WHERE l."userId" = $1
+         AND ($2::text IS NULL OR l."businessId" = $2::text)
+         AND ($3::timestamptz IS NULL OR l."createdAt" >= $3::timestamptz)
+         AND ($4::timestamptz IS NULL OR l."createdAt" <= $4::timestamptz)
+         AND ($5::text IS NULL OR l."platform" = $5::text)
+         AND l."budget" IS NOT NULL
+         AND (
+           LOWER(COALESCE(l."thumbtackStatus", '')) = ANY($6::text[])
+           OR LOWER(COALESCE(l."status", '')) = ANY($6::text[])
+         )`,
+      userId,
+      query.businessId ?? null,
+      query.startDate ? new Date(query.startDate) : null,
+      query.endDate ? new Date(query.endDate) : null,
+      query.platform ?? null,
+      wonStatuses,
+    );
+
+    const row = rows[0];
+    return {
+      value: row?.avg_price != null ? parseFloat(row.avg_price) : null,
+      count: row?.cnt != null ? Number(row.cnt) : 0,
+    };
   }
 
   // Average Thumbtack lead price (cost the pro paid per lead).

@@ -958,6 +958,7 @@ export interface AnalyticsData {
   roomStats?: RoomStatsMetric;
 
   averageLeadPrice?: { value: number | null; count: number };
+  averageJobPrice?: { value: number | null; count: number };
 
   dateRange: {
     start: string;
