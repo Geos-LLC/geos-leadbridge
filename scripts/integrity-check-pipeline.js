@@ -1,9 +1,9 @@
 /**
  * LB ↔ SF pipeline integrity check.
  *
- * Runs five drift/error queries against the live database and exits non-zero
- * when anything looks wrong. Designed to be run manually or wired into a
- * future cron without further code changes.
+ * Runs drift/error/coverage queries against the live database and exits
+ * non-zero when anything looks wrong. Designed to be run manually or wired
+ * into a future cron without further code changes.
  *
  *   DATABASE_URL=$DIRECT_URL node scripts/integrity-check-pipeline.js
  *
@@ -18,9 +18,12 @@
  *   3. SF-linked leads with statusSource ∉ {service_flow, manual}
  *   4. sf_inbound_events with processingError in last 24h
  *   5. crm_webhook_deliveries failed/5xx in last 24h
+ *   6. sf_link_missing — coverage signal: leads that look like SF candidates
+ *      but have no sfJobId (LB→SF outbound round-trip never closed)
  *
  * The canonical set is hard-coded here to keep the script standalone (no TS
- * imports). Keep in sync with src/leads/canonical-status.ts.
+ * imports). Keep in sync with src/leads/canonical-status.ts and the matching
+ * check #6 in src/monitoring/pipeline-integrity.service.ts.
  */
 
 const { PrismaClient } = require('../generated/prisma');
@@ -32,6 +35,10 @@ const CANONICAL_STATUSES = [
 ];
 
 const VALID_SF_STATUS_SOURCES = ['service_flow', 'manual'];
+
+const SF_LINK_MISSING_NON_TERMINAL_STATUSES = ['new', 'contacted', 'engaged', 'quoted', 'booked'];
+const SF_LINK_MISSING_FLOOR = 10;
+const SF_LINK_MISSING_RATIO = 0.5;
 
 (async () => {
   const p = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL || process.env.DIRECT_URL });
@@ -153,16 +160,79 @@ const VALID_SF_STATUS_SOURCES = ['service_flow', 'manual'];
       results.push({ check: '5. crm_webhook_failed_or_5xx_24h', count: outboundTotal, severity: 'fail' });
     }
 
+    // ── 6. sf_link_missing — coverage check ────────────────────────────
+    // Eligible candidates: leads created in [NOW−7d, NOW−1h] that are SF-shaped
+    // (have phone, non-terminal status) AND belong to a user with an active
+    // outbound CrmWebhookSubscription emitting lead.created. Missing = the
+    // subset where sfJobId is still NULL — the LB→SF round-trip never closed.
+    const sfLinkCoverage = await p.$queryRawUnsafe(`
+      SELECT
+        COUNT(*) FILTER (WHERE l."sfJobId" IS NULL)::int AS missing,
+        COUNT(*)::int AS eligible
+      FROM leads l
+      WHERE l."createdAt" > NOW() - INTERVAL '7 days'
+        AND l."createdAt" < NOW() - INTERVAL '1 hour'
+        AND l."customerPhone" IS NOT NULL
+        AND l.status = ANY($1::text[])
+        AND EXISTS (
+          SELECT 1 FROM crm_webhook_subscriptions s
+          WHERE s."userId" = l."userId"
+            AND s.direction = 'outbound'
+            AND s."isActive" = true
+            AND 'lead.created' = ANY(s.events)
+        )
+    `, SF_LINK_MISSING_NON_TERMINAL_STATUSES);
+    const linkMissing = sfLinkCoverage[0]?.missing ?? 0;
+    const linkEligible = sfLinkCoverage[0]?.eligible ?? 0;
+    const linkRatio = linkEligible === 0 ? 0 : linkMissing / linkEligible;
+    const linkMissingFail =
+      linkMissing >= SF_LINK_MISSING_FLOOR && linkRatio >= SF_LINK_MISSING_RATIO;
+
+    console.log(`\n=== 6. sf_link_missing — coverage signal ===`);
+    console.log(`  eligible=${linkEligible} missing=${linkMissing} ratio=${linkRatio.toFixed(3)} ` +
+      `(fail when missing>=${SF_LINK_MISSING_FLOOR} AND ratio>=${SF_LINK_MISSING_RATIO})`);
+    if (linkMissing > 0) {
+      const breakdown = await p.$queryRawUnsafe(`
+        SELECT l."userId", l.platform, COUNT(*)::int AS n
+        FROM leads l
+        WHERE l."sfJobId" IS NULL
+          AND l."createdAt" > NOW() - INTERVAL '7 days'
+          AND l."createdAt" < NOW() - INTERVAL '1 hour'
+          AND l."customerPhone" IS NOT NULL
+          AND l.status = ANY($1::text[])
+          AND EXISTS (
+            SELECT 1 FROM crm_webhook_subscriptions s
+            WHERE s."userId" = l."userId"
+              AND s.direction = 'outbound'
+              AND s."isActive" = true
+              AND 'lead.created' = ANY(s.events)
+          )
+        GROUP BY l."userId", l.platform
+        ORDER BY n DESC
+        LIMIT 10
+      `, SF_LINK_MISSING_NON_TERMINAL_STATUSES);
+      console.table(breakdown.map(r => ({ user: r.userId.slice(0, 8), platform: r.platform, n: r.n })));
+    }
+    if (linkMissingFail) {
+      results.push({ check: '6. sf_link_missing', count: linkMissing, severity: 'fail' });
+    } else if (linkMissing > 0) {
+      console.log('OK — under fail threshold (in-flight or below ratio).');
+      results.push({ check: '6. sf_link_missing', count: linkMissing, severity: 'ok' });
+    } else {
+      console.log('OK — every eligible candidate has an sfJobId.');
+      results.push({ check: '6. sf_link_missing', count: 0, severity: 'ok' });
+    }
+
     // ── Summary ────────────────────────────────────────────────────────
     console.log('\n=== Summary ===');
     console.table(results.map(r => ({ check: r.check, count: r.count, severity: r.severity })));
 
     const failed = results.filter(r => r.severity === 'fail');
     if (failed.length === 0) {
-      console.log('\nResult: CLEAN. All 5 checks passed.');
+      console.log('\nResult: CLEAN. All 6 checks passed.');
       process.exit(0);
     } else {
-      console.log(`\nResult: DRIFT/ERRORS in ${failed.length} of 5 checks: ${failed.map(f => f.check).join(', ')}`);
+      console.log(`\nResult: DRIFT/ERRORS in ${failed.length} of 6 checks: ${failed.map(f => f.check).join(', ')}`);
       process.exit(1);
     }
   } catch (err) {
