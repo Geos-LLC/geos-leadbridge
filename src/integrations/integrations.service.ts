@@ -30,14 +30,24 @@ export class IntegrationsService {
   async saveBudgetSnapshot(userId: string, dto: BudgetSnapshotDto) {
     const now = new Date();
     const snapshotId = crypto.randomUUID();
+    // Yelp monthly budgets attach a 'YYYY-MM' period in scope.period and we
+    // persist it into scopeCategory (which is unused for budget_monthly).
+    // This gives each calendar month its own snapshot history.
+    const periodKey = dto.scope?.period || dto.scope?.category || null;
 
     const result = await this.prisma.$transaction(async (tx) => {
-      // Close the previous active snapshot (effective_to IS NULL)
+      // Close the previous active snapshot (effective_to IS NULL).
+      // Scope by savedAccountId when provided so multi-account budgets don't
+      // close each other; legacy callers without savedAccountId keep the
+      // old per-user behavior. When a period (YYYY-MM) is provided, scope
+      // by period too — different months are independent histories.
       const previous = await tx.thumbtackSettingsSnapshot.findFirst({
         where: {
           userId,
           snapshotType: dto.snapshotType || 'budget',
           effectiveTo: null,
+          ...(dto.savedAccountId ? { savedAccountId: dto.savedAccountId } : {}),
+          ...(periodKey ? { scopeCategory: periodKey } : {}),
         },
         orderBy: { effectiveFrom: 'desc' },
       });
@@ -59,7 +69,7 @@ export class IntegrationsService {
           savedAccountId: dto.savedAccountId || null,
           provider: dto.provider || 'thumbtack',
           snapshotType: dto.snapshotType || 'budget',
-          scopeCategory: dto.scope?.category || null,
+          scopeCategory: periodKey,
           scopeLocation: dto.scope?.location || null,
           weeklyBudget: dto.budget.weekly,
           currency: dto.budget.currency || 'USD',

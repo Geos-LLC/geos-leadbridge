@@ -10,6 +10,7 @@ import {
   Users,
   RefreshCw,
   Loader2,
+  DollarSign,
 } from 'lucide-react';
 import {
   PieChart,
@@ -49,7 +50,12 @@ export function Analytics() {
   const [tsData, setTsData] = useState<TimeSeriesPoint[]>([]);
   const [tsLoading, setTsLoading] = useState(false);
 
-  // Filters from URL params
+  // Filters from URL params.
+  // businessId values:
+  //   'all'             — every account
+  //   'all_thumbtack'   — all Thumbtack accounts
+  //   'all_yelp'        — all Yelp accounts
+  //   <real businessId> — single account
   const businessId = searchParams.get('businessId') || 'all';
   const timeRange = searchParams.get('range') || 'all';
   const customStart = searchParams.get('startDate') || '';
@@ -134,8 +140,10 @@ export function Analytics() {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      const params: { businessId?: string } = {};
-      if (businessId !== 'all') params.businessId = businessId;
+      const params: { businessId?: string; platform?: 'thumbtack' | 'yelp' } = {};
+      if (businessId === 'all_thumbtack') params.platform = 'thumbtack';
+      else if (businessId === 'all_yelp') params.platform = 'yelp';
+      else if (businessId !== 'all') params.businessId = businessId;
       const { data: fullData, calculatedAt: ts } = await analyticsApi.refreshAnalytics(params);
       setAnalytics(fullData);
       setCalculatedAt(ts);
@@ -160,7 +168,11 @@ export function Analytics() {
   const buildQueryParams = () => {
     const params: any = {};
 
-    if (businessId !== 'all') {
+    if (businessId === 'all_thumbtack') {
+      params.platform = 'thumbtack';
+    } else if (businessId === 'all_yelp') {
+      params.platform = 'yelp';
+    } else if (businessId !== 'all') {
       params.businessId = businessId;
     }
 
@@ -349,6 +361,12 @@ export function Analytics() {
               }}
             >
               <option value="all">All Accounts</option>
+              {savedAccounts.some((a) => a.platform === 'thumbtack') && (
+                <option value="all_thumbtack">{'\uD83D\uDD35 '}All Thumbtack</option>
+              )}
+              {savedAccounts.some((a) => a.platform === 'yelp') && (
+                <option value="all_yelp">{'\uD83D\uDD34 '}All Yelp</option>
+              )}
               {savedAccounts.map((account) => (
                 <option key={account.id} value={account.businessId}>
                   {account.platform === 'yelp' ? '\uD83D\uDD34 ' : '\uD83D\uDD35 '}{account.businessName}
@@ -599,8 +617,8 @@ export function Analytics() {
                   {!tsData.some(r => r.avgBudget != null) && (
                     <p className="text-xs text-slate-400 mb-3">No lead price data available — lead prices are captured from Thumbtack webhooks.</p>
                   )}
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={tsData} margin={{ top: 5, right: 68, left: 0, bottom: 5 }}>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={tsData} margin={{ top: 24, right: 68, left: 0, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                       <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
                       <YAxis width={48} tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
@@ -612,14 +630,28 @@ export function Analytics() {
                         }}
                       />
                       <Bar dataKey="avgBudget" name="Avg Lead Cost" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={48}>
+                        {/* Avg lead cost — centered inside the bar */}
+                        <LabelList
+                          dataKey="avgBudget"
+                          content={(props: any) => {
+                            const { x, y, width, height, value } = props;
+                            if (value == null || height < 18) return null;
+                            return (
+                              <text x={x + width / 2} y={y + height / 2 + 4} textAnchor="middle" fontSize={10} fill="white" fontWeight={700}>
+                                ${Number(value).toFixed(2)}
+                              </text>
+                            );
+                          }}
+                        />
+                        {/* Total spend — above the bar */}
                         <LabelList
                           dataKey="totalBudget"
                           content={(props: any) => {
-                            const { x, y, width, height, value } = props;
-                            if (!value || height < 18) return null;
+                            const { x, y, width, value } = props;
+                            if (value == null) return null;
                             return (
-                              <text x={x + width / 2} y={y + height / 2 + 4} textAnchor="middle" fontSize={10} fill="white" fontWeight={700}>
-                                ${Number(value).toFixed(0)}
+                              <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={11} fill="#475569" fontWeight={700}>
+                                ${Number(value).toLocaleString('en-US', { maximumFractionDigits: 0 })}
                               </text>
                             );
                           }}
@@ -635,39 +667,67 @@ export function Analytics() {
 
       {displayData ? (
         <>
-          {/* Summary KPIs — single bordered row */}
-          <div
-            className="grid grid-cols-2 md:grid-cols-4"
-            style={{
-              background: 'var(--lb-surface)',
-              border: '1px solid var(--lb-line)',
-              borderRadius: 'var(--lb-radius-lg)',
-            }}
-          >
-            <Kpi
-              label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Total leads</span>}
-              value={displayData.totalLeads}
-              loading={isUpdating}
-            />
-            <Kpi
-              label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Clock size={12} /> Avg connection</span>}
-              value={displayData.connectionTime ? formatDuration(displayData.connectionTime.averageMinutes) : '—'}
-              loading={isUpdating}
-            />
-            <Kpi
-              label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><MessageSquare size={12} /> Msgs/lead</span>}
-              value={displayData.messagesPerLead ? displayData.messagesPerLead.average.toFixed(1) : '—'}
-              loading={isUpdating}
-            />
-            <Kpi
-              label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Engagement</span>}
-              value={`${displayData.customerEngagement?.engagementRate?.toFixed(1) ?? 0}%`}
-              delta="active"
-              deltaDir="up"
-              loading={isUpdating}
-              muted
-            />
-          </div>
+          {/* Summary KPIs — single bordered row.
+              Adds Avg Lead Price (Thumbtack-only, hidden on all_yelp) and
+              Avg Job Price (any platform, when there are won leads). */}
+          {(() => {
+            const showLeadPrice = displayData.averageLeadPrice != null && businessId !== 'all_yelp';
+            const showJobPrice = displayData.averageJobPrice?.value != null;
+            const extraCols = (showLeadPrice ? 1 : 0) + (showJobPrice ? 1 : 0);
+            const colClass = extraCols === 2 ? 'md:grid-cols-6' : extraCols === 1 ? 'md:grid-cols-5' : 'md:grid-cols-4';
+            return (
+              <div
+                className={`grid grid-cols-2 ${colClass}`}
+                style={{
+                  background: 'var(--lb-surface)',
+                  border: '1px solid var(--lb-line)',
+                  borderRadius: 'var(--lb-radius-lg)',
+                }}
+              >
+                <Kpi
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Total leads</span>}
+                  value={displayData.totalLeads}
+                  loading={isUpdating}
+                />
+                <Kpi
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Clock size={12} /> Avg connection</span>}
+                  value={displayData.connectionTime ? formatDuration(displayData.connectionTime.averageMinutes) : '—'}
+                  loading={isUpdating}
+                />
+                <Kpi
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><MessageSquare size={12} /> Msgs/lead</span>}
+                  value={displayData.messagesPerLead ? displayData.messagesPerLead.average.toFixed(1) : '—'}
+                  loading={isUpdating}
+                />
+                <Kpi
+                  label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Engagement</span>}
+                  value={`${displayData.customerEngagement?.engagementRate?.toFixed(1) ?? 0}%`}
+                  delta="active"
+                  deltaDir="up"
+                  loading={isUpdating}
+                  muted
+                />
+                {showLeadPrice && (
+                  <Kpi
+                    label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><BarChart3 size={12} /> Avg lead price (TT)</span>}
+                    value={
+                      displayData.averageLeadPrice?.value != null
+                        ? `$${displayData.averageLeadPrice.value.toFixed(2)}`
+                        : '—'
+                    }
+                    loading={isUpdating}
+                  />
+                )}
+                {showJobPrice && (
+                  <Kpi
+                    label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><DollarSign size={12} /> Avg job price</span>}
+                    value={`$${displayData.averageJobPrice!.value!.toFixed(0)}`}
+                    loading={isUpdating}
+                  />
+                )}
+              </div>
+            );
+          })()}
 
           {/* Charts Section */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

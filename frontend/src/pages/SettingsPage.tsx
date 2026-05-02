@@ -111,9 +111,16 @@ export default function SettingsPage() {
     onConfirm: () => void;
   } | null>(null);
 
-  // Budget snapshots
-  const [budgetSnapshots, setBudgetSnapshots] = useState<Array<{ id: string; weeklyBudget: string; currency: string; capturedAt: string; effectiveFrom: string; effectiveTo: string | null; active: boolean; scopeCategory: string | null; scopeLocation: string | null }>>([]);
+  // Budget snapshots (per importAccountId — TT weekly + Yelp monthly).
+  const [budgetSnapshots, setBudgetSnapshots] = useState<Array<{ id: string; weeklyBudget: string; currency: string; capturedAt: string; effectiveFrom: string; effectiveTo: string | null; active: boolean; scopeCategory: string | null; scopeLocation: string | null; snapshotType: string }>>([]);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
+
+  // Yelp per-month budget editor modal
+  const [yelpBudgetEditing, setYelpBudgetEditing] = useState<{ accountId: string; accountName: string } | null>(null);
+  const [yelpBudgetYear, setYelpBudgetYear] = useState(() => new Date().getFullYear());
+  // Map of 'YYYY-MM' -> input string. Holds in-progress edits for the open modal.
+  const [yelpBudgetInputs, setYelpBudgetInputs] = useState<Record<string, string>>({});
+  const [yelpBudgetSaving, setYelpBudgetSaving] = useState(false);
 
   // Delete account
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -178,6 +185,26 @@ export default function SettingsPage() {
     document.addEventListener('leadbridge-refresh-import', handleRefresh);
     return () => document.removeEventListener('leadbridge-refresh-import', handleRefresh);
   }, [importAccountId]);
+
+  // Seed the per-month budget inputs whenever the modal opens, the year
+  // changes, or the underlying snapshots reload. Pre-fills each of the 12
+  // months for the selected year with the latest active value (if any).
+  useEffect(() => {
+    if (!yelpBudgetEditing) return;
+    const seeded: Record<string, string> = {};
+    const latestByPeriod = new Map<string, string>();
+    for (const s of budgetSnapshots) {
+      if (s.snapshotType !== 'budget_monthly' || !s.scopeCategory) continue;
+      if (!latestByPeriod.has(s.scopeCategory)) {
+        latestByPeriod.set(s.scopeCategory, String(Number(s.weeklyBudget)));
+      }
+    }
+    for (let m = 1; m <= 12; m++) {
+      const key = `${yelpBudgetYear}-${String(m).padStart(2, '0')}`;
+      seeded[key] = latestByPeriod.get(key) ?? '';
+    }
+    setYelpBudgetInputs(seeded);
+  }, [yelpBudgetEditing, yelpBudgetYear, budgetSnapshots]);
 
   // Load extension pending leads + budget snapshots when import account changes
   useEffect(() => {
@@ -1445,6 +1472,44 @@ export default function SettingsPage() {
                           )}
                         </div>
                       )}
+
+                      {/* Monthly Budget — per-month manual entry (Yelp doesn't expose a budget API).
+                          Each calendar month has its own snapshot history (scopeCategory holds 'YYYY-MM'). */}
+                      {importAccountId && (() => {
+                        const acc = accounts.find(a => a.id === importAccountId);
+                        // Latest active snapshot per period (YYYY-MM).
+                        const monthlyByPeriod = new Map<string, { weeklyBudget: string; currency: string }>();
+                        for (const s of budgetSnapshots) {
+                          if (s.snapshotType !== 'budget_monthly' || !s.scopeCategory) continue;
+                          if (!s.active && monthlyByPeriod.has(s.scopeCategory)) continue;
+                          if (!monthlyByPeriod.has(s.scopeCategory)) {
+                            monthlyByPeriod.set(s.scopeCategory, { weeklyBudget: s.weeklyBudget, currency: s.currency });
+                          }
+                        }
+                        const setMonthsCount = monthlyByPeriod.size;
+                        return (
+                          <div className="flex items-center justify-between px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                            <div className="flex items-center gap-1.5">
+                              <DollarSign size={13} className="text-slate-400" />
+                              <span className="font-semibold text-slate-700">Monthly Budget:</span>
+                              <span className="text-slate-900 ml-1">
+                                {setMonthsCount > 0
+                                  ? <><span className="font-bold">{setMonthsCount}</span> {setMonthsCount === 1 ? 'month' : 'months'} set</>
+                                  : <span className="text-slate-400">Not set</span>}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => {
+                                if (!acc) return;
+                                setYelpBudgetEditing({ accountId: acc.id, accountName: acc.businessName });
+                              }}
+                              className="text-red-600 hover:text-red-700 font-semibold hover:underline inline-flex items-center gap-1"
+                            >
+                              {setMonthsCount > 0 ? <><Pencil size={12} /> Manage</> : <><DollarSign size={12} /> Add Budget</>}
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -2272,6 +2337,157 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+
+      {/* Yelp Per-Month Budget editor modal */}
+      {yelpBudgetEditing && (() => {
+        // Build the persisted-value lookup so we only POST changed months on save.
+        const persisted = new Map<string, string>();
+        for (const s of budgetSnapshots) {
+          if (s.snapshotType !== 'budget_monthly' || !s.scopeCategory) continue;
+          if (!persisted.has(s.scopeCategory)) {
+            persisted.set(s.scopeCategory, String(Number(s.weeklyBudget)));
+          }
+        }
+        const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const currentYear = new Date().getFullYear();
+        return (
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => !yelpBudgetSaving && setYelpBudgetEditing(null)}
+          >
+            <div
+              className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl max-h-[85vh] flex flex-col"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">Monthly Yelp Budget</h3>
+                  <p className="text-xs text-slate-500 mt-0.5 truncate">{yelpBudgetEditing.accountName}</p>
+                </div>
+                <button
+                  disabled={yelpBudgetSaving}
+                  onClick={() => setYelpBudgetEditing(null)}
+                  className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all disabled:opacity-40"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Year selector */}
+              <div className="flex items-center justify-between mb-3">
+                <button
+                  disabled={yelpBudgetSaving}
+                  onClick={() => setYelpBudgetYear(y => y - 1)}
+                  className="p-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-40"
+                  aria-label="Previous year"
+                >
+                  <ChevronUp size={16} className="rotate-[-90deg]" />
+                </button>
+                <span className="text-base font-bold text-slate-900">{yelpBudgetYear}</span>
+                <button
+                  disabled={yelpBudgetSaving || yelpBudgetYear >= currentYear + 1}
+                  onClick={() => setYelpBudgetYear(y => y + 1)}
+                  className="p-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-40"
+                  aria-label="Next year"
+                >
+                  <ChevronDown size={16} className="rotate-[-90deg]" />
+                </button>
+              </div>
+
+              <p className="text-[11px] text-slate-400 mb-3">
+                Yelp doesn't expose budgets via API — enter the value you set in your Yelp Ads dashboard for each month. Leave blank to clear.
+              </p>
+
+              {/* Per-month grid */}
+              <div className="overflow-y-auto flex-1 -mx-1 px-1">
+                <div className="grid grid-cols-2 gap-2">
+                  {monthLabels.map((label, idx) => {
+                    const m = idx + 1;
+                    const key = `${yelpBudgetYear}-${String(m).padStart(2, '0')}`;
+                    const val = yelpBudgetInputs[key] ?? '';
+                    const wasSet = persisted.has(key);
+                    return (
+                      <label key={key} className="flex items-center gap-2">
+                        <span className="w-9 shrink-0 text-xs font-semibold text-slate-600">{label}</span>
+                        <div className="relative flex-1">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-semibold">$</span>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="1"
+                            placeholder={wasSet ? '' : '0'}
+                            value={val}
+                            onChange={e => setYelpBudgetInputs(s => ({ ...s, [key]: e.target.value }))}
+                            disabled={yelpBudgetSaving}
+                            className={`w-full pl-6 pr-2 py-1.5 border rounded-lg text-sm font-medium focus:ring-2 focus:ring-red-100 focus:border-red-300 disabled:opacity-50 ${wasSet ? 'border-slate-300 bg-white' : 'border-slate-200 bg-slate-50'}`}
+                          />
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 mt-5">
+                <button
+                  disabled={yelpBudgetSaving}
+                  onClick={() => setYelpBudgetEditing(null)}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-40"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={yelpBudgetSaving}
+                  onClick={async () => {
+                    // Compute changed months. Empty string is treated as "no value yet" — we
+                    // skip writing it. (Future: support clearing a month explicitly.)
+                    const writes: Array<{ period: string; amount: number }> = [];
+                    for (const [period, raw] of Object.entries(yelpBudgetInputs)) {
+                      if (!period.startsWith(`${yelpBudgetYear}-`)) continue;
+                      const trimmed = raw.trim();
+                      if (trimmed === '') continue;
+                      const amount = Number(trimmed);
+                      if (Number.isNaN(amount) || amount < 0) continue;
+                      const before = persisted.get(period);
+                      if (before != null && Number(before) === amount) continue;
+                      writes.push({ period, amount });
+                    }
+                    if (writes.length === 0) {
+                      notify.info('No changes', 'Nothing to save for this year.');
+                      return;
+                    }
+                    setYelpBudgetSaving(true);
+                    try {
+                      for (const w of writes) {
+                        await integrationsApi.saveBudgetSnapshot({
+                          savedAccountId: yelpBudgetEditing.accountId,
+                          provider: 'yelp',
+                          amount: w.amount,
+                          cadence: 'monthly',
+                          periodMonth: w.period,
+                        });
+                      }
+                      const res = await integrationsApi.getBudgetSnapshots(yelpBudgetEditing.accountId);
+                      setBudgetSnapshots(res.snapshots || []);
+                      notify.success('Budgets saved', `${writes.length} ${writes.length === 1 ? 'month' : 'months'} updated`);
+                      setYelpBudgetEditing(null);
+                    } catch (err: any) {
+                      notify.error('Save failed', err?.message || 'Could not save budgets');
+                    } finally {
+                      setYelpBudgetSaving(false);
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 inline-flex items-center gap-2 disabled:opacity-40"
+                >
+                  {yelpBudgetSaving && <Loader2 size={14} className="animate-spin" />}
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Connection Modal */}
       <ConnectionModal
