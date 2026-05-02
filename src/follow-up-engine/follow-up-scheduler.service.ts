@@ -165,8 +165,12 @@ export class FollowUpSchedulerService implements OnModuleInit {
    *      releases mid-cycle (e.g. transaction rolled back).
    *
    * Per-cycle processing can include external I/O (SMS/AI calls in
-   * processEnrollment), so we extend the transaction timeout to 5 minutes —
-   * enough headroom for a full batch of 20 enrollments.
+   * processEnrollment) and a full batch of 20 enrollments can legitimately
+   * run several minutes. Set the transaction timeout to 10 minutes — well
+   * past observed worst-case batches (21:17:00 prod cycle of 9 enrollments
+   * tripped the original 5-minute ceiling). The minute-cron's `this.processing`
+   * flag prevents re-entry, so a long-running cycle just causes intervening
+   * ticks to no-op.
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async processFollowUps(): Promise<void> {
@@ -270,7 +274,7 @@ export class FollowUpSchedulerService implements OnModuleInit {
             }
           }
         },
-        { timeoutMs: 300_000 },
+        { timeoutMs: 600_000 },
       );
 
       if (isSkipped(outcome)) return;
