@@ -282,8 +282,16 @@ export class PipelineIntegrityService {
    * LeadBridge's workspace.
    *
    * Returns a list of problems — empty list = healthy. Skips silently (returns
-   * empty problems) if SIGCORE_API_KEY isn't configured, since this is a
-   * production check and dev/test environments may not have it set.
+   * empty problems) when:
+   *   1. SIGCORE_API_KEY isn't configured (dev/test envs without Sigcore wired)
+   *   2. SIGCORE_WEBHOOK_HEALTH_OWNER is set to a value that doesn't match this
+   *      LB instance's resolved expected delivery URL host. Use case: when one
+   *      Sigcore workspace is shared between multiple LB environments
+   *      (e.g. staging Sigcore inheriting the production workspace), the
+   *      subscription URL is fixed at the owner's host. Setting this env var
+   *      to that owner's host on every LB instance means only the owner
+   *      actually runs the check; non-owner instances stop emitting false
+   *      positives without losing coverage on the owner.
    */
   private async checkSigcoreWebhookHealth(): Promise<{ problems: Array<Record<string, unknown>> }> {
     const sigcoreApiKey = this.configService.get<string>('SIGCORE_API_KEY');
@@ -305,6 +313,25 @@ export class PipelineIntegrityService {
           },
         ],
       };
+    }
+
+    // Owner gate. Only consult when explicitly set — leaving it unset keeps the
+    // pre-gate behavior so existing single-environment deployments don't have
+    // to opt in.
+    const owner = this.configService.get<string>('SIGCORE_WEBHOOK_HEALTH_OWNER');
+    if (owner) {
+      let myHost: string;
+      try {
+        myHost = new URL(expectedDeliveryUrl).host;
+      } catch {
+        myHost = '';
+      }
+      if (owner !== myHost) {
+        this.logger.debug(
+          `[PipelineIntegrity] sigcore_webhook_health skipped: not_owner host=${myHost} owner=${owner}`,
+        );
+        return { problems: [] };
+      }
     }
 
     const sigcoreUrl = this.configService.get<string>(
