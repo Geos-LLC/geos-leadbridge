@@ -295,8 +295,12 @@ export class LeadsService {
    * Keeps the existing read strategy: Yelp → live Yelp API (authoritative for
    * customer replies; the webhook path records to ThreadContext but does NOT
    * persist Message rows), Thumbtack/SMS → local DB (webhook-persisted).
+   *
+   * `skipCache` bypasses Redis for this call (loader runs and result is still
+   * written back to the cache on success). Used by the lead-click path so the
+   * first paint after opening a lead is never served from a 5-min-stale snapshot.
    */
-  async getMessages(userId: string, leadId: string): Promise<any[]> {
+  async getMessages(userId: string, leadId: string, skipCache = false): Promise<any[]> {
     const t0 = Date.now();
     const shortLead = leadId.slice(0, 8);
     let wasCacheHit = true; // flipped to false inside the loader
@@ -355,14 +359,15 @@ export class LeadsService {
         }
 
         this.logger.log(
-          `[getMessages] MISS lead=${shortLead} platform=${leadWithMessages.platform} source=${source} loader-total=${Date.now() - loaderT0}ms count=${messages.length}`,
+          `[getMessages] MISS lead=${shortLead} platform=${leadWithMessages.platform} source=${source} loader-total=${Date.now() - loaderT0}ms count=${messages.length}${skipCache ? ' (cache-skipped)' : ''}`,
         );
         return messages;
       },
+      { enabled: !skipCache },
     );
 
     const totalMs = Date.now() - t0;
-    if (wasCacheHit) {
+    if (wasCacheHit && !skipCache) {
       this.logger.log(`[getMessages] HIT  lead=${shortLead} total=${totalMs}ms count=${result.length}`);
     } else {
       this.logger.log(`[getMessages] DONE lead=${shortLead} total=${totalMs}ms (see MISS line above)`);

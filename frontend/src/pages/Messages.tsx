@@ -251,6 +251,12 @@ export function Messages() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Message cache: stores loaded timeline + summary per lead ID to avoid re-fetching
   const messageCache = useRef<Record<string, { timeline: TimelineEvent[]; summary: CommunicationSummary; cachedAt: number }>>({});
+  // Mirrors `selectedLead` so the SSE handler (closed over once at mount) can
+  // see the currently-active lead instead of the one selected at mount time.
+  const selectedLeadRef = useRef<Lead | null>(null);
+  // Mirrors `loadMessagesForLead` so the SSE handler invokes the latest closure
+  // (which captures up-to-date state setters and the freshest dependencies).
+  const loadMessagesForLeadRef = useRef<(lead: Lead, forceRefresh?: boolean) => void>(() => {});
 
   // Multi-select state
   const [multiSelectMode, setMultiSelectMode] = useState(false);
@@ -561,6 +567,21 @@ export function Messages() {
             }
             return e;
           }));
+        } else if (data.type === 'lead.messages.changed') {
+          // Backend invalidated the messages cache for this lead (inbound webhook,
+          // outbound send, resync). Drop the in-memory cache and, if the user is
+          // currently viewing this lead, refetch with fresh=true so they see the
+          // new message immediately instead of waiting for the next click.
+          //
+          // Use refs (not the closed-over state) — this handler was registered
+          // once at mount and never sees later renders' state.
+          if (data.leadId) {
+            delete messageCache.current[data.leadId];
+            const active = selectedLeadRef.current;
+            if (active && active.id === data.leadId) {
+              loadMessagesForLeadRef.current(active, true);
+            }
+          }
         }
       } catch (err) {
         console.error('[Messages] Error parsing SSE event:', err);
@@ -611,11 +632,21 @@ export function Messages() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountFilter]);
 
-  // Refresh current conversation messages when tab becomes visible
+  // Keep the loadMessagesForLead ref in sync — every render produces a fresh
+  // closure, and the SSE handler (registered once at mount) needs the latest
+  // one to call. Without this, the SSE-triggered refetch would invoke the
+  // version captured at mount, which closes over stale state setters.
+  useEffect(() => {
+    loadMessagesForLeadRef.current = loadMessagesForLead;
+  });
+
+  // Refresh current conversation messages when tab becomes visible.
+  // forceRefresh=true — same rationale as the lead-click path: returning to the
+  // tab must show the actual current state, not a cache snapshot.
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && selectedLead) {
-        loadMessagesForLead(selectedLead);
+        loadMessagesForLead(selectedLead, true);
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -676,10 +707,14 @@ export function Messages() {
     }
   };
 
-  // Load messages when selected lead changes
+  // Load messages when selected lead changes.
+  // forceRefresh=true so the click bypasses both the in-memory frontend cache
+  // and the Redis backend cache — opening a lead must always paint the freshest
+  // thread the DB knows about, not a 5-min-stale snapshot.
   useEffect(() => {
+    selectedLeadRef.current = selectedLead;
     if (selectedLead) {
-      loadMessagesForLead(selectedLead);
+      loadMessagesForLead(selectedLead, true);
     }
   }, [selectedLead]);
 
@@ -771,7 +806,7 @@ export function Messages() {
     setLastSeenTimestamps(prev => ({ ...prev, [lead.id]: timestamp }));
   };
 
-  const loadMessagesForLead = async (lead: Lead, forceRefresh = false) => {
+  const loadMessagesForLead = async (lead: Lead, forceRefresh = false): Promise<void> => {
     // Serve from cache if available and fresh (< 2 min old)
     const cached = messageCache.current[lead.id];
     const CACHE_TTL = 2 * 60 * 1000; // 2 minutes
@@ -815,7 +850,11 @@ export function Messages() {
     };
 
     try {
-      const { messages: apiMessages } = await leadsApi.getMessages(lead.id);
+      // forceRefresh = the caller wants the freshest possible view (e.g. user just
+      // clicked the lead, tab regained focus, SSE pushed an update). Pair the
+      // frontend cache bypass with backend cache bypass so we don't read a
+      // 5-min-stale Redis snapshot of the messages thread.
+      const { messages: apiMessages } = await leadsApi.getMessages(lead.id, { fresh: forceRefresh });
 
       // Fire-and-forget auto-resync when DB is empty. Previously this awaited
       // resyncMessages + a second getMessages before rendering, blocking the
@@ -1602,7 +1641,8 @@ export function Messages() {
                     if (multiSelectMode) {
                       toggleLeadSelection(lead.id, { stopPropagation: () => {} } as React.MouseEvent);
                     } else if (selectedLead?.id === lead.id) {
-                      loadMessagesForLead(lead);
+                      // Re-clicking the already-selected lead: force a fresh fetch.
+                      loadMessagesForLead(lead, true);
                       setMobilePanel('chat');
                     } else {
                       console.log('[Messages] Negotiation object:', lead);

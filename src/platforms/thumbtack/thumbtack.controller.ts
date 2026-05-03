@@ -482,13 +482,23 @@ export class ThumbtackController {
   }
 
   /**
-   * Get messages for a lead/negotiation
+   * Get messages for a lead/negotiation.
+   *
+   * `?fresh=1` (or `?fresh=true`) bypasses the Redis cache for this call. The
+   * frontend passes it on lead-click so the first paint after opening a lead is
+   * never served from a 5-min-stale snapshot. Subsequent reads (without the
+   * param) hit cache as usual.
    */
   @Get('leads/:id/messages')
-  async getMessages(@CurrentUser() user: any, @Param('id') id: string) {
-    console.log(`[ThumbtackController] getMessages called - userId: ${user.id}, leadId: ${id}`);
+  async getMessages(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Query('fresh') fresh?: string,
+  ) {
+    const skipCache = fresh === '1' || fresh === 'true';
+    console.log(`[ThumbtackController] getMessages called - userId: ${user.id}, leadId: ${id}, skipCache: ${skipCache}`);
     try {
-      const messages = await this.leadsService.getMessages(user.id, id);
+      const messages = await this.leadsService.getMessages(user.id, id, skipCache);
       console.log(`[ThumbtackController] getMessages success - ${messages.length} messages`);
 
       return {

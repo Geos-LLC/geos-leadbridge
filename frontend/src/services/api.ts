@@ -422,8 +422,9 @@ export const leadsApi = {
     const { data } = await api.get(`/v1/thumbtack/leads/${id}`);
     return data;
   },
-  getMessages: async (leadId: string): Promise<{ messages: ApiMessage[]; count: number }> => {
-    const { data } = await api.get(`/v1/thumbtack/leads/${leadId}/messages`);
+  getMessages: async (leadId: string, opts?: { fresh?: boolean }): Promise<{ messages: ApiMessage[]; count: number }> => {
+    const qs = opts?.fresh ? '?fresh=1' : '';
+    const { data } = await api.get(`/v1/thumbtack/leads/${leadId}/messages${qs}`);
     return data;
   },
   sendMessage: async (leadId: string, message: string): Promise<{ success: boolean }> => {
