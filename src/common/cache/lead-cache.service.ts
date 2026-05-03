@@ -1,5 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { OnEvent } from '@nestjs/event-emitter';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { CacheService } from './cache.service';
 import { CacheKeys } from './cache-keys';
 
@@ -17,7 +17,15 @@ import { CacheKeys } from './cache-keys';
 export class LeadCacheService {
   private readonly logger = new Logger(LeadCacheService.name);
 
-  constructor(private readonly cache: CacheService) {}
+  /**
+   * `eventEmitter` is `@Optional()` so unit tests that construct this service
+   * with `new LeadCacheService(cache)` still work — production wiring always
+   * provides one via the AppModule's EventEmitterModule.
+   */
+  constructor(
+    private readonly cache: CacheService,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
+  ) {}
 
   /** Invalidate the per-user leads list (all `businessId` partitions). */
   async invalidateLeadList(userId: string): Promise<void> {
@@ -53,7 +61,15 @@ export class LeadCacheService {
     ]);
   }
 
-  /** Combined: list + detail + messages. Inbound/outbound message paths use this. */
+  /**
+   * Combined: list + detail + messages. Inbound/outbound message paths use this.
+   *
+   * Also emits `lead.messages.changed.${userId}` so the SSE stream can push the
+   * change to any browser currently viewing the lead. Without this, a tab open
+   * on the lead would wait until the user reopens it (or the 5-min Redis TTL
+   * elapses) before showing the new message. The emit is non-blocking and only
+   * fires when both userId and leadId are present.
+   */
   async invalidateLeadMessagesAndList(userId: string, leadId: string): Promise<void> {
     if (!userId && !leadId) return;
     await Promise.all([
@@ -61,6 +77,9 @@ export class LeadCacheService {
       userId && leadId ? this.cache.del(CacheKeys.leadDetail(userId, leadId)) : Promise.resolve(),
       userId && leadId ? this.cache.del(CacheKeys.leadMessages(userId, leadId)) : Promise.resolve(),
     ]);
+    if (this.eventEmitter && userId && leadId) {
+      this.eventEmitter.emit(`lead.messages.changed.${userId}`, { userId, leadId });
+    }
   }
 
   // ==========================================================================

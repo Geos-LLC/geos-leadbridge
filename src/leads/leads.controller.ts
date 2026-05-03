@@ -126,6 +126,14 @@ export class LeadsController {
         type: 'lead.status.conflict',
         ...(payload as any),
       })),
+      // Fired by LeadCacheService.invalidateLeadMessagesAndList — every inbound
+      // webhook, outbound send, or resync that mutates a lead's message thread
+      // emits this. Frontend uses it to refetch the active lead so the user
+      // sees new messages immediately, without waiting for the Redis TTL.
+      scopedStream(`lead.messages.changed.${userId}`, (payload) => ({
+        type: 'lead.messages.changed',
+        ...(payload as any),
+      })),
     );
   }
 
