@@ -2005,17 +2005,28 @@ export class WebhooksService {
       await this.leadCache.invalidateLeadMessagesAndList(userId, lead.id);
 
       // Stop follow-up enrollments
+      let reEngagementSent = false;
       if (lead.threadId) {
         try {
           const fuResult = await this.followUpEngine.handleCustomerReply(lead.threadId, latestCustomerMessage);
           if (fuResult.reEngagementAlert && savedAccount) {
-            this.notificationsService.sendReEngagementAlert(userId, savedAccount.id, fuResult.reEngagementAlert)
+            await this.notificationsService.sendReEngagementAlert(userId, savedAccount.id, fuResult.reEngagementAlert)
               .catch(err => this.logger.warn(`[ReEngagement] Yelp alert failed: ${err.message}`));
+            reEngagementSent = true;
           }
         } catch (err: any) {
           this.logger.warn(`Failed to stop Yelp follow-up on customer reply: ${err.message}`);
         }
       }
+
+      // Customer message count drives isSecondCustomerMessage (for first_only reply rules).
+      // The current reply was just persisted via ensureMessagePersisted above, so the
+      // count already includes it.
+      const customerMessageCount = lead.threadId
+        ? await this.prisma.message.count({
+            where: { conversationId: lead.threadId, sender: 'customer' },
+          })
+        : 0;
 
       this.logger.log(`Yelp customer reply on lead ${leadId}`);
       // Emit CRM webhook for customer message
@@ -2035,10 +2046,40 @@ export class WebhooksService {
           customerMessage: leadData.message || undefined,
           accountName: savedAccount.businessName,
           isFirstCustomerReply: false,
-          isSecondCustomerMessage: false,
+          isSecondCustomerMessage: customerMessageCount === 2,
         });
       } catch (err: any) {
         this.logger.error(`Yelp reply automation failed: ${err.message}`);
+      }
+
+      // Trigger SMS notifications for customer replies (business-phone alerts).
+      // Skip if a re-engagement alert already fired (don't double-alert).
+      if (savedAccount && !reEngagementSent) {
+        try {
+          await this.notificationsService.handleCustomerReply({
+            userId,
+            savedAccountId: savedAccount.id,
+            leadId: lead.id,
+            accountName: savedAccount.businessName,
+            platform: 'yelp',
+            lead: {
+              customerName: lead.customerName,
+              customerPhone: lead.customerPhone,
+              category: lead.category,
+              city: lead.city,
+              state: lead.state,
+              postcode: lead.postcode,
+              message: latestCustomerMessage || lead.message,
+              rawJson: lead.rawJson,
+            },
+            isFirstCustomerReply: false,
+            isSecondCustomerMessage: customerMessageCount === 2,
+          });
+        } catch (err: any) {
+          this.logger.error(`Yelp customer-reply SMS notification failed: ${err.message}`);
+        }
+      } else if (reEngagementSent) {
+        this.logger.log(`[ReEngagement] Suppressed Yelp customer_reply notification — re-engagement alert already sent`);
       }
       return;
     }
