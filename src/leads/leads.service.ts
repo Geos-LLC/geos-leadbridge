@@ -342,29 +342,7 @@ export class LeadsService {
         let source: string;
         const dbMessages = leadWithMessages.conversation?.messages || [];
 
-        // Yelp special case: when the caller asked for fresh data (skipCache),
-        // hit the live Yelp API. Yelp has no incremental sync — webhooks can
-        // miss events, BIZ replies sent from biz.yelp.com only show up if the
-        // echo path persisted them, etc. The user's mental model is "click =
-        // see everything," so on click we pay one Yelp API round-trip and
-        // upsert any missing events. `getYelpMessages` already syncs to the
-        // local Message table (fire-and-forget) so subsequent reads are cheap.
-        if (skipCache && leadWithMessages.platform === 'yelp') {
-          const tYelpStart = Date.now();
-          try {
-            const yelpMessages = await this.getYelpMessages(userId, leadWithMessages);
-            const tYelpEnd = Date.now();
-            messages = yelpMessages;
-            source = `yelp-api-fresh(db-${tDbEnd - tDbStart}ms-had-${dbMessages.length},api-${tYelpEnd - tYelpStart}ms)`;
-          } catch (err: any) {
-            // Yelp API down / token expired / etc. — fall back to whatever's
-            // in the DB so the user still sees the conversation, just possibly
-            // missing the very latest events.
-            this.logger.warn(`[getMessages] Yelp API fresh fetch failed for lead=${shortLead}: ${err.message} — falling back to DB`);
-            messages = dbMessages.map(msg => this.formatMessageRow(msg));
-            source = `db-fallback(yelp-api-failed)`;
-          }
-        } else if (dbMessages.length > 0) {
+        if (dbMessages.length > 0) {
           messages = dbMessages.map(msg => this.formatMessageRow(msg));
           source = `db-combined(${tDbEnd - tDbStart}ms)`;
         } else if (leadWithMessages.platform === 'yelp') {
