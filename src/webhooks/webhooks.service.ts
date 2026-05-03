@@ -1901,6 +1901,57 @@ export class WebhooksService {
       // stops one enrollment that was going to fire anyway (invisible cost).
       const classification = await this.classifyYelpNewEvent(leadId, eventId, accessToken);
 
+      // Full-thread persistence runs FIRST — even when the event is an echo
+      // (i.e. a BIZ message). Without this, a message the business owner sends
+      // from biz.yelp.com never reaches LB's DB: the echo branch returns early
+      // a few lines down, and the customer-reply branch only persists customer
+      // events. Read path then serves a stale thread because the Yelp branch of
+      // getMessages() falls back to the live Yelp API only when the DB row set
+      // is EMPTY — one stored customer message is enough to mask all missing
+      // BIZ messages forever.
+      //
+      // Idempotent: ensureMessagePersisted upserts on (platform, externalMessageId).
+      // Re-running on echo paths costs N upserts where N=thread length, capped
+      // by Yelp's per-lead event count. Cache invalidation + SSE emit happen
+      // inside invalidateLeadMessagesAndList so any browser viewing this lead
+      // refetches immediately.
+      if (
+        this.configService.get<boolean>('features.yelpWebhookPersistFullThread') &&
+        lead.threadId &&
+        Array.isArray(classification.events) &&
+        classification.events.length > 0
+      ) {
+        let persisted = 0;
+        for (const ev of classification.events) {
+          if (!ev?.id || !isDisplayableYelpEvent(ev)) continue;
+          const content = extractYelpEventContent(ev);
+          if (!content) continue;
+          const sender = yelpEventSender(ev);
+          const sentAt = ev.time_created ? new Date(ev.time_created) : new Date();
+          try {
+            const result = await this.conversationContextService.ensureMessagePersisted({
+              conversationId: lead.threadId,
+              leadId: lead.id,
+              userId,
+              platform: 'yelp',
+              externalMessageId: ev.id,
+              sender,
+              senderType: sender === 'customer' ? 'customer' : undefined,
+              content,
+              sentAt,
+              rawJson: JSON.stringify(ev),
+            });
+            if (result?.created) persisted++;
+          } catch (err: any) {
+            this.logger.warn(`[yelp_full_thread_persist] failed eventId=${ev.id} lead=${leadId}: ${err.message}`);
+          }
+        }
+        if (persisted > 0) {
+          this.logger.log(`[yelp_full_thread_persist] lead=${leadId} persisted=${persisted} echo=${classification.outcome === 'echo'}`);
+          await this.leadCache.invalidateLeadMessagesAndList(userId, lead.id);
+        }
+      }
+
       if (classification.outcome === 'echo') {
         this.logger.log(`[echo_confirmed] yelp lead=${leadId} eventId=${eventId ?? 'n/a'}`);
         return;
@@ -1946,51 +1997,12 @@ export class WebhooksService {
       }
 
       // Invalidate the cached messages thread for this lead so the next fetch
-      // picks up the just-persisted customer reply.
+      // picks up the just-persisted customer reply. Full-thread persist already
+      // ran above (before the echo return) — it would have invalidated then,
+      // but only when persisted>0. This second call covers the case where the
+      // single-message persist just above wrote a customer-reply row that
+      // wasn't in the classifier.events set.
       await this.leadCache.invalidateLeadMessagesAndList(userId, lead.id);
-
-      // Phase 1.1 — full-thread persistence behind FEATURE_YELP_WEBHOOK_PERSIST_FULL_THREAD.
-      // The single-message persist above only stores the latest customer reply.
-      // When enabled, also persist every other displayable event from the SAME
-      // fetch the classifier already issued (no extra API call). Idempotent via
-      // (platform, externalMessageId). Default: false — flip on per the cache plan.
-      if (
-        this.configService.get<boolean>('features.yelpWebhookPersistFullThread') &&
-        lead.threadId &&
-        Array.isArray(classification.events) &&
-        classification.events.length > 0
-      ) {
-        let persisted = 0;
-        for (const ev of classification.events) {
-          if (!ev?.id || !isDisplayableYelpEvent(ev)) continue;
-          const content = extractYelpEventContent(ev);
-          if (!content) continue;
-          const sender = yelpEventSender(ev);
-          const sentAt = ev.time_created ? new Date(ev.time_created) : new Date();
-          try {
-            const result = await this.conversationContextService.ensureMessagePersisted({
-              conversationId: lead.threadId,
-              leadId: lead.id,
-              userId,
-              platform: 'yelp',
-              externalMessageId: ev.id,
-              sender,
-              senderType: sender === 'customer' ? 'customer' : undefined,
-              content,
-              sentAt,
-              rawJson: JSON.stringify(ev),
-            });
-            if (result?.created) persisted++;
-          } catch (err: any) {
-            this.logger.warn(`[yelp_full_thread_persist] failed eventId=${ev.id} lead=${leadId}: ${err.message}`);
-          }
-        }
-        if (persisted > 0) {
-          this.logger.log(`[yelp_full_thread_persist] lead=${leadId} persisted=${persisted}`);
-          // Re-invalidate so the cache picks up the historical rows we just added.
-          await this.leadCache.invalidateLeadMessagesAndList(userId, lead.id);
-        }
-      }
 
       // Stop follow-up enrollments
       if (lead.threadId) {
