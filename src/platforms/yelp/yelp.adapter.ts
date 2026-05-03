@@ -24,6 +24,11 @@ import {
   NormalizedQuote,
   MessageSender,
 } from '../../common/dto/normalized.dto';
+import {
+  extractYelpEventContent,
+  isDisplayableYelpEvent,
+  yelpEventSender,
+} from './yelp-event-content.util';
 
 @Injectable()
 export class YelpAdapter implements IPlatformAdapter {
@@ -285,8 +290,47 @@ export class YelpAdapter implements IPlatformAdapter {
     return [];
   }
 
-  async getConversation(_credentials: PlatformCredentials, _threadId: string, _options?: PaginationOptions): Promise<NormalizedMessage[]> {
-    return [];
+  /**
+   * Fetch the full event thread for a Yelp lead and return it as NormalizedMessage[].
+   *
+   * Yelp has no dedicated "messages" REST endpoint — lead events ARE the message
+   * thread (TEXT, BIZ_REPLY, REGULAR_RESPONSE, RAQ_AVAILABILITY, …). We reuse
+   * `getLeadEvents` and project each displayable event through the same helpers
+   * the webhook write path uses (`isDisplayableYelpEvent`, `extractYelpEventContent`,
+   * `yelpEventSender`) so resync output matches what the webhook would persist.
+   *
+   * Used by `LeadsService.resyncMessages` (the Refresh button in the UI). Without
+   * this, the resync would silently return 0 messages for Yelp leads — the read
+   * path falls back to the live Yelp API only when the DB row set is empty,
+   * which means historic Yelp threads with one persisted customer message but
+   * missing BIZ replies stay incomplete forever.
+   */
+  async getConversation(credentials: PlatformCredentials, threadId: string, _options?: PaginationOptions): Promise<NormalizedMessage[]> {
+    const events = await this.getLeadEvents(credentials, threadId);
+    if (!Array.isArray(events) || events.length === 0) return [];
+
+    const messages: NormalizedMessage[] = [];
+    for (const ev of events) {
+      if (!ev?.id || !isDisplayableYelpEvent(ev)) continue;
+      const content = extractYelpEventContent(ev);
+      if (!content) continue;
+      const sender = yelpEventSender(ev);
+      const msg = new NormalizedMessage();
+      msg.id = ev.id;
+      msg.conversationId = threadId;
+      msg.platform = PlatformName.YELP;
+      msg.externalMessageId = ev.id;
+      msg.sender = sender === 'pro' ? MessageSender.PRO : MessageSender.CUSTOMER;
+      msg.content = content;
+      msg.isRead = true;
+      msg.sentAt = ev.time_created ? new Date(ev.time_created) : new Date();
+      msg.raw = ev;
+      messages.push(msg);
+    }
+    // Caller (importMessagesForNegotiation) reads the last element to set
+    // conversation.lastMessageAt — sort ascending so that's actually the latest.
+    messages.sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime());
+    return messages;
   }
 
   async sendMessage(credentials: PlatformCredentials, leadId: string, message: string): Promise<NormalizedMessage> {
