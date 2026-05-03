@@ -641,12 +641,12 @@ export function Messages() {
   });
 
   // Refresh current conversation messages when tab becomes visible.
-  // forceRefresh=true — same rationale as the lead-click path: returning to the
-  // tab must show the actual current state, not a cache snapshot.
+  // forceRefresh=false: rely on cache for instant paint. Server-side lazy sync
+  // + SSE will push any updates that arrived while the tab was hidden.
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && selectedLead) {
-        loadMessagesForLead(selectedLead, true);
+        loadMessagesForLead(selectedLead, false);
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -708,13 +708,15 @@ export function Messages() {
   };
 
   // Load messages when selected lead changes.
-  // forceRefresh=true so the click bypasses both the in-memory frontend cache
-  // and the Redis backend cache — opening a lead must always paint the freshest
-  // thread the DB knows about, not a 5-min-stale snapshot.
+  // forceRefresh=false: paint from the in-memory frontend cache or backend Redis
+  // (instant). The lazy Yelp background sync on the server will pick up any
+  // missed events asynchronously and push `lead.messages.changed` via SSE — at
+  // which point the handler below refetches with forceRefresh=true and the user
+  // sees the new messages without clicking Refresh.
   useEffect(() => {
     selectedLeadRef.current = selectedLead;
     if (selectedLead) {
-      loadMessagesForLead(selectedLead, true);
+      loadMessagesForLead(selectedLead, false);
     }
   }, [selectedLead]);
 
@@ -1641,7 +1643,8 @@ export function Messages() {
                     if (multiSelectMode) {
                       toggleLeadSelection(lead.id, { stopPropagation: () => {} } as React.MouseEvent);
                     } else if (selectedLead?.id === lead.id) {
-                      // Re-clicking the already-selected lead: force a fresh fetch.
+                      // Re-clicking the already-selected lead: user is asking
+                      // for a refresh — bypass both caches so DB is read fresh.
                       loadMessagesForLead(lead, true);
                       setMobilePanel('chat');
                     } else {

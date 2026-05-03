@@ -88,6 +88,15 @@ function mapPlatformRawToLb(platform: string, raw: string): string | null {
 @Injectable()
 export class LeadsService {
   private readonly logger = new Logger(LeadsService.name);
+
+  // Lazy Yelp sync — see `tryYelpBackgroundSync`. Per-process state, intentionally
+  // not in Redis: cross-instance dedup is unnecessary because the upserts are
+  // idempotent on (platform, externalMessageId), so duplicate runs cost nothing
+  // beyond a wasted API call. Each instance enforces its own 60s rate limit.
+  private readonly yelpBgSyncLastAt = new Map<string, number>();
+  private readonly yelpBgSyncInflight = new Map<string, Promise<void>>();
+  private static readonly YELP_BG_SYNC_RATE_LIMIT_MS = 60_000;
+
   constructor(
     private prisma: PrismaService,
     private platformService: PlatformService,
@@ -305,6 +314,13 @@ export class LeadsService {
     const shortLead = leadId.slice(0, 8);
     let wasCacheHit = true; // flipped to false inside the loader
 
+    // Fire-and-forget: keep the read path on DB→Redis (cheap, instant) and let a
+    // rate-limited background sync fill any gaps webhooks missed. When the sync
+    // finds new rows, it invalidates the messages cache → emits `lead.messages.changed`
+    // → the SSE handler in the frontend refetches → user sees the new messages
+    // without clicking Refresh. Awaiting here would defeat the point.
+    this.tryYelpBackgroundSync(userId, leadId);
+
     const result = await this.cache.getOrSet<any[]>(
       CacheKeys.leadMessages(userId, leadId),
       LEAD_MESSAGES_TTL_SECONDS,
@@ -484,6 +500,111 @@ export class LeadsService {
     } catch (err: any) {
       console.error(`[LeadsService] Failed to fetch Yelp messages: ${err.message}`);
       return [];
+    }
+  }
+
+  /**
+   * Lazy data-freshness for Yelp.
+   *
+   * Webhooks alone are not a reliable feed: events sent before LB connected the
+   * Yelp account never arrived; events that landed during a deploy or Yelp
+   * outage are gone; BIZ replies sent from biz.yelp.com only land if the
+   * echo-path persist runs (and only on instances that have it). The result is
+   * a DB that's "mostly" right with intermittent gaps.
+   *
+   * On every `getMessages(...)` for a Yelp lead we kick this off in the
+   * background — non-blocking, rate-limited per leadId. The read path returns
+   * whatever's in DB right now (instant). If the Yelp API turns up new events,
+   * we upsert and call `invalidateLeadMessagesAndList`, which busts Redis AND
+   * fires `lead.messages.changed.${userId}` on the SSE channel. The frontend
+   * listener refetches and the user sees the new messages without clicking
+   * Refresh.
+   *
+   * The 60s rate limit is per-process; cross-instance dedup is intentionally
+   * absent because `ensureMessagePersisted` upserts on
+   * `(platform, externalMessageId)` — duplicate runs across staging+prod cost
+   * one wasted API call, no data corruption.
+   */
+  private tryYelpBackgroundSync(userId: string, leadId: string): void {
+    const now = Date.now();
+    const last = this.yelpBgSyncLastAt.get(leadId);
+    if (last !== undefined && now - last < LeadsService.YELP_BG_SYNC_RATE_LIMIT_MS) return;
+    if (this.yelpBgSyncInflight.has(leadId)) return;
+
+    this.yelpBgSyncLastAt.set(leadId, now);
+
+    const promise = this.runYelpBackgroundSync(userId, leadId)
+      .catch(err => this.logger.warn(`[yelp_bg_sync] failed lead=${leadId.slice(0, 8)}: ${err?.message || err}`))
+      .finally(() => {
+        this.yelpBgSyncInflight.delete(leadId);
+      });
+
+    this.yelpBgSyncInflight.set(leadId, promise);
+  }
+
+  private async runYelpBackgroundSync(userId: string, leadId: string): Promise<void> {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, userId },
+      select: {
+        id: true,
+        platform: true,
+        businessId: true,
+        externalRequestId: true,
+        threadId: true,
+      },
+    });
+    if (!lead || lead.platform !== 'yelp' || !lead.threadId || !lead.businessId || !lead.externalRequestId) return;
+
+    // PlatformService.getAccountCredentialsByBusinessId returns auto-refreshed
+    // tokens; `null` means no Yelp account is connected for this business.
+    const credentials = await this.platformService
+      .getAccountCredentialsByBusinessId(userId, 'yelp', lead.businessId)
+      .catch(() => null);
+    if (!credentials?.accessToken) return;
+
+    const adapter = this.platformFactory.getAdapter('yelp') as any;
+    if (typeof adapter.getConversation !== 'function') return;
+
+    const tApiStart = Date.now();
+    const messages: any[] = await adapter.getConversation(credentials, lead.externalRequestId).catch((err: any) => {
+      this.logger.warn(`[yelp_bg_sync] yelp api failed lead=${leadId.slice(0, 8)}: ${err?.message || err}`);
+      return [];
+    });
+    const apiMs = Date.now() - tApiStart;
+    if (!Array.isArray(messages) || messages.length === 0) {
+      this.logger.log(`[yelp_bg_sync] lead=${leadId.slice(0, 8)} api=${apiMs}ms no_events`);
+      return;
+    }
+
+    let created = 0;
+    for (const msg of messages) {
+      if (!msg?.externalMessageId) continue;
+      const senderLc = String(msg.sender || '').toLowerCase();
+      const sender: 'pro' | 'customer' = senderLc === 'pro' ? 'pro' : 'customer';
+      try {
+        const result = await this.conversationContext.ensureMessagePersisted({
+          conversationId: lead.threadId,
+          leadId: lead.id,
+          userId,
+          platform: 'yelp',
+          externalMessageId: msg.externalMessageId,
+          sender,
+          senderType: sender === 'customer' ? 'customer' : undefined,
+          content: msg.content || '',
+          sentAt: msg.sentAt instanceof Date ? msg.sentAt : new Date(msg.sentAt),
+          rawJson: msg.raw ? JSON.stringify(msg.raw) : undefined,
+        });
+        if (result?.created) created++;
+      } catch (err: any) {
+        this.logger.warn(`[yelp_bg_sync] persist failed eventId=${msg.externalMessageId} lead=${leadId.slice(0, 8)}: ${err?.message || err}`);
+      }
+    }
+
+    if (created > 0) {
+      this.logger.log(`[yelp_bg_sync] lead=${leadId.slice(0, 8)} api=${apiMs}ms created=${created} → invalidate+SSE`);
+      await this.leadCache.invalidateLeadMessagesAndList(userId, leadId);
+    } else {
+      this.logger.log(`[yelp_bg_sync] lead=${leadId.slice(0, 8)} api=${apiMs}ms scanned=${messages.length} no_new_rows`);
     }
   }
 
