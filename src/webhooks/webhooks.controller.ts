@@ -13,6 +13,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Logger,
   RawBodyRequest,
   Req,
 } from '@nestjs/common';
@@ -21,9 +22,16 @@ import { WebhooksService } from './webhooks.service';
 import { CallConnectService } from '../call-connect/call-connect.service';
 import { Public } from '../common/decorators/public.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import {
+  isWebhookProcessingOwner,
+  logSkippedWebhook,
+  NOT_OWNER_SKIP_RESPONSE,
+} from '../common/webhook-processing-owner';
 
 @Controller('webhooks')
 export class WebhooksController {
+  private readonly logger = new Logger(WebhooksController.name);
+
   constructor(
     private webhooksService: WebhooksService,
     private callConnectService: CallConnectService,
@@ -40,6 +48,11 @@ export class WebhooksController {
     @Headers('x-thumbtack-signature') signature: string,
     @Body() payload: any,
   ) {
+    if (!isWebhookProcessingOwner()) {
+      logSkippedWebhook(this.logger, 'thumbtack', { eventType: payload?.event_type });
+      return NOT_OWNER_SKIP_RESPONSE;
+    }
+
     await this.webhooksService.handleThumbtackWebhook(signature, payload);
 
     return { received: true };
@@ -69,6 +82,15 @@ export class WebhooksController {
     @Body() payload: any,
     @Req() req: RawBodyRequest<Request>,
   ) {
+    if (!isWebhookProcessingOwner()) {
+      logSkippedWebhook(this.logger, 'yelp', {
+        eventType: payload?.data?.event_type,
+        businessId: payload?.data?.id,
+        eventId: payload?.data?.event_id || payload?.data?.updates?.[0]?.event_id,
+      });
+      return NOT_OWNER_SKIP_RESPONSE;
+    }
+
     await this.webhooksService.handleYelpWebhook(
       signature,
       payload,
@@ -91,6 +113,14 @@ export class WebhooksController {
     @Body() payload: any,
     @Req() req: RawBodyRequest<Request>,
   ) {
+    if (!isWebhookProcessingOwner()) {
+      logSkippedWebhook(this.logger, 'sigcore_delivery_status', {
+        eventType: eventType || payload?.event,
+        messageId: payload?.data?.messageId,
+      });
+      return NOT_OWNER_SKIP_RESPONSE;
+    }
+
     await this.webhooksService.handleSigcoreDeliveryStatus({
       eventType: eventType || payload?.event,
       timestamp,
@@ -117,6 +147,15 @@ export class WebhooksController {
     @Body() payload: any,
     @Req() req: RawBodyRequest<Request>,
   ) {
+    if (!isWebhookProcessingOwner()) {
+      logSkippedWebhook(this.logger, 'sigcore_call_connect', {
+        eventType: payload?.event,
+        accountId,
+        sessionId: payload?.data?.sessionId,
+      });
+      return NOT_OWNER_SKIP_RESPONSE;
+    }
+
     const rawBody = req.rawBody?.toString() || JSON.stringify(payload);
 
     // Verify HMAC signature (per-business secret via accountId, or env fallback)
@@ -149,6 +188,16 @@ export class WebhooksController {
     @Body() payload: any,
     @Req() req: RawBodyRequest<Request>,
   ) {
+    if (!isWebhookProcessingOwner()) {
+      logSkippedWebhook(this.logger, 'sigcore_inbound_sms', {
+        eventType: eventType || payload?.event,
+        accountId,
+        messageId: payload?.data?.messageId,
+        fromNumber: payload?.data?.fromNumber,
+      });
+      return NOT_OWNER_SKIP_RESPONSE;
+    }
+
     await this.webhooksService.handleInboundSms({
       eventType: eventType || payload?.event,
       timestamp,
