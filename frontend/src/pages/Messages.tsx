@@ -1864,7 +1864,13 @@ export function Messages() {
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-slate-500 truncate">{selectedLead.category || 'Service Request'}</p>
+                    <p className="text-sm text-slate-500 truncate">
+                      {selectedLead.category || 'Service Request'}
+                      {(() => {
+                        const accountName = getAccountNameForLead(selectedLead);
+                        return accountName ? <span className="text-slate-400"> · {accountName}</span> : null;
+                      })()}
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-1 sm:gap-3 shrink-0">
