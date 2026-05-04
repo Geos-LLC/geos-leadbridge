@@ -2,7 +2,8 @@
  * Follow-Up Seed Data
  *
  * 12 preset templates: 4 trigger states × 3 presets (conservative, standard, persistent).
- * Yelp only (v1). Platform field required on every template.
+ * Each preset applies to one or more platforms via the `platforms` array — the seed
+ * loop creates one DB row per (preset × requested-platform) match.
  *
  * Each step has an objective (not a hardcoded message).
  * AI generates actual text from objective + ThreadContext.
@@ -16,7 +17,7 @@ export const FOLLOW_UP_PRESETS = [
     name: 'Conservative — After Initial Reply',
     triggerState: 'no_reply_after_initial',
     preset: 'conservative',
-    platform: 'yelp',
+    platforms: ['yelp', 'thumbtack'],
     stepsJson: {
       schemaVersion: 1,
       steps: [
@@ -30,7 +31,7 @@ export const FOLLOW_UP_PRESETS = [
     name: 'Standard — After Initial Reply',
     triggerState: 'no_reply_after_initial',
     preset: 'standard',
-    platform: 'yelp',
+    platforms: ['yelp', 'thumbtack'],
     isDefault: true,
     stepsJson: {
       schemaVersion: 1,
@@ -53,7 +54,7 @@ export const FOLLOW_UP_PRESETS = [
     name: 'Persistent — After Initial Reply',
     triggerState: 'no_reply_after_initial',
     preset: 'persistent',
-    platform: 'yelp',
+    platforms: ['yelp', 'thumbtack'],
     stepsJson: {
       schemaVersion: 1,
       steps: [
@@ -76,7 +77,7 @@ export const FOLLOW_UP_PRESETS = [
     name: 'Conservative — After Question',
     triggerState: 'no_reply_after_question',
     preset: 'conservative',
-    platform: 'yelp',
+    platforms: ['yelp', 'thumbtack'],
     stepsJson: {
       schemaVersion: 1,
       steps: [
@@ -90,7 +91,7 @@ export const FOLLOW_UP_PRESETS = [
     name: 'Standard — After Question',
     triggerState: 'no_reply_after_question',
     preset: 'standard',
-    platform: 'yelp',
+    platforms: ['yelp', 'thumbtack'],
     isDefault: true,
     stepsJson: {
       schemaVersion: 1,
@@ -107,7 +108,7 @@ export const FOLLOW_UP_PRESETS = [
     name: 'Persistent — After Question',
     triggerState: 'no_reply_after_question',
     preset: 'persistent',
-    platform: 'yelp',
+    platforms: ['yelp', 'thumbtack'],
     stepsJson: {
       schemaVersion: 1,
       steps: [
@@ -129,7 +130,7 @@ export const FOLLOW_UP_PRESETS = [
     name: 'Conservative — After Price',
     triggerState: 'no_reply_after_price',
     preset: 'conservative',
-    platform: 'yelp',
+    platforms: ['yelp', 'thumbtack'],
     stepsJson: {
       schemaVersion: 1,
       steps: [
@@ -143,7 +144,7 @@ export const FOLLOW_UP_PRESETS = [
     name: 'Standard — After Price',
     triggerState: 'no_reply_after_price',
     preset: 'standard',
-    platform: 'yelp',
+    platforms: ['yelp', 'thumbtack'],
     isDefault: true,
     stepsJson: {
       schemaVersion: 1,
@@ -160,7 +161,7 @@ export const FOLLOW_UP_PRESETS = [
     name: 'Persistent — After Price',
     triggerState: 'no_reply_after_price',
     preset: 'persistent',
-    platform: 'yelp',
+    platforms: ['yelp', 'thumbtack'],
     stepsJson: {
       schemaVersion: 1,
       steps: [
@@ -182,7 +183,7 @@ export const FOLLOW_UP_PRESETS = [
     name: 'Conservative — After Conversion Step',
     triggerState: 'no_reply_after_conversion',
     preset: 'conservative',
-    platform: 'yelp',
+    platforms: ['yelp', 'thumbtack'],
     stepsJson: {
       schemaVersion: 1,
       steps: [
@@ -195,7 +196,7 @@ export const FOLLOW_UP_PRESETS = [
     name: 'Standard — After Conversion Step',
     triggerState: 'no_reply_after_conversion',
     preset: 'standard',
-    platform: 'yelp',
+    platforms: ['yelp', 'thumbtack'],
     isDefault: true,
     stepsJson: {
       schemaVersion: 1,
@@ -211,7 +212,7 @@ export const FOLLOW_UP_PRESETS = [
     name: 'Persistent — After Conversion Step',
     triggerState: 'no_reply_after_conversion',
     preset: 'persistent',
-    platform: 'yelp',
+    platforms: ['yelp', 'thumbtack'],
     stepsJson: {
       schemaVersion: 1,
       steps: [
@@ -250,13 +251,13 @@ export async function seedPresetsForUser(
 
   let seeded = 0;
   for (const preset of FOLLOW_UP_PRESETS) {
-    if (preset.platform !== platform) continue;
+    if (!(preset.platforms as readonly string[]).includes(platform)) continue;
 
     await prisma.followUpSequenceTemplate.create({
       data: {
         userId,
         savedAccountId: savedAccountId || null,
-        platform: preset.platform,
+        platform,
         name: preset.name,
         triggerState: preset.triggerState,
         mode: 'suggest',

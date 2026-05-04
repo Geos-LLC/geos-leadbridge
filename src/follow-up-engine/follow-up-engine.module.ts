@@ -3,7 +3,7 @@
  *
  * Sequence-based follow-up system, separate from conversation context.
  * Reads ThreadContext (source of truth), writes to its own tables.
- * Yelp v1, extensible to Thumbtack via platform field.
+ * Supports Yelp and Thumbtack — preset templates are seeded per platform.
  */
 
 import { Module, forwardRef } from '@nestjs/common';

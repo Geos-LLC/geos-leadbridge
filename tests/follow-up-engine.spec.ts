@@ -345,9 +345,9 @@ describe('Seed presets', () => {
     expect(FOLLOW_UP_PRESETS).toHaveLength(12);
   });
 
-  it('all presets are Yelp platform', () => {
+  it('every preset covers both Yelp and Thumbtack', () => {
     for (const preset of FOLLOW_UP_PRESETS) {
-      expect(preset.platform).toBe('yelp');
+      expect(preset.platforms).toEqual(expect.arrayContaining(['yelp', 'thumbtack']));
     }
   });
 
