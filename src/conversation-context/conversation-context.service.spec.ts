@@ -15,7 +15,9 @@ function buildPrisma() {
   return {
     message: {
       findUnique: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn().mockResolvedValue({ id: 'msg-new' }),
+      update: jest.fn().mockResolvedValue({ id: 'msg-updated' }),
     },
     lead: {
       update: jest.fn().mockResolvedValue({}),
@@ -118,6 +120,192 @@ describe('ConversationContextService.ensureMessagePersisted', () => {
     });
 
     expect(prisma.lead.update).not.toHaveBeenCalled();
+  });
+
+  // ----- Yelp synthetic-row backfill -----
+  // Regression for the "AI" + "Platform" double-message bug. When Yelp's POST
+  // /events response returns no event_id, sendMessage writes a synthetic row
+  // (externalMessageId=null, senderType='ai'/'user'). When the same message
+  // later arrives via webhook full-thread persist or runYelpBackgroundSync
+  // carrying the real event_id, ensureMessagePersisted must update the existing
+  // synthetic row (preserving senderType) instead of inserting a duplicate.
+
+  it('backfills externalMessageId onto an existing synthetic AI row instead of inserting a duplicate', async () => {
+    const prisma = buildPrisma();
+    const aiSentAt = new Date('2026-05-03T16:02:00Z');
+    const echoSentAt = new Date('2026-05-03T16:02:05Z');
+    prisma.message.findMany.mockResolvedValueOnce([
+      {
+        id: 'synthetic-ai-row',
+        conversationId: 'conv-1',
+        platform: 'yelp',
+        sender: 'pro',
+        senderType: 'ai',
+        externalMessageId: null,
+        content: 'Happy to help! Would morning or afternoon work better?',
+        sentAt: aiSentAt,
+        rawJson: null,
+      },
+    ]);
+    prisma.message.update.mockResolvedValueOnce({ id: 'synthetic-ai-row' });
+    const service = makeService(prisma);
+
+    const result = await service.ensureMessagePersisted({
+      conversationId: 'conv-1',
+      leadId: 'lead-1',
+      userId: 'user-1',
+      platform: 'yelp',
+      externalMessageId: 'yelp-real-event-id',
+      sender: 'pro',
+      content: 'Happy to help! Would morning or afternoon work better?',
+      sentAt: echoSentAt,
+      rawJson: '{"id":"yelp-real-event-id","user_type":"BIZ"}',
+    });
+
+    expect(result.created).toBe(false);
+    expect(result.id).toBe('synthetic-ai-row');
+    expect(prisma.message.create).not.toHaveBeenCalled();
+    // Synthetic row got upgraded with the real event_id; senderType is NOT in
+    // the update payload (the existing 'ai' value is preserved by omission).
+    expect(prisma.message.update).toHaveBeenCalledWith({
+      where: { id: 'synthetic-ai-row' },
+      data: expect.objectContaining({
+        externalMessageId: 'yelp-real-event-id',
+        sentAt: echoSentAt,
+      }),
+      select: { id: true },
+    });
+    const updateCall = prisma.message.update.mock.calls[0][0];
+    expect(updateCall.data).not.toHaveProperty('senderType');
+    expect(updateCall.data).not.toHaveProperty('content');
+    // Backfill is not a "create" - recordMessage / lead.lastCustomerActivityAt
+    // should NOT fire (the original send already updated thread context).
+    expect(prisma.lead.update).not.toHaveBeenCalled();
+  });
+
+  it('normalizes em-dash and curly quotes when matching synthetic rows', async () => {
+    const prisma = buildPrisma();
+    prisma.message.findMany.mockResolvedValueOnce([
+      {
+        id: 'synthetic-ai-row',
+        conversationId: 'conv-1',
+        platform: 'yelp',
+        sender: 'pro',
+        senderType: 'ai',
+        externalMessageId: null,
+        // sendMessage stored em-dash + curly apostrophe; Yelp echoes back as -- and straight '
+        content: "We're open 9-5 — happy to chat about it. Let’s schedule.",
+        sentAt: new Date('2026-05-03T16:02:00Z'),
+        rawJson: null,
+      },
+    ]);
+    prisma.message.update.mockResolvedValueOnce({ id: 'synthetic-ai-row' });
+    const service = makeService(prisma);
+
+    const result = await service.ensureMessagePersisted({
+      conversationId: 'conv-1',
+      leadId: 'lead-1',
+      userId: 'user-1',
+      platform: 'yelp',
+      externalMessageId: 'yelp-real-event-id',
+      sender: 'pro',
+      content: "We're open 9-5 -- happy to chat about it. Let's schedule.",
+      sentAt: new Date('2026-05-03T16:02:05Z'),
+    });
+
+    expect(result.created).toBe(false);
+    expect(result.id).toBe('synthetic-ai-row');
+    expect(prisma.message.create).not.toHaveBeenCalled();
+    expect(prisma.message.update).toHaveBeenCalled();
+  });
+
+  it('does NOT backfill when no synthetic candidate matches by content', async () => {
+    const prisma = buildPrisma();
+    prisma.message.findMany.mockResolvedValueOnce([
+      {
+        id: 'unrelated-synthetic',
+        conversationId: 'conv-1',
+        platform: 'yelp',
+        sender: 'pro',
+        senderType: 'ai',
+        externalMessageId: null,
+        content: 'completely different message body',
+        sentAt: new Date('2026-05-03T16:02:00Z'),
+        rawJson: null,
+      },
+    ]);
+    const service = makeService(prisma);
+
+    const result = await service.ensureMessagePersisted({
+      conversationId: 'conv-1',
+      leadId: 'lead-1',
+      userId: 'user-1',
+      platform: 'yelp',
+      externalMessageId: 'yelp-real-event-id',
+      sender: 'pro',
+      content: 'incoming message that does not match',
+      sentAt: new Date('2026-05-03T16:02:05Z'),
+    });
+
+    expect(result.created).toBe(true);
+    expect(prisma.message.update).not.toHaveBeenCalled();
+    expect(prisma.message.create).toHaveBeenCalled();
+  });
+
+  it('does NOT backfill for system-sender messages', async () => {
+    const prisma = buildPrisma();
+    const service = makeService(prisma);
+
+    await service.ensureMessagePersisted({
+      conversationId: 'conv-1',
+      leadId: 'lead-1',
+      userId: 'user-1',
+      platform: 'yelp',
+      externalMessageId: 'yelp-system-evt',
+      sender: 'system',
+      content: 'system event payload',
+    });
+
+    // No findMany call against synthetic candidates; system events go straight
+    // to plain create (they don't echo back the way pro/customer sends do).
+    expect(prisma.message.findMany).not.toHaveBeenCalled();
+    expect(prisma.message.create).toHaveBeenCalled();
+  });
+
+  it('falls through to insert if the backfill update throws (race with concurrent writer)', async () => {
+    const prisma = buildPrisma();
+    prisma.message.findMany.mockResolvedValueOnce([
+      {
+        id: 'synthetic-ai-row',
+        conversationId: 'conv-1',
+        platform: 'yelp',
+        sender: 'pro',
+        senderType: 'ai',
+        externalMessageId: null,
+        content: 'msg body',
+        sentAt: new Date('2026-05-03T16:02:00Z'),
+        rawJson: null,
+      },
+    ]);
+    const p2002 = Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
+    prisma.message.update.mockRejectedValueOnce(p2002);
+    const service = makeService(prisma);
+
+    const result = await service.ensureMessagePersisted({
+      conversationId: 'conv-1',
+      leadId: 'lead-1',
+      userId: 'user-1',
+      platform: 'yelp',
+      externalMessageId: 'yelp-real-event-id',
+      sender: 'pro',
+      content: 'msg body',
+      sentAt: new Date('2026-05-03T16:02:05Z'),
+    });
+
+    // Update failed -> we surface the row via the create path (or its P2002
+    // recovery). Test asserts we don't blow up and we do return a row.
+    expect(result.id).toBeDefined();
+    expect(prisma.message.create).toHaveBeenCalled();
   });
 
   it('recovers from a P2002 unique-constraint race by re-reading the existing row', async () => {

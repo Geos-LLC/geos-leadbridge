@@ -610,72 +610,45 @@ export class LeadsService {
 
   /**
    * Sync Yelp API messages to local Message table + ThreadContext.
-   * Idempotent: skips messages that already exist (by externalMessageId).
+   *
+   * Delegates to ConversationContextService.ensureMessagePersisted, which:
+   *   - Dedups on (platform, externalMessageId) - re-runs are no-ops.
+   *   - Backfills externalMessageId onto pre-existing synthetic rows
+   *     (externalMessageId=null, senderType='ai'/'user' from sendMessage)
+   *     when normalized content matches inside the backfill window. This is
+   *     what prevents the AI-row + Platform-row duplicate in the UI when Yelp's
+   *     POST /events response didn't return an event_id.
+   *   - Calls recordMessage on first insert; backfills do NOT re-record (the
+   *     original send already updated ThreadContext stats).
    */
   private async syncYelpMessagesToLocal(userId: string, lead: any, messages: any[]): Promise<void> {
     const conversationId = lead.threadId;
     if (!conversationId) return;
 
-    // Yelp frequently folds em-dash/en-dash to '--' and curly quotes to straight.
-    // Normalize for content-based matching so sendMessage-created rows (which
-    // carry senderType='ai'/'user') are detected instead of creating duplicates.
-    const normalize = (s: string | null | undefined) =>
-      (s || '')
-        .trim()
-        .replace(/\s+/g, ' ')
-        .replace(/[\u2014\u2013]/g, '--')
-        .replace(/[\u2018\u2019]/g, "'")
-        .replace(/[\u201C\u201D]/g, '"');
-
     for (const msg of messages) {
-      const exists = await this.prisma.message.findFirst({
-        where: { platform: 'yelp', externalMessageId: msg.externalMessageId },
-      });
-      if (exists) continue;
-
-      // Try to find an existing local Message with matching content but null
-      // externalMessageId (this happens for AI/manual sends where Yelp returned
-      // an empty response). Update it instead of creating a duplicate —
-      // preserving whatever senderType was set by sendMessage.
-      const normalizedContent = normalize(msg.content);
-      const candidates = await this.prisma.message.findMany({
-        where: { conversationId, platform: 'yelp', sender: msg.sender, externalMessageId: null },
-      });
-      const existingByContent = candidates.find(c => normalize(c.content) === normalizedContent);
-      if (existingByContent) {
-        await this.prisma.message.update({
-          where: { id: existingByContent.id },
-          data: { externalMessageId: msg.externalMessageId, sentAt: new Date(msg.sentAt) },
-        });
-        continue;
-      }
-
-      // Creating from Yelp API — no senderType is known here (API doesn't say
-      // AI vs manual). Leave senderType null so it falls back to "Platform" in
-      // the UI. sendMessage will have stamped 'ai'/'user' on rows it created.
-      await this.prisma.message.create({
-        data: {
+      const sender: 'pro' | 'customer' = msg.sender === 'customer' ? 'customer' : 'pro';
+      try {
+        await this.conversationContext.ensureMessagePersisted({
           conversationId,
+          leadId: lead.id,
           userId,
           platform: 'yelp',
           externalMessageId: msg.externalMessageId,
-          sender: msg.sender,
+          sender,
+          // Don't pass senderType for outbound - the Yelp API can't distinguish
+          // AI vs manual sends. If a synthetic row exists, ensureMessagePersisted
+          // backfills it (preserving the original senderType). Fresh inserts get
+          // senderType=null, which surfaces as "Platform" in the UI.
+          senderType: sender === 'customer' ? 'customer' : undefined,
           content: msg.content,
-          isRead: true,
           sentAt: new Date(msg.sentAt),
           rawJson: JSON.stringify(msg),
-        },
-      });
-
-      // Update thread context
-      await this.conversationContext.recordMessage({
-        conversationId,
-        leadId: lead.id,
-        platform: 'yelp',
-        sender: msg.sender === 'customer' ? 'customer' : 'pro',
-        content: msg.content,
-        timestamp: new Date(msg.sentAt),
-      }).catch(() => {});
+        });
+      } catch (err: any) {
+        this.logger.warn(
+          `[syncYelpMessagesToLocal] persist failed eventId=${msg.externalMessageId}: ${err?.message || err}`,
+        );
+      }
     }
   }
 

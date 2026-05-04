@@ -20,6 +20,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import OpenAI from 'openai';
+import { findBackfillCandidate } from './content-match.util';
 
 /** Input when recording a new message in the thread */
 export interface RecordMessageInput {
@@ -151,6 +152,49 @@ export class ConversationContextService {
       if (existing) {
         messageId = existing.id;
       } else {
+        // Backfill before insert: an outbound send may have written a synthetic
+        // row (externalMessageId=null, senderType='ai'/'user') because the
+        // platform's POST response didn't return an event_id. When the same
+        // message later arrives via webhook / thread fetch with a real id, we
+        // upgrade the existing row instead of inserting a duplicate. Scoped to
+        // pro/customer senders — system messages don't echo back this way.
+        if (input.sender === 'pro' || input.sender === 'customer') {
+          const candidate = await findBackfillCandidate(this.prisma, {
+            conversationId: input.conversationId,
+            platform: input.platform,
+            sender: input.sender,
+            content: input.content,
+            sentAt,
+          });
+          if (candidate) {
+            // Preserve senderType (the synthetic row carries the AI vs manual
+            // distinction set by sendMessage) and content. Update externalMessageId
+            // so future lookups dedup properly, plus rawJson and sentAt for
+            // accuracy. P2002 on (platform, externalMessageId) is possible if a
+            // concurrent inserter beat us — fall through to the create path on
+            // failure so we still surface the row.
+            try {
+              const updated = await this.prisma.message.update({
+                where: { id: candidate.id },
+                data: {
+                  externalMessageId: input.externalMessageId,
+                  sentAt,
+                  rawJson: input.rawJson ?? candidate.rawJson ?? undefined,
+                },
+                select: { id: true },
+              });
+              this.logger.log(
+                `[backfill] ${input.platform} message ${candidate.id} → externalMessageId=${input.externalMessageId} (was synthetic)`,
+              );
+              return { id: updated.id, created: false };
+            } catch (err: any) {
+              this.logger.warn(
+                `[backfill] update failed for ${candidate.id} (${err?.code || 'unknown'}): falling through to insert`,
+              );
+              // fall through to plain create below
+            }
+          }
+        }
         try {
           const row = await this.prisma.message.create({
             data: {
