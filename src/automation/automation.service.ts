@@ -758,6 +758,17 @@ export class AutomationService implements OnModuleInit {
     rule: any,
     context: AutomationTriggerContext,
   ): Promise<void> {
+    // Synthetic AI Conversation rules (id `ai-conversation-<accountId>`) have no
+    // matching AutomationRule row, so we can't create a PendingAutomatedMessage
+    // (FK violation) or bump triggerCount. Execute in-memory with a synthetic
+    // pendingId — executePendingMessage detects the prefix and skips DB writes.
+    if (typeof rule.id === 'string' && rule.id.startsWith('ai-conversation-')) {
+      const syntheticId = `synthetic-${rule.id}-${context.negotiationId}`;
+      this.logger.log(`[AI Conversation] executing synthetic rule ${rule.id} for ${context.negotiationId}`);
+      await this.executePendingMessage(syntheticId, rule, context);
+      return;
+    }
+
     // Check for duplicate (same rule + negotiation)
     const existing = await this.prisma.pendingAutomatedMessage.findFirst({
       where: {
@@ -1047,11 +1058,13 @@ export class AutomationService implements OnModuleInit {
         }).catch(err => this.logger.warn(`Failed to record outbound in context: ${err.message}`));
       }
 
-      // Mark as sent
-      await this.prisma.pendingAutomatedMessage.update({
-        where: { id: pendingId },
-        data: { status: 'sent', sentAt: new Date() },
-      });
+      // Mark as sent (skip for synthetic AI Conversation rules — no DB row)
+      if (!pendingId.startsWith('synthetic-')) {
+        await this.prisma.pendingAutomatedMessage.update({
+          where: { id: pendingId },
+          data: { status: 'sent', sentAt: new Date() },
+        });
+      }
 
       // Record template usage if applicable
       if (!rule.useAi && rule.template) {
@@ -1062,10 +1075,12 @@ export class AutomationService implements OnModuleInit {
     } catch (error: any) {
       this.logger.error(`Failed to send automated message: ${pendingId} — ${error.message}`);
 
-      await this.prisma.pendingAutomatedMessage.update({
-        where: { id: pendingId },
-        data: { status: 'failed', failureReason: error.message },
-      });
+      if (!pendingId.startsWith('synthetic-')) {
+        await this.prisma.pendingAutomatedMessage.update({
+          where: { id: pendingId },
+          data: { status: 'failed', failureReason: error.message },
+        });
+      }
 
       // Capture to monitoring for dashboard + email alert
       this.monitoring.captureError({
