@@ -19,6 +19,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { STRATEGY_PROMPTS, OBJECTIVE_FLAVORS } from '../ai/strategy-prompts';
+import { buildTimeAwarenessBlock, prefixWithTimestamp, resolveTimezone } from '../ai/time-context';
 import OpenAI from 'openai';
 
 export interface SequenceStep {
@@ -184,11 +185,13 @@ export class FollowUpGeneratorService {
       requestDetails = `Customer request: ${lead.message.substring(0, 200)}`;
     }
 
+    let timezone: string = 'America/New_York';
     if (lead?.businessId) {
       const account = await this.prisma.savedAccount.findFirst({
         where: { userId: lead.userId, businessId: lead.businessId },
-        select: { servicePricingJson: true },
+        select: { servicePricingJson: true, followUpTimezone: true },
       });
+      timezone = resolveTimezone(account?.followUpTimezone);
       if (account?.servicePricingJson) {
         try {
           const p = JSON.parse(account.servicePricingJson);
@@ -253,8 +256,11 @@ export class FollowUpGeneratorService {
     }
 
     // Step 6: Build the final prompt
+    const now = new Date();
     const systemParts = [
       globalPrompt,
+      '',
+      buildTimeAwarenessBlock(now, timezone),
       '',
       '--- FOLLOW-UP CONTEXT ---',
       'The customer has NOT replied. You are writing a follow-up message.',
@@ -357,7 +363,7 @@ export class FollowUpGeneratorService {
       for (const msg of context.recentMessages) {
         messages.push({
           role: msg.role === 'customer' ? 'user' : 'assistant',
-          content: msg.content,
+          content: prefixWithTimestamp(msg.content, msg.sentAt, now, timezone),
         });
       }
     }

@@ -36,8 +36,8 @@ export class AiController {
     const [userRecord, account] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true } }),
       lead.businessId
-        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true } })
-        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true } }),
+        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true, followUpTimezone: true } })
+        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true, followUpTimezone: true } }),
     ]);
 
     const details = this.extractLeadDetails(lead.rawJson);
@@ -59,6 +59,8 @@ export class AiController {
       systemPrompt,
       conversationHistory: conversationHistory ?? [],
       leadDetails: details,
+      currentTime: new Date(),
+      timezone: account?.followUpTimezone ?? undefined,
     });
 
     return { reply };
@@ -85,8 +87,8 @@ export class AiController {
     const [userRecord, account] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true } }),
       lead.businessId
-        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true, followUpSettingsJson: true } })
-        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true, followUpSettingsJson: true } }),
+        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true, followUpSettingsJson: true, followUpTimezone: true } })
+        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true, followUpSettingsJson: true, followUpTimezone: true } }),
     ]);
 
     const details = this.extractLeadDetails(lead.rawJson);
@@ -141,6 +143,8 @@ export class AiController {
       systemPrompt,
       conversationHistory,
       leadDetails: details,
+      currentTime: new Date(),
+      timezone: account?.followUpTimezone ?? undefined,
     });
 
     return { reply, contextMode: mode };

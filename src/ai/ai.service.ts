@@ -1,10 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
+import {
+  buildTimeAwarenessBlock,
+  prefixWithTimestamp,
+  resolveTimezone,
+} from './time-context';
 
 export interface ConversationMessage {
   role: 'customer' | 'pro';
   content: string;
+  /** When this message was actually sent. Used to prefix the model's view of history. */
+  sentAt?: Date | string;
 }
 
 export interface AiReplyContext {
@@ -19,6 +26,10 @@ export interface AiReplyContext {
   systemPrompt?: string;   // Strategy prompt (from prompt template)
   conversationHistory?: ConversationMessage[];
   leadDetails?: Record<string, string>;
+  /** "Now" — defaults to new Date() at generation time. */
+  currentTime?: Date;
+  /** IANA tz, e.g. "America/New_York". Defaults inside time-context helpers. */
+  timezone?: string;
 }
 
 @Injectable()
@@ -51,28 +62,36 @@ export class AiService {
       ? `${globalPrompt}\n\n${strategyPrompt}`
       : globalPrompt;
 
-    const userPrompt = this.buildUserPrompt(ctx);
+    const now = ctx.currentTime ?? new Date();
+    const timezone = resolveTimezone(ctx.timezone);
+    const userPrompt = this.buildUserPrompt(ctx, now, timezone);
 
-    this.logger.log(`[AI] Generating reply for customer "${ctx.customerName}" — category: ${ctx.category || 'unknown'}`);
+    this.logger.log(`[AI] Generating reply for customer "${ctx.customerName}" — category: ${ctx.category || 'unknown'} — tz: ${timezone}`);
 
     // Build the message thread:
-    // system (instructions + lead context) → history turns → final customer message
+    // system (instructions + lead context + current time) → history turns → final customer message
     const openAiMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
       { role: 'system', content: systemPrompt + '\n\n' + userPrompt },
     ];
 
-    // Inject conversation history as alternating user/assistant turns
+    // Inject conversation history as alternating user/assistant turns,
+    // each prefixed with its [absolute time, relative delta] stamp so the
+    // model can reason about gaps and stale offers.
     if (ctx.conversationHistory && ctx.conversationHistory.length > 0) {
       for (const m of ctx.conversationHistory) {
         openAiMessages.push({
           role: m.role === 'customer' ? 'user' : 'assistant',
-          content: m.content,
+          content: prefixWithTimestamp(m.content, m.sentAt, now, timezone),
         });
       }
     }
 
-    // Final customer message to reply to
-    openAiMessages.push({ role: 'user', content: ctx.customerMessage });
+    // Final customer message — implicitly "just now" per the time-awareness block,
+    // but stamp it explicitly too so the model can't miss it.
+    openAiMessages.push({
+      role: 'user',
+      content: prefixWithTimestamp(ctx.customerMessage, now, now, timezone),
+    });
 
     const completion = await this.client.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -90,8 +109,16 @@ export class AiService {
     return reply;
   }
 
-  private buildUserPrompt(ctx: AiReplyContext): string {
-    const parts: string[] = ['--- Lead Context ---'];
+  private buildUserPrompt(ctx: AiReplyContext, now: Date, timezone: string): string {
+    const parts: string[] = [];
+
+    // Time awareness goes first — current local time + rules for handling
+    // stale offers and conversation gaps. The history that follows uses the
+    // same clock, so the model can compute "has 2:30 PM passed yet?" itself.
+    parts.push(buildTimeAwarenessBlock(now, timezone));
+    parts.push('');
+
+    parts.push('--- Lead Context ---');
 
     if (ctx.accountName) parts.push(`Business: ${ctx.accountName}`);
     if (ctx.category) parts.push(`Service requested: ${ctx.category}`);

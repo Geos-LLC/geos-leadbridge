@@ -530,7 +530,7 @@ export class ConversationContextService {
     includeLeadDetails?: boolean;
   }): Promise<{
     systemContext: string;
-    recentMessages: Array<{ role: 'customer' | 'pro'; content: string }>;
+    recentMessages: Array<{ role: 'customer' | 'pro'; content: string; sentAt: Date }>;
     threadState: Record<string, any>;
   } | null> {
     const ctx = await this.getContext(conversationId, options?.recentMessageLimit ?? 10);
@@ -555,10 +555,12 @@ export class ConversationContextService {
     parts.push(`Messages: ${ctx.totalMessages} total (${ctx.customerMessages} customer, ${ctx.businessMessages} business, ${ctx.aiMessages} AI)`);
     parts.push('--- End Thread Context ---');
 
-    // Convert recent messages to AI-ready format
+    // Convert recent messages to AI-ready format. We carry `sentAt` through
+    // so downstream prompt builders can stamp each message with its timestamp.
     const recentMessages = ctx.recentMessages.map(m => ({
       role: (m.sender === 'customer' ? 'customer' : 'pro') as 'customer' | 'pro',
       content: m.content,
+      sentAt: m.sentAt,
     }));
 
     // Build state object for programmatic access

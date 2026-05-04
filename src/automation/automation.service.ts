@@ -921,7 +921,7 @@ export class AutomationService implements OnModuleInit {
           ? await this.conversationContext.buildContext(lead.threadId).catch(() => null)
           : null;
 
-        let conversationHistory: { role: 'customer' | 'pro'; content: string }[];
+        let conversationHistory: { role: 'customer' | 'pro'; content: string; sentAt?: Date }[];
         let customerMessage: string;
         let threadContextPrompt: string | undefined;
 
@@ -943,6 +943,7 @@ export class AutomationService implements OnModuleInit {
             .map(m => ({
               role: (m.sender === 'customer' ? 'customer' : 'pro') as 'customer' | 'pro',
               content: m.content!,
+              sentAt: m.sentAt,
             }));
           const firstCustomerMsg = conversationHistory.find(m => m.role === 'customer')?.content;
           customerMessage = firstCustomerMsg || context.customerMessage || lead.message || '';
@@ -1011,7 +1012,9 @@ export class AutomationService implements OnModuleInit {
           } catch { /* invalid JSON */ }
         }
 
-        // Generate reply via OpenAI
+        // Generate reply via OpenAI. Pass current time + timezone so the model
+        // knows whether previously offered slots have passed and how big the
+        // gaps between messages are.
         messageToSend = await this.aiService.generateReply({
           customerName: context.customerName,
           customerMessage,
@@ -1024,6 +1027,8 @@ export class AutomationService implements OnModuleInit {
           systemPrompt,
           conversationHistory,
           leadDetails,
+          currentTime: new Date(),
+          timezone: fullRule?.activeHoursTimezone || 'America/New_York',
         });
         this.logger.log(`[AI] Generated reply for pending message ${pendingId} (threadCtx: ${!!threadCtx}, history: ${conversationHistory.length} msgs)`);
       } else {
