@@ -5,6 +5,7 @@ import { AiService, ConversationMessage } from './ai.service';
 import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { buildPriceRangeInstruction } from './price-range';
+import { buildBusinessContextBlock } from './business-context';
 
 @Controller('v1/ai')
 @UseGuards(JwtAuthGuard)
@@ -34,17 +35,28 @@ export class AiController {
     if (!lead) throw new Error('Lead not found');
 
     const [userRecord, account] = await Promise.all([
-      this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true } }),
+      this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true, name: true } }),
       lead.businessId
-        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true, followUpTimezone: true } })
-        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true, followUpTimezone: true } }),
+        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
+        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
     ]);
 
     const details = this.extractLeadDetails(lead.rawJson);
     const pricingPrompt = this.buildPricingPrompt(account?.servicePricingJson);
+    const businessBlock = buildBusinessContextBlock({
+      businessName: account?.businessName ?? null,
+      ownerName: userRecord?.name ?? null,
+      city: lead.city ?? null,
+      state: lead.state ?? null,
+      followUpSettingsJson: account?.followUpSettingsJson ?? null,
+      activeHoursStart: account?.followUpActiveHoursStart ?? null,
+      activeHoursEnd: account?.followUpActiveHoursEnd ?? null,
+      timezone: account?.followUpTimezone ?? null,
+    });
     let systemPrompt = strategyPrompt ?? undefined;
+    systemPrompt = systemPrompt ? `${systemPrompt}\n\n${businessBlock}` : businessBlock;
     if (pricingPrompt) {
-      systemPrompt = systemPrompt ? `${systemPrompt}\n\n${pricingPrompt}` : pricingPrompt;
+      systemPrompt = `${systemPrompt}\n\n${pricingPrompt}`;
     }
 
     const reply = await this.aiService.generateReply({
@@ -85,10 +97,10 @@ export class AiController {
     if (!lead) throw new Error('Lead not found');
 
     const [userRecord, account] = await Promise.all([
-      this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true } }),
+      this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true, name: true } }),
       lead.businessId
-        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true, followUpSettingsJson: true, followUpTimezone: true } })
-        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true, followUpSettingsJson: true, followUpTimezone: true } }),
+        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
+        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
     ]);
 
     const details = this.extractLeadDetails(lead.rawJson);
@@ -107,7 +119,7 @@ export class AiController {
       }
     }
 
-    // Build the system prompt: strategy + thread context + pricing
+    // Build the system prompt: strategy + thread context + business profile + pricing + urgency
     let systemPrompt = strategyPrompt ?? undefined;
     if (threadContextPrompt) {
       systemPrompt = systemPrompt
@@ -115,20 +127,31 @@ export class AiController {
         : threadContextPrompt;
     }
 
+    // Always inject business profile (name, owner, turnaround, active hours,
+    // scheduling rules) so the AI knows what it can offer.
+    const businessBlock = buildBusinessContextBlock({
+      businessName: account?.businessName ?? null,
+      ownerName: userRecord?.name ?? null,
+      city: lead.city ?? null,
+      state: lead.state ?? null,
+      followUpSettingsJson: account?.followUpSettingsJson ?? null,
+      activeHoursStart: account?.followUpActiveHoursStart ?? null,
+      activeHoursEnd: account?.followUpActiveHoursEnd ?? null,
+      timezone: account?.followUpTimezone ?? null,
+    });
+    systemPrompt = systemPrompt ? `${systemPrompt}\n\n${businessBlock}` : businessBlock;
+
     // Inject pricing context if configured
     const pricingPrompt = this.buildPricingPrompt(account?.servicePricingJson);
     if (pricingPrompt) {
-      systemPrompt = systemPrompt
-        ? `${systemPrompt}\n\n${pricingPrompt}`
-        : pricingPrompt;
+      systemPrompt = `${systemPrompt}\n\n${pricingPrompt}`;
     }
 
-    // Inject urgency context
+    // Inject urgency context (only adds extra weight when customer flagged urgent;
+    // base capability already covered by business profile above)
     const urgencyPrompt = await this.buildUrgencyPrompt(conversationId, account?.followUpSettingsJson);
     if (urgencyPrompt) {
-      systemPrompt = systemPrompt
-        ? `${systemPrompt}\n\n${urgencyPrompt}`
-        : urgencyPrompt;
+      systemPrompt = `${systemPrompt}\n\n${urgencyPrompt}`;
     }
 
     const reply = await this.aiService.generateReply({

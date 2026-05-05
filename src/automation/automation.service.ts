@@ -953,10 +953,10 @@ export class AutomationService implements OnModuleInit {
         // Extract structured lead details from rawJson
         const leadDetails = this.extractLeadDetails(lead.rawJson);
 
-        // Fetch user's global AI prompt
+        // Fetch user's global AI prompt + name (used for business context)
         const userRecord = await this.prisma.user.findUnique({
           where: { id: context.userId },
-          select: { globalAiPrompt: true },
+          select: { globalAiPrompt: true, name: true },
         });
 
         // Build strategy prompt
@@ -981,9 +981,34 @@ export class AutomationService implements OnModuleInit {
         const account = context.businessId
           ? await this.prisma.savedAccount.findFirst({
               where: { userId: context.userId, businessId: context.businessId },
-              select: { servicePricingJson: true, followUpSettingsJson: true },
+              select: {
+                businessName: true,
+                servicePricingJson: true,
+                followUpSettingsJson: true,
+                followUpActiveHoursStart: true,
+                followUpActiveHoursEnd: true,
+                followUpTimezone: true,
+              },
             })
           : null;
+
+        // Inject business profile (name, owner, turnaround capability, active
+        // hours, scheduling rules). Without this the AI fabricates specific
+        // time slots — see business-context.ts.
+        {
+          const { buildBusinessContextBlock } = require('../ai/business-context');
+          const businessBlock = buildBusinessContextBlock({
+            businessName: account?.businessName ?? context.accountName ?? null,
+            ownerName: userRecord?.name ?? null,
+            city: context.city ?? null,
+            state: context.state ?? null,
+            followUpSettingsJson: account?.followUpSettingsJson ?? null,
+            activeHoursStart: account?.followUpActiveHoursStart ?? null,
+            activeHoursEnd: account?.followUpActiveHoursEnd ?? null,
+            timezone: account?.followUpTimezone ?? null,
+          });
+          systemPrompt = `${systemPrompt}\n\n${businessBlock}`;
+        }
 
         let pricingJson: string | null = account?.servicePricingJson ?? null;
         if (!pricingJson) {

@@ -20,6 +20,7 @@ import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { STRATEGY_PROMPTS, OBJECTIVE_FLAVORS } from '../ai/strategy-prompts';
 import { buildTimeAwarenessBlock, prefixWithTimestamp, resolveTimezone } from '../ai/time-context';
+import { buildBusinessContextBlock } from '../ai/business-context';
 import OpenAI from 'openai';
 
 export interface SequenceStep {
@@ -185,11 +186,25 @@ export class FollowUpGeneratorService {
       requestDetails = `Customer request: ${lead.message.substring(0, 200)}`;
     }
 
+    // Load all account fields once — used for pricing, business profile, and urgency.
     let timezone: string = 'America/New_York';
+    let businessContext = '';
+    let urgencyContext = '';
     if (lead?.businessId) {
       const account = await this.prisma.savedAccount.findFirst({
         where: { userId: lead.userId, businessId: lead.businessId },
-        select: { servicePricingJson: true, followUpTimezone: true },
+        select: {
+          businessName: true,
+          servicePricingJson: true,
+          followUpTimezone: true,
+          followUpSettingsJson: true,
+          followUpActiveHoursStart: true,
+          followUpActiveHoursEnd: true,
+        },
+      });
+      const owner = await this.prisma.user.findUnique({
+        where: { id: lead.userId },
+        select: { name: true },
       });
       timezone = resolveTimezone(account?.followUpTimezone);
       if (account?.servicePricingJson) {
@@ -210,15 +225,21 @@ export class FollowUpGeneratorService {
           }
         } catch { /* invalid JSON */ }
       }
-    }
 
-    // Step 3b: Load urgency context
-    let urgencyContext = '';
-    if (lead?.businessId) {
-      const account = await this.prisma.savedAccount.findFirst({
-        where: { userId: lead.userId, businessId: lead.businessId },
-        select: { followUpSettingsJson: true },
+      // Business profile (turnaround capability, active hours, scheduling rules)
+      businessContext = buildBusinessContextBlock({
+        businessName: account?.businessName ?? null,
+        ownerName: owner?.name ?? null,
+        city: lead.city ?? null,
+        state: lead.state ?? null,
+        followUpSettingsJson: account?.followUpSettingsJson ?? null,
+        activeHoursStart: account?.followUpActiveHoursStart ?? null,
+        activeHoursEnd: account?.followUpActiveHoursEnd ?? null,
+        timezone: account?.followUpTimezone ?? null,
       });
+
+      // Extra urgency emphasis when customer flagged urgent (base capability
+      // already in the business profile above)
       const threadCtx = context?.threadState;
       const customerUrgency = threadCtx?.customerUrgency || 'low';
       let urgentCapability = 'same_day';
@@ -262,6 +283,7 @@ export class FollowUpGeneratorService {
       '',
       buildTimeAwarenessBlock(now, timezone),
       '',
+      ...(businessContext ? [businessContext, ''] : []),
       '--- FOLLOW-UP CONTEXT ---',
       'The customer has NOT replied. You are writing a follow-up message.',
       'Write as the business owner, not as an AI. Be natural, brief, and professional.',

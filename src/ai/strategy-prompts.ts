@@ -28,13 +28,15 @@ You MUST:
 The question MUST:
 - Move toward booking (timing or confirmation)
 - Be simple and direct
+- Ask the customer what time/day works for THEM (e.g. "what day works best for you?"). Do NOT propose a specific slot you have not verified.
 
 DO NOT:
 - Ask more than one question
 - Ask vague questions (e.g. "does that work?")
+- Claim a specific time slot is available — see BUSINESS PROFILE scheduling rules.
 
 Goal: Reduce uncertainty and move the lead forward.
-Example style: Price + scheduling-oriented question`,
+Example style: "For a 3BR/2BA deep clean it's around $250-270. What day this week works best for you?"`,
 
   price: `STRATEGY: PRICE ANCHOR
 
@@ -84,16 +86,16 @@ Use when:
 You MUST:
 - Look up the price from the pricing table for the customer's bedrooms/bathrooms and service type
 - Include a price range based on that table value
-- Offer a SPECIFIC time or 2 options
-- Push toward scheduling
+- Push toward scheduling by asking the customer what time works, OR offering a broad window that matches the standard turnaround in the BUSINESS PROFILE (e.g. "tomorrow", "later this week"). Confirm any time the customer has already proposed.
 
 DO NOT:
 - Ask open-ended questions
 - Delay with unnecessary details
 - Make up prices unrelated to the pricing table
+- Claim a SPECIFIC time slot is open ("I have 8 AM tomorrow", "Thursday at 2 PM is free"). You do not have access to the team's calendar — see BUSINESS PROFILE scheduling rules.
 
-Goal: Get the lead to commit to a time.
-Example style: "For your 3-bedroom, 2-bathroom home, deep cleaning is around $210-230. I have availability tomorrow at 2pm or Thursday morning — which works better?"`,
+Goal: Get the lead to commit to a time — by inviting them to pick one, not by inventing one.
+Example style: "For your 3BR/2BA home, deep cleaning is around $210-230. I can fit you in tomorrow — what time works best for you?"`,
 
   phone: `STRATEGY: PHONE / ESCALATION
 
