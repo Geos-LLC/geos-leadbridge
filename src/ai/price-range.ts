@@ -10,7 +10,7 @@ export interface PriceRangeGap {
 }
 
 const DEFAULT_INSTRUCTION =
-  'Use these prices as your reference. Match the customer\'s bedrooms/bathrooms to the correct row. You may quote a range around the table price but it MUST be based on the actual table values — do NOT invent prices unrelated to the table.';
+  'This pricing table is REFERENCE material. Only use it when the PRIMARY INSTRUCTION tells you to quote, OR when the customer explicitly asks about price or budget. When you DO quote, match the customer\'s bedrooms/bathrooms to the correct row, and stay within a sensible range around the table value. NEVER invent prices unrelated to the table. If you are not quoting, do not bring up price.';
 
 export function buildPriceRangeInstruction(range: PriceRangeGap | null | undefined): string {
   if (!range) return DEFAULT_INSTRUCTION;
@@ -21,7 +21,7 @@ export function buildPriceRangeInstruction(range: PriceRangeGap | null | undefin
   const plusType = range.plus?.type === '$' ? '$' : '%';
 
   if (minusVal === 0 && plusVal === 0) {
-    return 'Use these prices as your reference. Match the customer\'s bedrooms/bathrooms to the correct row. Quote the EXACT table price for the match — do NOT quote a range, and do NOT invent prices unrelated to the table.';
+    return 'This pricing table is REFERENCE material. Only use it when the PRIMARY INSTRUCTION tells you to quote, OR when the customer explicitly asks about price or budget. When you DO quote, match the customer\'s bedrooms/bathrooms to the correct row and quote the EXACT table price (no range). NEVER invent prices unrelated to the table. If you are not quoting, do not bring up price.';
   }
 
   const fmt = (val: number, type: string) => (type === '$' ? `$${val}` : `${val}%`);
@@ -37,5 +37,5 @@ export function buildPriceRangeInstruction(range: PriceRangeGap | null | undefin
     example = ` Example: if the table price is $200, quote a range of around $${200 - minusVal}-${200 + plusVal}.`;
   }
 
-  return `Use these prices as your reference. Match the customer's bedrooms/bathrooms to the correct row. When quoting, provide a range of ${low} below to ${high} above the table price.${example} Do NOT invent prices unrelated to the table.`;
+  return `This pricing table is REFERENCE material. Only use it when the PRIMARY INSTRUCTION tells you to quote, OR when the customer explicitly asks about price or budget. When you DO quote, match the customer's bedrooms/bathrooms to the correct row and provide a range of ${low} below to ${high} above the table price.${example} NEVER invent prices unrelated to the table. If you are not quoting, do not bring up price.`;
 }

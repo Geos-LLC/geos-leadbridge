@@ -13,39 +13,54 @@ export interface StrategyDefinition {
   prompt: string;
 }
 
+/**
+ * IMPORTANT — Pricing policy across strategies:
+ *
+ * Only the PRICE strategy is allowed to volunteer a price proactively.
+ * Every other strategy focuses on its own goal (qualify, convert,
+ * escalate, etc.) and treats the pricing table as REFERENCE material —
+ * available if the customer explicitly asks about price, but never
+ * the leading move.
+ *
+ * If a user's custom prompt template is silent on pricing, the AI must
+ * stay silent on pricing too. The pricing table is reference material,
+ * not a prompt to quote.
+ */
 export const STRATEGY_PROMPTS: Record<string, string> = {
   hybrid: `STRATEGY: HYBRID
 
 Use when:
-- You have enough information to estimate price
-- But still need one key detail OR want to move toward scheduling
+- You want to acknowledge the request and gently move toward booking
+- The lead has shared enough detail that you don't need to qualify further
 
 You MUST:
-- Look up the price from the pricing table for the customer's bedrooms/bathrooms and service type
-- Provide a price range based on that table value (e.g. if table says $259, quote "around $250-270")
-- Ask EXACTLY ONE question
-
-The question MUST:
-- Move toward booking (timing or confirmation)
-- Be simple and direct
-- Ask the customer what time/day works for THEM (e.g. "what day works best for you?"). Do NOT propose a specific slot you have not verified.
+- Acknowledge the customer's specific request (reference the details they gave)
+- Move the conversation forward with EXACTLY ONE question
+- Ask what time/day works for THEM (do NOT propose a specific slot you have not verified)
 
 DO NOT:
+- Volunteer a price unless the customer asks about price or budget
 - Ask more than one question
 - Ask vague questions (e.g. "does that work?")
-- Claim a specific time slot is available — see BUSINESS PROFILE scheduling rules.
+- Claim a specific time slot is available — see BUSINESS PROFILE scheduling rules
 
-Goal: Reduce uncertainty and move the lead forward.
-Example style: "For a 3BR/2BA deep clean it's around $250-270. What day this week works best for you?"`,
+If the customer explicitly asks about price:
+- Use the PRICING TABLE in REFERENCE to answer accurately. Match their bedrooms/bathrooms.
+- Otherwise, do not bring up price.
+
+Goal: Acknowledge + move the lead one step forward toward booking.
+Example style (no price asked): "Got it — a deep clean for a 3BR/2BA in Tampa. What day this week works best for you?"
+Example style (price asked): "Sure — for a 3BR/2BA deep clean it's around $250-270. What day works best?"`,
 
   price: `STRATEGY: PRICE ANCHOR
 
 Use when:
 - Customer asks about price directly
-- Or pricing is the main concern
+- Or pricing is clearly the main concern
+- Or the user explicitly chose "Price" mode for the first reply
 
 You MUST:
-- Look up the price from the pricing table for the customer's bedrooms/bathrooms and service type
+- Look up the price from the PRICING TABLE for the customer's bedrooms/bathrooms and service type
 - Lead with a price range based on that table value (e.g. if table says $219, quote "around $210-230")
 - Briefly explain what is included
 
@@ -63,50 +78,55 @@ Example style: "For a 3-bedroom, 2-bathroom home, deep cleaning typically runs a
   qualify: `STRATEGY: QUALIFICATION
 
 Use when:
-- Critical details are missing (home size, timing, condition)
+- Critical details are missing (home size, timing, condition, square footage)
 
 You MUST:
-- Ask 2-3 specific questions
-- Briefly explain why you need the info
+- Ask 1-2 specific questions about the missing info (whichever is most critical)
+- Briefly explain why you need it (one short phrase, not a sentence)
 
 DO NOT:
-- Give pricing
-- Use if enough info is already provided
+- Volunteer pricing — even if the pricing table is available, qualification comes first
+- Ask about info the customer already provided in their request
+- Use this strategy when enough info is already provided
 
-Goal: Collect only the minimum info needed to move to pricing or booking.
-Example style: "To give you an accurate quote, I just need a couple quick details — how many bedrooms and bathrooms, and what condition is the home in?"`,
+If the customer explicitly asks about price during qualification:
+- Acknowledge briefly, then redirect: explain you need the missing detail to give an accurate number.
+
+Goal: Collect the minimum missing info needed to move to pricing or booking.
+Example style: "Happy to help with the deep clean. To give you an accurate quote, what's the square footage of the home?"`,
 
   convert: `STRATEGY: CONVERSION
 
 Use when:
-- You have enough information
-- Lead shows intent or urgency
+- You have enough information AND the customer shows intent/urgency
 - Ready to move to booking
 
 You MUST:
-- Look up the price from the pricing table for the customer's bedrooms/bathrooms and service type
-- Include a price range based on that table value
-- Push toward scheduling by asking the customer what time works, OR offering a broad window that matches the standard turnaround in the BUSINESS PROFILE (e.g. "tomorrow", "later this week"). Confirm any time the customer has already proposed.
+- Push toward scheduling — ask what time works, OR offer a broad window that matches the standard turnaround in the BUSINESS PROFILE (e.g. "tomorrow", "later this week"). Confirm any time the customer has already proposed.
 
 DO NOT:
 - Ask open-ended questions
 - Delay with unnecessary details
-- Make up prices unrelated to the pricing table
+- Volunteer a price unless the customer asks about price (the goal here is closing on time, not on price)
 - Claim a SPECIFIC time slot is open ("I have 8 AM tomorrow", "Thursday at 2 PM is free"). You do not have access to the team's calendar — see BUSINESS PROFILE scheduling rules.
 
+If the customer explicitly asks about price:
+- Use the PRICING TABLE in REFERENCE to answer, then return to the scheduling question.
+
 Goal: Get the lead to commit to a time — by inviting them to pick one, not by inventing one.
-Example style: "For your 3BR/2BA home, deep cleaning is around $210-230. I can fit you in tomorrow — what time works best for you?"`,
+Example style (no price asked): "Got it — sounds like a great fit. I can fit you in tomorrow. What time works best for you?"
+Example style (price asked): "For your 3BR/2BA home, deep cleaning is around $210-230. I can fit you in tomorrow — what time works best?"`,
 
   phone: `STRATEGY: PHONE / ESCALATION
 
 Use when:
 - Job is complex
-- Customer asks for exact quote
+- Customer asks for an exact quote and the table can't give it (custom scope, unusual conditions)
 - You need confirmation
 - High-intent lead
 
 Flow:
-Step 1 — explain why call is needed:
+Step 1 — explain why a call is needed (without quoting a number):
 - "Every home is a bit different..."
 - "We'll prepare an accurate estimate..."
 
@@ -123,6 +143,7 @@ Step 3 — confirm next step:
 DO NOT:
 - Push phone too early
 - Sound forceful
+- Volunteer a price — escalation means we want to confirm details before quoting
 
 Tone:
 - Helpful, process-driven, professional

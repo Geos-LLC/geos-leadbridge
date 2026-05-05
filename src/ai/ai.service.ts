@@ -22,8 +22,33 @@ export interface AiReplyContext {
   state?: string;
   budget?: number;
   accountName?: string;
-  globalPrompt?: string;   // Global AI prompt (from user settings)
-  systemPrompt?: string;   // Strategy prompt (from prompt template)
+  /**
+   * GLOBAL prompt — guardrails layer. Tone, opt-out behavior, scheduling
+   * rules, and the REACTIVE pricing policy live here. Falls back to the
+   * built-in DEFAULT_GLOBAL_AI_PROMPT when not provided.
+   */
+  globalPrompt?: string;
+  /**
+   * PRIMARY INSTRUCTION — the strategy or user-edited template that
+   * decides what the AI should DO right now (qualify, convert, etc.).
+   * This layer overrides the GLOBAL when they conflict. If the user has
+   * a custom prompt template, pass its content here.
+   */
+  strategyPrompt?: string;
+  /**
+   * @deprecated — kept for backward compatibility with callers that still
+   * pass the older `systemPrompt` field. New callers should use the
+   * separate strategyPrompt + reference blocks for proper section labeling.
+   */
+  systemPrompt?: string;
+  /** REFERENCE — thread context (summary + state). Optional. */
+  threadContextBlock?: string;
+  /** REFERENCE — business profile (name, owner, hours, scheduling rules). Optional. */
+  businessBlock?: string;
+  /** REFERENCE — pricing table + range instruction. Optional. */
+  pricingBlock?: string;
+  /** REFERENCE — urgency context (customer urgency × business capability). Optional. */
+  urgencyBlock?: string;
   conversationHistory?: ConversationMessage[];
   leadDetails?: Record<string, string>;
   /** "Now" — defaults to new Date() at generation time. */
@@ -51,16 +76,46 @@ export class AiService {
   async generateReply(ctx: AiReplyContext): Promise<string> {
     const { TemplatesService } = require('../templates/templates.service');
 
-    // Global prompt: user's custom global prompt → default global prompt
+    // GLOBAL — guardrails. User's custom global prompt → default global.
     const globalPrompt = ctx.globalPrompt?.trim() || TemplatesService.DEFAULT_GLOBAL_AI_PROMPT;
 
-    // Strategy prompt: selected strategy template (e.g., Hybrid, Price-Anchor)
-    const strategyPrompt = ctx.systemPrompt?.trim() || '';
+    // PRIMARY INSTRUCTION — strategy / user prompt template. Wins over GLOBAL
+    // when they conflict. The legacy `systemPrompt` field is accepted as a
+    // fallback for any caller that hasn't migrated to `strategyPrompt` yet.
+    const strategyPrompt = (ctx.strategyPrompt ?? ctx.systemPrompt)?.trim() || '';
 
-    // Combine: global prompt + strategy add-on
-    const systemPrompt = strategyPrompt
-      ? `${globalPrompt}\n\n${strategyPrompt}`
-      : globalPrompt;
+    // REFERENCE blocks — factual context the model may consult, never the
+    // primary goal. Order: thread context (what we know about this convo),
+    // business profile (who we are / scheduling), pricing table (only if
+    // quoting), urgency.
+    const referenceBlocks: string[] = [];
+    if (ctx.threadContextBlock?.trim()) {
+      referenceBlocks.push(`=== REFERENCE: THREAD CONTEXT ===\n${ctx.threadContextBlock.trim()}`);
+    }
+    if (ctx.businessBlock?.trim()) {
+      referenceBlocks.push(`=== REFERENCE: BUSINESS PROFILE ===\n${ctx.businessBlock.trim()}`);
+    }
+    if (ctx.pricingBlock?.trim()) {
+      referenceBlocks.push(`=== REFERENCE: PRICING TABLE (use only when quoting — see GLOBAL pricing behavior) ===\n${ctx.pricingBlock.trim()}`);
+    }
+    if (ctx.urgencyBlock?.trim()) {
+      referenceBlocks.push(`=== REFERENCE: URGENCY ===\n${ctx.urgencyBlock.trim()}`);
+    }
+
+    // Assemble the system prompt with explicit section labels so the model
+    // can tell guardrails from goal from reference. PRIMARY INSTRUCTION sits
+    // last among the directive sections — LLMs weight late + explicitly
+    // labeled instructions heavier, which makes the user template / strategy
+    // dominate when the GLOBAL and PRIMARY conflict.
+    const sections: string[] = [];
+    sections.push(`=== GLOBAL (guardrails — apply to every reply) ===\n${globalPrompt}`);
+    if (strategyPrompt) {
+      sections.push(`=== PRIMARY INSTRUCTION (this overrides GLOBAL when they conflict) ===\n${strategyPrompt}`);
+    }
+    if (referenceBlocks.length > 0) {
+      sections.push(referenceBlocks.join('\n\n'));
+    }
+    const systemPrompt = sections.join('\n\n');
 
     const now = ctx.currentTime ?? new Date();
     const timezone = resolveTimezone(ctx.timezone);

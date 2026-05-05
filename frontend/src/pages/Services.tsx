@@ -2293,18 +2293,20 @@ export function Services() {
                   {/* Reply Type selector — 3 modes */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Instant Reply Mode</label>
+                    <p className="text-[10px] text-slate-400 mb-2">How the first reply is composed. <span className="font-semibold text-slate-600">With Price Range</span> forces the Price strategy; <span className="font-semibold text-slate-600">Auto Message</span> uses your saved AI strategy and prompt.</p>
                     <div className="grid grid-cols-3 gap-2">
                       {(() => {
-                        const modes: Array<{ key: 'custom' | 'price' | 'auto'; emoji: string; label: string; active: string }> = [
-                          { key: 'custom', emoji: '🟢', label: 'Custom Message', active: '#16a34a' },
-                          { key: 'price',  emoji: '🔵', label: 'With Price Range', active: '#1d4ed8' },
-                          { key: 'auto',   emoji: '🟣', label: 'Auto Message', active: '#7c3aed' },
+                        const modes: Array<{ key: 'custom' | 'price' | 'auto'; emoji: string; label: string; active: string; desc: string }> = [
+                          { key: 'custom', emoji: '🟢', label: 'Custom Message', active: '#16a34a', desc: 'Send your saved template literally — no AI generation' },
+                          { key: 'price',  emoji: '🔵', label: 'With Price Range', active: '#1d4ed8', desc: 'AI leads with a price range from your pricing table (Price strategy)' },
+                          { key: 'auto',   emoji: '🟣', label: 'Auto Message', active: '#7c3aed', desc: 'AI generates using your AI Conversation Strategy below' },
                         ];
                         return modes.map(m => {
                           const isActive = replyMode === m.key;
                           return (
                             <button
                               key={m.key}
+                              title={m.desc}
                               onClick={() => { if (firstReplyRule) changeRuleReplyMode(firstReplyRule.id, m.key, m.key === 'auto' ? autoReplyAiPrompt : undefined); }}
                               className="py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all"
                               style={{
@@ -3600,26 +3602,30 @@ export function Services() {
                   {/* AI Strategy */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Conversation Strategy</label>
-                    <p className="text-[10px] text-slate-400 mb-2">Choose how AI should guide the conversation.</p>
+                    <p className="text-[10px] text-slate-400 mb-2">Pick the goal for each reply. Only <span className="font-semibold text-slate-600">Price</span> volunteers a price proactively — the other strategies stay focused on their own goal and only quote when the customer asks.</p>
                     <div className="flex flex-wrap gap-1.5 mb-2">
                       {([
-                        { key: 'auto' as const, emoji: '🤖', label: 'Auto', desc: 'AI picks best strategy per conversation' },
-                        { key: 'hybrid' as const, emoji: '⚖️', label: 'Hybrid', desc: 'Price + one question' },
-                        { key: 'price' as const, emoji: '💰', label: 'Price', desc: 'Lead with pricing' },
-                        { key: 'qualify' as const, emoji: '🧠', label: 'Qualify', desc: 'Ask for details' },
-                        { key: 'convert' as const, emoji: '📞', label: 'Convert', desc: 'Push to booking' },
-                        { key: 'phone' as const, emoji: '📱', label: 'Phone', desc: 'Escalate to call' },
+                        { key: 'auto' as const, emoji: '🤖', label: 'Auto', desc: 'AI picks the strategy per conversation' },
+                        { key: 'hybrid' as const, emoji: '⚖️', label: 'Hybrid', desc: 'Acknowledge + one question; price only if asked' },
+                        { key: 'price' as const, emoji: '💰', label: 'Price', desc: 'Lead with a price range from your pricing table' },
+                        { key: 'qualify' as const, emoji: '🧠', label: 'Qualify', desc: 'Ask for missing detail (size, condition); no pricing' },
+                        { key: 'convert' as const, emoji: '📅', label: 'Convert', desc: 'Push toward scheduling; price only if asked' },
+                        { key: 'phone' as const, emoji: '📱', label: 'Phone', desc: 'Escalate to a call; no quoting' },
                       ]).map(s => (
                         <button key={s.key}
                           onClick={() => {
                             setFuStrategy(s.key);
                             if (s.key !== 'auto') {
+                              // Inline summaries shown in the editor preview. The
+                              // canonical strategy text lives in
+                              // `src/ai/strategy-prompts.ts` on the backend; this
+                              // is a short user-facing rendering of the same intent.
                               const prompts: Record<string, string> = {
-                                hybrid: 'STRATEGY: HYBRID\n\nYou MUST:\n- Provide a price range based on pricing settings\n- Ask EXACTLY ONE question that moves toward booking\n\nDO NOT:\n- Ask more than one question\n- Ask vague questions',
-                                price: 'STRATEGY: PRICE ANCHOR\n\nYou MUST:\n- Lead with a price range based on pricing settings\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Be vague or hesitant',
-                                qualify: 'STRATEGY: QUALIFICATION\n\nYou MUST:\n- Ask 2-3 specific questions about missing details\n- Explain why you need the info\n\nDO NOT:\n- Give pricing\n- Ask generic questions',
-                                convert: 'STRATEGY: CONVERSION\n\nYou MUST:\n- Include pricing based on settings\n- Offer a SPECIFIC time or 2 options\n- Push toward scheduling\n\nDO NOT:\n- Ask open-ended questions',
-                                phone: 'STRATEGY: PHONE / ESCALATION\n\nYou MUST:\n- Explain why a call is needed\n- Ask for phone naturally\n\nDO NOT:\n- Push phone too early\n- Sound forceful',
+                                hybrid: 'STRATEGY: HYBRID\n\nYou MUST:\n- Acknowledge the customer\'s specific request (reference their details)\n- Move forward with EXACTLY ONE question (timing or confirmation)\n\nDO NOT:\n- Volunteer a price unless the customer asks about price or budget\n- Ask more than one question\n\nIf the customer asks about price, use the pricing table to answer accurately.',
+                                price: 'STRATEGY: PRICE ANCHOR\n\nYou MUST:\n- Lead with a price range based on the pricing table for the customer\'s BR/BA\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Invent prices unrelated to the table',
+                                qualify: 'STRATEGY: QUALIFICATION\n\nYou MUST:\n- Ask 1-2 specific questions about the missing critical detail (e.g. square footage, condition, timing)\n- Briefly explain why you need it\n\nDO NOT:\n- Volunteer pricing — qualification comes first\n- Ask about info the customer already provided',
+                                convert: 'STRATEGY: CONVERSION\n\nYou MUST:\n- Push toward scheduling (ask what time works, or offer a broad window matching your turnaround)\n\nDO NOT:\n- Volunteer a price unless the customer asks (the goal here is closing on time, not on price)\n- Claim a SPECIFIC time slot is open\n- Ask open-ended questions',
+                                phone: 'STRATEGY: PHONE / ESCALATION\n\nYou MUST:\n- Explain why a call is needed (without quoting a number)\n- Ask for the best phone number naturally\n\nDO NOT:\n- Volunteer a price\n- Push phone too early or sound forceful',
                               };
                               setFuStrategyPrompt(prompts[s.key] || '');
                             }

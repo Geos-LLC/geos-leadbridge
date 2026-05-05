@@ -42,7 +42,7 @@ export class AiController {
     ]);
 
     const details = this.extractLeadDetails(lead.rawJson);
-    const pricingPrompt = this.buildPricingPrompt(account?.servicePricingJson);
+    const pricingBlock = this.buildPricingPrompt(account?.servicePricingJson);
     const businessBlock = buildBusinessContextBlock({
       businessName: account?.businessName ?? null,
       ownerName: userRecord?.name ?? null,
@@ -53,11 +53,6 @@ export class AiController {
       activeHoursEnd: account?.followUpActiveHoursEnd ?? null,
       timezone: account?.followUpTimezone ?? null,
     });
-    let systemPrompt = strategyPrompt ?? undefined;
-    systemPrompt = systemPrompt ? `${systemPrompt}\n\n${businessBlock}` : businessBlock;
-    if (pricingPrompt) {
-      systemPrompt = `${systemPrompt}\n\n${pricingPrompt}`;
-    }
 
     const reply = await this.aiService.generateReply({
       customerName: lead.customerName,
@@ -68,7 +63,9 @@ export class AiController {
       budget: lead.budget ? Number(lead.budget) : undefined,
       accountName: account?.businessName ?? undefined,
       globalPrompt: userRecord?.globalAiPrompt ?? undefined,
-      systemPrompt,
+      strategyPrompt,
+      businessBlock,
+      pricingBlock: pricingBlock ?? undefined,
       conversationHistory: conversationHistory ?? [],
       leadDetails: details,
       currentTime: new Date(),
@@ -119,16 +116,9 @@ export class AiController {
       }
     }
 
-    // Build the system prompt: strategy + thread context + business profile + pricing + urgency
-    let systemPrompt = strategyPrompt ?? undefined;
-    if (threadContextPrompt) {
-      systemPrompt = systemPrompt
-        ? `${systemPrompt}\n\n${threadContextPrompt}`
-        : threadContextPrompt;
-    }
-
-    // Always inject business profile (name, owner, turnaround, active hours,
-    // scheduling rules) so the AI knows what it can offer.
+    // Build labeled section blocks. ai.service.ts joins them under explicit
+    // headings (GLOBAL / PRIMARY INSTRUCTION / REFERENCE: …) so the model can
+    // distinguish guardrails from goal from reference material.
     const businessBlock = buildBusinessContextBlock({
       businessName: account?.businessName ?? null,
       ownerName: userRecord?.name ?? null,
@@ -139,20 +129,8 @@ export class AiController {
       activeHoursEnd: account?.followUpActiveHoursEnd ?? null,
       timezone: account?.followUpTimezone ?? null,
     });
-    systemPrompt = systemPrompt ? `${systemPrompt}\n\n${businessBlock}` : businessBlock;
-
-    // Inject pricing context if configured
-    const pricingPrompt = this.buildPricingPrompt(account?.servicePricingJson);
-    if (pricingPrompt) {
-      systemPrompt = `${systemPrompt}\n\n${pricingPrompt}`;
-    }
-
-    // Inject urgency context (only adds extra weight when customer flagged urgent;
-    // base capability already covered by business profile above)
-    const urgencyPrompt = await this.buildUrgencyPrompt(conversationId, account?.followUpSettingsJson);
-    if (urgencyPrompt) {
-      systemPrompt = `${systemPrompt}\n\n${urgencyPrompt}`;
-    }
+    const pricingBlock = this.buildPricingPrompt(account?.servicePricingJson);
+    const urgencyBlock = await this.buildUrgencyPrompt(conversationId, account?.followUpSettingsJson);
 
     const reply = await this.aiService.generateReply({
       customerName: lead.customerName,
@@ -163,7 +141,11 @@ export class AiController {
       budget: lead.budget ? Number(lead.budget) : undefined,
       accountName: account?.businessName ?? undefined,
       globalPrompt: userRecord?.globalAiPrompt ?? undefined,
-      systemPrompt,
+      strategyPrompt,
+      threadContextBlock: threadContextPrompt,
+      businessBlock,
+      pricingBlock: pricingBlock ?? undefined,
+      urgencyBlock: urgencyBlock ?? undefined,
       conversationHistory,
       leadDetails: details,
       currentTime: new Date(),
@@ -276,7 +258,7 @@ export class AiController {
 
       parts.push('--- End Pricing Guide ---');
       parts.push(buildPriceRangeInstruction(p.priceRange));
-      parts.push('When the strategy requires pricing, match bedrooms and bathrooms from the lead details to find the right row in the table above. If the exact combination is not in the table, use the closest match. Mention applicable discounts (recurring, order amount) when relevant.');
+      parts.push('When you DO quote (per the GLOBAL pricing policy + PRIMARY INSTRUCTION), match bedrooms and bathrooms from the lead details to find the right row above. If the exact combination is not in the table, use the closest match. Mention applicable discounts (recurring, order amount) when relevant. If you are not quoting, do not mention price.');
 
       return parts.join('\n');
     } catch {

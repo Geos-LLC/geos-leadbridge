@@ -75,6 +75,13 @@ export class TemplatesService {
     },
   ];
 
+  /**
+   * User-editable starter prompts. The 5 built-in strategies (Hybrid, Price,
+   * Qualify, Convert, Phone) live in `src/ai/strategy-prompts.ts` as a single
+   * source of truth — they are NOT seeded as editable templates. This array
+   * holds only the "First Reply" starter, which a user can customize to
+   * override the default strategy behavior for the first message.
+   */
   private static readonly DEFAULT_PROMPTS: { name: string; content: string; type: string; isDefault: boolean }[] = [
     {
       name: 'First Reply',
@@ -83,8 +90,7 @@ export class TemplatesService {
 Your goal:
 - Acknowledge their request warmly
 - Show you understand what they need (reference their specific details)
-- Give a price range if you have enough info (bedrooms, bathrooms, service type)
-- Ask ONE key question if critical info is missing (e.g. square footage, condition)
+- Ask ONE key question if critical info is missing (e.g. square footage, condition, timing)
 - Keep it short (2-3 sentences)
 
 Tone:
@@ -93,77 +99,18 @@ Tone:
 - Show you read their request carefully
 
 DO NOT:
+- Volunteer a price unless the customer asks about price or budget
 - Ask questions about info they already provided
 - Give vague responses like "let me know"
 - Write more than 3-4 sentences
 - Use bullet points or formatting
 
+If the customer explicitly asks about price:
+- Use the PRICING TABLE in REFERENCE to answer accurately. Otherwise, do not bring up price.
+
 Sign off with your business name.`,
       type: 'prompt',
       isDefault: true,
-    },
-    {
-      name: 'Price-Anchor Strategy',
-      content: `STRATEGY: PRICE ANCHOR
-
-Use when:
-- Customer asks about price directly
-- Or pricing is the main concern
-
-You MUST:
-- Lead with a price range based on pricing settings
-- Briefly explain what is included
-
-DO NOT:
-- Ask questions
-- Be vague or hesitant
-
-Tone: Confident and clear
-
-Goal: Give the customer a number to react to.`,
-      type: 'prompt',
-      isDefault: false,
-    },
-    {
-      name: 'Qualification Strategy',
-      content: `STRATEGY: QUALIFICATION
-
-Use when:
-- Critical details are missing (home size, timing, condition)
-
-You MUST:
-- Ask 2-3 specific questions
-- Briefly explain why you need the info
-
-DO NOT:
-- Give pricing
-- Use if enough info is already provided
-
-Goal: Collect only the minimum info needed to move to pricing or booking.`,
-      type: 'prompt',
-      isDefault: false,
-    },
-    {
-      name: 'Conversion Strategy',
-      content: `STRATEGY: CONVERSION
-
-Use when:
-- You have enough information
-- Lead shows intent or urgency
-- Ready to move to booking
-
-You MUST:
-- Include pricing based on settings
-- Offer a SPECIFIC time or 2 options
-- Push toward scheduling
-
-DO NOT:
-- Ask open-ended questions
-- Delay with unnecessary details
-
-Goal: Get the lead to commit to a time.`,
-      type: 'prompt',
-      isDefault: false,
     },
   ];
 
@@ -194,12 +141,12 @@ Platform behavior:
 - Follow-ups must feel like a continuation of the conversation
 - Do not push phone calls too early unless needed
 
-Pricing behavior:
-- Use pricing settings provided by the system (DO NOT invent prices)
-- Base estimates on bedrooms, bathrooms, service type, condition, and extras
-- Prefer ranges early (e.g. "typically $140-180")
-- If enough data is available, be confident in pricing
-- If data is missing, estimate conservatively or ask for key detail
+Pricing behavior (REACTIVE by default):
+- The PRIMARY INSTRUCTION (strategy or user template) decides whether to quote a price. If it does NOT explicitly tell you to quote, do NOT volunteer a price.
+- The PRICING TABLE provided in REFERENCE is for answering accurately when pricing is appropriate — it is NOT a prompt to quote.
+- When you DO quote a price, base it on the PRICING TABLE (DO NOT invent prices). Match bedrooms, bathrooms, service type, and apply extras/condition surcharges as configured.
+- If the customer explicitly asks about price or budget, you may answer using the PRICING TABLE even if the strategy didn't ask you to lead with price.
+- If the customer's request is ambiguous on size/condition, prefer asking the missing detail over guessing a number — unless the active strategy is PRICE ANCHOR.
 
 Scheduling behavior (CRITICAL):
 - A BUSINESS PROFILE section will be provided with the standard turnaround (e.g. same-day, within 24h, 48h) and active hours of operation. Trust those values.

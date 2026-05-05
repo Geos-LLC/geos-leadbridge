@@ -213,14 +213,14 @@ export class FollowUpGeneratorService {
           const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
           if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
             const priceParts = [
-              '--- PRICING TABLE (reference for accurate quoting) ---',
+              '=== REFERENCE: PRICING TABLE (use only when quoting — see GLOBAL pricing behavior) ===',
             ];
             for (const row of p.priceTable.slice(0, 10)) {
               const prices = enabledTypes.map((t: any) => `${t.label}: $${row[t.key] || '?'}`).join(', ');
               priceParts.push(`  ${row.bed}BR/${row.bath}BA — ${prices}`);
             }
-            priceParts.push('--- END PRICING ---');
-            priceParts.push('Use these prices as your reference. Match the customer\'s bedrooms/bathrooms to the correct row. You may quote a range around the table price but it MUST be based on the actual table values — do NOT invent prices unrelated to the table.');
+            priceParts.push('');
+            priceParts.push('This pricing table is REFERENCE material. Only use it when the PRIMARY INSTRUCTION (strategy / step objective) tells you to quote, OR when the customer explicitly asks about price. When you DO quote, match the customer\'s bedrooms/bathrooms to the correct row and stay within a sensible range around the table value. NEVER invent prices unrelated to the table. If you are not quoting, do not bring up price.');
             pricingContext = priceParts.join('\n');
           }
         } catch { /* invalid JSON */ }
@@ -276,16 +276,18 @@ export class FollowUpGeneratorService {
       globalPrompt = TemplatesService.DEFAULT_GLOBAL_AI_PROMPT;
     }
 
-    // Step 6: Build the final prompt
+    // Step 6: Build the final prompt with labeled sections so the model can
+    // distinguish guardrails (GLOBAL) from goal (PRIMARY INSTRUCTION) from
+    // reference material. Mirrors ai.service.ts assembly.
     const now = new Date();
     const systemParts = [
+      '=== GLOBAL (guardrails — apply to every reply) ===',
       globalPrompt,
       '',
       buildTimeAwarenessBlock(now, timezone),
       '',
-      ...(businessContext ? [businessContext, ''] : []),
-      '--- FOLLOW-UP CONTEXT ---',
-      'The customer has NOT replied. You are writing a follow-up message.',
+      '=== PRIMARY INSTRUCTION (this overrides GLOBAL when they conflict) ===',
+      'FOLLOW-UP CONTEXT: The customer has NOT replied. You are writing a follow-up message.',
       'Write as the business owner, not as an AI. Be natural, brief, and professional.',
       'Do NOT use subject lines, greetings like "Dear", or sign-offs. Just the message body.',
       'Keep it under 3 sentences unless the objective requires more detail.',
@@ -298,7 +300,11 @@ export class FollowUpGeneratorService {
     }
 
     if (customPrompt) {
-      systemParts.push('', 'CUSTOM INSTRUCTIONS:', customPrompt);
+      systemParts.push('', 'CUSTOM INSTRUCTIONS (user-supplied — these override the strategy default above):', customPrompt);
+    }
+
+    if (businessContext) {
+      systemParts.push('', '=== REFERENCE: BUSINESS PROFILE ===', businessContext);
     }
 
     if (pricingContext) {
@@ -306,11 +312,11 @@ export class FollowUpGeneratorService {
     }
 
     if (urgencyContext) {
-      systemParts.push('', urgencyContext);
+      systemParts.push('', '=== REFERENCE: URGENCY ===', urgencyContext);
     }
 
     if (context?.systemContext) {
-      systemParts.push('', context.systemContext);
+      systemParts.push('', '=== REFERENCE: THREAD CONTEXT ===', context.systemContext);
     }
 
     if (lead) {

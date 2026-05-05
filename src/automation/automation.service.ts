@@ -959,9 +959,13 @@ export class AutomationService implements OnModuleInit {
           select: { globalAiPrompt: true, name: true },
         });
 
-        // Build strategy prompt
+        // PRIMARY INSTRUCTION — strategy prompt
         // - replyMode='price' → force price anchor strategy (ignore user prompt template)
         // - replyMode='auto'  → rule.promptTemplate/aiSystemPrompt → fallback hybrid
+        // - user prompt templates dominate the strategy default and are passed
+        //   through as-is. The reactive pricing policy in the GLOBAL prompt
+        //   (templates.service.ts DEFAULT_GLOBAL_AI_PROMPT) prevents the AI
+        //   from volunteering a price when the user's template is silent on it.
         const { STRATEGY_PROMPTS } = require('../ai/strategy-prompts');
         const ruleReplyMode = (rule as any).replyMode as 'custom' | 'price' | 'auto' | undefined;
         let strategyPrompt: string;
@@ -971,13 +975,8 @@ export class AutomationService implements OnModuleInit {
           strategyPrompt = rule.promptTemplate?.content || rule.aiSystemPrompt || STRATEGY_PROMPTS.hybrid;
         }
 
-        // Inject thread context
-        let systemPrompt = threadContextPrompt
-          ? `${strategyPrompt}\n\n${threadContextPrompt}`.trim()
-          : strategyPrompt;
-
-        // Inject pricing context from account settings, falling back to any
-        // sibling account's pricing when this account has none set.
+        // Pricing context from account settings, with sibling-account fallback
+        // when this account has none of its own.
         const account = context.businessId
           ? await this.prisma.savedAccount.findFirst({
               where: { userId: context.userId, businessId: context.businessId },
@@ -992,23 +991,20 @@ export class AutomationService implements OnModuleInit {
             })
           : null;
 
-        // Inject business profile (name, owner, turnaround capability, active
-        // hours, scheduling rules). Without this the AI fabricates specific
-        // time slots — see business-context.ts.
-        {
-          const { buildBusinessContextBlock } = require('../ai/business-context');
-          const businessBlock = buildBusinessContextBlock({
-            businessName: account?.businessName ?? context.accountName ?? null,
-            ownerName: userRecord?.name ?? null,
-            city: context.city ?? null,
-            state: context.state ?? null,
-            followUpSettingsJson: account?.followUpSettingsJson ?? null,
-            activeHoursStart: account?.followUpActiveHoursStart ?? null,
-            activeHoursEnd: account?.followUpActiveHoursEnd ?? null,
-            timezone: account?.followUpTimezone ?? null,
-          });
-          systemPrompt = `${systemPrompt}\n\n${businessBlock}`;
-        }
+        // REFERENCE: business profile (name, owner, turnaround, active hours,
+        // scheduling rules). Without this the AI fabricates specific time slots
+        // — see business-context.ts.
+        const { buildBusinessContextBlock } = require('../ai/business-context');
+        const businessBlock = buildBusinessContextBlock({
+          businessName: account?.businessName ?? context.accountName ?? null,
+          ownerName: userRecord?.name ?? null,
+          city: context.city ?? null,
+          state: context.state ?? null,
+          followUpSettingsJson: account?.followUpSettingsJson ?? null,
+          activeHoursStart: account?.followUpActiveHoursStart ?? null,
+          activeHoursEnd: account?.followUpActiveHoursEnd ?? null,
+          timezone: account?.followUpTimezone ?? null,
+        });
 
         let pricingJson: string | null = account?.servicePricingJson ?? null;
         if (!pricingJson) {
@@ -1020,19 +1016,22 @@ export class AutomationService implements OnModuleInit {
           pricingJson = sibling?.servicePricingJson ?? null;
         }
 
+        // REFERENCE: pricing table — only consulted when the PRIMARY
+        // INSTRUCTION says to quote, or when the customer asks about price.
+        let pricingBlock: string | undefined;
         if (pricingJson) {
           try {
             const p = JSON.parse(pricingJson);
             const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
             if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
-              const priceParts = ['--- PRICING TABLE (reference for accurate quoting) ---'];
+              const priceParts: string[] = [];
               for (const row of p.priceTable.slice(0, 10)) {
                 const prices = enabledTypes.map((t: any) => `${t.label}: $${row[t.key] || '?'}`).join(', ');
                 priceParts.push(`  ${row.bed}BR/${row.bath}BA — ${prices}`);
               }
-              priceParts.push('--- END PRICING ---');
+              priceParts.push('');
               priceParts.push(buildPriceRangeInstruction(p.priceRange));
-              systemPrompt = `${systemPrompt}\n\n${priceParts.join('\n')}`;
+              pricingBlock = priceParts.join('\n');
             }
           } catch { /* invalid JSON */ }
         }
@@ -1049,7 +1048,10 @@ export class AutomationService implements OnModuleInit {
           budget: context.budget,
           accountName: context.accountName,
           globalPrompt: userRecord?.globalAiPrompt || undefined,
-          systemPrompt,
+          strategyPrompt,
+          threadContextBlock: threadContextPrompt,
+          businessBlock,
+          pricingBlock,
           conversationHistory,
           leadDetails,
           currentTime: new Date(),
