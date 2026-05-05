@@ -640,6 +640,17 @@ export class FollowUpSchedulerService implements OnModuleInit {
       return;
     }
 
+    // Pending-suggestion guard: in suggest mode, don't generate another card while
+    // the previous one is still waiting for the user to approve/skip. Advance only
+    // happens via the approve/edit/skip handlers (engineService.advanceAfterSuggestion).
+    const pendingSuggestion = await this.prisma.followUpStepExecution.findFirst({
+      where: { enrollmentId: enrollment.id, stepIndex: enrollment.currentStepIndex, status: 'suggested' },
+    });
+    if (pendingSuggestion) {
+      this.logger.debug(`[FollowUpScheduler] Step ${enrollment.currentStepIndex} already pending approval for enrollment ${enrollment.id} — waiting`);
+      return;
+    }
+
     if (!step) {
       // No more steps — complete
       await this.prisma.followUpEnrollment.update({
@@ -691,6 +702,10 @@ export class FollowUpSchedulerService implements OnModuleInit {
       }
 
       this.logger.log(`[FollowUpScheduler] Suggested step ${enrollment.currentStepIndex} for enrollment ${enrollment.id}: "${step.objective}"`);
+      // In suggest mode, hold here — do NOT advance currentStepIndex or schedule
+      // the next step. The approve/edit/skip handlers (which call
+      // engineService.advanceAfterSuggestion) own the advance.
+      return;
     } else {
       // Auto-send mode: send via platform adapter
       let messageId: string | null = null;

@@ -421,6 +421,82 @@ export class FollowUpEngineService {
   }
 
   /**
+   * Advance an enrollment after a suggestion has been approved, edited, or skipped.
+   * In suggest mode the scheduler does NOT auto-advance — it pauses at the current
+   * step until the user acts. This handler resumes the sequence by computing the
+   * next step's due time (or completing the enrollment if there are no more steps).
+   *
+   * Idempotent: silently no-ops if the enrollment is no longer active (e.g. the
+   * customer replied between suggestion firing and approval).
+   */
+  async advanceAfterSuggestion(enrollmentId: string): Promise<void> {
+    const enrollment = await this.prisma.followUpEnrollment.findUnique({
+      where: { id: enrollmentId },
+      include: {
+        sequenceTemplate: true,
+        lead: { select: { userId: true, businessId: true } },
+      },
+    });
+    if (!enrollment || enrollment.status !== 'active') return;
+
+    // Resolve steps: prefer user-configured (Services UI) over the template seed.
+    let steps: Array<{ delayMinutes: number; [k: string]: any }> = [];
+    if (enrollment.lead?.businessId) {
+      const acct = await this.prisma.savedAccount.findFirst({
+        where: { userId: enrollment.lead.userId, businessId: enrollment.lead.businessId },
+        select: { followUpSettingsJson: true },
+      });
+      if (acct?.followUpSettingsJson) {
+        try {
+          const s = JSON.parse(acct.followUpSettingsJson);
+          const u = s.followUpSteps || s.followUpSmartSteps || s.followUpCustomSteps;
+          if (Array.isArray(u) && u.length > 0) {
+            steps = u.map((x: any, i: number) => ({
+              stepOrder: i,
+              delayMinutes: this.parseDelayString(x.delay),
+            }));
+          }
+        } catch {}
+      }
+    }
+    if (steps.length === 0) {
+      steps = ((enrollment.sequenceTemplate.stepsJson as any)?.steps || []) as any;
+    }
+
+    const nextIdx = enrollment.currentStepIndex + 1;
+    const nextStep = steps[nextIdx];
+    const now = new Date();
+
+    if (nextStep) {
+      const nextDue = this.computeNextDueAt(
+        now, nextStep.delayMinutes, null, null, 'America/New_York',
+      );
+      await this.prisma.followUpEnrollment.update({
+        where: { id: enrollmentId },
+        data: { currentStepIndex: nextIdx, nextStepDueAt: nextDue, lastExecutedAt: now },
+      });
+      await this.prisma.threadContext.updateMany({
+        where: { conversationId: enrollment.conversationId },
+        data: { nextFollowUpAt: nextDue, followUpStatus: 'active' },
+      });
+    } else {
+      await this.prisma.followUpEnrollment.update({
+        where: { id: enrollmentId },
+        data: {
+          currentStepIndex: nextIdx,
+          status: 'completed',
+          completedAt: now,
+          lastExecutedAt: now,
+        },
+      });
+      await this.prisma.threadContext.updateMany({
+        where: { conversationId: enrollment.conversationId },
+        data: { activeEnrollmentId: null, nextFollowUpAt: null, followUpStatus: 'completed' },
+      });
+    }
+  }
+
+  /**
    * Pause/resume an enrollment.
    */
   async pauseEnrollment(enrollmentId: string): Promise<void> {

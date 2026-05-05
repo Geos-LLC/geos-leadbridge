@@ -909,6 +909,8 @@ export class FollowUpEngineController {
       data: { lastFollowUpSentAt: sentAt },
     });
 
+    await this.engineService.advanceAfterSuggestion(execution.enrollmentId);
+
     return { success: true, messageId };
   }
 
@@ -965,6 +967,8 @@ export class FollowUpEngineController {
       data: { lastFollowUpSentAt: sentAt },
     });
 
+    await this.engineService.advanceAfterSuggestion(execution.enrollmentId);
+
     return { success: true, messageId };
   }
 
@@ -993,6 +997,8 @@ export class FollowUpEngineController {
       where: { id },
       data: { status: 'skipped' },
     });
+
+    await this.engineService.advanceAfterSuggestion(execution.enrollmentId);
 
     return { success: true };
   }
