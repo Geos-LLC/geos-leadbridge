@@ -336,6 +336,22 @@ export function Services() {
     const acc = accounts.find(a => a.id === id) || storedAccounts.find(a => a.id === id);
     if (acc?.businessId) localStorage.setItem('lb_last_account_filter', acc.businessId);
   };
+
+  // Apply-to-all toggles (separate per platform), persisted in localStorage.
+  // When checked, save handlers fan out the change to every account on that platform.
+  const [applyToAllYelp, _setApplyToAllYelp] = useState<boolean>(() => localStorage.getItem('lb_apply_all_yelp') === '1');
+  const [applyToAllTT, _setApplyToAllTT] = useState<boolean>(() => localStorage.getItem('lb_apply_all_tt') === '1');
+  const setApplyToAllYelp = (v: boolean) => { _setApplyToAllYelp(v); localStorage.setItem('lb_apply_all_yelp', v ? '1' : '0'); };
+  const setApplyToAllTT = (v: boolean) => { _setApplyToAllTT(v); localStorage.setItem('lb_apply_all_tt', v ? '1' : '0'); };
+  const getApplyTargets = (): string[] => {
+    const platform = accounts.find(a => a.id === selectedAccountId)?.platform;
+    if (!platform || !selectedAccountId) return selectedAccountId ? [selectedAccountId] : [];
+    const apply = platform === 'yelp' ? applyToAllYelp : platform === 'thumbtack' ? applyToAllTT : false;
+    if (!apply) return [selectedAccountId];
+    const ids = accounts.filter(a => a.platform === platform).map(a => a.id);
+    return ids.length > 0 ? ids : [selectedAccountId];
+  };
+  const fanoutOthers = (): string[] => getApplyTargets().filter(id => id !== selectedAccountId);
   const sc = _svcCache.get(initialAccountId); // cached service data for this account
   const [loading, setLoading] = useState(!sc);
   const [error, setError] = useState<string | null>(null);
@@ -1022,6 +1038,42 @@ export function Services() {
           setAutoReplyRules([rule]);
         }
       }
+      // Fan out to other platform accounts when "Apply to all" is checked
+      const others = fanoutOthers();
+      if (others.length > 0) {
+        await Promise.allSettled(others.map(async (id) => {
+          const { rules } = await automationApi.getRulesForAccount(id);
+          const existing = rules.filter(r => r.triggerType === 'new_lead');
+          if (existing.length > 0) {
+            await Promise.all(existing.map(r => automationApi.updateRule(r.id, { enabled })));
+          } else if (enabled) {
+            if (autoReplyUseAi) {
+              await automationApi.createRule({
+                savedAccountId: id,
+                name: 'Auto Reply - Immediate',
+                triggerType: 'new_lead',
+                useAi: true,
+                promptTemplateId: autoReplyPromptTemplateId || undefined,
+                aiSystemPrompt: autoReplyAiPrompt || undefined,
+                delayMinutes: 0,
+                enabled: true,
+              } as any);
+            } else {
+              const tplId = templates.find(t => t.name.includes('Auto Reply'))?.id;
+              if (tplId) {
+                await automationApi.createRule({
+                  savedAccountId: id,
+                  name: 'Auto Reply - Immediate',
+                  triggerType: 'new_lead',
+                  templateId: tplId,
+                  delayMinutes: 0,
+                  enabled: true,
+                } as any);
+              }
+            }
+          }
+        }));
+      }
     } catch (err: any) {
       console.error('[toggleAutoReply] FAILED:', err.response?.data || err.message);
       // Rollback on error
@@ -1105,6 +1157,49 @@ export function Services() {
         setExpandedCard('notifications');
         showSuccess(alertToPhone ? 'Lead Notifications enabled' : 'Lead Notifications enabled — configure your alert phone number');
       }
+      // Fan out to other platform accounts when "Apply to all" is checked
+      const others = fanoutOthers();
+      if (others.length > 0) {
+        const THUMBTACK_ALERT_TEMPLATE_FANOUT =
+          'New lead for {account.name}\n' +
+          '{lead.name}, Price {lead.price}\n' +
+          'Location: {lead.location}, {lead.zip}\n' +
+          'Service: {lead.service} {lead.bedrooms} bed / {lead.bathrooms} bath\n' +
+          'Frequency: {lead.frequency}\n' +
+          'Description: {lead.serviceDescription}\n' +
+          'Add-ons: {lead.addons}\n' +
+          'Pets: {lead.pets}\n' +
+          'Message: {lead.message}\n' +
+          'Phone: {lead.phone}';
+        const YELP_ALERT_TEMPLATE_FANOUT =
+          'New Yelp lead for {account.name}\n' +
+          '{lead.name}\n' +
+          'Service: {lead.service}\n' +
+          'Location: {lead.location}, {lead.zip}\n' +
+          'Availability: {lead.availability}\n' +
+          'Message: {lead.message}\n' +
+          'Phone: {lead.phone}\n' +
+          'Email: {lead.email}';
+        await Promise.allSettled(others.map(async (id) => {
+          const { rules } = await notificationsApi.getRules(id);
+          const existing = rules.find(r => r.triggerType === 'new_lead');
+          if (existing) {
+            await notificationsApi.updateRule(id, existing.id, { enabled });
+          } else if (enabled) {
+            const accPlatform = accounts.find(a => a.id === id)?.platform || 'yelp';
+            const tpl = accPlatform === 'yelp' ? YELP_ALERT_TEMPLATE_FANOUT : THUMBTACK_ALERT_TEMPLATE_FANOUT;
+            const tplName = accPlatform === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack';
+            await notificationsApi.createRule(id, {
+              name: tplName,
+              triggerType: 'new_lead',
+              toPhone: alertToPhone,
+              sendToCustomer: false,
+              template: tpl,
+              enabled: true,
+            } as any);
+          }
+        }));
+      }
       // Invalidate diagnostics cache so Dashboard/Settings show fresh data
       setAccountDiagnostics({});
     } catch (err: any) {
@@ -1130,6 +1225,10 @@ export function Services() {
     try {
       const { settings } = await callConnectApi.saveSettings(selectedAccountId, { enabled });
       setCcEnabled(settings.enabled);
+      const others = fanoutOthers();
+      if (others.length > 0) {
+        await Promise.allSettled(others.map(id => callConnectApi.saveSettings(id, { enabled })));
+      }
     } catch (err: any) {
       console.error('Failed to toggle Call Connect:', err.response?.data || err.message);
       setCcEnabled(!enabled); // rollback
@@ -1143,7 +1242,7 @@ export function Services() {
     if (!selectedAccountId) return;
     setCcSaving(true);
     try {
-      await callConnectApi.saveSettings(selectedAccountId, {
+      const payload = {
         enabled: ccEnabled,
         mode: ccMode,
         agentStrategy: ccAgentStrategy,
@@ -1159,8 +1258,15 @@ export function Services() {
         leadVoicemailEnabled: ccVoicemailEnabled,
         leadVoicemailMessage: ccVoicemailEnabled ? ccVoicemailMessage : undefined,
         botNumberE164: ccBotNumber || undefined,
-      });
-      showSuccess('Instant Call settings saved');
+      };
+      await callConnectApi.saveSettings(selectedAccountId, payload);
+      const others = fanoutOthers();
+      if (others.length > 0) {
+        await Promise.allSettled(others.map(id => callConnectApi.saveSettings(id, payload)));
+        showSuccess(`Instant Call settings saved to ${others.length + 1} accounts`);
+      } else {
+        showSuccess('Instant Call settings saved');
+      }
       setCcSavedSnapshot({
         mode: ccMode,
         agentPhone: ccAgentPhone,
@@ -1187,10 +1293,12 @@ export function Services() {
     setCtEnabled(enabled); // optimistic
     setCtSaving(true);
     try {
-      await notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
-        enabled,
-        autoReplyTemplate: ctAutoReplyTemplate,
-      });
+      const payload = { enabled, autoReplyTemplate: ctAutoReplyTemplate };
+      await notificationsApi.saveCustomerTextingSettings(selectedAccountId, payload);
+      const others = fanoutOthers();
+      if (others.length > 0) {
+        await Promise.allSettled(others.map(id => notificationsApi.saveCustomerTextingSettings(id, payload)));
+      }
     } catch (err: any) {
       console.error('Failed to toggle Instant Text:', err.response?.data || err.message);
       setCtEnabled(!enabled); // rollback
@@ -1204,11 +1312,15 @@ export function Services() {
     if (!selectedAccountId) return;
     setCtSaving(true);
     try {
-      await notificationsApi.saveCustomerTextingSettings(selectedAccountId, {
-        enabled: ctEnabled,
-        autoReplyTemplate: ctAutoReplyTemplate,
-      });
-      showSuccess('Instant Text settings saved');
+      const payload = { enabled: ctEnabled, autoReplyTemplate: ctAutoReplyTemplate };
+      await notificationsApi.saveCustomerTextingSettings(selectedAccountId, payload);
+      const others = fanoutOthers();
+      if (others.length > 0) {
+        await Promise.allSettled(others.map(id => notificationsApi.saveCustomerTextingSettings(id, payload)));
+        showSuccess(`Instant Text settings saved to ${others.length + 1} accounts`);
+      } else {
+        showSuccess('Instant Text settings saved');
+      }
       setCtSavedSnapshot({ autoReplyTemplate: ctAutoReplyTemplate });
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Failed to save Instant Text settings');
@@ -1260,6 +1372,12 @@ export function Services() {
       thumbtackApi.updateSavedAccount(selectedAccountId, { agentPhoneOverride: finalPhone })
         .catch(() => { setError('Failed to save business phone override'); })
     );
+    // Fan out to other accounts of the same platform when "Apply to all" is checked
+    const others = fanoutOthers();
+    for (const id of others) {
+      promises.push(callConnectApi.saveSettings(id, { agentPhoneE164: finalPhone }).catch(() => {}));
+      promises.push(thumbtackApi.updateSavedAccount(id, { agentPhoneOverride: finalPhone }).catch(() => {}));
+    }
     await Promise.all(promises);
     savingAgentPhoneRef.current = false;
   }
@@ -1415,7 +1533,21 @@ export function Services() {
       });
       setLeadAlertRule(rule);
       setAlertSavedSnapshot({ toPhone: alertToPhone });
-      showSuccess('Lead Alert settings saved');
+      const others = fanoutOthers();
+      if (others.length > 0) {
+        // Fetch each target's existing alert rule and update its toPhone.
+        // Skip accounts without an alert rule — they need to be enabled first.
+        await Promise.allSettled(others.map(async (id) => {
+          const { rules } = await notificationsApi.getRules(id);
+          const existing = rules.find(r => r.triggerType === 'new_lead');
+          if (existing) {
+            await notificationsApi.updateRule(id, existing.id, { toPhone: alertToPhone });
+          }
+        }));
+        showSuccess(`Lead Alert settings saved to ${others.length + 1} accounts`);
+      } else {
+        showSuccess('Lead Alert settings saved');
+      }
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Failed to save alert settings');
     } finally {
@@ -1783,32 +1915,65 @@ export function Services() {
             The big switches. Turn these on and Leadbridge handles new leads for you.
           </p>
         </div>
-        <div style={{ position: 'relative', minWidth: 240 }}>
-          <select
-            value={selectedAccountId}
-            onChange={e => setSelectedAccountId(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '8px 36px 8px 12px',
-              fontSize: 13,
-              fontFamily: 'inherit',
-              fontWeight: 500,
-              background: 'var(--lb-ink-10)',
-              border: '1px solid var(--lb-line)',
-              color: 'var(--lb-ink-1)',
-              borderRadius: 'var(--lb-radius)',
-              outline: 'none',
-              appearance: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            {accounts.map(acc => (
-              <option key={acc.id} value={acc.id}>{acc.platform === 'yelp' ? '\uD83D\uDD34 ' : '\uD83D\uDD35 '}{acc.businessName}</option>
-            ))}
-          </select>
-          <div style={{ position: 'absolute', top: 0, right: 10, bottom: 0, display: 'flex', alignItems: 'center', pointerEvents: 'none', color: 'var(--lb-ink-5)' }}>
-            <ChevronDown size={14} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+          <div style={{ position: 'relative', minWidth: 240 }}>
+            <select
+              value={selectedAccountId}
+              onChange={e => setSelectedAccountId(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '8px 36px 8px 12px',
+                fontSize: 13,
+                fontFamily: 'inherit',
+                fontWeight: 500,
+                background: 'var(--lb-ink-10)',
+                border: '1px solid var(--lb-line)',
+                color: 'var(--lb-ink-1)',
+                borderRadius: 'var(--lb-radius)',
+                outline: 'none',
+                appearance: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              {accounts.map(acc => (
+                <option key={acc.id} value={acc.id}>{acc.platform === 'yelp' ? '\uD83D\uDD34 ' : '\uD83D\uDD35 '}{acc.businessName}</option>
+              ))}
+            </select>
+            <div style={{ position: 'absolute', top: 0, right: 10, bottom: 0, display: 'flex', alignItems: 'center', pointerEvents: 'none', color: 'var(--lb-ink-5)' }}>
+              <ChevronDown size={14} />
+            </div>
           </div>
+          {(() => {
+            const yelpCount = accounts.filter(a => a.platform === 'yelp').length;
+            const ttCount = accounts.filter(a => a.platform === 'thumbtack').length;
+            if (yelpCount < 2 && ttCount < 2) return null;
+            return (
+              <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--lb-ink-3)', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                {yelpCount >= 2 && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', userSelect: 'none' }}>
+                    <input
+                      type="checkbox"
+                      checked={applyToAllYelp}
+                      onChange={e => setApplyToAllYelp(e.target.checked)}
+                      style={{ cursor: 'pointer', accentColor: '#dc2626' }}
+                    />
+                    <span>\uD83D\uDD34 Apply to all Yelp ({yelpCount})</span>
+                  </label>
+                )}
+                {ttCount >= 2 && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', userSelect: 'none' }}>
+                    <input
+                      type="checkbox"
+                      checked={applyToAllTT}
+                      onChange={e => setApplyToAllTT(e.target.checked)}
+                      style={{ cursor: 'pointer', accentColor: '#2563eb' }}
+                    />
+                    <span>\uD83D\uDD35 Apply to all Thumbtack ({ttCount})</span>
+                  </label>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
 
@@ -3314,7 +3479,7 @@ export function Services() {
                 onClick={async () => {
                   setFuSaving(true);
                   try {
-                    await followUpApi.saveSettings(selectedAccountId, {
+                    const buildPayload = (acctId: string) => ({
                       mode: fuMode,
                       aiConversationEnabled: aiConversationOn,
                       preset: fuPreset,
@@ -3322,7 +3487,7 @@ export function Services() {
                       activeHoursStart: fuAvailability === 'active_hours' ? fuStart : null as any,
                       activeHoursEnd: fuAvailability === 'active_hours' ? fuEnd : null as any,
                       timezone: fuTz,
-                      platform: accounts.find(a => a.id === selectedAccountId)?.platform || 'yelp',
+                      platform: accounts.find(a => a.id === acctId)?.platform || 'yelp',
                       steps: fuSmartSteps,
                       availability: fuAvailability,
                       strategyMode: 'auto',
@@ -3347,13 +3512,19 @@ export function Services() {
                       aiMaxReplies,
                       reEngagementAlertEnabled: reEngagementAlertOn,
                       reEngagementTemplate,
-                    } as any);
+                    });
+                    await followUpApi.saveSettings(selectedAccountId, buildPayload(selectedAccountId) as any);
+                    const others = fanoutOthers();
+                    if (others.length > 0) {
+                      await Promise.allSettled(others.map(id => followUpApi.saveSettings(id, buildPayload(id) as any)));
+                    }
                     const wasHistorical = fuIncludeHistorical;
+                    const fanoutSuffix = others.length > 0 ? ` to ${others.length + 1} accounts` : '';
                     showSuccess(fuMode === 'off'
-                      ? 'Follow-ups disabled and saved'
+                      ? `Follow-ups disabled and saved${fanoutSuffix}`
                       : wasHistorical
-                        ? 'Settings saved — enrolling existing leads in background'
-                        : 'Follow-up settings saved');
+                        ? `Settings saved${fanoutSuffix} — enrolling existing leads in background`
+                        : `Follow-up settings saved${fanoutSuffix}`);
                   } catch (err: any) {
                     setError(err.message || 'Failed to save follow-up settings');
                   } finally {
