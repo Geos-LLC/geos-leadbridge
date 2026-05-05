@@ -959,24 +959,8 @@ export class AutomationService implements OnModuleInit {
           select: { globalAiPrompt: true, name: true },
         });
 
-        // PRIMARY INSTRUCTION — strategy prompt
-        // - replyMode='price' → force price anchor strategy (ignore user prompt template)
-        // - replyMode='auto'  → rule.promptTemplate/aiSystemPrompt → fallback hybrid
-        // - user prompt templates dominate the strategy default and are passed
-        //   through as-is. The reactive pricing policy in the GLOBAL prompt
-        //   (templates.service.ts DEFAULT_GLOBAL_AI_PROMPT) prevents the AI
-        //   from volunteering a price when the user's template is silent on it.
-        const { STRATEGY_PROMPTS } = require('../ai/strategy-prompts');
-        const ruleReplyMode = (rule as any).replyMode as 'custom' | 'price' | 'auto' | undefined;
-        let strategyPrompt: string;
-        if (ruleReplyMode === 'price') {
-          strategyPrompt = STRATEGY_PROMPTS.price;
-        } else {
-          strategyPrompt = rule.promptTemplate?.content || rule.aiSystemPrompt || STRATEGY_PROMPTS.hybrid;
-        }
-
-        // Pricing context from account settings, with sibling-account fallback
-        // when this account has none of its own.
+        // Load account first so we can read the central followUpStrategy
+        // when resolving the PRIMARY INSTRUCTION below.
         const account = context.businessId
           ? await this.prisma.savedAccount.findFirst({
               where: { userId: context.userId, businessId: context.businessId },
@@ -990,6 +974,45 @@ export class AutomationService implements OnModuleInit {
               },
             })
           : null;
+
+        // Parse central AI Strategy from followUpSettingsJson. Same setting
+        // is used by Follow-ups (follow-up-generator.service.ts:124) and by
+        // the AI Strategy panel in the Services page UI.
+        let accountFollowUpStrategy: string | undefined;
+        let accountFollowUpStrategyPrompt: string | undefined;
+        if (account?.followUpSettingsJson) {
+          try {
+            const s = JSON.parse(account.followUpSettingsJson);
+            if (typeof s.followUpStrategy === 'string') accountFollowUpStrategy = s.followUpStrategy;
+            if (typeof s.followUpStrategyPrompt === 'string') accountFollowUpStrategyPrompt = s.followUpStrategyPrompt;
+          } catch { /* invalid JSON */ }
+        }
+
+        // PRIMARY INSTRUCTION — strategy prompt resolution.
+        // Priority (highest to lowest):
+        //   1. rule.replyMode='price' → force Price strategy (legacy Instant
+        //      Reply override; future UI no longer sets this but old rows still might)
+        //   2. rule.promptTemplate.content → explicit per-rule template (e.g. user
+        //      edits the First Reply prompt for this specific automation)
+        //   3. accountFollowUpStrategyPrompt → user's customized text for the
+        //      central strategy (when they edited the AI Strategy preview)
+        //   4. STRATEGY_PROMPTS[accountFollowUpStrategy] → central strategy default
+        //   5. rule.aiSystemPrompt → legacy free-form prompt on the rule
+        //   6. STRATEGY_PROMPTS.hybrid → ultimate fallback
+        const { STRATEGY_PROMPTS } = require('../ai/strategy-prompts');
+        const ruleReplyMode = (rule as any).replyMode as 'custom' | 'price' | 'auto' | undefined;
+        let strategyPrompt: string;
+        if (ruleReplyMode === 'price') {
+          strategyPrompt = STRATEGY_PROMPTS.price;
+        } else if (rule.promptTemplate?.content) {
+          strategyPrompt = rule.promptTemplate.content;
+        } else if (accountFollowUpStrategyPrompt) {
+          strategyPrompt = accountFollowUpStrategyPrompt;
+        } else if (accountFollowUpStrategy && accountFollowUpStrategy !== 'auto' && STRATEGY_PROMPTS[accountFollowUpStrategy]) {
+          strategyPrompt = STRATEGY_PROMPTS[accountFollowUpStrategy];
+        } else {
+          strategyPrompt = rule.aiSystemPrompt || STRATEGY_PROMPTS.hybrid;
+        }
 
         // REFERENCE: business profile (name, owner, turnaround, active hours,
         // scheduling rules). Without this the AI fabricates specific time slots

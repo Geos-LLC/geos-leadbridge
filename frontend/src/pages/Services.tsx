@@ -2212,6 +2212,101 @@ export function Services() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-6">
+          {/* 0. AI Strategy — single source of truth used by Instant Reply (Auto mode), AI Conversation, and Follow-ups */}
+          {selectedAccountId && (() => {
+            const STRATEGIES: Array<{ key: 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone'; emoji: string; label: string; desc: string }> = [
+              { key: 'auto',    emoji: '🤖', label: 'Auto',    desc: 'AI picks the strategy per conversation' },
+              { key: 'hybrid',  emoji: '⚖️', label: 'Hybrid',  desc: 'Acknowledge + one question; price only if asked' },
+              { key: 'price',   emoji: '💰', label: 'Price',   desc: 'Lead with a price range from your pricing table' },
+              { key: 'qualify', emoji: '🧠', label: 'Qualify', desc: 'Ask for missing detail (size, condition); no pricing' },
+              { key: 'convert', emoji: '📅', label: 'Convert', desc: 'Push toward scheduling; price only if asked' },
+              { key: 'phone',   emoji: '📱', label: 'Phone',   desc: 'Escalate to a call; no quoting' },
+            ];
+            const STRATEGY_PROMPT_PREVIEWS: Record<string, string> = {
+              hybrid: 'STRATEGY: HYBRID\n\nYou MUST:\n- Acknowledge the customer\'s specific request (reference their details)\n- Move forward with EXACTLY ONE question (timing or confirmation)\n\nDO NOT:\n- Volunteer a price unless the customer asks about price or budget\n- Ask more than one question\n\nIf the customer asks about price, use the pricing table to answer accurately.',
+              price: 'STRATEGY: PRICE ANCHOR\n\nYou MUST:\n- Lead with a price range based on the pricing table for the customer\'s BR/BA\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Invent prices unrelated to the table',
+              qualify: 'STRATEGY: QUALIFICATION\n\nYou MUST:\n- Ask 1-2 specific questions about the missing critical detail (e.g. square footage, condition, timing)\n- Briefly explain why you need it\n\nDO NOT:\n- Volunteer pricing — qualification comes first\n- Ask about info the customer already provided',
+              convert: 'STRATEGY: CONVERSION\n\nYou MUST:\n- Push toward scheduling (ask what time works, or offer a broad window matching your turnaround)\n\nDO NOT:\n- Volunteer a price unless the customer asks (the goal here is closing on time, not on price)\n- Claim a SPECIFIC time slot is open\n- Ask open-ended questions',
+              phone: 'STRATEGY: PHONE / ESCALATION\n\nYou MUST:\n- Explain why a call is needed (without quoting a number)\n- Ask for the best phone number naturally\n\nDO NOT:\n- Volunteer a price\n- Push phone too early or sound forceful',
+            };
+            return (
+            <div data-tour="ai-strategy-card" className="bg-white rounded-3xl border border-violet-100 shadow-sm overflow-hidden">
+              <div className="flex items-center gap-3 px-6 py-4 bg-gradient-to-r from-violet-50/60 to-white border-b border-violet-100">
+                <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base font-bold text-slate-800">AI Strategy</h3>
+                    <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 text-[10px] font-semibold uppercase tracking-wide">Applies everywhere</span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">Single source of truth for how AI replies. Used by <span className="font-semibold text-slate-700">Instant Reply</span> (Auto mode), <span className="font-semibold text-slate-700">AI Conversation</span>, and <span className="font-semibold text-slate-700">Follow-ups</span>.</p>
+                </div>
+              </div>
+              <div className="px-6 py-5 space-y-4">
+                <p className="text-[11px] text-slate-500">Pick the goal for each reply. Only <span className="font-semibold text-slate-700">Price</span> volunteers a price proactively — the other strategies stay focused on their own goal and only quote when the customer asks.</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {STRATEGIES.map(s => (
+                    <button key={s.key}
+                      onClick={() => {
+                        setFuStrategy(s.key);
+                        if (s.key !== 'auto') {
+                          setFuStrategyPrompt(STRATEGY_PROMPT_PREVIEWS[s.key] || '');
+                        }
+                      }}
+                      className={`text-[11px] px-2.5 py-1.5 rounded-lg font-semibold border-2 transition-all ${fuStrategy === s.key ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-violet-200'}`}
+                      title={s.desc}>
+                      {s.emoji} {s.label}
+                    </button>
+                  ))}
+                </div>
+                {fuStrategy === 'auto' ? (
+                  <p className="text-[11px] text-slate-400">AI picks the best strategy based on conversation context.</p>
+                ) : (
+                  <div className="bg-white p-3 rounded-xl border border-dashed border-slate-200 text-slate-600 text-xs leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap relative group">
+                    {fuStrategyPrompt || 'No prompt set'}
+                    <button onClick={() => setTemplateEditor({ mode: 'create', ruleId: '', templateId: undefined, templateName: `AI Strategy — ${fuStrategy.charAt(0).toUpperCase() + fuStrategy.slice(1)}`, content: fuStrategyPrompt || '', type: `fu-strategy-${fuStrategy}` })}
+                      className="absolute top-2 right-2 p-1.5 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600">
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+                <button
+                  disabled={fuSaving}
+                  onClick={async () => {
+                    setFuSaving(true);
+                    try {
+                      const payload: any = {
+                        followUpStrategy: fuStrategy,
+                        followUpStrategyPrompt: fuStrategy !== 'auto' ? fuStrategyPrompt : undefined,
+                      };
+                      await followUpApi.saveSettings(selectedAccountId, payload);
+                      const others = fanoutOthers();
+                      if (others.length > 0) {
+                        await Promise.allSettled(others.map(id => followUpApi.saveSettings(id, payload)));
+                      }
+                      const fanoutSuffix = others.length > 0 ? ` to ${others.length + 1} accounts` : '';
+                      showSuccess(`AI Strategy saved${fanoutSuffix}`);
+                    } catch (err: any) {
+                      setError(err.message || 'Failed to save AI strategy');
+                    } finally {
+                      setFuSaving(false);
+                    }
+                  }}
+                  className={`w-full px-4 py-2.5 text-white text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 ${
+                    fuSaving ? 'bg-slate-400 cursor-not-allowed' : 'bg-violet-600 hover:bg-violet-700 hover:shadow-lg hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
+                  }`}>
+                  {fuSaving ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</>
+                  ) : (
+                    <><Save className="w-4 h-4" /> Save AI Strategy</>
+                  )}
+                </button>
+              </div>
+            </div>
+            );
+          })()}
+
           {/* 1. Lead Notifications (combined Auto-Reply + Lead Alerts) */}
           {(() => {
             const noPhone = tenantPhones.length === 0;
@@ -2290,19 +2385,21 @@ export function Services() {
                   </label>
                 </div>
                 <div className="px-5 py-4 space-y-4">
-                  {/* Reply Type selector — 3 modes */}
+                  {/* Reply Type selector — Custom Template vs AI. The legacy
+                      'price' replyMode is treated as AI in the UI; users now
+                      pick Price as their AI Strategy at the top of the page. */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Instant Reply Mode</label>
-                    <p className="text-[10px] text-slate-400 mb-2">How the first reply is composed. <span className="font-semibold text-slate-600">With Price Range</span> forces the Price strategy; <span className="font-semibold text-slate-600">Auto Message</span> uses your saved AI strategy and prompt.</p>
-                    <div className="grid grid-cols-3 gap-2">
+                    <p className="text-[10px] text-slate-400 mb-2">How the first reply is composed.</p>
+                    <div className="grid grid-cols-2 gap-2">
                       {(() => {
-                        const modes: Array<{ key: 'custom' | 'price' | 'auto'; emoji: string; label: string; active: string; desc: string }> = [
-                          { key: 'custom', emoji: '🟢', label: 'Custom Message', active: '#16a34a', desc: 'Send your saved template literally — no AI generation' },
-                          { key: 'price',  emoji: '🔵', label: 'With Price Range', active: '#1d4ed8', desc: 'AI leads with a price range from your pricing table (Price strategy)' },
-                          { key: 'auto',   emoji: '🟣', label: 'Auto Message', active: '#7c3aed', desc: 'AI generates using your AI Conversation Strategy below' },
+                        const modes: Array<{ key: 'custom' | 'auto'; emoji: string; label: string; active: string; desc: string }> = [
+                          { key: 'custom', emoji: '🟢', label: 'Custom Template', active: '#16a34a', desc: 'Send your saved template literally — no AI generation' },
+                          { key: 'auto',   emoji: '🟣', label: 'AI', active: '#7c3aed', desc: 'AI generates the reply using your AI Strategy (top of page)' },
                         ];
+                        const uiMode: 'custom' | 'auto' = replyMode === 'custom' ? 'custom' : 'auto';
                         return modes.map(m => {
-                          const isActive = replyMode === m.key;
+                          const isActive = uiMode === m.key;
                           return (
                             <button
                               key={m.key}
@@ -2367,8 +2464,8 @@ export function Services() {
                             </div>
                           )}
                         </div>
-                      ) : replyMode === 'price' ? (
-                        /* Price mode: inline pricing table preview + Edit button */
+                      ) : false && replyMode === 'price' ? (
+                        /* Legacy 'price' content kept for now (gated off) — UI now treats price as AI mode and routes pricing setup through the unified AI Strategy panel. Kept for historical reference; safe to remove once we're confident no rules need the inline table here. */
                         <div>
                           <div className="flex items-center justify-between mb-2">
                             <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">Pricing Source</label>
@@ -2518,9 +2615,27 @@ export function Services() {
                           </div>
                         </div>
                       ) : (
-                        /* Auto mode: prompt selector + editable content */
+                        /* Auto mode: shared AI Strategy badge + prompt selector */
+                        <div className="space-y-3">
+                          <div className="rounded-xl border border-violet-100 bg-violet-50/40 px-4 py-3 flex items-center gap-3">
+                            <Zap className="w-4 h-4 text-violet-500 shrink-0" />
+                            <div className="flex-1 min-w-0 text-xs">
+                              <div className="font-semibold text-slate-700">
+                                AI Strategy: <span className="text-violet-700 capitalize">{fuStrategy}</span>
+                              </div>
+                              <div className="text-[10px] text-slate-500">Used to generate the first reply. To lead with a price range, set strategy to <span className="font-semibold">Price</span> in the AI Strategy card at the top.</div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const el = document.querySelector('[data-tour="ai-strategy-card"]') as HTMLElement | null;
+                                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                              }}
+                              className="shrink-0 text-[11px] font-semibold text-violet-700 hover:text-violet-900 underline underline-offset-2"
+                            >Change</button>
+                          </div>
                         <div>
-                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Reply Instructions</label>
+                          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">First-Reply Prompt Override (optional)</label>
                           <select
                             value={autoReplyPromptTemplateId}
                             onChange={e => {
@@ -2566,6 +2681,7 @@ export function Services() {
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
                           </div>
+                        </div>
                         </div>
                       )}
                     </div>
@@ -3050,6 +3166,25 @@ export function Services() {
                           </button>
                         ))}
                       </div>
+                    </div>
+
+                    {/* Inherited AI Strategy badge — follow-up AI generation uses the central strategy. */}
+                    <div className="rounded-xl border border-violet-100 bg-violet-50/40 px-4 py-3 flex items-center gap-3">
+                      <Zap className="w-4 h-4 text-violet-500 shrink-0" />
+                      <div className="flex-1 min-w-0 text-xs">
+                        <div className="font-semibold text-slate-700">
+                          AI Strategy: <span className="text-violet-700 capitalize">{fuStrategy}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500">Used when AI generates follow-up messages. Set in <span className="font-semibold">AI Strategy</span> at the top of this page.</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const el = document.querySelector('[data-tour="ai-strategy-card"]') as HTMLElement | null;
+                          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }}
+                        className="shrink-0 text-[11px] font-semibold text-violet-700 hover:text-violet-900 underline underline-offset-2"
+                      >Change</button>
                     </div>
 
                     {/* Follow-up Plan */}
@@ -3599,54 +3734,23 @@ export function Services() {
               )}
               {(aiConversationOn || !canUseConvert) && (
                 <div className={`space-y-4 relative${!canUseConvert ? ' opacity-60 pointer-events-none select-none' : ''}`}>
-                  {/* AI Strategy */}
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">AI Conversation Strategy</label>
-                    <p className="text-[10px] text-slate-400 mb-2">Pick the goal for each reply. Only <span className="font-semibold text-slate-600">Price</span> volunteers a price proactively — the other strategies stay focused on their own goal and only quote when the customer asks.</p>
-                    <div className="flex flex-wrap gap-1.5 mb-2">
-                      {([
-                        { key: 'auto' as const, emoji: '🤖', label: 'Auto', desc: 'AI picks the strategy per conversation' },
-                        { key: 'hybrid' as const, emoji: '⚖️', label: 'Hybrid', desc: 'Acknowledge + one question; price only if asked' },
-                        { key: 'price' as const, emoji: '💰', label: 'Price', desc: 'Lead with a price range from your pricing table' },
-                        { key: 'qualify' as const, emoji: '🧠', label: 'Qualify', desc: 'Ask for missing detail (size, condition); no pricing' },
-                        { key: 'convert' as const, emoji: '📅', label: 'Convert', desc: 'Push toward scheduling; price only if asked' },
-                        { key: 'phone' as const, emoji: '📱', label: 'Phone', desc: 'Escalate to a call; no quoting' },
-                      ]).map(s => (
-                        <button key={s.key}
-                          onClick={() => {
-                            setFuStrategy(s.key);
-                            if (s.key !== 'auto') {
-                              // Inline summaries shown in the editor preview. The
-                              // canonical strategy text lives in
-                              // `src/ai/strategy-prompts.ts` on the backend; this
-                              // is a short user-facing rendering of the same intent.
-                              const prompts: Record<string, string> = {
-                                hybrid: 'STRATEGY: HYBRID\n\nYou MUST:\n- Acknowledge the customer\'s specific request (reference their details)\n- Move forward with EXACTLY ONE question (timing or confirmation)\n\nDO NOT:\n- Volunteer a price unless the customer asks about price or budget\n- Ask more than one question\n\nIf the customer asks about price, use the pricing table to answer accurately.',
-                                price: 'STRATEGY: PRICE ANCHOR\n\nYou MUST:\n- Lead with a price range based on the pricing table for the customer\'s BR/BA\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Invent prices unrelated to the table',
-                                qualify: 'STRATEGY: QUALIFICATION\n\nYou MUST:\n- Ask 1-2 specific questions about the missing critical detail (e.g. square footage, condition, timing)\n- Briefly explain why you need it\n\nDO NOT:\n- Volunteer pricing — qualification comes first\n- Ask about info the customer already provided',
-                                convert: 'STRATEGY: CONVERSION\n\nYou MUST:\n- Push toward scheduling (ask what time works, or offer a broad window matching your turnaround)\n\nDO NOT:\n- Volunteer a price unless the customer asks (the goal here is closing on time, not on price)\n- Claim a SPECIFIC time slot is open\n- Ask open-ended questions',
-                                phone: 'STRATEGY: PHONE / ESCALATION\n\nYou MUST:\n- Explain why a call is needed (without quoting a number)\n- Ask for the best phone number naturally\n\nDO NOT:\n- Volunteer a price\n- Push phone too early or sound forceful',
-                              };
-                              setFuStrategyPrompt(prompts[s.key] || '');
-                            }
-                          }}
-                          className={`text-[11px] px-2.5 py-1.5 rounded-lg font-semibold border-2 transition-all ${fuStrategy === s.key ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}
-                          title={s.desc}>
-                          {s.emoji} {s.label}
-                        </button>
-                      ))}
-                    </div>
-                    {fuStrategy === 'auto' ? (
-                      <p className="text-[11px] text-slate-400">AI picks the best strategy based on conversation context.</p>
-                    ) : (
-                      <div className="bg-white p-3 rounded-xl border border-dashed border-slate-200 text-slate-600 text-xs leading-relaxed max-h-28 overflow-y-auto whitespace-pre-wrap relative group">
-                        {fuStrategyPrompt || 'No prompt set'}
-                        <button onClick={() => setTemplateEditor({ mode: 'create', ruleId: '', templateId: undefined, templateName: `AI Strategy — ${fuStrategy.charAt(0).toUpperCase() + fuStrategy.slice(1)}`, content: fuStrategyPrompt || '', type: `fu-strategy-${fuStrategy}` })}
-                          className="absolute top-2 right-2 p-1.5 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600">
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
+                  {/* AI Strategy — inherited from the central AI Strategy card at the top. */}
+                  <div className="rounded-xl border border-violet-100 bg-violet-50/40 px-4 py-3 flex items-center gap-3">
+                    <Zap className="w-4 h-4 text-violet-500 shrink-0" />
+                    <div className="flex-1 min-w-0 text-xs">
+                      <div className="font-semibold text-slate-700">
+                        Strategy: <span className="text-violet-700 capitalize">{fuStrategy}</span>
                       </div>
-                    )}
+                      <div className="text-[10px] text-slate-500">Set in <span className="font-semibold">AI Strategy</span> at the top of this page. Applies to AI Conversation, Follow-ups, and Instant Reply (Auto mode).</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const el = document.querySelector('[data-tour="ai-strategy-card"]') as HTMLElement | null;
+                        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }}
+                      className="shrink-0 text-[11px] font-semibold text-violet-700 hover:text-violet-900 underline underline-offset-2"
+                    >Change</button>
                   </div>
 
                   {/* Availability */}

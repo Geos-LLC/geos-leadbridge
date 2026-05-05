@@ -513,7 +513,13 @@ export class FollowUpEngineController {
       steps, timing, customSteps, smartSteps, availability, strategyMode, scenarios, stopOnReply, stopOnOptOut, stopOnBooked,
       onNo, retryDays, urgentCapability, includeHistorical, ...rest } = body;
 
-    const extendedSettings: Record<string, any> = {};
+    // Merge with existing followUpSettingsJson so partial saves (e.g. only the
+    // strategy from the central AI Strategy panel) don't wipe out other
+    // fields (quiet hours, AI rules, re-engagement settings, etc.).
+    let extendedSettings: Record<string, any> = {};
+    if (account.followUpSettingsJson) {
+      try { extendedSettings = JSON.parse(account.followUpSettingsJson) || {}; } catch { extendedSettings = {}; }
+    }
     // Unified steps array (replaces smart/custom split)
     if (steps !== undefined) extendedSettings.followUpSteps = steps;
     // Legacy compat
@@ -548,16 +554,19 @@ export class FollowUpEngineController {
     if (body.reEngagementAlertEnabled !== undefined) extendedSettings.reEngagementAlertEnabled = body.reEngagementAlertEnabled;
     if (body.reEngagementTemplate !== undefined) extendedSettings.reEngagementTemplate = body.reEngagementTemplate;
 
+    // Use `undefined` (not nullish-coalesce-default) for fields that weren't
+    // sent so partial saves from the central AI Strategy panel don't reset
+    // unrelated columns to defaults.
     await this.prisma.savedAccount.update({
       where: { id: savedAccountId },
       data: {
-        followUpMode: mode,
+        followUpMode: mode ?? undefined,
         aiConversationEnabled: body.aiConversationEnabled ?? undefined,
-        followUpPreset: preset || 'standard',
-        followUpReplyType: replyType,
-        followUpActiveHoursStart: activeHoursStart,
-        followUpActiveHoursEnd: activeHoursEnd,
-        followUpTimezone: timezone,
+        followUpPreset: preset ?? undefined,
+        followUpReplyType: replyType ?? undefined,
+        followUpActiveHoursStart: activeHoursStart ?? undefined,
+        followUpActiveHoursEnd: activeHoursEnd ?? undefined,
+        followUpTimezone: timezone ?? undefined,
         followUpSettingsJson: Object.keys(extendedSettings).length > 0 ? JSON.stringify(extendedSettings) : undefined,
       },
     });
