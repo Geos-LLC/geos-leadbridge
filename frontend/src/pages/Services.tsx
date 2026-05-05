@@ -2842,16 +2842,13 @@ export function Services() {
                 </div>
                 {fuMode !== 'off' && (
                   <div className="px-5 py-4 space-y-4">
-                    {/* Follow-up Mode — hidden: Follow-ups and AI Conversation are now separate sections.
-                        State is still set by legacy code; AI conversation controls live in its own card below. */}
-                    {false && (
                     <div>
                       <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Mode</label>
-                      <p className="text-[10px] text-slate-400 mb-2">Choose whether follow-ups use preset templates or AI conversation handling.</p>
+                      <p className="text-[10px] text-slate-400 mb-2">Choose how follow-ups are delivered.</p>
                       <div className="flex gap-2">
                         {([
-                          { value: 'suggest' as const, label: 'Templates', desc: 'Send preset follow-up messages on schedule', replyType: 'template' as const },
-                          { value: 'auto_send' as const, label: 'AI Conversation', desc: 'Let AI continue the conversation after the first reply', replyType: 'ai' as const },
+                          { value: 'suggest' as const, label: 'Suggest', desc: 'Draft follow-ups for you to approve before sending', replyType: 'ai' as const },
+                          { value: 'auto_send' as const, label: 'Active', desc: 'Send follow-ups automatically without approval', replyType: 'ai' as const },
                         ]).map(opt => (
                           <button key={opt.value}
                             onClick={() => { setFuMode(opt.value); setFuReplyType(opt.replyType); }}
@@ -2865,7 +2862,6 @@ export function Services() {
                         ))}
                       </div>
                     </div>
-                    )}
 
                     {/* Follow-up Plan */}
                     <div>
