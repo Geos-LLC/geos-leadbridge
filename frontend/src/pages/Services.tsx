@@ -1941,7 +1941,7 @@ export function Services() {
                       onChange={e => setApplyToAllYelp(e.target.checked)}
                       style={{ cursor: yelpCount < 2 ? 'not-allowed' : 'pointer', accentColor: '#dc2626' }}
                     />
-                    <span>{'\u{1F534}'} All Yelp ({yelpCount})</span>
+                    <span>{'🔴 All Yelp (' + yelpCount + ')'}</span>
                   </label>
                 )}
                 {ttCount > 0 && (
@@ -1963,7 +1963,7 @@ export function Services() {
                       onChange={e => setApplyToAllTT(e.target.checked)}
                       style={{ cursor: ttCount < 2 ? 'not-allowed' : 'pointer', accentColor: '#2563eb' }}
                     />
-                    <span>{'\u{1F535}'} All Thumbtack ({ttCount})</span>
+                    <span>{'🔵 All Thumbtack (' + ttCount + ')'}</span>
                   </label>
                 )}
               </div>
