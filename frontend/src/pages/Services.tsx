@@ -1915,13 +1915,13 @@ export function Services() {
             The big switches. Turn these on and Leadbridge handles new leads for you.
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
           {(() => {
             const yelpCount = accounts.filter(a => a.platform === 'yelp').length;
             const ttCount = accounts.filter(a => a.platform === 'thumbtack').length;
             if (yelpCount === 0 && ttCount === 0) return null;
             return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--lb-ink-3)', alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--lb-ink-3)', alignItems: 'flex-start', whiteSpace: 'nowrap' }}>
                 {yelpCount > 0 && (
                   <label
                     title={yelpCount < 2 ? 'Connect more Yelp accounts to use apply-to-all' : `Save changes to all ${yelpCount} Yelp accounts at once`}
@@ -1941,7 +1941,7 @@ export function Services() {
                       onChange={e => setApplyToAllYelp(e.target.checked)}
                       style={{ cursor: yelpCount < 2 ? 'not-allowed' : 'pointer', accentColor: '#dc2626' }}
                     />
-                    <span>\uD83D\uDD34 Apply to all Yelp ({yelpCount})</span>
+                    <span>{'\u{1F534}'} All Yelp ({yelpCount})</span>
                   </label>
                 )}
                 {ttCount > 0 && (
@@ -1963,13 +1963,13 @@ export function Services() {
                       onChange={e => setApplyToAllTT(e.target.checked)}
                       style={{ cursor: ttCount < 2 ? 'not-allowed' : 'pointer', accentColor: '#2563eb' }}
                     />
-                    <span>\uD83D\uDD35 Apply to all Thumbtack ({ttCount})</span>
+                    <span>{'\u{1F535}'} All Thumbtack ({ttCount})</span>
                   </label>
                 )}
               </div>
             );
           })()}
-          <div style={{ position: 'relative', minWidth: 240 }}>
+          <div style={{ position: 'relative', minWidth: 240, flexShrink: 0 }}>
             <select
               value={selectedAccountId}
               onChange={e => setSelectedAccountId(e.target.value)}
