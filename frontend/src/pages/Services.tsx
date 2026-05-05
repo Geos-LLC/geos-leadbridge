@@ -341,9 +341,18 @@ export function Services() {
   // When checked, save handlers fan out the change to every account on that platform.
   const [applyToAllYelp, _setApplyToAllYelp] = useState<boolean>(() => localStorage.getItem('lb_apply_all_yelp') === '1');
   const [applyToAllTT, _setApplyToAllTT] = useState<boolean>(() => localStorage.getItem('lb_apply_all_tt') === '1');
+  // "All accounts" mode — when on, save handlers fan out to every account on every platform.
+  // Form continues to render data from `selectedAccountId` (the last real account picked).
+  const [allAccountsMode, _setAllAccountsMode] = useState<boolean>(() => localStorage.getItem('lb_all_accounts_mode') === '1');
   const setApplyToAllYelp = (v: boolean) => { _setApplyToAllYelp(v); localStorage.setItem('lb_apply_all_yelp', v ? '1' : '0'); };
   const setApplyToAllTT = (v: boolean) => { _setApplyToAllTT(v); localStorage.setItem('lb_apply_all_tt', v ? '1' : '0'); };
+  const setAllAccountsMode = (v: boolean) => { _setAllAccountsMode(v); localStorage.setItem('lb_all_accounts_mode', v ? '1' : '0'); };
+  const ALL_ACCOUNTS_SENTINEL = '__ALL_ACCOUNTS__';
   const getApplyTargets = (): string[] => {
+    if (allAccountsMode) {
+      const ids = accounts.map(a => a.id);
+      return ids.length > 0 ? ids : (selectedAccountId ? [selectedAccountId] : []);
+    }
     const platform = accounts.find(a => a.id === selectedAccountId)?.platform;
     if (!platform || !selectedAccountId) return selectedAccountId ? [selectedAccountId] : [];
     const apply = platform === 'yelp' ? applyToAllYelp : platform === 'thumbtack' ? applyToAllTT : false;
@@ -1922,72 +1931,95 @@ export function Services() {
             if (yelpCount === 0 && ttCount === 0) return null;
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--lb-ink-3)', alignItems: 'flex-start', whiteSpace: 'nowrap' }}>
-                {yelpCount > 0 && (
-                  <label
-                    title={yelpCount < 2 ? 'Connect more Yelp accounts to use apply-to-all' : `Save changes to all ${yelpCount} Yelp accounts at once`}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      cursor: yelpCount < 2 ? 'not-allowed' : 'pointer',
-                      userSelect: 'none',
-                      opacity: yelpCount < 2 ? 0.45 : 1,
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={applyToAllYelp && yelpCount >= 2}
-                      disabled={yelpCount < 2}
-                      onChange={e => setApplyToAllYelp(e.target.checked)}
-                      style={{ cursor: yelpCount < 2 ? 'not-allowed' : 'pointer', accentColor: '#dc2626' }}
-                    />
-                    <span>{'🔴 All Yelp (' + yelpCount + ')'}</span>
-                  </label>
-                )}
-                {ttCount > 0 && (
-                  <label
-                    title={ttCount < 2 ? 'Connect more Thumbtack accounts to use apply-to-all' : `Save changes to all ${ttCount} Thumbtack accounts at once`}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      cursor: ttCount < 2 ? 'not-allowed' : 'pointer',
-                      userSelect: 'none',
-                      opacity: ttCount < 2 ? 0.45 : 1,
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={applyToAllTT && ttCount >= 2}
-                      disabled={ttCount < 2}
-                      onChange={e => setApplyToAllTT(e.target.checked)}
-                      style={{ cursor: ttCount < 2 ? 'not-allowed' : 'pointer', accentColor: '#2563eb' }}
-                    />
-                    <span>{'🔵 All Thumbtack (' + ttCount + ')'}</span>
-                  </label>
-                )}
+                {yelpCount > 0 && (() => {
+                  const disabled = yelpCount < 2 || allAccountsMode;
+                  const title = allAccountsMode
+                    ? '"All accounts" mode is active — every account is already a save target'
+                    : (yelpCount < 2 ? 'Connect more Yelp accounts to use apply-to-all' : `Save changes to all ${yelpCount} Yelp accounts at once`);
+                  return (
+                    <label
+                      title={title}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        cursor: disabled ? 'not-allowed' : 'pointer',
+                        userSelect: 'none',
+                        opacity: disabled ? 0.45 : 1,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!allAccountsMode && applyToAllYelp && yelpCount >= 2}
+                        disabled={disabled}
+                        onChange={e => setApplyToAllYelp(e.target.checked)}
+                        style={{ cursor: disabled ? 'not-allowed' : 'pointer', accentColor: '#dc2626' }}
+                      />
+                      <span>{'🔴 All Yelp (' + yelpCount + ')'}</span>
+                    </label>
+                  );
+                })()}
+                {ttCount > 0 && (() => {
+                  const disabled = ttCount < 2 || allAccountsMode;
+                  const title = allAccountsMode
+                    ? '"All accounts" mode is active — every account is already a save target'
+                    : (ttCount < 2 ? 'Connect more Thumbtack accounts to use apply-to-all' : `Save changes to all ${ttCount} Thumbtack accounts at once`);
+                  return (
+                    <label
+                      title={title}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        cursor: disabled ? 'not-allowed' : 'pointer',
+                        userSelect: 'none',
+                        opacity: disabled ? 0.45 : 1,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!allAccountsMode && applyToAllTT && ttCount >= 2}
+                        disabled={disabled}
+                        onChange={e => setApplyToAllTT(e.target.checked)}
+                        style={{ cursor: disabled ? 'not-allowed' : 'pointer', accentColor: '#2563eb' }}
+                      />
+                      <span>{'🔵 All Thumbtack (' + ttCount + ')'}</span>
+                    </label>
+                  );
+                })()}
               </div>
             );
           })()}
           <div style={{ position: 'relative', minWidth: 240, flexShrink: 0 }}>
             <select
-              value={selectedAccountId}
-              onChange={e => setSelectedAccountId(e.target.value)}
+              value={allAccountsMode ? ALL_ACCOUNTS_SENTINEL : selectedAccountId}
+              onChange={e => {
+                if (e.target.value === ALL_ACCOUNTS_SENTINEL) {
+                  setAllAccountsMode(true);
+                  // Keep selectedAccountId as-is so the form continues to render data.
+                } else {
+                  setAllAccountsMode(false);
+                  setSelectedAccountId(e.target.value);
+                }
+              }}
               style={{
                 width: '100%',
                 padding: '8px 36px 8px 12px',
                 fontSize: 13,
                 fontFamily: 'inherit',
-                fontWeight: 500,
-                background: 'var(--lb-ink-10)',
-                border: '1px solid var(--lb-line)',
-                color: 'var(--lb-ink-1)',
+                fontWeight: allAccountsMode ? 700 : 500,
+                background: allAccountsMode ? 'oklch(0.95 0.04 270)' : 'var(--lb-ink-10)',
+                border: allAccountsMode ? '1px solid oklch(0.7 0.15 270)' : '1px solid var(--lb-line)',
+                color: allAccountsMode ? 'oklch(0.35 0.18 270)' : 'var(--lb-ink-1)',
                 borderRadius: 'var(--lb-radius)',
                 outline: 'none',
                 appearance: 'none',
                 cursor: 'pointer',
               }}
             >
+              {accounts.length > 1 && (
+                <option value={ALL_ACCOUNTS_SENTINEL}>{'\uD83C\uDF10 All accounts (' + accounts.length + ')'}</option>
+              )}
               {accounts.map(acc => (
                 <option key={acc.id} value={acc.id}>{acc.platform === 'yelp' ? '\uD83D\uDD34 ' : '\uD83D\uDD35 '}{acc.businessName}</option>
               ))}
