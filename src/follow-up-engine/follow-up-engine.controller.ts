@@ -571,6 +571,34 @@ export class FollowUpEngineController {
       },
     });
 
+    // When the global AI Strategy is saved, fan out to this user's AutomationRules
+    // so legacy per-rule overrides don't silently shadow the global setting.
+    // Why: strategy-resolution priority chain in automation.service has 3 legacy
+    // override fields (replyMode='price', promptTemplateId, aiSystemPrompt) ahead
+    // of STRATEGY_PROMPTS[followUpStrategy]. Old rule rows from the pre-unified-UI
+    // era (before commit a1510ca) carry stale values that win the priority chain.
+    if (body.followUpStrategy !== undefined) {
+      const cleared = await this.prisma.automationRule.updateMany({
+        where: {
+          userId: user.id,
+          useAi: true,
+          OR: [
+            { replyMode: 'price' },
+            { promptTemplateId: { not: null } },
+            { aiSystemPrompt: { not: null } },
+          ],
+        },
+        data: {
+          replyMode: 'auto',
+          promptTemplateId: null,
+          aiSystemPrompt: null,
+        },
+      });
+      if (cleared.count > 0) {
+        this.logger.log(`[strategy-save] cleared legacy overrides on ${cleared.count} rule(s) for user ${user.id} (strategy=${body.followUpStrategy})`);
+      }
+    }
+
     // When mode is turned off, stop all active enrollments for this account's leads
     if (mode === 'off') {
       const accountLeads = await this.prisma.lead.findMany({

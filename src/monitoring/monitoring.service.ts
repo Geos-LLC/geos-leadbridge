@@ -157,8 +157,134 @@ export class MonitoringService implements OnModuleInit {
       });
 
       this.logger.warn(`[${severity.toUpperCase()}] [${options.category}] ${options.message}${options.accountName ? ` (${options.accountName})` : ''}`);
+
+      // Auto-detect platform-level OpenAI auth failures inside any captured error.
+      // These affect every tenant and need an out-of-band dev alert (the
+      // per-account email goes to the customer, not the developer).
+      if (this.isOpenAiAuthError(options.message)) {
+        this.notifyDevAlert({
+          kind: 'openai_auth_failure',
+          subject: 'LeadBridge: OpenAI API key broken',
+          message: options.message,
+          context: options.context,
+        }).catch(err => this.logger.error(`[DevAlert] notify failed: ${err.message}`));
+      }
     } catch (err: any) {
       this.logger.error(`MonitoringService.captureError internal failure: ${err.message}`);
+    }
+  }
+
+  // ==========================================
+  // Dev Alerts — platform-wide failures (broken keys, dead infra)
+  // ==========================================
+
+  private isOpenAiAuthError(msg: string | undefined | null): boolean {
+    if (!msg) return false;
+    return /401\s*incorrect api key|invalid_api_key|invalid api key/i.test(msg);
+  }
+
+  /**
+   * Send a developer-facing email alert for platform-level failures.
+   * Dedups to one email per 24h per `kind` via SystemErrorLog.emailedAt.
+   * Fire-and-forget safe — never throws.
+   *
+   * Recipient: alerts@leadbridge360.com (also the from address). Override via
+   * DEV_ALERT_EMAIL env var.
+   */
+  async notifyDevAlert(opts: {
+    kind: string;            // stable code, e.g. 'openai_auth_failure'
+    subject: string;
+    message: string;
+    context?: Record<string, any>;
+  }): Promise<void> {
+    try {
+      const apiKey = this.configService.get<string>('SENDGRID_API_KEY') || process.env.SENDGRID_API_KEY;
+      if (!apiKey) {
+        this.logger.warn('[DevAlert] SendGrid not configured — skipping');
+        return;
+      }
+      const fromEmail = this.configService.get<string>('SENDGRID_FROM_EMAIL') || process.env.SENDGRID_FROM_EMAIL || 'alerts@leadbridge360.com';
+      const toEmail = this.configService.get<string>('DEV_ALERT_EMAIL') || process.env.DEV_ALERT_EMAIL || 'alerts@leadbridge360.com';
+
+      // Dedup via SystemErrorLog (category='other', code=kind, no accountId).
+      const DEDUP_WINDOW_MS = 24 * 60 * 60 * 1000;
+      const existing = await this.prisma.systemErrorLog.findFirst({
+        where: { category: 'other', code: opts.kind, accountId: null, userId: null },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (existing?.emailedAt && Date.now() - existing.emailedAt.getTime() < DEDUP_WINDOW_MS) {
+        this.logger.debug(`[DevAlert] suppressed (sent ${Math.round((Date.now() - existing.emailedAt.getTime()) / 60000)}m ago): ${opts.kind}`);
+        return;
+      }
+
+      const ctxJson = opts.context ? JSON.stringify(opts.context, null, 2) : null;
+      const body = [
+        `Kind: ${opts.kind}`,
+        `When: ${new Date().toISOString()}`,
+        '',
+        opts.message,
+        ctxJson ? `\nContext:\n${ctxJson}` : '',
+      ].join('\n');
+
+      const sgMail = require('@sendgrid/mail');
+      sgMail.setApiKey(apiKey);
+      await sgMail.send({
+        to: toEmail,
+        from: { email: fromEmail, name: 'LeadBridge Dev Alerts' },
+        subject: opts.subject,
+        text: body,
+      });
+
+      // Update or create the dedup row
+      if (existing) {
+        await this.prisma.systemErrorLog.update({
+          where: { id: existing.id },
+          data: { emailedAt: new Date(), message: opts.message },
+        });
+      } else {
+        await this.prisma.systemErrorLog.create({
+          data: {
+            category: 'other',
+            code: opts.kind,
+            severity: 'error',
+            message: opts.message,
+            context: ctxJson,
+            emailedAt: new Date(),
+          },
+        });
+      }
+      this.logger.warn(`[DevAlert] sent: ${opts.kind} → ${toEmail}`);
+    } catch (err: any) {
+      this.logger.error(`[DevAlert] internal failure (${opts.kind}): ${err.message}`);
+    }
+  }
+
+  /**
+   * Cron: every hour, probe OpenAI to detect a broken key even when no leads
+   * are coming in. Catches outages on quiet days.
+   */
+  @Cron('30 */1 * * *')
+  async openAiKeyProbe(): Promise<void> {
+    const apiKey = this.configService.get<string>('OPENAI_API_KEY') || process.env.OPENAI_API_KEY;
+    if (!apiKey) return;
+    try {
+      const r = await fetch('https://api.openai.com/v1/models', {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (r.status === 401) {
+        const body = await r.text().catch(() => '');
+        this.logger.error(`[OpenAIProbe] 401 — ${body.slice(0, 200)}`);
+        await this.notifyDevAlert({
+          kind: 'openai_auth_failure',
+          subject: 'LeadBridge: OpenAI API key broken (probe)',
+          message: `Hourly probe got 401 from OpenAI /v1/models. Key suffix: ...${apiKey.slice(-6)}.`,
+          context: { source: 'probe', responseExcerpt: body.slice(0, 200) },
+        });
+      } else if (!r.ok) {
+        this.logger.warn(`[OpenAIProbe] non-OK status ${r.status}`);
+      }
+    } catch (err: any) {
+      this.logger.warn(`[OpenAIProbe] network error: ${err.message}`);
     }
   }
 
