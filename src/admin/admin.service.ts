@@ -367,7 +367,9 @@ export class AdminService {
     if (dto.trialLeadsHandled !== undefined) data.trialLeadsHandled = dto.trialLeadsHandled;
     if (dto.trialLeadsLimit !== undefined) data.trialLeadsLimit = dto.trialLeadsLimit;
 
-    // If resetting leads to 0, also reset trial dates to give a fresh 14-day trial
+    // If resetting leads to 0, also reset trial dates to give a fresh 14-day trial.
+    // Must clear trialEndedAt/trialEndNotifiedAt too — otherwise canProcessLead() keeps
+    // blocking and the trial-end notification won't re-fire if they exhaust again.
     if (dto.trialLeadsHandled === 0) {
       const now = new Date();
       const newTrialEnd = new Date(now);
@@ -375,6 +377,8 @@ export class AdminService {
       data.trialStartDate = now;
       data.trialEndDate = newTrialEnd;
       data.trialUsed = false;
+      data.trialEndedAt = null;
+      data.trialEndNotifiedAt = null;
     }
 
     const updatedUser = await this.prisma.user.update({
