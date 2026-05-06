@@ -851,11 +851,17 @@ export class FollowUpSchedulerService implements OnModuleInit {
       const uiSteps = settings.followUpSteps || settings.followUpSmartSteps || settings.followUpCustomSteps;
       if (!uiSteps || !Array.isArray(uiSteps) || uiSteps.length === 0) return null;
 
+      // Sequence-level mode wins. When the account is in AI mode we drop any
+      // leftover step text so the generator runs the AI path; this keeps stale
+      // accounts (saved before the UI strip-on-AI logic landed) consistent
+      // with the user's intent without forcing them to re-save.
+      const aiMode = settings.followUpReplyType === 'ai';
+
       return uiSteps.map((s: any, i: number) => ({
         stepOrder: i,
         delayMinutes: this.parseDelay(s.delay),
         objective: 'follow_up',
-        messageTemplate: s.message || null,
+        messageTemplate: aiMode ? null : (s.message || null),
       }));
     } catch {
       return null;
