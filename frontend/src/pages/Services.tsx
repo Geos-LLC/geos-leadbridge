@@ -441,20 +441,31 @@ export function Services() {
   const [fuMode, setFuMode] = useState<'off' | 'suggest' | 'auto_send'>('suggest');
   const [fuReplyType, setFuReplyType] = useState<'template' | 'ai'>('ai');
   // Timing mode removed — one editable sequence for both Manual and Auto-send
-  const SMART_DEFAULTS = [
-    { label: '1st', delay: '2 min', message: 'Hi {{lead.name}}, just wanted to make sure you saw my message. Happy to answer any questions!' },
-    { label: '2nd', delay: '10 min', message: 'Quick follow-up — I have availability this week if you\'d like to get on the schedule. Let me know what works for you!' },
-    { label: '3rd', delay: '1 hour', message: 'Hi {{lead.name}}, still here if you need anything. Would you like a price estimate based on your home details?' },
-    { label: '4th', delay: '1 day', message: 'Hey {{lead.name}}, just checking in. I\'d love to help with your {{lead.category}} — want me to put together a quote?' },
-    { label: '5th', delay: '3 days', message: 'Hi {{lead.name}}, I know things get busy! I still have openings this week for {{lead.category}}. Let me know if you\'re still interested.' },
-    { label: '6th', delay: '7 days', message: 'Hi {{lead.name}}, following up one more time. If you\'re still looking for {{lead.category}}, I\'d be happy to help. No pressure either way!' },
-    { label: '7th', delay: '2 weeks', message: 'Hey {{lead.name}}, it\'s been a couple weeks — just wanted to check if you still need {{lead.category}}. We\'re here if you do!' },
-    { label: '8th', delay: '1 month', message: 'Hi {{lead.name}}, hope you\'re doing well! If you\'re still thinking about {{lead.category}}, we have some availability coming up. Just let me know.' },
-    { label: '9th', delay: '3 months', message: 'Hi {{lead.name}}, it\'s been a while! If you ever need {{lead.category}} in the future, don\'t hesitate to reach out. We\'d love to help.' },
-    { label: '10th', delay: '6 months', message: 'Hey {{lead.name}}, just a friendly check-in. If you need {{lead.category}} or know someone who does, we\'re always here!' },
-    { label: '11th', delay: '1 year', message: 'Hi {{lead.name}}, it\'s been a year since you reached out about {{lead.category}}. If you ever need us again, we\'d love to hear from you!' },
+  type FuStep = { label: string; delay: string; message: string; mode: 'template' | 'ai' };
+  const SMART_DEFAULTS: FuStep[] = [
+    { label: '1st', delay: '2 min', mode: 'template', message: 'Hi {{lead.name}}, just wanted to make sure you saw my message. Happy to answer any questions!' },
+    { label: '2nd', delay: '10 min', mode: 'template', message: 'Quick follow-up — I have availability this week if you\'d like to get on the schedule. Let me know what works for you!' },
+    { label: '3rd', delay: '1 hour', mode: 'template', message: 'Hi {{lead.name}}, still here if you need anything. Would you like a price estimate based on your home details?' },
+    { label: '4th', delay: '1 day', mode: 'template', message: 'Hey {{lead.name}}, just checking in. I\'d love to help with your {{lead.category}} — want me to put together a quote?' },
+    { label: '5th', delay: '3 days', mode: 'template', message: 'Hi {{lead.name}}, I know things get busy! I still have openings this week for {{lead.category}}. Let me know if you\'re still interested.' },
+    { label: '6th', delay: '7 days', mode: 'template', message: 'Hi {{lead.name}}, following up one more time. If you\'re still looking for {{lead.category}}, I\'d be happy to help. No pressure either way!' },
+    { label: '7th', delay: '2 weeks', mode: 'template', message: 'Hey {{lead.name}}, it\'s been a couple weeks — just wanted to check if you still need {{lead.category}}. We\'re here if you do!' },
+    { label: '8th', delay: '1 month', mode: 'template', message: 'Hi {{lead.name}}, hope you\'re doing well! If you\'re still thinking about {{lead.category}}, we have some availability coming up. Just let me know.' },
+    { label: '9th', delay: '3 months', mode: 'template', message: 'Hi {{lead.name}}, it\'s been a while! If you ever need {{lead.category}} in the future, don\'t hesitate to reach out. We\'d love to help.' },
+    { label: '10th', delay: '6 months', mode: 'template', message: 'Hey {{lead.name}}, just a friendly check-in. If you need {{lead.category}} or know someone who does, we\'re always here!' },
+    { label: '11th', delay: '1 year', mode: 'template', message: 'Hi {{lead.name}}, it\'s been a year since you reached out about {{lead.category}}. If you ever need us again, we\'d love to hear from you!' },
   ];
-  const [fuSmartSteps, setFuSmartSteps] = useState(SMART_DEFAULTS.map(s => ({ ...s })));
+  // Coerce a possibly-legacy step from the API (no `mode` field) into the strict
+  // FuStep shape: explicit s.mode wins; else infer 'template' if a message is
+  // saved, 'ai' otherwise. Keeps the typed template around in state even when
+  // the user toggles to AI, so flipping back doesn't lose the text.
+  const hydrateStep = (s: any, idx: number): FuStep => ({
+    label: s?.label ?? `${idx + 1}th`,
+    delay: s?.delay ?? '',
+    message: s?.message ?? '',
+    mode: s?.mode === 'ai' || s?.mode === 'template' ? s.mode : (s?.message ? 'template' : 'ai'),
+  });
+  const [fuSmartSteps, setFuSmartSteps] = useState<FuStep[]>(SMART_DEFAULTS.map(s => ({ ...s })));
   const [fuAvailability, setFuAvailability] = useState<'always' | 'active_hours'>('active_hours');
   const [fuStart, setFuStart] = useState('18:00');
   const [fuEnd, setFuEnd] = useState('09:00');
@@ -473,7 +484,6 @@ export function Services() {
   const [fuQuietHoursEnd, setFuQuietHoursEnd] = useState('08:00');
   const [fuQuietHoursEnabled, setFuQuietHoursEnabled] = useState(true);
   const [fuSaving, setFuSaving] = useState(false);
-  const [fuTimingEditing, setFuTimingEditing] = useState(false);
   const [fuShowRules, setFuShowRules] = useState(false);
   const [aiConversationOn, setAiConversationOn] = useState(false);
   const [aiShowRules, setAiShowRules] = useState(false);
@@ -647,10 +657,8 @@ export function Services() {
         if (s.followUpTimezone) setFuTz(s.followUpTimezone);
         // New fields (stored in extended settings JSON)
         // timing mode removed — single sequence
-        if (s.followUpSteps) setFuSmartSteps(s.followUpSteps);
-        else if (s.followUpSmartSteps) setFuSmartSteps(s.followUpSmartSteps);
-        else if (s.followUpCustomSteps) setFuSmartSteps(s.followUpCustomSteps);
-        if (s.followUpSmartSteps) setFuSmartSteps(s.followUpSmartSteps);
+        const rawSteps = s.followUpSteps || s.followUpSmartSteps || s.followUpCustomSteps;
+        if (Array.isArray(rawSteps)) setFuSmartSteps(rawSteps.map(hydrateStep));
         if (s.followUpAvailability) setFuAvailability(s.followUpAvailability);
         // Strategy mode is always 'auto', scenarios always all-enabled
         // fuStopOnReply is always true (internal rule)
@@ -3219,30 +3227,59 @@ export function Services() {
                       >Change</button>
                     </div>
 
-                    {/* Follow-up Plan */}
+                    {/* Follow-up Plan — per-step Template/AI picker mirrors Instant Reply Mode UI. */}
                     <div>
                       <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Follow-up Plan</label>
-                      {fuMode === 'suggest' ? (
-                        <div className="space-y-2">
-                          <p className="text-[11px] text-slate-400 mb-1">Preset messages sent on schedule. Edit each template below.</p>
-                          {fuSmartSteps.map((step, i) => (
-                            <div key={i} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                              <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-100">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[10px] font-bold text-slate-500">#{i + 1}</span>
-                                  <span className="text-[11px] text-slate-600">after <strong>{step.delay || '—'}</strong></span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                  <input type="text" value={step.delay}
-                                    onChange={e => { const u = [...fuSmartSteps]; u[i] = { ...u[i], delay: e.target.value }; setFuSmartSteps(u); }}
-                                    className="w-20 px-1.5 py-0.5 border border-slate-200 rounded text-[10px] text-center bg-white" />
-                                  {fuSmartSteps.length > 1 && (
-                                    <button onClick={() => setFuSmartSteps(fuSmartSteps.filter((_, j) => j !== i))}
-                                      className="text-slate-300 hover:text-red-500"><Trash2 size={11} /></button>
-                                  )}
-                                </div>
+                      <p className="text-[11px] text-slate-400 mb-2">Pick how each step is composed. Template sends the saved text literally; AI generates the message from the conversation using your AI Strategy.</p>
+                      <div className="space-y-2">
+                        {fuSmartSteps.map((step, i) => (
+                          <div key={i} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                            <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-100">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-slate-500">#{i + 1}</span>
+                                <span className="text-[11px] text-slate-600">after <strong>{step.delay || '—'}</strong></span>
                               </div>
-                              <div className="px-3 py-2 text-xs text-slate-600 leading-relaxed relative group min-h-[40px]">
+                              <div className="flex items-center gap-1.5">
+                                <input type="text" value={step.delay}
+                                  onChange={e => { const u = [...fuSmartSteps]; u[i] = { ...u[i], delay: e.target.value }; setFuSmartSteps(u); }}
+                                  className="w-20 px-1.5 py-0.5 border border-slate-200 rounded text-[10px] text-center bg-white" />
+                                {fuSmartSteps.length > 1 && (
+                                  <button onClick={() => setFuSmartSteps(fuSmartSteps.filter((_, j) => j !== i))}
+                                    className="text-slate-300 hover:text-red-500"><Trash2 size={11} /></button>
+                                )}
+                              </div>
+                            </div>
+                            {/* Per-step mode picker (matches Instant Reply Mode buttons) */}
+                            <div className="px-3 pt-3">
+                              <div className="grid grid-cols-2 gap-2">
+                                {(() => {
+                                  const modes: Array<{ key: 'template' | 'ai'; emoji: string; label: string; active: string; desc: string }> = [
+                                    { key: 'template', emoji: '🟢', label: 'Custom Template', active: '#16a34a', desc: 'Send your saved template literally — no AI generation' },
+                                    { key: 'ai',       emoji: '🟣', label: 'AI',              active: '#7c3aed', desc: 'AI generates the reply using your AI Strategy and conversation context' },
+                                  ];
+                                  return modes.map(m => {
+                                    const isActive = step.mode === m.key;
+                                    return (
+                                      <button
+                                        key={m.key}
+                                        title={m.desc}
+                                        onClick={() => { const u = [...fuSmartSteps]; u[i] = { ...u[i], mode: m.key }; setFuSmartSteps(u); }}
+                                        className="py-1.5 px-2 rounded-lg text-[11px] font-semibold border-2 transition-all"
+                                        style={{
+                                          background: isActive ? m.active : '#f1f5f9',
+                                          color: isActive ? '#fff' : '#64748b',
+                                          borderColor: isActive ? m.active : '#e2e8f0',
+                                        }}
+                                      >
+                                        {m.emoji} {m.label}
+                                      </button>
+                                    );
+                                  });
+                                })()}
+                              </div>
+                            </div>
+                            {step.mode === 'template' ? (
+                              <div className="px-3 py-2 mt-1 text-xs text-slate-600 leading-relaxed relative group min-h-[40px]">
                                 {step.message || <span className="text-slate-300 italic">No template set — click edit to add</span>}
                                 <button
                                   onClick={() => setTemplateEditor({ mode: step.message ? 'service-edit' : 'create', ruleId: '', templateId: undefined, templateName: `Follow-up #${i + 1} (${step.delay})`, content: step.message || '', type: `fu-step-${i}` })}
@@ -3250,45 +3287,21 @@ export function Services() {
                                   <Pencil className="w-3.5 h-3.5" />
                                 </button>
                               </div>
-                            </div>
-                          ))}
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => setFuSmartSteps([...fuSmartSteps, { label: `${fuSmartSteps.length + 1}th`, delay: '', message: '' }])}
-                              className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold">+ Add step</button>
-                            <button onClick={() => setFuSmartSteps(SMART_DEFAULTS.map(s => ({ ...s })))}
-                              className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold ml-auto">Reset to defaults</button>
+                            ) : (
+                              <div className="px-3 py-2 mt-1 flex items-start gap-2 text-[11px] text-slate-500 leading-relaxed">
+                                <Zap className="w-3.5 h-3.5 text-violet-500 mt-0.5 shrink-0" />
+                                <span>AI writes this step from the live conversation, using <span className="font-semibold capitalize text-slate-700">{fuStrategy}</span> strategy and the previous messages so it stays on-topic.</span>
+                              </div>
+                            )}
                           </div>
+                        ))}
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => setFuSmartSteps([...fuSmartSteps, { label: `${fuSmartSteps.length + 1}th`, delay: '', message: '', mode: 'ai' }])}
+                            className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold">+ Add step</button>
+                          <button onClick={() => setFuSmartSteps(SMART_DEFAULTS.map(s => ({ ...s })))}
+                            className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold ml-auto">Reset to defaults</button>
                         </div>
-                      ) : (
-                        <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-2">
-                          <p className="text-[11px] text-slate-400 mb-1">AI generates messages at each step based on conversation context.</p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {fuSmartSteps.map((step, i) => (
-                              <span key={i} className="text-[10px] px-2 py-0.5 rounded border bg-white text-slate-500 border-slate-100">{i + 1}. {step.delay || '—'}</span>
-                            ))}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => setFuTimingEditing(!fuTimingEditing)} className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-1"><Pencil className="w-3 h-3" /> Edit timing</button>
-                            <button onClick={() => { setFuSmartSteps(SMART_DEFAULTS.map(s => ({ ...s }))); setFuTimingEditing(false); }} className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold ml-auto">Reset</button>
-                          </div>
-                          {fuTimingEditing && (
-                            <div className="space-y-1.5 pt-2 border-t border-slate-200">
-                              {fuSmartSteps.map((step, i) => (
-                                <div key={i} className="flex items-center gap-2">
-                                  <span className="text-[10px] text-slate-400 w-5 text-right shrink-0">{i + 1}.</span>
-                                  <input type="text" value={step.delay} onChange={e => { const u = [...fuSmartSteps]; u[i] = { ...u[i], delay: e.target.value }; setFuSmartSteps(u); }}
-                                    className="flex-1 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs" placeholder="e.g. 2 min" />
-                                  {fuSmartSteps.length > 1 && (
-                                    <button onClick={() => setFuSmartSteps(fuSmartSteps.filter((_, j) => j !== i))} className="text-slate-300 hover:text-red-500 text-xs shrink-0">✕</button>
-                                  )}
-                                </div>
-                              ))}
-                              <button onClick={() => setFuSmartSteps([...fuSmartSteps, { label: `${fuSmartSteps.length + 1}th`, delay: '', message: '' }])}
-                                className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold">+ Add step</button>
-                            </div>
-                          )}
-                        </div>
-                      )}
+                      </div>
                     </div>
 
                     {/* Re-enroll after customer reply */}
@@ -3679,7 +3692,14 @@ export function Services() {
                       activeHoursEnd: fuAvailability === 'active_hours' ? fuEnd : null as any,
                       timezone: fuTz,
                       platform: accounts.find(a => a.id === acctId)?.platform || 'yelp',
-                      steps: fuSmartSteps,
+                      // For AI-mode steps, send an empty message so the backend's
+                      // `messageTemplate: s.message || null` mapping resolves to
+                      // null and the generator runs the AI path. We still send
+                      // `mode` so the explicit choice round-trips on reload.
+                      steps: fuSmartSteps.map(s => ({
+                        ...s,
+                        message: s.mode === 'ai' ? '' : s.message,
+                      })),
                       availability: fuAvailability,
                       strategyMode: 'auto',
                       scenarios: { hybrid: true, price: true, qualify: true, convert: true, phone: true },
