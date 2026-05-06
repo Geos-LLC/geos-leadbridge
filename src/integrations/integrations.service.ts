@@ -118,13 +118,15 @@ export class IntegrationsService {
       });
 
       if (existing) {
-        // Update: only mark needsRefetch if the lead was already imported
-        // (avoids marking all leads as needsRefetch when batch streaming re-sends them)
+        // Don't auto-flag needsRefetch on re-collection. Page-scrape data (budget,
+        // city, postcode) doesn't change after lead creation, so re-scraping
+        // every re-collected lead just creates a permanent "missing details"
+        // backlog. The genuine case (API recovered from local data, full details
+        // unavailable) is handled in leads.service.ts where the data is missing.
         await this.prisma.thumbtackLeadId.update({
           where: { id: existing.id },
           data: {
             batchId,
-            ...(existing.imported ? { needsRefetch: true } : {}),
             lastActivityAt: capturedAt,
             ...(status ? { thumbtackStatus: status } : {}),
             ...(customerName ? { customerName } : {}),
