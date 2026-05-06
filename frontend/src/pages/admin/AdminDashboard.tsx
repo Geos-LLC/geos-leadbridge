@@ -385,6 +385,10 @@ export default function AdminDashboard() {
         {usersAccessDenied ? (
           <SupportAccessRequired
             scope="user:list"
+            // Bundle the write-side scopes so a single grant request unblocks
+            // the row-level actions (reset trial, change subscription, delete)
+            // that otherwise silently 404 with no recovery UI of their own.
+            bundleScopes={['user:read', 'user:write', 'user:delete', 'trials:reset']}
             sectionLabel="the user list"
             onGranted={loadData}
           />

@@ -5,6 +5,11 @@ import { notify } from '../store/notificationStore';
 
 type Props = {
   scope: string;
+  // Optional extra scopes to bundle into the issued grant alongside `scope`.
+  // The displayed/explained scope stays `scope` (the one that triggered the
+  // banner); bundling lets one click cover related write-side actions on the
+  // same page (e.g. user:list banner also pre-authorizes user:write).
+  bundleScopes?: string[];
   tenantId?: string;
   sectionLabel: string;
   onGranted: () => void;
@@ -17,7 +22,8 @@ const DURATION_OPTIONS = [
   { label: '24 hours', value: 1440 },
 ];
 
-export function SupportAccessRequired({ scope, tenantId, sectionLabel, onGranted }: Props) {
+export function SupportAccessRequired({ scope, bundleScopes, tenantId, sectionLabel, onGranted }: Props) {
+  const allScopes = Array.from(new Set([scope, ...(bundleScopes ?? [])]));
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [duration, setDuration] = useState(60);
@@ -33,11 +39,12 @@ export function SupportAccessRequired({ scope, tenantId, sectionLabel, onGranted
       setSubmitting(true);
       await supportGrantsApi.createSelf({
         tenantId: tenantId ?? '__platform__',
-        scopes: [scope],
+        scopes: allScopes,
         reason: trimmed,
         durationMinutes: duration,
       });
-      notify.success('Access granted', `Support grant issued for ${scope} (${duration} min).`);
+      const scopeLabel = allScopes.length === 1 ? allScopes[0] : `${allScopes.length} scopes`;
+      notify.success('Access granted', `Support grant issued for ${scopeLabel} (${duration} min).`);
       setOpen(false);
       setReason('');
       onGranted();
@@ -77,7 +84,8 @@ export function SupportAccessRequired({ scope, tenantId, sectionLabel, onGranted
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Request support grant</h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  Scope: <span className="font-mono">{scope}</span>
+                  {allScopes.length === 1 ? 'Scope: ' : 'Scopes: '}
+                  <span className="font-mono">{allScopes.join(', ')}</span>
                   {tenantId && tenantId !== '__platform__' ? (
                     <> · Tenant: <span className="font-mono">{tenantId}</span></>
                   ) : (
