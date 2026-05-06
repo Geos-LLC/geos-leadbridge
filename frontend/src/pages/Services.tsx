@@ -304,6 +304,7 @@ export function Services() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const subscriptionTier = useAuthStore(s => s.user?.subscriptionTier);
+  const trialActive = useAuthStore(s => s.user?.trialActive);
   const setAuthUser = useAuthStore(s => s.setAuth);
   const authToken = useAuthStore(s => s.token);
   // Refresh the cached user on mount so a newly-purchased plan applies without requiring re-login.
@@ -317,10 +318,11 @@ export function Services() {
       })
       .catch(() => { /* silent: stale cache is not fatal */ });
   }, [authToken, setAuthUser]);
-  // Tier 2+ = Engage (PRO or ENTERPRISE). Unlocks SMS, calls, follow-ups, re-engagement alerts.
-  const canUseEngage = subscriptionTier === 'PRO' || subscriptionTier === 'ENTERPRISE';
-  // Tier 3 = Convert (ENTERPRISE). Unlocks AI Conversation.
-  const canUseConvert = subscriptionTier === 'ENTERPRISE';
+  // Engage/Convert unlock: paid PRO/ENTERPRISE or active adaptive trial.
+  // Trial users get the full feature set during the trial so they actually
+  // exercise SMS/calls/follow-ups before deciding to upgrade.
+  const canUseEngage = trialActive || subscriptionTier === 'PRO' || subscriptionTier === 'ENTERPRISE';
+  const canUseConvert = trialActive || subscriptionTier === 'ENTERPRISE';
   const storedAccounts = useAppStore(state => state.savedAccounts);
   const setSavedAccounts = useAppStore(state => state.setSavedAccounts);
   const setAccountDiagnostics = useAppStore(state => state.setAccountDiagnostics);

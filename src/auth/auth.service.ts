@@ -10,6 +10,7 @@ import { EncryptionUtil } from '../common/utils/encryption.util';
 import { SigcoreService } from '../sigcore/sigcore.service';
 import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
+import { TrialService } from '../trial/trial.service';
 import * as crypto from 'crypto';
 import emailjs from '@emailjs/nodejs';
 
@@ -24,6 +25,7 @@ export class AuthService {
     private jwtService: JwtService,
     private sigcoreService: SigcoreService,
     private cache: CacheService,
+    private trialService: TrialService,
   ) {}
 
   /**
@@ -166,6 +168,14 @@ export class AuthService {
         phoneNumber: true,
         businessPhone: true,
         createdAt: true,
+        // Trial fields — used to compute `trialActive` so the frontend can
+        // unlock Engage/Convert features for trial users without an extra
+        // /v1/billing/subscription fetch on every page mount.
+        trialType: true,
+        trialEndedAt: true,
+        trialEndDate: true,
+        trialLeadsHandled: true,
+        trialLeadsLimit: true,
         platforms: {
           select: {
             platformName: true,
@@ -181,7 +191,12 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
 
-    return user;
+    // Reuse the canonical trial-active logic (paid sub OR active adaptive
+    // trial). Frontend gates use this to unlock Engage/Convert features
+    // during trial — same semantics as canProcessLead's 'trial' branch.
+    const trialView = this.trialService.buildTrialView(user);
+
+    return { ...user, trialActive: trialView.isActive };
   }
 
   /**

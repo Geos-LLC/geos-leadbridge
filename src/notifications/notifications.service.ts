@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { CacheService } from '../common/cache/cache.service';
 import { CacheKeys } from '../common/cache/cache-keys';
+import { TrialService } from '../trial/trial.service';
 import {
   buildDeliveryStatusWebhookUrl,
   buildInboundSmsWebhookUrl,
@@ -191,6 +192,7 @@ export class NotificationsService {
     private prisma: PrismaService,
     private configService: ConfigService,
     private cache: CacheService,
+    private trialService: TrialService,
   ) {
     this.appSigcoreApiKey = this.configService.get<string>('SIGCORE_API_KEY', '');
   }
@@ -2920,13 +2922,12 @@ export class NotificationsService {
   ): Promise<{ success: boolean; tenantPhone?: any; error?: string }> {
     this.logger.log(`[purchaseTenantPhone] userId=${userId}, account=${savedAccountId}, phone=${phoneNumber}`);
 
-    // 0. Tier gate: only Engage (PRO) and Convert (ENTERPRISE) can purchase LeadBridge Numbers.
-    const tierUser = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { subscriptionTier: true },
-    });
-    if (tierUser?.subscriptionTier !== 'PRO' && tierUser?.subscriptionTier !== 'ENTERPRISE') {
-      this.logger.warn(`[purchaseTenantPhone] Rejected: tier=${tierUser?.subscriptionTier || 'none'}`);
+    // 0. Access gate: paid Engage/Convert OR active adaptive trial. Trial users
+    // get the full feature set so they actually exercise SMS/calls during the
+    // trial; canProcessLead encapsulates both branches (paid + active trial).
+    const access = await this.trialService.canProcessLead(userId);
+    if (!access.allowed) {
+      this.logger.warn(`[purchaseTenantPhone] Rejected: reason=${access.reason}`);
       return { success: false, error: 'Upgrade to Engage or Convert to buy LeadBridge Numbers.' };
     }
 

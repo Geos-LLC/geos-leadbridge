@@ -32,6 +32,10 @@ export interface User {
   trialStartDate?: string;
   trialEndDate?: string;
   trialUsed?: boolean;
+  // True when the user has an active adaptive trial (computed server-side
+  // from trialType + trialEndedAt + lead/time limits). Frontend uses it to
+  // unlock Engage/Convert features during the trial without an extra fetch.
+  trialActive?: boolean;
   onboardingProfile?: OnboardingProfile | null;
 }
 

@@ -1851,7 +1851,7 @@ export default function SettingsPage() {
         <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-6">
           <LeadBridgeNumberManager
             accounts={accounts}
-            canPurchase={subscription?.tier === 'PRO' || subscription?.tier === 'ENTERPRISE'}
+            canPurchase={subscription?.trial?.isActive || subscription?.tier === 'PRO' || subscription?.tier === 'ENTERPRISE'}
             onSuccess={msg => notify.success('Success', msg)}
             onError={msg => notify.error('Error', msg)}
           />
