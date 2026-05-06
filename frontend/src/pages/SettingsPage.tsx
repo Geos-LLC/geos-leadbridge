@@ -147,18 +147,26 @@ export default function SettingsPage() {
     loadData(true);
   }, []);
 
-  // Check the Thumbtack-specific marker, not the generic flag (which the Yelp extension also sets)
+  // Detect Thumbtack extension. The per-extension marker is preferred, but older
+  // Thumbtack builds only set the generic flag — fall back to that when the Yelp
+  // marker isn't present (so a Yelp-only profile doesn't false-positive).
   useEffect(() => {
     const check = () => {
-      const installed = document.documentElement.getAttribute('data-leadbridge-ext-thumbtack') === 'true';
-      setExtensionInstalled(installed);
+      const html = document.documentElement;
+      const tt = html.getAttribute('data-leadbridge-ext-thumbtack') === 'true';
+      const generic = html.getAttribute('data-leadbridge-extension') === 'true';
+      const yelp = html.getAttribute('data-leadbridge-ext-yelp') === 'true';
+      setExtensionInstalled(tt || (generic && !yelp));
     };
     check();
     const timer = setTimeout(check, 1500);
     const onVisibility = () => { if (document.visibilityState === 'visible') check(); };
     document.addEventListener('visibilitychange', onVisibility);
     const observer = new MutationObserver(check);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-leadbridge-ext-thumbtack'] });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-leadbridge-ext-thumbtack', 'data-leadbridge-extension', 'data-leadbridge-ext-yelp'],
+    });
     return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibility); observer.disconnect(); };
   }, []);
 
