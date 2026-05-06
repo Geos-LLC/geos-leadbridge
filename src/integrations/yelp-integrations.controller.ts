@@ -18,6 +18,28 @@ import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.serv
 import { LeadStatusService, WriteStatusResult } from '../leads/lead-status.service';
 import { mapYelpToLbStatus } from './yelp-status-map';
 
+// Parses relative timestamps the extension scrapes from biz.yelp.com card
+// labels ("22 hours ago", "3 days ago", "2 weeks ago", "1 month ago"). Used
+// when the Yelp API can't return the lead's actual time_created (401/404)
+// so historical imports don't all land at "now".
+function parseRelativeDate(s: string | null | undefined): Date | null {
+  if (!s) return null;
+  const m = s.match(/(\d+)\s+(minute|hour|day|week|month|year)s?\s+ago/i);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  const unitMs: Record<string, number> = {
+    minute: 60_000,
+    hour: 3_600_000,
+    day: 86_400_000,
+    week: 604_800_000,
+    month: 2_592_000_000,
+    year: 31_536_000_000,
+  };
+  const ms = unitMs[m[2].toLowerCase()];
+  if (!ms) return null;
+  return new Date(Date.now() - n * ms);
+}
+
 @Controller('v1/integrations/yelp')
 @UseGuards(JwtAuthGuard)
 export class YelpIntegrationsController {
@@ -220,7 +242,10 @@ export class YelpIntegrationsController {
       try {
         const leadData = await yelpAdapter.getLead({ accessToken: creds.accessToken }, leadId);
 
-        // Create conversation
+        // Create conversation. On update we don't bump lastMessageAt — this
+        // endpoint is hit by extension imports (often for historical leads),
+        // and overwriting with NOW would clobber whatever real activity time
+        // is already there from earlier webhook delivery.
         const conversation = await this.prisma.conversation.upsert({
           where: { platform_externalThreadId: { platform: 'yelp', externalThreadId: leadId } },
           create: {
@@ -231,7 +256,7 @@ export class YelpIntegrationsController {
             lastMessageAt: leadData.createdAt || new Date(),
             status: 'active',
           },
-          update: { lastMessageAt: new Date() },
+          update: {},
         });
 
         // Create lead with the canonical default 'new'. The scraped raw status
@@ -258,6 +283,11 @@ export class YelpIntegrationsController {
             category: leadData.category || leadCategories?.[leadId],
             status: 'new',
             rawJson: JSON.stringify(leadData.raw || {}),
+            // Preserve the lead's actual Yelp creation date so historical
+            // imports show up on their real day in analytics, not on the
+            // import day. Falls through to Prisma's default(now()) when the
+            // adapter couldn't determine a date.
+            ...(leadData.createdAt ? { createdAt: leadData.createdAt } : {}),
           },
         });
 
@@ -306,6 +336,9 @@ export class YelpIntegrationsController {
 
         try {
           const scrapedName = leadNames?.[leadId] || 'Unknown';
+          // Best-effort historical date from the extension's relative-time
+          // scrape ("22 hours ago", "3 days ago", etc.). Falls back to NOW.
+          const scrapedDate = parseRelativeDate(leadDates?.[leadId]);
           const conversation = await this.prisma.conversation.upsert({
             where: { platform_externalThreadId: { platform: 'yelp', externalThreadId: leadId } },
             create: {
@@ -313,7 +346,7 @@ export class YelpIntegrationsController {
               platform: 'yelp',
               externalThreadId: leadId,
               customerName: scrapedName,
-              lastMessageAt: new Date(),
+              lastMessageAt: scrapedDate || new Date(),
               status: 'active',
             },
             update: { customerName: scrapedName !== 'Unknown' ? scrapedName : undefined },
@@ -338,6 +371,9 @@ export class YelpIntegrationsController {
               postcode: leadLocations?.[leadId]?.match(/\d{5}/)?.[0],
               status: 'new',
               rawJson: JSON.stringify({ scraped: true, source: 'extension', location: leadLocations?.[leadId], date: leadDates?.[leadId] }),
+              // Preserve the parsed historical date (extension's relative
+              // timestamp) so analytics aren't all bunched at "now".
+              ...(scrapedDate ? { createdAt: scrapedDate } : {}),
             },
           });
 
