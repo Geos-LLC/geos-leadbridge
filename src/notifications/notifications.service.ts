@@ -2644,6 +2644,10 @@ export class NotificationsService {
    * Send a system SMS directly to a user's business phone (e.g. trial-end alert).
    * Uses any active TenantPhoneNumber the user owns as the from-number, falls back
    * to letting Sigcore pick. Skips silently if no businessPhone configured.
+   *
+   * Must use the tenant's sc_tenant_* key (from NotificationSettings.sigcoreApiKey),
+   * NOT the app-level workspace key. Sigcore's /v1/messages outbound resolver rejects
+   * workspace-keyed calls with 422 AMBIGUOUS_FROM_NUMBER because req.tenantId is null.
    */
   async sendSystemSmsToUser(
     userId: string,
@@ -2657,13 +2661,16 @@ export class NotificationsService {
       return { success: false, error: 'no_business_phone' };
     }
 
-    const fromPhone = await this.resolveBotPhone(userId);
-    const apiKey =
-      this.configService.get<string>('SIGCORE_API_KEY') ||
-      this.appSigcoreApiKey;
+    const tenantSettings = await this.prisma.notificationSettings.findFirst({
+      where: { savedAccount: { userId }, sigcoreApiKey: { not: null } },
+      select: { sigcoreApiKey: true },
+    });
+    const apiKey = tenantSettings?.sigcoreApiKey;
     if (!apiKey) {
-      return { success: false, error: 'no_sigcore_key' };
+      return { success: false, error: 'no_tenant_key' };
     }
+
+    const fromPhone = await this.resolveBotPhone(userId);
 
     try {
       const result = await this.sendViaSigcore({
@@ -2672,7 +2679,7 @@ export class NotificationsService {
         fromPhone,
         apiKey,
         sigcoreWorkspaceId: null,
-        metadata: { purpose: 'system_alert', tenantId: userId },
+        metadata: { purpose: 'system_alert' },
       });
       this.logger.log(`[SystemSMS] Sent to user ${userId} (${user.businessPhone}): ${result.status}`);
       return { success: true };
