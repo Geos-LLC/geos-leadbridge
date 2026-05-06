@@ -651,14 +651,25 @@ export function Services() {
       if (res.success && res.settings) {
         const s = res.settings as any;
         if (s.followUpMode) setFuMode(s.followUpMode);
-        if (s.followUpReplyType) setFuReplyType(s.followUpReplyType);
         if (s.followUpActiveHoursStart) setFuStart(s.followUpActiveHoursStart);
         if (s.followUpActiveHoursEnd) setFuEnd(s.followUpActiveHoursEnd);
         if (s.followUpTimezone) setFuTz(s.followUpTimezone);
         // New fields (stored in extended settings JSON)
         // timing mode removed — single sequence
         const rawSteps = s.followUpSteps || s.followUpSmartSteps || s.followUpCustomSteps;
-        if (Array.isArray(rawSteps)) setFuSmartSteps(rawSteps.map(hydrateStep));
+        const hydratedSteps = Array.isArray(rawSteps) ? rawSteps.map(hydrateStep) : null;
+        if (hydratedSteps) setFuSmartSteps(hydratedSteps);
+        // Resolve sequence-level mode AFTER hydrating steps:
+        //   1. explicit followUpReplyType from the API wins
+        //   2. else infer from saved data: any step with a message → 'template'
+        //   3. else default to 'ai' (covers fresh accounts and AI-only setups)
+        if (s.followUpReplyType === 'template' || s.followUpReplyType === 'ai') {
+          setFuReplyType(s.followUpReplyType);
+        } else if (hydratedSteps && hydratedSteps.some(st => st.message)) {
+          setFuReplyType('template');
+        } else {
+          setFuReplyType('ai');
+        }
         if (s.followUpAvailability) setFuAvailability(s.followUpAvailability);
         // Strategy mode is always 'auto', scenarios always all-enabled
         // fuStopOnReply is always true (internal rule)
@@ -3227,10 +3238,42 @@ export function Services() {
                       >Change</button>
                     </div>
 
-                    {/* Follow-up Plan — per-step Template/AI picker mirrors Instant Reply Mode UI. */}
+                    {/* Follow-up Plan — single sequence-level Template/AI picker mirrors Instant Reply Mode UI. */}
                     <div>
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Mode</label>
+                      <p className="text-[10px] text-slate-400 mb-2">How follow-up messages are composed.</p>
+                      <div className="grid grid-cols-2 gap-2 mb-3">
+                        {(() => {
+                          const modes: Array<{ key: 'template' | 'ai'; emoji: string; label: string; active: string; desc: string }> = [
+                            { key: 'template', emoji: '🟢', label: 'Custom Template', active: '#16a34a', desc: 'Send your saved templates literally — no AI generation' },
+                            { key: 'ai',       emoji: '🟣', label: 'AI',              active: '#7c3aed', desc: 'AI generates each step from the conversation using your AI Strategy' },
+                          ];
+                          return modes.map(m => {
+                            const isActive = fuReplyType === m.key;
+                            return (
+                              <button
+                                key={m.key}
+                                title={m.desc}
+                                onClick={() => setFuReplyType(m.key)}
+                                className="py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all"
+                                style={{
+                                  background: isActive ? m.active : '#f1f5f9',
+                                  color: isActive ? '#fff' : '#64748b',
+                                  borderColor: isActive ? m.active : '#e2e8f0',
+                                }}
+                              >
+                                {m.emoji} {m.label}
+                              </button>
+                            );
+                          });
+                        })()}
+                      </div>
                       <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Follow-up Plan</label>
-                      <p className="text-[11px] text-slate-400 mb-2">Pick how each step is composed. Template sends the saved text literally; AI generates the message from the conversation using your AI Strategy.</p>
+                      <p className="text-[11px] text-slate-400 mb-2">
+                        {fuReplyType === 'template'
+                          ? 'Preset messages sent on schedule. Edit each template below.'
+                          : <>AI writes each step from the live conversation using <span className="font-semibold capitalize text-slate-700">{fuStrategy}</span> strategy. You only set the timing.</>}
+                      </p>
                       <div className="space-y-2">
                         {fuSmartSteps.map((step, i) => (
                           <div key={i} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -3249,37 +3292,8 @@ export function Services() {
                                 )}
                               </div>
                             </div>
-                            {/* Per-step mode picker (matches Instant Reply Mode buttons) */}
-                            <div className="px-3 pt-3">
-                              <div className="grid grid-cols-2 gap-2">
-                                {(() => {
-                                  const modes: Array<{ key: 'template' | 'ai'; emoji: string; label: string; active: string; desc: string }> = [
-                                    { key: 'template', emoji: '🟢', label: 'Custom Template', active: '#16a34a', desc: 'Send your saved template literally — no AI generation' },
-                                    { key: 'ai',       emoji: '🟣', label: 'AI',              active: '#7c3aed', desc: 'AI generates the reply using your AI Strategy and conversation context' },
-                                  ];
-                                  return modes.map(m => {
-                                    const isActive = step.mode === m.key;
-                                    return (
-                                      <button
-                                        key={m.key}
-                                        title={m.desc}
-                                        onClick={() => { const u = [...fuSmartSteps]; u[i] = { ...u[i], mode: m.key }; setFuSmartSteps(u); }}
-                                        className="py-1.5 px-2 rounded-lg text-[11px] font-semibold border-2 transition-all"
-                                        style={{
-                                          background: isActive ? m.active : '#f1f5f9',
-                                          color: isActive ? '#fff' : '#64748b',
-                                          borderColor: isActive ? m.active : '#e2e8f0',
-                                        }}
-                                      >
-                                        {m.emoji} {m.label}
-                                      </button>
-                                    );
-                                  });
-                                })()}
-                              </div>
-                            </div>
-                            {step.mode === 'template' ? (
-                              <div className="px-3 py-2 mt-1 text-xs text-slate-600 leading-relaxed relative group min-h-[40px]">
+                            {fuReplyType === 'template' ? (
+                              <div className="px-3 py-2 text-xs text-slate-600 leading-relaxed relative group min-h-[40px]">
                                 {step.message || <span className="text-slate-300 italic">No template set — click edit to add</span>}
                                 <button
                                   onClick={() => setTemplateEditor({ mode: step.message ? 'service-edit' : 'create', ruleId: '', templateId: undefined, templateName: `Follow-up #${i + 1} (${step.delay})`, content: step.message || '', type: `fu-step-${i}` })}
@@ -3288,9 +3302,9 @@ export function Services() {
                                 </button>
                               </div>
                             ) : (
-                              <div className="px-3 py-2 mt-1 flex items-start gap-2 text-[11px] text-slate-500 leading-relaxed">
+                              <div className="px-3 py-2 flex items-start gap-2 text-[11px] text-slate-500 leading-relaxed">
                                 <Zap className="w-3.5 h-3.5 text-violet-500 mt-0.5 shrink-0" />
-                                <span>AI writes this step from the live conversation, using <span className="font-semibold capitalize text-slate-700">{fuStrategy}</span> strategy and the previous messages so it stays on-topic.</span>
+                                <span>AI generates this message from the conversation when the step fires.</span>
                               </div>
                             )}
                           </div>
@@ -3692,13 +3706,14 @@ export function Services() {
                       activeHoursEnd: fuAvailability === 'active_hours' ? fuEnd : null as any,
                       timezone: fuTz,
                       platform: accounts.find(a => a.id === acctId)?.platform || 'yelp',
-                      // For AI-mode steps, send an empty message so the backend's
-                      // `messageTemplate: s.message || null` mapping resolves to
-                      // null and the generator runs the AI path. We still send
-                      // `mode` so the explicit choice round-trips on reload.
+                      // When the sequence is in AI mode, blank every step's message so
+                      // the backend mapper (`messageTemplate: s.message || null`) takes
+                      // the AI path. Templates are kept in state so flipping back to
+                      // Template mode restores them — but we also keep the persisted
+                      // text so a user who only flips the saved value can recover it.
                       steps: fuSmartSteps.map(s => ({
                         ...s,
-                        message: s.mode === 'ai' ? '' : s.message,
+                        message: fuReplyType === 'ai' ? '' : s.message,
                       })),
                       availability: fuAvailability,
                       strategyMode: 'auto',
