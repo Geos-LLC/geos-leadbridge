@@ -147,20 +147,18 @@ export default function SettingsPage() {
     loadData(true);
   }, []);
 
-  // Detect Chrome extension — recheck on tab focus and when the attribute is set
+  // Check the Thumbtack-specific marker, not the generic flag (which the Yelp extension also sets)
   useEffect(() => {
     const check = () => {
-      const installed = document.documentElement.getAttribute('data-leadbridge-extension') === 'true';
+      const installed = document.documentElement.getAttribute('data-leadbridge-ext-thumbtack') === 'true';
       setExtensionInstalled(installed);
     };
     check();
     const timer = setTimeout(check, 1500);
-    // Recheck when user returns to this tab (e.g. after installing the extension)
     const onVisibility = () => { if (document.visibilityState === 'visible') check(); };
     document.addEventListener('visibilitychange', onVisibility);
-    // Watch for the attribute being set by the content script
     const observer = new MutationObserver(check);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-leadbridge-extension'] });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-leadbridge-ext-thumbtack'] });
     return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibility); observer.disconnect(); };
   }, []);
 
