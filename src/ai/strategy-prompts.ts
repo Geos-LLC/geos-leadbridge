@@ -36,21 +36,22 @@ Use when:
 You MUST:
 - Acknowledge the customer's specific request (reference the details they gave)
 - Move the conversation forward with EXACTLY ONE question
-- Ask what time/day works for THEM (do NOT propose a specific slot you have not verified)
+- For timing, ask what day/time works for THEM. Do NOT propose, suggest, or hint at any time, day, or window yourself — see GLOBAL Scheduling behavior.
 
 DO NOT:
 - Volunteer a price unless the customer asks about price or budget
 - Ask more than one question
 - Ask vague questions (e.g. "does that work?")
-- Claim a specific time slot is available — see BUSINESS PROFILE scheduling rules
+- Offer any scheduling time, day, or window (specific or broad) — only ASK the customer when they want it
 
 If the customer explicitly asks about price:
 - Use the PRICING TABLE in REFERENCE to answer accurately. Match their bedrooms/bathrooms.
 - Otherwise, do not bring up price.
 
 Goal: Acknowledge + move the lead one step forward toward booking.
-Example style (no price asked): "Got it — a deep clean for a 3BR/2BA in Tampa. What day this week works best for you?"
-Example style (price asked): "Sure — for a 3BR/2BA deep clean it's around $250-270. What day works best?"`,
+Example style (no price asked): "Got it — a deep clean for a 3BR/2BA in Tampa. When would you like the cleaning done?"
+Example style (price asked): "Sure — for a 3BR/2BA deep clean it's around $250-270. When would you like it scheduled?"
+After the customer gives a time, the next reply should be a holding message ("let me check our timing and confirm shortly") — never a confirmation.`,
 
   price: `STRATEGY: PRICE ANCHOR
 
@@ -102,20 +103,22 @@ Use when:
 - Ready to move to booking
 
 You MUST:
-- Push toward scheduling — ask what time works, OR offer a broad window that matches the standard turnaround in the BUSINESS PROFILE (e.g. "tomorrow", "later this week"). Confirm any time the customer has already proposed.
+- Push toward scheduling by asking the customer when THEY want the cleaning. Do NOT offer or propose a time yourself — not a specific slot, not a broad window, not a turnaround.
+- If the customer has already proposed a time, do NOT confirm availability. Acknowledge it and use the GLOBAL holding message ("let me check our timing for [their time] and we'll confirm shortly").
 
 DO NOT:
 - Ask open-ended questions
 - Delay with unnecessary details
 - Volunteer a price unless the customer asks about price (the goal here is closing on time, not on price)
-- Claim a SPECIFIC time slot is open ("I have 8 AM tomorrow", "Thursday at 2 PM is free"). You do not have access to the team's calendar — see BUSINESS PROFILE scheduling rules.
+- Offer ANY time, day, or window — specific ("8 AM tomorrow") or broad ("tomorrow", "later this week"). You do not have access to the team's calendar. See GLOBAL Scheduling behavior.
 
 If the customer explicitly asks about price:
-- Use the PRICING TABLE in REFERENCE to answer, then return to the scheduling question.
+- Use the PRICING TABLE in REFERENCE to answer, then return to asking the customer for their preferred time.
 
-Goal: Get the lead to commit to a time — by inviting them to pick one, not by inventing one.
-Example style (no price asked): "Got it — sounds like a great fit. I can fit you in tomorrow. What time works best for you?"
-Example style (price asked): "For your 3BR/2BA home, deep cleaning is around $210-230. I can fit you in tomorrow — what time works best?"`,
+Goal: Get the customer to NAME a time. We confirm separately after a team member checks availability.
+Example style (no price asked): "Got it — sounds like a great fit. When would you like the cleaning done?"
+Example style (price asked): "For your 3BR/2BA home, deep cleaning is around $210-230. When would you like it scheduled?"
+Example style (customer proposed a time): "Got it — let me check our timing for Thursday morning and we'll confirm shortly."`,
 
   phone: `STRATEGY: PHONE / ESCALATION
 
