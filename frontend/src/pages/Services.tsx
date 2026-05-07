@@ -798,6 +798,13 @@ export function Services() {
         // Re-engagement alerts
         reEngagementAlertEnabled: reEngagementAlertOn,
         reEngagementTemplate,
+        // NOTE: aiConversationEnabled is intentionally NOT in this payload.
+        // The toggle handler is the sole writer of that field — including
+        // it here re-introduces a race: a toggle save may land first, then
+        // the debounced auto-save fires with whatever React state had at
+        // the time the effect was scheduled (often the pre-toggle value)
+        // and silently overwrites the DB back to the old value. Keeping
+        // it out makes the toggle authoritative.
       };
       followUpApi.saveSettings(selectedAccountId, payload as any).catch((err: any) => {
         setError(err?.response?.data?.message || err?.message || 'Failed to save');
@@ -814,7 +821,7 @@ export function Services() {
     fuIncludeHistorical, fuExtraWindows,
     fuReEnrollOnSilence, fuReEnrollDelay,
     fuQuietHoursEnabled, fuQuietHoursStart, fuQuietHoursEnd,
-    aiConversationOn,
+    // aiConversationOn intentionally omitted — see note in payload.
     aiStopOnOptOut, aiStopOnBooked, aiStopOnPriceAgreed, aiMaxReplies,
     aiDeferralCheckIn, aiDeferralDelay, aiDeferralMessage,
     aiHiredReengage, aiHiredDelay, aiHiredMessage,
