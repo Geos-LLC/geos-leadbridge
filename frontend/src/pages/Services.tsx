@@ -3406,19 +3406,26 @@ export function Services() {
                               ))}
                             </div>
                           </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Message</label>
-                            <textarea
-                              value={aiDeferralMessage}
-                              onChange={e => setAiDeferralMessage(e.target.value)}
-                              rows={3}
-                              className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                            />
-                            <div className="flex items-center justify-between mt-1">
-                              <p className="text-[10px] text-slate-400">{'{{lead.name}}'} is replaced with the customer's name.</p>
-                              <button type="button" onClick={() => setAiDeferralMessage(DEFAULT_DEFERRAL_MSG)} className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold">Reset to default</button>
+                          {fuReplyType === 'template' ? (
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Message</label>
+                              <textarea
+                                value={aiDeferralMessage}
+                                onChange={e => setAiDeferralMessage(e.target.value)}
+                                rows={3}
+                                className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                              />
+                              <div className="flex items-center justify-between mt-1">
+                                <p className="text-[10px] text-slate-400">{'{{lead.name}}'} is replaced with the customer's name.</p>
+                                <button type="button" onClick={() => setAiDeferralMessage(DEFAULT_DEFERRAL_MSG)} className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold">Reset to default</button>
+                              </div>
                             </div>
-                          </div>
+                          ) : (
+                            <div className="flex items-start gap-2 text-[11px] text-slate-500 leading-relaxed bg-violet-50/40 border border-violet-100 rounded-lg px-3 py-2">
+                              <Zap className="w-3.5 h-3.5 text-violet-500 mt-0.5 shrink-0" />
+                              <span>AI generates this check-in from the conversation using your <span className="font-semibold capitalize text-slate-700">{fuStrategy}</span> strategy. Switch Follow-up Mode to <span className="font-semibold">Custom Template</span> above to write a fixed message instead.</span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -3454,19 +3461,26 @@ export function Services() {
                               ))}
                             </div>
                           </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Message</label>
-                            <textarea
-                              value={aiHiredMessage}
-                              onChange={e => setAiHiredMessage(e.target.value)}
-                              rows={3}
-                              className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                            />
-                            <div className="flex items-center justify-between mt-1">
-                              <p className="text-[10px] text-slate-400">{'{{lead.name}}'} is replaced with the customer's name.</p>
-                              <button type="button" onClick={() => setAiHiredMessage(DEFAULT_HIRED_MSG)} className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold">Reset to default</button>
+                          {fuReplyType === 'template' ? (
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Message</label>
+                              <textarea
+                                value={aiHiredMessage}
+                                onChange={e => setAiHiredMessage(e.target.value)}
+                                rows={3}
+                                className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                              />
+                              <div className="flex items-center justify-between mt-1">
+                                <p className="text-[10px] text-slate-400">{'{{lead.name}}'} is replaced with the customer's name.</p>
+                                <button type="button" onClick={() => setAiHiredMessage(DEFAULT_HIRED_MSG)} className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold">Reset to default</button>
+                              </div>
                             </div>
-                          </div>
+                          ) : (
+                            <div className="flex items-start gap-2 text-[11px] text-slate-500 leading-relaxed bg-violet-50/40 border border-violet-100 rounded-lg px-3 py-2">
+                              <Zap className="w-3.5 h-3.5 text-violet-500 mt-0.5 shrink-0" />
+                              <span>AI generates this re-engage from the conversation using your <span className="font-semibold capitalize text-slate-700">{fuStrategy}</span> strategy. Switch Follow-up Mode to <span className="font-semibold">Custom Template</span> above to write a fixed message instead.</span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

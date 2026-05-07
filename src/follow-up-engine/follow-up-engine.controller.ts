@@ -585,7 +585,8 @@ export class FollowUpEngineController {
     // land there too. Lazy-seed them first if they don't exist yet.
     const triggerSettingsTouched =
       body.aiDeferralCheckIn !== undefined || body.aiDeferralDelay !== undefined || body.aiDeferralMessage !== undefined ||
-      body.aiHiredCompetitorReengage !== undefined || body.aiHiredCompetitorDelay !== undefined || body.aiHiredCompetitorMessage !== undefined;
+      body.aiHiredCompetitorReengage !== undefined || body.aiHiredCompetitorDelay !== undefined || body.aiHiredCompetitorMessage !== undefined ||
+      replyType !== undefined; // flipping AI/Template mode also rewrites the deferral/hired template steps
     if (triggerSettingsTouched) {
       const platformForTemplates = platform || account.platform;
       try {
@@ -611,6 +612,14 @@ export class FollowUpEngineController {
         return num || 4320; // safety fallback: 3 days
       };
 
+      // When the user picked AI mode for the follow-up plan, the deferral
+      // and hired-competitor messages should also be AI-generated. The
+      // engine takes the AI path when step.messageTemplate is null/empty,
+      // so we clear it on AI mode. The user's edited literal message stays
+      // in followUpSettingsJson so flipping back to Template mode restores
+      // it without retyping.
+      const aiMode = (replyType ?? account.followUpReplyType) === 'ai';
+
       const propagate = async (
         triggerState: 'customer_deferred' | 'customer_hired_competitor',
         enabled: boolean | undefined,
@@ -622,33 +631,38 @@ export class FollowUpEngineController {
         });
         if (!tmpl) return;
         const stepsJson = (tmpl.stepsJson as any) || { schemaVersion: 1, steps: [] };
+        const nextLiteralMessage = aiMode
+          ? null
+          : message !== undefined
+            ? message
+            : (stepsJson.steps?.[0]?.messageTemplate ?? null);
         const updatedSteps = (stepsJson.steps || []).map((s: any, i: number) => {
           if (i !== 0) return s;
           return {
             ...s,
             delayMinutes: delay !== undefined ? parseShortDelay(delay) : s.delayMinutes,
-            messageTemplate: message !== undefined ? message : s.messageTemplate,
+            messageTemplate: nextLiteralMessage,
           };
         });
         await this.prisma.followUpSequenceTemplate.update({
           where: { id: tmpl.id },
           data: {
             stepsJson: { ...stepsJson, steps: updatedSteps },
+            generationMode: aiMode ? 'ai' : 'template',
             ...(enabled !== undefined ? { enabled } : {}),
           },
         });
       };
 
-      if (body.aiDeferralCheckIn !== undefined || body.aiDeferralDelay !== undefined || body.aiDeferralMessage !== undefined) {
-        await propagate('customer_deferred', body.aiDeferralCheckIn, body.aiDeferralDelay, body.aiDeferralMessage).catch((err: any) => {
-          this.logger.warn(`[saveSettings] customer_deferred template propagation failed: ${err.message}`);
-        });
-      }
-      if (body.aiHiredCompetitorReengage !== undefined || body.aiHiredCompetitorDelay !== undefined || body.aiHiredCompetitorMessage !== undefined) {
-        await propagate('customer_hired_competitor', body.aiHiredCompetitorReengage, body.aiHiredCompetitorDelay, body.aiHiredCompetitorMessage).catch((err: any) => {
-          this.logger.warn(`[saveSettings] customer_hired_competitor template propagation failed: ${err.message}`);
-        });
-      }
+      // Always propagate when triggerSettingsTouched fires — covers the
+      // replyType-only flip case where delay/message/toggle are unchanged
+      // but the literal message still needs to be cleared (or restored).
+      await propagate('customer_deferred', body.aiDeferralCheckIn, body.aiDeferralDelay, body.aiDeferralMessage).catch((err: any) => {
+        this.logger.warn(`[saveSettings] customer_deferred template propagation failed: ${err.message}`);
+      });
+      await propagate('customer_hired_competitor', body.aiHiredCompetitorReengage, body.aiHiredCompetitorDelay, body.aiHiredCompetitorMessage).catch((err: any) => {
+        this.logger.warn(`[saveSettings] customer_hired_competitor template propagation failed: ${err.message}`);
+      });
     }
 
     // When the global AI Strategy is saved, fan out to this user's AutomationRules
