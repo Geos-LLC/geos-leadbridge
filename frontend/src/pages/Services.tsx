@@ -784,7 +784,7 @@ export function Services() {
         fuQuietHoursStart,
         fuQuietHoursEnd,
         // AI Conversation rules
-        aiConversationEnabled: aiConversationOn,
+        // (aiConversationEnabled intentionally omitted — see note below)
         aiStopOnOptOut,
         aiStopOnBooked,
         aiStopOnPriceAgreed,
