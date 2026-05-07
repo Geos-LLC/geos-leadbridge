@@ -1047,6 +1047,32 @@ export function Services() {
     }
   }
 
+  // Save the availability mode together with the active-hours start/end,
+  // timezone, and extra time windows. Backend stores `availability` in
+  // followUpSettingsJson; activeHoursStart/End/timezone are SavedAccount
+  // columns shared by AI Conversation and Follow-ups (single source of truth).
+  // Pass `next` to override the mode; pass overrides for any field whose
+  // React state hasn't flushed yet (e.g. the click that flipped the mode).
+  function saveAvailabilityNow(
+    next: 'always' | 'active_hours' = fuAvailability,
+    overrides?: { start?: string; end?: string; tz?: string; extraWindows?: { start: string; end: string }[] },
+  ) {
+    const payload: Record<string, any> = { availability: next };
+    if (next === 'active_hours') {
+      payload.activeHoursStart = overrides?.start ?? fuStart;
+      payload.activeHoursEnd = overrides?.end ?? fuEnd;
+      payload.timezone = overrides?.tz ?? fuTz;
+      const wins = overrides?.extraWindows ?? fuExtraWindows;
+      payload.fuExtraWindows = wins.length > 0 ? wins : undefined;
+    } else {
+      payload.activeHoursStart = null;
+      payload.activeHoursEnd = null;
+    }
+    return quickSaveSettings(payload, {
+      successMsg: next === 'always' ? 'Availability: Always (24/7)' : 'Active hours saved',
+    });
+  }
+
   // --- Phone formatting helpers ---
 
   function formatPhoneE164(raw: string): string {
@@ -3704,11 +3730,11 @@ export function Services() {
                       <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Auto Reply Availability</label>
                       <p className="text-[11px] text-slate-400 mb-2">Choose when follow-ups can be sent automatically.</p>
                       <div className="flex gap-2 mb-3">
-                        <button onClick={() => setFuAvailability('always')}
+                        <button onClick={() => { setFuAvailability('always'); saveAvailabilityNow('always'); }}
                           className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'always' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
                           Always (24/7)
                         </button>
-                        <button onClick={() => setFuAvailability('active_hours')}
+                        <button onClick={() => { setFuAvailability('active_hours'); saveAvailabilityNow('active_hours'); }}
                           className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'active_hours' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
                           Set up active time
                         </button>
@@ -3719,15 +3745,15 @@ export function Services() {
                           <div className="grid grid-cols-3 gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
                             <div>
                               <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
-                              <input type="time" value={fuStart} onChange={e => setFuStart(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                              <input type="time" value={fuStart} onChange={e => setFuStart(e.target.value)} onBlur={() => saveAvailabilityNow('active_hours')} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
                             </div>
                             <div>
                               <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
-                              <input type="time" value={fuEnd} onChange={e => setFuEnd(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                              <input type="time" value={fuEnd} onChange={e => setFuEnd(e.target.value)} onBlur={() => saveAvailabilityNow('active_hours')} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
                             </div>
                             <div>
                               <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Timezone</label>
-                              <select value={fuTz} onChange={e => setFuTz(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
+                              <select value={fuTz} onChange={e => { setFuTz(e.target.value); saveAvailabilityNow('active_hours', { tz: e.target.value }); }} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
                                 <option value="America/New_York">Eastern</option>
                                 <option value="America/Chicago">Central</option>
                                 <option value="America/Denver">Mountain</option>
@@ -3740,23 +3766,23 @@ export function Services() {
                             <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
                               <div>
                                 <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
-                                <input type="time" value={w.start} onChange={e => { const u = [...fuExtraWindows]; u[i] = { ...u[i], start: e.target.value }; setFuExtraWindows(u); }}
+                                <input type="time" value={w.start} onChange={e => { const u = [...fuExtraWindows]; u[i] = { ...u[i], start: e.target.value }; setFuExtraWindows(u); }} onBlur={() => saveAvailabilityNow('active_hours')}
                                   className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
                               </div>
                               <div>
                                 <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
-                                <input type="time" value={w.end} onChange={e => { const u = [...fuExtraWindows]; u[i] = { ...u[i], end: e.target.value }; setFuExtraWindows(u); }}
+                                <input type="time" value={w.end} onChange={e => { const u = [...fuExtraWindows]; u[i] = { ...u[i], end: e.target.value }; setFuExtraWindows(u); }} onBlur={() => saveAvailabilityNow('active_hours')}
                                   className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
                               </div>
                               <div className="flex items-end pb-1">
-                                <button onClick={() => setFuExtraWindows(fuExtraWindows.filter((_, j) => j !== i))}
+                                <button onClick={() => { const u = fuExtraWindows.filter((_, j) => j !== i); setFuExtraWindows(u); saveAvailabilityNow('active_hours', { extraWindows: u }); }}
                                   className="p-2 text-slate-400 hover:text-red-500 transition-colors">
                                   <Trash2 size={14} />
                                 </button>
                               </div>
                             </div>
                           ))}
-                          <button onClick={() => setFuExtraWindows([...fuExtraWindows, { start: '13:00', end: '17:00' }])}
+                          <button onClick={() => { const u = [...fuExtraWindows, { start: '13:00', end: '17:00' }]; setFuExtraWindows(u); saveAvailabilityNow('active_hours', { extraWindows: u }); }}
                             className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-1">
                             + Add time window
                           </button>
@@ -4018,11 +4044,11 @@ export function Services() {
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Auto Reply Availability</label>
                     <p className="text-[11px] text-slate-400 mb-2">Choose when AI can reply automatically.</p>
                     <div className="flex gap-2 mb-3">
-                      <button onClick={() => setFuAvailability('always')}
+                      <button onClick={() => { setFuAvailability('always'); saveAvailabilityNow('always'); }}
                         className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'always' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
                         Always (24/7)
                       </button>
-                      <button onClick={() => setFuAvailability('active_hours')}
+                      <button onClick={() => { setFuAvailability('active_hours'); saveAvailabilityNow('active_hours'); }}
                         className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${fuAvailability === 'active_hours' ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
                         Set up active time
                       </button>
@@ -4032,15 +4058,15 @@ export function Services() {
                         <div className="grid grid-cols-3 gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
                           <div>
                             <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
-                            <input type="time" value={fuStart} onChange={e => setFuStart(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                            <input type="time" value={fuStart} onChange={e => setFuStart(e.target.value)} onBlur={() => saveAvailabilityNow('active_hours')} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
                           </div>
                           <div>
                             <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
-                            <input type="time" value={fuEnd} onChange={e => setFuEnd(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
+                            <input type="time" value={fuEnd} onChange={e => setFuEnd(e.target.value)} onBlur={() => saveAvailabilityNow('active_hours')} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
                           </div>
                           <div>
                             <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Timezone</label>
-                            <select value={fuTz} onChange={e => setFuTz(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
+                            <select value={fuTz} onChange={e => { setFuTz(e.target.value); saveAvailabilityNow('active_hours', { tz: e.target.value }); }} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
                               <option value="America/New_York">Eastern</option>
                               <option value="America/Chicago">Central</option>
                               <option value="America/Denver">Mountain</option>
@@ -4052,23 +4078,23 @@ export function Services() {
                           <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
                             <div>
                               <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
-                              <input type="time" value={w.start} onChange={e => { const u = [...fuExtraWindows]; u[i] = { ...u[i], start: e.target.value }; setFuExtraWindows(u); }}
+                              <input type="time" value={w.start} onChange={e => { const u = [...fuExtraWindows]; u[i] = { ...u[i], start: e.target.value }; setFuExtraWindows(u); }} onBlur={() => saveAvailabilityNow('active_hours')}
                                 className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
                             </div>
                             <div>
                               <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
-                              <input type="time" value={w.end} onChange={e => { const u = [...fuExtraWindows]; u[i] = { ...u[i], end: e.target.value }; setFuExtraWindows(u); }}
+                              <input type="time" value={w.end} onChange={e => { const u = [...fuExtraWindows]; u[i] = { ...u[i], end: e.target.value }; setFuExtraWindows(u); }} onBlur={() => saveAvailabilityNow('active_hours')}
                                 className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" />
                             </div>
                             <div className="flex items-end pb-1">
-                              <button onClick={() => setFuExtraWindows(fuExtraWindows.filter((_, j) => j !== i))}
+                              <button onClick={() => { const u = fuExtraWindows.filter((_, j) => j !== i); setFuExtraWindows(u); saveAvailabilityNow('active_hours', { extraWindows: u }); }}
                                 className="p-2 text-slate-400 hover:text-red-500 transition-colors">
                                 <Trash2 size={14} />
                               </button>
                             </div>
                           </div>
                         ))}
-                        <button onClick={() => setFuExtraWindows([...fuExtraWindows, { start: '13:00', end: '17:00' }])}
+                        <button onClick={() => { const u = [...fuExtraWindows, { start: '13:00', end: '17:00' }]; setFuExtraWindows(u); saveAvailabilityNow('active_hours', { extraWindows: u }); }}
                           className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-1">
                           + Add time window
                         </button>
