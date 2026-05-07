@@ -640,6 +640,32 @@ export class AutomationService implements OnModuleInit {
         }
       }
 
+      // Rule: stop on customer deferral — phrases that explicitly signal "I'm
+      // pausing the conversation" (e.g. "I'll get back to you", "let me think").
+      // Replying after these reads as pestering and is a top complaint source.
+      // Defaults ON; opt out per-account by setting aiStopOnDeferral=false.
+      if (aiRules.aiStopOnDeferral !== false && context.customerMessage) {
+        const deferralPhrases = [
+          'get back to you', 'get back to u',
+          'let me think', 'let me check', 'let me look',
+          'i\'ll think', 'ill think', 'i will think',
+          'i\'ll let you know', 'ill let you know', 'i will let you know',
+          'i\'ll be in touch', 'ill be in touch', 'we\'ll be in touch', 'we will be in touch',
+          'need to think', 'need to discuss', 'need to talk',
+          'have to think', 'have to discuss', 'have to talk',
+          'thinking about it', 'thinking it over',
+          'talk it over', 'discuss it with',
+          'shopping around', 'comparing quotes', 'comparing prices',
+          'give me a minute', 'give me some time', 'give me a bit',
+        ];
+        const msgLower = context.customerMessage.toLowerCase();
+        const matched = deferralPhrases.find(p => msgLower.includes(p));
+        if (matched) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — customer signaled deferral ("${matched}")`);
+          return;
+        }
+      }
+
       // Rule: max replies per conversation
       if (aiRules.aiMaxReplies && aiRules.aiMaxReplies > 0 && lead?.threadId) {
         const aiReplyCount = await this.prisma.message.count({
