@@ -1605,33 +1605,6 @@ export function Services() {
     savingAgentPhoneRef.current = false;
   }
 
-  function discardAlertChanges() {
-    if (!alertSavedSnapshot) return;
-    setAlertToPhone(alertSavedSnapshot.toPhone);
-  }
-
-  function discardCtChanges() {
-    if (!ctSavedSnapshot) return;
-    setCtAutoReplyTemplate(ctSavedSnapshot.autoReplyTemplate);
-    setCtSelectedTemplateId(templates.find(t => t.content === ctSavedSnapshot.autoReplyTemplate)?.id || '');
-  }
-
-  function discardCommsChanges() {
-    discardCtChanges();
-    discardCcChanges();
-  }
-
-  async function saveCommsSettings() {
-    if (!selectedAccountId) return;
-    const saving1 = ctDirty ? saveCtSettings() : Promise.resolve();
-    const saving2 = ccDirty ? saveCcSettings() : Promise.resolve();
-    await Promise.all([saving1, saving2]);
-    if (!ctDirty && !ccDirty) {
-      // Nothing was dirty — just save both anyway
-      await Promise.all([saveCtSettings(), saveCcSettings()]);
-    }
-  }
-
   async function doTestCall() {
     if (!selectedAccountId) return;
     setCcTesting(true);
@@ -1670,17 +1643,6 @@ export function Services() {
       return;
     }
     await doTestCall();
-  }
-
-  function discardCcChanges() {
-    if (!ccSavedSnapshot) return;
-    setCcMode(ccSavedSnapshot.mode);
-    setCcAgentPhone(ccSavedSnapshot.agentPhone);
-    setCcBotNumber(ccSavedSnapshot.botNumber);
-    setCcAgentWhisperMessage(ccSavedSnapshot.agentWhisperMessage);
-    setCcLeadGreetingMessage(ccSavedSnapshot.leadGreetingMessage);
-    setCcVoicemailMessage(ccSavedSnapshot.voicemailMessage);
-    setCcCallForwardingNumber(ccSavedSnapshot.callForwardingNumber);
   }
 
   // --- Auto Reply Handlers ---
