@@ -2379,41 +2379,6 @@ export function Services() {
                     </button>
                   </div>
                 )}
-                <button
-                  disabled={fuSaving}
-                  onClick={async () => {
-                    setFuSaving(true);
-                    try {
-                      const payload: any = {
-                        followUpStrategy: fuStrategy,
-                        // Send null (not undefined) when no custom prompt: clears any
-                        // stale value previously saved from the watered-down preview.
-                        followUpStrategyPrompt: fuStrategy !== 'auto' && fuStrategyPrompt
-                          ? fuStrategyPrompt
-                          : null,
-                      };
-                      await followUpApi.saveSettings(selectedAccountId, payload);
-                      const others = fanoutOthers();
-                      if (others.length > 0) {
-                        await Promise.allSettled(others.map(id => followUpApi.saveSettings(id, payload)));
-                      }
-                      const fanoutSuffix = others.length > 0 ? ` to ${others.length + 1} accounts` : '';
-                      showSuccess(`AI Strategy saved${fanoutSuffix}`);
-                    } catch (err: any) {
-                      setError(err.message || 'Failed to save AI strategy');
-                    } finally {
-                      setFuSaving(false);
-                    }
-                  }}
-                  className={`w-full px-4 py-2.5 text-white text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 ${
-                    fuSaving ? 'bg-slate-400 cursor-not-allowed' : 'bg-violet-600 hover:bg-violet-700 hover:shadow-lg hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
-                  }`}>
-                  {fuSaving ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</>
-                  ) : (
-                    <><Save className="w-4 h-4" /> Save AI Strategy</>
-                  )}
-                </button>
               </div>
             </div>
             );
