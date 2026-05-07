@@ -509,6 +509,18 @@ export class FollowUpEngineController {
     });
     if (!account) return { success: false, error: 'Account not found' };
 
+    // Diagnostic — log the fields users care most about so toggle bugs are
+    // visible in Loki without DB inspection.
+    this.logger.log(
+      `[follow-up.saveSettings] acct=${savedAccountId} ` +
+      `aiConversationEnabled=${body.aiConversationEnabled === undefined ? '(omitted)' : body.aiConversationEnabled} ` +
+      `mode=${body.mode === undefined ? '(omitted)' : body.mode} ` +
+      `followUpStrategy=${body.followUpStrategy === undefined ? '(omitted)' : body.followUpStrategy} ` +
+      `followUpStrategyPrompt=${body.followUpStrategyPrompt === undefined ? '(omitted)' : (body.followUpStrategyPrompt === null ? 'null' : (body.followUpStrategyPrompt + '').length + ' chars')} ` +
+      `availability=${body.availability ?? '(omitted)'} ` +
+      `keys=[${Object.keys(body).join(',')}]`
+    );
+
     // Extract extended settings into JSON
     const { mode, preset, replyType, activeHoursStart, activeHoursEnd, timezone, platform,
       steps, timing, customSteps, smartSteps, availability, strategyMode, scenarios, stopOnReply, stopOnOptOut, stopOnBooked,

@@ -3952,12 +3952,38 @@ export function Services() {
               description="Let the system continue the conversation based on previous messages."
               enabled={aiConversationOn && canUseConvert}
               onToggle={(on) => {
-                if (!canUseConvert) return;
+                // Always allow turning OFF. Only block turning ON for non-Convert tiers.
+                if (on && !canUseConvert) return;
                 setAiConversationOn(on);
-                quickSaveSettings(
-                  { aiConversationEnabled: on },
-                  { successMsg: on ? 'AI Conversation enabled' : 'AI Conversation disabled' },
-                );
+                // Save synchronously (await), then refetch to guarantee DB state
+                // matches what the user sees in the toggle. Catches the case where
+                // the immediate save succeeds but a stale auto-save from earlier
+                // overwrites it with the previous value.
+                (async () => {
+                  try {
+                    await followUpApi.saveSettings(selectedAccountId, { aiConversationEnabled: on } as any);
+                    const others = fanoutOthers();
+                    if (others.length > 0) {
+                      await Promise.allSettled(others.map(id =>
+                        followUpApi.saveSettings(id, { aiConversationEnabled: on } as any)
+                      ));
+                    }
+                    // Refetch and confirm the DB value matches our optimistic state
+                    const fresh = await followUpApi.getSettings(selectedAccountId);
+                    const dbValue = (fresh?.settings as any)?.aiConversationEnabled;
+                    if (typeof dbValue === 'boolean' && dbValue !== on) {
+                      // DB came back different — something is overwriting. Sync UI to DB.
+                      setAiConversationOn(dbValue);
+                      setError(`AI Conversation save mismatch (DB=${dbValue}). Try again or hard-refresh.`);
+                    } else {
+                      const fanoutSuffix = others.length > 0 ? ` to ${others.length + 1} accounts` : '';
+                      showSuccess(`AI Conversation ${on ? 'enabled' : 'disabled'}${fanoutSuffix}`);
+                    }
+                  } catch (err: any) {
+                    setAiConversationOn(!on); // rollback
+                    setError(err?.response?.data?.message || err?.message || 'Failed to save AI Conversation toggle');
+                  }
+                })();
               }}
               expanded={expandedCard === 'ai-conversation'}
               onExpand={() => setExpandedCard(expandedCard === 'ai-conversation' ? null : 'ai-conversation')}
