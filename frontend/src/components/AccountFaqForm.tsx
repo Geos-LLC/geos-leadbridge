@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Plus, Trash2, Save, Loader2 } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Plus, Trash2, Save, Loader2, Upload } from 'lucide-react';
 import { usersApi } from '../services/api';
 
 export interface AccountFaq {
@@ -53,6 +53,9 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll }: Ac
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [inherited, setInherited] = useState(false);
+  const [uploading, setUploading] = useState<'standard' | 'deep' | null>(null);
+  const standardFileRef = useRef<HTMLInputElement | null>(null);
+  const deepFileRef = useRef<HTMLInputElement | null>(null);
 
   const loadId = saveToAll && saveToAll.length > 0 ? saveToAll[0] : accountId;
   useEffect(() => {
@@ -92,6 +95,30 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll }: Ac
       ...(prev || DEFAULT_FAQ),
       customQA: [...(prev?.customQA || []), { question: '', answer: '' }],
     }));
+  };
+
+  const handleChecklistUpload = async (target: 'standard' | 'deep', e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const existing = (target === 'standard' ? faq?.standardScope : faq?.deepScope) || '';
+    if (existing.trim() && !confirm(`This will replace the current ${target} cleaning scope. Continue?`)) return;
+
+    setUploading(target);
+    try {
+      const res = await usersApi.parseChecklistFile(file);
+      const key: keyof AccountFaq = target === 'standard' ? 'standardScope' : 'deepScope';
+      update(key, res.text);
+      if (res.truncated) {
+        alert(`Imported ~${Math.round(res.text.length / 1000)}KB of text. The file was longer than 20KB and was truncated to keep the AI prompt small.`);
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'Failed to parse file';
+      alert(`Upload failed: ${msg}`);
+    } finally {
+      setUploading(null);
+    }
   };
 
   const removeCustomQA = (idx: number) => {
@@ -327,25 +354,63 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll }: Ac
         </div>
       </div>
 
-      {/* Scope */}
+      {/* Scope — with upload-checklist buttons */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
-          <label className={labelCls}>Standard cleaning includes</label>
+          <div className="flex items-center justify-between mb-2">
+            <label className={`${labelCls} mb-0`}>Standard cleaning includes</label>
+            <button
+              type="button"
+              onClick={() => standardFileRef.current?.click()}
+              disabled={uploading === 'standard'}
+              className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-lg text-[11px] font-semibold transition-colors"
+              title="Upload a checklist file (PDF, DOCX, TXT, MD)"
+            >
+              {uploading === 'standard' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+              Upload checklist
+            </button>
+            <input
+              ref={standardFileRef}
+              type="file"
+              accept=".pdf,.docx,.txt,.md,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,text/csv"
+              onChange={e => handleChecklistUpload('standard', e)}
+              className="hidden"
+            />
+          </div>
           <textarea
             value={faq.standardScope || ''}
             onChange={e => update('standardScope', e.target.value)}
-            placeholder="e.g. Kitchen surfaces & appliances exterior, all bathrooms, dusting, vacuuming, mopping"
-            rows={3}
+            placeholder="e.g. Kitchen surfaces & appliances exterior, all bathrooms, dusting, vacuuming, mopping. Or upload a checklist file above."
+            rows={5}
             className={inputCls}
           />
         </div>
         <div>
-          <label className={labelCls}>Deep cleaning includes</label>
+          <div className="flex items-center justify-between mb-2">
+            <label className={`${labelCls} mb-0`}>Deep cleaning includes</label>
+            <button
+              type="button"
+              onClick={() => deepFileRef.current?.click()}
+              disabled={uploading === 'deep'}
+              className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-lg text-[11px] font-semibold transition-colors"
+              title="Upload a checklist file (PDF, DOCX, TXT, MD)"
+            >
+              {uploading === 'deep' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+              Upload checklist
+            </button>
+            <input
+              ref={deepFileRef}
+              type="file"
+              accept=".pdf,.docx,.txt,.md,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,text/csv"
+              onChange={e => handleChecklistUpload('deep', e)}
+              className="hidden"
+            />
+          </div>
           <textarea
             value={faq.deepScope || ''}
             onChange={e => update('deepScope', e.target.value)}
-            placeholder="e.g. Everything in standard + baseboards, inside cabinets, doors & frames, detailed scrubbing"
-            rows={3}
+            placeholder="e.g. Everything in standard + baseboards, inside cabinets, doors & frames, detailed scrubbing. Or upload a checklist file above."
+            rows={5}
             className={inputCls}
           />
         </div>
@@ -369,32 +434,55 @@ export default function AccountFaqForm({ accountId, accountName, saveToAll }: Ac
         <div>
           <label className={labelCls}>Crew sizing rule</label>
           <div className="grid grid-cols-3 gap-2">
-            <input
-              type="number"
-              min={1}
-              value={faq.crewSizeRule?.hoursThreshold ?? ''}
-              onChange={e => update('crewSizeRule', { ...faq.crewSizeRule, hoursThreshold: Number(e.target.value) })}
-              placeholder="Hours"
-              className={inputCls}
-            />
-            <input
-              type="number"
-              min={1}
-              value={faq.crewSizeRule?.sizeUnder ?? ''}
-              onChange={e => update('crewSizeRule', { ...faq.crewSizeRule, sizeUnder: Number(e.target.value) })}
-              placeholder="Cleaners ≤"
-              className={inputCls}
-            />
-            <input
-              type="number"
-              min={1}
-              value={faq.crewSizeRule?.sizeOver ?? ''}
-              onChange={e => update('crewSizeRule', { ...faq.crewSizeRule, sizeOver: Number(e.target.value) })}
-              placeholder="Cleaners >"
-              className={inputCls}
-            />
+            <div>
+              <input
+                type="number"
+                min={1}
+                value={faq.crewSizeRule?.hoursThreshold ?? ''}
+                onChange={e => update('crewSizeRule', { ...faq.crewSizeRule, hoursThreshold: Number(e.target.value) })}
+                placeholder="4"
+                className={inputCls}
+              />
+              <p className="text-[10px] text-slate-500 mt-1 leading-tight">Hours threshold (job length)</p>
+            </div>
+            <div>
+              <input
+                type="number"
+                min={1}
+                value={faq.crewSizeRule?.sizeUnder ?? ''}
+                onChange={e => update('crewSizeRule', { ...faq.crewSizeRule, sizeUnder: Number(e.target.value) })}
+                placeholder="1"
+                className={inputCls}
+              />
+              <p className="text-[10px] text-slate-500 mt-1 leading-tight">Cleaners if job ≤ threshold</p>
+            </div>
+            <div>
+              <input
+                type="number"
+                min={1}
+                value={faq.crewSizeRule?.sizeOver ?? ''}
+                onChange={e => update('crewSizeRule', { ...faq.crewSizeRule, sizeOver: Number(e.target.value) })}
+                placeholder="2"
+                className={inputCls}
+              />
+              <p className="text-[10px] text-slate-500 mt-1 leading-tight">Cleaners if job &gt; threshold</p>
+            </div>
           </div>
-          <p className="text-[10px] text-slate-400 mt-1">Default: 1 cleaner if ≤4 hours, 2 if &gt;4 hours. Same total price either way.</p>
+          {(() => {
+            const t = faq.crewSizeRule?.hoursThreshold;
+            const u = faq.crewSizeRule?.sizeUnder;
+            const o = faq.crewSizeRule?.sizeOver;
+            const ready = Number(t) > 0 && Number(u) > 0 && Number(o) > 0;
+            return (
+              <p className="text-[11px] text-slate-600 mt-2 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+                {ready ? (
+                  <>Plain English: <span className="font-semibold">send {u} cleaner{u === 1 ? '' : 's'} for jobs up to {t} hour{t === 1 ? '' : 's'}, {o} cleaners for jobs over {t} hour{t === 1 ? '' : 's'}.</span> Same total price either way — 2 cleaners just cut on-site time roughly in half.</>
+                ) : (
+                  <>Default: 1 cleaner for jobs up to 4 hours, 2 cleaners for jobs over 4 hours. Same total price either way.</>
+                )}
+              </p>
+            );
+          })()}
         </div>
       </div>
 

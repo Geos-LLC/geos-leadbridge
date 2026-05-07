@@ -49,9 +49,11 @@
     "class-validator": "^0.14.3",
     "dotenv": "^17.2.3",
     "ioredis": "^5.10.1",
+    "mammoth": "^1.12.0",
     "openai": "^6.32.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
+    "pdf-parse": "^2.4.5",
     "prisma": "^6.19.1",
     "stripe": "^20.3.0"
   },

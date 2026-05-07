@@ -1136,6 +1136,14 @@ export const usersApi = {
     const { data } = await api.post(`/v1/users/me/faq/${sourceAccountId}/copy-to-all`);
     return data;
   },
+  parseChecklistFile: async (file: File): Promise<{ success: boolean; text: string; truncated: boolean; originalLength: number }> => {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await api.post('/v1/users/me/faq/parse-checklist', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
 };
 
 // Teams API

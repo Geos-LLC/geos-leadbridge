@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Request, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Request, UseGuards, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { UsersService } from './users.service';
 import { SigcoreSearchResult } from '../sigcore/sigcore.service';
@@ -126,6 +127,51 @@ export class UsersController {
   @Post('me/faq/:accountId/copy-to-all')
   async copyFaqToAll(@Request() req: any, @Param('accountId') accountId: string) {
     return this.usersService.copyAccountFaqToAll(req.user.id, accountId);
+  }
+
+  /**
+   * Parse an uploaded checklist file (PDF, DOCX, TXT, MD) and return its
+   * extracted text so the frontend can drop it into a scope textarea.
+   * Storage is intentionally NOT persisted — the user reviews the parsed
+   * text and saves it as part of the FAQ JSON.
+   * POST /v1/users/me/faq/parse-checklist
+   */
+  @Post('me/faq/parse-checklist')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  async parseChecklist(@UploadedFile() file?: any) {
+    if (!file?.buffer) throw new BadRequestException('No file uploaded');
+    const name = (file.originalname || '').toLowerCase();
+    const mime = file.mimetype || '';
+    const buf: Buffer = file.buffer;
+
+    let text = '';
+    try {
+      if (name.endsWith('.pdf') || mime === 'application/pdf') {
+        const pdfParse = require('pdf-parse');
+        const out = await pdfParse(buf);
+        text = (out?.text || '').trim();
+      } else if (name.endsWith('.docx') || mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        const mammoth = require('mammoth');
+        const out = await mammoth.extractRawText({ buffer: buf });
+        text = (out?.value || '').trim();
+      } else if (name.endsWith('.txt') || name.endsWith('.md') || name.endsWith('.csv') || mime.startsWith('text/')) {
+        text = buf.toString('utf8').trim();
+      } else {
+        throw new BadRequestException('Unsupported file type. Use PDF, DOCX, TXT, or MD.');
+      }
+    } catch (err: any) {
+      if (err instanceof BadRequestException) throw err;
+      throw new BadRequestException(`Could not parse file: ${err.message || 'unknown error'}`);
+    }
+
+    if (!text) throw new BadRequestException('File parsed, but no text was found.');
+
+    // Cap at ~20KB of plaintext so a giant manual doesn't blow up the prompt
+    const MAX = 20_000;
+    const truncated = text.length > MAX;
+    if (truncated) text = text.slice(0, MAX);
+
+    return { success: true, text, truncated, originalLength: text.length };
   }
 
   /**
