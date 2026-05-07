@@ -47,6 +47,8 @@ export interface AiReplyContext {
   businessBlock?: string;
   /** REFERENCE — pricing table + range instruction. Optional. */
   pricingBlock?: string;
+  /** REFERENCE — per-account FAQ (insurance, supplies, pets, payment, scope, etc.). Optional. */
+  faqBlock?: string;
   /** REFERENCE — urgency context (customer urgency × business capability). Optional. */
   urgencyBlock?: string;
   conversationHistory?: ConversationMessage[];
@@ -97,6 +99,9 @@ export class AiService {
     }
     if (ctx.pricingBlock?.trim()) {
       referenceBlocks.push(`=== REFERENCE: PRICING TABLE (use only when quoting — see GLOBAL pricing behavior) ===\n${ctx.pricingBlock.trim()}`);
+    }
+    if (ctx.faqBlock?.trim()) {
+      referenceBlocks.push(`=== REFERENCE: ACCOUNT FAQ (verified answers — use verbatim when relevant) ===\n${ctx.faqBlock.trim()}`);
     }
     if (ctx.urgencyBlock?.trim()) {
       referenceBlocks.push(`=== REFERENCE: URGENCY ===\n${ctx.urgencyBlock.trim()}`);

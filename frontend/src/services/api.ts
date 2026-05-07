@@ -1124,6 +1124,18 @@ export const usersApi = {
     const { data } = await api.post(`/v1/users/me/pricing/${sourceAccountId}/copy-to-all`);
     return data;
   },
+  getAccountFaq: async (accountId: string): Promise<{ success: boolean; faq: any; inherited?: boolean; sourceAccountId?: string | null }> => {
+    const { data } = await api.get(`/v1/users/me/faq/${accountId}`);
+    return data;
+  },
+  updateAccountFaq: async (accountId: string, faq: any): Promise<{ success: boolean }> => {
+    const { data } = await api.patch(`/v1/users/me/faq/${accountId}`, { faq });
+    return data;
+  },
+  copyAccountFaqToAll: async (sourceAccountId: string): Promise<{ success: boolean; updated: number }> => {
+    const { data } = await api.post(`/v1/users/me/faq/${sourceAccountId}/copy-to-all`);
+    return data;
+  },
 };
 
 // Teams API

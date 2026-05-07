@@ -967,6 +967,7 @@ export class AutomationService implements OnModuleInit {
               select: {
                 businessName: true,
                 servicePricingJson: true,
+                faqJson: true,
                 followUpSettingsJson: true,
                 followUpActiveHoursStart: true,
                 followUpActiveHoursEnd: true,
@@ -1059,6 +1060,12 @@ export class AutomationService implements OnModuleInit {
           } catch { /* invalid JSON */ }
         }
 
+        // REFERENCE: account FAQ — verified per-tenant answers to the most
+        // common customer questions. Empty fields fall through to the GLOBAL
+        // defer-when-empty rule.
+        const { buildFaqBlock, parseAccountFaq } = require('../ai/faq-context');
+        const faqBlock = buildFaqBlock(parseAccountFaq(account?.faqJson)) || undefined;
+
         // Generate reply via OpenAI. Pass current time + timezone so the model
         // knows whether previously offered slots have passed and how big the
         // gaps between messages are.
@@ -1075,6 +1082,7 @@ export class AutomationService implements OnModuleInit {
           threadContextBlock: threadContextPrompt,
           businessBlock,
           pricingBlock,
+          faqBlock,
           conversationHistory,
           leadDetails,
           currentTime: new Date(),

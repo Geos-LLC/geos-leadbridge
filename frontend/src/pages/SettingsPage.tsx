@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info, Eye, EyeOff, DollarSign, Clock, ArrowUpRight, List, Trash2, AlertTriangle } from 'lucide-react';
+import { Settings, CheckCircle, AlertCircle, Rocket, Zap, Lock, Download, ChevronDown, ChevronUp, Loader2, X, Pencil, Check, RefreshCw, Info, Eye, EyeOff, DollarSign, Clock, ArrowUpRight, List, Trash2, AlertTriangle, HelpCircle } from 'lucide-react';
 import { authApi, billingApi, thumbtackApi, leadsApi, usersApi, integrationsApi, platformsApi, notificationsApi } from '../services/api';
 import type { TenantPhoneNumber } from '../services/api';
 import { notify } from '../store/notificationStore';
@@ -10,6 +10,7 @@ import type { StripeInvoice } from '../services/api';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import ConnectionModal from '../components/ConnectionModal';
 import ServicePricingForm from '../components/ServicePricingForm';
+import AccountFaqForm from '../components/AccountFaqForm';
 import TeamSection from '../components/TeamSection';
 import { LeadBridgeNumberManager } from '../components/LeadBridgeNumberManager';
 
@@ -1861,6 +1862,11 @@ export default function SettingsPage() {
       {/* Section 4: AI Global Prompt */}
       <GlobalAiPromptSection />
 
+      {/* Section 4.5: Account FAQ */}
+      {accounts.length > 0 && (
+        <AccountFaqSection accounts={accounts} />
+      )}
+
       {/* Section 5: Service Pricing */}
       {accounts.length > 0 && (
         <ServicePricingSection accounts={accounts} />
@@ -2554,6 +2560,64 @@ function ServicePricingSection({ accounts }: { accounts: SavedAccount[] }) {
                 </summary>
                 <div className="p-4">
                   <ServicePricingForm accountId={acc.id} accountName={acc.businessName} />
+                </div>
+              </details>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Account FAQ section — per-account or shared FAQ config.
+ * Sits between the AI Global Prompt (universal guardrails) and the Pricing
+ * Table (universal price reference) — covers tenant-specific answers the AI
+ * needs (insurance, supplies, pets, payment, scope, etc.) so it stops
+ * deferring or fabricating on common questions.
+ */
+function AccountFaqSection({ accounts }: { accounts: SavedAccount[] }) {
+  const [sharedFaq, setSharedFaq] = useState(true);
+
+  return (
+    <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+      <div className="p-8">
+        <div className="flex items-center gap-3 mb-1">
+          <HelpCircle className="w-5 h-5 text-blue-600" />
+          <h2 className="text-xl font-bold text-slate-900">Account FAQ</h2>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">
+          Verified answers to the most common customer questions. The AI uses these verbatim and defers on anything you leave blank — no fabricating "yes we're insured" or "we accept Venmo" if you haven't said so.
+        </p>
+
+        {accounts.length > 1 && (
+          <label className="flex items-center gap-2 mb-6 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={sharedFaq}
+              onChange={e => setSharedFaq(e.target.checked)}
+              className="accent-blue-600 w-4 h-4 rounded"
+            />
+            <span className="text-sm text-slate-700 font-medium">Same FAQ for all businesses</span>
+          </label>
+        )}
+
+        {accounts.length === 1 || sharedFaq ? (
+          <AccountFaqForm
+            accountId={sharedFaq ? accounts.map(a => a.id).join(',') : accounts[0].id}
+            accountName={sharedFaq && accounts.length > 1 ? 'All Businesses' : accounts[0].businessName}
+            saveToAll={sharedFaq && accounts.length > 1 ? accounts.map(a => a.id) : undefined}
+          />
+        ) : (
+          <div className="space-y-4">
+            {accounts.map(acc => (
+              <details key={acc.id} className="border border-slate-200 rounded-xl overflow-hidden">
+                <summary className="px-4 py-3 bg-slate-50 cursor-pointer text-sm font-semibold text-slate-700 hover:bg-slate-100">
+                  {acc.businessName} <span className="text-[10px] font-normal text-slate-400 ml-1">({acc.platform})</span>
+                </summary>
+                <div className="p-4">
+                  <AccountFaqForm accountId={acc.id} accountName={acc.businessName} />
                 </div>
               </details>
             ))}

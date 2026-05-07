@@ -428,6 +428,8 @@ model SavedAccount {
   followUpSettingsJson     String?  @db.Text // Extended follow-up settings (timing, rules, scenarios)
   // Service pricing configuration (JSON — per-account pricing table)
   servicePricingJson       String?  @db.Text
+  // FAQ — per-account answers to common customer questions, injected as REFERENCE in AI prompts
+  faqJson                  String?  @db.Text
   // Team — when set, org members can access this account
   organizationId           String?
   lastUsedAt               DateTime @default(now())

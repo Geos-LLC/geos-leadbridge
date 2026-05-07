@@ -259,6 +259,76 @@ export class UsersService {
   }
 
   /**
+   * Get the per-account FAQ JSON. Falls back to a sibling account's FAQ when
+   * this account hasn't been configured yet, so a multi-account user only
+   * has to fill it in once.
+   */
+  async getAccountFaq(userId: string, accountId: string) {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: accountId, userId },
+      select: { id: true, faqJson: true },
+    });
+    if (!account) throw new NotFoundException('Account not found');
+
+    let faq: any = null;
+    let inherited = false;
+    let sourceAccountId: string | null = null;
+
+    if (account.faqJson) {
+      try { faq = JSON.parse(account.faqJson); sourceAccountId = accountId; }
+      catch { faq = null; }
+    }
+
+    if (!faq) {
+      const sibling = await this.prisma.savedAccount.findFirst({
+        where: { userId, id: { not: accountId }, faqJson: { not: null } },
+        select: { id: true, faqJson: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (sibling?.faqJson) {
+        try { faq = JSON.parse(sibling.faqJson); inherited = true; sourceAccountId = sibling.id; }
+        catch { faq = null; }
+      }
+    }
+
+    return { success: true, faq, inherited, sourceAccountId };
+  }
+
+  /**
+   * Save the per-account FAQ JSON.
+   */
+  async updateAccountFaq(userId: string, accountId: string, faq: any) {
+    const account = await this.prisma.savedAccount.findFirst({
+      where: { id: accountId, userId },
+    });
+    if (!account) throw new NotFoundException('Account not found');
+    await this.prisma.savedAccount.update({
+      where: { id: accountId },
+      data: { faqJson: faq == null ? null : JSON.stringify(faq) },
+    });
+    await this.cache.delPattern(CacheKeys.savedAccountsPattern(userId));
+    return { success: true };
+  }
+
+  /**
+   * Copy an account's FAQ to every other account owned by the same user.
+   */
+  async copyAccountFaqToAll(userId: string, sourceAccountId: string) {
+    const source = await this.prisma.savedAccount.findFirst({
+      where: { id: sourceAccountId, userId },
+      select: { faqJson: true },
+    });
+    if (!source) throw new NotFoundException('Source account not found');
+    if (!source.faqJson) throw new NotFoundException('Source account has no FAQ to copy');
+    const result = await this.prisma.savedAccount.updateMany({
+      where: { userId, id: { not: sourceAccountId } },
+      data: { faqJson: source.faqJson },
+    });
+    await this.cache.delPattern(CacheKeys.savedAccountsPattern(userId));
+    return { success: true, updated: result.count };
+  }
+
+  /**
    * Delete the current user's own account
    */
   async deleteOwnAccount(userId: string) {

@@ -102,6 +102,33 @@ export class UsersController {
   }
 
   /**
+   * Get the per-account FAQ
+   * GET /v1/users/me/faq/:accountId
+   */
+  @Get('me/faq/:accountId')
+  async getFaq(@Request() req: any, @Param('accountId') accountId: string) {
+    return this.usersService.getAccountFaq(req.user.id, accountId);
+  }
+
+  /**
+   * Save the per-account FAQ
+   * PATCH /v1/users/me/faq/:accountId
+   */
+  @Patch('me/faq/:accountId')
+  async updateFaq(@Request() req: any, @Param('accountId') accountId: string, @Body() body: { faq: any }) {
+    return this.usersService.updateAccountFaq(req.user.id, accountId, body.faq);
+  }
+
+  /**
+   * Copy an account's FAQ to every other account owned by the same user.
+   * POST /v1/users/me/faq/:accountId/copy-to-all
+   */
+  @Post('me/faq/:accountId/copy-to-all')
+  async copyFaqToAll(@Request() req: any, @Param('accountId') accountId: string) {
+    return this.usersService.copyAccountFaqToAll(req.user.id, accountId);
+  }
+
+  /**
    * Delete the current user's own account
    * DELETE /v1/users/me
    */

@@ -21,6 +21,7 @@ import { ConversationContextService } from '../conversation-context/conversation
 import { STRATEGY_PROMPTS, OBJECTIVE_FLAVORS } from '../ai/strategy-prompts';
 import { buildTimeAwarenessBlock, prefixWithTimestamp, resolveTimezone } from '../ai/time-context';
 import { buildBusinessContextBlock } from '../ai/business-context';
+import { buildFaqBlock, parseAccountFaq } from '../ai/faq-context';
 import OpenAI from 'openai';
 
 export interface SequenceStep {
@@ -163,6 +164,7 @@ export class FollowUpGeneratorService {
 
     // Step 3: Load pricing context and lead details
     let pricingContext = '';
+    let faqContext = '';
     const lead = await this.prisma.lead.findFirst({
       where: { threadId: conversationId },
       select: { customerName: true, category: true, city: true, state: true, businessId: true, userId: true, message: true, rawJson: true },
@@ -196,6 +198,7 @@ export class FollowUpGeneratorService {
         select: {
           businessName: true,
           servicePricingJson: true,
+          faqJson: true,
           followUpTimezone: true,
           followUpSettingsJson: true,
           followUpActiveHoursStart: true,
@@ -224,6 +227,11 @@ export class FollowUpGeneratorService {
             pricingContext = priceParts.join('\n');
           }
         } catch { /* invalid JSON */ }
+      }
+
+      const faq = buildFaqBlock(parseAccountFaq(account?.faqJson));
+      if (faq) {
+        faqContext = `=== REFERENCE: ACCOUNT FAQ (verified answers — use verbatim when relevant) ===\n${faq}`;
       }
 
       // Business profile (turnaround capability, active hours, scheduling rules)
@@ -309,6 +317,10 @@ export class FollowUpGeneratorService {
 
     if (pricingContext) {
       systemParts.push('', pricingContext);
+    }
+
+    if (faqContext) {
+      systemParts.push('', faqContext);
     }
 
     if (urgencyContext) {

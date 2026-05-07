@@ -6,6 +6,7 @@ import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { buildPriceRangeInstruction } from './price-range';
 import { buildBusinessContextBlock } from './business-context';
+import { buildFaqBlock, parseAccountFaq } from './faq-context';
 
 @Controller('v1/ai')
 @UseGuards(JwtAuthGuard)
@@ -37,12 +38,13 @@ export class AiController {
     const [userRecord, account] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true, name: true } }),
       lead.businessId
-        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
-        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
+        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true, faqJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
+        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true, faqJson: true, followUpTimezone: true, followUpSettingsJson: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
     ]);
 
     const details = this.extractLeadDetails(lead.rawJson);
     const pricingBlock = this.buildPricingPrompt(account?.servicePricingJson);
+    const faqBlock = buildFaqBlock(parseAccountFaq(account?.faqJson));
     const businessBlock = buildBusinessContextBlock({
       businessName: account?.businessName ?? null,
       ownerName: userRecord?.name ?? null,
@@ -66,6 +68,7 @@ export class AiController {
       strategyPrompt,
       businessBlock,
       pricingBlock: pricingBlock ?? undefined,
+      faqBlock: faqBlock ?? undefined,
       conversationHistory: conversationHistory ?? [],
       leadDetails: details,
       currentTime: new Date(),
@@ -96,8 +99,8 @@ export class AiController {
     const [userRecord, account] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: user.id }, select: { globalAiPrompt: true, name: true } }),
       lead.businessId
-        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
-        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
+        ? this.prisma.savedAccount.findFirst({ where: { userId: user.id, businessId: lead.businessId }, select: { businessName: true, servicePricingJson: true, faqJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } })
+        : this.prisma.savedAccount.findFirst({ where: { userId: user.id }, select: { businessName: true, servicePricingJson: true, faqJson: true, followUpSettingsJson: true, followUpTimezone: true, followUpActiveHoursStart: true, followUpActiveHoursEnd: true } }),
     ]);
 
     const details = this.extractLeadDetails(lead.rawJson);
@@ -130,6 +133,7 @@ export class AiController {
       timezone: account?.followUpTimezone ?? null,
     });
     const pricingBlock = this.buildPricingPrompt(account?.servicePricingJson);
+    const faqBlock = buildFaqBlock(parseAccountFaq(account?.faqJson));
     const urgencyBlock = await this.buildUrgencyPrompt(conversationId, account?.followUpSettingsJson);
 
     const reply = await this.aiService.generateReply({
@@ -145,6 +149,7 @@ export class AiController {
       threadContextBlock: threadContextPrompt,
       businessBlock,
       pricingBlock: pricingBlock ?? undefined,
+      faqBlock: faqBlock ?? undefined,
       urgencyBlock: urgencyBlock ?? undefined,
       conversationHistory,
       leadDetails: details,
