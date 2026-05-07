@@ -58,6 +58,14 @@ interface TemplateEditorModalProps {
   initialDelay?: string;
   showDelayField?: boolean;
   delayPresets?: string[];
+  /**
+   * When true, hides the Content textarea entirely (used for AI-mode
+   * follow-up steps where the message is generated, not authored).
+   * Pair with contentPlaceholder to show an explanatory note.
+   */
+  hideContentField?: boolean;
+  /** Optional note shown in place of the Content textarea when hidden. */
+  contentPlaceholder?: React.ReactNode;
 }
 
 export function TemplateEditorModal({
@@ -66,6 +74,7 @@ export function TemplateEditorModal({
   showDefaultCheckbox, initialIsDefault, saveError,
   onSave, onSaveAsNew,
   initialDelay, showDelayField, delayPresets,
+  hideContentField, contentPlaceholder,
 }: TemplateEditorModalProps) {
   const [name, setName] = useState(initialName);
   const [content, setContent] = useState(initialContent);
@@ -221,19 +230,28 @@ export function TemplateEditorModal({
             </div>
           )}
 
-          <div className="space-y-2">
-            <label className="block text-sm font-semibold text-slate-700">Content</label>
-            <textarea
-              ref={contentRef}
-              value={content}
-              onChange={e => setContent(e.target.value)}
-              placeholder="Enter template content..."
-              rows={8}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all resize-none font-sans"
-            />
-          </div>
+          {!hideContentField ? (
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-slate-700">Content</label>
+              <textarea
+                ref={contentRef}
+                value={content}
+                onChange={e => setContent(e.target.value)}
+                placeholder="Enter template content..."
+                rows={8}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all resize-none font-sans"
+              />
+            </div>
+          ) : contentPlaceholder ? (
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-slate-700">Message</label>
+              <div className="px-4 py-3 bg-violet-50/40 border border-violet-100 rounded-xl text-sm text-slate-600 leading-relaxed">
+                {contentPlaceholder}
+              </div>
+            </div>
+          ) : null}
 
-          {variables.length > 0 && (
+          {variables.length > 0 && !hideContentField && (
             <div className="space-y-3">
               <label className="block text-sm font-semibold text-slate-700">
                 Variables <span className="text-xs font-normal text-slate-500">(click to insert at cursor)</span>
