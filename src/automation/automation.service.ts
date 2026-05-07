@@ -1042,10 +1042,13 @@ export class AutomationService implements OnModuleInit {
       let messageToSend: string;
 
       if (rule.useAi) {
-        // Try thread context first (summary + state + recent messages)
-        // Falls back to raw transcript if no ThreadContext exists yet
+        // Try thread context first (summary + state + recent messages).
+        // Pass 100 as recentMessageLimit so the AI sees effectively the full
+        // thread, not just the default 10. Without this the AI can lose
+        // earlier context (e.g. scheduling discussion) and regress to
+        // qualifying questions on a long conversation.
         const threadCtx = lead.threadId
-          ? await this.conversationContext.buildContext(lead.threadId).catch(() => null)
+          ? await this.conversationContext.buildContext(lead.threadId, { recentMessageLimit: 100 }).catch(() => null)
           : null;
 
         let conversationHistory: { role: 'customer' | 'pro'; content: string; sentAt?: Date }[];

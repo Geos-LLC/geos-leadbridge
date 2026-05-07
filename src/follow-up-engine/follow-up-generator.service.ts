@@ -110,11 +110,12 @@ export class FollowUpGeneratorService {
       return this.generateFromTemplate(step);
     }
 
-    // Step 1: Load thread context. recentMessageLimit was 5 — too aggressive,
-    // caused the AI to lose the prior conversation and regress to qualifying
-    // questions even when the customer had already discussed scheduling. Bump
-    // to 20 to capture the full back-and-forth on a normal lead thread.
-    const context = await this.conversationContext.buildContext(conversationId, { recentMessageLimit: 20 });
+    // Step 1: Load thread context. We pass 100 as the limit — large enough to
+    // cover effectively any real lead thread (typical max is 30-50 messages
+    // before a status transition closes it). Earlier versions used 5 then 20,
+    // both small enough that the prior scheduling discussion fell off and the
+    // AI regressed to qualifying questions. 100 is the practical "full thread".
+    const context = await this.conversationContext.buildContext(conversationId, { recentMessageLimit: 100 });
     const threadState = await this.conversationContext.getThreadState(conversationId);
 
     // Step 2: Determine strategy

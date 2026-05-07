@@ -110,7 +110,7 @@ export class AiController {
     let threadContextPrompt: string | undefined;
 
     if (mode !== 'none' && conversationId) {
-      const context = await this.contextService.buildContext(conversationId, { recentMessageLimit: 10 });
+      const context = await this.contextService.buildContext(conversationId, { recentMessageLimit: 100 });
       if (context) {
         conversationHistory = context.recentMessages;
         if (mode === 'full') {
