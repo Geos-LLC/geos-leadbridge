@@ -32,6 +32,31 @@ export const OPT_OUT_PHRASES: readonly string[] = [
   'do not contact',
   'leave me alone',
   'remove me',
+  // Cancellation phrases — Lewam case: customer said "It's ok we can cancel" /
+  // "No it is canceled" / "That was canceled" multiple times. Without these
+  // the lead stayed status=new, AI kept auto-replying, and a fresh follow-up
+  // enrollment fired 24h later asking "are you still interested?". Treating
+  // these as opt-out marks the lead lost, blocks future enrollments, and
+  // stops AI Conversation immediately.
+  'is canceled',
+  'is cancelled',
+  'was canceled',
+  'was cancelled',
+  'cancel it',
+  'cancel that',
+  'cancel the',
+  'cancel my',
+  'cancel this',
+  'we cancel',
+  'we can cancel',
+  'we will cancel',
+  'please cancel',
+  'i cancel',
+  'i need to cancel',
+  'i want to cancel',
+  'i have to cancel',
+  'going to cancel',
+  'gonna cancel',
 ];
 
 export const HIRED_SOMEONE_PHRASES: readonly string[] = [
@@ -691,12 +716,17 @@ export class AutomationService implements OnModuleInit {
       }
 
       // Check AI conversation rules
-      // Rule: stop on opt-out keywords in customer message
+      // Rule: stop on opt-out keywords in customer message. Sources both the
+      // exported OPT_OUT_PHRASES (canonical list — also drives lead.status
+      // transition to 'lost') and the inline list. Cancellation phrases live
+      // in OPT_OUT_PHRASES; merging here keeps the two paths consistent.
       if (aiRules.aiStopOnOptOut !== false && context.customerMessage) {
-        const optOutPhrases = ['stop', 'unsubscribe', 'don\'t contact', 'do not contact', 'leave me alone', 'not interested', 'remove me'];
+        const inlineExtras = ['stop', 'not interested'];
+        const allOptOut = [...OPT_OUT_PHRASES, ...inlineExtras];
         const msgLower = context.customerMessage.toLowerCase();
-        if (optOutPhrases.some(p => msgLower.includes(p))) {
-          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — customer opted out`);
+        const matched = allOptOut.find(p => msgLower.includes(p));
+        if (matched) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — customer opted out / canceled ("${matched}")`);
           return;
         }
       }
