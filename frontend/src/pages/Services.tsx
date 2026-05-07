@@ -1023,6 +1023,30 @@ export function Services() {
     setTimeout(() => setSuccessMessage(null), 3000);
   }
 
+  // Persist a small partial settings payload to the selected account (and
+  // optionally fan out to other accounts on the same platform). Used by
+  // save-on-toggle handlers so a user's flip is durable even if they navigate
+  // away without clicking a section's "Save" button. Detailed sub-settings
+  // still go through the section's full Save button.
+  async function quickSaveSettings(payload: Record<string, any>, opts?: { successMsg?: string; fanout?: boolean }): Promise<void> {
+    if (!selectedAccountId) return;
+    try {
+      await followUpApi.saveSettings(selectedAccountId, payload as any);
+      let count = 1;
+      if (opts?.fanout) {
+        const others = fanoutOthers();
+        if (others.length > 0) {
+          await Promise.allSettled(others.map(id => followUpApi.saveSettings(id, payload as any)));
+          count += others.length;
+        }
+      }
+      const suffix = count > 1 ? ` to ${count} accounts` : '';
+      if (opts?.successMsg) showSuccess(`${opts.successMsg}${suffix}`);
+    } catch (err: any) {
+      setError(err?.response?.data?.message || err?.message || 'Failed to save');
+    }
+  }
+
   // --- Phone formatting helpers ---
 
   function formatPhoneE164(raw: string): string {
@@ -2333,6 +2357,10 @@ export function Services() {
                         // is the source of truth (includes guardrails like "ALWAYS ask for
                         // SQUARE FOOTAGE first" for Qualify). User customizes via the editor.
                         setFuStrategyPrompt('');
+                        quickSaveSettings(
+                          { followUpStrategy: s.key, followUpStrategyPrompt: null },
+                          { successMsg: `Strategy: ${s.label}`, fanout: true },
+                        );
                       }}
                       className={`text-[11px] px-2.5 py-1.5 rounded-lg font-semibold border-2 transition-all ${fuStrategy === s.key ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-violet-200'}`}
                       title={s.desc}>
@@ -3203,7 +3231,14 @@ export function Services() {
               title="If the Lead Doesn't Respond"
               description="Control what happens after the first reply if the lead goes quiet."
               enabled={fuMode !== 'off'}
-              onToggle={(on) => setFuMode(on ? 'suggest' : 'off')}
+              onToggle={(on) => {
+                const next = on ? 'suggest' : 'off';
+                setFuMode(next);
+                quickSaveSettings(
+                  { mode: next },
+                  { successMsg: on ? 'Follow-ups enabled' : 'Follow-ups disabled' },
+                );
+              }}
               expanded={expandedCard === 'yelp-followups'}
               onExpand={() => setExpandedCard(expandedCard === 'yelp-followups' ? null : 'yelp-followups')}
               iconBgColor="bg-red-50"
@@ -3964,7 +3999,14 @@ export function Services() {
               titleBadge={<TierBadge tier="convert" />}
               description="Let the system continue the conversation based on previous messages."
               enabled={aiConversationOn && canUseConvert}
-              onToggle={(on) => { if (canUseConvert) setAiConversationOn(on); }}
+              onToggle={(on) => {
+                if (!canUseConvert) return;
+                setAiConversationOn(on);
+                quickSaveSettings(
+                  { aiConversationEnabled: on },
+                  { successMsg: on ? 'AI Conversation enabled' : 'AI Conversation disabled' },
+                );
+              }}
               expanded={expandedCard === 'ai-conversation'}
               onExpand={() => setExpandedCard(expandedCard === 'ai-conversation' ? null : 'ai-conversation')}
               iconBgColor="bg-violet-50"
