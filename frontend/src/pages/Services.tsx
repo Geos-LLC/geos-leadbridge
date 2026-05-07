@@ -821,6 +821,31 @@ export function Services() {
     reEngagementAlertOn, reEngagementTemplate,
   ]);
 
+  // Debounced auto-save for Lead Alerts. Fires when alertDirty flips true.
+  // The save function updates the snapshot which clears dirty — no loop.
+  useEffect(() => {
+    if (!alertDirty) return;
+    const t = setTimeout(() => { saveAlertSettings(); }, 600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alertDirty, alertToPhone]);
+
+  // Debounced auto-save for Customer Texting (Instant Text).
+  useEffect(() => {
+    if (!ctDirty) return;
+    const t = setTimeout(() => { saveCtSettings(); }, 600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctDirty, ctAutoReplyTemplate]);
+
+  // Debounced auto-save for Call Connect (Instant Call).
+  useEffect(() => {
+    if (!ccDirty) return;
+    const t = setTimeout(() => { saveCcSettings(); }, 600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ccDirty, ccMode, ccAgentPhone, ccBotNumber, ccAgentWhisperMessage, ccLeadGreetingMessage, ccVoicemailMessage, ccCallForwardingNumber]);
+
   async function loadAccounts() {
     try {
       const { accounts: accs } = await thumbtackApi.getSavedAccounts();
@@ -2966,26 +2991,10 @@ export function Services() {
                   )}
                 </div>
 
-                {/* Alert Save */}
-                {leadAlertRule && (
-                  <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/30">
-                    {alertDirty ? (
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-xs text-amber-600 font-medium flex items-center gap-1">
-                          <AlertCircle className="w-3 h-3" /> Unsaved changes
-                        </span>
-                        <div className="flex gap-2">
-                          <button onClick={discardAlertChanges} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Discard</button>
-                          <button onClick={saveAlertSettings} disabled={saving || !alertToPhone} className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1">
-                            {saving && <Loader2 className="w-3 h-3 animate-spin" />} Save
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <button onClick={saveAlertSettings} disabled={saving} className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
-                        {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} Save Alerts
-                      </button>
-                    )}
+                {/* Auto-saves on change (debounced ~600ms). Saving indicator shown inline if needed. */}
+                {leadAlertRule && saving && (
+                  <div className="px-5 py-2 text-[11px] text-slate-400 flex items-center gap-2">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Saving…
                   </div>
                 )}
 
@@ -3279,27 +3288,12 @@ export function Services() {
                 </div>
               </div>
 
-              {/* ── Contact Immediately — Save / unsaved changes ── */}
-              <div className="pt-4 border-t border-slate-100">
-                {commsDirty ? (
-                  <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3">
-                    <div className="flex items-center gap-2 text-amber-700">
-                      <AlertCircle className="w-4 h-4 shrink-0" />
-                      <span className="text-sm font-medium">You have unsaved changes</span>
-                    </div>
-                    <div className="flex gap-2 shrink-0">
-                      <button onClick={discardCommsChanges} className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Discard</button>
-                      <button onClick={saveCommsSettings} disabled={ctSaving || ccSaving} className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1">
-                        {(ctSaving || ccSaving) && <Loader2 className="w-3 h-3 animate-spin" />} Save Settings
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button onClick={saveCommsSettings} disabled={ctSaving || ccSaving} className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50">
-                    {(ctSaving || ccSaving) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save Settings
-                  </button>
-                )}
-              </div>
+              {/* Auto-saves on change (debounced ~600ms). */}
+              {(ctSaving || ccSaving) && (
+                <div className="pt-3 text-[11px] text-slate-400 flex items-center gap-2">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Saving…
+                </div>
+              )}
 
             </div>
           </ServiceCard>
