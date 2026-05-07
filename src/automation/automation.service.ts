@@ -656,6 +656,25 @@ export class AutomationService implements OnModuleInit {
         try { aiRules = JSON.parse(savedAccount.followUpSettingsJson); } catch {}
       }
 
+      // Active hours enforcement for AI Conversation. The Services UI
+      // exposes "Always (24/7) / Set up active time" inside the AI
+      // Conversation card. When set to active_hours, the saved
+      // followUpActiveHoursStart / followUpActiveHoursEnd columns gate
+      // when AI replies — outside the window we don't auto-respond.
+      // Previously this only kicked in for isFollowUp rules in
+      // executePendingMessage; the synthetic ai-conversation-* rule
+      // bypassed it because there's no AutomationRule row to look up.
+      const aiAvailability = aiRules.followUpAvailability ?? aiRules.availability;
+      const ahStart = savedAccount.followUpActiveHoursStart;
+      const ahEnd = savedAccount.followUpActiveHoursEnd;
+      const ahTz = savedAccount.followUpTimezone || 'America/New_York';
+      if (aiAvailability === 'active_hours' && ahStart && ahEnd) {
+        if (!this.isInActiveHours(ahStart, ahEnd, ahTz)) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — outside active hours (${ahStart}-${ahEnd} ${ahTz})`);
+          return;
+        }
+      }
+
       // Check terminal lead status — don't reply to done/hired/archived leads
       const lead = context.leadId ? await this.prisma.lead.findUnique({
         where: { id: context.leadId },
