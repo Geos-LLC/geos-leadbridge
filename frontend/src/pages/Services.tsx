@@ -493,6 +493,18 @@ export function Services() {
   const [aiStopOnBooked, setAiStopOnBooked] = useState(true);
   const [aiStopOnPriceAgreed, setAiStopOnPriceAgreed] = useState(false);
   const [aiMaxReplies, setAiMaxReplies] = useState(0); // 0 = unlimited
+  // Customer-reply trigger follow-ups (deferral / hired-competitor).
+  // Toggles default ON; the backend looks for the per-account
+  // FollowUpSequenceTemplate (lazy-seeded if missing) and enrolls a
+  // single-step sequence. Delay + message are stored on the template.
+  const DEFAULT_DEFERRAL_MSG = "Hi {{lead.name}}, just circling back — did you get a chance to think it over? Happy to answer any questions or help get you on the schedule if you're ready.";
+  const DEFAULT_HIRED_MSG = "Hi {{lead.name}}, hope your cleaning went well! If anything didn't go the way you hoped, we'd be happy to help next time. No pressure either way.";
+  const [aiDeferralCheckIn, setAiDeferralCheckIn] = useState(true);
+  const [aiDeferralDelay, setAiDeferralDelay] = useState('3d');
+  const [aiDeferralMessage, setAiDeferralMessage] = useState(DEFAULT_DEFERRAL_MSG);
+  const [aiHiredReengage, setAiHiredReengage] = useState(true);
+  const [aiHiredDelay, setAiHiredDelay] = useState('21d');
+  const [aiHiredMessage, setAiHiredMessage] = useState(DEFAULT_HIRED_MSG);
   const [reEngagementAlertOn, setReEngagementAlertOn] = useState(true);
   const [reEngagementTemplate, setReEngagementTemplate] = useState('Lead {{lead.name}} replied: "{{message}}"');
   // Legacy compat
@@ -696,6 +708,12 @@ export function Services() {
         if (s.aiStopOnBooked !== undefined) setAiStopOnBooked(s.aiStopOnBooked);
         if (s.aiStopOnPriceAgreed !== undefined) setAiStopOnPriceAgreed(s.aiStopOnPriceAgreed);
         if (s.aiMaxReplies !== undefined) setAiMaxReplies(s.aiMaxReplies);
+        if (s.aiDeferralCheckIn !== undefined) setAiDeferralCheckIn(s.aiDeferralCheckIn);
+        if (s.aiDeferralDelay) setAiDeferralDelay(s.aiDeferralDelay);
+        if (s.aiDeferralMessage) setAiDeferralMessage(s.aiDeferralMessage);
+        if (s.aiHiredCompetitorReengage !== undefined) setAiHiredReengage(s.aiHiredCompetitorReengage);
+        if (s.aiHiredCompetitorDelay) setAiHiredDelay(s.aiHiredCompetitorDelay);
+        if (s.aiHiredCompetitorMessage) setAiHiredMessage(s.aiHiredCompetitorMessage);
         // Re-engagement alerts
         if (s.reEngagementAlertEnabled !== undefined) setReEngagementAlertOn(s.reEngagementAlertEnabled);
         if (s.reEngagementTemplate) setReEngagementTemplate(s.reEngagementTemplate);
@@ -3356,6 +3374,103 @@ export function Services() {
                       )}
                     </div>
 
+                    {/* Check in after customer deferral */}
+                    <div className="rounded-xl border border-slate-200 overflow-hidden">
+                      <label className="flex items-center gap-3 p-3 bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors">
+                        <input type="checkbox" checked={aiDeferralCheckIn} onChange={(e) => setAiDeferralCheckIn(e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                        <div>
+                          <span className="text-xs font-semibold text-slate-700">Check in after customer deferral</span>
+                          <span className="block text-[10px] text-slate-400">When customer says "I'll get back to you" / "let me think", silence the AI and schedule one nudge later. Cancels if they reply first.</span>
+                        </div>
+                      </label>
+                      {aiDeferralCheckIn && (
+                        <div className="px-3 py-3 border-t border-slate-100 space-y-3">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Send check-in after</label>
+                            <div className="flex flex-wrap gap-1.5">
+                              {([
+                                { value: '1d', label: '1 day' },
+                                { value: '2d', label: '2 days' },
+                                { value: '3d', label: '3 days' },
+                                { value: '5d', label: '5 days' },
+                                { value: '7d', label: '1 week' },
+                                { value: '14d', label: '2 weeks' },
+                              ]).map(opt => (
+                                <button key={opt.value} onClick={() => setAiDeferralDelay(opt.value)}
+                                  className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border-2 transition-all ${
+                                    aiDeferralDelay === opt.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
+                                  }`}>
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Message</label>
+                            <textarea
+                              value={aiDeferralMessage}
+                              onChange={e => setAiDeferralMessage(e.target.value)}
+                              rows={3}
+                              className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                            />
+                            <div className="flex items-center justify-between mt-1">
+                              <p className="text-[10px] text-slate-400">{'{{lead.name}}'} is replaced with the customer's name.</p>
+                              <button type="button" onClick={() => setAiDeferralMessage(DEFAULT_DEFERRAL_MSG)} className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold">Reset to default</button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Re-engage after customer hired competitor */}
+                    <div className="rounded-xl border border-slate-200 overflow-hidden">
+                      <label className="flex items-center gap-3 p-3 bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors">
+                        <input type="checkbox" checked={aiHiredReengage} onChange={(e) => setAiHiredReengage(e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                        <div>
+                          <span className="text-xs font-semibold text-slate-700">Re-engage after customer hired competitor</span>
+                          <span className="block text-[10px] text-slate-400">When customer says they hired someone else, send one polite check-in later. Captures the dissatisfied ones.</span>
+                        </div>
+                      </label>
+                      {aiHiredReengage && (
+                        <div className="px-3 py-3 border-t border-slate-100 space-y-3">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Send re-engage after</label>
+                            <div className="flex flex-wrap gap-1.5">
+                              {([
+                                { value: '14d', label: '2 weeks' },
+                                { value: '21d', label: '3 weeks' },
+                                { value: '30d', label: '1 month' },
+                                { value: '42d', label: '6 weeks' },
+                                { value: '60d', label: '2 months' },
+                              ]).map(opt => (
+                                <button key={opt.value} onClick={() => setAiHiredDelay(opt.value)}
+                                  className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border-2 transition-all ${
+                                    aiHiredDelay === opt.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
+                                  }`}>
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">Message</label>
+                            <textarea
+                              value={aiHiredMessage}
+                              onChange={e => setAiHiredMessage(e.target.value)}
+                              rows={3}
+                              className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                            />
+                            <div className="flex items-center justify-between mt-1">
+                              <p className="text-[10px] text-slate-400">{'{{lead.name}}'} is replaced with the customer's name.</p>
+                              <button type="button" onClick={() => setAiHiredMessage(DEFAULT_HIRED_MSG)} className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold">Reset to default</button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     {/* Quiet hours */}
                     <div className="rounded-xl border border-slate-200 overflow-hidden">
                       <label className="flex items-center gap-3 p-3 bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors">
@@ -3738,6 +3853,12 @@ export function Services() {
                       aiStopOnBooked,
                       aiStopOnPriceAgreed,
                       aiMaxReplies,
+                      aiDeferralCheckIn,
+                      aiDeferralDelay,
+                      aiDeferralMessage,
+                      aiHiredCompetitorReengage: aiHiredReengage,
+                      aiHiredCompetitorDelay: aiHiredDelay,
+                      aiHiredCompetitorMessage: aiHiredMessage,
                       reEngagementAlertEnabled: reEngagementAlertOn,
                       reEngagementTemplate,
                     });

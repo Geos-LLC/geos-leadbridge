@@ -15,6 +15,8 @@ import { MonitoringService } from '../monitoring/monitoring.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { TrialService } from '../trial/trial.service';
 import { buildPriceRangeInstruction } from '../ai/price-range';
+import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
+import { ensureCustomerReplyPresets } from '../follow-up-engine/follow-up-seed';
 
 /**
  * Customer-reply phrase sets used by both:
@@ -77,7 +79,10 @@ export function detectCustomerReplyTransition(message: string): CustomerReplyTra
   return { kind: 'engaged' };
 }
 
-const REENGAGE_DAYS_AFTER_HIRED_SOMEONE = 75;
+// 21 days — aligned with the customer_hired_competitor FollowUpEnrollment so
+// there is one canonical re-engagement clock. Previously 75 days; superseded
+// when the FollowUpEnrollment took over as the active re-engagement mechanism.
+const REENGAGE_DAYS_AFTER_HIRED_SOMEONE = 21;
 
 export type ReplyMode = 'custom' | 'price' | 'auto';
 
@@ -163,7 +168,64 @@ export class AutomationService implements OnModuleInit {
     private trialService: TrialService,
     @Inject(forwardRef(() => LeadStatusService))
     private leadStatusService: LeadStatusService,
+    @Inject(forwardRef(() => FollowUpEngineService))
+    private followUpEngine: FollowUpEngineService,
   ) {}
+
+  /**
+   * Enroll a conversation in a customer-reply trigger sequence (deferred /
+   * hired-competitor). Lazy-seeds the template if this account pre-dates
+   * the feature. Single-step sequences with literal-message generation.
+   * Idempotent — enrollInSequence already returns the existing enrollment
+   * if one is active on the conversation.
+   */
+  private async enrollInCustomerReplySequence(
+    triggerState: 'customer_deferred' | 'customer_hired_competitor',
+    leadId: string,
+    threadId: string | null | undefined,
+    userId: string,
+    platform: string,
+    savedAccountId: string | null,
+    activeHoursStart: string | null | undefined,
+    activeHoursEnd: string | null | undefined,
+    activeHoursTimezone: string | null | undefined,
+  ): Promise<void> {
+    if (!threadId) return;
+    try {
+      // Lazy-seed the customer-reply trigger templates if this account
+      // hasn't been seeded yet (e.g. pre-dates the feature).
+      if (savedAccountId) {
+        await ensureCustomerReplyPresets(
+          this.prisma,
+          userId,
+          platform,
+          savedAccountId,
+          activeHoursStart || '09:00',
+          activeHoursEnd || '21:00',
+          activeHoursTimezone || 'America/New_York',
+        );
+      }
+
+      const template = await this.prisma.followUpSequenceTemplate.findFirst({
+        where: {
+          ...(savedAccountId ? { savedAccountId } : { userId, savedAccountId: null }),
+          platform,
+          triggerState,
+          enabled: true,
+        },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+      });
+      if (!template) {
+        this.logger.log(`[AUTOMATION] No ${triggerState} template found for account ${savedAccountId || userId} on ${platform} — skipping enrollment`);
+        return;
+      }
+
+      await this.followUpEngine.enrollInSequence(threadId, template.id, platform, leadId);
+      this.logger.log(`[AUTOMATION] ✓ Enrolled conversation ${threadId} in ${triggerState} (template ${template.id})`);
+    } catch (err: any) {
+      this.logger.error(`[AUTOMATION] ${triggerState} enrollment failed for ${threadId}: ${err.message}`);
+    }
+  }
 
   /**
    * On startup, restore pending messages and reschedule them
@@ -620,12 +682,28 @@ export class AutomationService implements OnModuleInit {
         }
       }
 
-      // Rule: stop on booked/hired keywords
+      // Rule: stop on booked/hired keywords. Then schedule a longer
+      // re-engagement follow-up (default 21 days) — the customer's current
+      // job may not work out, and a polite check-in then captures the
+      // dissatisfied ones.
       if (aiRules.aiStopOnBooked !== false && context.customerMessage) {
         const bookedPhrases = ['already hired', 'booked another', 'found someone', 'went with someone', 'already have someone', 'no longer need'];
         const msgLower = context.customerMessage.toLowerCase();
         if (bookedPhrases.some(p => msgLower.includes(p))) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — customer booked elsewhere`);
+          if (aiRules.aiHiredCompetitorReengage !== false && context.leadId && lead?.threadId) {
+            await this.enrollInCustomerReplySequence(
+              'customer_hired_competitor',
+              context.leadId,
+              lead.threadId,
+              context.userId,
+              savedAccount.platform,
+              savedAccount.id,
+              savedAccount.followUpActiveHoursStart,
+              savedAccount.followUpActiveHoursEnd,
+              savedAccount.followUpTimezone,
+            );
+          }
           return;
         }
       }
@@ -662,6 +740,19 @@ export class AutomationService implements OnModuleInit {
         const matched = deferralPhrases.find(p => msgLower.includes(p));
         if (matched) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — customer signaled deferral ("${matched}")`);
+          if (aiRules.aiDeferralCheckIn !== false && context.leadId && lead?.threadId) {
+            await this.enrollInCustomerReplySequence(
+              'customer_deferred',
+              context.leadId,
+              lead.threadId,
+              context.userId,
+              savedAccount.platform,
+              savedAccount.id,
+              savedAccount.followUpActiveHoursStart,
+              savedAccount.followUpActiveHoursEnd,
+              savedAccount.followUpTimezone,
+            );
+          }
           return;
         }
       }
@@ -709,7 +800,9 @@ export class AutomationService implements OnModuleInit {
    * Decision table (handled by detectCustomerReplyTransition):
    *   opt-out phrase           -> lost   (lostReason='opt_out')
    *   hired-someone phrase     -> lost   (lostReason='hired_someone',
-   *                                       reengageAt=now+75d)
+   *                                       reengageAt=now+21d, plus a
+   *                                       customer_hired_competitor
+   *                                       FollowUpEnrollment)
    *   agreed phrase            -> booked
    *   anything else            -> engaged
    *                              (no-downgrade guard silently skips when the

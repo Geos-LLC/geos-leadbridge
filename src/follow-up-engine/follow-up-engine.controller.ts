@@ -16,6 +16,7 @@ import { ConversationContextService } from '../conversation-context/conversation
 import { FollowUpEngineService } from './follow-up-engine.service';
 import { FollowUpGeneratorService, SequenceStep } from './follow-up-generator.service';
 import { TrialService } from '../trial/trial.service';
+import { ensureCustomerReplyPresets } from './follow-up-seed';
 
 @Controller('v1/follow-ups')
 @UseGuards(JwtAuthGuard)
@@ -550,6 +551,13 @@ export class FollowUpEngineController {
     if (body.aiStopOnBooked !== undefined) extendedSettings.aiStopOnBooked = body.aiStopOnBooked;
     if (body.aiStopOnPriceAgreed !== undefined) extendedSettings.aiStopOnPriceAgreed = body.aiStopOnPriceAgreed;
     if (body.aiMaxReplies !== undefined) extendedSettings.aiMaxReplies = body.aiMaxReplies;
+    // Customer-reply trigger follow-ups (deferral / hired-competitor)
+    if (body.aiDeferralCheckIn !== undefined) extendedSettings.aiDeferralCheckIn = body.aiDeferralCheckIn;
+    if (body.aiDeferralDelay !== undefined) extendedSettings.aiDeferralDelay = body.aiDeferralDelay;
+    if (body.aiDeferralMessage !== undefined) extendedSettings.aiDeferralMessage = body.aiDeferralMessage;
+    if (body.aiHiredCompetitorReengage !== undefined) extendedSettings.aiHiredCompetitorReengage = body.aiHiredCompetitorReengage;
+    if (body.aiHiredCompetitorDelay !== undefined) extendedSettings.aiHiredCompetitorDelay = body.aiHiredCompetitorDelay;
+    if (body.aiHiredCompetitorMessage !== undefined) extendedSettings.aiHiredCompetitorMessage = body.aiHiredCompetitorMessage;
     // Re-engagement alerts
     if (body.reEngagementAlertEnabled !== undefined) extendedSettings.reEngagementAlertEnabled = body.reEngagementAlertEnabled;
     if (body.reEngagementTemplate !== undefined) extendedSettings.reEngagementTemplate = body.reEngagementTemplate;
@@ -570,6 +578,78 @@ export class FollowUpEngineController {
         followUpSettingsJson: Object.keys(extendedSettings).length > 0 ? JSON.stringify(extendedSettings) : undefined,
       },
     });
+
+    // Propagate the customer-reply trigger settings to the corresponding
+    // FollowUpSequenceTemplate. The templates are the source of truth for
+    // the enrollment engine, so delay + message edits in the UI need to
+    // land there too. Lazy-seed them first if they don't exist yet.
+    const triggerSettingsTouched =
+      body.aiDeferralCheckIn !== undefined || body.aiDeferralDelay !== undefined || body.aiDeferralMessage !== undefined ||
+      body.aiHiredCompetitorReengage !== undefined || body.aiHiredCompetitorDelay !== undefined || body.aiHiredCompetitorMessage !== undefined;
+    if (triggerSettingsTouched) {
+      const platformForTemplates = platform || account.platform;
+      try {
+        await ensureCustomerReplyPresets(
+          this.prisma,
+          user.id,
+          platformForTemplates,
+          savedAccountId,
+          activeHoursStart || account.followUpActiveHoursStart || '09:00',
+          activeHoursEnd || account.followUpActiveHoursEnd || '21:00',
+          timezone || account.followUpTimezone || 'America/New_York',
+        );
+      } catch (err: any) {
+        this.logger.warn(`[saveSettings] ensureCustomerReplyPresets failed: ${err.message}`);
+      }
+
+      const parseShortDelay = (d: string): number => {
+        const s = String(d || '').toLowerCase().trim();
+        const num = parseInt(s) || 0;
+        if (s.endsWith('h')) return num * 60;
+        if (s.endsWith('d')) return num * 1440;
+        if (s.endsWith('w')) return num * 10080;
+        return num || 4320; // safety fallback: 3 days
+      };
+
+      const propagate = async (
+        triggerState: 'customer_deferred' | 'customer_hired_competitor',
+        enabled: boolean | undefined,
+        delay: string | undefined,
+        message: string | undefined,
+      ) => {
+        const tmpl = await this.prisma.followUpSequenceTemplate.findFirst({
+          where: { savedAccountId, platform: platformForTemplates, triggerState },
+        });
+        if (!tmpl) return;
+        const stepsJson = (tmpl.stepsJson as any) || { schemaVersion: 1, steps: [] };
+        const updatedSteps = (stepsJson.steps || []).map((s: any, i: number) => {
+          if (i !== 0) return s;
+          return {
+            ...s,
+            delayMinutes: delay !== undefined ? parseShortDelay(delay) : s.delayMinutes,
+            messageTemplate: message !== undefined ? message : s.messageTemplate,
+          };
+        });
+        await this.prisma.followUpSequenceTemplate.update({
+          where: { id: tmpl.id },
+          data: {
+            stepsJson: { ...stepsJson, steps: updatedSteps },
+            ...(enabled !== undefined ? { enabled } : {}),
+          },
+        });
+      };
+
+      if (body.aiDeferralCheckIn !== undefined || body.aiDeferralDelay !== undefined || body.aiDeferralMessage !== undefined) {
+        await propagate('customer_deferred', body.aiDeferralCheckIn, body.aiDeferralDelay, body.aiDeferralMessage).catch((err: any) => {
+          this.logger.warn(`[saveSettings] customer_deferred template propagation failed: ${err.message}`);
+        });
+      }
+      if (body.aiHiredCompetitorReengage !== undefined || body.aiHiredCompetitorDelay !== undefined || body.aiHiredCompetitorMessage !== undefined) {
+        await propagate('customer_hired_competitor', body.aiHiredCompetitorReengage, body.aiHiredCompetitorDelay, body.aiHiredCompetitorMessage).catch((err: any) => {
+          this.logger.warn(`[saveSettings] customer_hired_competitor template propagation failed: ${err.message}`);
+        });
+      }
+    }
 
     // When the global AI Strategy is saved, fan out to this user's AutomationRules
     // so legacy per-rule overrides don't silently shadow the global setting.

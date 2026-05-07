@@ -225,7 +225,70 @@ export const FOLLOW_UP_PRESETS = [
       ],
     },
   },
+
+  // ==========================================
+  // customer_deferred — fires when the customer says "I'll get back to
+  // you" / "let me think". Single-step, fixed message, default 3 days.
+  // ==========================================
+  {
+    name: 'Customer Deferred Check-In',
+    triggerState: 'customer_deferred',
+    preset: 'standard',
+    platforms: ['yelp', 'thumbtack'],
+    isDefault: true,
+    stepsJson: {
+      schemaVersion: 1,
+      steps: [
+        {
+          stepOrder: 0,
+          delayMinutes: 4320, // 3 days
+          objective: 'follow_up',
+          messageTemplate: "Hi {{lead.name}}, just circling back — did you get a chance to think it over? Happy to answer any questions or help get you on the schedule if you're ready.",
+        },
+      ],
+    },
+  },
+
+  // ==========================================
+  // customer_hired_competitor — fires when the customer says they hired
+  // someone else. Single-step, fixed message, default 21 days.
+  // Supersedes the old Lead.reengageAt = now+75d behavior.
+  // ==========================================
+  {
+    name: 'Customer Hired Competitor Re-Engage',
+    triggerState: 'customer_hired_competitor',
+    preset: 'standard',
+    platforms: ['yelp', 'thumbtack'],
+    isDefault: true,
+    stepsJson: {
+      schemaVersion: 1,
+      steps: [
+        {
+          stepOrder: 0,
+          delayMinutes: 30240, // 21 days
+          objective: 'follow_up',
+          messageTemplate: "Hi {{lead.name}}, hope your cleaning went well! If anything didn't go the way you hoped, we'd be happy to help next time. No pressure either way.",
+        },
+      ],
+    },
+  },
 ] as const;
+
+/**
+ * Customer-reply trigger states — auto-fired by phrase detection in
+ * automation.service.ts (deferral / hired-competitor). Use literal-message
+ * mode + auto_send because the message text is fixed and we want to fire
+ * without admin review.
+ */
+const CUSTOMER_REPLY_TRIGGER_STATES = ['customer_deferred', 'customer_hired_competitor'] as const;
+
+function modeForTriggerState(triggerState: string): 'suggest' | 'auto_send' {
+  return (CUSTOMER_REPLY_TRIGGER_STATES as readonly string[]).includes(triggerState) ? 'auto_send' : 'suggest';
+}
+
+function generationModeForTriggerState(triggerState: string): 'ai' | 'template' {
+  return (CUSTOMER_REPLY_TRIGGER_STATES as readonly string[]).includes(triggerState) ? 'template' : 'ai';
+}
 
 /**
  * Seed preset templates for a user.
@@ -260,8 +323,8 @@ export async function seedPresetsForUser(
         platform,
         name: preset.name,
         triggerState: preset.triggerState,
-        mode: 'suggest',
-        generationMode: 'ai',
+        mode: modeForTriggerState(preset.triggerState),
+        generationMode: generationModeForTriggerState(preset.triggerState),
         preset: preset.preset,
         isDefault: (preset as any).isDefault || false,
         activeHoursStart,
@@ -276,4 +339,61 @@ export async function seedPresetsForUser(
   }
 
   return seeded;
+}
+
+/**
+ * Idempotently seed JUST the customer-reply trigger templates (deferred,
+ * hired-competitor). Safe to call on accounts that already have the older
+ * 12 presets — only creates rows for the trigger states that are missing.
+ *
+ * Used as a lazy backfill: the first time a customer says "I'll get back
+ * to you" on an account that pre-dates this feature, this seeds the
+ * template so the enrollment can proceed.
+ */
+export async function ensureCustomerReplyPresets(
+  prisma: any,
+  userId: string,
+  platform: string,
+  savedAccountId: string | null,
+  activeHoursStart: string = '09:00',
+  activeHoursEnd: string = '21:00',
+  activeHoursTimezone: string = 'America/New_York',
+): Promise<number> {
+  let created = 0;
+  for (const triggerState of CUSTOMER_REPLY_TRIGGER_STATES) {
+    const exists = await prisma.followUpSequenceTemplate.findFirst({
+      where: savedAccountId
+        ? { savedAccountId, platform, triggerState }
+        : { userId, platform, savedAccountId: null, triggerState },
+      select: { id: true },
+    });
+    if (exists) continue;
+
+    const preset = FOLLOW_UP_PRESETS.find(
+      p => p.triggerState === triggerState && (p.platforms as readonly string[]).includes(platform),
+    );
+    if (!preset) continue;
+
+    await prisma.followUpSequenceTemplate.create({
+      data: {
+        userId,
+        savedAccountId: savedAccountId,
+        platform,
+        name: preset.name,
+        triggerState: preset.triggerState,
+        mode: modeForTriggerState(triggerState),
+        generationMode: generationModeForTriggerState(triggerState),
+        preset: preset.preset,
+        isDefault: true,
+        activeHoursStart,
+        activeHoursEnd,
+        activeHoursTimezone,
+        stepsJson: preset.stepsJson,
+        schemaVersion: 1,
+        enabled: true,
+      },
+    });
+    created++;
+  }
+  return created;
 }

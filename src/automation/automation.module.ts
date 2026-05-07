@@ -11,6 +11,7 @@ import { LeadsModule } from '../leads/leads.module';
 import { PlatformsModule } from '../platforms/platforms.module';
 import { AiModule } from '../ai/ai.module';
 import { ConversationContextModule } from '../conversation-context/conversation-context.module';
+import { FollowUpEngineModule } from '../follow-up-engine/follow-up-engine.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ConversationContextModule } from '../conversation-context/conversation-
     forwardRef(() => PlatformsModule),
     AiModule,
     ConversationContextModule,
+    forwardRef(() => FollowUpEngineModule),
   ],
   controllers: [AutomationController],
   providers: [AutomationService],
