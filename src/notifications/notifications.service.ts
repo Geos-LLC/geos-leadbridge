@@ -540,13 +540,20 @@ export class NotificationsService {
     // call picks up this row immediately rather than waiting on the 60s TTL.
     await this.cache.del(CacheKeys.notificationLogsByLead(userId, leadId));
 
-    // 5. Send via Sigcore
+    // 5. Send via Sigcore — align apiKey to the tenant that owns fromPhone
+    //    (see resolveApiKeyForFromPhone for rationale).
     try {
+      const sendApiKey = await this.resolveApiKeyForFromPhone(
+        userId,
+        savedAccountId,
+        fromPhone,
+        apiKey,
+      );
       const result = await this.sendViaSigcore({
         to: lead.customerPhone,
         body: messageBody,
         fromPhone,
-        apiKey,
+        apiKey: sendApiKey || apiKey,
         sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
         metadata: {
           purpose: 'customer_texting',
@@ -1077,11 +1084,15 @@ export class NotificationsService {
       : `SMS from ${fromNumber}:\n${body}`;
     this.logger.log(`[forwardInboundSms] Forwarding to ${destPhone} for account ${savedAccountId}`);
 
+    const sendApiKey = settings.savedAccount?.userId
+      ? await this.resolveApiKeyForFromPhone(settings.savedAccount.userId, savedAccountId, fromPhone, apiKey)
+      : apiKey;
+
     await this.sendViaSigcore({
       to: destPhone,
       body: forwardBody,
       fromPhone,
-      apiKey,
+      apiKey: sendApiKey || apiKey,
       sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
       metadata: { purpose: 'sms_forwarding', savedAccountId },
     });
@@ -1309,10 +1320,19 @@ export class NotificationsService {
     // call sees this row immediately rather than waiting on the 60s TTL.
     await this.cache.del(CacheKeys.notificationLogsByLead(userId, leadId));
 
-    // Send via Sigcore
+    // Send via Sigcore.
+    // The Sigcore /v1/messages outbound resolver looks up `fromNumber` in the
+    // caller's tenant. resolveBotPhone falls back cross-account when the lead's
+    // SavedAccount has no dedicated number of its own — if the resolved phone is
+    // registered to a sibling SavedAccount's Sigcore tenant, we MUST send with
+    // that tenant's API key or Sigcore returns 422 INVALID_PROFILE_PHONE.
     try {
-      // Always use tenant API key for dedicated numbers
-      const apiKey = settings.sigcoreApiKey;
+      const apiKey = await this.resolveApiKeyForFromPhone(
+        userId,
+        savedAccountId,
+        fromPhone,
+        settings.sigcoreApiKey,
+      );
       if (!apiKey) {
         this.logger.error(`No Sigcore API key for rule ${ruleName} - tenant key not configured`);
         throw new Error('No Sigcore API key configured. Please provision your phone workspace first.');
@@ -2613,6 +2633,48 @@ export class NotificationsService {
       select: { businessPhone: true },
     });
     return user?.businessPhone || null;
+  }
+
+  /**
+   * Pick the Sigcore tenant API key that matches the SavedAccount that OWNS
+   * the resolved fromPhone. resolveBotPhone falls back cross-account when the
+   * lead's account has no dedicated number; if the phone is registered to a
+   * sibling account's Sigcore tenant, sending with the lead-account key gets
+   * 422 INVALID_PROFILE_PHONE ("fromNumber X is not assigned to any profile
+   * under this tenant"). Returns the owner-account's apiKey when there's a
+   * mismatch, or the original apiKey otherwise.
+   */
+  private async resolveApiKeyForFromPhone(
+    userId: string,
+    savedAccountId: string | null | undefined,
+    fromPhone: string | null | undefined,
+    fallbackApiKey: string | null | undefined,
+  ): Promise<string | null> {
+    if (!fromPhone) return fallbackApiKey ?? null;
+    try {
+      const phoneOwner = await this.prisma.tenantPhoneNumber.findFirst({
+        where: { phoneNumber: fromPhone, userId, status: 'ACTIVE' },
+        select: { savedAccountId: true },
+      });
+      if (
+        phoneOwner?.savedAccountId &&
+        phoneOwner.savedAccountId !== savedAccountId
+      ) {
+        const ownerSettings = await this.prisma.notificationSettings.findUnique({
+          where: { savedAccountId: phoneOwner.savedAccountId },
+          select: { sigcoreApiKey: true },
+        });
+        if (ownerSettings?.sigcoreApiKey) {
+          this.logger.log(
+            `[resolveApiKey] cross-tenant: fromPhone=${fromPhone} owner=${phoneOwner.savedAccountId} (lead=${savedAccountId})`,
+          );
+          return ownerSettings.sigcoreApiKey;
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`[resolveApiKey] lookup failed: ${err.message}`);
+    }
+    return fallbackApiKey ?? null;
   }
 
   /**

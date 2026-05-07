@@ -2329,9 +2329,10 @@ export function Services() {
                     <button key={s.key}
                       onClick={() => {
                         setFuStrategy(s.key);
-                        if (s.key !== 'auto') {
-                          setFuStrategyPrompt(STRATEGY_PROMPT_PREVIEWS[s.key] || '');
-                        }
+                        // Don't pre-fill the saved prompt — backend STRATEGY_PROMPTS[strategy]
+                        // is the source of truth (includes guardrails like "ALWAYS ask for
+                        // SQUARE FOOTAGE first" for Qualify). User customizes via the editor.
+                        setFuStrategyPrompt('');
                       }}
                       className={`text-[11px] px-2.5 py-1.5 rounded-lg font-semibold border-2 transition-all ${fuStrategy === s.key ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-violet-200'}`}
                       title={s.desc}>
@@ -2343,8 +2344,8 @@ export function Services() {
                   <p className="text-[11px] text-slate-400">AI picks the best strategy based on conversation context.</p>
                 ) : (
                   <div className="bg-white p-3 rounded-xl border border-dashed border-slate-200 text-slate-600 text-xs leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap relative group">
-                    {fuStrategyPrompt || 'No prompt set'}
-                    <button onClick={() => setTemplateEditor({ mode: 'create', ruleId: '', templateId: undefined, templateName: `AI Strategy — ${fuStrategy.charAt(0).toUpperCase() + fuStrategy.slice(1)}`, content: fuStrategyPrompt || '', type: `fu-strategy-${fuStrategy}` })}
+                    {fuStrategyPrompt || `${STRATEGY_PROMPT_PREVIEWS[fuStrategy] || ''}\n\n(Using backend default — click the pencil to customize.)`}
+                    <button onClick={() => setTemplateEditor({ mode: 'create', ruleId: '', templateId: undefined, templateName: `AI Strategy — ${fuStrategy.charAt(0).toUpperCase() + fuStrategy.slice(1)}`, content: fuStrategyPrompt || STRATEGY_PROMPT_PREVIEWS[fuStrategy] || '', type: `fu-strategy-${fuStrategy}` })}
                       className="absolute top-2 right-2 p-1.5 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600">
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
@@ -2357,7 +2358,11 @@ export function Services() {
                     try {
                       const payload: any = {
                         followUpStrategy: fuStrategy,
-                        followUpStrategyPrompt: fuStrategy !== 'auto' ? fuStrategyPrompt : undefined,
+                        // Send null (not undefined) when no custom prompt: clears any
+                        // stale value previously saved from the watered-down preview.
+                        followUpStrategyPrompt: fuStrategy !== 'auto' && fuStrategyPrompt
+                          ? fuStrategyPrompt
+                          : null,
                       };
                       await followUpApi.saveSettings(selectedAccountId, payload);
                       const others = fanoutOthers();
@@ -3672,16 +3677,8 @@ export function Services() {
                           <button key={s.key}
                             onClick={() => {
                               setFuStrategy(s.key);
-                              if (s.key !== 'auto') {
-                                const prompts: Record<string, string> = {
-                                  hybrid: 'STRATEGY: HYBRID\n\nYou MUST:\n- Provide a price range based on pricing settings\n- Ask EXACTLY ONE question that moves toward booking\n\nDO NOT:\n- Ask more than one question\n- Ask vague questions',
-                                  price: 'STRATEGY: PRICE ANCHOR\n\nYou MUST:\n- Lead with a price range based on pricing settings\n- Briefly explain what is included\n\nDO NOT:\n- Ask questions\n- Be vague or hesitant',
-                                  qualify: 'STRATEGY: QUALIFICATION\n\nYou MUST:\n- Ask 2-3 specific questions about missing details\n- Explain why you need the info\n\nDO NOT:\n- Give pricing\n- Ask generic questions',
-                                  convert: 'STRATEGY: CONVERSION\n\nYou MUST:\n- Include pricing based on settings\n- Offer a SPECIFIC time or 2 options\n- Push toward scheduling\n\nDO NOT:\n- Ask open-ended questions',
-                                  phone: 'STRATEGY: PHONE / ESCALATION\n\nYou MUST:\n- Explain why a call is needed\n- Ask for phone naturally\n\nDO NOT:\n- Push phone too early\n- Sound forceful',
-                                };
-                                setFuStrategyPrompt(prompts[s.key] || '');
-                              }
+                              // Don't pre-fill — backend STRATEGY_PROMPTS owns the prompt.
+                              setFuStrategyPrompt('');
                             }}
                             className={`text-[11px] px-2.5 py-1.5 rounded-lg font-semibold border-2 transition-all ${fuStrategy === s.key ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}
                             title={s.desc}>
@@ -3904,7 +3901,9 @@ export function Services() {
                       stopOnBooked: fuStopOnBooked,
                       urgentCapability: fuUrgentCapability,
                       followUpStrategy: fuStrategy,
-                      followUpStrategyPrompt: fuStrategy !== 'auto' ? fuStrategyPrompt : undefined,
+                      followUpStrategyPrompt: fuStrategy !== 'auto' && fuStrategyPrompt
+                        ? fuStrategyPrompt
+                        : null,
                       includeHistorical: fuIncludeHistorical,
                       applyToExisting: fuIncludeHistorical,
                       fuExtraWindows: fuExtraWindows.length > 0 ? fuExtraWindows : undefined,
