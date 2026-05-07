@@ -493,7 +493,6 @@ export function Services() {
   const [fuQuietHoursStart, setFuQuietHoursStart] = useState('22:00');
   const [fuQuietHoursEnd, setFuQuietHoursEnd] = useState('08:00');
   const [fuQuietHoursEnabled, setFuQuietHoursEnabled] = useState(true);
-  const [fuSaving, setFuSaving] = useState(false);
   const [fuShowRules, setFuShowRules] = useState(false);
   const [aiConversationOn, setAiConversationOn] = useState(false);
   const [aiShowRules, setAiShowRules] = useState(false);
@@ -515,8 +514,6 @@ export function Services() {
   const [aiHiredMessage, setAiHiredMessage] = useState(DEFAULT_HIRED_MSG);
   const [reEngagementAlertOn, setReEngagementAlertOn] = useState(true);
   const [reEngagementTemplate, setReEngagementTemplate] = useState('Lead {{lead.name}} replied: "{{message}}"');
-  // Legacy compat
-  const fuPreset = 'standard' as const;
   // Track which saved template is currently loaded in each CC message field (for edit button)
   const [ccWhisperTemplateId, setCcWhisperTemplateId] = useState<string | null>(sc?.ccWhisperTemplateId ?? null);
   const [ccGreetingTemplateId, setCcGreetingTemplateId] = useState<string | null>(sc?.ccGreetingTemplateId ?? null);
@@ -666,9 +663,16 @@ export function Services() {
     }
   }
 
+  // Tracks which account we've finished hydrating from the API. The auto-save
+  // effect below uses this to skip the initial render that fires immediately
+  // after setState() flushes the loaded values — without it, we'd round-trip
+  // the loaded data right back to the server on every account switch.
+  const fuBootstrappedFor = useRef<string | null>(null);
+
   // Load follow-up settings when account changes
   useEffect(() => {
     if (!selectedAccountId) return;
+    fuBootstrappedFor.current = null;
     followUpApi.getSettings(selectedAccountId).then(res => {
       if (res.success && res.settings) {
         const s = res.settings as any;
@@ -726,8 +730,96 @@ export function Services() {
         if (s.reEngagementAlertEnabled !== undefined) setReEngagementAlertOn(s.reEngagementAlertEnabled);
         if (s.reEngagementTemplate) setReEngagementTemplate(s.reEngagementTemplate);
       }
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => {
+      // Mark hydration complete so auto-save can run for subsequent state changes.
+      // Wait one tick so the setState calls above flush before the auto-save effect
+      // observes them — otherwise the auto-save would race the bootstrap flag.
+      Promise.resolve().then(() => {
+        fuBootstrappedFor.current = selectedAccountId;
+      });
+    });
   }, [selectedAccountId]);
+
+  // Debounced auto-save: any change to the follow-up / AI Conversation /
+  // re-engagement state below persists ~600ms after the user stops typing or
+  // toggling. Replaces the old Save Settings button. Skips firing on initial
+  // hydration via fuBootstrappedFor — see ref above.
+  // Specific actions (chip clicks, ServiceCard toggles, availability buttons)
+  // still call quickSaveSettings/saveAvailabilityNow directly for instant
+  // feedback + the apply-to-all fan-out, but for everything else this effect
+  // is the only persistence path.
+  useEffect(() => {
+    if (!selectedAccountId) return;
+    if (fuBootstrappedFor.current !== selectedAccountId) return;
+    const t = setTimeout(() => {
+      const payload = {
+        // Follow-ups
+        mode: fuMode,
+        replyType: fuReplyType,
+        steps: fuSmartSteps.map((s, i) => ({
+          ...s,
+          message: fuReplyType === 'ai'
+            ? ''
+            : (s.message || SMART_DEFAULTS[i]?.message || `Hi {{lead.name}}, just following up on your request. Let me know if you'd still like to move forward.`),
+        })),
+        availability: fuAvailability,
+        activeHoursStart: fuAvailability === 'active_hours' ? fuStart : null,
+        activeHoursEnd: fuAvailability === 'active_hours' ? fuEnd : null,
+        timezone: fuTz,
+        platform: accounts.find(a => a.id === selectedAccountId)?.platform || 'yelp',
+        strategyMode: 'auto',
+        scenarios: { hybrid: true, price: true, qualify: true, convert: true, phone: true },
+        stopOnReply: fuStopOnReply,
+        stopOnOptOut: fuStopOnOptOut,
+        stopOnBooked: fuStopOnBooked,
+        urgentCapability: fuUrgentCapability,
+        followUpStrategy: fuStrategy,
+        followUpStrategyPrompt: fuStrategy !== 'auto' && fuStrategyPrompt ? fuStrategyPrompt : null,
+        includeHistorical: fuIncludeHistorical,
+        applyToExisting: fuIncludeHistorical,
+        fuExtraWindows: fuExtraWindows.length > 0 ? fuExtraWindows : undefined,
+        fuReEnrollOnSilence,
+        fuReEnrollDelay,
+        fuQuietHoursEnabled,
+        fuQuietHoursStart,
+        fuQuietHoursEnd,
+        // AI Conversation rules
+        aiConversationEnabled: aiConversationOn,
+        aiStopOnOptOut,
+        aiStopOnBooked,
+        aiStopOnPriceAgreed,
+        aiMaxReplies,
+        aiDeferralCheckIn,
+        aiDeferralDelay,
+        aiDeferralMessage,
+        aiHiredCompetitorReengage: aiHiredReengage,
+        aiHiredCompetitorDelay: aiHiredDelay,
+        aiHiredCompetitorMessage: aiHiredMessage,
+        // Re-engagement alerts
+        reEngagementAlertEnabled: reEngagementAlertOn,
+        reEngagementTemplate,
+      };
+      followUpApi.saveSettings(selectedAccountId, payload as any).catch((err: any) => {
+        setError(err?.response?.data?.message || err?.message || 'Failed to save');
+      });
+    }, 600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selectedAccountId,
+    fuMode, fuReplyType, fuSmartSteps,
+    fuAvailability, fuStart, fuEnd, fuTz,
+    fuStopOnReply, fuStopOnOptOut, fuStopOnBooked, fuUrgentCapability,
+    fuStrategy, fuStrategyPrompt,
+    fuIncludeHistorical, fuExtraWindows,
+    fuReEnrollOnSilence, fuReEnrollDelay,
+    fuQuietHoursEnabled, fuQuietHoursStart, fuQuietHoursEnd,
+    aiConversationOn,
+    aiStopOnOptOut, aiStopOnBooked, aiStopOnPriceAgreed, aiMaxReplies,
+    aiDeferralCheckIn, aiDeferralDelay, aiDeferralMessage,
+    aiHiredReengage, aiHiredDelay, aiHiredMessage,
+    reEngagementAlertOn, reEngagementTemplate,
+  ]);
 
   async function loadAccounts() {
     try {
@@ -3891,94 +3983,7 @@ export function Services() {
                 )}
               </div>
 
-              {/* Save button */}
-              <button
-                disabled={fuSaving}
-                onClick={async () => {
-                  setFuSaving(true);
-                  try {
-                    const buildPayload = (acctId: string) => ({
-                      mode: fuMode,
-                      aiConversationEnabled: aiConversationOn,
-                      preset: fuPreset,
-                      replyType: fuReplyType,
-                      activeHoursStart: fuAvailability === 'active_hours' ? fuStart : null as any,
-                      activeHoursEnd: fuAvailability === 'active_hours' ? fuEnd : null as any,
-                      timezone: fuTz,
-                      platform: accounts.find(a => a.id === acctId)?.platform || 'yelp',
-                      // When the sequence is in AI mode, blank every step's message so
-                      // the backend mapper (`messageTemplate: s.message || null`) takes
-                      // the AI path. In Template mode, fall back to SMART_DEFAULTS for
-                      // any step the user hasn't customized — that's what the chip UI
-                      // shows them as the active message, so the saved data should
-                      // match what they're seeing. Generic fallback for steps beyond
-                      // the defaults table.
-                      steps: fuSmartSteps.map((s, i) => ({
-                        ...s,
-                        message: fuReplyType === 'ai'
-                          ? ''
-                          : (s.message || SMART_DEFAULTS[i]?.message || `Hi {{lead.name}}, just following up on your request. Let me know if you'd still like to move forward.`),
-                      })),
-                      availability: fuAvailability,
-                      strategyMode: 'auto',
-                      scenarios: { hybrid: true, price: true, qualify: true, convert: true, phone: true },
-                      stopOnReply: fuStopOnReply,
-                      stopOnOptOut: fuStopOnOptOut,
-                      stopOnBooked: fuStopOnBooked,
-                      urgentCapability: fuUrgentCapability,
-                      followUpStrategy: fuStrategy,
-                      followUpStrategyPrompt: fuStrategy !== 'auto' && fuStrategyPrompt
-                        ? fuStrategyPrompt
-                        : null,
-                      includeHistorical: fuIncludeHistorical,
-                      applyToExisting: fuIncludeHistorical,
-                      fuExtraWindows: fuExtraWindows.length > 0 ? fuExtraWindows : undefined,
-                      fuReEnrollOnSilence,
-                      fuReEnrollDelay,
-                      fuQuietHoursEnabled,
-                      fuQuietHoursStart,
-                      fuQuietHoursEnd,
-                      aiStopOnOptOut,
-                      aiStopOnBooked,
-                      aiStopOnPriceAgreed,
-                      aiMaxReplies,
-                      aiDeferralCheckIn,
-                      aiDeferralDelay,
-                      aiDeferralMessage,
-                      aiHiredCompetitorReengage: aiHiredReengage,
-                      aiHiredCompetitorDelay: aiHiredDelay,
-                      aiHiredCompetitorMessage: aiHiredMessage,
-                      reEngagementAlertEnabled: reEngagementAlertOn,
-                      reEngagementTemplate,
-                    });
-                    await followUpApi.saveSettings(selectedAccountId, buildPayload(selectedAccountId) as any);
-                    const others = fanoutOthers();
-                    if (others.length > 0) {
-                      await Promise.allSettled(others.map(id => followUpApi.saveSettings(id, buildPayload(id) as any)));
-                    }
-                    const wasHistorical = fuIncludeHistorical;
-                    const fanoutSuffix = others.length > 0 ? ` to ${others.length + 1} accounts` : '';
-                    showSuccess(fuMode === 'off'
-                      ? `Follow-ups disabled and saved${fanoutSuffix}`
-                      : wasHistorical
-                        ? `Settings saved${fanoutSuffix} — enrolling existing leads in background`
-                        : `Follow-up settings saved${fanoutSuffix}`);
-                  } catch (err: any) {
-                    setError(err.message || 'Failed to save follow-up settings');
-                  } finally {
-                    setFuSaving(false);
-                  }
-                }}
-                className={`w-full px-4 py-2.5 text-white text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 ${
-                  fuSaving ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 hover:shadow-lg hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
-                }`}
-              >
-                {fuSaving ? (
-                  <><svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Saving...</>
-                ) : (
-                  <><Save className="w-4 h-4" /> Save Settings</>
-                )}
-              </button>
+              {/* Settings auto-save on change (debounced ~600ms). No Save button needed. */}
             </ServiceCard>
           )}
 
