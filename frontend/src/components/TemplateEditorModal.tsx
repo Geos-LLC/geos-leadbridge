@@ -48,8 +48,16 @@ interface TemplateEditorModalProps {
   showDefaultCheckbox?: boolean;
   initialIsDefault?: boolean;
   saveError?: string | null;
-  onSave: (data: { name: string; content: string; isDefault?: boolean }) => void;
+  onSave: (data: { name: string; content: string; isDefault?: boolean; delay?: string }) => void;
   onSaveAsNew?: (data: { name: string; content: string }) => void;
+  /**
+   * When provided, the modal renders an editable "Send after" delay
+   * input above the content textarea. Used by the follow-up step editor
+   * to edit both delay + message in a single popup.
+   */
+  initialDelay?: string;
+  showDelayField?: boolean;
+  delayPresets?: string[];
 }
 
 export function TemplateEditorModal({
@@ -57,10 +65,12 @@ export function TemplateEditorModal({
   templateName, saving, variables, existingNames = [],
   showDefaultCheckbox, initialIsDefault, saveError,
   onSave, onSaveAsNew,
+  initialDelay, showDelayField, delayPresets,
 }: TemplateEditorModalProps) {
   const [name, setName] = useState(initialName);
   const [content, setContent] = useState(initialContent);
   const [isDefault, setIsDefault] = useState(initialIsDefault || false);
+  const [delay, setDelay] = useState(initialDelay || '');
   const [saveAsNewMode, setSaveAsNewMode] = useState(false);
   const [newName, setNewName] = useState('');
   const [nameError, setNameError] = useState<string | null>(null);
@@ -71,11 +81,12 @@ export function TemplateEditorModal({
       setName(initialName);
       setContent(initialContent);
       setIsDefault(initialIsDefault || false);
+      setDelay(initialDelay || '');
       setSaveAsNewMode(false);
       setNewName('');
       setNameError(null);
     }
-  }, [isOpen, initialName, initialContent, initialIsDefault]);
+  }, [isOpen, initialName, initialContent, initialIsDefault, initialDelay]);
 
   if (!isOpen) return null;
 
@@ -112,7 +123,12 @@ export function TemplateEditorModal({
     if (mode === 'create' || mode === 'edit') {
       if (!validateName(name)) return;
     }
-    onSave({ name: name.trim(), content: content.trim(), isDefault });
+    onSave({
+      name: name.trim(),
+      content: content.trim(),
+      isDefault,
+      ...(showDelayField ? { delay: delay.trim() } : {}),
+    });
   }
 
   function handleSaveAsNew() {
@@ -172,6 +188,36 @@ export function TemplateEditorModal({
               {nameError && (
                 <p className="text-sm text-red-600 font-medium">{nameError}</p>
               )}
+            </div>
+          )}
+
+          {showDelayField && (
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-slate-700">Send after</label>
+              <input
+                type="text"
+                value={delay}
+                onChange={e => setDelay(e.target.value)}
+                placeholder="e.g. 2 min, 1 hour, 1 day, 1 week"
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              />
+              {delayPresets && delayPresets.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {delayPresets.map(p => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setDelay(p)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all ${
+                        delay === p ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-slate-400">How long to wait after the previous step (or initial reply) before this message goes out.</p>
             </div>
           )}
 

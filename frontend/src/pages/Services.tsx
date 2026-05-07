@@ -3,7 +3,7 @@ import {
   Loader2, ChevronDown, MessageSquare, Bell, PhoneCall,
   Zap, Briefcase, AlertCircle, AlertTriangle, CheckCircle, X,
   Pencil, Phone, Send, ChevronUp, Trash2, Save,
-  Link2, Sparkles, RefreshCw, Unlink, Clock, Lock,
+  Link2, Sparkles, RefreshCw, Unlink, Clock, Lock, Plus,
 } from 'lucide-react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import {
@@ -415,6 +415,14 @@ export function Services() {
     templateName?: string;
     content: string;
     type: 'autoReply' | 'alert' | 'cc-whisper' | 'cc-greeting' | 'cc-voicemail' | 'ct' | string;
+  } | null>(null);
+  // Follow-up step editor — opens when the user clicks a chip in the
+  // template-mode follow-up plan. Edits both delay + message in a single
+  // popup. Local-only state; the actual persist happens via Save Settings.
+  const [fuStepEditor, setFuStepEditor] = useState<{
+    idx: number;
+    delay: string;
+    message: string;
   } | null>(null);
 
   // Instant Call Connect state
@@ -3294,48 +3302,112 @@ export function Services() {
                           ? 'Preset messages sent on schedule. Edit each template below.'
                           : <>AI writes each step from the live conversation using <span className="font-semibold capitalize text-slate-700">{fuStrategy}</span> strategy. You only set the timing.</>}
                       </p>
-                      <div className="space-y-2">
-                        {fuSmartSteps.map((step, i) => (
-                          <div key={i} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                            <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-100">
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold text-slate-500">#{i + 1}</span>
-                                <span className="text-[11px] text-slate-600">after <strong>{step.delay || '—'}</strong></span>
+                      {fuReplyType === 'ai' ? (
+                        // AI mode — keep the original vertical list, since the
+                        // user only edits timing here and there's no message.
+                        <div className="space-y-2">
+                          {fuSmartSteps.map((step, i) => (
+                            <div key={i} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                              <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-100">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-bold text-slate-500">#{i + 1}</span>
+                                  <span className="text-[11px] text-slate-600">after <strong>{step.delay || '—'}</strong></span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <input type="text" value={step.delay}
+                                    onChange={e => { const u = [...fuSmartSteps]; u[i] = { ...u[i], delay: e.target.value }; setFuSmartSteps(u); }}
+                                    className="w-20 px-1.5 py-0.5 border border-slate-200 rounded text-[10px] text-center bg-white" />
+                                  {fuSmartSteps.length > 1 && (
+                                    <button onClick={() => setFuSmartSteps(fuSmartSteps.filter((_, j) => j !== i))}
+                                      className="text-slate-300 hover:text-red-500"><Trash2 size={11} /></button>
+                                  )}
+                                </div>
                               </div>
-                              <div className="flex items-center gap-1.5">
-                                <input type="text" value={step.delay}
-                                  onChange={e => { const u = [...fuSmartSteps]; u[i] = { ...u[i], delay: e.target.value }; setFuSmartSteps(u); }}
-                                  className="w-20 px-1.5 py-0.5 border border-slate-200 rounded text-[10px] text-center bg-white" />
-                                {fuSmartSteps.length > 1 && (
-                                  <button onClick={() => setFuSmartSteps(fuSmartSteps.filter((_, j) => j !== i))}
-                                    className="text-slate-300 hover:text-red-500"><Trash2 size={11} /></button>
-                                )}
-                              </div>
-                            </div>
-                            {fuReplyType === 'template' ? (
-                              <div className="px-3 py-2 text-xs text-slate-600 leading-relaxed relative group min-h-[40px]">
-                                {step.message || <span className="text-slate-300 italic">No template set — click edit to add</span>}
-                                <button
-                                  onClick={() => setTemplateEditor({ mode: step.message ? 'service-edit' : 'create', ruleId: '', templateId: undefined, templateName: `Follow-up #${i + 1} (${step.delay})`, content: step.message || '', type: `fu-step-${i}` })}
-                                  className="absolute top-2 right-2 p-1.5 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-violet-600">
-                                  <Pencil className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            ) : (
                               <div className="px-3 py-2 flex items-start gap-2 text-[11px] text-slate-500 leading-relaxed">
                                 <Zap className="w-3.5 h-3.5 text-violet-500 mt-0.5 shrink-0" />
                                 <span>AI generates this message from the conversation when the step fires.</span>
                               </div>
-                            )}
+                            </div>
+                          ))}
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => setFuSmartSteps([...fuSmartSteps, { label: `${fuSmartSteps.length + 1}th`, delay: '', message: '', mode: 'ai' }])}
+                              className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold">+ Add step</button>
+                            <button onClick={() => setFuSmartSteps(SMART_DEFAULTS.map(s => ({ ...s })))}
+                              className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold ml-auto">Reset to defaults</button>
                           </div>
-                        ))}
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => setFuSmartSteps([...fuSmartSteps, { label: `${fuSmartSteps.length + 1}th`, delay: '', message: '', mode: 'ai' }])}
-                            className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold">+ Add step</button>
-                          <button onClick={() => setFuSmartSteps(SMART_DEFAULTS.map(s => ({ ...s })))}
-                            className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold ml-auto">Reset to defaults</button>
                         </div>
-                      </div>
+                      ) : (
+                        // Template mode — compact horizontal chip row. Each chip
+                        // shows the step number + delay; click opens a popup that
+                        // edits delay + message together.
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap gap-2 items-center">
+                            {fuSmartSteps.map((step, i) => {
+                              const fallbackMsg = SMART_DEFAULTS[i]?.message || '';
+                              const effectiveMsg = step.message || fallbackMsg;
+                              const hasCustomMsg = !!step.message;
+                              return (
+                                <div key={i} className="relative group">
+                                  <button
+                                    type="button"
+                                    onClick={() => setFuStepEditor({ idx: i, delay: step.delay || '', message: effectiveMsg })}
+                                    title={effectiveMsg ? `Click to edit\n\n${effectiveMsg.slice(0, 200)}${effectiveMsg.length > 200 ? '…' : ''}` : 'Click to edit'}
+                                    className={`flex flex-col items-center justify-center px-3 py-2 rounded-xl border-2 transition-all min-w-[78px] ${
+                                      hasCustomMsg
+                                        ? 'bg-violet-50 border-violet-200 hover:border-violet-400 hover:shadow-sm'
+                                        : 'bg-slate-50 border-slate-200 hover:border-violet-300 hover:bg-violet-50/40'
+                                    }`}
+                                  >
+                                    <span className="text-[10px] font-bold text-slate-400 leading-none">#{i + 1}</span>
+                                    <span className="text-xs font-bold text-slate-700 leading-tight mt-1">{step.delay || '—'}</span>
+                                  </button>
+                                  {fuSmartSteps.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); setFuSmartSteps(fuSmartSteps.filter((_, j) => j !== i)); }}
+                                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-white border border-slate-200 rounded-full text-slate-300 hover:text-red-500 hover:border-red-200 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow-sm"
+                                      title="Remove step"
+                                    >
+                                      <Trash2 className="w-2.5 h-2.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newIdx = fuSmartSteps.length;
+                                const def = SMART_DEFAULTS[newIdx];
+                                setFuSmartSteps([
+                                  ...fuSmartSteps,
+                                  {
+                                    label: def?.label || `${newIdx + 1}th`,
+                                    delay: def?.delay || '1 day',
+                                    message: def?.message || `Hi {{lead.name}}, just following up on your request. Let me know if you'd still like to move forward.`,
+                                    mode: 'template',
+                                  },
+                                ]);
+                              }}
+                              className="flex flex-col items-center justify-center px-3 py-2 rounded-xl border-2 border-dashed border-slate-300 text-slate-500 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-all min-w-[78px]"
+                              title="Add another step"
+                            >
+                              <Plus className="w-4 h-4" />
+                              <span className="text-[10px] font-bold leading-tight mt-0.5">Add</span>
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-slate-400">
+                            <span>Click any step to edit its delay and message.</span>
+                            <button
+                              type="button"
+                              onClick={() => setFuSmartSteps(SMART_DEFAULTS.map(s => ({ ...s })))}
+                              className="text-slate-400 hover:text-slate-600 font-semibold"
+                            >
+                              Reset to defaults
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Re-enroll after customer reply */}
@@ -3839,12 +3911,16 @@ export function Services() {
                       platform: accounts.find(a => a.id === acctId)?.platform || 'yelp',
                       // When the sequence is in AI mode, blank every step's message so
                       // the backend mapper (`messageTemplate: s.message || null`) takes
-                      // the AI path. Templates are kept in state so flipping back to
-                      // Template mode restores them — but we also keep the persisted
-                      // text so a user who only flips the saved value can recover it.
-                      steps: fuSmartSteps.map(s => ({
+                      // the AI path. In Template mode, fall back to SMART_DEFAULTS for
+                      // any step the user hasn't customized — that's what the chip UI
+                      // shows them as the active message, so the saved data should
+                      // match what they're seeing. Generic fallback for steps beyond
+                      // the defaults table.
+                      steps: fuSmartSteps.map((s, i) => ({
                         ...s,
-                        message: fuReplyType === 'ai' ? '' : s.message,
+                        message: fuReplyType === 'ai'
+                          ? ''
+                          : (s.message || SMART_DEFAULTS[i]?.message || `Hi {{lead.name}}, just following up on your request. Let me know if you'd still like to move forward.`),
                       })),
                       availability: fuAvailability,
                       strategyMode: 'auto',
@@ -4443,6 +4519,28 @@ export function Services() {
         existingNames={templates.map(t => t.name)}
         onSave={templateEditor?.mode === 'create' ? handleEditorCreate : handleEditorUpdate}
         onSaveAsNew={handleEditorSaveAsNew}
+      />
+
+      {/* Follow-up step popup (chip click) — edits delay + message together */}
+      <TemplateEditorModal
+        isOpen={!!fuStepEditor}
+        onClose={() => setFuStepEditor(null)}
+        mode="service-edit"
+        initialName=""
+        initialContent={fuStepEditor?.message || ''}
+        initialDelay={fuStepEditor?.delay || ''}
+        showDelayField={true}
+        delayPresets={['2 min', '10 min', '1 hour', '4 hours', '1 day', '3 days', '7 days', '2 weeks', '1 month']}
+        templateName={fuStepEditor != null ? `Step #${fuStepEditor.idx + 1}` : ''}
+        saving={false}
+        variables={SMS_VARIABLES}
+        existingNames={[]}
+        onSave={({ content, delay }) => {
+          if (fuStepEditor == null) return;
+          const idx = fuStepEditor.idx;
+          setFuSmartSteps(prev => prev.map((s, i) => i === idx ? { ...s, delay: delay ?? s.delay, message: content } : s));
+          setFuStepEditor(null);
+        }}
       />
 
       {/* Onboarding Tour */}
