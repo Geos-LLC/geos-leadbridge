@@ -110,8 +110,11 @@ export class FollowUpGeneratorService {
       return this.generateFromTemplate(step);
     }
 
-    // Step 1: Load thread context
-    const context = await this.conversationContext.buildContext(conversationId, { recentMessageLimit: 5 });
+    // Step 1: Load thread context. recentMessageLimit was 5 — too aggressive,
+    // caused the AI to lose the prior conversation and regress to qualifying
+    // questions even when the customer had already discussed scheduling. Bump
+    // to 20 to capture the full back-and-forth on a normal lead thread.
+    const context = await this.conversationContext.buildContext(conversationId, { recentMessageLimit: 20 });
     const threadState = await this.conversationContext.getThreadState(conversationId);
 
     // Step 2: Determine strategy
@@ -299,6 +302,16 @@ export class FollowUpGeneratorService {
       'Write as the business owner, not as an AI. Be natural, brief, and professional.',
       'Do NOT use subject lines, greetings like "Dear", or sign-offs. Just the message body.',
       'Keep it under 3 sentences unless the objective requires more detail.',
+      '',
+      // Conversation-stage guardrail: if scheduling / booking has already been
+      // discussed in the prior thread, do NOT regress to qualifying questions
+      // (bedrooms, bathrooms, square footage). Carol case: AI asked for room
+      // count after the customer had already moved on to picking a day.
+      'IMPORTANT — read the conversation history below before writing:',
+      '- If the customer has already discussed scheduling, picked an availability, asked about timing, or said "afternoons/mornings work", DO NOT ask qualifying questions about home size, bedrooms, bathrooms, or square footage. Stay in scheduling mode.',
+      '- If the customer is paused waiting on someone else (spouse, partner, family), DO NOT pressure them with new questions. A brief, low-pressure check-in is fine — but no new asks.',
+      '- If the customer has already given home details in their message (rooms, size, condition, special requests), DO NOT ask them again.',
+      '- The strategy below is a default direction; the conversation history overrides it when the lead has progressed past that stage.',
       '',
       strategyPrompt,
     ];

@@ -518,7 +518,12 @@ export class FollowUpSchedulerService implements OnModuleInit {
       }
     }
 
-    // Check quiet hours — don't send during nighttime
+    // Check quiet hours AND active hours — don't send during nighttime / outside
+    // the user-configured availability window. Originally only quiet hours were
+    // honored, but the same UI exposes "Set up active time" (followUpAvailability
+    // = 'active_hours' + followUpActiveHoursStart/End) that users naturally
+    // expect to gate follow-ups too. Carol case: account had 18:00→09:00 active
+    // hours but follow-up still fired at 15:41 EDT.
     if (enrollment.leadId) {
       const leadForQuiet = await this.prisma.lead.findUnique({
         where: { id: enrollment.leadId },
@@ -527,37 +532,56 @@ export class FollowUpSchedulerService implements OnModuleInit {
       if (leadForQuiet?.businessId) {
         const acct = await this.prisma.savedAccount.findFirst({
           where: { userId: leadForQuiet.userId, businessId: leadForQuiet.businessId },
-          select: { followUpSettingsJson: true, followUpTimezone: true },
+          select: {
+            followUpSettingsJson: true,
+            followUpTimezone: true,
+            followUpActiveHoursStart: true,
+            followUpActiveHoursEnd: true,
+          },
         });
-        if (acct?.followUpSettingsJson) {
-          try {
-            const settings = JSON.parse(acct.followUpSettingsJson);
-            if (settings.fuQuietHoursEnabled && settings.fuQuietHoursStart && settings.fuQuietHoursEnd) {
-              const tz = acct.followUpTimezone || 'America/New_York';
-              const formatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
-              const localTime = formatter.format(now);
-              const [h, m] = localTime.split(':').map(Number);
-              const [qsH, qsM] = settings.fuQuietHoursStart.split(':').map(Number);
-              const [qeH, qeM] = settings.fuQuietHoursEnd.split(':').map(Number);
-              const current = h * 60 + m;
-              const quietStart = qsH * 60 + qsM;
-              const quietEnd = qeH * 60 + qeM;
-              // Overnight quiet: e.g. 22:00-08:00
-              const inQuiet = quietStart > quietEnd
-                ? (current >= quietStart || current < quietEnd)
-                : (current >= quietStart && current < quietEnd);
-              if (inQuiet) {
-                // Reschedule to quiet hours end
-                const nextDue = this.engineService.computeNextDueAt(now, 0, settings.fuQuietHoursEnd, '23:59', tz);
-                await this.prisma.followUpEnrollment.update({
-                  where: { id: enrollment.id },
-                  data: { nextStepDueAt: nextDue },
-                });
-                this.logger.log(`[FollowUpScheduler] Quiet hours — rescheduled enrollment ${enrollment.id} to ${nextDue.toISOString()}`);
-                return;
-              }
+        if (acct) {
+          let settings: any = {};
+          try { settings = JSON.parse(acct.followUpSettingsJson || '{}'); } catch {}
+          const tz = acct.followUpTimezone || 'America/New_York';
+          const fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+          const [h, m] = fmt.format(now).split(':').map(Number);
+          const current = h * 60 + m;
+          const inWindow = (start: string, end: string): boolean => {
+            const [sh, sm] = start.split(':').map(Number);
+            const [eh, em] = end.split(':').map(Number);
+            const s = sh * 60 + sm;
+            const e = eh * 60 + em;
+            return s > e ? (current >= s || current < e) : (current >= s && current < e);
+          };
+
+          // Quiet hours: skip if currently in quiet window
+          if (settings.fuQuietHoursEnabled && settings.fuQuietHoursStart && settings.fuQuietHoursEnd) {
+            if (inWindow(settings.fuQuietHoursStart, settings.fuQuietHoursEnd)) {
+              const nextDue = this.engineService.computeNextDueAt(now, 0, settings.fuQuietHoursEnd, '23:59', tz);
+              await this.prisma.followUpEnrollment.update({
+                where: { id: enrollment.id },
+                data: { nextStepDueAt: nextDue },
+              });
+              this.logger.log(`[FollowUpScheduler] Quiet hours — rescheduled enrollment ${enrollment.id} to ${nextDue.toISOString()}`);
+              return;
             }
-          } catch {}
+          }
+
+          // Active hours: skip if availability=active_hours and we're outside the window
+          const isActiveHoursMode = (settings.followUpAvailability ?? settings.availability) === 'active_hours';
+          const ahStart = acct.followUpActiveHoursStart;
+          const ahEnd = acct.followUpActiveHoursEnd;
+          if (isActiveHoursMode && ahStart && ahEnd) {
+            if (!inWindow(ahStart, ahEnd)) {
+              const nextDue = this.engineService.computeNextDueAt(now, 0, ahStart, ahEnd, tz);
+              await this.prisma.followUpEnrollment.update({
+                where: { id: enrollment.id },
+                data: { nextStepDueAt: nextDue },
+              });
+              this.logger.log(`[FollowUpScheduler] Outside active hours (${ahStart}-${ahEnd} ${tz}) — rescheduled enrollment ${enrollment.id} to ${nextDue.toISOString()}`);
+              return;
+            }
+          }
         }
       }
     }

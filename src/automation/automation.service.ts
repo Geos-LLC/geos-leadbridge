@@ -735,6 +735,14 @@ export class AutomationService implements OnModuleInit {
           'talk it over', 'discuss it with',
           'shopping around', 'comparing quotes', 'comparing prices',
           'give me a minute', 'give me some time', 'give me a bit',
+          // "check with my husband/wife/partner/spouse/boss" etc — Carol case
+          'check with my husband', 'check with my wife', 'check with my partner', 'check with my spouse',
+          'check with the husband', 'check with the wife', 'check with my hubby',
+          'ask my husband', 'ask my wife', 'ask my partner', 'ask my spouse',
+          'talk to my husband', 'talk to my wife', 'talk to my partner', 'talk to my spouse',
+          'run it by', 'run this by', 'run it past', 'run this past',
+          'check with the boss', 'ask the boss', 'check with my family',
+          'need to check', 'need to ask', 'will need to check', 'will need to ask',
         ];
         const msgLower = context.customerMessage.toLowerCase();
         const matched = deferralPhrases.find(p => msgLower.includes(p));

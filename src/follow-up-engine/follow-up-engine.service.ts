@@ -70,6 +70,43 @@ export class FollowUpEngineService {
       return;
     }
 
+    // Don't re-enroll if the customer's most recent message was a deferral phrase.
+    // Re-enrolling here would generate a "just checking in" message that pesters a
+    // customer who explicitly said they're paused (e.g. "I need to check with my
+    // husband"). The dedicated customer_deferred sequence — enrolled by the AI
+    // Conversation handler when the deferral fires — is the right path for those.
+    const lastCustomerMsg = await this.prisma.message.findFirst({
+      where: { conversationId, sender: 'customer' },
+      orderBy: { sentAt: 'desc' },
+      select: { content: true, sentAt: true },
+    });
+    if (lastCustomerMsg?.content) {
+      const DEFERRAL_PHRASES = [
+        'get back to you', 'let me think', 'let me check', 'let me look',
+        "i'll think", "ill think", 'i will think',
+        "i'll let you know", 'ill let you know', 'i will let you know',
+        "i'll be in touch", 'ill be in touch', "we'll be in touch", 'we will be in touch',
+        'need to think', 'need to discuss', 'need to talk',
+        'have to think', 'have to discuss', 'have to talk',
+        'thinking about it', 'thinking it over',
+        'talk it over', 'discuss it with',
+        'shopping around', 'comparing quotes', 'comparing prices',
+        'check with my husband', 'check with my wife', 'check with my partner', 'check with my spouse',
+        'check with the husband', 'check with the wife', 'check with my hubby',
+        'ask my husband', 'ask my wife', 'ask my partner', 'ask my spouse',
+        'talk to my husband', 'talk to my wife', 'talk to my partner', 'talk to my spouse',
+        'run it by', 'run this by', 'run it past', 'run this past',
+        'check with the boss', 'ask the boss', 'check with my family',
+        'need to check', 'need to ask', 'will need to check', 'will need to ask',
+      ];
+      const msgLower = lastCustomerMsg.content.toLowerCase();
+      const matched = DEFERRAL_PHRASES.find(p => msgLower.includes(p));
+      if (matched) {
+        this.logger.log(`[FollowUpEngine] Skipping re-enrollment for ${conversationId} — last customer message was a deferral ("${matched}")`);
+        return;
+      }
+    }
+
     // Find matching sequence template
     const template = await this.prisma.followUpSequenceTemplate.findFirst({
       where: {
