@@ -19,7 +19,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { STRATEGY_PROMPTS, OBJECTIVE_FLAVORS } from '../ai/strategy-prompts';
-import { buildTimeAwarenessBlock, prefixWithTimestamp, resolveTimezone } from '../ai/time-context';
+import { buildTimeAwarenessBlock, prefixWithTimestamp, resolveTimezone, stripLeadingTimestampPrefix } from '../ai/time-context';
 import { buildBusinessContextBlock } from '../ai/business-context';
 import { buildFaqBlock, parseAccountFaq } from '../ai/faq-context';
 import OpenAI from 'openai';
@@ -442,8 +442,13 @@ export class FollowUpGeneratorService {
         temperature,
       });
 
-      const reply = completion.choices[0]?.message?.content?.trim();
-      if (!reply) throw new Error('Empty AI response');
+      const rawReply = completion.choices[0]?.message?.content?.trim();
+      if (!rawReply) throw new Error('Empty AI response');
+
+      const reply = stripLeadingTimestampPrefix(rawReply);
+      if (reply !== rawReply) {
+        this.logger.warn(`[FollowUpGenerator] Stripped echoed timestamp prefix from reply`);
+      }
 
       this.logger.log(`[FollowUpGenerator] Generated ${reply.length} chars — strategy=${strategyKey}, objective=${step.objective}`);
 

@@ -5,6 +5,7 @@ import {
   buildTimeAwarenessBlock,
   prefixWithTimestamp,
   resolveTimezone,
+  stripLeadingTimestampPrefix,
 } from './time-context';
 
 export interface ConversationMessage {
@@ -160,9 +161,17 @@ export class AiService {
       temperature: 0.4,
     });
 
-    const reply = completion.choices[0]?.message?.content?.trim();
-    if (!reply) {
+    const rawReply = completion.choices[0]?.message?.content?.trim();
+    if (!rawReply) {
       throw new Error('OpenAI returned empty response');
+    }
+
+    // Strip any leading [Today …, just now] prefix the model may have echoed
+    // from the time-stamped history. The system prompt forbids it, but the
+    // strip is a hard backstop so a slip never reaches the customer.
+    const reply = stripLeadingTimestampPrefix(rawReply);
+    if (reply !== rawReply) {
+      this.logger.warn(`[AI] Stripped echoed timestamp prefix from reply`);
     }
 
     this.logger.log(`[AI] Reply generated (${reply.length} chars)`);

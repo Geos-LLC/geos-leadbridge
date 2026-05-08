@@ -111,13 +111,30 @@ export function buildTimeAwarenessBlock(now: Date, timezone: string): string {
     `Current local time: ${formatLocalTime(now, tz)} (${tz})`,
     '',
     'TIME AWARENESS RULES:',
-    '- Each message in the conversation history is prefixed with [its local timestamp, relative delta].',
+    '- Each message in the conversation history is prefixed with [its local timestamp, relative delta]. These brackets are metadata for YOUR reasoning only.',
+    '- NEVER include the bracketed timestamp prefix in your reply. Output only the message text the customer should read — no leading "[Today …]", no "[just now]", nothing in square brackets that mirrors that format.',
     '- If you previously offered a specific time and that time has already passed (per the current local time above), do NOT re-offer the same slot. Propose a new one or ask the customer for their preferred time.',
     '- If a long gap (hours, days, weeks, months) elapsed between the customer\'s last message and the previous message, acknowledge the gap naturally. Do not pretend the conversation is unbroken.',
     '- Match cadence to recency: rapid back-and-forth (minutes apart) → brief, direct replies. Long silence followed by a reply → a warmer, slightly fuller re-engagement that re-establishes context.',
     '- The customer\'s most recent message (the one you are replying to) was sent at the current local time above.',
     '--- END TIME CONTEXT ---',
   ].join('\n');
+}
+
+/**
+ * Strip any leading `[...]` brackets the model may have echoed from the
+ * timestamp-prefixed history. Defensive backstop — the prompt already tells
+ * the model not to emit these, but we strip on the way out so a slip never
+ * reaches the customer. Repeats once in case the model stacked two prefixes.
+ */
+export function stripLeadingTimestampPrefix(reply: string): string {
+  let out = reply.trimStart();
+  for (let i = 0; i < 2; i++) {
+    const m = out.match(/^\[[^\]\n]*\]\s*/);
+    if (!m) break;
+    out = out.slice(m[0].length).trimStart();
+  }
+  return out;
 }
 
 /**
