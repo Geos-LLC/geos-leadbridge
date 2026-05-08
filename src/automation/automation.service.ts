@@ -1278,8 +1278,14 @@ export class AutomationService implements OnModuleInit {
           // Use enriched context — summary + state instead of full transcript
           conversationHistory = threadCtx.recentMessages;
           threadContextPrompt = threadCtx.systemContext;
+          // Prefer the live trigger message (the customer reply that fired this
+          // auto-reply) over the first message in history. Donna case: anchoring
+          // on firstCustomerMsg meant every reply re-responded to the original
+          // lead pitch ("My Mother passed…") instead of the latest "It's already
+          // done." Falls back to firstCustomerMsg / lead.message for follow-ups
+          // where there's no live customer trigger.
           const firstCustomerMsg = conversationHistory.find(m => m.role === 'customer')?.content;
-          customerMessage = firstCustomerMsg || context.customerMessage || lead.message || '';
+          customerMessage = context.customerMessage || firstCustomerMsg || lead.message || '';
           this.logger.log(`[AI] Using thread context for ${pendingId} (stage: ${threadCtx.threadState.stage}, msgs: ${conversationHistory.length})`);
         } else {
           // Fallback: load raw transcript (no ThreadContext yet)
@@ -1295,7 +1301,7 @@ export class AutomationService implements OnModuleInit {
               sentAt: m.sentAt,
             }));
           const firstCustomerMsg = conversationHistory.find(m => m.role === 'customer')?.content;
-          customerMessage = firstCustomerMsg || context.customerMessage || lead.message || '';
+          customerMessage = context.customerMessage || firstCustomerMsg || lead.message || '';
           this.logger.log(`[AI] Using raw transcript for ${pendingId} (no thread context, ${conversationHistory.length} msgs)`);
         }
 

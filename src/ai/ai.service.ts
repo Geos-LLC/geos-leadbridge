@@ -187,6 +187,26 @@ export class AiService {
     parts.push(buildTimeAwarenessBlock(now, timezone));
     parts.push('');
 
+    // CONTINUATION guardrail — when there's any prior assistant turn in the
+    // history, this is a continuation, not a first contact. The lead context
+    // block below still surfaces sensitive details (death, divorce, hardship)
+    // that anchor the model into re-opening with condolences and re-quoting
+    // pricing every turn (Donna case). This block makes the continuation
+    // status explicit and forbids the most common drift patterns.
+    const hasPriorAssistantTurn =
+      Array.isArray(ctx.conversationHistory) &&
+      ctx.conversationHistory.some((m) => m.role === 'pro' && (m.content || '').trim().length > 0);
+    if (hasPriorAssistantTurn) {
+      parts.push('--- CONTINUATION ---');
+      parts.push('This is a CONTINUATION of an existing conversation. The customer has heard from you before — they know who you are and what you offer.');
+      parts.push('- Do NOT open with greetings ("Hi <name>,"), self-introductions, condolences, or expressions of sympathy. Those belong in the FIRST reply only.');
+      parts.push('- Do NOT re-quote pricing, re-summarize the job (bedrooms / bathrooms / services), or re-offer scheduling unless the customer JUST asked for it again.');
+      parts.push('- Respond ONLY to what the customer most recently said. If they said "thanks" / "all done" / "got it" / "the house has been cleaned" / similar wrap-up, do not pitch — match their energy with a brief acknowledgment, or stay silent if there is nothing useful to add.');
+      parts.push('- The Lead Context below (sensitive details, original survey answers) is REFERENCE for your awareness, not a prompt to re-perform. Treat it as background you already used.');
+      parts.push('--- END CONTINUATION ---');
+      parts.push('');
+    }
+
     parts.push('--- Lead Context ---');
 
     if (ctx.accountName) parts.push(`Business: ${ctx.accountName}`);
