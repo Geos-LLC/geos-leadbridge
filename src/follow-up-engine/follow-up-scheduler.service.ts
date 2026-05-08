@@ -15,12 +15,14 @@ import { PrismaService } from '../common/utils/prisma.service';
 import { CronLockTx, isSkipped, withCronLock } from '../common/utils/cron-lock';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { LeadsService } from '../leads/leads.service';
+import { LeadStatusService } from '../leads/lead-status.service';
 import { FollowUpEngineService } from './follow-up-engine.service';
 import { FollowUpGeneratorService, SequenceStep } from './follow-up-generator.service';
 import { LONG_TERM_STEPS } from './long-term-steps';
 import { TrialService } from '../trial/trial.service';
 import { PlatformFactory } from '../platforms/platform.factory';
 import { EncryptionUtil } from '../common/utils/encryption.util';
+import { IntentClassifierService, IntentClassification, CustomerIntent } from '../ai/intent-classifier.service';
 
 @Injectable()
 export class FollowUpSchedulerService implements OnModuleInit {
@@ -39,6 +41,9 @@ export class FollowUpSchedulerService implements OnModuleInit {
     private readonly configService: ConfigService,
     private readonly trialService: TrialService,
     private readonly platformFactory: PlatformFactory,
+    private readonly intentClassifier: IntentClassifierService,
+    @Inject(forwardRef(() => LeadStatusService))
+    private readonly leadStatusService: LeadStatusService,
   ) {
     // FOLLOWUP_SCHEDULER env var: set to 'false' on staging to let production handle it.
     // Defaults to true (enabled). User controls follow-ups via per-account settings.
@@ -455,6 +460,167 @@ export class FollowUpSchedulerService implements OnModuleInit {
     });
   }
 
+  /**
+   * Classifier gate confidence threshold. Below this we pass through to
+   * generation — false-positive on a terminal intent stops a legitimate
+   * follow-up. Aligned with the AI Conversation gate threshold.
+   */
+  private static readonly CLASSIFIER_CONFIDENCE_THRESHOLD = 0.7;
+
+  /**
+   * Classifier gate for the scheduled follow-up engine.
+   *
+   * Reads the latest customer message in the thread, classifies it, and decides
+   * whether the enrollment should fire at all. Catches the cases where:
+   *   - The customer said "It's already done" / "please lose my information" /
+   *     "we hired someone else" before the inbound-reply classifier was live, or
+   *   - The phrase-list checks in handleCustomerReply missed an unusual phrasing
+   *     and never flipped lead.status to terminal.
+   *
+   * Returns true when the enrollment was stopped (caller must return without
+   * generating). Returns false when the gate passed through and the enrollment
+   * should proceed.
+   *
+   * Idempotency:
+   *   - stopEnrollment filters by status='active' so re-runs are no-ops.
+   *   - writeStatus dedups on (leadId, source, sourceEventId). The
+   *     sourceEventId here is `followup_classifier_<enrollmentId>_<intent>`
+   *     so re-runs of the same gate decision write nothing.
+   *
+   * Re-engagement sequences (customer_deferred, customer_hired_competitor)
+   * are special — those exist precisely to re-engage paused/lost customers.
+   * The gate does NOT stop them on deferring/completed/hired/agreed intents
+   * (those would defeat the sequence's purpose). It DOES still stop them on
+   * opt_out — even paused customers who explicitly say "stop" must not get
+   * re-engagement messages.
+   */
+  private async classifyAndMaybeStop(enrollment: any, now: Date): Promise<boolean> {
+    if (!enrollment.conversationId) return false;
+
+    // Find the latest customer message. If there's no customer message yet
+    // (initial-outreach enrollments before any reply), there's nothing for
+    // the classifier to read — pass through.
+    const lastCustomer = await this.prisma.message.findFirst({
+      where: { conversationId: enrollment.conversationId, sender: 'customer' },
+      orderBy: { createdAt: 'desc' },
+      select: { content: true, createdAt: true },
+    });
+    if (!lastCustomer || !lastCustomer.content) return false;
+
+    // Pull a small history window for classifier context. Keep it tight
+    // (5 turns) — the classifier only needs the recent shape of the
+    // conversation to disambiguate things like "already done" (booking that
+    // ran successfully vs hired-someone vs canceled).
+    const recent = await this.prisma.message.findMany({
+      where: { conversationId: enrollment.conversationId },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      select: { sender: true, content: true },
+    });
+    const recentHistory = recent.reverse().map((m: any) => ({
+      role: (m.sender === 'customer' ? 'customer' : 'pro') as 'customer' | 'pro',
+      content: m.content || '',
+    }));
+
+    let leadStatus: string | undefined;
+    let leadCategory: string | undefined;
+    if (enrollment.leadId) {
+      const lead = await this.prisma.lead.findUnique({
+        where: { id: enrollment.leadId },
+        select: { status: true, category: true },
+      });
+      leadStatus = lead?.status ?? undefined;
+      leadCategory = lead?.category ?? undefined;
+    }
+
+    let classification: IntentClassification;
+    try {
+      classification = await this.intentClassifier.classify({
+        message: lastCustomer.content,
+        recentHistory,
+        leadStatus,
+        leadCategory,
+      });
+    } catch (err: any) {
+      // Classifier failure is non-fatal — fall through to generation. The
+      // existing follow-up engine guards (terminal status, customer-replied-
+      // since-enrollment, the inbound-reply classifier on next customer
+      // message) are the safety net.
+      this.logger.warn(`[FollowUpScheduler] Classifier gate threw — passing through (${err.message})`);
+      return false;
+    }
+
+    if (!classification.fromLlm
+        || classification.confidence < FollowUpSchedulerService.CLASSIFIER_CONFIDENCE_THRESHOLD) {
+      return false;
+    }
+
+    const intent: CustomerIntent = classification.intent;
+    const conf = classification.confidence;
+
+    // Pass-through for non-terminal intents.
+    if (intent === 'asking' || intent === 'engaged') return false;
+
+    const triggerState: string | undefined = enrollment.sequenceTemplate?.triggerState;
+    const isReEngagementSequence = triggerState === 'customer_deferred'
+      || triggerState === 'customer_hired_competitor';
+    if (isReEngagementSequence && intent !== 'opt_out') {
+      this.logger.log(`[FollowUpScheduler] classifier gate: intent=${intent} conf=${conf.toFixed(2)} but enrollment ${enrollment.id} is re-engagement (${triggerState}) — passing through`);
+      return false;
+    }
+
+    // Stop the enrollment. Idempotent — only flips active enrollments.
+    await this.engineService.stopEnrollment(enrollment.id, `classifier_${intent}`);
+    this.logger.log(`[FollowUpScheduler] ✗ STOPPED enrollment ${enrollment.id} via classifier intent=${intent} conf=${conf.toFixed(2)} reason="${classification.reason}"`);
+
+    // Flip lead status where appropriate. Skipped for 'deferring' (pause, not lost)
+    // and for cases where the lead has no id (defensive).
+    if (enrollment.leadId && intent !== 'deferring') {
+      const sourceEventId = `followup_classifier_${enrollment.id}_${intent}`;
+      const baseInput = {
+        leadId: enrollment.leadId,
+        source: 'lb_automation' as const,
+        sourceEventId,
+        actorType: 'system' as const,
+        metadata: {
+          classifier_intent: intent,
+          classifier_confidence: conf,
+          classifier_reason: classification.reason,
+          enrollment_id: enrollment.id,
+        },
+      };
+      try {
+        if (intent === 'agreed') {
+          // Customer agreed on price — handoff to manager. Belt-and-suspenders
+          // (handleCustomerReply already does this, but the gate is a safety
+          // net for cases the inbound path missed).
+          await this.leadStatusService.writeStatus({
+            ...baseInput,
+            newStatus: 'booked',
+            reason: 'followup_classifier_agreed',
+          });
+        } else {
+          // opt_out / hired_elsewhere / completed → lost
+          const lostReason = intent === 'opt_out' ? 'opt_out' : 'hired_someone';
+          const reengageAt = intent === 'opt_out'
+            ? null
+            : new Date(now.getTime() + 21 * 24 * 60 * 60 * 1000);
+          await this.leadStatusService.writeStatus({
+            ...baseInput,
+            newStatus: 'lost',
+            lostReason,
+            reason: `followup_classifier_${intent}`,
+            reengageAt,
+          });
+        }
+      } catch (err: any) {
+        this.logger.warn(`[FollowUpScheduler] writeStatus failed for lead ${enrollment.leadId}: ${err.message}`);
+      }
+    }
+
+    return true;
+  }
+
   private async processEnrollment(enrollment: any, now: Date): Promise<void> {
     // Idempotency: re-check status
     const fresh = await this.prisma.followUpEnrollment.findUnique({
@@ -688,6 +854,15 @@ export class FollowUpSchedulerService implements OnModuleInit {
       this.logger.log(`[FollowUpScheduler] Enrollment ${enrollment.id} completed (all steps done)`);
       return;
     }
+
+    // ── Classifier gate ─────────────────────────────────────────────────
+    // Last guard before we burn an OpenAI generation + an outbound SMS.
+    // Reads the latest customer message and decides whether this enrollment
+    // should fire at all. Catches Lynn-class ("please lose my information")
+    // and Donna-class ("the house has already been cleaned") cases that the
+    // phrase lists or the inbound-reply classifier missed (or pre-dated).
+    const stoppedByClassifier = await this.classifyAndMaybeStop(enrollment, now);
+    if (stoppedByClassifier) return;
 
     // Generate message
     const generated = await this.generatorService.generateMessage(

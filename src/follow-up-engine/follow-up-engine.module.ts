@@ -13,6 +13,7 @@ import { TenancyModule } from '../common/tenancy/tenancy.module';
 import { ConversationContextModule } from '../conversation-context/conversation-context.module';
 import { LeadsModule } from '../leads/leads.module';
 import { PlatformsModule } from '../platforms/platforms.module';
+import { AiModule } from '../ai/ai.module';
 import { FollowUpEngineService } from './follow-up-engine.service';
 import { FollowUpStateService } from './follow-up-state.service';
 import { FollowUpSchedulerService } from './follow-up-scheduler.service';
@@ -26,6 +27,7 @@ import { FollowUpEngineController } from './follow-up-engine.controller';
     TenancyModule,
     ConversationContextModule,
     PlatformsModule,
+    AiModule,
     forwardRef(() => LeadsModule),
   ],
   providers: [

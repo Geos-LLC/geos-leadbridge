@@ -85,7 +85,17 @@ describe('FollowUpSchedulerService', () => {
     const configService = { get: jest.fn().mockReturnValue(undefined) } as any;
     const trialService = { canProcessLead: jest.fn().mockResolvedValue({ allowed: true, reason: null }) } as any;
     const platformFactory = { getAdapter: jest.fn().mockReturnValue({ getLeadEvents: jest.fn().mockResolvedValue([]) }) } as any;
-    service = new FollowUpSchedulerService(prisma, contextService, leadsService, engineService, generatorService, eventEmitter, configService, trialService, platformFactory);
+    // Default classifier stub returns low-confidence engaged so the gate falls
+    // through. Individual gate tests override this with mockResolvedValueOnce.
+    const intentClassifier = {
+      classify: jest.fn().mockResolvedValue({
+        intent: 'engaged', confidence: 0, reason: 'test stub', fromLlm: false,
+      }),
+    } as any;
+    const leadStatusService = {
+      writeStatus: jest.fn().mockResolvedValue({ leadId: LEAD_ID, applied: true, status: 'lost' }),
+    } as any;
+    service = new FollowUpSchedulerService(prisma, contextService, leadsService, engineService, generatorService, eventEmitter, configService, trialService, platformFactory, intentClassifier, leadStatusService);
     jest.clearAllMocks();
     // Reset mocks after construction
     prisma.followUpEnrollment.findUnique.mockResolvedValue({
@@ -632,6 +642,292 @@ describe('FollowUpSchedulerService', () => {
 
       const updates = (prisma.webhookEvent.update.mock.calls as any[]).map(c => c[0]);
       expect(updates[0].data.processingError).toContain('reconciled:max_attempts');
+    });
+  });
+
+  describe('classifier gate (classifyAndMaybeStop)', () => {
+    /**
+     * The classifier gate runs late in processEnrollment — after terminal
+     * status, customer-replied-since-enrollment, quiet hours, and step
+     * duplication checks all pass. To exercise it we set up a "happy path"
+     * enrollment with no customer reply since enrollment, then simulate the
+     * thread containing a terminal-intent customer message that the inbound
+     * classifier missed (or pre-dated).
+     */
+
+    function happyPathEnrollment(opts: { triggerState?: string } = {}) {
+      return {
+        id: ENROLLMENT_ID,
+        conversationId: CONVERSATION_ID,
+        leadId: LEAD_ID,
+        currentStepIndex: 0,
+        createdAt: new Date('2026-04-01T00:00:00Z'),
+        mode: 'auto_send' as const,
+        platform: 'yelp',
+        nextStepDueAt: new Date('2026-04-17T12:00:00Z'),
+        sequenceTemplate: {
+          stepsJson: { steps: [{ stepOrder: 0, delayMinutes: 2, objective: 'quick_check_in' }] },
+          activeHoursStart: null,
+          activeHoursEnd: null,
+          activeHoursTimezone: 'America/New_York',
+          generationMode: 'ai' as const,
+          triggerState: opts.triggerState ?? 'no_reply_after_initial',
+        },
+      };
+    }
+
+    function setUpHappyPath(classifierResult: any, opts: { lastCustomerMsg?: string } = {}) {
+      const now = new Date('2026-04-17T12:00:00Z');
+      const customerMsg = opts.lastCustomerMsg ?? "It's already done, thanks";
+
+      // Lead is non-terminal so terminal-status check passes.
+      // Multiple findUnique call sites with different selects — return a
+      // superset that satisfies all (status, lastCustomerActivityAt, userId).
+      // Crucially: lastCustomerActivityAt is BEFORE enrollment.createdAt so
+      // the customer-replied-since-enrollment check passes.
+      prisma.lead.findUnique.mockImplementation((args: any) => {
+        // The classifier gate's own findUnique queries `category` — return that too.
+        return Promise.resolve({
+          id: LEAD_ID,
+          status: 'engaged',
+          thumbtackStatus: null,
+          userId: 'user-1',
+          businessId: 'biz-1',
+          lastCustomerActivityAt: new Date('2026-03-30T00:00:00Z'),
+          category: 'Deep cleaning',
+        });
+      });
+
+      // No Message row newer than enrollment (passes the
+      // customer-replied-since-enrollment check). But there IS a customer
+      // message overall — the gate's own findFirst returns it.
+      // The scheduler calls message.findFirst twice:
+      //   1. (sender='customer', sentAt > enrollment.createdAt) — for the
+      //      customer-replied check. Must return null to pass through.
+      //   2. (sender='customer', orderBy createdAt desc) — for the gate.
+      //      Must return the latest customer message.
+      // Match on the `sentAt` filter to distinguish.
+      prisma.message.findFirst.mockImplementation((args: any) => {
+        if (args?.where?.sentAt) return Promise.resolve(null);
+        return Promise.resolve({
+          id: 'msg-customer-old',
+          content: customerMsg,
+          createdAt: new Date('2026-03-30T00:00:00Z'),
+        });
+      });
+
+      // The gate also pulls last 5 turns via findMany.
+      prisma.message.findMany = jest.fn().mockResolvedValue([
+        { sender: 'customer', content: customerMsg },
+      ]);
+
+      // Use the classifier mock attached during construction.
+      const classifier = (service as any).intentClassifier;
+      classifier.classify.mockResolvedValueOnce(classifierResult);
+
+      return now;
+    }
+
+    it('stops enrollment and flips lead to lost on opt_out at confidence ≥ threshold', async () => {
+      const now = setUpHappyPath(
+        { intent: 'opt_out', confidence: 0.95, reason: 'explicit info removal', fromLlm: true },
+        { lastCustomerMsg: 'Please lose my information' },
+      );
+
+      await (service as any).processEnrollment(happyPathEnrollment(), now);
+
+      expect(engineService.stopEnrollment).toHaveBeenCalledWith(ENROLLMENT_ID, 'classifier_opt_out');
+      expect(generatorService.generateMessage).not.toHaveBeenCalled();
+
+      const ws = (service as any).leadStatusService.writeStatus;
+      expect(ws).toHaveBeenCalledTimes(1);
+      expect(ws.mock.calls[0][0]).toMatchObject({
+        leadId: LEAD_ID,
+        source: 'lb_automation',
+        newStatus: 'lost',
+        lostReason: 'opt_out',
+        reason: 'followup_classifier_opt_out',
+        reengageAt: null,
+      });
+      // Idempotency: deterministic sourceEventId per (enrollment, intent)
+      expect(ws.mock.calls[0][0].sourceEventId).toBe(`followup_classifier_${ENROLLMENT_ID}_opt_out`);
+    });
+
+    it('stops + flips to lost with hired_someone reason on hired_elsewhere', async () => {
+      const now = setUpHappyPath(
+        { intent: 'hired_elsewhere', confidence: 0.92, reason: 'hired competitor', fromLlm: true },
+        { lastCustomerMsg: 'we already booked someone else' },
+      );
+
+      await (service as any).processEnrollment(happyPathEnrollment(), now);
+
+      expect(engineService.stopEnrollment).toHaveBeenCalledWith(ENROLLMENT_ID, 'classifier_hired_elsewhere');
+      const ws = (service as any).leadStatusService.writeStatus;
+      expect(ws.mock.calls[0][0]).toMatchObject({
+        newStatus: 'lost',
+        lostReason: 'hired_someone',
+        reason: 'followup_classifier_hired_elsewhere',
+      });
+      expect(ws.mock.calls[0][0].reengageAt).toBeInstanceOf(Date);
+    });
+
+    it('stops + flips to lost with hired_someone reason on completed (Donna case)', async () => {
+      const now = setUpHappyPath(
+        { intent: 'completed', confidence: 0.88, reason: 'work finished elsewhere', fromLlm: true },
+        { lastCustomerMsg: 'The house has already been cleaned' },
+      );
+
+      await (service as any).processEnrollment(happyPathEnrollment(), now);
+
+      expect(engineService.stopEnrollment).toHaveBeenCalledWith(ENROLLMENT_ID, 'classifier_completed');
+      const ws = (service as any).leadStatusService.writeStatus;
+      expect(ws.mock.calls[0][0]).toMatchObject({
+        newStatus: 'lost',
+        lostReason: 'hired_someone',
+        reason: 'followup_classifier_completed',
+      });
+    });
+
+    it('stops + flips to booked on agreed (manager handoff)', async () => {
+      const now = setUpHappyPath(
+        { intent: 'agreed', confidence: 0.9, reason: 'price accepted', fromLlm: true },
+        { lastCustomerMsg: "Sounds good, let's book it" },
+      );
+
+      await (service as any).processEnrollment(happyPathEnrollment(), now);
+
+      expect(engineService.stopEnrollment).toHaveBeenCalledWith(ENROLLMENT_ID, 'classifier_agreed');
+      const ws = (service as any).leadStatusService.writeStatus;
+      expect(ws.mock.calls[0][0]).toMatchObject({
+        newStatus: 'booked',
+        reason: 'followup_classifier_agreed',
+      });
+      // No lostReason on booked transition
+      expect(ws.mock.calls[0][0].lostReason).toBeUndefined();
+    });
+
+    it('stops on deferring WITHOUT flipping lead status (pause, not lost)', async () => {
+      const now = setUpHappyPath(
+        { intent: 'deferring', confidence: 0.85, reason: 'I will get back to you', fromLlm: true },
+        { lastCustomerMsg: "Thanks, I'll get back to you" },
+      );
+
+      await (service as any).processEnrollment(happyPathEnrollment(), now);
+
+      expect(engineService.stopEnrollment).toHaveBeenCalledWith(ENROLLMENT_ID, 'classifier_deferring');
+      // Deferring is a pause — no status flip
+      expect((service as any).leadStatusService.writeStatus).not.toHaveBeenCalled();
+    });
+
+    it('passes through to generation on engaged intent', async () => {
+      const now = setUpHappyPath(
+        { intent: 'engaged', confidence: 0.9, reason: 'continuing conversation', fromLlm: true },
+        { lastCustomerMsg: 'Yes 3 bedrooms' },
+      );
+
+      await (service as any).processEnrollment(happyPathEnrollment(), now);
+
+      expect(engineService.stopEnrollment).not.toHaveBeenCalled();
+      expect(generatorService.generateMessage).toHaveBeenCalled();
+    });
+
+    it('passes through on asking intent (customer wants an answer)', async () => {
+      const now = setUpHappyPath(
+        { intent: 'asking', confidence: 0.95, reason: 'pricing question', fromLlm: true },
+        { lastCustomerMsg: 'How much for 3 bed?' },
+      );
+
+      await (service as any).processEnrollment(happyPathEnrollment(), now);
+
+      expect(engineService.stopEnrollment).not.toHaveBeenCalled();
+      expect(generatorService.generateMessage).toHaveBeenCalled();
+    });
+
+    it('passes through when classifier returns low confidence', async () => {
+      const now = setUpHappyPath(
+        { intent: 'completed', confidence: 0.5, reason: 'unclear', fromLlm: true },
+        { lastCustomerMsg: 'ok' },
+      );
+
+      await (service as any).processEnrollment(happyPathEnrollment(), now);
+
+      expect(engineService.stopEnrollment).not.toHaveBeenCalled();
+      expect(generatorService.generateMessage).toHaveBeenCalled();
+    });
+
+    it('passes through when classifier failed (fromLlm=false)', async () => {
+      const now = setUpHappyPath(
+        { intent: 'engaged', confidence: 0, reason: 'classifier_failed: timeout', fromLlm: false },
+      );
+
+      await (service as any).processEnrollment(happyPathEnrollment(), now);
+
+      expect(engineService.stopEnrollment).not.toHaveBeenCalled();
+      expect(generatorService.generateMessage).toHaveBeenCalled();
+    });
+
+    it('passes through re-engagement (customer_deferred) sequence on completed intent', async () => {
+      // The deferred re-engagement sequence exists PRECISELY to message
+      // customers in this state. Stopping it on completed/deferring/etc.
+      // would defeat its purpose.
+      const now = setUpHappyPath(
+        { intent: 'completed', confidence: 0.9, reason: 'job done', fromLlm: true },
+      );
+
+      await (service as any).processEnrollment(happyPathEnrollment({ triggerState: 'customer_deferred' }), now);
+
+      expect(engineService.stopEnrollment).not.toHaveBeenCalled();
+      expect(generatorService.generateMessage).toHaveBeenCalled();
+    });
+
+    it('STOPS re-engagement (customer_hired_competitor) sequence on opt_out — explicit unsubscribe overrides', async () => {
+      // Re-engagement sequences must respect opt_out — even paused customers
+      // who explicitly say "stop" should not get more messages.
+      const now = setUpHappyPath(
+        { intent: 'opt_out', confidence: 0.99, reason: 'explicit unsubscribe', fromLlm: true },
+        { lastCustomerMsg: 'stop messaging me' },
+      );
+
+      await (service as any).processEnrollment(happyPathEnrollment({ triggerState: 'customer_hired_competitor' }), now);
+
+      expect(engineService.stopEnrollment).toHaveBeenCalledWith(ENROLLMENT_ID, 'classifier_opt_out');
+      expect(generatorService.generateMessage).not.toHaveBeenCalled();
+    });
+
+    it('passes through when there is no customer message in the thread', async () => {
+      const now = new Date('2026-04-17T12:00:00Z');
+      prisma.lead.findUnique.mockResolvedValue({
+        id: LEAD_ID,
+        status: 'new',
+        thumbtackStatus: null,
+        userId: 'user-1',
+        businessId: 'biz-1',
+        lastCustomerActivityAt: null,
+        category: 'Deep cleaning',
+      });
+      // Both findFirst variants return null (no messages yet)
+      prisma.message.findFirst.mockResolvedValue(null);
+
+      await (service as any).processEnrollment(happyPathEnrollment(), now);
+
+      // Classifier should never have been called (no message to classify)
+      expect((service as any).intentClassifier.classify).not.toHaveBeenCalled();
+      // And we proceed to generate
+      expect(generatorService.generateMessage).toHaveBeenCalled();
+    });
+
+    it('does not flip lead status when enrollment has no leadId (defensive)', async () => {
+      const now = setUpHappyPath(
+        { intent: 'opt_out', confidence: 0.95, reason: 'explicit', fromLlm: true },
+      );
+      const enrollment = { ...happyPathEnrollment(), leadId: null };
+
+      await (service as any).processEnrollment(enrollment, now);
+
+      // Enrollment still stopped
+      expect(engineService.stopEnrollment).toHaveBeenCalledWith(ENROLLMENT_ID, 'classifier_opt_out');
+      // But no lead.status write
+      expect((service as any).leadStatusService.writeStatus).not.toHaveBeenCalled();
     });
   });
 });
