@@ -201,6 +201,74 @@ describe('FollowUpEngineService', () => {
       jest.useRealTimers();
     });
 
+    it('firstStepDelayMinutesOverride wins on step 0 (Devi case — customer-stated re-engage window)', async () => {
+      // Customer said "in 2 weeks". Classifier extracts 14 days → 20160 min.
+      // Configured first step is 2 min; override should anchor next-due to
+      // now + 14 days, NOT now + 2 min.
+      const now = new Date('2026-04-20T22:03:00Z');
+      jest.useFakeTimers({ now });
+
+      prisma.message.findFirst.mockResolvedValue({ sentAt: now });
+      prisma.followUpStepExecution.count.mockResolvedValue(0);
+      prisma.savedAccount.findFirst.mockResolvedValue({
+        followUpMode: 'auto_send',
+        followUpSettingsJson: JSON.stringify({
+          followUpSteps: [{ label: '1st', delay: '2 min', message: 'checkin' }],
+        }),
+      });
+
+      await service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID, 14 * 24 * 60);
+
+      const createCall = prisma.followUpEnrollment.create.mock.calls[0][0];
+      const expected = new Date(now.getTime() + 14 * 24 * 60 * 60_000);
+      expect(createCall.data.nextStepDueAt.getTime()).toBe(expected.getTime());
+      jest.useRealTimers();
+    });
+
+    it('firstStepDelayMinutesOverride is ignored on re-enrollment (startStepIndex > 0)', async () => {
+      // If prior follow-ups have been sent, the customer's stale "in 2 weeks"
+      // would mis-anchor a fresh enrollment. Keep the configured cadence.
+      const now = new Date('2026-04-20T22:03:00Z');
+      jest.useFakeTimers({ now });
+
+      prisma.message.findFirst.mockResolvedValue({ sentAt: now });
+      prisma.followUpStepExecution.count.mockResolvedValue(2); // re-enrollment
+      prisma.savedAccount.findFirst.mockResolvedValue({
+        followUpMode: 'auto_send',
+        followUpSettingsJson: null,
+      });
+
+      await service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID, 14 * 24 * 60);
+
+      const createCall = prisma.followUpEnrollment.create.mock.calls[0][0];
+      // Should land on step 2 (1440 min from template) — override ignored
+      // because startStepIndex > 0.
+      const expected = new Date(now.getTime() + 1440 * 60_000);
+      expect(createCall.data.nextStepDueAt.getTime()).toBe(expected.getTime());
+      jest.useRealTimers();
+    });
+
+    it('falls back to configured first step when override is undefined', async () => {
+      const now = new Date('2026-04-20T22:03:00Z');
+      jest.useFakeTimers({ now });
+
+      prisma.message.findFirst.mockResolvedValue({ sentAt: now });
+      prisma.followUpStepExecution.count.mockResolvedValue(0);
+      prisma.savedAccount.findFirst.mockResolvedValue({
+        followUpMode: 'auto_send',
+        followUpSettingsJson: JSON.stringify({
+          followUpSteps: [{ label: '1st', delay: '3 days', message: 'checkin' }],
+        }),
+      });
+
+      await service.enrollInSequence(CONVERSATION_ID, TEMPLATE_ID, 'yelp', LEAD_ID); // no override
+
+      const createCall = prisma.followUpEnrollment.create.mock.calls[0][0];
+      const expected = new Date(now.getTime() + 3 * 24 * 60 * 60_000);
+      expect(createCall.data.nextStepDueAt.getTime()).toBe(expected.getTime());
+      jest.useRealTimers();
+    });
+
     it('throws when template not found', async () => {
       prisma.followUpSequenceTemplate.findUnique.mockResolvedValue(null);
 

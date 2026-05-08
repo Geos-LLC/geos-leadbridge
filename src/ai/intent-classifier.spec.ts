@@ -31,9 +31,11 @@ function makeService(mockCreate: MockChatCreate): IntentClassifierService {
   return svc;
 }
 
-function llmReply(intent: string, confidence: number, reason = 'mocked'): MockChatCreate {
+function llmReply(intent: string, confidence: number, reason = 'mocked', suggestedReengageInDays?: number | null): MockChatCreate {
+  const payload: any = { intent, confidence, reason };
+  if (suggestedReengageInDays !== undefined) payload.suggestedReengageInDays = suggestedReengageInDays;
   return jest.fn().mockResolvedValue({
-    choices: [{ message: { content: JSON.stringify({ intent, confidence, reason }) } }],
+    choices: [{ message: { content: JSON.stringify(payload) } }],
   });
 }
 
@@ -221,6 +223,80 @@ describe('IntentClassifierService', () => {
       const svc = makeService(llmReply('asking', 0.95, 'pricing question'));
       const result = await svc.classify({ message: 'How much for a 3 bedroom?' });
       expect(result.intent).toBe('asking');
+    });
+  });
+
+  /**
+   * suggestedReengageInDays — explicit time-bound deferrals/completions.
+   * The Devi case ("back in 2 weeks") is the canonical example: classifier
+   * extracts the duration so the customer_deferred enrollment can anchor the
+   * re-engagement to the customer's stated timing instead of the default
+   * cadence.
+   */
+  describe('suggestedReengageInDays extraction', () => {
+    it('Devi case — "back in 2 weeks to reschedule" → deferring + 14 days', async () => {
+      const svc = makeService(llmReply('deferring', 0.9, 'time-bound pause', 14));
+      const result = await svc.classify({
+        message: "Hi I have to reschedule I'm in the military and they are sending me on a detachment. I will be in touch when I'm home in 2 weeks to reschedule",
+      });
+      expect(result.intent).toBe('deferring');
+      expect(result.suggestedReengageInDays).toBe(14);
+    });
+
+    it('passes through suggestedReengageInDays for hired_elsewhere intent', async () => {
+      const svc = makeService(llmReply('hired_elsewhere', 0.9, 'temporary pick', 30));
+      const result = await svc.classify({
+        message: 'We went with someone else for now, ask us again in a month',
+      });
+      expect(result.intent).toBe('hired_elsewhere');
+      expect(result.suggestedReengageInDays).toBe(30);
+    });
+
+    it('omits suggestedReengageInDays when intent is engaged (model returned a value but it should be ignored)', async () => {
+      const svc = makeService(llmReply('engaged', 0.9, 'continuing', 7));
+      const result = await svc.classify({ message: 'Yes 3 bedrooms' });
+      expect(result.intent).toBe('engaged');
+      expect(result.suggestedReengageInDays).toBeUndefined();
+    });
+
+    it('omits suggestedReengageInDays when null returned (no explicit timing)', async () => {
+      const svc = makeService(llmReply('deferring', 0.9, 'vague pause', null));
+      const result = await svc.classify({ message: "I'll get back to you" });
+      expect(result.intent).toBe('deferring');
+      expect(result.suggestedReengageInDays).toBeUndefined();
+    });
+
+    it('clamps suggestedReengageInDays to 180 when model returns absurdly high value', async () => {
+      const svc = makeService(llmReply('deferring', 0.9, 'far future', 9999));
+      const result = await svc.classify({ message: 'maybe in a few years' });
+      expect(result.suggestedReengageInDays).toBe(180);
+    });
+
+    it('clamps suggestedReengageInDays to ≥1 when model returns 0 or negative', async () => {
+      const svc = makeService(llmReply('deferring', 0.9, 'now-ish', 0));
+      const result = await svc.classify({ message: 'tomorrow' });
+      // 0 is treated as "unset" since we require > 0
+      expect(result.suggestedReengageInDays).toBeUndefined();
+    });
+
+    it('rounds fractional days', async () => {
+      const svc = makeService(llmReply('deferring', 0.9, 'half a week', 3.7));
+      const result = await svc.classify({ message: 'in about half a week' });
+      expect(result.suggestedReengageInDays).toBe(4);
+    });
+
+    it('omits when intent is opt_out (no re-engagement on explicit unsubscribe)', async () => {
+      const svc = makeService(llmReply('opt_out', 0.99, 'explicit', 14));
+      const result = await svc.classify({ message: 'stop messaging me, also in 2 weeks' });
+      expect(result.intent).toBe('opt_out');
+      expect(result.suggestedReengageInDays).toBeUndefined();
+    });
+
+    it('omits when intent is agreed (booked, not paused)', async () => {
+      const svc = makeService(llmReply('agreed', 0.95, 'booked', 7));
+      const result = await svc.classify({ message: 'Sounds good, see you next week' });
+      expect(result.intent).toBe('agreed');
+      expect(result.suggestedReengageInDays).toBeUndefined();
     });
   });
 });

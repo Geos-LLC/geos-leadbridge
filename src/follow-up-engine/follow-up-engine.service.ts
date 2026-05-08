@@ -132,12 +132,22 @@ export class FollowUpEngineService {
 
   /**
    * Enroll a conversation in a follow-up sequence.
+   *
+   * @param firstStepDelayMinutesOverride
+   *   Optional override for the first step's delay. Used when the customer
+   *   stated an explicit return window in their message (e.g. "back in 2
+   *   weeks" → 20160 minutes). The classifier extracts the duration; callers
+   *   pass it through to anchor the first re-engagement to the customer's
+   *   own timing instead of the seed template's default cadence. Only applied
+   *   when startStepIndex === 0 (no prior follow-ups on this thread). Bounded
+   *   by the classifier service to [1, 180] days.
    */
   async enrollInSequence(
     conversationId: string,
     templateId: string,
     platform: string,
     leadId?: string,
+    firstStepDelayMinutesOverride?: number,
   ): Promise<string> {
     const template = await this.prisma.followUpSequenceTemplate.findUnique({
       where: { id: templateId },
@@ -255,11 +265,27 @@ export class FollowUpEngineService {
     // Compute first step due time relative to the last message sent (not now),
     // so step delays reflect time since last contact, not enrollment time.
     // Follow-ups do NOT use active hours — quiet hours are handled by scheduler.
+    //
+    // When the caller provides firstStepDelayMinutesOverride AND we're starting
+    // from step 0 (no prior follow-ups), the override wins. This is the
+    // classifier-extracted "back in 2 weeks" path: customer named a specific
+    // return window, so we anchor to that instead of the configured cadence.
+    // For re-enrollment (startStepIndex > 0) we keep the configured delay so
+    // a stale duration from a months-old message doesn't reset progress.
     const firstStep = steps[startStepIndex];
+    const useOverride = startStepIndex === 0
+      && typeof firstStepDelayMinutesOverride === 'number'
+      && firstStepDelayMinutesOverride > 0;
+    const effectiveDelay = useOverride
+      ? firstStepDelayMinutesOverride!
+      : firstStep.delayMinutes;
+    if (useOverride) {
+      this.logger.log(`[FollowUp] First-step delay overridden to ${firstStepDelayMinutesOverride}m (configured was ${firstStep.delayMinutes}m) — customer-stated re-engage window`);
+    }
     const fromTime = lastMessageSentAt || new Date();
     const nextDue = this.computeNextDueAt(
       fromTime,
-      firstStep.delayMinutes,
+      effectiveDelay,
       null,
       null,
       'America/New_York',

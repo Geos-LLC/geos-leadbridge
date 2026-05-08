@@ -225,6 +225,14 @@ export class AutomationService implements OnModuleInit {
     activeHoursStart: string | null | undefined,
     activeHoursEnd: string | null | undefined,
     activeHoursTimezone: string | null | undefined,
+    /**
+     * Number of days the customer explicitly named as the return window
+     * ("back in 2 weeks" → 14). Overrides the first-step delay on the
+     * sequence so the next re-engagement fires at the customer's stated
+     * timing instead of the configured default cadence. Pass undefined when
+     * no explicit duration was extracted.
+     */
+    suggestedReengageInDays?: number,
   ): Promise<void> {
     if (!threadId) return;
     try {
@@ -256,8 +264,12 @@ export class AutomationService implements OnModuleInit {
         return;
       }
 
-      await this.followUpEngine.enrollInSequence(threadId, template.id, platform, leadId);
-      this.logger.log(`[AUTOMATION] ✓ Enrolled conversation ${threadId} in ${triggerState} (template ${template.id})`);
+      const overrideMinutes = typeof suggestedReengageInDays === 'number' && suggestedReengageInDays > 0
+        ? suggestedReengageInDays * 24 * 60
+        : undefined;
+      await this.followUpEngine.enrollInSequence(threadId, template.id, platform, leadId, overrideMinutes);
+      const overrideBit = overrideMinutes ? ` first-step=${suggestedReengageInDays}d (customer-stated)` : '';
+      this.logger.log(`[AUTOMATION] ✓ Enrolled conversation ${threadId} in ${triggerState} (template ${template.id})${overrideBit}`);
     } catch (err: any) {
       this.logger.error(`[AUTOMATION] ${triggerState} enrollment failed for ${threadId}: ${err.message}`);
     }
@@ -766,6 +778,7 @@ export class AutomationService implements OnModuleInit {
               savedAccount.followUpActiveHoursStart,
               savedAccount.followUpActiveHoursEnd,
               savedAccount.followUpTimezone,
+              classification.suggestedReengageInDays,
             );
           }
           return;
@@ -787,6 +800,7 @@ export class AutomationService implements OnModuleInit {
               savedAccount.followUpActiveHoursStart,
               savedAccount.followUpActiveHoursEnd,
               savedAccount.followUpTimezone,
+              classification.suggestedReengageInDays,
             );
           }
           return;
