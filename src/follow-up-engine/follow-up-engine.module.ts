@@ -18,6 +18,7 @@ import { FollowUpEngineService } from './follow-up-engine.service';
 import { FollowUpStateService } from './follow-up-state.service';
 import { FollowUpSchedulerService } from './follow-up-scheduler.service';
 import { FollowUpGeneratorService } from './follow-up-generator.service';
+import { FollowUpGateService } from './follow-up-gate.service';
 import { FollowUpMigrationService } from './follow-up-migration.service';
 import { FollowUpEngineController } from './follow-up-engine.controller';
 
@@ -36,6 +37,7 @@ import { FollowUpEngineController } from './follow-up-engine.controller';
     FollowUpStateService,
     FollowUpSchedulerService,
     FollowUpGeneratorService,
+    FollowUpGateService,
     FollowUpMigrationService,
   ],
   controllers: [FollowUpEngineController],

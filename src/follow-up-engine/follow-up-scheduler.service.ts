@@ -23,6 +23,7 @@ import { TrialService } from '../trial/trial.service';
 import { PlatformFactory } from '../platforms/platform.factory';
 import { EncryptionUtil } from '../common/utils/encryption.util';
 import { IntentClassifierService, IntentClassification, CustomerIntent } from '../ai/intent-classifier.service';
+import { FollowUpGateService, GateDecision } from './follow-up-gate.service';
 
 @Injectable()
 export class FollowUpSchedulerService implements OnModuleInit {
@@ -44,6 +45,7 @@ export class FollowUpSchedulerService implements OnModuleInit {
     private readonly intentClassifier: IntentClassifierService,
     @Inject(forwardRef(() => LeadStatusService))
     private readonly leadStatusService: LeadStatusService,
+    private readonly gateService: FollowUpGateService,
   ) {
     // FOLLOWUP_SCHEDULER env var: set to 'false' on staging to let production handle it.
     // Defaults to true (enabled). User controls follow-ups via per-account settings.
@@ -495,87 +497,36 @@ export class FollowUpSchedulerService implements OnModuleInit {
    * re-engagement messages.
    */
   private async classifyAndMaybeStop(enrollment: any, now: Date): Promise<boolean> {
-    if (!enrollment.conversationId) return false;
-
-    // Find the latest customer message. If there's no customer message yet
-    // (initial-outreach enrollments before any reply), there's nothing for
-    // the classifier to read — pass through.
-    const lastCustomer = await this.prisma.message.findFirst({
-      where: { conversationId: enrollment.conversationId, sender: 'customer' },
-      orderBy: { createdAt: 'desc' },
-      select: { content: true, createdAt: true },
+    // v8.1/Phase-1-Task-2 refactor: gate evaluation is now in FollowUpGateService
+    // and shared with the controller's /preview endpoint. This method is the
+    // SCHEDULER's caller — it applies the side effects (stopEnrollment +
+    // writeStatus). Preview controller calls evaluate() directly with no
+    // side effects, just returning the decision to the UI.
+    const decision = await this.gateService.evaluate({
+      conversationId: enrollment.conversationId,
+      enrollmentId: enrollment.id,
+      leadId: enrollment.leadId ?? null,
+      triggerState: enrollment.sequenceTemplate?.triggerState ?? null,
     });
-    if (!lastCustomer || !lastCustomer.content) return false;
 
-    // Pull a small history window for classifier context. Keep it tight
-    // (5 turns) — the classifier only needs the recent shape of the
-    // conversation to disambiguate things like "already done" (booking that
-    // ran successfully vs hired-someone vs canceled).
-    const recent = await this.prisma.message.findMany({
-      where: { conversationId: enrollment.conversationId },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-      select: { sender: true, content: true },
-    });
-    const recentHistory = recent.reverse().map((m: any) => ({
-      role: (m.sender === 'customer' ? 'customer' : 'pro') as 'customer' | 'pro',
-      content: m.content || '',
-    }));
-
-    let leadStatus: string | undefined;
-    let leadCategory: string | undefined;
-    if (enrollment.leadId) {
-      const lead = await this.prisma.lead.findUnique({
-        where: { id: enrollment.leadId },
-        select: { status: true, category: true },
-      });
-      leadStatus = lead?.status ?? undefined;
-      leadCategory = lead?.category ?? undefined;
-    }
-
-    let classification: IntentClassification;
-    try {
-      classification = await this.intentClassifier.classify({
-        message: lastCustomer.content,
-        recentHistory,
-        leadStatus,
-        leadCategory,
-      });
-    } catch (err: any) {
-      // Classifier failure is non-fatal — fall through to generation. The
-      // existing follow-up engine guards (terminal status, customer-replied-
-      // since-enrollment, the inbound-reply classifier on next customer
-      // message) are the safety net.
-      this.logger.warn(`[FollowUpScheduler] Classifier gate threw — passing through (${err.message})`);
+    if (!decision.shouldBlock) {
+      // Preserve the re-engagement bypass log that existing tests assert on.
+      if (decision.action === 'pass_re_engagement') {
+        this.logger.log(`[FollowUpScheduler] classifier gate: intent=${decision.intent} conf=${(decision.confidence ?? 0).toFixed(2)} but enrollment ${enrollment.id} is re-engagement (${enrollment.sequenceTemplate?.triggerState}) — passing through`);
+      }
       return false;
     }
 
-    if (!classification.fromLlm
-        || classification.confidence < FollowUpSchedulerService.CLASSIFIER_CONFIDENCE_THRESHOLD) {
-      return false;
-    }
-
-    const intent: CustomerIntent = classification.intent;
-    const conf = classification.confidence;
-
-    // Pass-through for non-terminal intents.
-    if (intent === 'asking' || intent === 'engaged') return false;
-
-    const triggerState: string | undefined = enrollment.sequenceTemplate?.triggerState;
-    const isReEngagementSequence = triggerState === 'customer_deferred'
-      || triggerState === 'customer_hired_competitor';
-    if (isReEngagementSequence && intent !== 'opt_out') {
-      this.logger.log(`[FollowUpScheduler] classifier gate: intent=${intent} conf=${conf.toFixed(2)} but enrollment ${enrollment.id} is re-engagement (${triggerState}) — passing through`);
-      return false;
-    }
+    const intent = decision.intent as CustomerIntent;
+    const conf = decision.confidence;
 
     // Stop the enrollment. Idempotent — only flips active enrollments.
     await this.engineService.stopEnrollment(enrollment.id, `classifier_${intent}`);
-    this.logger.log(`[FollowUpScheduler] ✗ STOPPED enrollment ${enrollment.id} via classifier intent=${intent} conf=${conf.toFixed(2)} reason="${classification.reason}"`);
+    this.logger.log(`[FollowUpScheduler] ✗ STOPPED enrollment ${enrollment.id} via classifier intent=${intent} conf=${conf.toFixed(2)} reason="${decision.classifierReason ?? ''}"`);
 
     // Flip lead status where appropriate. Skipped for 'deferring' (pause, not lost)
     // and for cases where the lead has no id (defensive).
-    if (enrollment.leadId && intent !== 'deferring') {
+    if (enrollment.leadId && decision.sideEffect !== 'stop_only' && decision.sideEffect !== 'none') {
       const sourceEventId = `followup_classifier_${enrollment.id}_${intent}`;
       const baseInput = {
         leadId: enrollment.leadId,
@@ -585,12 +536,12 @@ export class FollowUpSchedulerService implements OnModuleInit {
         metadata: {
           classifier_intent: intent,
           classifier_confidence: conf,
-          classifier_reason: classification.reason,
+          classifier_reason: decision.classifierReason,
           enrollment_id: enrollment.id,
         },
       };
       try {
-        if (intent === 'agreed') {
+        if (decision.sideEffect === 'stop_and_booked') {
           // Customer agreed on price — handoff to manager. Belt-and-suspenders
           // (handleCustomerReply already does this, but the gate is a safety
           // net for cases the inbound path missed).
@@ -599,7 +550,7 @@ export class FollowUpSchedulerService implements OnModuleInit {
             newStatus: 'booked',
             reason: 'followup_classifier_agreed',
           });
-        } else {
+        } else if (decision.sideEffect === 'stop_and_lost') {
           // opt_out / hired_elsewhere / completed → lost
           const lostReason = intent === 'opt_out' ? 'opt_out' : 'hired_someone';
           const reengageAt = intent === 'opt_out'

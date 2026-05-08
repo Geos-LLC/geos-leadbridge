@@ -95,7 +95,13 @@ describe('FollowUpSchedulerService', () => {
     const leadStatusService = {
       writeStatus: jest.fn().mockResolvedValue({ leadId: LEAD_ID, applied: true, status: 'lost' }),
     } as any;
-    service = new FollowUpSchedulerService(prisma, contextService, leadsService, engineService, generatorService, eventEmitter, configService, trialService, platformFactory, intentClassifier, leadStatusService);
+    // Real gate service wired to the same prisma + classifier mocks the
+    // scheduler uses. Existing scheduler tests stay accurate because they
+    // validate end-to-end gate-then-side-effect behavior, not the internal
+    // shape of classifyAndMaybeStop.
+    const { FollowUpGateService } = require('./follow-up-gate.service');
+    const gateService = new FollowUpGateService(prisma, intentClassifier);
+    service = new FollowUpSchedulerService(prisma, contextService, leadsService, engineService, generatorService, eventEmitter, configService, trialService, platformFactory, intentClassifier, leadStatusService, gateService);
     jest.clearAllMocks();
     // Reset mocks after construction
     prisma.followUpEnrollment.findUnique.mockResolvedValue({

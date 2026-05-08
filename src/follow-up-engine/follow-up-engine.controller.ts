@@ -15,6 +15,7 @@ import { LeadsService } from '../leads/leads.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { FollowUpEngineService } from './follow-up-engine.service';
 import { FollowUpGeneratorService, SequenceStep } from './follow-up-generator.service';
+import { FollowUpGateService } from './follow-up-gate.service';
 import { TrialService } from '../trial/trial.service';
 import { ensureCustomerReplyPresets } from './follow-up-seed';
 
@@ -32,6 +33,7 @@ export class FollowUpEngineController {
     private readonly conversationContext: ConversationContextService,
     private readonly generatorService: FollowUpGeneratorService,
     private readonly trialService: TrialService,
+    private readonly gateService: FollowUpGateService,
   ) {}
 
   /**
@@ -300,6 +302,33 @@ export class FollowUpEngineController {
     const step = steps[enrollment.currentStepIndex];
     if (!step) return { success: false, error: 'No more steps' };
 
+    // v8.1/Phase-1-Task-2: gate the preview path with the same classifier
+    // logic the scheduler uses. Without this, the preview can render AI text
+    // for a customer who has opted out / completed / hired elsewhere — exactly
+    // the "creepy follow-up" symptom we're closing. Pure-decision; no DB
+    // mutations here. The next scheduler tick will apply side effects.
+    const decision = await this.gateService.evaluate({
+      conversationId,
+      enrollmentId: enrollment.id,
+      leadId: enrollment.leadId ?? null,
+      triggerState: enrollment.sequenceTemplate?.triggerState ?? null,
+    });
+
+    if (decision.shouldBlock) {
+      this.logger.warn(`[FollowUpController] Preview BLOCKED enrollment=${enrollment.id} intent=${decision.intent} conf=${decision.confidence.toFixed(2)} reason="${decision.classifierReason ?? ''}"`);
+      return {
+        success: false,
+        blocked: true,
+        reason: decision.reason,
+        intent: decision.intent,
+        confidence: decision.confidence,
+        classifierReason: decision.classifierReason,
+        // UI hint: scheduler will stop this enrollment + flip lead status on
+        // next tick. Caller may show "won't fire — customer said X".
+        nextAction: decision.sideEffect,
+      };
+    }
+
     const generated = await this.generatorService.generateMessage(
       step,
       conversationId,
@@ -307,7 +336,18 @@ export class FollowUpEngineController {
       enrollment.sequenceTemplate.promptTemplateId,
     );
 
-    return { success: true, message: generated.message, strategyUsed: generated.strategyUsed };
+    return {
+      success: true,
+      message: generated.message,
+      strategyUsed: generated.strategyUsed,
+      // Echo the gate metadata even on pass — useful for UI badges
+      // ("classifier: engaged @ 0.9") and for path-divergence diagnostics.
+      gate: {
+        action: decision.action,
+        intent: decision.intent,
+        confidence: decision.confidence,
+      },
+    };
   }
 
   /**

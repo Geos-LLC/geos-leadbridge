@@ -55,6 +55,7 @@ function makeController(ownerUserId: string) {
     {} as any, // ConversationContextService
     {} as any, // FollowUpGeneratorService
     {} as any, // TrialService
+    {} as any, // FollowUpGateService — not exercised by enrollment endpoints under test
   );
   return { controller, prisma, engineService };
 }
