@@ -67,6 +67,15 @@ export const HIRED_SOMEONE_PHRASES: readonly string[] = [
   'already have someone',
   'no longer need',
   'not interested',
+  // Donna case: customer said "It's already done, thanks" / "It's already done,
+  // thank you" twice. Lead stayed status=new, AI kept auto-replying with a
+  // hallucinated condolence + repeat price quote. Treating these as
+  // hired-someone flips the lead to lost (lostReason='hired_someone',
+  // reengage in 21d) and stops AI Conversation immediately.
+  'already done',
+  'all done',
+  'all set',
+  'taken care of',
 ];
 
 export const AGREED_PHRASES: readonly string[] = [
@@ -734,12 +743,13 @@ export class AutomationService implements OnModuleInit {
       // Rule: stop on booked/hired keywords. Then schedule a longer
       // re-engagement follow-up (default 21 days) — the customer's current
       // job may not work out, and a polite check-in then captures the
-      // dissatisfied ones.
+      // dissatisfied ones. Sources HIRED_SOMEONE_PHRASES (canonical — also
+      // drives lead.status -> lost transition) so the two paths can't drift.
       if (aiRules.aiStopOnBooked !== false && context.customerMessage) {
-        const bookedPhrases = ['already hired', 'booked another', 'found someone', 'went with someone', 'already have someone', 'no longer need'];
         const msgLower = context.customerMessage.toLowerCase();
-        if (bookedPhrases.some(p => msgLower.includes(p))) {
-          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — customer booked elsewhere`);
+        const matched = HIRED_SOMEONE_PHRASES.find(p => msgLower.includes(p));
+        if (matched) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — customer booked elsewhere ("${matched}")`);
           if (aiRules.aiHiredCompetitorReengage !== false && context.leadId && lead?.threadId) {
             await this.enrollInCustomerReplySequence(
               'customer_hired_competitor',
