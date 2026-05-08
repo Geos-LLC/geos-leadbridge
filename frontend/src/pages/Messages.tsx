@@ -2039,7 +2039,13 @@ export function Messages() {
                             ? (event.senderType === 'ai' ? 'text-blue-700' : 'text-blue-100')
                             : 'text-blue-600'
                         }`}>
-                          {event.channel === 'platform' && (event.direction === 'outbound' && event.senderType === 'ai' ? 'AI' : 'Platform')}
+                          {event.channel === 'platform' && (
+                            event.direction === 'inbound'
+                              ? 'Client'
+                              : event.senderType === 'ai'
+                              ? 'AI'
+                              : 'Dispatcher'
+                          )}
                           {event.channel === 'sms' && 'SMS'}
                           {event.channel === 'call' && 'Call'}
                           {event.channel === 'automation' && 'Auto'}
