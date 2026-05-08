@@ -42,7 +42,7 @@ function makeService(prisma: any): NotificationsService {
     getOrSet: jest.fn(async (_k: string, _ttl: number, loader: () => Promise<any>) => loader()),
     del: jest.fn().mockResolvedValue(undefined),
   } as any;
-  return new NotificationsService(prisma, configService, cache);
+  return new NotificationsService(prisma, configService, cache, {} as any);
 }
 
 describe('NotificationsService — cross-tenant Sigcore access', () => {

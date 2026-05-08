@@ -95,7 +95,7 @@ describe('NotificationsService', () => {
       getOrSet: jest.fn(async (_k: string, _ttl: number, loader: () => Promise<any>) => loader()),
       del: jest.fn().mockResolvedValue(undefined),
     };
-    service = new NotificationsService(prisma, config, cache);
+    service = new NotificationsService(prisma, config, cache, {} as any);
 
     // Spy on private sendViaSigcore to avoid real HTTP calls
     jest.spyOn(service as any, 'sendViaSigcore').mockResolvedValue(mockSigcoreResult);

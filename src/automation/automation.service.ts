@@ -11,6 +11,7 @@ import { LeadsService } from '../leads/leads.service';
 import { LeadStatusService } from '../leads/lead-status.service';
 import { ConfigService } from '@nestjs/config';
 import { AiService } from '../ai/ai.service';
+import { IntentClassifierService, IntentClassification } from '../ai/intent-classifier.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { TrialService } from '../trial/trial.service';
@@ -197,6 +198,7 @@ export class AutomationService implements OnModuleInit {
     private leadsService: LeadsService,
     private configService: ConfigService,
     private aiService: AiService,
+    private intentClassifier: IntentClassifierService,
     private monitoring: MonitoringService,
     private conversationContext: ConversationContextService,
     private trialService: TrialService,
@@ -619,10 +621,12 @@ export class AutomationService implements OnModuleInit {
     this.logger.log(`[AUTOMATION] ✓ ELIGIBLE: This is a customer reply (not the first message)`);
 
     // Trial paywall: customer replies on existing conversations get 24h grace
-    // after trial end. Look up the lead's thread so canProcessLead can check.
+    // after trial end. Look up the lead's thread + status (status feeds the
+    // intent classifier — "it's done" means different things at engaged vs
+    // booked).
     const lead = await this.prisma.lead.findUnique({
       where: { id: context.leadId },
-      select: { threadId: true },
+      select: { threadId: true, status: true, thumbtackStatus: true, category: true },
     });
     const allowed = await this.trialService.canProcessLead(context.userId, lead?.threadId ?? undefined);
     if (!allowed.allowed) {
@@ -630,12 +634,26 @@ export class AutomationService implements OnModuleInit {
       return;
     }
 
+    // ── LLM intent classification ────────────────────────────────────────
+    // One classification per inbound customer message. Shared by the status
+    // transition path AND the AI Conversation skip checks below — never
+    // double-classify. Phrase lists serve as the safety net when confidence
+    // is low or the LLM is unavailable.
+    const classification = context.customerMessage
+      ? await this.classifyCustomerReply({
+          message: context.customerMessage,
+          threadId: lead?.threadId,
+          leadStatus: lead?.status ?? undefined,
+          leadCategory: lead?.category ?? context.category,
+        })
+      : undefined;
+
     // ── Canonical status transition ───────────────────────────────────────
     // Fires on every customer reply, independent of whether automation rules
     // or AI Conversation handle the response. The LeadStatusService guards
     // (no-downgrade / same-status / terminal / SF-protect / dedup) decide
     // whether the write actually applies.
-    await this.applyCustomerReplyStatusTransition(context).catch((err) => {
+    await this.applyCustomerReplyStatusTransition(context, classification).catch((err) => {
       this.logger.warn(`[AUTOMATION] status transition failed for lead ${context.leadId}: ${err.message}`);
     });
 
@@ -709,11 +727,8 @@ export class AutomationService implements OnModuleInit {
         }
       }
 
-      // Check terminal lead status — don't reply to done/hired/archived leads
-      const lead = context.leadId ? await this.prisma.lead.findUnique({
-        where: { id: context.leadId },
-        select: { status: true, thumbtackStatus: true, threadId: true },
-      }) : null;
+      // Check terminal lead status — don't reply to done/hired/archived leads.
+      // Reuses the outer-scope `lead` (already loaded with status + threadId).
       if (lead) {
         const s = (lead.status || '').toLowerCase();
         const ts = (lead.thumbtackStatus || '').toLowerCase();
@@ -724,11 +739,66 @@ export class AutomationService implements OnModuleInit {
         }
       }
 
-      // Check AI conversation rules
-      // Rule: stop on opt-out keywords in customer message. Sources both the
-      // exported OPT_OUT_PHRASES (canonical list — also drives lead.status
-      // transition to 'lost') and the inline list. Cancellation phrases live
-      // in OPT_OUT_PHRASES; merging here keeps the two paths consistent.
+      // ── Classifier-driven short-circuit ────────────────────────────────
+      // When the LLM is confident (≥0.7) about a terminal/pause intent, act
+      // on it directly. This catches the cases the phrase lists miss
+      // (Lynn: "please lose my information", Donna: "it's already done",
+      // free-form cancellations, polite winding-down). The inline phrase
+      // checks below remain as the fallback for low-confidence/LLM-failure
+      // cases — never delete them, they're the safety net.
+      if (classification && classification.fromLlm
+          && classification.confidence >= AutomationService.CLASSIFIER_CONFIDENCE_THRESHOLD) {
+        const intent = classification.intent;
+        if (intent === 'opt_out' && aiRules.aiStopOnOptOut !== false) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — classifier=opt_out conf=${classification.confidence.toFixed(2)} reason="${classification.reason}"`);
+          return;
+        }
+        if ((intent === 'hired_elsewhere' || intent === 'completed') && aiRules.aiStopOnBooked !== false) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — classifier=${intent} conf=${classification.confidence.toFixed(2)} reason="${classification.reason}"`);
+          if (aiRules.aiHiredCompetitorReengage !== false && context.leadId && lead?.threadId) {
+            await this.enrollInCustomerReplySequence(
+              'customer_hired_competitor',
+              context.leadId,
+              lead.threadId,
+              context.userId,
+              savedAccount.platform,
+              savedAccount.id,
+              savedAccount.followUpActiveHoursStart,
+              savedAccount.followUpActiveHoursEnd,
+              savedAccount.followUpTimezone,
+            );
+          }
+          return;
+        }
+        if (intent === 'agreed' && aiRules.aiStopOnPriceAgreed) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation paused — classifier=agreed conf=${classification.confidence.toFixed(2)} (manager handoff)`);
+          return;
+        }
+        if (intent === 'deferring' && aiRules.aiStopOnDeferral !== false) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — classifier=deferring conf=${classification.confidence.toFixed(2)} reason="${classification.reason}"`);
+          if (aiRules.aiDeferralCheckIn !== false && context.leadId && lead?.threadId) {
+            await this.enrollInCustomerReplySequence(
+              'customer_deferred',
+              context.leadId,
+              lead.threadId,
+              context.userId,
+              savedAccount.platform,
+              savedAccount.id,
+              savedAccount.followUpActiveHoursStart,
+              savedAccount.followUpActiveHoursEnd,
+              savedAccount.followUpTimezone,
+            );
+          }
+          return;
+        }
+        // intent='asking' or 'engaged' — fall through to AI reply generation.
+      }
+
+      // ── Phrase-list fallback ───────────────────────────────────────────
+      // Runs when classifier was unavailable, low-confidence, or returned a
+      // non-terminal intent. These checks predate the classifier and remain
+      // as a safety net — never delete without a separate cleanup PR.
+      // Rule: stop on opt-out keywords in customer message.
       if (aiRules.aiStopOnOptOut !== false && context.customerMessage) {
         const inlineExtras = ['stop', 'not interested'];
         const allOptOut = [...OPT_OUT_PHRASES, ...inlineExtras];
@@ -859,26 +929,116 @@ export class AutomationService implements OnModuleInit {
   }
 
   /**
+   * Run the LLM intent classifier on a customer message. Pulls recent
+   * conversation history (last 5 turns) for context and passes the current
+   * lead status — both materially change the right answer ("it's done" at
+   * status=booked vs status=engaged means different things). Returns a
+   * structured intent + confidence, or a fromLlm=false fallback if the
+   * classifier is unavailable.
+   */
+  private async classifyCustomerReply(opts: {
+    message: string;
+    threadId?: string | null;
+    leadStatus?: string;
+    leadCategory?: string;
+  }): Promise<IntentClassification> {
+    let recentHistory: { role: 'customer' | 'pro'; content: string }[] = [];
+    if (opts.threadId) {
+      try {
+        const recent = await this.prisma.message.findMany({
+          where: { conversationId: opts.threadId },
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+          select: { sender: true, content: true },
+        });
+        recentHistory = recent.reverse().map((m: any) => ({
+          role: (m.sender === 'customer' ? 'customer' : 'pro') as 'customer' | 'pro',
+          content: m.content || '',
+        }));
+      } catch {
+        // history is best-effort context; classifier still works without it
+      }
+    }
+    return this.intentClassifier.classify({
+      message: opts.message,
+      recentHistory,
+      leadStatus: opts.leadStatus,
+      leadCategory: opts.leadCategory,
+    });
+  }
+
+  /**
+   * Confidence threshold below which we treat the LLM result as unreliable
+   * and fall back to phrase-list classification. Tuned conservatively —
+   * false-positive on a terminal intent prematurely loses the lead, so we
+   * only act on the LLM when it's clearly confident. Below this threshold
+   * we either fall through to phrase lists (status transition) or just let
+   * the AI reply normally (skip checks).
+   */
+  private static readonly CLASSIFIER_CONFIDENCE_THRESHOLD = 0.7;
+
+  /**
+   * Map a high-confidence LLM intent to the legacy CustomerReplyTransition
+   * kind. Returns null when the classifier isn't trustworthy here — caller
+   * should fall back to the phrase-list `detectCustomerReplyTransition`.
+   *
+   * - opt_out                       -> opt_out
+   * - hired_elsewhere | completed   -> hired_someone (same status + 21d reengage)
+   * - agreed                        -> agreed
+   * - deferring | asking | engaged  -> engaged (no terminal write; no-downgrade guarded)
+   */
+  private intentToTransitionKind(c: IntentClassification): CustomerReplyTransition['kind'] | null {
+    if (!c.fromLlm || c.confidence < AutomationService.CLASSIFIER_CONFIDENCE_THRESHOLD) {
+      return null;
+    }
+    switch (c.intent) {
+      case 'opt_out': return 'opt_out';
+      case 'hired_elsewhere':
+      case 'completed': return 'hired_someone';
+      case 'agreed': return 'agreed';
+      case 'deferring':
+      case 'asking':
+      case 'engaged':
+      default: return 'engaged';
+    }
+  }
+
+  /**
    * Run the canonical Lead.status transition triggered by a customer reply.
    * Returns the writeStatus result so callers (and tests) can inspect what
    * happened. Errors are surfaced — callers should wrap if they want best-effort
    * semantics.
    *
-   * Decision table (handled by detectCustomerReplyTransition):
-   *   opt-out phrase           -> lost   (lostReason='opt_out')
-   *   hired-someone phrase     -> lost   (lostReason='hired_someone',
+   * Decision priority:
+   *   1. Pre-computed LLM classification (if confidence >= threshold)
+   *   2. Phrase-list `detectCustomerReplyTransition` (fallback / safety net)
+   *
+   * Decision table:
+   *   opt-out                  -> lost   (lostReason='opt_out')
+   *   hired_someone/completed  -> lost   (lostReason='hired_someone',
    *                                       reengageAt=now+21d, plus a
    *                                       customer_hired_competitor
-   *                                       FollowUpEnrollment)
-   *   agreed phrase            -> booked
+   *                                       FollowUpEnrollment via the
+   *                                       handleCustomerReply caller)
+   *   agreed                   -> booked
    *   anything else            -> engaged
    *                              (no-downgrade guard silently skips when the
    *                              lead is already past contacted)
    */
-  private async applyCustomerReplyStatusTransition(context: CustomerReplyContext) {
+  private async applyCustomerReplyStatusTransition(
+    context: CustomerReplyContext,
+    classification?: IntentClassification,
+  ) {
     if (!context.leadId || !context.customerMessage) return;
 
-    const transition = detectCustomerReplyTransition(context.customerMessage);
+    // Prefer high-confidence LLM classification; fall back to phrase lists.
+    const llmKind = classification ? this.intentToTransitionKind(classification) : null;
+    const transition: CustomerReplyTransition = llmKind
+      ? ({ kind: llmKind } as CustomerReplyTransition)
+      : detectCustomerReplyTransition(context.customerMessage);
+    if (llmKind) {
+      this.logger.log(`[classifier] status transition kind=${llmKind} (intent=${classification!.intent} conf=${classification!.confidence.toFixed(2)})`);
+    }
     const sourceEventId = context.messageId
       ? `reply_${context.messageId}_${transition.kind}`
       : `reply_${context.leadId}_${transition.kind}_${createHash('sha256')

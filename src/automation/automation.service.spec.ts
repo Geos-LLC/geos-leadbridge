@@ -39,17 +39,27 @@ function buildSvc() {
 
   // Wire the transition method into a real instance using the constructor so
   // we exercise the actual private helper. All other deps are unused for the
-  // transition path so we pass through trivial mocks.
+  // transition path so we pass through trivial mocks. The intent classifier
+  // is given a stub that always returns a low-confidence engaged result, so
+  // applyCustomerReplyStatusTransition falls through to the phrase-list path
+  // (which is what these tests are pinning).
+  const intentClassifier = {
+    classify: jest.fn().mockResolvedValue({
+      intent: 'engaged', confidence: 0, reason: 'test stub', fromLlm: false,
+    }),
+  } as any;
   const svc = new AutomationService(
     /* prisma */ {} as any,
     /* templates */ {} as any,
     /* leads */ {} as any,
     /* config */ {} as any,
     /* ai */ {} as any,
+    /* intentClassifier */ intentClassifier,
     /* monitoring */ {} as any,
     /* conversationContext */ {} as any,
     /* trial */ {} as any,
     leadStatusService,
+    /* followUpEngine */ {} as any,
   );
 
   return { svc, writeStatus };
@@ -122,7 +132,7 @@ describe('AutomationService.applyCustomerReplyStatusTransition', () => {
   });
 
   describe('hired-someone', () => {
-    it('writes lost + lostReason=hired_someone + reengageAt ~75 days out', async () => {
+    it('writes lost + lostReason=hired_someone + reengageAt ~21 days out', async () => {
       const { svc, writeStatus } = buildSvc();
       const before = Date.now();
       await runTransition(svc, 'thanks, i already hired someone else');
@@ -137,8 +147,8 @@ describe('AutomationService.applyCustomerReplyStatusTransition', () => {
         lostReason: 'hired_someone',
         reason: 'hired_someone',
       });
-      const expectedMin = before + 75 * 24 * 60 * 60 * 1000;
-      const expectedMax = after + 75 * 24 * 60 * 60 * 1000;
+      const expectedMin = before + 21 * 24 * 60 * 60 * 1000;
+      const expectedMax = after + 21 * 24 * 60 * 60 * 1000;
       const reengageMs = (call.reengageAt as Date).getTime();
       expect(reengageMs).toBeGreaterThanOrEqual(expectedMin);
       expect(reengageMs).toBeLessThanOrEqual(expectedMax);
