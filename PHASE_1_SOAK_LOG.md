@@ -95,16 +95,98 @@ Verdict: **GREEN**. Cleared Task 3 ship.
 - Smoke: 66/66 gate + equivalence + classifier tests pass; scheduler ticking healthily ("Processing 7 claimed enrollments" at 03:06:02Z) with new audit-log writes.
 - 0 prisma errors, 0 follow-up scheduler errors, 0 unrecognized-intent errors (terminal_defer is in coerceIntent allowlist).
 
-### Reduced observation window (2-4 hours from 03:05Z)
+### Reduced observation window (2-4 hours from 03:05Z) — SUPERSEDED 2026-05-09T03:15Z
 
-Window closes between 2026-05-09T05:05Z and 07:05Z. Operator will re-invoke
-during/after that window for the GREEN/YELLOW/RED verdict using:
-  - Same 6 Loki + 5 DB queries from §"Daily check"
-  - Plus: terminal_defer-specific queries (gate decisions for new intent)
-  - Plus: any additional crashes / Prisma errors / scheduler errors since deploy
+Operator changed direction before the 2-4hr window expired: with all
+listed Phase 1 scope items complete, run the verdict immediately and
+treat that as the "Phase 1 implementation complete" stamp. The actual
+soak (single window on the final completed system) starts AFTER this
+verdict, replacing the original two-window structure entirely.
 
-If GREEN at end of reduced window → mark Phase 1 implementation complete
-with reduced-soak caveat. v8.1 unblocks for separate consideration.
+### Phase 1 implementation-complete verdict (2026-05-09T03:15Z)
+
+Window: Task 3 prod deploy (03:05Z) → verdict run (03:15Z) = 10 min.
+
+| Metric | Hits/Value | Verdict |
+|---|---:|---|
+| 1a. Gate BLOCK / re-engagement bypass | 0 | n/a (no AI traffic in window) |
+| 1b. Classifier failed (fail-open) | 0 | GREEN |
+| 1c. Yelp Step 1 lookups | 1 | healthy |
+| 1d. writeStatus skipped (any reason) | 0 | GREEN |
+| 1e. Sigcore cross-tenant rejects | 0 | GREEN |
+| 1f. Crash patterns LB+Sigcore | 0 | GREEN |
+| terminal_defer BLOCK hits | 0 | n/a (no terminal_defer messages in window) |
+| `unrecognized intent` errors | 0 | GREEN — coerceIntent allowlist accepts terminal_defer |
+| classifier intent= log lines | 0 | low traffic, expected |
+| `prisma:error` / FollowUp ERROR | 0 | GREEN |
+| 2a. Donna fingerprint cumulative | 0 | GREEN |
+| 2b. Donna fingerprint NEW since 03:05Z | 0 | GREEN |
+| 2c. Active enrollment dupes | 0 | GREEN |
+| 2d. status_changed audit rows since 03:05Z | 0 | low traffic |
+| 2e. Yelp dupe pair candidates | 0 | GREEN |
+| `follow_up_enrollment_audit_log` rows | 0 | low traffic; table reachable, no errors |
+
+**Verdict: 🟢 GREEN.** All metrics clean.
+
+**Caveats acknowledged:**
+- 10-min window with low-overnight-UTC traffic means several metrics (terminal_defer hits, classifier traffic, audit log writes, status changes) had nothing to measure. Their zero values prove "no errors" but do NOT prove "code path exercised under real load". The final soak (next section) is what closes that confidence gap.
+- Reduced-soak waiver from the operator earlier in this session stands.
+
+## Phase 1 implementation: COMPLETE (with reduced-confidence caveat)
+
+Verified-complete scope:
+
+| Item | Commit / Receipt | State |
+|---|---|---|
+| Fix B — Yelp upsert update-branch status revert | LB `3793a29` → prod `351936ad` | shipped + live-verified by Donna webhook at 00:39Z |
+| Fix A — Sigcore cross-tenant fromNumber guard | Sigcore `25f35010` → prod `63274af2` | shipped, 0 rejections (no impersonation attempts) |
+| Fix C — Sigcore OP tenant-disconnect webhook cleanup | Sigcore `260a57a9` → prod `7d7794de` | shipped (structural; current prod has zero IDs to clean) |
+| B3 — Donna + Devi heal | audit log `d73ebf52`, `d11bb6a2` | both rows healed; cumulative fingerprint 0 |
+| B1 — Yelp message dedup | `audit-yelp-message-duplicates.js --merge --execute` | 30 stamped, 31 deleted; 0 pairs remain |
+| Task 4 — enrollment audit log + idempotency | LB `92dfe93` → prod `aa0a1b70`, migration `20260509000000` applied | shipped, table reachable, 0 errors |
+| Task 3 — terminal_defer intent + gate change | LB `d4604f5` → prod `a0ca18ea` | shipped, 0 unrecognized-intent errors, 920/920 unit tests + 66/66 gate-equivalence tests pass |
+| 0 active enrollment dupes | A1 verification + ongoing | GREEN |
+| 0 Yelp message dupe pairs | B1 + post-B1 verification | GREEN |
+| 0 partial-state Donna/Devi fingerprints | B3 + cumulative count | GREEN |
+| Baseline metrics clean | Tier A + accelerated validation | GREEN |
+
+---
+
+## Final soak (single window, on completed Phase 1 state)
+
+**T+0 (final): 2026-05-09T03:15Z** (reset from the original 02:40Z stamp).
+
+### Length: 5 days
+T+5 verdict due **2026-05-14T03:15Z**. Same length as the originally-planned window 1; long enough to observe meaningful production traffic across:
+  - At least one weekend/weekday cycle
+  - Multiple Yelp + Thumbtack inbound batches per tenant
+  - Several follow-up scheduler ticks per minute × 5 days × 60 min/hr × 24 hr ≈ 432,000 ticks
+  - Realistic distribution of customer intents (engaged, asking, deferring, terminal_defer, agreed, opt_out, hired_elsewhere, completed)
+
+### Daily checkpoints
+Same procedure as `PHASE_1_SOAK_PLAYBOOK.md` §"Daily check" — 6 Loki queries + 5 DB queries — but additionally include:
+- `block_terminal terminal_defer` count (must show ≥1 hit by T+3 to validate the new intent class is being returned in real traffic; absence by T+3 is YELLOW signal that the prompt change isn't surfacing the intent)
+- `follow_up_enrollment_audit_log` row count (must grow each day; absence is YELLOW signal that audit-log writes aren't reaching the table)
+- `re-engagement bypass` vs `BLOCK terminal_defer` ratio on `customer_deferred` triggerState (validates the bypass-exclusion logic)
+
+### Thresholds
+Inherits `PHASE_1_SOAK_PLAYBOOK.md` §"Thresholds" GREEN/YELLOW/RED bands plus the two new ones above.
+
+### T+5 verdict (2026-05-14T03:15Z)
+- **GREEN** → Phase 1 final-soak ACCEPTED. v8.1 unblocks for separate operator decision.
+- **YELLOW** → root-cause + decide: extend, patch, or accept with caveat.
+- **RED** → patch or rollback responsible commit; reset clock.
+
+### Daily checkpoint table
+
+| Day | Date (UTC) | Gate decisions | classifier_failed % | terminal_defer hits | Donna +24h | partial-state cum | dupe enrollments | Yelp dupes | cross-tenant rejects | crashes | audit rows cum | verdict |
+|-----|-----------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|---------|
+| 0   | 2026-05-09 | (baseline) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **GREEN — final T+0 stamped** |
+| 1   | 2026-05-10 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| 2   | 2026-05-11 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| 3   | 2026-05-12 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| 4   | 2026-05-13 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| 5   | 2026-05-14 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | T+5 verdict |
 
 ## Anomalies
 
