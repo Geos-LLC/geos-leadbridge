@@ -61,6 +61,7 @@ function scanFile(absPath) {
       i++;
     }
     const callArg = src.slice(callStart + 1, i - 1);
+    const callKind = m[2]; // 'update' | 'updateMany' | 'upsert'
 
     // Look for `status:` at any depth inside the call arg. Be tolerant of
     // surrounding whitespace and quoted keys.
@@ -71,13 +72,33 @@ function scanFile(absPath) {
     const upTo = src.slice(0, callStart);
     const lineNo = upTo.split('\n').length;
 
+    // For upsert calls, the `update:` branch is a runtime status WRITE that
+    // bypasses LeadStatusService — the same class of bug as a bare update().
+    // Reject `status:` in the update-branch unconditionally; the exemption
+    // marker only covers the `create:` branch (INSERT default at row birth).
+    // See Donna RCA 2026-05-08 — Yelp webhook upsert silently reverted
+    // canonical terminals before this guard was tightened.
+    if (callKind === 'upsert') {
+      const updateBlock = extractObjectBlock(callArg, /\bupdate\s*:\s*\{/);
+      if (updateBlock && statusFieldRe.test(updateBlock)) {
+        VIOLATIONS.push({
+          file: rel,
+          line: lineNo,
+          snippet: '<upsert update branch writes Lead.status — must go through LeadStatusService>',
+          kind: 'upsert_update_branch',
+        });
+        continue;
+      }
+      // Fall through: status only in `create:` branch — exemption marker handles it below.
+    }
+
     // Check the call site for the exemption marker. The window covers:
-    //   - up to 3 lines BEFORE the call (where // comments typically sit)
+    //   - up to 6 lines BEFORE the call (block comments may span multiple lines)
     //   - the call line itself (trailing comment)
     //   - the entire call body (in case the marker is on the data block)
     // Operators must add the marker explicitly so it shows up in code review.
     const lines = src.split('\n');
-    const startLine = Math.max(0, lineNo - 4); // 3 lines before, 0-indexed
+    const startLine = Math.max(0, lineNo - 7); // 6 lines before, 0-indexed
     const endLineIdx = src.slice(0, i).split('\n').length;
     const block = lines.slice(startLine, endLineIdx).join('\n');
     if (block.includes(EXEMPT_MARKER)) continue;
@@ -88,6 +109,27 @@ function scanFile(absPath) {
       snippet: block.split('\n')[0].trim().slice(0, 140),
     });
   }
+}
+
+/**
+ * Find the body of a named object property inside `src`, e.g. `update: { ... }`.
+ * Returns the inner block text (without the surrounding braces) or null when
+ * the property is absent. Brace-balanced: handles nested objects.
+ */
+function extractObjectBlock(src, headerRe) {
+  const m = headerRe.exec(src);
+  if (!m) return null;
+  const openIdx = m.index + m[0].length - 1; // position of '{'
+  let depth = 1;
+  let i = openIdx + 1;
+  while (i < src.length && depth > 0) {
+    const c = src[i];
+    if (c === '{') depth++;
+    else if (c === '}') depth--;
+    i++;
+  }
+  if (depth !== 0) return null; // unbalanced — let the outer scan handle it
+  return src.slice(openIdx + 1, i - 1);
 }
 
 function walk(dir) {
@@ -109,12 +151,18 @@ if (VIOLATIONS.length > 0) {
   console.error('\n[lead-status-guard] ❌ Direct Lead.status writes detected outside LeadStatusService:\n');
   for (const v of VIOLATIONS) {
     console.error(`  ${v.file}:${v.line}`);
-    console.error(`    ${v.snippet}\n`);
+    console.error(`    ${v.snippet}`);
+    if (v.kind === 'upsert_update_branch') {
+      console.error('    (upsert.update branch — NOT exemptable; route real status changes through LeadStatusService.writeStatus(source: \'platform_sync\').)');
+    }
+    console.error('');
   }
   console.error('Every Lead.status write must go through LeadStatusService.writeStatus().');
   console.error(`If this write is genuinely unavoidable, add an inline comment with the marker:`);
   console.error(`    // ${EXEMPT_MARKER} <one-line justification>`);
-  console.error('and request explicit approval in the PR.\n');
+  console.error('and request explicit approval in the PR.');
+  console.error('Note: the exemption marker covers the `create:` branch of an upsert (INSERT default)');
+  console.error('but does NOT cover the `update:` branch — that always requires LeadStatusService.\n');
   process.exit(1);
 }
 

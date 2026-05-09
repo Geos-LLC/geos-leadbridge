@@ -1834,7 +1834,12 @@ export class WebhooksService {
       update: {},
     });
 
-    // lb-status-guard: allow Yelp webhook lead-creation — INSERT default, not a status transition. Refactor tracked separately.
+    // lb-status-guard: allow Yelp webhook lead-creation — `status: 'new'` is an
+    // INSERT default in `create:` only, NOT a status transition. The `update:`
+    // branch deliberately does NOT touch `status` — any real platform-side
+    // status change must go through LeadStatusService.writeStatus(source:
+    // 'platform_sync'). Writing the Yelp ILQ string directly here previously
+    // silently reverted LB-canonical terminals (see Donna RCA 2026-05-08).
     const lead = await this.prisma.lead.upsert({
       where: { platform_externalRequestId: { platform: 'yelp', externalRequestId: leadId } },
       create: {
@@ -1859,7 +1864,6 @@ export class WebhooksService {
         customerPhone: leadData.customerPhone || undefined,
         customerEmail: leadData.customerEmail || undefined,
         message: leadData.message || undefined,
-        status: leadData.status || undefined,
         rawJson: JSON.stringify(leadData.raw || data),
         threadId: conversation.id,
       },
