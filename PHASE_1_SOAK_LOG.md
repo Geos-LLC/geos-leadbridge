@@ -59,6 +59,53 @@ Production state at T+0:
 - **Window 2**: TBD
 - **Final**: TBD
 
+## Operator decision — 5-day soak waived (2026-05-09T03:00Z)
+
+Operator elected to finish Phase 1 implementation today and waive the
+originally-planned 5-day window 1 + 3-day window 2 schedule. Replacement
+plan: accelerated validation since T+0 + immediate Task 3 deploy +
+short observation window (2-4 hours) before final verdict.
+
+**Explicit acknowledgement**: this reduces confidence from real
+production observation. Phase 2 (SF v8.1) remains gated on the
+reduced-soak GREEN verdict.
+
+### Accelerated post-T+0 validation (window: T+0 to T+0+16min)
+
+| Metric | Value | Verdict |
+|---|---:|---|
+| Gate BLOCK / re-engagement bypass | 0 | low traffic, expected |
+| Gate classifier failed | 0 | GREEN |
+| Yelp inbound webhook activity | 2 | healthy |
+| writeStatus skipped (any reason) | 0 | GREEN |
+| Sigcore cross-tenant rejects | 0 | GREEN |
+| Crash patterns LB+Sigcore | 0 | GREEN |
+| Donna fingerprint cum | 0 | GREEN |
+| Donna fingerprint NEW since T+0 | 0 | GREEN |
+| Active enrollment dupes | 0 | GREEN |
+| Yelp dupe pair candidates | 0 | GREEN |
+
+Verdict: **GREEN**. Cleared Task 3 ship.
+
+### Task 3 production deploy (2026-05-09T03:05Z)
+
+- Commit: `d4604f5` (terminal_defer intent + gate change)
+- Staging deploy `ed1efffa` SUCCESS at 02:57:30Z, Nest started 02:59:10Z, 0 crashes.
+- Prod deploy `a0ca18ea` SUCCESS, Nest started 03:05:19Z, 0 crashes.
+- Smoke: 66/66 gate + equivalence + classifier tests pass; scheduler ticking healthily ("Processing 7 claimed enrollments" at 03:06:02Z) with new audit-log writes.
+- 0 prisma errors, 0 follow-up scheduler errors, 0 unrecognized-intent errors (terminal_defer is in coerceIntent allowlist).
+
+### Reduced observation window (2-4 hours from 03:05Z)
+
+Window closes between 2026-05-09T05:05Z and 07:05Z. Operator will re-invoke
+during/after that window for the GREEN/YELLOW/RED verdict using:
+  - Same 6 Loki + 5 DB queries from §"Daily check"
+  - Plus: terminal_defer-specific queries (gate decisions for new intent)
+  - Plus: any additional crashes / Prisma errors / scheduler errors since deploy
+
+If GREEN at end of reduced window → mark Phase 1 implementation complete
+with reduced-soak caveat. v8.1 unblocks for separate consideration.
+
 ## Anomalies
 
 (append-only; record any signal that requires investigation, regardless of severity)
