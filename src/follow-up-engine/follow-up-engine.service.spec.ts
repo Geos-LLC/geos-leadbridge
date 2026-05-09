@@ -18,8 +18,16 @@ function buildPrismaMock() {
     followUpEnrollment: {
       findFirst: jest.fn().mockResolvedValue(null),
       findUnique: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn().mockImplementation((args: any) => Promise.resolve({ id: 'enroll-new', ...args.data })),
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    // Phase 1 Task 4 — audit log for state transitions. Default: no existing
+    // dedup row; create no-op; tests that exercise dedup override findFirst.
+    followUpEnrollmentAuditLog: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockImplementation((args: any) => Promise.resolve({ id: 'audit-1', ...args.data })),
+      findMany: jest.fn().mockResolvedValue([]),
     },
     followUpSequenceTemplate: {
       findFirst: jest.fn().mockResolvedValue(null),
@@ -370,17 +378,35 @@ describe('FollowUpEngineService', () => {
 
   describe('handleCustomerReply', () => {
     it('stops active enrollments', async () => {
+      // Phase 1 Task 4: handleCustomerReply now snapshots active enrollments
+      // via findMany, then transitions each via writeEnrollmentAudit (which
+      // wraps updateMany + audit-log create in a $transaction).
+      prisma.followUpEnrollment.findMany.mockResolvedValue([{ id: 'enroll-1' }]);
       prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
 
       await service.handleCustomerReply(CONVERSATION_ID);
 
+      expect(prisma.followUpEnrollment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { conversationId: CONVERSATION_ID, status: 'active' } }),
+      );
       expect(prisma.followUpEnrollment.updateMany).toHaveBeenCalledWith({
-        where: { conversationId: CONVERSATION_ID, status: 'active' },
+        where: { id: 'enroll-1', status: 'active' },
         data: expect.objectContaining({ status: 'stopped', stoppedReason: 'customer_replied' }),
       });
+      expect(prisma.followUpEnrollmentAuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            enrollmentId: 'enroll-1',
+            oldStatus: 'active',
+            newStatus: 'stopped',
+            reason: 'customer_replied',
+          }),
+        }),
+      );
     });
 
     it('clears thread context when enrollment stopped', async () => {
+      prisma.followUpEnrollment.findMany.mockResolvedValue([{ id: 'enroll-1' }]);
       prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
 
       await service.handleCustomerReply(CONVERSATION_ID);
@@ -392,11 +418,138 @@ describe('FollowUpEngineService', () => {
     });
 
     it('is idempotent — no error when no active enrollment', async () => {
-      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 0 });
+      prisma.followUpEnrollment.findMany.mockResolvedValue([]);
 
       await expect(service.handleCustomerReply(CONVERSATION_ID)).resolves.not.toThrow();
-      // ThreadContext should NOT be updated when count=0
+      // ThreadContext should NOT be updated when there's no active enrollment
       expect(prisma.threadContext.updateMany).not.toHaveBeenCalled();
+      // No audit row should be created either
+      expect(prisma.followUpEnrollmentAuditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('dedups when sourceEventId matches an existing audit row', async () => {
+      // Phase 1 Task 4: retry-prone webhooks pass sourceEventId; if the audit
+      // row already exists, the entire transition no-ops.
+      prisma.followUpEnrollment.findMany.mockResolvedValue([{ id: 'enroll-1' }]);
+      prisma.followUpEnrollmentAuditLog.findFirst.mockResolvedValue({ id: 'existing-audit' });
+
+      const result = await service.handleCustomerReply(CONVERSATION_ID, undefined, {
+        sourceEventId: 'webhook-event-42',
+        actorType: 'webhook',
+      });
+
+      expect(result.stopped).toBe(false);
+      // updateMany must NOT be called when dedup hits
+      expect(prisma.followUpEnrollment.updateMany).not.toHaveBeenCalled();
+      expect(prisma.followUpEnrollmentAuditLog.create).not.toHaveBeenCalled();
+      expect(prisma.threadContext.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('writes audit row with sourceEventId + actorType when caller provides them', async () => {
+      prisma.followUpEnrollment.findMany.mockResolvedValue([{ id: 'enroll-1' }]);
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.handleCustomerReply(CONVERSATION_ID, 'thanks!', {
+        sourceEventId: 'webhook-event-99',
+        actorType: 'webhook',
+        actorId: 'wh-99',
+      });
+
+      expect(prisma.followUpEnrollmentAuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            enrollmentId: 'enroll-1',
+            sourceEventId: 'webhook-event-99',
+            actorType: 'webhook',
+            actorId: 'wh-99',
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('stopEnrollment / pauseEnrollment / resumeEnrollment audit (Phase 1 Task 4)', () => {
+    it('stopEnrollment writes an audit row on real transition', async () => {
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+      prisma.followUpEnrollment.findUnique.mockResolvedValue({
+        id: 'enroll-stop-1', conversationId: CONVERSATION_ID,
+      });
+
+      await service.stopEnrollment('enroll-stop-1', 'manual', { actorType: 'manual', actorId: 'op-7' });
+
+      expect(prisma.followUpEnrollment.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'enroll-stop-1', status: 'active' },
+          data: expect.objectContaining({ status: 'stopped', stoppedReason: 'manual' }),
+        }),
+      );
+      expect(prisma.followUpEnrollmentAuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            enrollmentId: 'enroll-stop-1',
+            oldStatus: 'active',
+            newStatus: 'stopped',
+            reason: 'manual',
+            actorType: 'manual',
+            actorId: 'op-7',
+          }),
+        }),
+      );
+    });
+
+    it('stopEnrollment no-ops when sourceEventId already in audit log', async () => {
+      prisma.followUpEnrollmentAuditLog.findFirst.mockResolvedValue({ id: 'prior-audit' });
+
+      await service.stopEnrollment('enroll-x', 'manual', { sourceEventId: 'op-event-77' });
+
+      expect(prisma.followUpEnrollment.updateMany).not.toHaveBeenCalled();
+      expect(prisma.followUpEnrollmentAuditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('pauseEnrollment writes audit row active→paused', async () => {
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.pauseEnrollment('enroll-pause-1');
+
+      expect(prisma.followUpEnrollment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'enroll-pause-1', status: 'active' },
+        data: { status: 'paused' },
+      });
+      expect(prisma.followUpEnrollmentAuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            oldStatus: 'active', newStatus: 'paused', reason: 'manual_pause',
+          }),
+        }),
+      );
+    });
+
+    it('resumeEnrollment writes audit row paused→active', async () => {
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.resumeEnrollment('enroll-resume-1');
+
+      expect(prisma.followUpEnrollment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'enroll-resume-1', status: 'paused' },
+        data: { status: 'active' },
+      });
+      expect(prisma.followUpEnrollmentAuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            oldStatus: 'paused', newStatus: 'active', reason: 'manual_resume',
+          }),
+        }),
+      );
+    });
+
+    it('pauseEnrollment skips audit row when count===0 (no real transition)', async () => {
+      // Already paused — updateMany affects 0 rows. Audit row must NOT be
+      // created (recording would imply a transition that didn't happen).
+      prisma.followUpEnrollment.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.pauseEnrollment('enroll-already-paused');
+
+      expect(prisma.followUpEnrollmentAuditLog.create).not.toHaveBeenCalled();
     });
   });
 

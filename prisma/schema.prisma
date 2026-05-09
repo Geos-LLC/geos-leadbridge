@@ -94,14 +94,14 @@ model User {
   hasOwnNumber          Boolean             @default(false)
 
   // Trial period
-  trialStartDate       DateTime?
-  trialEndDate         DateTime?
-  trialUsed            Boolean    @default(false)
-  trialLeadsHandled    Int        @default(0)
-  trialLeadsLimit      Int        @default(10)
-  trialType            TrialType?
-  trialEndedAt         DateTime?
-  trialEndNotifiedAt   DateTime?
+  trialStartDate     DateTime?
+  trialEndDate       DateTime?
+  trialUsed          Boolean    @default(false)
+  trialLeadsHandled  Int        @default(0)
+  trialLeadsLimit    Int        @default(10)
+  trialType          TrialType?
+  trialEndedAt       DateTime?
+  trialEndNotifiedAt DateTime?
 
   // Track Thumbtack account to prevent trial abuse
   // Users can't get another trial with same Thumbtack account
@@ -161,7 +161,7 @@ model OnboardingProfile {
 
   // Step 1 — required (blocking)
   primaryLeadSource    String? // "thumbtack" | "yelp" | "google" | "facebook" | "other"
-  secondaryLeadSources String[] @default([])
+  secondaryLeadSources String[]  @default([])
   weeklyLeadVolume     String? // "0-5" | "5-15" | "15-50" | "50+"
   serviceType          String? // "house_cleaning" | "carpet_upholstery" | "window_cleaning" | "pressure_washing" | "plumbing" | "electrical" | "hvac" | "handyman" | "landscaping" | "junk_removal" | "moving" | "pest_control" | "other"
   serviceTypeOther     String?
@@ -216,46 +216,46 @@ model Platform {
 // ==========================================
 
 model Lead {
-  id                String    @id @default(uuid())
-  userId            String
-  platform          String // "thumbtack" | "yelp" | etc.
-  businessId        String? // Platform's business ID (for multi-account filtering)
-  externalRequestId String // Platform's unique lead/request ID
-  customerName      String
-  customerPhone     String?
-  customerEmail     String?
-  message           String    @db.Text
-  budget            Decimal?  @db.Decimal(10, 2)
-  postcode          String?
-  city              String?
-  state             String?
-  category          String? // Service category
+  id                     String    @id @default(uuid())
+  userId                 String
+  platform               String // "thumbtack" | "yelp" | etc.
+  businessId             String? // Platform's business ID (for multi-account filtering)
+  externalRequestId      String // Platform's unique lead/request ID
+  customerName           String
+  customerPhone          String?
+  customerEmail          String?
+  message                String    @db.Text
+  budget                 Decimal?  @db.Decimal(10, 2)
+  postcode               String?
+  city                   String?
+  state                  String?
+  category               String? // Service category
   // Canonical LB pipeline status. See src/leads/canonical-status.ts.
   // Pipeline: new -> contacted -> engaged -> quoted -> booked -> scheduled -> in_progress -> completed
   // Terminals: lost, cancelled, no_show, archived
-  status            String    @default("new")
+  status                 String    @default("new")
   // Set when status='lost'. Values: 'opt_out' | 'hired_someone' | 'no_response' | 'manual'
-  lostReason        String?
+  lostReason             String?
   // When this lead becomes a re-engage candidate (e.g. lost+hired_someone -> +75d).
-  reengageAt        DateTime?
-  thumbtackStatus   String? // Job status from Thumbtack UI (e.g. "Hired", "Not hired")
-  platformStatus    String? // Generic platform-native status (Yelp Done/Closed/Hired, etc.)
-  platformStatusAt  DateTime? // When platform status was last observed
-  threadId          String? // Universal conversation ID
-  rawJson           String    @db.Text // Original platform payload
-  syncedToCrm       Boolean   @default(false)
+  reengageAt             DateTime?
+  thumbtackStatus        String? // Job status from Thumbtack UI (e.g. "Hired", "Not hired")
+  platformStatus         String? // Generic platform-native status (Yelp Done/Closed/Hired, etc.)
+  platformStatusAt       DateTime? // When platform status was last observed
+  threadId               String? // Universal conversation ID
+  rawJson                String    @db.Text // Original platform payload
+  syncedToCrm            Boolean   @default(false)
   // Service Flow sync fields (see plans/2026-04-17-job-sync-sf-lb.md)
-  sfJobId           String? // SF jobs.id — sticky mapping
-  sfJobMappedAt     DateTime?
-  sfLastEventAt     DateTime? // Last accepted SF event occurred_at
-  statusSource      String? // 'service_flow' | 'platform_sync' | 'manual' | 'lb_automation'
-  statusUpdatedAt   DateTime? // When Lead.status last changed; used for ordering
+  sfJobId                String? // SF jobs.id — sticky mapping
+  sfJobMappedAt          DateTime?
+  sfLastEventAt          DateTime? // Last accepted SF event occurred_at
+  statusSource           String? // 'service_flow' | 'platform_sync' | 'manual' | 'lb_automation'
+  statusUpdatedAt        DateTime? // When Lead.status last changed; used for ordering
   // Last time a customer message arrived on this lead. Provider-agnostic
   // signal read by the follow-up scheduler self-heal to stop enrollments
   // even when a provider failed to persist a Message row.
   lastCustomerActivityAt DateTime?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   // Relationships
   user                    User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -287,22 +287,22 @@ model Lead {
 // ==========================================
 
 model Conversation {
-  id               String   @id @default(uuid())
+  id               String    @id @default(uuid())
   userId           String
   platform         String // "thumbtack" | "yelp" | etc.
   externalThreadId String // Platform's conversation/thread ID
   customerName     String
-  lastMessageAt    DateTime @default(now())
-  unreadCount      Int      @default(0)
-  status           String   @default("active") // "active" | "archived" | "closed"
-  metadataJson     String?  @db.Text
+  lastMessageAt    DateTime  @default(now())
+  unreadCount      Int       @default(0)
+  status           String    @default("active") // "active" | "archived" | "closed"
+  metadataJson     String?   @db.Text
   // Backfill bookkeeping — populated by future recurring sync (cache plan Phase 2/3).
   // Lets the sync pick "needs backfill" deterministically without per-row Message.count
   // queries. Null = never backfilled. Otherwise: "in_progress" | "complete" | "failed".
   backfillStatus   String?
   lastBackfilledAt DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   // Relationships
   user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1177,10 +1177,11 @@ model FollowUpEnrollment {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  sequenceTemplate FollowUpSequenceTemplate @relation(fields: [sequenceTemplateId], references: [id], onDelete: Cascade)
-  conversation     Conversation             @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  lead             Lead?                    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  sequenceTemplate FollowUpSequenceTemplate     @relation(fields: [sequenceTemplateId], references: [id], onDelete: Cascade)
+  conversation     Conversation                 @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  lead             Lead?                        @relation(fields: [leadId], references: [id], onDelete: SetNull)
   stepExecutions   FollowUpStepExecution[]
+  auditLog         FollowUpEnrollmentAuditLog[]
 
   @@index([status, nextStepDueAt]) // Scheduler query: find due active enrollments
   @@index([conversationId, status]) // Active enrollment lookup per thread
@@ -1190,6 +1191,34 @@ model FollowUpEnrollment {
   //   20260417120000_followup_duplicate_fix:
   //     CREATE UNIQUE INDEX ... ON follow_up_enrollments (conversation_id) WHERE status = 'active';
   @@map("follow_up_enrollments")
+}
+
+/// Audit log for state transitions on FollowUpEnrollment.
+/// Phase 1 Task 4 — historical state-change visibility + sourceEventId-based
+/// idempotency for retry-prone callers (webhook handlers, scheduler).
+///
+/// One row per actual transition. The `updateMany` filter on prior status
+/// ensures the row is only created when a real state change happened (count
+/// === 1). The sourceEventId column lets retry-prone callers dedup at the
+/// audit-row level: if a row already exists with the same sourceEventId,
+/// the entire transition no-ops.
+model FollowUpEnrollmentAuditLog {
+  id            String   @id @default(cuid())
+  enrollmentId  String
+  oldStatus     String // e.g. "active"
+  newStatus     String // e.g. "stopped" | "paused" | "active" | "completed"
+  reason        String? // free-form: "customer_replied" | "manual" | "lead_status_lost" | "lead_status_booked" | etc.
+  sourceEventId String? // dedup key — null when caller didn't provide
+  actorType     String? // "system" | "manual" | "webhook" | "cron" | "scheduler"
+  actorId       String? // operator userId, webhook event id, or cron run id
+  occurredAt    DateTime
+  createdAt     DateTime @default(now())
+
+  enrollment FollowUpEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@index([enrollmentId, createdAt(sort: Desc)])
+  @@index([sourceEventId])
+  @@map("follow_up_enrollment_audit_log")
 }
 
 model FollowUpStepExecution {

@@ -12,6 +12,21 @@ import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { FollowUpStateService, FollowUpState } from './follow-up-state.service';
 
+/**
+ * Audit metadata for enrollment state-change calls. All fields optional —
+ * callers without retry-prone semantics may omit the entire object. When
+ * `sourceEventId` is provided, the audit log dedup guard short-circuits
+ * repeat calls (see writeEnrollmentAudit). Phase 1 Task 4 — 2026-05-09.
+ */
+export interface EnrollmentAuditOptions {
+  /** Stable id for retry-dedup. e.g. WebhookEvent.id, lead.id+intent, cron run id. */
+  sourceEventId?: string;
+  /** Coarse classification of the actor: 'system' | 'manual' | 'webhook' | 'cron' | 'scheduler'. */
+  actorType?: string;
+  /** Free-form actor identifier (operator userId, webhook id, etc.). */
+  actorId?: string | null;
+}
+
 @Injectable()
 export class FollowUpEngineService {
   private readonly logger = new Logger(FollowUpEngineService.name);
@@ -22,6 +37,66 @@ export class FollowUpEngineService {
     private readonly stateService: FollowUpStateService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * Atomically transition an enrollment's status and write an audit row.
+   *
+   * Pattern:
+   *   1. If `sourceEventId` is provided, check for an existing audit row with
+   *      that key against this enrollment. If found, no-op (returns
+   *      transitioned=false, deduped=true).
+   *   2. Otherwise open a transaction:
+   *      a. updateMany scoped to the prior status (atomic state guard).
+   *      b. If updateMany count===1, create the audit row in the same tx.
+   *      c. If count===0 (already in target state), skip the audit row
+   *         (no transition occurred — recording would be misleading).
+   *
+   * Returns whether the transition actually happened so callers can run
+   * downstream side-effects (ThreadContext clear, re-engagement alert, etc.)
+   * only on real transitions.
+   */
+  private async writeEnrollmentAudit(
+    enrollmentId: string,
+    fromStatus: string,
+    toStatus: string,
+    extraData: Record<string, unknown>,
+    reason: string | null,
+    opts: EnrollmentAuditOptions | undefined,
+    occurredAt: Date,
+  ): Promise<{ transitioned: boolean; deduped: boolean }> {
+    if (opts?.sourceEventId) {
+      const existing = await this.prisma.followUpEnrollmentAuditLog.findFirst({
+        where: { enrollmentId, sourceEventId: opts.sourceEventId },
+        select: { id: true },
+      });
+      if (existing) {
+        return { transitioned: false, deduped: true };
+      }
+    }
+
+    const transitioned = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.followUpEnrollment.updateMany({
+        where: { id: enrollmentId, status: fromStatus },
+        data: { status: toStatus, ...extraData } as any,
+      });
+      if (result.count === 0) return false;
+      await tx.followUpEnrollmentAuditLog.create({
+        data: {
+          enrollmentId,
+          oldStatus: fromStatus,
+          newStatus: toStatus,
+          reason,
+          sourceEventId: opts?.sourceEventId ?? null,
+          actorType: opts?.actorType ?? null,
+          actorId: opts?.actorId ?? null,
+          occurredAt,
+        },
+      });
+      return true;
+    });
+
+    return { transitioned, deduped: false };
+  }
 
   /**
    * Evaluate a thread for follow-up eligibility.
@@ -370,18 +445,48 @@ export class FollowUpEngineService {
   /**
    * Stop enrollment on customer reply. Idempotent — safe for duplicate webhooks.
    * Returns whether any enrollment was actually stopped (for re-engagement alerts).
+   *
+   * Phase 1 Task 4: writes a FollowUpEnrollmentAuditLog row per stopped
+   * enrollment. Optional `auditOpts.sourceEventId` (e.g. WebhookEvent.id)
+   * dedups retries — repeated calls with the same id no-op.
    */
-  async handleCustomerReply(conversationId: string, customerMessage?: string): Promise<{ stopped: boolean; reEngagementAlert: string | null }> {
-    const result = await this.prisma.followUpEnrollment.updateMany({
+  async handleCustomerReply(
+    conversationId: string,
+    customerMessage?: string,
+    auditOpts?: EnrollmentAuditOptions,
+  ): Promise<{ stopped: boolean; reEngagementAlert: string | null }> {
+    const occurredAt = new Date();
+
+    // Snapshot the active enrollment(s) BEFORE updateMany so we can write
+    // per-row audit entries. Partial-unique-index ensures ≤1 active per
+    // conversation in the normal case, but we treat it as a list defensively.
+    const active = await this.prisma.followUpEnrollment.findMany({
       where: { conversationId, status: 'active' },
-      data: {
-        status: 'stopped',
-        stoppedReason: 'customer_replied',
-        completedAt: new Date(),
-      },
+      select: { id: true },
     });
 
-    if (result.count === 0) {
+    if (active.length === 0) {
+      return { stopped: false, reEngagementAlert: null };
+    }
+
+    let anyTransitioned = false;
+    for (const e of active) {
+      const r = await this.writeEnrollmentAudit(
+        e.id,
+        'active',
+        'stopped',
+        { stoppedReason: 'customer_replied', completedAt: occurredAt },
+        'customer_replied',
+        auditOpts,
+        occurredAt,
+      );
+      if (r.transitioned) anyTransitioned = true;
+    }
+
+    if (!anyTransitioned) {
+      // All enrollments were either deduped (sourceEventId already seen) or
+      // had moved out of 'active' between snapshot and update. Treat as
+      // "no transition" so re-engagement alerts don't fire on retries.
       return { stopped: false, reEngagementAlert: null };
     }
 
@@ -456,17 +561,30 @@ export class FollowUpEngineService {
 
   /**
    * Stop enrollment manually.
+   *
+   * Phase 1 Task 4: writes an audit row inside the same transaction as the
+   * status update. Optional `auditOpts.sourceEventId` dedups retries.
    */
-  async stopEnrollment(enrollmentId: string, reason: string): Promise<void> {
-    await this.prisma.followUpEnrollment.updateMany({
-      where: { id: enrollmentId, status: 'active' },
-      data: {
-        status: 'stopped',
-        stoppedReason: reason,
-        completedAt: new Date(),
-      },
-    });
+  async stopEnrollment(
+    enrollmentId: string,
+    reason: string,
+    auditOpts?: EnrollmentAuditOptions,
+  ): Promise<void> {
+    const occurredAt = new Date();
+    await this.writeEnrollmentAudit(
+      enrollmentId,
+      'active',
+      'stopped',
+      { stoppedReason: reason, completedAt: occurredAt },
+      reason,
+      auditOpts,
+      occurredAt,
+    );
 
+    // ThreadContext fan-out runs regardless of transition outcome — if the
+    // enrollment is in 'stopped' state at this point (whether transitioned
+    // by us or already there), the cached ThreadContext fields should
+    // reflect that. updateMany is idempotent.
     const enrollment = await this.prisma.followUpEnrollment.findUnique({
       where: { id: enrollmentId },
     });
@@ -561,19 +679,39 @@ export class FollowUpEngineService {
 
   /**
    * Pause/resume an enrollment.
+   *
+   * Phase 1 Task 4: each transition writes a FollowUpEnrollmentAuditLog row.
    */
-  async pauseEnrollment(enrollmentId: string): Promise<void> {
-    await this.prisma.followUpEnrollment.updateMany({
-      where: { id: enrollmentId, status: 'active' },
-      data: { status: 'paused' },
-    });
+  async pauseEnrollment(
+    enrollmentId: string,
+    auditOpts?: EnrollmentAuditOptions,
+  ): Promise<void> {
+    const occurredAt = new Date();
+    await this.writeEnrollmentAudit(
+      enrollmentId,
+      'active',
+      'paused',
+      {},
+      'manual_pause',
+      auditOpts,
+      occurredAt,
+    );
   }
 
-  async resumeEnrollment(enrollmentId: string): Promise<void> {
-    await this.prisma.followUpEnrollment.updateMany({
-      where: { id: enrollmentId, status: 'paused' },
-      data: { status: 'active' },
-    });
+  async resumeEnrollment(
+    enrollmentId: string,
+    auditOpts?: EnrollmentAuditOptions,
+  ): Promise<void> {
+    const occurredAt = new Date();
+    await this.writeEnrollmentAudit(
+      enrollmentId,
+      'paused',
+      'active',
+      {},
+      'manual_resume',
+      auditOpts,
+      occurredAt,
+    );
   }
 
   // ──────────────────────────────────────────────────────────────────
