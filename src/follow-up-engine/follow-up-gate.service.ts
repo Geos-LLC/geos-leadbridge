@@ -205,10 +205,17 @@ export class FollowUpGateService {
 
     // Re-engagement bypass: sequences whose entire purpose is to message
     // paused/lost customers must NOT be stopped on deferring/completed/hired/
-    // agreed intents. They DO still stop on opt_out (explicit unsubscribe).
+    // agreed intents — those represent recoverable signals during the
+    // re-engagement window. They DO still stop on:
+    //   - opt_out (explicit unsubscribe — non-recoverable)
+    //   - terminal_defer (Task 3, 2026-05-09): unbounded "maybe later"
+    //     deflection. By definition the customer is NOT committing to a
+    //     return window; sending another re-engagement attempt is the
+    //     same creepy-follow-up anti-pattern this gate exists to prevent.
     const isReEngagementSequence = input.triggerState === 'customer_deferred'
       || input.triggerState === 'customer_hired_competitor';
-    if (isReEngagementSequence && intent !== 'opt_out') {
+    const bypassableInReEngagement = intent !== 'opt_out' && intent !== 'terminal_defer';
+    if (isReEngagementSequence && bypassableInReEngagement) {
       this.logger.log(`[FollowUpGate] re-engagement bypass: intent=${intent} conf=${classification.confidence.toFixed(2)} triggerState=${input.triggerState}`);
       return {
         action: 'pass_re_engagement',
@@ -223,6 +230,11 @@ export class FollowUpGateService {
     }
 
     // Terminal-state intent on a non-re-engagement sequence — block.
+    // Side-effect mapping:
+    //   agreed         → stop_and_booked  (handoff)
+    //   deferring      → stop_only        (bounded pause; will re-engage later)
+    //   terminal_defer → stop_and_lost    (unbounded deflection ≈ soft no)
+    //   opt_out / hired_elsewhere / completed → stop_and_lost
     const sideEffect: GateSideEffect = intent === 'agreed'
       ? 'stop_and_booked'
       : intent === 'deferring'

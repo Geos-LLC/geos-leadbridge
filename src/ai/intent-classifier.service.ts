@@ -18,7 +18,8 @@ export type CustomerIntent =
   | 'hired_elsewhere' // they got someone else / hired another company
   | 'completed'       // job done by us or another party — no longer needed
   | 'agreed'          // "book it" / "sounds good" — handoff to manager
-  | 'deferring'       // "I'll get back to you" / "let me think" / "check with my husband"
+  | 'deferring'       // BOUNDED pause with intent to return: "back next week" / "let me think for a couple days" / "check with my husband"
+  | 'terminal_defer'  // UNBOUNDED / indefinite deflection: "maybe later" / "someday" / "not now, hard to say" / "we'll see"
   | 'asking'          // active question that needs an AI reply
   | 'engaged';        // continuing conversation, neither closing nor pausing
 
@@ -66,7 +67,9 @@ Intents (pick exactly one):
 
 - agreed — Customer accepts a proposal/quote and is ready to book. Examples: "sounds good", "let's do it", "book it", "yes please", "I'm in", "perfect, when can you come?". Active forward motion.
 
-- deferring — Customer is pausing the conversation. Includes both vague pauses ("I'll get back to you", "let me think", "shopping around") AND time-bound pauses with explicit return windows ("back in 2 weeks", "I'll reach out next month", "I'm traveling, will be in touch when I'm home in 10 days"). A time-bound pause is STILL deferring even when the customer sounds engaged about returning — they're explicitly pausing the conversation NOW.
+- deferring — Customer is pausing the conversation BUT clearly intends to return, with either an explicit return window or a concrete decision-making step. Examples: "back in 2 weeks", "I'll reach out next month", "let me check with my husband and get back to you", "I'm traveling, will be in touch when I'm home in 10 days", "shopping around — will let you know by Friday". The pause is bounded by a stated time, a stated decision, or a clear come-back signal.
+
+- terminal_defer — Customer is deflecting with NO intent to return, NO stated window, OR a window so far out it's effectively a soft no. This is "polite no". Examples: "maybe later", "someday", "not now, hard to say", "we'll see", "thanks but I'm going to think about it for a while", "not interested right now", "we'll keep your info on file, thanks". Distinguish from deferring by the ABSENCE of a return commitment — vague pauses without a stated window or decision are terminal_defer, not deferring.
 
 - asking — Customer is asking a question that needs an answer. Examples: "How much for 3 bed?", "What time can you come?", "Do you do windows?", "Are you insured?".
 
@@ -74,7 +77,10 @@ Intents (pick exactly one):
 
 Rules:
 
-1. Lean toward 'engaged' when ambiguous. False-positive on opt_out / hired_elsewhere / completed prematurely loses the customer. EXCEPTION: a clear time-bound pause ("back in 2 weeks", "next month", "after vacation") IS deferring even when the customer is otherwise positive — replying to it as if the conversation is live spams them during a window they explicitly closed.
+1. Lean toward 'engaged' when ambiguous. False-positive on opt_out / hired_elsewhere / completed prematurely loses the customer. EXCEPTIONS:
+   - A clear time-bound pause ("back in 2 weeks", "next month", "after vacation") IS deferring even when the customer is otherwise positive — replying to it as if the conversation is live spams them during a window they explicitly closed.
+   - A clear unbounded deflection ("maybe later", "we'll see", "going to think about it for a while" with NO return window) IS terminal_defer — keeping the conversation alive against an indefinite punt is the same anti-pattern, just slower-burning.
+2. **Bounded vs unbounded** — the deferring/terminal_defer split is the single most important call you make. If the message names a duration ("2 weeks"), a decision ("when I check with my partner"), or a concrete future event ("after my move"), it's deferring. If it gives vague time ("maybe", "someday", "soon-ish", "later") or no time at all ("we'll see", "thanks for the info"), it's terminal_defer. When unsure, prefer terminal_defer — over-pausing engaged customers is reversible (they reply); under-pausing politely-declining customers is creepy follow-up.
 2. Confidence ≥ 0.85 only when the message is unambiguous. Borderline → 0.5–0.7.
 3. Bare "thanks" / "thank you" / "ok" / "got it" by itself, especially after the AI's last message was a farewell or holding statement, is 'completed' (the conversation is naturally winding down). When it follows an AI question like "what day works?", it's 'engaged'.
 4. Cancellation phrases ("cancel that", "we can cancel") with context that a job exists → 'completed'. Cancellation as a question ("can I cancel my morning slot to switch to afternoon?") → 'engaged' — they want to reschedule, not stop.
@@ -149,6 +155,10 @@ export class IntentClassifierService {
           && (intent === 'deferring' || intent === 'hired_elsewhere' || intent === 'completed')) {
         suggestedReengageInDays = Math.round(Math.min(180, rawDays));
       }
+      // Note: terminal_defer is intentionally excluded from suggestedReengageInDays
+      // — by definition the customer didn't commit to a return window. The gate
+      // treats terminal_defer as stop_and_lost (per follow-up-gate.service.ts);
+      // there's no auto-re-engage to schedule.
 
       const daysBit = suggestedReengageInDays != null ? ` reengage_in=${suggestedReengageInDays}d` : '';
       this.logger.log(`[classifier] intent=${intent} conf=${confidence.toFixed(2)}${daysBit} reason="${reason}" msg="${this.truncate(ctx.message, 80)}"`);
@@ -178,7 +188,7 @@ export class IntentClassifierService {
 
   private coerceIntent(value: unknown): CustomerIntent | null {
     const allowed: CustomerIntent[] = [
-      'opt_out', 'hired_elsewhere', 'completed', 'agreed', 'deferring', 'asking', 'engaged',
+      'opt_out', 'hired_elsewhere', 'completed', 'agreed', 'deferring', 'terminal_defer', 'asking', 'engaged',
     ];
     if (typeof value !== 'string') return null;
     return (allowed as string[]).includes(value) ? (value as CustomerIntent) : null;

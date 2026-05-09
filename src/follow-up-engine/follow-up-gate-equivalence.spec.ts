@@ -68,12 +68,28 @@ const MATRIX: MatrixRow[] = [
     expectedSideEffect: 'stop_and_booked',
   },
   {
-    name: 'deferring → block_terminal + stop_only (pause not lost)',
+    name: 'deferring (bounded) → block_terminal + stop_only (pause not lost)',
     customerMessage: "I'll get back to you next week",
     classifier: { intent: 'deferring', confidence: 0.85, reason: 'pause', fromLlm: true },
     expectedShouldBlock: true,
     expectedAction: 'block_terminal',
     expectedSideEffect: 'stop_only',
+  },
+  {
+    name: 'terminal_defer (unbounded "maybe later") → block_terminal + stop_and_lost',
+    customerMessage: 'maybe later',
+    classifier: { intent: 'terminal_defer', confidence: 0.88, reason: 'unbounded deflection', fromLlm: true },
+    expectedShouldBlock: true,
+    expectedAction: 'block_terminal',
+    expectedSideEffect: 'stop_and_lost',
+  },
+  {
+    name: 'terminal_defer (no return window) → block_terminal + stop_and_lost',
+    customerMessage: "thanks but I'm going to think about it for a while",
+    classifier: { intent: 'terminal_defer', confidence: 0.92, reason: 'no return window', fromLlm: true },
+    expectedShouldBlock: true,
+    expectedAction: 'block_terminal',
+    expectedSideEffect: 'stop_and_lost',
   },
   {
     name: 'engaged → proceed',
@@ -124,6 +140,29 @@ const MATRIX: MatrixRow[] = [
     expectedShouldBlock: true,
     expectedAction: 'block_terminal',
     expectedSideEffect: 'stop_and_lost',
+  },
+  {
+    // Phase 1 Task 3: re-engagement sequences MUST also block terminal_defer.
+    // The whole point of terminal_defer is "no return commitment" — sending
+    // another re-engagement message is the creepy follow-up this gate exists
+    // to prevent. Distinct from regular `deferring` (bounded) which DOES
+    // bypass the re-engagement gate to allow scheduled messaging.
+    name: 're-engagement BLOCKS terminal_defer: terminal_defer on customer_deferred',
+    customerMessage: 'maybe someday',
+    classifier: { intent: 'terminal_defer', confidence: 0.9, reason: 'indefinite punt', fromLlm: true },
+    triggerState: 'customer_deferred',
+    expectedShouldBlock: true,
+    expectedAction: 'block_terminal',
+    expectedSideEffect: 'stop_and_lost',
+  },
+  {
+    name: 're-engagement bypass STILL applies to bounded deferring: deferring on customer_deferred',
+    customerMessage: "I'll let you know in 3 weeks",
+    classifier: { intent: 'deferring', confidence: 0.88, reason: 'bounded pause', fromLlm: true },
+    triggerState: 'customer_deferred',
+    expectedShouldBlock: false,
+    expectedAction: 'pass_re_engagement',
+    expectedSideEffect: 'none',
   },
 ];
 
