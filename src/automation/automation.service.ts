@@ -1417,13 +1417,30 @@ export class AutomationService implements OnModuleInit {
             const p = JSON.parse(pricingJson);
             const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
             if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
+              // Resolve the per-account range/exact toggle stored in followUpSettingsJson.
+              let priceQuoteMode: 'range' | 'exact' | undefined;
+              if (account?.followUpSettingsJson) {
+                try {
+                  const s = JSON.parse(account.followUpSettingsJson);
+                  if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') priceQuoteMode = s.priceQuoteMode;
+                } catch { /* fall back to legacy inference in buildPriceRangeInstruction */ }
+              }
+              const sqftAdjustEnabled = p?.sqftAdjustEnabled !== false; // default ON
               const priceParts: string[] = [];
               for (const row of p.priceTable.slice(0, 10)) {
-                const prices = enabledTypes.map((t: any) => `${t.label}: $${row[t.key] || '?'}`).join(', ');
-                priceParts.push(`  ${row.bed}BR/${row.bath}BA — ${prices}`);
+                const sqft = Number(row.sqft) || 0;
+                const prices = enabledTypes.map((t: any) => {
+                  const price = Number(row[t.key]) || 0;
+                  const perSqft = sqft > 0 ? (price / sqft).toFixed(3) : null;
+                  return perSqft && sqftAdjustEnabled
+                    ? `${t.label}: $${price} ($${perSqft}/sqft)`
+                    : `${t.label}: $${price}`;
+                }).join(', ');
+                const sizeLabel = sqft > 0 ? `${row.bed}BR/${row.bath}BA @ ${sqft} sqft` : `${row.bed}BR/${row.bath}BA`;
+                priceParts.push(`  ${sizeLabel} — ${prices}`);
               }
               priceParts.push('');
-              priceParts.push(buildPriceRangeInstruction(p.priceRange));
+              priceParts.push(buildPriceRangeInstruction(p.priceRange, { priceQuoteMode, sqftAdjustEnabled }));
               pricingBlock = priceParts.join('\n');
             }
           } catch { /* invalid JSON */ }

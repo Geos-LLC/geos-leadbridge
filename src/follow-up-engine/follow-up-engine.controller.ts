@@ -597,6 +597,8 @@ export class FollowUpEngineController {
     if (body.applyToExisting !== undefined) extendedSettings.followUpApplyToExisting = body.applyToExisting;
     if (body.followUpStrategy !== undefined) extendedSettings.followUpStrategy = body.followUpStrategy;
     if (body.followUpStrategyPrompt !== undefined) extendedSettings.followUpStrategyPrompt = body.followUpStrategyPrompt;
+    // 'range' | 'exact' — toggles range-vs-exact pricing instruction in the AI prompt.
+    if (body.priceQuoteMode !== undefined) extendedSettings.priceQuoteMode = body.priceQuoteMode;
     // Follow-up plan settings
     if (body.fuExtraWindows !== undefined) extendedSettings.fuExtraWindows = body.fuExtraWindows;
     if (body.fuReEnrollOnSilence !== undefined) extendedSettings.fuReEnrollOnSilence = body.fuReEnrollOnSilence;

@@ -11,27 +11,28 @@ export const DEFAULT_CLEANING_PRICING = {
     { key: 'airbnb', label: 'Airbnb Turnaround', enabled: true },
   ],
   priceTable: [
-    { bed: 1, bath: 1, regular: 129, deep: 179, airbnb: 139 },
-    { bed: 1, bath: 2, regular: 129, deep: 179, airbnb: 139 },
-    { bed: 2, bath: 1, regular: 139, deep: 179, airbnb: 149 },
-    { bed: 2, bath: 2, regular: 139, deep: 189, airbnb: 159 },
-    { bed: 2, bath: 3, regular: 149, deep: 199, airbnb: 169 },
-    { bed: 3, bath: 1, regular: 149, deep: 209, airbnb: 169 },
-    { bed: 3, bath: 2, regular: 159, deep: 219, airbnb: 179 },
-    { bed: 3, bath: 3, regular: 169, deep: 229, airbnb: 189 },
-    { bed: 3, bath: 4, regular: 179, deep: 239, airbnb: 199 },
-    { bed: 4, bath: 2, regular: 189, deep: 259, airbnb: 209 },
-    { bed: 4, bath: 3, regular: 209, deep: 279, airbnb: 229 },
-    { bed: 4, bath: 4, regular: 229, deep: 309, airbnb: 249 },
-    { bed: 4, bath: 5, regular: 249, deep: 339, airbnb: 269 },
-    { bed: 5, bath: 2, regular: 239, deep: 319, airbnb: 259 },
-    { bed: 5, bath: 3, regular: 249, deep: 329, airbnb: 279 },
-    { bed: 5, bath: 4, regular: 269, deep: 349, airbnb: 299 },
-    { bed: 5, bath: 5, regular: 289, deep: 369, airbnb: 319 },
-    { bed: 6, bath: 3, regular: 289, deep: 379, airbnb: 329 },
-    { bed: 6, bath: 4, regular: 309, deep: 389, airbnb: 349 },
-    { bed: 6, bath: 5, regular: 329, deep: 409, airbnb: 369 },
+    { bed: 1, bath: 1, sqft: 600,  regular: 129, deep: 179, airbnb: 139 },
+    { bed: 1, bath: 2, sqft: 700,  regular: 129, deep: 179, airbnb: 139 },
+    { bed: 2, bath: 1, sqft: 900,  regular: 139, deep: 179, airbnb: 149 },
+    { bed: 2, bath: 2, sqft: 1100, regular: 139, deep: 189, airbnb: 159 },
+    { bed: 2, bath: 3, sqft: 1300, regular: 149, deep: 199, airbnb: 169 },
+    { bed: 3, bath: 1, sqft: 1200, regular: 149, deep: 209, airbnb: 169 },
+    { bed: 3, bath: 2, sqft: 1500, regular: 159, deep: 219, airbnb: 179 },
+    { bed: 3, bath: 3, sqft: 1800, regular: 169, deep: 229, airbnb: 189 },
+    { bed: 3, bath: 4, sqft: 2000, regular: 179, deep: 239, airbnb: 199 },
+    { bed: 4, bath: 2, sqft: 1800, regular: 189, deep: 259, airbnb: 209 },
+    { bed: 4, bath: 3, sqft: 2200, regular: 209, deep: 279, airbnb: 229 },
+    { bed: 4, bath: 4, sqft: 2500, regular: 229, deep: 309, airbnb: 249 },
+    { bed: 4, bath: 5, sqft: 2800, regular: 249, deep: 339, airbnb: 269 },
+    { bed: 5, bath: 2, sqft: 2200, regular: 239, deep: 319, airbnb: 259 },
+    { bed: 5, bath: 3, sqft: 2500, regular: 249, deep: 329, airbnb: 279 },
+    { bed: 5, bath: 4, sqft: 2800, regular: 269, deep: 349, airbnb: 299 },
+    { bed: 5, bath: 5, sqft: 3200, regular: 289, deep: 369, airbnb: 319 },
+    { bed: 6, bath: 3, sqft: 2900, regular: 289, deep: 379, airbnb: 329 },
+    { bed: 6, bath: 4, sqft: 3300, regular: 309, deep: 389, airbnb: 349 },
+    { bed: 6, bath: 5, sqft: 3700, regular: 329, deep: 409, airbnb: 369 },
   ],
+  sqftAdjustEnabled: true,
   frequencyDiscounts: [
     { key: 'weekly', label: 'Weekly', discount: 15 },
     { key: 'biweekly', label: 'Every 2 Weeks', discount: 10 },
@@ -142,7 +143,7 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
   const addPriceRow = () => {
     setPricing((p: any) => ({
       ...p,
-      priceTable: [...p.priceTable, { bed: 1, bath: 1, regular: 0, deep: 0, move: 0, airbnb: 0 }],
+      priceTable: [...p.priceTable, { bed: 1, bath: 1, sqft: 600, regular: 0, deep: 0, move: 0, airbnb: 0 }],
     }));
   };
 
@@ -216,6 +217,22 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
         </div>
       </div>
 
+      {/* Square footage adjustment toggle */}
+      <label className="flex items-start gap-2 px-3 py-2 border border-slate-200 rounded-xl cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={pricing.sqftAdjustEnabled !== false}
+          onChange={e => setPricing((p: any) => ({ ...p, sqftAdjustEnabled: e.target.checked }))}
+          className="accent-blue-600 w-4 h-4 rounded mt-0.5"
+        />
+        <div className="flex-1">
+          <div className="text-[12px] font-semibold text-slate-700">Adjust price by square footage</div>
+          <div className="text-[10px] text-slate-400 mt-0.5">
+            When the lead's reported sqft is larger than the row's default, AI scales the price using the row's $/sqft rate. Otherwise the table price is used as-is.
+          </div>
+        </div>
+      </label>
+
       {/* Price Table */}
       <div className="border border-slate-200 rounded-xl overflow-hidden">
         <button
@@ -232,14 +249,22 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
                 <tr className="bg-slate-50 text-slate-500">
                   <th className="px-2 py-1.5 text-left font-semibold">Bed</th>
                   <th className="px-2 py-1.5 text-left font-semibold">Bath</th>
+                  <th className="px-2 py-1.5 text-left font-semibold">Sqft</th>
                   {enabledTypes.map((t: any) => (
                     <th key={t.key} className="px-2 py-1.5 text-left font-semibold">{t.label}</th>
+                  ))}
+                  {enabledTypes.map((t: any) => (
+                    <th key={`psf-${t.key}`} className="px-2 py-1.5 text-left font-semibold text-slate-400" title={`${t.label} price per square foot — derived from price ÷ sqft`}>
+                      $/sqft {t.label.split(' ')[0]}
+                    </th>
                   ))}
                   <th className="px-2 py-1.5 w-8"></th>
                 </tr>
               </thead>
               <tbody>
-                {pricing.priceTable?.map((row: any, i: number) => (
+                {pricing.priceTable?.map((row: any, i: number) => {
+                  const sqft = Number(row.sqft) || 0;
+                  return (
                   <tr key={i} className="border-t border-slate-100 hover:bg-slate-50/50">
                     <td className="px-1 py-1">
                       <input type="number" value={row.bed} min={1} max={10}
@@ -251,6 +276,11 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
                         onChange={e => updatePriceCell(i, 'bath', parseInt(e.target.value) || 1)}
                         className="w-10 px-1 py-0.5 border border-slate-200 rounded text-center text-[10px]" />
                     </td>
+                    <td className="px-1 py-1">
+                      <input type="number" value={row.sqft ?? ''} min={0} step={50}
+                        onChange={e => updatePriceCell(i, 'sqft', parseInt(e.target.value) || 0)}
+                        className="w-16 px-1 py-0.5 border border-slate-200 rounded text-center text-[10px]" />
+                    </td>
                     {enabledTypes.map((t: any) => (
                       <td key={t.key} className="px-1 py-1">
                         <div className="flex items-center">
@@ -261,13 +291,25 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
                         </div>
                       </td>
                     ))}
+                    {enabledTypes.map((t: any) => {
+                      const price = Number(row[t.key]) || 0;
+                      const perSqft = sqft > 0 ? price / sqft : 0;
+                      return (
+                        <td key={`psf-${t.key}`} className="px-1 py-1">
+                          <span className="text-slate-400 text-[10px]">
+                            {sqft > 0 ? `$${perSqft.toFixed(3)}` : '—'}
+                          </span>
+                        </td>
+                      );
+                    })}
                     <td className="px-1 py-1">
                       <button onClick={() => removePriceRow(i)} className="text-slate-300 hover:text-red-500">
                         <Trash2 size={10} />
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
             <button onClick={addPriceRow}

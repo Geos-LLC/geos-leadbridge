@@ -22,6 +22,7 @@ import { STRATEGY_PROMPTS, OBJECTIVE_FLAVORS } from '../ai/strategy-prompts';
 import { buildTimeAwarenessBlock, prefixWithTimestamp, resolveTimezone, stripLeadingTimestampPrefix } from '../ai/time-context';
 import { buildBusinessContextBlock } from '../ai/business-context';
 import { buildFaqBlock, parseAccountFaq } from '../ai/faq-context';
+import { buildPriceRangeInstruction } from '../ai/price-range';
 import OpenAI from 'openai';
 
 export interface SequenceStep {
@@ -219,15 +220,32 @@ export class FollowUpGeneratorService {
           const p = JSON.parse(account.servicePricingJson);
           const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
           if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
+            // Same range/exact toggle as automation.service / ai.controller.
+            let priceQuoteMode: 'range' | 'exact' | undefined;
+            if (account?.followUpSettingsJson) {
+              try {
+                const s = JSON.parse(account.followUpSettingsJson);
+                if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') priceQuoteMode = s.priceQuoteMode;
+              } catch { /* fall back to legacy inference */ }
+            }
+            const sqftAdjustEnabled = p?.sqftAdjustEnabled !== false;
             const priceParts = [
               '=== REFERENCE: PRICING TABLE (use only when quoting — see GLOBAL pricing behavior) ===',
             ];
             for (const row of p.priceTable.slice(0, 10)) {
-              const prices = enabledTypes.map((t: any) => `${t.label}: $${row[t.key] || '?'}`).join(', ');
-              priceParts.push(`  ${row.bed}BR/${row.bath}BA — ${prices}`);
+              const sqft = Number(row.sqft) || 0;
+              const prices = enabledTypes.map((t: any) => {
+                const price = Number(row[t.key]) || 0;
+                const perSqft = sqft > 0 ? (price / sqft).toFixed(3) : null;
+                return perSqft && sqftAdjustEnabled
+                  ? `${t.label}: $${price} ($${perSqft}/sqft)`
+                  : `${t.label}: $${price}`;
+              }).join(', ');
+              const sizeLabel = sqft > 0 ? `${row.bed}BR/${row.bath}BA @ ${sqft} sqft` : `${row.bed}BR/${row.bath}BA`;
+              priceParts.push(`  ${sizeLabel} — ${prices}`);
             }
             priceParts.push('');
-            priceParts.push('This pricing table is REFERENCE material. Only use it when the PRIMARY INSTRUCTION (strategy / step objective) tells you to quote, OR when the customer explicitly asks about price. When you DO quote, match the customer\'s bedrooms/bathrooms to the correct row and stay within a sensible range around the table value. NEVER invent prices unrelated to the table. If you are not quoting, do not bring up price.');
+            priceParts.push(buildPriceRangeInstruction(p.priceRange, { priceQuoteMode, sqftAdjustEnabled }));
             pricingContext = priceParts.join('\n');
           }
         } catch { /* invalid JSON */ }

@@ -43,7 +43,7 @@ export class AiController {
     ]);
 
     const details = this.extractLeadDetails(lead.rawJson);
-    const pricingBlock = this.buildPricingPrompt(account?.servicePricingJson);
+    const pricingBlock = this.buildPricingPrompt(account?.servicePricingJson, account?.followUpSettingsJson);
     const faqBlock = buildFaqBlock(parseAccountFaq(account?.faqJson));
     const businessBlock = buildBusinessContextBlock({
       businessName: account?.businessName ?? null,
@@ -132,7 +132,7 @@ export class AiController {
       activeHoursEnd: account?.followUpActiveHoursEnd ?? null,
       timezone: account?.followUpTimezone ?? null,
     });
-    const pricingBlock = this.buildPricingPrompt(account?.servicePricingJson);
+    const pricingBlock = this.buildPricingPrompt(account?.servicePricingJson, account?.followUpSettingsJson);
     const faqBlock = buildFaqBlock(parseAccountFaq(account?.faqJson));
     const urgencyBlock = await this.buildUrgencyPrompt(conversationId, account?.followUpSettingsJson);
 
@@ -210,19 +210,41 @@ export class AiController {
     return parts.join('\n');
   }
 
-  private buildPricingPrompt(pricingJson: string | null | undefined): string | null {
+  private buildPricingPrompt(
+    pricingJson: string | null | undefined,
+    followUpSettingsJson?: string | null,
+  ): string | null {
     if (!pricingJson) return null;
     try {
       const p = JSON.parse(pricingJson);
       const parts: string[] = ['--- Your Pricing Guide (use these EXACT prices when quoting) ---'];
 
-      // Price table
+      // Resolve quote mode from AI strategy settings (per-account toggle).
+      let priceQuoteMode: 'range' | 'exact' | undefined;
+      if (followUpSettingsJson) {
+        try {
+          const s = JSON.parse(followUpSettingsJson);
+          if (s?.priceQuoteMode === 'range' || s?.priceQuoteMode === 'exact') priceQuoteMode = s.priceQuoteMode;
+        } catch { /* invalid JSON — fall back to legacy inference */ }
+      }
+      const sqftAdjustEnabled = p?.sqftAdjustEnabled !== false; // default ON
+
+      // Price table — emit each row with its default sqft and the derived $/sqft
+      // per cleaning type, so the AI can scale up for larger properties.
       const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
       if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
-        parts.push('Base prices by property size:');
+        parts.push('Base prices by property size (sqft column is the default size for that BR/BA combo):');
         for (const row of p.priceTable) {
-          const prices = enabledTypes.map((t: any) => `${t.label}: $${row[t.key] || '?'}`).join(', ');
-          parts.push(`  ${row.bed}BR/${row.bath}BA — ${prices}`);
+          const sqft = Number(row.sqft) || 0;
+          const prices = enabledTypes.map((t: any) => {
+            const price = Number(row[t.key]) || 0;
+            const perSqft = sqft > 0 ? (price / sqft).toFixed(3) : null;
+            return perSqft && sqftAdjustEnabled
+              ? `${t.label}: $${price} ($${perSqft}/sqft)`
+              : `${t.label}: $${price}`;
+          }).join(', ');
+          const sizeLabel = sqft > 0 ? `${row.bed}BR/${row.bath}BA @ ${sqft} sqft` : `${row.bed}BR/${row.bath}BA`;
+          parts.push(`  ${sizeLabel} — ${prices}`);
         }
       }
 
@@ -262,7 +284,7 @@ export class AiController {
       }
 
       parts.push('--- End Pricing Guide ---');
-      parts.push(buildPriceRangeInstruction(p.priceRange));
+      parts.push(buildPriceRangeInstruction(p.priceRange, { priceQuoteMode, sqftAdjustEnabled }));
       parts.push('When you DO quote (per the GLOBAL pricing policy + PRIMARY INSTRUCTION), match bedrooms and bathrooms from the lead details to find the right row above. If the exact combination is not in the table, use the closest match. Mention applicable discounts (recurring, order amount) when relevant. If you are not quoting, do not mention price.');
 
       return parts.join('\n');

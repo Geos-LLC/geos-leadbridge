@@ -486,6 +486,9 @@ export function Services() {
   const [fuStopOnBooked, setFuStopOnBooked] = useState(true);
   const [fuStrategy, setFuStrategy] = useState<'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone'>('auto');
   const [fuStrategyPrompt, setFuStrategyPrompt] = useState('');
+  // Switch the AI between "range" quoting (e.g. $179–$219) and "exact" quoting
+  // (single table price). Stored in followUpSettingsJson.priceQuoteMode.
+  const [priceQuoteMode, setPriceQuoteMode] = useState<'range' | 'exact'>('range');
   const [fuUrgentCapability, setFuUrgentCapability] = useState<'same_day' | '24h' | '48h' | 'none'>('24h');
   const [fuIncludeHistorical, setFuIncludeHistorical] = useState(false);
   const [fuReEnrollOnSilence, setFuReEnrollOnSilence] = useState(true);
@@ -706,6 +709,7 @@ export function Services() {
         if (s.followUpApplyToExisting !== undefined) setFuIncludeHistorical(s.followUpApplyToExisting);
         if (s.followUpStrategy) setFuStrategy(s.followUpStrategy);
         if (s.followUpStrategyPrompt) setFuStrategyPrompt(s.followUpStrategyPrompt);
+        if (s.priceQuoteMode === 'exact' || s.priceQuoteMode === 'range') setPriceQuoteMode(s.priceQuoteMode);
         // Follow-up plan settings
         if (s.fuExtraWindows) setFuExtraWindows(s.fuExtraWindows);
         if (s.fuReEnrollOnSilence !== undefined) setFuReEnrollOnSilence(s.fuReEnrollOnSilence);
@@ -775,6 +779,7 @@ export function Services() {
         urgentCapability: fuUrgentCapability,
         followUpStrategy: fuStrategy,
         followUpStrategyPrompt: fuStrategy !== 'auto' && fuStrategyPrompt ? fuStrategyPrompt : null,
+        priceQuoteMode,
         includeHistorical: fuIncludeHistorical,
         applyToExisting: fuIncludeHistorical,
         fuExtraWindows: fuExtraWindows.length > 0 ? fuExtraWindows : undefined,
@@ -817,7 +822,7 @@ export function Services() {
     fuMode, fuReplyType, fuSmartSteps,
     fuAvailability, fuStart, fuEnd, fuTz,
     fuStopOnReply, fuStopOnOptOut, fuStopOnBooked, fuUrgentCapability,
-    fuStrategy, fuStrategyPrompt,
+    fuStrategy, fuStrategyPrompt, priceQuoteMode,
     fuIncludeHistorical, fuExtraWindows,
     fuReEnrollOnSilence, fuReEnrollDelay,
     fuQuietHoursEnabled, fuQuietHoursStart, fuQuietHoursEnd,
@@ -2491,6 +2496,36 @@ export function Services() {
                     </button>
                   </div>
                 )}
+
+                {/* Price quote mode switch — controls whether the AI quotes a range
+                    or the exact table price. Persisted in followUpSettingsJson.priceQuoteMode
+                    and consumed by buildPriceRangeInstruction(). */}
+                <div className="pt-3 border-t border-slate-100">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[11px] font-semibold text-slate-700">How AI quotes price</div>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        {priceQuoteMode === 'range'
+                          ? 'AI gives a price range and tells the customer the dispatcher will confirm the exact number.'
+                          : 'AI quotes the exact table price — no range, no dispatcher hand-off.'}
+                      </p>
+                    </div>
+                    <div className="flex gap-1.5 shrink-0">
+                      {(['range', 'exact'] as const).map(m => (
+                        <button
+                          key={m}
+                          onClick={() => {
+                            setPriceQuoteMode(m);
+                            quickSaveSettings({ priceQuoteMode: m }, { successMsg: `Price: ${m === 'range' ? 'Range' : 'Exact'}`, fanout: true });
+                          }}
+                          className={`text-[11px] px-2.5 py-1.5 rounded-lg font-semibold border-2 transition-all ${priceQuoteMode === m ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-violet-200'}`}
+                        >
+                          {m === 'range' ? 'Range' : 'Exact'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
             );
