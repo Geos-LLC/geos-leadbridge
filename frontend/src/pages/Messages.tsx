@@ -1909,9 +1909,9 @@ export function Messages() {
                   >
                     {resyncingMessages ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
                   </button>
-                  {/* Mobile details arrow */}
+                  {/* Details panel toggle — visible on all viewports below xl (sidebar auto-shows ≥1280px) */}
                   <button
-                    className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors md:hidden"
+                    className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors xl:hidden"
                     onClick={() => setMobilePanel('details')}
                     title="Lead details"
                   >
@@ -2166,6 +2166,9 @@ export function Messages() {
                             const previewKey = `${event.id}:${strategy.key}`;
                             const preview = aiPreview[previewKey];
                             const isSuggested = strategySuggestion?.suggested === strategy.key;
+                            const rawSet = leadFollowUpInfo?.accountStrategy;
+                            const isSet = rawSet != null && rawSet !== 'auto' && rawSet === strategy.key;
+                            const isBoth = isSet && isSuggested;
                             const score = strategySuggestion?.scores?.[strategy.key];
                             return (
                               <button
@@ -2199,10 +2202,17 @@ export function Messages() {
                                 className={`text-[10px] px-1.5 py-0.5 rounded-md transition-colors ${
                                   preview?.reply ? 'bg-violet-100 text-violet-700 font-semibold' :
                                   preview?.loading ? 'bg-violet-50 text-violet-400' :
+                                  isBoth ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 ring-1 ring-emerald-300 font-semibold' :
+                                  isSet ? 'text-blue-700 bg-blue-50 hover:bg-blue-100 ring-1 ring-blue-300 font-semibold' :
                                   isSuggested ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50 ring-1 ring-amber-200' :
                                   'text-violet-400 hover:text-violet-600 hover:bg-violet-50'
                                 }`}
-                                title={isSuggested ? `AI suggests: ${strategySuggestion?.reason}` : undefined}
+                                title={
+                                  isBoth ? `Set on account AND suggested by AI — ${strategySuggestion?.reason || ''}` :
+                                  isSet ? `Set on account: this is the strategy follow-ups actually use` :
+                                  isSuggested ? `AI suggests: ${strategySuggestion?.reason}` :
+                                  undefined
+                                }
                               >
                                 {preview?.loading ? <Loader2 size={9} className="animate-spin inline" /> : strategy.emoji} {strategy.label}
                                 {score !== undefined && <span className="text-[8px] ml-0.5 opacity-70">{Math.round(score * 100)}%</span>}
