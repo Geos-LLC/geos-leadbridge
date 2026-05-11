@@ -2559,6 +2559,56 @@ export function Messages() {
               <div className="space-y-1">
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Ongoing Communication</h4>
                 <div className="bg-slate-50 rounded-xl p-2.5 space-y-2 text-[11px]">
+                  {/* Strategy at-a-glance — Set (account-configured) vs Suggested (per-thread AI) */}
+                  {(() => {
+                    const rawSet = leadFollowUpInfo.accountStrategy;
+                    const setKey = rawSet && rawSet !== 'auto' ? rawSet : null;
+                    const setStrategy = setKey ? AI_STRATEGIES.find(s => s.key === setKey) : null;
+                    const suggestedKey = strategySuggestion?.suggested;
+                    const suggestedStrategy = suggestedKey ? AI_STRATEGIES.find(s => s.key === suggestedKey) : null;
+                    const matches = setKey != null && suggestedKey != null && setKey === suggestedKey;
+                    return (
+                      <div className="grid grid-cols-2 gap-1.5 pb-1.5 border-b border-slate-200/70">
+                        {/* SET — blue (account-configured, authoritative) */}
+                        <div className="bg-blue-50/60 border border-blue-200 rounded-lg px-2 py-1.5">
+                          <div className="flex items-center gap-1 mb-0.5">
+                            <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500" aria-hidden />
+                            <span className="text-blue-700 font-bold uppercase tracking-wide text-[9px]">Set</span>
+                            <span className="text-slate-400 text-[9px]">account</span>
+                          </div>
+                          {setStrategy ? (
+                            <div className="flex items-center gap-1 text-blue-700 font-semibold text-[11px]">
+                              <span>{setStrategy.emoji}</span>
+                              <span>{setStrategy.label}</span>
+                            </div>
+                          ) : (
+                            <div className="text-slate-500 font-medium text-[11px]">Auto</div>
+                          )}
+                        </div>
+                        {/* SUGGESTED — amber (AI), emerald when matching Set */}
+                        <div
+                          className={`rounded-lg px-2 py-1.5 border ${
+                            matches ? 'bg-emerald-50/60 border-emerald-200' : 'bg-amber-50/60 border-amber-200'
+                          }`}
+                          title={matches ? 'Matches the account-configured strategy' : (setKey ? 'Differs from the account-configured strategy — Set wins for follow-ups' : 'Account is on Auto — Suggested will be used')}
+                        >
+                          <div className="flex items-center gap-1 mb-0.5">
+                            <span className={`inline-block w-1.5 h-1.5 rounded-full ${matches ? 'bg-emerald-500' : 'bg-amber-500'}`} aria-hidden />
+                            <span className={`font-bold uppercase tracking-wide text-[9px] ${matches ? 'text-emerald-700' : 'text-amber-700'}`}>Suggested</span>
+                            <span className="text-slate-400 text-[9px]">AI</span>
+                          </div>
+                          {suggestedStrategy ? (
+                            <div className={`flex items-center gap-1 font-semibold text-[11px] ${matches ? 'text-emerald-700' : 'text-amber-700'}`}>
+                              <span>{suggestedStrategy.emoji}</span>
+                              <span>{suggestedStrategy.label}</span>
+                            </div>
+                          ) : (
+                            <div className="text-slate-400 font-medium text-[11px]">—</div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {/* Follow-up status */}
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">Follow-ups</span>
@@ -2847,67 +2897,29 @@ export function Messages() {
               </div>
             )}
 
-            {/* Follow-up Status — compact thread status */}
+            {/* Follow-up Status — compact thread status (Set vs Suggested live at top of Ongoing Communication) */}
             {strategySuggestion && (() => {
               const rawSet = leadFollowUpInfo?.accountStrategy;
               const setKey = rawSet && rawSet !== 'auto' ? rawSet : null;
               const setStrategy = setKey ? AI_STRATEGIES.find(s => s.key === setKey) : null;
-              const suggestedStrategy = AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested);
               const matches = setKey != null && setKey === strategySuggestion.suggested;
               return (
                 <div className="space-y-1">
                   <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Follow-up Status</h4>
-                  <div className="bg-slate-50 rounded-xl p-2.5 space-y-1.5 text-[11px] text-slate-600">
-                    {/* SET — account-configured strategy (blue: user-controlled, authoritative for follow-ups) */}
-                    <div className="flex items-center justify-between">
-                      <span className="inline-flex items-center gap-1">
-                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500" aria-hidden />
-                        <span className="text-blue-700 font-semibold uppercase tracking-wide text-[9px]">Set</span>
-                        <span className="text-slate-400 text-[9px]">account</span>
-                      </span>
-                      {setStrategy ? (
-                        <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-md px-1.5 py-0.5 font-semibold">
-                          <span>{setStrategy.emoji}</span>
-                          <span>{setStrategy.label}</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-500 border border-slate-200 rounded-md px-1.5 py-0.5 font-medium">
-                          Auto
-                        </span>
-                      )}
-                    </div>
-                    {/* SUGGESTED — per-thread AI recommendation (amber: AI-derived, informational) */}
-                    <div className="flex items-center justify-between">
-                      <span className="inline-flex items-center gap-1">
-                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" aria-hidden />
-                        <span className="text-amber-700 font-semibold uppercase tracking-wide text-[9px]">Suggested</span>
-                        <span className="text-slate-400 text-[9px]">AI</span>
-                      </span>
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold border ${
-                          matches
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-amber-50 text-amber-700 border-amber-200'
-                        }`}
-                        title={matches ? 'Matches the account-configured strategy' : 'Differs from the account-configured strategy'}
-                      >
-                        <span>{suggestedStrategy?.emoji}</span>
-                        <span>{suggestedStrategy?.label}</span>
-                      </span>
-                    </div>
-                    {/* Inline note explaining the relationship */}
+                  <div className="bg-slate-50 rounded-xl p-2.5 space-y-1 text-[11px] text-slate-600">
+                    {/* Explanatory note — which strategy actually controls follow-ups */}
                     {setKey ? (
                       matches ? (
-                        <p className="text-[9px] text-emerald-600 leading-snug pt-0.5">
-                          Account setting matches the AI suggestion — follow-ups will use {setStrategy?.label}.
+                        <p className="text-[10px] text-emerald-700 leading-snug">
+                          <span className="font-semibold">Set</span> matches <span className="font-semibold">Suggested</span> — follow-ups use {setStrategy?.label}.
                         </p>
                       ) : (
-                        <p className="text-[9px] text-slate-500 leading-snug pt-0.5">
-                          Follow-ups use the <span className="text-blue-700 font-semibold">Set</span> strategy ({setStrategy?.label}). The <span className="text-amber-700 font-semibold">Suggested</span> badge is the AI's per-thread recommendation only.
+                        <p className="text-[10px] text-slate-600 leading-snug">
+                          Follow-ups use the <span className="text-blue-700 font-semibold">Set</span> strategy ({setStrategy?.label}). The <span className="text-amber-700 font-semibold">Suggested</span> pill is the AI's per-thread recommendation only.
                         </p>
                       )
                     ) : (
-                      <p className="text-[9px] text-slate-500 leading-snug pt-0.5">
+                      <p className="text-[10px] text-slate-600 leading-snug">
                         Account strategy is <span className="font-semibold">Auto</span> — follow-ups will use the <span className="text-amber-700 font-semibold">Suggested</span> strategy.
                       </p>
                     )}
