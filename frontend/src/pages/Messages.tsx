@@ -330,6 +330,7 @@ export function Messages() {
               nextMessagePreview: res.enrollment.nextMessagePreview || null,
               nextMessageMode: res.enrollment.nextMessageMode || 'ai',
               pendingSuggestionId: res.enrollment.pendingSuggestionId || null,
+              accountStrategy: res.enrollment.accountStrategy || null,
               aiConversationOn: res.enrollment.aiConversationOn ?? false,
               aiAvailability: res.enrollment.aiAvailability || 'always',
               aiActiveHoursStart: res.enrollment.aiActiveHoursStart || null,
@@ -351,6 +352,7 @@ export function Messages() {
               nextMessagePreview: null,
               nextMessageMode: 'ai',
               pendingSuggestionId: null,
+              accountStrategy: extra.accountStrategy || null,
               aiConversationOn: extra.aiConversationOn ?? false,
               aiAvailability: extra.aiAvailability || 'always',
               aiActiveHoursStart: extra.aiActiveHoursStart || null,
@@ -376,6 +378,7 @@ export function Messages() {
     nextMessagePreview: string | null;
     nextMessageMode: 'template' | 'ai';
     pendingSuggestionId: string | null;
+    accountStrategy: string | null;
     aiConversationOn: boolean;
     aiAvailability: string;
     aiActiveHoursStart: string | null;
@@ -2845,33 +2848,86 @@ export function Messages() {
             )}
 
             {/* Follow-up Status — compact thread status */}
-            {strategySuggestion && (
-              <div className="space-y-1">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Follow-up Status</h4>
-                <div className="bg-slate-50 rounded-xl p-2.5 space-y-1 text-[11px] text-slate-600">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Suggested</span>
-                    <span className="font-semibold">
-                      {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.emoji}{' '}
-                      {AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested)?.label}
-                    </span>
+            {strategySuggestion && (() => {
+              const rawSet = leadFollowUpInfo?.accountStrategy;
+              const setKey = rawSet && rawSet !== 'auto' ? rawSet : null;
+              const setStrategy = setKey ? AI_STRATEGIES.find(s => s.key === setKey) : null;
+              const suggestedStrategy = AI_STRATEGIES.find(s => s.key === strategySuggestion.suggested);
+              const matches = setKey != null && setKey === strategySuggestion.suggested;
+              return (
+                <div className="space-y-1">
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Follow-up Status</h4>
+                  <div className="bg-slate-50 rounded-xl p-2.5 space-y-1.5 text-[11px] text-slate-600">
+                    {/* SET — account-configured strategy (blue: user-controlled, authoritative for follow-ups) */}
+                    <div className="flex items-center justify-between">
+                      <span className="inline-flex items-center gap-1">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500" aria-hidden />
+                        <span className="text-blue-700 font-semibold uppercase tracking-wide text-[9px]">Set</span>
+                        <span className="text-slate-400 text-[9px]">account</span>
+                      </span>
+                      {setStrategy ? (
+                        <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-md px-1.5 py-0.5 font-semibold">
+                          <span>{setStrategy.emoji}</span>
+                          <span>{setStrategy.label}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-500 border border-slate-200 rounded-md px-1.5 py-0.5 font-medium">
+                          Auto
+                        </span>
+                      )}
+                    </div>
+                    {/* SUGGESTED — per-thread AI recommendation (amber: AI-derived, informational) */}
+                    <div className="flex items-center justify-between">
+                      <span className="inline-flex items-center gap-1">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" aria-hidden />
+                        <span className="text-amber-700 font-semibold uppercase tracking-wide text-[9px]">Suggested</span>
+                        <span className="text-slate-400 text-[9px]">AI</span>
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold border ${
+                          matches
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-amber-50 text-amber-700 border-amber-200'
+                        }`}
+                        title={matches ? 'Matches the account-configured strategy' : 'Differs from the account-configured strategy'}
+                      >
+                        <span>{suggestedStrategy?.emoji}</span>
+                        <span>{suggestedStrategy?.label}</span>
+                      </span>
+                    </div>
+                    {/* Inline note explaining the relationship */}
+                    {setKey ? (
+                      matches ? (
+                        <p className="text-[9px] text-emerald-600 leading-snug pt-0.5">
+                          Account setting matches the AI suggestion — follow-ups will use {setStrategy?.label}.
+                        </p>
+                      ) : (
+                        <p className="text-[9px] text-slate-500 leading-snug pt-0.5">
+                          Follow-ups use the <span className="text-blue-700 font-semibold">Set</span> strategy ({setStrategy?.label}). The <span className="text-amber-700 font-semibold">Suggested</span> badge is the AI's per-thread recommendation only.
+                        </p>
+                      )
+                    ) : (
+                      <p className="text-[9px] text-slate-500 leading-snug pt-0.5">
+                        Account strategy is <span className="font-semibold">Auto</span> — follow-ups will use the <span className="text-amber-700 font-semibold">Suggested</span> strategy.
+                      </p>
+                    )}
+                    {strategySuggestion.threadState.stage && (
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-200/70">
+                        <span className="text-slate-500">Stage</span>
+                        <span className="font-medium capitalize">{strategySuggestion.threadState.stage}</span>
+                      </div>
+                    )}
+                    {strategySuggestion.threadState.awaitingCustomerReply && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500">State</span>
+                        <span className="text-amber-600 font-medium">Waiting for reply</span>
+                      </div>
+                    )}
+                    <p className="text-[9px] text-slate-400 pt-0.5">{strategySuggestion.reason}</p>
                   </div>
-                  {strategySuggestion.threadState.stage && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Stage</span>
-                      <span className="font-medium capitalize">{strategySuggestion.threadState.stage}</span>
-                    </div>
-                  )}
-                  {strategySuggestion.threadState.awaitingCustomerReply && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500">State</span>
-                      <span className="text-amber-600 font-medium">Waiting for reply</span>
-                    </div>
-                  )}
-                  <p className="text-[9px] text-slate-400 pt-0.5">{strategySuggestion.reason}</p>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
           </div>
         </aside>

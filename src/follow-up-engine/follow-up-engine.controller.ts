@@ -144,6 +144,7 @@ export class FollowUpEngineController {
       let aiActiveHoursEnd: string | null = null;
       let aiTimezone: string | null = null;
       let aiExtraWindows: any[] | null = null;
+      let accountStrategy: string | null = null;
       if (acct) {
         aiConversationOn = acct.aiConversationEnabled ?? false;
         followUpMode = acct.followUpMode || null;
@@ -155,6 +156,7 @@ export class FollowUpEngineController {
             const s = JSON.parse(acct.followUpSettingsJson);
             aiAvailability = s.followUpAvailability || null;
             if (s.fuExtraWindows) aiExtraWindows = s.fuExtraWindows;
+            if (typeof s.followUpStrategy === 'string') accountStrategy = s.followUpStrategy;
           } catch {}
         }
         if (!aiAvailability) {
@@ -167,6 +169,7 @@ export class FollowUpEngineController {
       return {
         success: true,
         enrollment: null,
+        accountStrategy,
         aiConversationOn,
         aiAvailability,
         aiActiveHoursStart,
@@ -203,6 +206,7 @@ export class FollowUpEngineController {
     let aiActiveHoursEnd: string | null = null;
     let aiTimezone: string | null = null;
     let aiExtraWindows: any[] | null = null;
+    let accountStrategy: string | null = null;
     let userSteps: SequenceStep[] | null = null;
     if (acct) {
       aiConversationOn = acct.aiConversationEnabled ?? false;
@@ -214,6 +218,7 @@ export class FollowUpEngineController {
           const s = JSON.parse(acct.followUpSettingsJson);
           aiAvailability = s.followUpAvailability || (aiActiveHoursStart ? 'active_hours' : 'always');
           if (s.fuExtraWindows) aiExtraWindows = s.fuExtraWindows;
+          if (typeof s.followUpStrategy === 'string') accountStrategy = s.followUpStrategy;
           const uiSteps = s.followUpSteps || s.followUpSmartSteps || s.followUpCustomSteps;
           if (Array.isArray(uiSteps) && uiSteps.length > 0) {
             userSteps = uiSteps.map((step: any, i: number) => ({
@@ -266,6 +271,7 @@ export class FollowUpEngineController {
         nextMessagePreview,
         nextMessageMode,
         pendingSuggestionId: pendingSuggestion?.id || null,
+        accountStrategy,
         aiConversationOn,
         aiAvailability,
         aiActiveHoursStart,
