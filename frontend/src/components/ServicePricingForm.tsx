@@ -11,26 +11,26 @@ export const DEFAULT_CLEANING_PRICING = {
     { key: 'airbnb', label: 'Airbnb Turnaround', enabled: true },
   ],
   priceTable: [
-    { bed: 1, bath: 1, sqft: 600,  regular: 129, deep: 179, airbnb: 139 },
-    { bed: 1, bath: 2, sqft: 700,  regular: 129, deep: 179, airbnb: 139 },
-    { bed: 2, bath: 1, sqft: 900,  regular: 139, deep: 179, airbnb: 149 },
-    { bed: 2, bath: 2, sqft: 1100, regular: 139, deep: 189, airbnb: 159 },
-    { bed: 2, bath: 3, sqft: 1300, regular: 149, deep: 199, airbnb: 169 },
-    { bed: 3, bath: 1, sqft: 1200, regular: 149, deep: 209, airbnb: 169 },
-    { bed: 3, bath: 2, sqft: 1500, regular: 159, deep: 219, airbnb: 179 },
-    { bed: 3, bath: 3, sqft: 1800, regular: 169, deep: 229, airbnb: 189 },
-    { bed: 3, bath: 4, sqft: 2000, regular: 179, deep: 239, airbnb: 199 },
-    { bed: 4, bath: 2, sqft: 1800, regular: 189, deep: 259, airbnb: 209 },
-    { bed: 4, bath: 3, sqft: 2200, regular: 209, deep: 279, airbnb: 229 },
-    { bed: 4, bath: 4, sqft: 2500, regular: 229, deep: 309, airbnb: 249 },
-    { bed: 4, bath: 5, sqft: 2800, regular: 249, deep: 339, airbnb: 269 },
-    { bed: 5, bath: 2, sqft: 2200, regular: 239, deep: 319, airbnb: 259 },
-    { bed: 5, bath: 3, sqft: 2500, regular: 249, deep: 329, airbnb: 279 },
-    { bed: 5, bath: 4, sqft: 2800, regular: 269, deep: 349, airbnb: 299 },
-    { bed: 5, bath: 5, sqft: 3200, regular: 289, deep: 369, airbnb: 319 },
-    { bed: 6, bath: 3, sqft: 2900, regular: 289, deep: 379, airbnb: 329 },
-    { bed: 6, bath: 4, sqft: 3300, regular: 309, deep: 389, airbnb: 349 },
-    { bed: 6, bath: 5, sqft: 3700, regular: 329, deep: 409, airbnb: 369 },
+    { bed: 1, bath: 1, sqftMin: 600,  sqftMax: 800,  regular: 129, deep: 179, airbnb: 139 },
+    { bed: 1, bath: 2, sqftMin: 700,  sqftMax: 900,  regular: 129, deep: 179, airbnb: 139 },
+    { bed: 2, bath: 1, sqftMin: 800,  sqftMax: 1000, regular: 139, deep: 179, airbnb: 149 },
+    { bed: 2, bath: 2, sqftMin: 1000, sqftMax: 1200, regular: 139, deep: 189, airbnb: 159 },
+    { bed: 2, bath: 3, sqftMin: 1100, sqftMax: 1300, regular: 149, deep: 199, airbnb: 169 },
+    { bed: 3, bath: 1, sqftMin: 1000, sqftMax: 1200, regular: 149, deep: 209, airbnb: 169 },
+    { bed: 3, bath: 2, sqftMin: 1300, sqftMax: 1600, regular: 159, deep: 219, airbnb: 179 },
+    { bed: 3, bath: 3, sqftMin: 1500, sqftMax: 1800, regular: 169, deep: 229, airbnb: 189 },
+    { bed: 3, bath: 4, sqftMin: 1800, sqftMax: 2200, regular: 179, deep: 239, airbnb: 199 },
+    { bed: 4, bath: 2, sqftMin: 1800, sqftMax: 2200, regular: 189, deep: 259, airbnb: 209 },
+    { bed: 4, bath: 3, sqftMin: 2200, sqftMax: 2600, regular: 209, deep: 279, airbnb: 229 },
+    { bed: 4, bath: 4, sqftMin: 2600, sqftMax: 3000, regular: 229, deep: 309, airbnb: 249 },
+    { bed: 4, bath: 5, sqftMin: 3000, sqftMax: 3600, regular: 249, deep: 339, airbnb: 269 },
+    { bed: 5, bath: 2, sqftMin: 2400, sqftMax: 2800, regular: 239, deep: 319, airbnb: 259 },
+    { bed: 5, bath: 3, sqftMin: 2800, sqftMax: 3400, regular: 249, deep: 329, airbnb: 279 },
+    { bed: 5, bath: 4, sqftMin: 3200, sqftMax: 3800, regular: 269, deep: 349, airbnb: 299 },
+    { bed: 5, bath: 5, sqftMin: 3600, sqftMax: 4200, regular: 289, deep: 369, airbnb: 319 },
+    { bed: 6, bath: 3, sqftMin: 3000, sqftMax: 3600, regular: 289, deep: 379, airbnb: 329 },
+    { bed: 6, bath: 4, sqftMin: 3600, sqftMax: 4200, regular: 309, deep: 389, airbnb: 349 },
+    { bed: 6, bath: 5, sqftMin: 4000, sqftMax: 4800, regular: 329, deep: 409, airbnb: 369 },
   ],
   sqftAdjustEnabled: true,
   frequencyDiscounts: [
@@ -143,7 +143,7 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
   const addPriceRow = () => {
     setPricing((p: any) => ({
       ...p,
-      priceTable: [...p.priceTable, { bed: 1, bath: 1, sqft: 600, regular: 0, deep: 0, move: 0, airbnb: 0 }],
+      priceTable: [...p.priceTable, { bed: 1, bath: 1, sqftMin: 600, sqftMax: 800, regular: 0, deep: 0, move: 0, airbnb: 0 }],
     }));
   };
 
@@ -228,7 +228,7 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
         <div className="flex-1">
           <div className="text-[12px] font-semibold text-slate-700">Adjust price by square footage</div>
           <div className="text-[10px] text-slate-400 mt-0.5">
-            When the lead's reported sqft is larger than the row's default, AI scales the price using the row's $/sqft rate. Otherwise the table price is used as-is.
+            When the lead's reported sqft exceeds the row's <span className="font-semibold">Sqft Max</span>, AI scales the price using the row's $/sqft (computed at the midpoint of the range). Properties within the min–max range use the table price as-is.
           </div>
         </div>
       </label>
@@ -249,12 +249,13 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
                 <tr className="bg-slate-50 text-slate-500">
                   <th className="px-2 py-1.5 text-left font-semibold">Bed</th>
                   <th className="px-2 py-1.5 text-left font-semibold">Bath</th>
-                  <th className="px-2 py-1.5 text-left font-semibold">Sqft</th>
+                  <th className="px-2 py-1.5 text-left font-semibold" title="Smallest property size this row's price applies to">Sqft Min</th>
+                  <th className="px-2 py-1.5 text-left font-semibold" title="Largest property size at the row's price — beyond this, AI scales by $/sqft">Sqft Max</th>
                   {enabledTypes.map((t: any) => (
                     <th key={t.key} className="px-2 py-1.5 text-left font-semibold">{t.label}</th>
                   ))}
                   {enabledTypes.map((t: any) => (
-                    <th key={`psf-${t.key}`} className="px-2 py-1.5 text-left font-semibold text-slate-400" title={`${t.label} price per square foot — derived from price ÷ sqft`}>
+                    <th key={`psf-${t.key}`} className="px-2 py-1.5 text-left font-semibold text-slate-400" title={`${t.label} price per square foot — derived from price ÷ midpoint of the sqft range`}>
                       $/sqft {t.label.split(' ')[0]}
                     </th>
                   ))}
@@ -263,7 +264,11 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
               </thead>
               <tbody>
                 {pricing.priceTable?.map((row: any, i: number) => {
-                  const sqft = Number(row.sqft) || 0;
+                  // Back-compat: rows saved before the min/max split carried a single `sqft` field.
+                  const legacySqft = Number(row.sqft) || 0;
+                  const sqftMin = Number(row.sqftMin) || legacySqft;
+                  const sqftMax = Number(row.sqftMax) || legacySqft;
+                  const midpoint = sqftMin && sqftMax ? (sqftMin + sqftMax) / 2 : (sqftMin || sqftMax);
                   return (
                   <tr key={i} className="border-t border-slate-100 hover:bg-slate-50/50">
                     <td className="px-1 py-1">
@@ -277,8 +282,13 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
                         className="w-10 px-1 py-0.5 border border-slate-200 rounded text-center text-[10px]" />
                     </td>
                     <td className="px-1 py-1">
-                      <input type="number" value={row.sqft ?? ''} min={0} step={50}
-                        onChange={e => updatePriceCell(i, 'sqft', parseInt(e.target.value) || 0)}
+                      <input type="number" value={row.sqftMin ?? ''} min={0} step={50}
+                        onChange={e => updatePriceCell(i, 'sqftMin', parseInt(e.target.value) || 0)}
+                        className="w-16 px-1 py-0.5 border border-slate-200 rounded text-center text-[10px]" />
+                    </td>
+                    <td className="px-1 py-1">
+                      <input type="number" value={row.sqftMax ?? ''} min={0} step={50}
+                        onChange={e => updatePriceCell(i, 'sqftMax', parseInt(e.target.value) || 0)}
                         className="w-16 px-1 py-0.5 border border-slate-200 rounded text-center text-[10px]" />
                     </td>
                     {enabledTypes.map((t: any) => (
@@ -293,11 +303,11 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
                     ))}
                     {enabledTypes.map((t: any) => {
                       const price = Number(row[t.key]) || 0;
-                      const perSqft = sqft > 0 ? price / sqft : 0;
+                      const perSqft = midpoint > 0 ? price / midpoint : 0;
                       return (
                         <td key={`psf-${t.key}`} className="px-1 py-1">
                           <span className="text-slate-400 text-[10px]">
-                            {sqft > 0 ? `$${perSqft.toFixed(3)}` : '—'}
+                            {midpoint > 0 ? `$${perSqft.toFixed(3)}` : '—'}
                           </span>
                         </td>
                       );

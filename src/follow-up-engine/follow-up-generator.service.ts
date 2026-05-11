@@ -233,15 +233,21 @@ export class FollowUpGeneratorService {
               '=== REFERENCE: PRICING TABLE (use only when quoting — see GLOBAL pricing behavior) ===',
             ];
             for (const row of p.priceTable.slice(0, 10)) {
-              const sqft = Number(row.sqft) || 0;
+              // Back-compat: rows saved before the min/max split carry a single `sqft` field.
+              const legacy = Number(row.sqft) || 0;
+              const sqftMin = Number(row.sqftMin) || legacy;
+              const sqftMax = Number(row.sqftMax) || legacy;
+              const midpoint = sqftMin && sqftMax ? (sqftMin + sqftMax) / 2 : (sqftMin || sqftMax);
               const prices = enabledTypes.map((t: any) => {
                 const price = Number(row[t.key]) || 0;
-                const perSqft = sqft > 0 ? (price / sqft).toFixed(3) : null;
+                const perSqft = midpoint > 0 ? (price / midpoint).toFixed(3) : null;
                 return perSqft && sqftAdjustEnabled
                   ? `${t.label}: $${price} ($${perSqft}/sqft)`
                   : `${t.label}: $${price}`;
               }).join(', ');
-              const sizeLabel = sqft > 0 ? `${row.bed}BR/${row.bath}BA @ ${sqft} sqft` : `${row.bed}BR/${row.bath}BA`;
+              let sizeLabel = `${row.bed}BR/${row.bath}BA`;
+              if (sqftMin && sqftMax && sqftMin !== sqftMax) sizeLabel += ` @ ${sqftMin}-${sqftMax} sqft`;
+              else if (midpoint > 0) sizeLabel += ` @ ${midpoint} sqft`;
               priceParts.push(`  ${sizeLabel} — ${prices}`);
             }
             priceParts.push('');

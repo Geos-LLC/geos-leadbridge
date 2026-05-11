@@ -229,21 +229,28 @@ export class AiController {
       }
       const sqftAdjustEnabled = p?.sqftAdjustEnabled !== false; // default ON
 
-      // Price table — emit each row with its default sqft and the derived $/sqft
-      // per cleaning type, so the AI can scale up for larger properties.
+      // Price table — emit each row with its sqft range (min/max) and the
+      // derived $/sqft per cleaning type (at the midpoint), so the AI scales
+      // up only when the lead's sqft exceeds the row's sqftMax.
       const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
       if (p.priceTable?.length > 0 && enabledTypes.length > 0) {
-        parts.push('Base prices by property size (sqft column is the default size for that BR/BA combo):');
+        parts.push('Base prices by property size (each row covers a sqft range; price applies within that range):');
         for (const row of p.priceTable) {
-          const sqft = Number(row.sqft) || 0;
+          // Back-compat: rows saved before the min/max split carry a single `sqft` field.
+          const legacy = Number(row.sqft) || 0;
+          const sqftMin = Number(row.sqftMin) || legacy;
+          const sqftMax = Number(row.sqftMax) || legacy;
+          const midpoint = sqftMin && sqftMax ? (sqftMin + sqftMax) / 2 : (sqftMin || sqftMax);
           const prices = enabledTypes.map((t: any) => {
             const price = Number(row[t.key]) || 0;
-            const perSqft = sqft > 0 ? (price / sqft).toFixed(3) : null;
+            const perSqft = midpoint > 0 ? (price / midpoint).toFixed(3) : null;
             return perSqft && sqftAdjustEnabled
               ? `${t.label}: $${price} ($${perSqft}/sqft)`
               : `${t.label}: $${price}`;
           }).join(', ');
-          const sizeLabel = sqft > 0 ? `${row.bed}BR/${row.bath}BA @ ${sqft} sqft` : `${row.bed}BR/${row.bath}BA`;
+          let sizeLabel = `${row.bed}BR/${row.bath}BA`;
+          if (sqftMin && sqftMax && sqftMin !== sqftMax) sizeLabel += ` @ ${sqftMin}-${sqftMax} sqft`;
+          else if (midpoint > 0) sizeLabel += ` @ ${midpoint} sqft`;
           parts.push(`  ${sizeLabel} — ${prices}`);
         }
       }

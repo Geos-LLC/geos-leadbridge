@@ -25,7 +25,7 @@ const PREAMBLE =
   "This pricing table is REFERENCE material. Only use it when the PRIMARY INSTRUCTION tells you to quote, OR when the customer explicitly asks about price or budget. NEVER invent prices unrelated to the table. If you are not quoting, do not bring up price.";
 
 const SQFT_INSTRUCTION =
-  "SQUARE FOOTAGE ADJUSTMENT: each row lists its default sqft. If the lead's reported sqft exceeds the matched row's default, scale the price up using the row's $/sqft rate (price ÷ default sqft) × the lead's actual sqft. If the lead's sqft is at or below the default, use the table price as-is. Round to the nearest $5.";
+  "SQUARE FOOTAGE ADJUSTMENT: each row lists a sqft range (e.g. \"@ 1000-1200 sqft\") and a $/sqft rate computed at the midpoint of that range. If the lead's reported sqft is inside the row's range, use the table price as-is. If it exceeds the row's max, scale up: scaled_price = row $/sqft × lead's actual sqft. Round to the nearest $5. Never scale below the table price for under-sized properties — use the table price as the floor.";
 
 const DISPATCHER_TAIL =
   " Tell the customer the dispatcher will confirm the exact price after a quick property check.";
