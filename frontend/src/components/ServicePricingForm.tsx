@@ -68,6 +68,41 @@ export const DEFAULT_CLEANING_PRICING = {
   },
 };
 
+/**
+ * Older saved pricing rows have prices but no sqftMin/sqftMax (those fields
+ * didn't exist yet). When the form loads, fill in the defaults from
+ * DEFAULT_CLEANING_PRICING based on a (bed, bath) match so existing accounts
+ * see populated sqft columns instead of blank cells.
+ *
+ * Also back-fills `sqftAdjustEnabled` if the saved JSON predates that flag —
+ * default ON, matching the form's new-account default.
+ */
+function hydrateSqftDefaults(pricing: any): any {
+  if (!pricing || !Array.isArray(pricing.priceTable)) return pricing;
+  const defaults = new Map<string, any>();
+  for (const row of DEFAULT_CLEANING_PRICING.priceTable) {
+    defaults.set(`${row.bed}/${row.bath}`, row);
+  }
+  const hydratedTable = pricing.priceTable.map((row: any) => {
+    const def = defaults.get(`${row.bed}/${row.bath}`);
+    const next = { ...row };
+    // Back-compat: an older single-value `sqft` field becomes both bounds.
+    const legacy = Number(next.sqft) || 0;
+    if (next.sqftMin == null || next.sqftMin === 0) {
+      next.sqftMin = legacy || (def && (def as any).sqftMin) || 0;
+    }
+    if (next.sqftMax == null || next.sqftMax === 0) {
+      next.sqftMax = legacy || (def && (def as any).sqftMax) || 0;
+    }
+    return next;
+  });
+  return {
+    ...pricing,
+    priceTable: hydratedTable,
+    sqftAdjustEnabled: pricing.sqftAdjustEnabled ?? true,
+  };
+}
+
 interface ServicePricingFormProps {
   accountId: string;
   accountName: string;
@@ -90,7 +125,7 @@ export default function ServicePricingForm({ accountId, accountName, saveToAll }
     if (!loadId) return;
     setLoading(true);
     usersApi.getServicePricing(loadId)
-      .then(res => setPricing(res.pricing || DEFAULT_CLEANING_PRICING))
+      .then(res => setPricing(hydrateSqftDefaults(res.pricing || DEFAULT_CLEANING_PRICING)))
       .catch(() => setPricing(DEFAULT_CLEANING_PRICING))
       .finally(() => setLoading(false));
   }, [loadId]);
