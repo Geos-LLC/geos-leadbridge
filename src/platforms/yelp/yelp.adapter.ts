@@ -228,16 +228,15 @@ export class YelpAdapter implements IPlatformAdapter {
       });
       this.logger.log(`Yelp getLead raw response: ${JSON.stringify(response.data).substring(0, 1000)}`);
 
-      // Fetch lead events for message text + phone number
-      let messageText = '';
+      // Fetch lead events for phone number extraction only. The first event's
+      // text is Yelp boilerplate ("Hi there… Here are my answers…") followed by
+      // the full survey Q&A — we deliberately do NOT use it as lead.message.
+      // The chat shows only the customer's free-form additional_info (see
+      // normalizeLead); structured survey data lives on the lead details panel.
       let allEvents: any[] = [];
       try {
         allEvents = await this.getLeadEvents(credentials, leadId);
         this.logger.log(`Yelp lead events: ${allEvents.length} events — ${JSON.stringify(allEvents).substring(0, 1000)}`);
-        const firstMessage = allEvents.find((e: any) =>
-          e.user_type === 'CONSUMER' && (e.event_type === 'TEXT' || e.event_type === 'RAQ_SUBMIT'),
-        );
-        messageText = firstMessage?.event_content?.text || firstMessage?.event_content?.fallback_text || firstMessage?.text || '';
       } catch (evErr: any) {
         this.logger.warn(`Failed to fetch events for lead ${leadId}: ${evErr.message}`);
       }
@@ -251,14 +250,6 @@ export class YelpAdapter implements IPlatformAdapter {
         if (phone) lead.customerPhone = phone;
       }
 
-      // Always prefer the full event message — it contains all survey Q&A
-      // Strip Yelp boilerplate intro
-      if (messageText) {
-        lead.message = messageText
-          .replace(/^Hi there[,!].*?(?:regarding my project|questions regarding my project):\s*/s, '')
-          .replace(/^Hi there[,!].*?(?:please respond with a price estimate\.)?\s*(?:Here are my answers to Yelp's questions regarding my project:\s*)?/si, '')
-          .trim();
-      }
       return lead;
     } catch (error) {
       const status = error.response?.status;
@@ -450,17 +441,13 @@ export class YelpAdapter implements IPlatformAdapter {
     // Phone — can come from multiple places depending on opt-in status
     lead.customerPhone = data.user?.phone || data.consumer?.phone || data.phone_number || data.consumer_phone_number;
 
-    // Message — combine survey answers + additional info for a complete picture
-    const surveyParts: string[] = [];
-    for (const q of data.project?.survey_answers || []) {
-      const answer = Array.isArray(q.answer_text) ? q.answer_text.join(', ') : q.answer_text;
-      surveyParts.push(`${q.question_text}: ${answer}`);
-    }
-    const availability = data.project?.availability?.status;
-    if (availability) surveyParts.push(`Availability: ${availability}`);
-    const additionalInfo = data.project?.additional_info;
-    if (additionalInfo) surveyParts.push(`Additional details: ${additionalInfo}`);
-    lead.message = surveyParts.join('\n') || data.request_text || '';
+    // Message — only the customer's free-form "Additional details" goes into
+    // the chat (matches Thumbtack: chat is empty when the customer didn't write
+    // anything beyond the structured form). Structured survey answers + location
+    // + availability still flow to the right-side lead details panel and the
+    // business-owner SMS, but they read raw.project.survey_answers directly —
+    // they do NOT come from lead.message.
+    lead.message = data.project?.additional_info || '';
 
     // Location — Yelp uses project.location.postal_code
     lead.postcode = data.project?.location?.postal_code || data.location?.zip_code;

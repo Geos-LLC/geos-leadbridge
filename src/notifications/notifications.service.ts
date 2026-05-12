@@ -1696,6 +1696,9 @@ export class NotificationsService {
     let email = 'Not provided';
     let availability = 'Not specified';
     let jobName = 'Not specified';
+    // Empty default (NOT "Not specified") so templates that include
+    // {lead.requestDetails} render cleanly when the lead has no survey data.
+    let requestDetails = '';
 
     if (lead.rawJson) {
       try {
@@ -1794,6 +1797,25 @@ export class NotificationsService {
         if (raw.estimate?.total) {
           estimate = raw.estimate.total;
         }
+
+        // Aggregate full survey Q&A as a single placeholder so templates can
+        // show the structured request without listing every question
+        // separately. Yelp's survey shape varies by business category, so this
+        // adapts automatically. Empty when no survey data exists.
+        if (details.length > 0) {
+          const lines: string[] = [];
+          for (const d of details) {
+            const q = d.question || d.question_text || '';
+            const ansRaw = d.answer ?? d.answer_text;
+            const a = Array.isArray(ansRaw) ? ansRaw.join(', ') : ansRaw;
+            if (q && a !== undefined && a !== null && String(a).length > 0) {
+              lines.push(`${q}: ${a}`);
+            }
+          }
+          if (lines.length > 0) {
+            requestDetails = lines.join('\n');
+          }
+        }
       } catch (_err) {
         // Failed to parse rawJson, use defaults
       }
@@ -1824,6 +1846,8 @@ export class NotificationsService {
     message = message.replace(/\{lead\.availability\}/gi, availability);
     message = message.replace(/\{\{lead\.jobName\}\}/gi, jobName);
     message = message.replace(/\{lead\.jobName\}/gi, jobName);
+    message = message.replace(/\{\{lead\.requestDetails\}\}/gi, requestDetails);
+    message = message.replace(/\{lead\.requestDetails\}/gi, requestDetails);
 
     return message;
   }

@@ -63,7 +63,7 @@ export class TemplatesService {
     },
     {
       name: 'Lead Alert - Yelp',
-      content: 'New Yelp lead for {account.name}\n{lead.name}\nService: {lead.service}\nLocation: {lead.location}, {lead.zip}\nAvailability: {lead.availability}\nMessage: {lead.message}\nPhone: {lead.phone}\nEmail: {lead.email}',
+      content: 'New Yelp lead for {account.name}\n{lead.name}\nService: {lead.service}\nLocation: {lead.location}, {lead.zip}\nAvailability: {lead.availability}\n{lead.requestDetails}\nNotes: {lead.message}\nPhone: {lead.phone}\nEmail: {lead.email}',
       type: 'message',
       isDefault: false,
     },
