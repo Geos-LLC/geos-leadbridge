@@ -16,7 +16,7 @@
  * incoming real-id event" lookup, so callers can backfill the existing row
  * instead of creating a duplicate. Shared by:
  *   - ConversationContextService.ensureMessagePersisted (webhook full-thread
- *     persist + runYelpBackgroundSync flow into this)
+ *     persist + runLazyMessageSync flow into this)
  *   - LeadsService.syncYelpMessagesToLocal (cold-start API fallback)
  */
 

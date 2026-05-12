@@ -126,7 +126,7 @@ describe('ConversationContextService.ensureMessagePersisted', () => {
   // Regression for the "AI" + "Platform" double-message bug. When Yelp's POST
   // /events response returns no event_id, sendMessage writes a synthetic row
   // (externalMessageId=null, senderType='ai'/'user'). When the same message
-  // later arrives via webhook full-thread persist or runYelpBackgroundSync
+  // later arrives via webhook full-thread persist or runLazyMessageSync
   // carrying the real event_id, ensureMessagePersisted must update the existing
   // synthetic row (preserving senderType) instead of inserting a duplicate.
 
