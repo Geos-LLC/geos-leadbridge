@@ -215,7 +215,11 @@ export class FollowUpGeneratorService {
         select: { name: true },
       });
       timezone = resolveTimezone(account?.followUpTimezone);
-      if (account?.servicePricingJson) {
+      // Qualify never quotes — suppress the pricing REFERENCE so the model
+      // isn't tempted to volunteer a number after the customer answers a
+      // qualifying question.
+      const suppressPricingForQualify = strategyKey === 'qualify';
+      if (account?.servicePricingJson && !suppressPricingForQualify) {
         try {
           const p = JSON.parse(account.servicePricingJson);
           const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);

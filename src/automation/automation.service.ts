@@ -1372,17 +1372,26 @@ export class AutomationService implements OnModuleInit {
         const { STRATEGY_PROMPTS } = require('../ai/strategy-prompts');
         const ruleReplyMode = (rule as any).replyMode as 'custom' | 'price' | 'auto' | undefined;
         let strategyPrompt: string;
+        let effectiveStrategyKey: string | undefined;
         if (ruleReplyMode === 'price') {
           strategyPrompt = STRATEGY_PROMPTS.price;
+          effectiveStrategyKey = 'price';
         } else if (rule.promptTemplate?.content) {
           strategyPrompt = rule.promptTemplate.content;
         } else if (accountFollowUpStrategyPrompt) {
           strategyPrompt = accountFollowUpStrategyPrompt;
+          effectiveStrategyKey = accountFollowUpStrategy;
         } else if (accountFollowUpStrategy && accountFollowUpStrategy !== 'auto' && STRATEGY_PROMPTS[accountFollowUpStrategy]) {
           strategyPrompt = STRATEGY_PROMPTS[accountFollowUpStrategy];
+          effectiveStrategyKey = accountFollowUpStrategy;
         } else {
           strategyPrompt = rule.aiSystemPrompt || STRATEGY_PROMPTS.hybrid;
+          if (!rule.aiSystemPrompt) effectiveStrategyKey = 'hybrid';
         }
+        // Qualify never quotes — suppress the pricing REFERENCE so the model
+        // isn't tempted to volunteer a number after the customer answers a
+        // qualifying question.
+        const suppressPricingForQualify = effectiveStrategyKey === 'qualify';
 
         // REFERENCE: business profile (name, owner, turnaround, active hours,
         // scheduling rules). Without this the AI fabricates specific time slots
@@ -1412,7 +1421,7 @@ export class AutomationService implements OnModuleInit {
         // REFERENCE: pricing table — only consulted when the PRIMARY
         // INSTRUCTION says to quote, or when the customer asks about price.
         let pricingBlock: string | undefined;
-        if (pricingJson) {
+        if (pricingJson && !suppressPricingForQualify) {
           try {
             const p = JSON.parse(pricingJson);
             const enabledTypes = (p.cleaningTypes || []).filter((t: any) => t.enabled);
