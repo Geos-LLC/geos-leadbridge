@@ -17,7 +17,7 @@ import { ConversationContextService } from '../conversation-context/conversation
 import { LeadsService } from '../leads/leads.service';
 import { LeadStatusService } from '../leads/lead-status.service';
 import { FollowUpEngineService } from './follow-up-engine.service';
-import { FollowUpGeneratorService, SequenceStep } from './follow-up-generator.service';
+import { FollowUpGeneratorService, GeneratedFollowUp, SequenceStep } from './follow-up-generator.service';
 import { LONG_TERM_STEPS } from './long-term-steps';
 import { TrialService } from '../trial/trial.service';
 import { PlatformFactory } from '../platforms/platform.factory';
@@ -815,13 +815,41 @@ export class FollowUpSchedulerService implements OnModuleInit {
     const stoppedByClassifier = await this.classifyAndMaybeStop(enrollment, now);
     if (stoppedByClassifier) return;
 
-    // Generate message
-    const generated = await this.generatorService.generateMessage(
-      step,
-      enrollment.conversationId,
-      enrollment.sequenceTemplate.generationMode,
-      enrollment.sequenceTemplate.promptTemplateId,
-    );
+    // Generate message. The generator throws when AI is down AND the account
+    // has no saved template text for this step — that's deliberate. We do NOT
+    // send a generic "Following up on your request." placeholder; instead we
+    // record the execution as failed and retry in 15 minutes, same as a send
+    // failure. This keeps the customer experience clean during OpenAI outages.
+    let generated: GeneratedFollowUp;
+    try {
+      generated = await this.generatorService.generateMessage(
+        step,
+        enrollment.conversationId,
+        enrollment.sequenceTemplate.generationMode,
+        enrollment.sequenceTemplate.promptTemplateId,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `[FollowUpScheduler] Generation failed for enrollment ${enrollment.id} step ${enrollment.currentStepIndex}: ${err?.message}`,
+      );
+      await this.prisma.followUpStepExecution.create({
+        data: {
+          enrollmentId: enrollment.id,
+          stepIndex: enrollment.currentStepIndex,
+          objective: step.objective,
+          status: 'failed',
+          scheduledAt: enrollment.nextStepDueAt || now,
+          executedAt: now,
+        },
+      });
+      const retryAt = new Date(now.getTime() + 15 * 60_000);
+      await this.prisma.followUpEnrollment.update({
+        where: { id: enrollment.id },
+        data: { nextStepDueAt: retryAt, lastExecutedAt: now },
+      });
+      this.logger.log(`[FollowUpScheduler] Will retry step ${enrollment.currentStepIndex} at ${retryAt.toISOString()} (generation failure)`);
+      return;
+    }
 
     if (enrollment.mode === 'suggest') {
       // Suggestion mode: create step execution with status 'suggested'

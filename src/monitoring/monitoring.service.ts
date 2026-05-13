@@ -158,7 +158,7 @@ export class MonitoringService implements OnModuleInit {
 
       this.logger.warn(`[${severity.toUpperCase()}] [${options.category}] ${options.message}${options.accountName ? ` (${options.accountName})` : ''}`);
 
-      // Auto-detect platform-level OpenAI auth failures inside any captured error.
+      // Auto-detect platform-level OpenAI failures inside any captured error.
       // These affect every tenant and need an out-of-band dev alert (the
       // per-account email goes to the customer, not the developer).
       if (this.isOpenAiAuthError(options.message)) {
@@ -166,6 +166,16 @@ export class MonitoringService implements OnModuleInit {
           kind: 'openai_auth_failure',
           subject: 'LeadBridge: OpenAI API key broken',
           message: options.message,
+          context: options.context,
+        }).catch(err => this.logger.error(`[DevAlert] notify failed: ${err.message}`));
+      } else if (this.isOpenAiQuotaError(options.message)) {
+        this.notifyDevAlert({
+          kind: 'openai_quota_exceeded',
+          subject: 'LeadBridge: OpenAI quota exceeded — AI replies degraded',
+          message:
+            'OpenAI is returning 429 quota errors. Every AI follow-up and AI Conversation reply is falling back to generic templates. ' +
+            'Top up billing on the OpenAI project for the key in OPENAI_API_KEY.\n\n' +
+            `First failure message: ${options.message}`,
           context: options.context,
         }).catch(err => this.logger.error(`[DevAlert] notify failed: ${err.message}`));
       }
@@ -181,6 +191,21 @@ export class MonitoringService implements OnModuleInit {
   private isOpenAiAuthError(msg: string | undefined | null): boolean {
     if (!msg) return false;
     return /401\s*incorrect api key|invalid_api_key|invalid api key/i.test(msg);
+  }
+
+  private isOpenAiQuotaError(msg: string | undefined | null): boolean {
+    if (!msg) return false;
+    // OpenAI 429 quota exhaustion. Matches the body text returned by both
+    // chat-completions and the responses API. Avoids matching transient
+    // rate-limit 429s ("Rate limit reached for ..."), which are recoverable
+    // and shouldn't page the developer.
+    return /(429[^a-z]*you exceeded your current quota|insufficient_quota|exceeded your current quota)/i.test(msg);
+  }
+
+  /** Public accessor — lets other services (e.g. automation, follow-up generator) ask
+   *  whether an OpenAI failure is platform-wide before deciding to short-circuit. */
+  isOpenAiPlatformFailure(msg: string | undefined | null): boolean {
+    return this.isOpenAiAuthError(msg) || this.isOpenAiQuotaError(msg);
   }
 
   /**

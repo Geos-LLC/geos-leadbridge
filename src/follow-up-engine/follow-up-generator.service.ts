@@ -14,10 +14,11 @@
  *   - Platform-agnostic (Yelp, Thumbtack, future platforms)
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/utils/prisma.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
+import { MonitoringService } from '../monitoring/monitoring.service';
 import { STRATEGY_PROMPTS, OBJECTIVE_FLAVORS } from '../ai/strategy-prompts';
 import { buildTimeAwarenessBlock, prefixWithTimestamp, resolveTimezone, stripLeadingTimestampPrefix } from '../ai/time-context';
 import { buildBusinessContextBlock } from '../ai/business-context';
@@ -47,6 +48,9 @@ export class FollowUpGeneratorService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly conversationContext: ConversationContextService,
+    // Optional so unit tests that direct-instantiate the service don't need to
+    // wire monitoring. Production DI always populates it via the global module.
+    @Optional() private readonly monitoring: MonitoringService | null = null,
   ) {}
 
   private get openai(): OpenAI | null {
@@ -107,8 +111,15 @@ export class FollowUpGeneratorService {
     promptTemplateId?: string | null,
   ): Promise<GeneratedFollowUp> {
     if (!this.openai) {
-      this.logger.warn('OpenAI not configured — using fallback template');
-      return this.generateFromTemplate(step);
+      this.logger.warn('OpenAI not configured — checking for user template fallback');
+      const userTemplate = await this.lookupUserStepTemplate(conversationId, step.stepOrder);
+      if (userTemplate) {
+        return this.generateFromTemplate(
+          { ...step, messageTemplate: userTemplate },
+          conversationId,
+        );
+      }
+      throw new Error(`OPENAI_API_KEY not configured and no user template for step ${step.stepOrder}`);
     }
 
     // Step 1: Load thread context. We pass 100 as the limit — large enough to
@@ -486,8 +497,91 @@ export class FollowUpGeneratorService {
         strategyUsed: strategyKey,
       };
     } catch (err: any) {
-      this.logger.error(`[FollowUpGenerator] AI generation failed: ${err.message}`);
-      return this.generateFromTemplate(step);
+      const errMessage = err?.message ?? String(err);
+      this.logger.error(`[FollowUpGenerator] AI generation failed: ${errMessage}`);
+
+      // Report to MonitoringService. captureError dedups via SystemErrorLog and
+      // auto-detects platform-wide OpenAI failures (auth + quota) — those fire
+      // a single dev-alert email per 24h to DEV_ALERT_EMAIL, not per-account
+      // spam to the customer.
+      if (this.monitoring) {
+        this.monitoring.captureError({
+          category: 'automation',
+          code: 'ai_followup_generation_failed',
+          severity: 'error',
+          message: errMessage,
+          userId: lead?.userId,
+          accountId: undefined, // SavedAccount.id not in scope; userId is enough for dedup
+          context: {
+            conversationId,
+            strategy: strategyKey,
+            objective: step.objective,
+            stepOrder: step.stepOrder,
+          },
+        }).catch(e => this.logger.warn(`[FollowUpGenerator] captureError failed: ${e?.message}`));
+      }
+
+      // Fallback policy when AI is unavailable:
+      //   1. Try the user's saved template text for this step (kept in
+      //      followUpSettingsJson.followUpSteps even when the sequence is in
+      //      AI mode — scheduler strips it for the generator, but for failure
+      //      fallback we want the real saved text, not "Following up on your
+      //      request.").
+      //   2. If the user never wrote step text, throw so the scheduler can
+      //      mark the execution as failed and retry. We deliberately do NOT
+      //      send the generic hardcoded placeholder — it's spammy and erodes
+      //      trust when AI is broken account-wide.
+      const userTemplate = await this.lookupUserStepTemplate(conversationId, step.stepOrder);
+      if (userTemplate) {
+        this.logger.warn(`[FollowUpGenerator] Falling back to user template for step ${step.stepOrder}`);
+        return this.generateFromTemplate(
+          { ...step, messageTemplate: userTemplate },
+          conversationId,
+        );
+      }
+
+      // No user template configured — refuse to send a generic fallback.
+      // The scheduler catches this and treats it as a transient send failure
+      // (15-minute retry), keeping the customer experience clean while OpenAI
+      // is down.
+      throw new Error(`AI generation failed and no user template configured for step ${step.stepOrder}: ${errMessage}`);
+    }
+  }
+
+  /**
+   * Read the user's saved follow-up step message text from SavedAccount
+   * settings — even when the sequence is in AI mode. Used as the
+   * "OpenAI is down" fallback so we send the user's words instead of the
+   * generic "Following up on your request." placeholder.
+   *
+   * Returns null when no template text exists for this step index.
+   */
+  private async lookupUserStepTemplate(
+    conversationId: string,
+    stepOrder: number,
+  ): Promise<string | null> {
+    try {
+      const lead = await this.prisma.lead.findFirst({
+        where: { threadId: conversationId },
+        select: { businessId: true, userId: true },
+      });
+      if (!lead?.businessId) return null;
+
+      const account = await this.prisma.savedAccount.findFirst({
+        where: { userId: lead.userId, businessId: lead.businessId },
+        select: { followUpSettingsJson: true },
+      });
+      if (!account?.followUpSettingsJson) return null;
+
+      const settings = JSON.parse(account.followUpSettingsJson);
+      const uiSteps = settings.followUpSteps || settings.followUpSmartSteps || settings.followUpCustomSteps;
+      if (!Array.isArray(uiSteps)) return null;
+
+      const entry = uiSteps[stepOrder];
+      const text = entry?.message;
+      return typeof text === 'string' && text.trim().length > 0 ? text : null;
+    } catch {
+      return null;
     }
   }
 
