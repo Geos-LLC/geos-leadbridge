@@ -444,9 +444,12 @@ export function Dashboard() {
             Lifetime metrics get an "all-time" delta hint so the timeframe is
             still visible at a glance. */}
         {(() => {
-          const platforms: Array<{ key: 'yelp' | 'thumbtack'; dot: string }> = [
-            { key: 'yelp',      dot: '🔴' },
-            { key: 'thumbtack', dot: '🔵' },
+          // Platform marker: small colored rounded square with "Y" (Yelp red)
+          // or "TT" (Thumbtack blue) — matches the pill style already used on
+          // the Messages page conversation header.
+          const platforms: Array<{ key: 'yelp' | 'thumbtack'; tag: string; bg: string }> = [
+            { key: 'yelp',      tag: 'Y',  bg: '#FF1A1A' },
+            { key: 'thumbtack', tag: 'TT', bg: '#41B1E1' },
           ];
           const visible = platforms.filter(p => stats[p.key].hasAccounts);
           const active = visible.length > 0 ? visible : [platforms[1]];
@@ -455,8 +458,23 @@ export function Dashboard() {
               {active.map((p, i) => (
                 <span key={p.key} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8 }}>
                   {i > 0 && <span aria-hidden style={{ display: 'inline-block', width: 1, alignSelf: 'stretch', background: 'var(--lb-line)' }} />}
-                  <span title={p.key === 'yelp' ? 'Yelp' : 'Thumbtack'} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
-                    <span style={{ fontSize: 10 }}>{p.dot}</span>
+                  <span title={p.key === 'yelp' ? 'Yelp' : 'Thumbtack'} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 5 }}>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      minWidth: 18,
+                      height: 14,
+                      padding: '0 4px',
+                      borderRadius: 3,
+                      background: p.bg,
+                      color: '#fff',
+                      fontSize: 9,
+                      fontWeight: 700,
+                      lineHeight: 1,
+                      letterSpacing: 0.2,
+                      transform: 'translateY(1px)',
+                    }}>{p.tag}</span>
                     {renderOne(p.key)}
                   </span>
                 </span>
