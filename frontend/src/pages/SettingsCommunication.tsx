@@ -49,16 +49,22 @@ function formatPhoneE164(raw: string): string {
 type TestStatus = 'idle' | 'sending' | 'delivered' | 'failed';
 
 /**
- * /settings/communication — full Communication & Alerts surface.
+ * Communication & Alerts UI.
  *
- * Mirrors the previously inline Automation-page Communication Setup +
- * Alerts & Notifications blocks. Backend behavior is unchanged: same setting
- * keys (reEngagementAlertEnabled, reEngagementTemplate, handoffAlertTemplate,
+ * Exported two ways:
+ *   • SettingsCommunicationSection — the content only. Used as an inline
+ *     section inside SettingsPage so Communication & Alerts lives alongside
+ *     the rest of the Settings page.
+ *   • SettingsCommunication (default) — full-page wrapper with back button.
+ *     Kept for back-compat with the /settings/communication route, which now
+ *     redirects to /settings#communication-alerts.
+ *
+ * Backend behavior is unchanged: same setting keys
+ * (reEngagementAlertEnabled, reEngagementTemplate, handoffAlertTemplate,
  * leadAlertRule rule shape, agentPhoneOverride, call-connect agentPhoneE164),
  * same APIs.
  */
-export function SettingsCommunication() {
-  const navigate = useNavigate();
+export function SettingsCommunicationSection() {
   const accounts = useAppStore(s => s.savedAccounts);
   const user = useAuthStore(s => s.user);
   const setAuth = useAuthStore(s => s.setAuth);
@@ -358,26 +364,15 @@ export function SettingsCommunication() {
 
   if (accounts.length === 0) {
     return (
-      <div className="max-w-4xl mx-auto p-6">
-        <button onClick={() => navigate('/services')} className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700 mb-4">
-          <ArrowLeft className="w-4 h-4" /> Back to Automation
-        </button>
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center">
-          <p className="text-amber-800">Connect a saved account first to configure alerts.</p>
-          <Link to="/settings" className="inline-block mt-3 px-4 py-2 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700">
-            Go to Settings →
-          </Link>
-        </div>
+      <div id="communication-alerts" className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center">
+        <p className="text-amber-800">Connect a saved account first to configure alerts.</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-6">
+    <div id="communication-alerts" className="space-y-6">
       <div>
-        <button onClick={() => navigate('/services')} className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700 mb-3">
-          <ArrowLeft className="w-4 h-4" /> Back to Automation
-        </button>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
             <Bell className="w-5 h-5" />
@@ -625,14 +620,31 @@ export function SettingsCommunication() {
                     <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
                   </label>
                 </div>
-                <div className={`px-5 py-4 space-y-3${!(leadAlertRule?.enabled) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-                  {!leadAlertRule && (
-                    <p className="text-xs text-slate-500">
-                      Toggle on to create a {selectedAccount?.platform === 'yelp' ? 'Yelp' : 'Thumbtack'} alert rule using the platform default template.
-                    </p>
-                  )}
+                <div className="px-5 py-4 space-y-3">
+                  {!leadAlertRule && (() => {
+                    // Show the platform default template up-front so the user
+                    // sees what the first message alert will look like before
+                    // enabling. Toggling on uses the same template via
+                    // createLeadAlertRule.
+                    const platform = selectedAccount?.platform || 'thumbtack';
+                    const defaultBody = platform === 'yelp' ? YELP_ALERT_TEMPLATE : THUMBTACK_ALERT_TEMPLATE;
+                    const platformLabel = platform === 'yelp' ? 'Yelp' : 'Thumbtack';
+                    return (
+                      <div>
+                        <label className="text-[11px] font-bold uppercase tracking-widest mb-2 block text-slate-400">
+                          Default {platformLabel} Template
+                        </label>
+                        <div className="bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed whitespace-pre-wrap">
+                          {defaultBody}
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-2">
+                          Toggle on above to create this alert rule. You can edit the template after it's created.
+                        </p>
+                      </div>
+                    );
+                  })()}
                   {leadAlertRule && (
-                    <div>
+                    <div className={!(leadAlertRule.enabled) ? ' opacity-40 pointer-events-none select-none' : ''}>
                       <label className={`text-[11px] font-bold uppercase tracking-widest mb-2 block ${templateMissing ? 'text-orange-500' : 'text-slate-400'}`}>
                         Template{templateMissing && <span className="ml-1">*</span>}
                       </label>
@@ -734,6 +746,23 @@ export function SettingsCommunication() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * Page wrapper for the legacy /settings/communication route. Keeps the
+ * Section visible with a back button. New surface for Communication & Alerts
+ * is /settings (the section is mounted inline under Business profile).
+ */
+export function SettingsCommunication() {
+  const navigate = useNavigate();
+  return (
+    <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-4">
+      <button onClick={() => navigate('/services')} className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700">
+        <ArrowLeft className="w-4 h-4" /> Back to Automation
+      </button>
+      <SettingsCommunicationSection />
     </div>
   );
 }

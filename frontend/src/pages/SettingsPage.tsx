@@ -13,6 +13,7 @@ import ServicePricingForm from '../components/ServicePricingForm';
 import AccountFaqForm from '../components/AccountFaqForm';
 import TeamSection from '../components/TeamSection';
 import { LeadBridgeNumberManager } from '../components/LeadBridgeNumberManager';
+import { SettingsCommunicationSection } from './SettingsCommunication';
 
 const tierNames: Record<string, string> = {
   STARTER: 'Respond',
@@ -900,6 +901,9 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+
+      {/* Section 1.5: Communication & Alerts (was /settings/communication) */}
+      <SettingsCommunicationSection />
 
       {/* Section 2: Marketplace Connections */}
       <div className="space-y-4">

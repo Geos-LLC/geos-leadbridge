@@ -2253,7 +2253,7 @@ export function Services() {
               <h2 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--lb-ink-1)' }}>Communication & Alerts</h2>
               <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--lb-ink-5)' }}>Manage phone numbers and team notifications.</p>
             </div>
-            <Link to="/settings/communication" className="text-xs font-semibold text-blue-600 hover:underline shrink-0">
+            <Link to="/settings#communication-alerts" className="text-xs font-semibold text-blue-600 hover:underline shrink-0">
               Manage in Settings →
             </Link>
           </div>
