@@ -496,7 +496,8 @@ export function Services() {
   const [fuQuietHoursStart, setFuQuietHoursStart] = useState('22:00');
   const [fuQuietHoursEnd, setFuQuietHoursEnd] = useState('08:00');
   const [fuQuietHoursEnabled, setFuQuietHoursEnabled] = useState(true);
-  const [fuShowRules, setFuShowRules] = useState(false);
+  // fuShowRules removed — the "Smart Follow-up Rules" collapsible was replaced
+  // by the inline "When the customer replies" + "Urgent request handling" blocks.
   const [aiConversationOn, setAiConversationOn] = useState(false);
   const [aiShowRules, setAiShowRules] = useState(false);
   const [aiStopOnOptOut, setAiStopOnOptOut] = useState(true);
@@ -3713,59 +3714,28 @@ export function Services() {
                       </div>
                     </label>
 
-                    {/* Smart Follow-up Rules (collapsed) */}
-                    <div className="border border-slate-200 rounded-xl overflow-hidden">
-                      <button onClick={() => setFuShowRules(!fuShowRules)} className="w-full px-4 py-3 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
-                        <div>
-                          <span className="text-[11px] font-bold text-slate-600 uppercase tracking-widest">Smart Follow-up Rules</span>
-                          <p className="text-[10px] text-slate-400 mt-0.5">Control when follow-ups stop and how special cases are handled.</p>
-                        </div>
-                        {fuShowRules ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
-                      </button>
-                      {fuShowRules && (
-                        <div className="px-4 py-4 space-y-4 border-t border-slate-100">
-                          <div>
-                            <div className="text-[11px] font-semibold text-slate-600 mb-2">Follow-ups stop when:</div>
-                            <div className="space-y-1.5">
-                              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                                <input type="checkbox" checked={fuStopOnOptOut} onChange={e => setFuStopOnOptOut(e.target.checked)} className="accent-blue-600 w-3.5 h-3.5" />
-                                Customer asks not to be contacted
-                              </label>
-                              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                                <input type="checkbox" checked={fuStopOnBooked} onChange={e => setFuStopOnBooked(e.target.checked)} className="accent-blue-600 w-3.5 h-3.5" />
-                                Job is booked or confirmed
-                              </label>
-                              <div className="flex items-center gap-2 text-sm text-slate-500">
-                                <span className="text-emerald-500 text-xs">&#10003;</span> Conversation is archived
-                              </div>
-                            </div>
-                          </div>
-                          <div>
-                            <div className="text-[11px] font-semibold text-slate-600 mb-1">Current sequence stops when:</div>
-                            <div className="flex items-center gap-2 text-sm text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
-                              <span className="text-emerald-500 text-xs">&#10003;</span> Customer replies — a new sequence may begin after the next unanswered message
-                            </div>
-                          </div>
-                          <p className="text-[9px] text-slate-400">Repeat-job reminders and reactivation will be available as a separate module in the future.</p>
-                          <div>
-                            <div className="text-[11px] font-semibold text-slate-600 mb-1">Urgent request handling</div>
-                            <p className="text-[10px] text-slate-400 mb-2">How quickly can you serve customers who need service urgently?</p>
-                            <div className="grid grid-cols-2 gap-1.5">
-                              {([
-                                { value: 'same_day' as const, label: 'Same day', desc: 'Can serve today' },
-                                { value: '24h' as const, label: 'Within 24h', desc: 'Next business day' },
-                                { value: '48h' as const, label: 'Within 48h', desc: '1-2 days out' },
-                                { value: 'none' as const, label: 'Not available', desc: 'By appointment only' },
-                              ]).map(opt => (
-                                <button key={opt.value} onClick={() => setFuUrgentCapability(opt.value)}
-                                  className={`py-2 px-2 rounded-lg text-[11px] font-semibold border-2 transition-all text-left ${fuUrgentCapability === opt.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
-                                  {opt.label}<span className="block text-[9px] font-normal opacity-70">{opt.desc}</span>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      )}
+                    {/* Urgent request handling — pulled out of the old "Smart
+                        Follow-up Rules" collapsible. Lifecycle stop checkboxes
+                        (opt-out, booked, archived) were removed from the UI per
+                        spec — they're shared automation rules, not follow-up-
+                        only. State (fuStopOnOptOut/Booked) still saves with its
+                        current value so no behavior changes. */}
+                    <div className="border border-slate-200 rounded-xl px-4 py-3 space-y-2">
+                      <div className="text-[11px] font-semibold text-slate-600">Urgent request handling</div>
+                      <p className="text-[10px] text-slate-400">How quickly can you serve customers who need service urgently?</p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {([
+                          { value: 'same_day' as const, label: 'Same day', desc: 'Can serve today' },
+                          { value: '24h' as const, label: 'Within 24h', desc: 'Next business day' },
+                          { value: '48h' as const, label: 'Within 48h', desc: '1-2 days out' },
+                          { value: 'none' as const, label: 'Not available', desc: 'By appointment only' },
+                        ]).map(opt => (
+                          <button key={opt.value} onClick={() => setFuUrgentCapability(opt.value)}
+                            className={`py-2 px-2 rounded-lg text-[11px] font-semibold border-2 transition-all text-left ${fuUrgentCapability === opt.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
+                            {opt.label}<span className="block text-[9px] font-normal opacity-70">{opt.desc}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -3952,34 +3922,46 @@ export function Services() {
               </div>
               )}
 
-              {/* ── Re-engagement Alerts sub-section ──
-                  Scoped UI: this card describes the follow-up/silence-based
-                  alert only. The same `reEngagementAlertEnabled` field also
-                  gates the AI-handoff alert server-side (auto-gated on
-                  aiConversationEnabled), but that path is exposed visually
-                  inside AI Conversation → Human Takeover. */}
+              {/* ── When the customer replies ──
+                  Single sub-section unifying the two reply behaviors:
+                    • Stop current follow-up sequence (always-on internal rule
+                      backed by hardcoded `fuStopOnReply = true`)
+                    • Notify manager (existing `reEngagementAlertEnabled` field —
+                      keeping the key for back-compat; UI label is "Reply Alerts")
+                  The same backend field still gates the AI-handoff path
+                  server-side (auto-gated on aiConversationEnabled); that flow
+                  is exposed in AI Conversation → Human Takeover. */}
               <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
                 {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
-                <div className={`flex items-center justify-between px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
-                  <div className="flex items-center gap-3">
+                <div className={`px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
+                  <div className="flex items-center gap-3 mb-2">
                     <Bell className="w-5 h-5 text-amber-500" />
                     <div>
                       <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-bold text-slate-800">Re-engagement Alerts</h4>
+                        <h4 className="text-sm font-bold text-slate-800">When the customer replies</h4>
                         <TierBadge tier="engage" />
                       </div>
-                      <p className="text-xs text-slate-400">Get notified when quiet or deferred leads reply again.</p>
+                      <p className="text-xs text-slate-400">A customer reply pauses the current follow-up sequence. Optionally notify your team so someone can jump back into the conversation quickly.</p>
                     </div>
                   </div>
-                  <label className={`inline-flex items-center ${canUseEngage ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                    <input type="checkbox" checked={reEngagementAlertOn} disabled={!canUseEngage} onChange={e => setReEngagementAlertOn(e.target.checked)} className="sr-only peer" />
-                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
-                  </label>
                 </div>
-                {reEngagementAlertOn && (
-                  <div className="px-5 py-4 space-y-3">
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Alert Message Template</label>
+                <div className={`px-5 py-4 space-y-3${!canUseEngage ? ' opacity-60 pointer-events-none' : ''}`}>
+                  <div className="text-[11px] font-semibold text-slate-600 mb-1">When a lead replies after follow-ups:</div>
+                  <div className="space-y-1.5">
+                    <label className="flex items-center gap-2 text-sm text-slate-600 cursor-not-allowed" title="Internal rule — always on. A customer reply pauses the active follow-up sequence.">
+                      <input type="checkbox" checked readOnly disabled className="accent-blue-600 w-3.5 h-3.5" />
+                      Stop current follow-up sequence
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                      <input type="checkbox" checked={reEngagementAlertOn} disabled={!canUseEngage}
+                        onChange={e => setReEngagementAlertOn(e.target.checked)}
+                        className="accent-blue-600 w-3.5 h-3.5" />
+                      <span>Notify manager <span className="text-[11px] font-semibold text-slate-400">(Reply Alerts)</span></span>
+                    </label>
+                  </div>
+                  {reEngagementAlertOn && (
+                    <div className="pt-2">
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Reply Alert Template</label>
                       <p className="text-[10px] text-slate-400 mb-2">
                         Use {'{{lead.name}}'} for lead name and {'{{message}}'} for their reply text.
                       </p>
@@ -3991,11 +3973,11 @@ export function Services() {
                         placeholder='Lead {{lead.name}} replied: "{{message}}"'
                       />
                     </div>
-                    <p className="text-[10px] text-slate-400 leading-relaxed">
-                      Fires when a previously silent lead replies after follow-ups went out. AI-handoff alerts (ready-to-book / wants-a-call) are configured in <span className="font-semibold text-slate-600">AI Conversation → Human Takeover</span>.
-                    </p>
-                  </div>
-                )}
+                  )}
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Fires when a previously silent lead replies after follow-ups went out. AI handoff alerts (ready-to-book / wants-a-call) are configured in <span className="font-semibold text-slate-600">AI Conversation → Human Takeover</span>.
+                  </p>
+                </div>
               </div>
 
               {/* Settings auto-save on change (debounced ~600ms). No Save button needed. */}
@@ -4153,7 +4135,7 @@ export function Services() {
                     <button onClick={() => setAiShowRules(!aiShowRules)} className="w-full px-4 py-3 flex items-center justify-between bg-slate-50 hover:bg-slate-100 transition-colors">
                       <div>
                         <span className="text-[11px] font-bold text-slate-600 uppercase tracking-widest">AI Conversation Rules</span>
-                        <p className="text-[10px] text-slate-400 mt-0.5">Control when AI stops replying and special handling.</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Control when AI replies, pauses, or hands off to a manager.</p>
                       </div>
                       {aiShowRules ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
                     </button>
@@ -4189,7 +4171,7 @@ export function Services() {
                         <div className="rounded-xl border border-violet-100 bg-violet-50/30 px-4 py-3 space-y-3">
                           <div>
                             <div className="text-[11px] font-bold text-violet-700 uppercase tracking-widest">Human Takeover</div>
-                            <p className="text-[10px] text-slate-500 mt-0.5">Notify manager when AI detects the customer needs a human.</p>
+                            <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">Human takeover happens during active AI Conversation when the customer is ready for a manager. This is different from <span className="font-semibold text-slate-600">Reply Alerts</span>, which simply notify you when a quiet lead replies.</p>
                           </div>
                           <div className="space-y-1.5">
                             <label className="flex items-center gap-2 text-sm text-slate-600 cursor-not-allowed" title="Always on — fires automatically while AI Conversation is on.">
@@ -4231,7 +4213,7 @@ export function Services() {
                             Manager can always take over by sending a message manually
                           </div>
                           <p className="text-[10px] text-slate-400 leading-relaxed">
-                            During AI Conversation, LeadBridge alerts your team when the customer is ready to book, asks for a live call, or otherwise needs a human to take over. Gated by <span className="font-semibold text-slate-600">Re-engagement Alerts</span> in "If the Lead Doesn't Respond".
+                            During AI Conversation, LeadBridge alerts your team when the customer is ready to book, asks for a live call, or otherwise needs a human to take over. Gated by <span className="font-semibold text-slate-600">Reply Alerts</span> in "If the Lead Doesn't Respond".
                           </p>
                         </div>
                       </div>
