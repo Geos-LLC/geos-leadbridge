@@ -53,6 +53,38 @@ export default function SettingsPage() {
   const [connectionModalOpen, setConnectionModalOpen] = useState(false);
   const [accountToReconnect, setAccountToReconnect] = useState<SavedAccount | null>(null);
 
+  // ── Settings tab navigation ──────────────────────────────────────────────
+  // UI-only category split. Each section is gated by activeTab; backend state
+  // and load paths are unchanged. URL hash drives the selected tab so deep
+  // links and back-compat anchors (e.g. #communication-alerts) keep working.
+  type SettingsTab = 'general' | 'communication' | 'marketplace' | 'ai' | 'pricing' | 'billing' | 'team';
+  const hashToTab = (h: string): SettingsTab => {
+    const raw = (h || '').replace(/^#/, '').toLowerCase();
+    if (!raw) return 'general';
+    if (raw.startsWith('communication')) return 'communication';
+    if (raw.startsWith('marketplace')) return 'marketplace';
+    if (raw.startsWith('ai')) return 'ai';
+    if (raw.startsWith('pricing')) return 'pricing';
+    if (raw.startsWith('billing') || raw === 'invoices' || raw === 'subscription') return 'billing';
+    if (raw.startsWith('team')) return 'team';
+    if (raw.startsWith('general') || raw === 'profile' || raw === 'danger') return 'general';
+    return 'general';
+  };
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => hashToTab(typeof window !== 'undefined' ? window.location.hash : ''));
+  useEffect(() => {
+    const onHash = () => setActiveTab(hashToTab(window.location.hash));
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const selectTab = (next: SettingsTab) => {
+    setActiveTab(next);
+    // Avoid pushing duplicate history entries.
+    const newHash = `#${next}`;
+    if (window.location.hash !== newHash) {
+      history.replaceState(null, '', `${window.location.pathname}${window.location.search}${newHash}`);
+    }
+  };
+
   // Name editing
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
@@ -641,6 +673,32 @@ export default function SettingsPage() {
         </p>
       </div>
 
+      {/* Settings tab navigation */}
+      <nav className="flex flex-wrap gap-1 border-b border-slate-200 -mx-1 px-1">
+        {([
+          { key: 'general',       label: 'General' },
+          { key: 'communication', label: 'Communication' },
+          { key: 'marketplace',   label: 'Marketplace' },
+          { key: 'ai',            label: 'AI' },
+          { key: 'pricing',       label: 'Pricing' },
+          { key: 'billing',       label: 'Billing' },
+          { key: 'team',          label: 'Team' },
+        ] as Array<{ key: SettingsTab; label: string }>).map(t => (
+          <button
+            key={t.key}
+            onClick={() => selectTab(t.key)}
+            className={`px-4 py-2 text-sm font-semibold transition-colors border-b-2 -mb-px ${
+              activeTab === t.key
+                ? 'text-blue-600 border-blue-600'
+                : 'text-slate-500 border-transparent hover:text-slate-800'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {activeTab === 'general' && (<>
       {/* Section 1: Account Info */}
       <div className="overflow-hidden" style={{ background: 'var(--lb-surface)', border: '1px solid var(--lb-line)', borderRadius: 'var(--lb-radius-lg)' }}>
         <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--lb-line-soft)' }}>
@@ -902,9 +960,17 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      </>)}
+
+      {activeTab === 'communication' && (
+      <>
       {/* Section 1.5: Communication & Alerts (was /settings/communication) */}
       <SettingsCommunicationSection />
 
+      </>)}
+
+      {activeTab === 'marketplace' && (
+      <>
       {/* Section 2: Marketplace Connections */}
       <div className="space-y-4">
         <h3 className="text-xl font-bold text-slate-900 px-2">Marketplace Connections</h3>
@@ -1548,6 +1614,10 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      </>)}
+
+      {activeTab === 'billing' && (
+      <>
       {/* Section 3: Subscription & Billing */}
       <div className="space-y-4">
         <h3 className="text-xl font-bold text-slate-900 px-2">Subscription & Billing</h3>
@@ -1849,6 +1919,10 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      </>)}
+
+      {activeTab === 'communication' && (
+      <>
       {/* Section 3.5: LeadBridge Numbers */}
       <div className="space-y-3">
         <h3 className="text-xl font-bold text-slate-900 px-2">LeadBridge Numbers</h3>
@@ -1863,6 +1937,10 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      </>)}
+
+      {activeTab === 'ai' && (
+      <>
       {/* Section 4: AI Global Prompt */}
       <GlobalAiPromptSection />
 
@@ -1871,14 +1949,26 @@ export default function SettingsPage() {
         <AccountFaqSection accounts={accounts} />
       )}
 
+      </>)}
+
+      {activeTab === 'pricing' && (
+      <>
       {/* Section 5: Service Pricing */}
       {accounts.length > 0 && (
         <ServicePricingSection accounts={accounts} />
       )}
 
+      </>)}
+
+      {activeTab === 'team' && (
+      <>
       {/* Section 6: Team */}
       <TeamSection />
 
+      </>)}
+
+      {activeTab === 'general' && (
+      <>
       {/* Danger Zone */}
       {user?.role !== 'ADMIN' && (
         <div className="bg-white rounded-3xl shadow-sm border border-red-100 overflow-hidden">
@@ -2504,6 +2594,7 @@ export default function SettingsPage() {
           </div>
         );
       })()}
+      </>)}
 
       {/* Connection Modal */}
       <ConnectionModal
@@ -2642,7 +2733,10 @@ function GlobalAiPromptSection() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [expanded, setExpanded] = useState(true);
+  // Compact-by-default — the prompt body is hidden until the user clicks
+  // "Edit Prompt". Prevents 200+ lines of system-prompt text from dominating
+  // the AI settings page on every load.
+  const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [dirty, setDirty] = useState(false);
 
@@ -2650,7 +2744,8 @@ function GlobalAiPromptSection() {
     usersApi.getGlobalAiPrompt().then(res => {
       setPrompt(res.prompt);
       setIsDefault(res.isDefault);
-      if (!res.isDefault) setEditing(true);
+      // Note: deliberately not auto-expanding when a custom prompt exists.
+      // The summary still says "Custom prompt active" so the user knows.
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
