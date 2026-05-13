@@ -466,6 +466,11 @@ export function Dashboard() {
                 <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--lb-line-soft)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontWeight: 600, fontFamily: 'var(--lb-font-mono)', color: 'var(--lb-ink-3)', textTransform: 'uppercase', letterSpacing: 0.08 }}>
                   <span>{p.dot} {p.label}</span>
                 </div>
+                {/* Timeframe-honest labels: only "Leads today" is bounded to
+                    today. The other three are lifetime (from all-time analytics
+                    + notification-rule lifetime trigger counts), so suffix them
+                    with "(all-time)" to prevent the 0-leads-today / 34%-
+                    engagement confusion the platform-split surfaced. */}
                 <div className="grid grid-cols-2 md:grid-cols-4">
                   <Kpi
                     label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Leads today</span>}
@@ -475,17 +480,19 @@ export function Dashboard() {
                   <Kpi
                     label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Send size={12} /> Auto replies</span>}
                     value={loading ? '—' : s.automatedReplies}
+                    delta={loading ? undefined : 'all-time'}
                     loading={loading}
                   />
                   <Kpi
                     label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Clock size={12} /> Avg response</span>}
                     value={loading ? '—' : s.avgResponseTime}
+                    delta={loading ? undefined : 'all-time'}
                     loading={loading}
                   />
                   <Kpi
                     label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Engagement</span>}
                     value={loading ? '—' : `${s.conversionRate}%`}
-                    delta={loading ? undefined : 'of leads replied'}
+                    delta={loading ? undefined : 'all-time · of leads replied'}
                     deltaDir="up"
                     loading={loading}
                     muted
