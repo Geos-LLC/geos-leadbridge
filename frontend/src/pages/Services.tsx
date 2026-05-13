@@ -520,6 +520,11 @@ export function Services() {
   // toggle is ON AND AI Conversation is enabled. No separate UI switch.
   const [reEngagementAlertOn, setReEngagementAlertOn] = useState(true);
   const [reEngagementTemplate, setReEngagementTemplate] = useState('Lead {{lead.name}} replied: "{{message}}"');
+  // Handoff Alert Template — surfaces an existing `handoffAlertTemplate` field
+  // in followUpSettingsJson that previously had no UI. The same single alert
+  // toggle (`reEngagementAlertEnabled`) still gates the handoff firing path
+  // server-side, auto-gated on `aiConversationEnabled`. No new toggle key.
+  const [handoffAlertTemplate, setHandoffAlertTemplate] = useState('Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"');
   // Track which saved template is currently loaded in each CC message field (for edit button)
   const [ccWhisperTemplateId, setCcWhisperTemplateId] = useState<string | null>(sc?.ccWhisperTemplateId ?? null);
   const [ccGreetingTemplateId, setCcGreetingTemplateId] = useState<string | null>(sc?.ccGreetingTemplateId ?? null);
@@ -737,6 +742,7 @@ export function Services() {
         // handoff when this toggle is ON AND AI Conversation is enabled).
         if (s.reEngagementAlertEnabled !== undefined) setReEngagementAlertOn(s.reEngagementAlertEnabled);
         if (s.reEngagementTemplate) setReEngagementTemplate(s.reEngagementTemplate);
+        if (s.handoffAlertTemplate) setHandoffAlertTemplate(s.handoffAlertTemplate);
       }
     }).catch(() => {}).finally(() => {
       // Mark hydration complete so auto-save can run for subsequent state changes.
@@ -807,6 +813,7 @@ export function Services() {
         // Re-engagement alerts — also gates Handoff alerts (no separate UI switch).
         reEngagementAlertEnabled: reEngagementAlertOn,
         reEngagementTemplate,
+        handoffAlertTemplate,
         // NOTE: aiConversationEnabled is intentionally NOT in this payload.
         // The toggle handler is the sole writer of that field — including
         // it here re-introduces a race: a toggle save may land first, then
@@ -834,7 +841,7 @@ export function Services() {
     aiStopOnOptOut, aiStopOnBooked, aiStopOnPriceAgreed, aiMaxReplies,
     aiDeferralCheckIn, aiDeferralDelay, aiDeferralMessage,
     aiHiredReengage, aiHiredDelay, aiHiredMessage,
-    reEngagementAlertOn, reEngagementTemplate,
+    reEngagementAlertOn, reEngagementTemplate, handoffAlertTemplate,
   ]);
 
   // Debounced auto-save for Lead Alerts. Fires when alertDirty flips true.
@@ -3945,14 +3952,12 @@ export function Services() {
               </div>
               )}
 
-              {/* ── Customer Reply Alerts sub-section ──
-                  Single toggle. ON = SMS owner when customer replies.
-                  Internally covers two firing modes:
-                    1. Re-engagement — previously silent lead replies (any intent)
-                    2. Handoff      — customer signals high intent during AI Conversation
-                  Mode (2) is auto-on whenever AI Conversation is on; mode (1)
-                  always available when a follow-up enrollment is active. The split
-                  is internal architecture, not a user choice. */}
+              {/* ── Re-engagement Alerts sub-section ──
+                  Scoped UI: this card describes the follow-up/silence-based
+                  alert only. The same `reEngagementAlertEnabled` field also
+                  gates the AI-handoff alert server-side (auto-gated on
+                  aiConversationEnabled), but that path is exposed visually
+                  inside AI Conversation → Human Takeover. */}
               <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
                 {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
                 <div className={`flex items-center justify-between px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
@@ -3960,10 +3965,10 @@ export function Services() {
                     <Bell className="w-5 h-5 text-amber-500" />
                     <div>
                       <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-bold text-slate-800">Customer Reply Alerts</h4>
+                        <h4 className="text-sm font-bold text-slate-800">Re-engagement Alerts</h4>
                         <TierBadge tier="engage" />
                       </div>
-                      <p className="text-xs text-slate-400">SMS the owner when a lead replies — covers re-engagement after silence and AI-detected "ready to book / call me now" handoff moments.</p>
+                      <p className="text-xs text-slate-400">Get notified when quiet or deferred leads reply again.</p>
                     </div>
                   </div>
                   <label className={`inline-flex items-center ${canUseEngage ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
@@ -3987,7 +3992,7 @@ export function Services() {
                       />
                     </div>
                     <p className="text-[10px] text-slate-400 leading-relaxed">
-                      You'll get pinged when a customer breaks silence after a follow-up, AND (when AI Conversation is on) the moment the AI detects they're ready to book or asking for a live call/Zoom.
+                      Fires when a previously silent lead replies after follow-ups went out. AI-handoff alerts (ready-to-book / wants-a-call) are configured in <span className="font-semibold text-slate-600">AI Conversation → Human Takeover</span>.
                     </p>
                   </div>
                 )}
@@ -4154,6 +4159,7 @@ export function Services() {
                     </button>
                     {aiShowRules && (
                       <div className="px-4 py-4 space-y-5 border-t border-slate-100">
+                        <p className="text-[11px] text-slate-400">Control when AI stops replying and when a manager should take over.</p>
                         <div>
                           <div className="text-[11px] font-semibold text-slate-600 mb-2">AI stops replying when:</div>
                           <div className="space-y-1.5">
@@ -4165,31 +4171,48 @@ export function Services() {
                               <input type="checkbox" checked={aiStopOnBooked} onChange={e => setAiStopOnBooked(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
                               Job is booked or confirmed
                             </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={aiStopOnPriceAgreed} onChange={e => setAiStopOnPriceAgreed(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
+                              Customer agrees on price — hand off to manager
+                            </label>
                             <div className="flex items-center gap-2 text-sm text-slate-500">
                               <span className="text-emerald-500 text-xs">&#10003;</span> Lead is done, scheduled, or archived
                             </div>
                           </div>
                         </div>
 
-                        {/* ── Human Takeover (visual grouping only — no new settings) ──
-                            Groups the existing handoff-related controls so they read as one
-                            decision: when AI should pause and let a manager take the
-                            conversation. No data model changes; same checkbox keys, same
-                            firing logic. */}
+                        {/* ── Human Takeover (visual block — exposes existing
+                            `handoffAlertTemplate` field, no new settings keys).
+                            The trigger checkboxes are display-only: the backend
+                            classifier always fires on agreed + wants_live_contact;
+                            per-intent gating is planned future work. */}
                         <div className="rounded-xl border border-violet-100 bg-violet-50/30 px-4 py-3 space-y-3">
                           <div>
                             <div className="text-[11px] font-bold text-violet-700 uppercase tracking-widest">Human Takeover</div>
-                            <p className="text-[10px] text-slate-500 mt-0.5">Control when AI should pause so a manager can take over.</p>
+                            <p className="text-[10px] text-slate-500 mt-0.5">Notify manager when AI detects the customer needs a human.</p>
                           </div>
                           <div className="space-y-1.5">
-                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                              <input type="checkbox" checked={aiStopOnPriceAgreed} onChange={e => setAiStopOnPriceAgreed(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
-                              Customer agrees on price — hand off to manager
+                            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-not-allowed" title="Always on — fires automatically while AI Conversation is on.">
+                              <input type="checkbox" checked readOnly disabled className="accent-violet-600 w-3.5 h-3.5" />
+                              Customer ready to book
                             </label>
-                            <div className="flex items-center gap-2 text-sm text-slate-500">
-                              <span className="text-emerald-500 text-xs">&#10003;</span>
-                              Manager can always take over by sending a message manually
-                            </div>
+                            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-not-allowed" title="Always on — fires automatically while AI Conversation is on.">
+                              <input type="checkbox" checked readOnly disabled className="accent-violet-600 w-3.5 h-3.5" />
+                              Customer asks for call/live contact
+                            </label>
+                          </div>
+                          <div>
+                            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Handoff Alert Template</label>
+                            <p className="text-[10px] text-slate-400 mb-2">
+                              Use {'{{lead.name}}'}, {'{{message}}'}, and {'{{intent}}'} ("ready to book" or "wants live call").
+                            </p>
+                            <textarea
+                              value={handoffAlertTemplate}
+                              onChange={e => setHandoffAlertTemplate(e.target.value)}
+                              rows={2}
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-400"
+                              placeholder='Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"'
+                            />
                           </div>
                           <div>
                             <div className="text-[11px] font-semibold text-slate-600 mb-1">Max AI replies per conversation</div>
@@ -4203,14 +4226,13 @@ export function Services() {
                               ))}
                             </div>
                           </div>
-                          <div className="rounded-lg bg-white/70 border border-violet-100 px-3 py-2 text-[11px] text-slate-600 leading-relaxed">
-                            <div className="font-semibold text-slate-700 mb-1">Notify manager when AI detects:</div>
-                            <ul className="list-disc list-inside space-y-0.5 text-slate-500">
-                              <li>customer is ready to book</li>
-                              <li>customer asks for a call or live contact</li>
-                            </ul>
-                            <p className="text-[10px] text-slate-400 mt-1.5">Fires automatically while AI Conversation is on. Gated by the <span className="font-semibold">Customer Reply Alerts</span> toggle in <span className="font-semibold">If the Lead Doesn't Respond</span>.</p>
+                          <div className="flex items-center gap-2 text-sm text-slate-500 bg-white/70 border border-violet-100 rounded-lg px-3 py-2">
+                            <span className="text-emerald-500 text-xs">&#10003;</span>
+                            Manager can always take over by sending a message manually
                           </div>
+                          <p className="text-[10px] text-slate-400 leading-relaxed">
+                            During AI Conversation, LeadBridge alerts your team when the customer is ready to book, asks for a live call, or otherwise needs a human to take over. Gated by <span className="font-semibold text-slate-600">Re-engagement Alerts</span> in "If the Lead Doesn't Respond".
+                          </p>
                         </div>
                       </div>
                     )}
