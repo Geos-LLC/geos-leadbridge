@@ -1,34 +1,68 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  Bell, Phone, MessageSquare, Zap, ArrowLeft, Loader2, AlertCircle, ChevronDown,
+  Bell, Phone, PhoneCall, MessageSquare, Zap, ArrowLeft, Loader2, AlertCircle,
+  AlertTriangle, CheckCircle, X, Send, ChevronDown,
 } from 'lucide-react';
-import { notificationsApi, templatesApi, followUpApi } from '../services/api';
+import {
+  notificationsApi, templatesApi, followUpApi, callConnectApi, thumbtackApi, authApi,
+} from '../services/api';
 import type { TenantPhoneNumber } from '../services/api';
-import type { NotificationRule, MessageTemplate } from '../types';
+import type { NotificationRule, MessageTemplate, CallConnectSettings } from '../types';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import { TierBadge, LockedFeatureOverlay } from '../components/TierBadges';
 
+const THUMBTACK_ALERT_TEMPLATE =
+  'New lead for {account.name}\n' +
+  '{lead.name}, Price {lead.price}\n' +
+  'Location: {lead.location}, {lead.zip}\n' +
+  'Service: {lead.service} {lead.bedrooms} bed / {lead.bathrooms} bath\n' +
+  'Frequency: {lead.frequency}\n' +
+  'Description: {lead.serviceDescription}\n' +
+  'Add-ons: {lead.addons}\n' +
+  'Pets: {lead.pets}\n' +
+  'Message: {lead.message}\n' +
+  'Phone: {lead.phone}';
+
+const YELP_ALERT_TEMPLATE =
+  'New Yelp lead for {account.name}\n' +
+  '{lead.name}\n' +
+  'Service: {lead.service}\n' +
+  'Location: {lead.location}, {lead.zip}\n' +
+  'Availability: {lead.availability}\n' +
+  'Message: {lead.message}\n' +
+  'Phone: {lead.phone}\n' +
+  'Email: {lead.email}';
+
+function isValidPhoneE164(phone: string): boolean {
+  return /^\+[1-9]\d{6,14}$/.test(phone.trim());
+}
+
+function formatPhoneE164(raw: string): string {
+  let cleaned = raw.replace(/[^\d+]/g, '');
+  if (!cleaned) return '';
+  if (/^\d/.test(cleaned)) cleaned = '+1' + cleaned.replace(/^\+?1?/, '');
+  return cleaned;
+}
+
+type TestStatus = 'idle' | 'sending' | 'delivered' | 'failed';
+
 /**
- * Communication & Alerts settings page.
+ * /settings/communication — full Communication & Alerts surface.
  *
- * Hosts the alert template editors and a phone-numbers summary that used to
- * live inline on the Automation (Services) page. The Automation page now
- * shows compact summary cards that link here.
- *
- * Backend behavior unchanged — this page reuses the existing notificationsApi
- * + followUpApi endpoints. Setting keys (`reEngagementAlertEnabled`,
- * `reEngagementTemplate`, `handoffAlertTemplate`, the lead-alert rule shape)
- * are unchanged.
- *
- * Phone editing (Business Phone, LeadBridge Number assignment) stays on
- * /settings; this page renders a read-only summary with edit links.
+ * Mirrors the previously inline Automation-page Communication Setup +
+ * Alerts & Notifications blocks. Backend behavior is unchanged: same setting
+ * keys (reEngagementAlertEnabled, reEngagementTemplate, handoffAlertTemplate,
+ * leadAlertRule rule shape, agentPhoneOverride, call-connect agentPhoneE164),
+ * same APIs.
  */
 export function SettingsCommunication() {
   const navigate = useNavigate();
   const accounts = useAppStore(s => s.savedAccounts);
   const user = useAuthStore(s => s.user);
+  const setAuth = useAuthStore(s => s.setAuth);
+  const authToken = useAuthStore(s => s.token);
   const subscriptionTier = useAuthStore(s => s.user?.subscriptionTier);
   const trialActive = useAuthStore(s => s.user?.trialActive);
   const canUseEngage = trialActive || subscriptionTier === 'PRO' || subscriptionTier === 'ENTERPRISE';
@@ -38,8 +72,16 @@ export function SettingsCommunication() {
   const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [leadAlertRule, setLeadAlertRule] = useState<NotificationRule | null>(null);
+  const [ccSettings, setCcSettings] = useState<CallConnectSettings | null>(null);
+  const [ctEnabled, setCtEnabled] = useState(false);
+  const [ctAutoReplyTemplate, setCtAutoReplyTemplate] = useState('');
 
-  // Per-account follow-up settings (re-engagement + handoff templates)
+  // Business Phone (per-account override; falls back to user.businessPhone).
+  const [businessPhoneInput, setBusinessPhoneInput] = useState('');
+  const [editingBusinessPhone, setEditingBusinessPhone] = useState(false);
+  const savingBusinessPhoneRef = useRef(false);
+
+  // Alert templates
   const [reEngagementAlertOn, setReEngagementAlertOn] = useState(true);
   const [reEngagementTemplate, setReEngagementTemplate] = useState(
     'Lead {{lead.name}} replied: "{{message}}"'
@@ -48,56 +90,84 @@ export function SettingsCommunication() {
     'Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"'
   );
 
+  // Test phone (used by Test Text + Test Call)
+  const [testPhone, setTestPhone] = useState('');
+
   const [hydrating, setHydrating] = useState(false);
   const [hydrated, setHydrated] = useState(false);
-  const [savingAlert, setSavingAlert] = useState(false);
+  const [savingAlertRule, setSavingAlertRule] = useState(false);
   const [creatingAlert, setCreatingAlert] = useState(false);
+  const [testAlertStatus, setTestAlertStatus] = useState<TestStatus>('idle');
+  const [testTextStatus, setTestTextStatus] = useState<TestStatus>('idle');
+  const [callTesting, setCallTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
-  // Pick the first account by default
+  // Refresh the cached user so a newly-set businessPhone shows on first paint.
+  useEffect(() => {
+    if (!authToken) return;
+    authApi.getProfile().then((profile: any) => {
+      const fresh = profile?.user ?? profile;
+      if (fresh?.id) setAuth(fresh, authToken);
+    }).catch(() => {});
+  }, [authToken, setAuth]);
+
+  // Pick first account by default.
   useEffect(() => {
     if (!selectedAccountId && accounts.length > 0) {
       setSelectedAccountId(accounts[0].id);
     }
   }, [accounts, selectedAccountId]);
 
-  // Load per-account state when account changes
+  const selectedAccount = accounts.find(a => a.id === selectedAccountId) || null;
+
+  // Load per-account state when account changes.
   useEffect(() => {
     if (!selectedAccountId) return;
     let cancelled = false;
     setHydrated(false);
     setHydrating(true);
+    setError(null);
     Promise.all([
       notificationsApi.getRules(selectedAccountId).catch(() => ({ rules: [] as NotificationRule[] })),
       templatesApi.getTemplates('message').catch(() => ({ templates: [] as MessageTemplate[] })),
       notificationsApi.listTenantPhones().catch(() => ({ success: false, data: [] as TenantPhoneNumber[] })),
       followUpApi.getSettings(selectedAccountId).catch(() => ({ success: false, settings: null })),
-    ]).then(([rulesRes, tplRes, phonesRes, fuRes]: any) => {
+      callConnectApi.getSettings(selectedAccountId).catch(() => ({ settings: null })),
+      notificationsApi.getCustomerTextingSettings(selectedAccountId).catch(() => null),
+    ]).then(([rulesRes, tplRes, phonesRes, fuRes, ccRes, ctRes]: any) => {
       if (cancelled) return;
       const newLeadRule = (rulesRes.rules || []).find((r: NotificationRule) => r.triggerType === 'new_lead') || null;
       setLeadAlertRule(newLeadRule);
       setTemplates(tplRes.templates || []);
       setTenantPhones(phonesRes.data || []);
+      setCcSettings(ccRes?.settings || null);
+      if (ctRes) {
+        setCtEnabled(!!ctRes.enabled);
+        setCtAutoReplyTemplate(ctRes.autoReplyTemplate || '');
+      }
       const s: any = fuRes?.settings;
       if (s) {
         if (s.reEngagementAlertEnabled !== undefined) setReEngagementAlertOn(!!s.reEngagementAlertEnabled);
         if (s.reEngagementTemplate) setReEngagementTemplate(s.reEngagementTemplate);
         if (s.handoffAlertTemplate) setHandoffAlertTemplate(s.handoffAlertTemplate);
       }
+      // Seed Business Phone from per-account override (preferred) → user.businessPhone
+      const acct = accounts.find(a => a.id === selectedAccountId);
+      const seedPhone = (acct as any)?.agentPhoneOverride || user?.businessPhone || '';
+      setBusinessPhoneInput(seedPhone);
     }).catch((err: any) => {
-      if (!cancelled) setError(err.message || 'Failed to load communication settings');
+      if (!cancelled) setError(err?.message || 'Failed to load communication settings');
     }).finally(() => {
       if (cancelled) return;
       setHydrating(false);
-      // Defer hydrated flag by a tick so the auto-save effect doesn't fire
-      // on the values we just set from the server.
       setTimeout(() => { if (!cancelled) setHydrated(true); }, 0);
     });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAccountId]);
 
-  // Debounced auto-save for the two alert templates. Mirrors the Services
-  // page pattern — same backend field names, same followUpApi.saveSettings.
+  // Debounced auto-save for the alert templates (existing followUpApi field).
   useEffect(() => {
     if (!selectedAccountId || !hydrated) return;
     const t = setTimeout(() => {
@@ -112,7 +182,6 @@ export function SettingsCommunication() {
     return () => clearTimeout(t);
   }, [selectedAccountId, hydrated, reEngagementAlertOn, reEngagementTemplate, handoffAlertTemplate]);
 
-  const selectedAccount = accounts.find(a => a.id === selectedAccountId) || null;
   const accountPhone = (() => {
     if (!selectedAccountId) return null;
     return tenantPhones.find(p => p.savedAccountId === selectedAccountId && p.status === 'ACTIVE')
@@ -120,53 +189,72 @@ export function SettingsCommunication() {
       || tenantPhones.find(p => p.status === 'ACTIVE')
       || null;
   })();
-  const businessPhone = selectedAccount?.agentPhoneOverride || user?.businessPhone || null;
+  const ccBotNumber = accountPhone?.phoneNumber || '';
   const templateMissing = !!leadAlertRule && !leadAlertRule.templateId && !leadAlertRule.messageTemplate;
+  const ccSamePhone = !!testPhone.trim() && isValidPhoneE164(testPhone) && (
+    ccBotNumber === testPhone.trim() || businessPhoneInput === testPhone.trim()
+  );
 
-  async function toggleLeadAlert(on: boolean) {
-    if (!selectedAccountId) return;
-    setSavingAlert(true);
-    setError(null);
-    try {
-      if (leadAlertRule && leadAlertRule.id !== '_pending') {
-        const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { enabled: on });
-        setLeadAlertRule(rule);
-      } else if (on) {
-        await createDefaultLeadAlertRule();
-      }
-    } catch (err: any) {
-      setError(err?.response?.data?.message || err?.message || 'Failed to toggle alert');
-    } finally {
-      setSavingAlert(false);
-    }
+  function showSuccess(msg: string) {
+    setSuccess(msg);
+    setTimeout(() => setSuccess(null), 3000);
   }
 
-  // Minimal creation path: uses a generic default template. The Automation
-  // page has a richer platform-specific seeding flow; here we keep it
-  // bare-minimum so the toggle works in the rare case the user lands here
-  // before ever enabling alerts elsewhere.
-  async function createDefaultLeadAlertRule() {
+  async function saveBusinessPhone(rawValue: string) {
     if (!selectedAccountId) return;
+    if (savingBusinessPhoneRef.current) return;
+    setEditingBusinessPhone(false);
+    const formatted = formatPhoneE164(rawValue);
+    if (formatted && !isValidPhoneE164(formatted)) {
+      setError('Business phone must be E.164 (e.g. +12125550100)');
+      return;
+    }
+    setBusinessPhoneInput(formatted);
+    savingBusinessPhoneRef.current = true;
+    const promises: Promise<any>[] = [];
+    if (leadAlertRule && leadAlertRule.id !== '_pending') {
+      promises.push(
+        notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { toPhone: formatted })
+          .then(({ rule }) => setLeadAlertRule(rule))
+          .catch(() => setError('Failed to save business phone to alert rule'))
+      );
+    }
+    promises.push(
+      callConnectApi.saveSettings(selectedAccountId, { agentPhoneE164: formatted })
+        .then(({ settings }) => setCcSettings(settings))
+        .catch(() => setError('Failed to save business phone to call settings'))
+    );
+    promises.push(
+      thumbtackApi.updateSavedAccount(selectedAccountId, { agentPhoneOverride: formatted })
+        .catch(() => setError('Failed to save business phone override'))
+    );
+    await Promise.all(promises);
+    savingBusinessPhoneRef.current = false;
+    showSuccess('Business phone saved');
+  }
+
+  // Platform-specific lead alert rule seeding — mirrors the Services
+  // toggleLeadAlerts logic so Yelp and Thumbtack get correct defaults.
+  async function createLeadAlertRule(): Promise<void> {
+    if (!selectedAccountId || !selectedAccount) return;
     setCreatingAlert(true);
     try {
-      const accPlatform = selectedAccount?.platform || 'thumbtack';
-      const tplName = accPlatform === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack';
-      const tplBody = accPlatform === 'yelp'
-        ? 'New Yelp lead for {account.name}\n{lead.name}\nService: {lead.service}\nMessage: {lead.message}\nPhone: {lead.phone}'
-        : 'New lead for {account.name}\n{lead.name}, Price {lead.price}\nService: {lead.service}\nMessage: {lead.message}\nPhone: {lead.phone}';
-      let templateId = templates.find(t => t.name === tplName)?.id;
+      const platform = selectedAccount.platform || 'thumbtack';
+      const templateName = platform === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack';
+      const defaultBody = platform === 'yelp' ? YELP_ALERT_TEMPLATE : THUMBTACK_ALERT_TEMPLATE;
+      let templateId = templates.find(t => t.name === templateName)?.id;
       if (!templateId) {
-        const { template } = await templatesApi.createTemplate(tplName, tplBody);
+        const { template } = await templatesApi.createTemplate(templateName, defaultBody);
         templateId = template.id;
         setTemplates(prev => [template, ...prev]);
       }
-      const toPhone = businessPhone || '';
+      const toPhone = businessPhoneInput || user?.businessPhone || '';
       const { rule } = await notificationsApi.createRule(selectedAccountId, {
-        name: tplName,
+        name: templateName,
         triggerType: 'new_lead',
         toPhone,
         sendToCustomer: false,
-        template: tplBody,
+        template: defaultBody,
         templateId,
         enabled: true,
       } as any);
@@ -178,18 +266,95 @@ export function SettingsCommunication() {
     }
   }
 
+  async function toggleLeadAlert(on: boolean) {
+    if (!selectedAccountId) return;
+    setSavingAlertRule(true);
+    setError(null);
+    try {
+      if (leadAlertRule && leadAlertRule.id !== '_pending') {
+        const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { enabled: on });
+        setLeadAlertRule(rule);
+      } else if (on) {
+        await createLeadAlertRule();
+      }
+    } catch (err: any) {
+      setError(err?.response?.data?.message || err?.message || 'Failed to toggle alert');
+    } finally {
+      setSavingAlertRule(false);
+    }
+  }
+
   const changeAlertTemplate = useCallback(async (templateId: string) => {
     if (!selectedAccountId || !leadAlertRule) return;
-    setSavingAlert(true);
+    setSavingAlertRule(true);
     try {
       const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { templateId });
       setLeadAlertRule(rule);
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || 'Failed to change template');
     } finally {
-      setSavingAlert(false);
+      setSavingAlertRule(false);
     }
   }, [selectedAccountId, leadAlertRule]);
+
+  async function sendTestAlert() {
+    if (!leadAlertRule || !selectedAccountId) return;
+    setTestAlertStatus('sending');
+    setError(null);
+    try {
+      const result = await notificationsApi.sendTest(selectedAccountId, leadAlertRule.id);
+      if (result.success) {
+        setTestAlertStatus('delivered');
+        setTimeout(() => setTestAlertStatus('idle'), 4000);
+      } else {
+        setTestAlertStatus('failed');
+        setError(result.message || 'Failed to send test');
+        setTimeout(() => setTestAlertStatus('idle'), 4000);
+      }
+    } catch (err: any) {
+      setTestAlertStatus('failed');
+      setError(err?.response?.data?.message || err?.message || 'Failed to send test SMS');
+      setTimeout(() => setTestAlertStatus('idle'), 4000);
+    }
+  }
+
+  async function sendTestText() {
+    if (!selectedAccountId || !testPhone || !isValidPhoneE164(testPhone)) return;
+    setTestTextStatus('sending');
+    setError(null);
+    try {
+      const result = await notificationsApi.sendTest(selectedAccountId, undefined, testPhone.trim(), ctAutoReplyTemplate || undefined);
+      if (result.success) {
+        setTestTextStatus('delivered');
+        setTimeout(() => setTestTextStatus('idle'), 4000);
+      } else {
+        setTestTextStatus('failed');
+        setError(result.message || 'Failed to send test');
+        setTimeout(() => setTestTextStatus('idle'), 4000);
+      }
+    } catch (err: any) {
+      setTestTextStatus('failed');
+      setError(err?.response?.data?.message || err?.message || 'Failed to send test SMS');
+      setTimeout(() => setTestTextStatus('idle'), 4000);
+    }
+  }
+
+  async function sendTestCall() {
+    if (!selectedAccountId || !testPhone || !isValidPhoneE164(testPhone)) return;
+    setCallTesting(true);
+    setError(null);
+    try {
+      await callConnectApi.testCall(selectedAccountId, testPhone.trim());
+      showSuccess('Test call triggered — your business phone should ring shortly');
+    } catch (err: any) {
+      setError(err?.response?.data?.message || err?.message || 'Test call failed');
+    } finally {
+      setCallTesting(false);
+    }
+  }
+
+  const ccEnabled = !!ccSettings?.enabled;
+  const testPhoneValid = !!testPhone.trim() && isValidPhoneE164(testPhone);
 
   if (accounts.length === 0) {
     return (
@@ -209,7 +374,6 @@ export function SettingsCommunication() {
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-6">
-      {/* Header */}
       <div>
         <button onClick={() => navigate('/services')} className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700 mb-3">
           <ArrowLeft className="w-4 h-4" /> Back to Automation
@@ -225,7 +389,6 @@ export function SettingsCommunication() {
         </div>
       </div>
 
-      {/* Account selector (alerts are per-account) */}
       {accounts.length > 1 && (
         <div>
           <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Saved Account</label>
@@ -249,6 +412,12 @@ export function SettingsCommunication() {
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700 flex items-center gap-2">
           <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+          <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-600"><X className="w-4 h-4" /></button>
+        </div>
+      )}
+      {success && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-700 flex items-center gap-2">
+          <CheckCircle className="w-4 h-4 shrink-0" /> {success}
         </div>
       )}
 
@@ -260,37 +429,162 @@ export function SettingsCommunication() {
 
       {!hydrating && (
         <>
-          {/* Phone numbers summary (read-only — full editing lives in /settings) */}
+          {/* Phone Setup */}
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
               <Phone className="w-5 h-5 text-blue-600" />
               <div className="flex-1">
-                <h2 className="text-sm font-bold text-slate-800">Phone Numbers</h2>
+                <h2 className="text-sm font-bold text-slate-800">Phone Setup</h2>
                 <p className="text-xs text-slate-400">Set up the numbers used for alerts, messaging, and calls.</p>
               </div>
-              <Link to="/settings" className="text-xs font-semibold text-blue-600 hover:underline shrink-0">
-                Manage in Settings →
-              </Link>
             </div>
-            <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">📱 Business Phone</span>
-                  <TierBadge tier="respond" />
+            <div className="px-5 py-4 space-y-4">
+              {/* Row 1: Business Phone (Respond) — editable. */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">📱 Business Phone</span>
+                    <TierBadge tier="respond" />
+                  </div>
+                  <p className="text-[11px] text-slate-400 mb-2">Used for alerts only. Lead notifications are sent here.</p>
+                  {editingBusinessPhone ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="tel"
+                        value={businessPhoneInput}
+                        onChange={e => setBusinessPhoneInput(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                        onBlur={() => saveBusinessPhone(businessPhoneInput)}
+                        onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') saveBusinessPhone(businessPhoneInput); }}
+                        autoFocus
+                        placeholder="+15551234567"
+                        className="flex-1 rounded-xl px-3 py-2.5 text-sm border border-slate-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                      />
+                      <button onClick={() => saveBusinessPhone(businessPhoneInput)} className="px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700">Done</button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 rounded-xl px-3 py-2.5 text-sm font-mono bg-slate-50 border border-slate-200 text-slate-800">
+                        {businessPhoneInput || <span className="text-slate-400">Not set</span>}
+                      </div>
+                      <button onClick={() => setEditingBusinessPhone(true)} className="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 shrink-0">
+                        Change
+                      </button>
+                    </div>
+                  )}
+                  {ccBotNumber && businessPhoneInput && ccBotNumber === businessPhoneInput && (
+                    <p className="mt-1.5 text-xs text-red-600 font-medium flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      This is your LeadBridge Number — use a different business phone.
+                    </p>
+                  )}
                 </div>
-                <p className="text-[11px] text-slate-400 mb-2">Where lead notifications are sent.</p>
-                <div className="rounded-xl px-3 py-2.5 text-sm font-mono bg-slate-50 border border-slate-200 text-slate-800">
-                  {businessPhone || <span className="text-slate-400">Not set</span>}
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🧪 Test Alert</span>
+                    <TierBadge tier="respond" />
+                  </div>
+                  <p className="text-[11px] text-slate-400 mb-2">Send a test SMS to your Business Phone.</p>
+                  <button
+                    onClick={sendTestAlert}
+                    disabled={testAlertStatus !== 'idle' || !(leadAlertRule?.enabled) || !businessPhoneInput || !isValidPhoneE164(businessPhoneInput)}
+                    title={!(leadAlertRule?.enabled) ? 'Enable New Lead Alerts below first' : !businessPhoneInput ? 'Set Business Phone above' : ''}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                      testAlertStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                      testAlertStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                      testAlertStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                      'bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50'
+                    }`}
+                  >
+                    {testAlertStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
+                     testAlertStatus === 'delivered' ? <CheckCircle size={14} /> :
+                     testAlertStatus === 'failed' ? <X size={14} /> :
+                     <Send size={14} />}
+                    {testAlertStatus === 'sending' ? 'Sending…' : testAlertStatus === 'delivered' ? 'Sent!' : testAlertStatus === 'failed' ? 'Failed' : 'Test Alert'}
+                  </button>
                 </div>
               </div>
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🤖 LeadBridge Number</span>
-                  <TierBadge tier="engage" />
-                </div>
-                <p className="text-[11px] text-slate-400 mb-2">Used for texting and calling leads.</p>
-                <div className="rounded-xl px-3 py-2.5 text-sm font-mono bg-slate-50 border border-slate-200 text-slate-800">
-                  {accountPhone?.phoneNumber || <span className="text-slate-400">Not assigned</span>}
+
+              {/* Row 2: LeadBridge Number + Test Number (Engage). */}
+              <div className="relative">
+                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
+                <div className={`grid grid-cols-1 md:grid-cols-2 gap-4${!canUseEngage ? ' opacity-60 pointer-events-none' : ''}`}>
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🤖 LeadBridge Number</span>
+                      <TierBadge tier="engage" />
+                    </div>
+                    <p className="text-[11px] text-slate-400 mb-2">Used for texting and calling leads. Manage numbers in <Link to="/settings" className="text-blue-600 hover:underline">Settings</Link>.</p>
+                    <div className="rounded-xl px-3 py-2.5 text-sm font-mono bg-blue-50/30 border-2 border-blue-200 text-blue-700">
+                      {accountPhone ? (
+                        <>
+                          {accountPhone.phoneNumber}
+                          {accountPhone.friendlyName && accountPhone.friendlyName !== accountPhone.phoneNumber && (
+                            <span className="ml-2 text-xs font-normal text-slate-500">— {accountPhone.friendlyName}</span>
+                          )}
+                        </>
+                      ) : <span className="text-slate-400">No active number assigned</span>}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🧪 Test Number</span>
+                      <TierBadge tier="engage" />
+                    </div>
+                    <p className="text-[11px] text-slate-400 mb-2">Used to test SMS and calls from your LeadBridge Number.</p>
+                    <input
+                      type="tel"
+                      value={testPhone}
+                      onChange={e => setTestPhone(e.target.value.replace(/[^\d+\s\-()]/g, ''))}
+                      onBlur={e => { const f = formatPhoneE164(e.target.value); if (f !== e.target.value) setTestPhone(f); }}
+                      placeholder="+15559876543"
+                      className={`w-full rounded-xl px-4 py-2.5 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:border-transparent transition-colors ${
+                        ccSamePhone ? 'border-2 border-amber-400 bg-amber-50/30 focus:ring-amber-200'
+                          : testPhone && !isValidPhoneE164(testPhone) ? 'border-2 border-red-300 bg-red-50/30 focus:ring-red-200'
+                          : testPhoneValid ? 'border-2 border-emerald-300 bg-emerald-50/20 focus:ring-emerald-200'
+                          : 'bg-slate-50 border border-slate-200 focus:ring-blue-500'
+                      }`}
+                    />
+                    {testPhone && !isValidPhoneE164(testPhone) && (
+                      <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 shrink-0" /> Must be E.164 format, e.g. +12125550100
+                      </p>
+                    )}
+                    {ccSamePhone && (
+                      <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
+                        <AlertTriangle size={12} /> Test phone cannot be the same as the bot number or business phone.
+                      </p>
+                    )}
+                    <div className="flex gap-2 flex-wrap mt-3">
+                      <button
+                        onClick={sendTestText}
+                        disabled={testTextStatus === 'sending' || !ctEnabled || !testPhoneValid || tenantPhones.length === 0 || ccSamePhone}
+                        title={!ctEnabled ? 'Enable Instant Text on the Automation page first' : !testPhoneValid ? 'Enter a valid test phone' : ''}
+                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                          testTextStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                          testTextStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                          testTextStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                          'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
+                        }`}
+                      >
+                        {testTextStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
+                         testTextStatus === 'delivered' ? <CheckCircle size={14} /> :
+                         testTextStatus === 'failed' ? <X size={14} /> :
+                         <Send size={14} />}
+                        {testTextStatus === 'sending' ? 'Sending…' : testTextStatus === 'delivered' ? 'Sent' : testTextStatus === 'failed' ? 'Failed' : 'Test Text'}
+                      </button>
+                      <button
+                        onClick={sendTestCall}
+                        disabled={callTesting || !ccEnabled || ccSamePhone || !testPhoneValid}
+                        title={!ccEnabled ? 'Enable Instant Call on the Automation page first' : !testPhoneValid ? 'Enter a valid test phone' : ''}
+                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                          callTesting ? 'bg-slate-100 text-slate-500' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
+                        }`}
+                      >
+                        {callTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
+                        {callTesting ? 'Calling…' : 'Test Call'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -325,7 +619,7 @@ export function SettingsCommunication() {
                       type="checkbox"
                       checked={leadAlertRule?.enabled ?? false}
                       onChange={e => toggleLeadAlert(e.target.checked)}
-                      disabled={savingAlert || creatingAlert}
+                      disabled={savingAlertRule || creatingAlert}
                       className="sr-only peer"
                     />
                     <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
@@ -333,7 +627,9 @@ export function SettingsCommunication() {
                 </div>
                 <div className={`px-5 py-4 space-y-3${!(leadAlertRule?.enabled) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
                   {!leadAlertRule && (
-                    <p className="text-xs text-slate-500">Toggle on to create a default alert rule for this account.</p>
+                    <p className="text-xs text-slate-500">
+                      Toggle on to create a {selectedAccount?.platform === 'yelp' ? 'Yelp' : 'Thumbtack'} alert rule using the platform default template.
+                    </p>
                   )}
                   {leadAlertRule && (
                     <div>
@@ -343,8 +639,8 @@ export function SettingsCommunication() {
                       <select
                         value={leadAlertRule.templateId || leadAlertRule.messageTemplate?.id || ''}
                         onChange={e => changeAlertTemplate(e.target.value)}
-                        disabled={savingAlert}
-                        className={`w-full rounded-xl p-3 text-sm font-medium disabled:opacity-50 transition-colors ${
+                        disabled={savingAlertRule}
+                        className={`w-full rounded-xl p-3 text-sm font-medium disabled:opacity-50 ${
                           templateMissing ? 'border-2 border-orange-300 bg-orange-50/40' : 'bg-white border border-slate-200'
                         }`}
                       >
@@ -358,9 +654,6 @@ export function SettingsCommunication() {
                           {leadAlertRule.messageTemplate.content}
                         </div>
                       )}
-                      <p className="mt-2 text-[10px] text-slate-400">
-                        Manage templates and content on the <Link to="/services" className="text-blue-600 hover:underline">Automation page</Link> or via the Templates section.
-                      </p>
                     </div>
                   )}
                 </div>
