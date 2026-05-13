@@ -2464,11 +2464,12 @@ export function Services() {
                     <h3 className="text-base font-bold text-slate-800">AI Strategy</h3>
                     <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 text-[10px] font-semibold uppercase tracking-wide">Applies everywhere</span>
                   </div>
-                  <p className="text-xs text-slate-500 mt-0.5">Single source of truth for how AI replies. Used by <span className="font-semibold text-slate-700">Instant Reply</span> (Auto mode), <span className="font-semibold text-slate-700">AI Conversation</span>, and <span className="font-semibold text-slate-700">Follow-ups</span>.</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Single source of truth for how AI-generated messages are written. Used by <span className="font-semibold text-slate-700">Instant Reply AI mode</span>, <span className="font-semibold text-slate-700">Follow-up AI mode</span>, and <span className="font-semibold text-slate-700">AI Conversation</span>.</p>
                 </div>
               </div>
               <div className="px-6 py-5 space-y-4">
                 <p className="text-[11px] text-slate-500">Pick the goal for each reply. Only <span className="font-semibold text-slate-700">Price</span> volunteers a price proactively — the other strategies stay focused on their own goal and only quote when the customer asks.</p>
+                <p className="text-[11px] text-slate-400 italic">AI Strategy controls how AI writes replies. Human takeover rules are configured in <span className="font-semibold text-slate-600">AI Conversation</span>.</p>
                 <div className="flex flex-wrap gap-1.5">
                   {STRATEGIES.map(s => (
                     <button key={s.key}
@@ -2851,7 +2852,7 @@ export function Services() {
                               <div className="font-semibold text-slate-700">
                                 AI Strategy: <span className="text-violet-700 capitalize">{fuStrategy}</span>
                               </div>
-                              <div className="text-[10px] text-slate-500">Used to generate the first reply. To lead with a price range, set strategy to <span className="font-semibold">Price</span> in the AI Strategy card at the top.</div>
+                              <div className="text-[10px] text-slate-500">Used only when <span className="font-semibold">Instant Reply Mode</span> is set to AI. Set globally in <span className="font-semibold">AI Strategy</span> above.</div>
                             </div>
                             <button
                               type="button"
@@ -3379,7 +3380,7 @@ export function Services() {
                         <div className="font-semibold text-slate-700">
                           AI Strategy: <span className="text-violet-700 capitalize">{fuStrategy}</span>
                         </div>
-                        <div className="text-[10px] text-slate-500">Used when AI generates follow-up messages. Set in <span className="font-semibold">AI Strategy</span> at the top of this page.</div>
+                        <div className="text-[10px] text-slate-500">Used only when <span className="font-semibold">Follow-up Mode</span> is set to AI. Set globally in <span className="font-semibold">AI Strategy</span> above.</div>
                       </div>
                       <button
                         type="button"
@@ -4152,7 +4153,7 @@ export function Services() {
                       {aiShowRules ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
                     </button>
                     {aiShowRules && (
-                      <div className="px-4 py-4 space-y-4 border-t border-slate-100">
+                      <div className="px-4 py-4 space-y-5 border-t border-slate-100">
                         <div>
                           <div className="text-[11px] font-semibold text-slate-600 mb-2">AI stops replying when:</div>
                           <div className="space-y-1.5">
@@ -4164,30 +4165,52 @@ export function Services() {
                               <input type="checkbox" checked={aiStopOnBooked} onChange={e => setAiStopOnBooked(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
                               Job is booked or confirmed
                             </label>
-                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                              <input type="checkbox" checked={aiStopOnPriceAgreed} onChange={e => setAiStopOnPriceAgreed(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
-                              Customer agrees on price — hand off to manager
-                            </label>
                             <div className="flex items-center gap-2 text-sm text-slate-500">
                               <span className="text-emerald-500 text-xs">&#10003;</span> Lead is done, scheduled, or archived
                             </div>
                           </div>
                         </div>
-                        <div>
-                          <div className="text-[11px] font-semibold text-slate-600 mb-1">Max AI replies per conversation</div>
-                          <p className="text-[10px] text-slate-400 mb-2">Limit how many times AI replies before handing off to a manager. 0 = unlimited.</p>
-                          <div className="flex gap-1.5">
-                            {[0, 3, 5, 10].map(n => (
-                              <button key={n} onClick={() => setAiMaxReplies(n)}
-                                className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border-2 transition-all ${aiMaxReplies === n ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-violet-200'}`}>
-                                {n === 0 ? 'Unlimited' : n}
-                              </button>
-                            ))}
+
+                        {/* ── Human Takeover (visual grouping only — no new settings) ──
+                            Groups the existing handoff-related controls so they read as one
+                            decision: when AI should pause and let a manager take the
+                            conversation. No data model changes; same checkbox keys, same
+                            firing logic. */}
+                        <div className="rounded-xl border border-violet-100 bg-violet-50/30 px-4 py-3 space-y-3">
+                          <div>
+                            <div className="text-[11px] font-bold text-violet-700 uppercase tracking-widest">Human Takeover</div>
+                            <p className="text-[10px] text-slate-500 mt-0.5">Control when AI should pause so a manager can take over.</p>
                           </div>
-                        </div>
-                        <div className="flex items-center gap-2 text-sm text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
-                          <span className="text-emerald-500 text-xs">&#10003;</span>
-                          Manager can always take over by sending a message manually
+                          <div className="space-y-1.5">
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={aiStopOnPriceAgreed} onChange={e => setAiStopOnPriceAgreed(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
+                              Customer agrees on price — hand off to manager
+                            </label>
+                            <div className="flex items-center gap-2 text-sm text-slate-500">
+                              <span className="text-emerald-500 text-xs">&#10003;</span>
+                              Manager can always take over by sending a message manually
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] font-semibold text-slate-600 mb-1">Max AI replies per conversation</div>
+                            <p className="text-[10px] text-slate-400 mb-2">Limit how many times AI replies before handing off to a manager. 0 = unlimited.</p>
+                            <div className="flex gap-1.5">
+                              {[0, 3, 5, 10].map(n => (
+                                <button key={n} onClick={() => setAiMaxReplies(n)}
+                                  className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border-2 transition-all ${aiMaxReplies === n ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-violet-200'}`}>
+                                  {n === 0 ? 'Unlimited' : n}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="rounded-lg bg-white/70 border border-violet-100 px-3 py-2 text-[11px] text-slate-600 leading-relaxed">
+                            <div className="font-semibold text-slate-700 mb-1">Notify manager when AI detects:</div>
+                            <ul className="list-disc list-inside space-y-0.5 text-slate-500">
+                              <li>customer is ready to book</li>
+                              <li>customer asks for a call or live contact</li>
+                            </ul>
+                            <p className="text-[10px] text-slate-400 mt-1.5">Fires automatically while AI Conversation is on. Gated by the <span className="font-semibold">Customer Reply Alerts</span> toggle in <span className="font-semibold">If the Lead Doesn't Respond</span>.</p>
+                          </div>
                         </div>
                       </div>
                     )}
