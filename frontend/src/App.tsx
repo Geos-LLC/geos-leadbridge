@@ -28,6 +28,7 @@ const Services = lazy(() => import('./pages/Services').then(m => ({ default: m.S
 const ApiTest = lazy(() => import('./pages/ApiTest').then(m => ({ default: m.ApiTest })));
 const Pricing = lazy(() => import('./pages/Pricing'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const SettingsCommunication = lazy(() => import('./pages/SettingsCommunication').then(m => ({ default: m.SettingsCommunication })));
 const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
 const AdminUserDetails = lazy(() => import('./pages/admin/AdminUserDetails'));
@@ -101,6 +102,7 @@ function App() {
               <Route path="/api-test" element={<ApiTest />} />
               <Route path="/pricing" element={<Pricing />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/settings/communication" element={<SettingsCommunication />} />
               <Route path="/invite/accept" element={<AcceptInvite />} />
               <Route path="/billing" element={<Navigate to="/settings" />} />
               <Route path="/admin" element={<AdminDashboard />} />
