@@ -438,69 +438,67 @@ export function Dashboard() {
             Updating...
           </div>
         )}
-        {/* Top summary, split by platform. Each platform that has at least
-            one connected account renders its own 4-KPI row. If only one
-            platform is connected, only that row shows. */}
+        {/* Top summary — one row of 4 metrics. Each cell shows both platform
+            values inline, separated by a vertical rule (e.g. 'Leads today: 3 | 0').
+            Only the platforms that have connected accounts contribute a value.
+            Lifetime metrics get an "all-time" delta hint so the timeframe is
+            still visible at a glance. */}
         {(() => {
-          const platformBlocks: Array<{ key: 'yelp' | 'thumbtack'; label: string; dot: string }> = [
-            { key: 'yelp',      label: 'Yelp',      dot: '🔴' },
-            { key: 'thumbtack', label: 'Thumbtack', dot: '🔵' },
+          const platforms: Array<{ key: 'yelp' | 'thumbtack'; dot: string }> = [
+            { key: 'yelp',      dot: '🔴' },
+            { key: 'thumbtack', dot: '🔵' },
           ];
-          const visible = platformBlocks.filter(b => stats[b.key].hasAccounts);
-          // If neither platform has accounts yet (fresh install), still show
-          // the Thumbtack row so the loading skeleton has something to render.
-          const rows = visible.length > 0 ? visible : [platformBlocks[1]];
-          return rows.map((p, i) => {
-            const s = stats[p.key];
-            return (
-              <div
-                key={p.key}
-                style={{
-                  background: 'var(--lb-surface)',
-                  border: '1px solid var(--lb-line)',
-                  borderRadius: 'var(--lb-radius-lg)',
-                  marginTop: i > 0 ? 12 : 0,
-                  overflow: 'hidden',
-                }}
-              >
-                <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--lb-line-soft)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontWeight: 600, fontFamily: 'var(--lb-font-mono)', color: 'var(--lb-ink-3)', textTransform: 'uppercase', letterSpacing: 0.08 }}>
-                  <span>{p.dot} {p.label}</span>
-                </div>
-                {/* Timeframe-honest labels: only "Leads today" is bounded to
-                    today. The other three are lifetime (from all-time analytics
-                    + notification-rule lifetime trigger counts), so suffix them
-                    with "(all-time)" to prevent the 0-leads-today / 34%-
-                    engagement confusion the platform-split surfaced. */}
-                <div className="grid grid-cols-2 md:grid-cols-4">
-                  <Kpi
-                    label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Leads today</span>}
-                    value={loading ? '—' : s.leadsToday}
-                    loading={loading}
-                  />
-                  <Kpi
-                    label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Send size={12} /> Auto replies</span>}
-                    value={loading ? '—' : s.automatedReplies}
-                    delta={loading ? undefined : 'all-time'}
-                    loading={loading}
-                  />
-                  <Kpi
-                    label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Clock size={12} /> Avg response</span>}
-                    value={loading ? '—' : s.avgResponseTime}
-                    delta={loading ? undefined : 'all-time'}
-                    loading={loading}
-                  />
-                  <Kpi
-                    label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Engagement</span>}
-                    value={loading ? '—' : `${s.conversionRate}%`}
-                    delta={loading ? undefined : 'all-time · of leads replied'}
-                    deltaDir="up"
-                    loading={loading}
-                    muted
-                  />
-                </div>
-              </div>
-            );
-          });
+          const visible = platforms.filter(p => stats[p.key].hasAccounts);
+          const active = visible.length > 0 ? visible : [platforms[1]];
+          const splitValue = (renderOne: (p: 'yelp' | 'thumbtack') => React.ReactNode): React.ReactNode => (
+            <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8 }}>
+              {active.map((p, i) => (
+                <span key={p.key} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8 }}>
+                  {i > 0 && <span aria-hidden style={{ display: 'inline-block', width: 1, alignSelf: 'stretch', background: 'var(--lb-line)' }} />}
+                  <span title={p.key === 'yelp' ? 'Yelp' : 'Thumbtack'} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
+                    <span style={{ fontSize: 10 }}>{p.dot}</span>
+                    {renderOne(p.key)}
+                  </span>
+                </span>
+              ))}
+            </span>
+          );
+          return (
+            <div
+              className="grid grid-cols-2 md:grid-cols-4"
+              style={{
+                background: 'var(--lb-surface)',
+                border: '1px solid var(--lb-line)',
+                borderRadius: 'var(--lb-radius-lg)',
+              }}
+            >
+              <Kpi
+                label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Leads today</span>}
+                value={loading ? '—' : splitValue(p => stats[p].leadsToday)}
+                loading={loading}
+              />
+              <Kpi
+                label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Send size={12} /> Auto replies</span>}
+                value={loading ? '—' : splitValue(p => stats[p].automatedReplies)}
+                delta={loading ? undefined : 'all-time'}
+                loading={loading}
+              />
+              <Kpi
+                label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Clock size={12} /> Avg response</span>}
+                value={loading ? '—' : splitValue(p => stats[p].avgResponseTime)}
+                delta={loading ? undefined : 'all-time'}
+                loading={loading}
+              />
+              <Kpi
+                label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Engagement</span>}
+                value={loading ? '—' : splitValue(p => `${stats[p].conversionRate}%`)}
+                delta={loading ? undefined : 'all-time · of leads replied'}
+                deltaDir="up"
+                loading={loading}
+                muted
+              />
+            </div>
+          );
         })()}
       </div>
 
@@ -700,33 +698,37 @@ export function Dashboard() {
             )}
           </Card>
 
-          {/* Weekly snapshot — split per platform. Same 4 KPIs (Leads /
-              Engagement / Lifetime replies / Messages sent) for each
-              platform that has connected accounts. */}
+          {/* Weekly snapshot — single 4-KPI row. Each cell shows both
+              platforms inline separated by a vertical rule (Yelp | Thumbtack). */}
           <Card title="7-day snapshot" padding={0}>
             {(() => {
-              const platformBlocks: Array<{ key: 'yelp' | 'thumbtack'; label: string; dot: string }> = [
-                { key: 'yelp',      label: 'Yelp',      dot: '🔴' },
-                { key: 'thumbtack', label: 'Thumbtack', dot: '🔵' },
+              const platforms: Array<{ key: 'yelp' | 'thumbtack'; dot: string }> = [
+                { key: 'yelp',      dot: '🔴' },
+                { key: 'thumbtack', dot: '🔵' },
               ];
-              const visible = platformBlocks.filter(b => stats[b.key].hasAccounts);
-              const rows = visible.length > 0 ? visible : [platformBlocks[1]];
-              return rows.map((p, i) => {
-                const s = stats[p.key];
-                return (
-                  <div key={p.key} style={{ borderTop: i > 0 ? '1px solid var(--lb-line-soft)' : 'none' }}>
-                    <div style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontWeight: 600, fontFamily: 'var(--lb-font-mono)', color: 'var(--lb-ink-3)', textTransform: 'uppercase', letterSpacing: 0.08, borderBottom: '1px solid var(--lb-line-soft)' }}>
-                      {p.dot} {p.label}
-                    </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4">
-                      <Kpi label="Leads" value={loading ? '—' : s.weeklyLeads} loading={loading} />
-                      <Kpi label="Engagement" value={loading ? '—' : `${s.engagement}%`} loading={loading} />
-                      <Kpi label="Lifetime replies" value={loading ? '—' : s.lifetimeReplies} loading={loading} />
-                      <Kpi label="Messages sent" value={loading ? '—' : s.messagesSent} loading={loading} muted />
-                    </div>
-                  </div>
-                );
-              });
+              const visible = platforms.filter(p => stats[p.key].hasAccounts);
+              const active = visible.length > 0 ? visible : [platforms[1]];
+              const splitValue = (renderOne: (p: 'yelp' | 'thumbtack') => React.ReactNode): React.ReactNode => (
+                <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8 }}>
+                  {active.map((p, i) => (
+                    <span key={p.key} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8 }}>
+                      {i > 0 && <span aria-hidden style={{ display: 'inline-block', width: 1, alignSelf: 'stretch', background: 'var(--lb-line)' }} />}
+                      <span title={p.key === 'yelp' ? 'Yelp' : 'Thumbtack'} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
+                        <span style={{ fontSize: 10 }}>{p.dot}</span>
+                        {renderOne(p.key)}
+                      </span>
+                    </span>
+                  ))}
+                </span>
+              );
+              return (
+                <div className="grid grid-cols-2 md:grid-cols-4">
+                  <Kpi label="Leads" value={loading ? '—' : splitValue(p => stats[p].weeklyLeads)} loading={loading} />
+                  <Kpi label="Engagement" value={loading ? '—' : splitValue(p => `${stats[p].engagement}%`)} loading={loading} />
+                  <Kpi label="Lifetime replies" value={loading ? '—' : splitValue(p => stats[p].lifetimeReplies)} loading={loading} />
+                  <Kpi label="Messages sent" value={loading ? '—' : splitValue(p => stats[p].messagesSent)} loading={loading} muted />
+                </div>
+              );
             })()}
             <div
               style={{
