@@ -2444,6 +2444,216 @@ export function Services() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-6">
+          {/* 0a. Alerts & Notifications — top-level grouping of every alert SMS path:
+               • New Lead Alerts        — fires when a new lead arrives (Respond tier)
+               • Reply Alerts           — fires when a quiet lead replies (Engage tier, gates re-engagement path server-side)
+               • AI Human Takeover      — fires when AI detects handoff intent during AI Conversation (Convert tier)
+               No new backend fields — each sub-block binds to its existing setting. */}
+          {selectedAccountId && (() => {
+            const toPhoneMissing = !!leadAlertRule && !alertToPhone;
+            const templateMissing = !!leadAlertRule && !leadAlertRule.templateId && !leadAlertRule.messageTemplate;
+            return (
+            <div className="bg-white rounded-3xl border border-amber-100 shadow-sm overflow-hidden">
+              <div className="flex items-center gap-3 px-6 py-4 bg-gradient-to-r from-amber-50/60 to-white border-b border-amber-100">
+                <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                  <Bell className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-base font-bold text-slate-800">Alerts & Notifications</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Choose which events should notify your team.</p>
+                </div>
+              </div>
+              <div className="px-6 py-5 space-y-4">
+
+                {/* ── New Lead Alerts ── */}
+                <div className="border border-slate-100 rounded-2xl overflow-hidden">
+                  <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50">
+                    <div className="flex items-center gap-3">
+                      <MessageSquare className="w-5 h-5 text-amber-600" />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-bold text-slate-800">New Lead Alerts</h4>
+                          <TierBadge tier="respond" />
+                        </div>
+                        <p className="text-xs text-slate-400">Get notified when a new lead arrives.</p>
+                      </div>
+                    </div>
+                    <label className="inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={leadAlertRule?.enabled ?? false}
+                        onChange={e => toggleLeadAlerts(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
+                    </label>
+                  </div>
+                  <div className={`px-5 py-4 space-y-4${!(leadAlertRule?.enabled) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+                    {leadAlertRule && (
+                      <div>
+                        <label className={`text-[11px] font-bold uppercase tracking-widest mb-2 block ${templateMissing ? 'text-orange-500' : 'text-slate-400'}`}>
+                          Template{templateMissing && <span className="ml-1 text-orange-500">*</span>}
+                        </label>
+                        <select
+                          value={leadAlertRule.templateId || leadAlertRule.messageTemplate?.id || ''}
+                          onChange={e => {
+                            if (e.target.value === '__create_new__') {
+                              setTemplateEditor({ mode: 'create', ruleId: leadAlertRule.id, content: '', type: 'alert' });
+                            } else {
+                              changeAlertRuleTemplate(leadAlertRule.id, e.target.value);
+                            }
+                          }}
+                          disabled={saving}
+                          className={`w-full rounded-xl p-3 text-sm font-medium disabled:opacity-50 transition-colors ${
+                            templateMissing ? 'border-2 border-orange-300 bg-orange-50/40 focus:ring-orange-200' : 'bg-white border border-slate-200'
+                          }`}
+                        >
+                          <option value="">Select template</option>
+                          {templates.map(t => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                          <option value="__create_new__">+ Create New Template</option>
+                        </select>
+                        {templateMissing && (
+                          <p className="mt-1.5 text-xs text-orange-600 font-medium flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3 shrink-0" />
+                            Select or create a template to define the SMS message content
+                          </p>
+                        )}
+                        {toPhoneMissing && (
+                          <p className="mt-1.5 text-xs text-orange-600 font-medium flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3 shrink-0" />
+                            Set a Business Phone in Communication Setup so alerts have a destination.
+                          </p>
+                        )}
+                        {leadAlertRule.messageTemplate && (
+                          <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
+                            {leadAlertRule.messageTemplate.content}
+                            <button
+                              onClick={() => setTemplateEditor({
+                                mode: 'service-edit',
+                                ruleId: leadAlertRule.id,
+                                templateId: leadAlertRule.messageTemplate!.id,
+                                templateName: templates.find(t => t.id === (leadAlertRule.templateId || leadAlertRule.messageTemplate?.id))?.name || 'template',
+                                content: leadAlertRule.messageTemplate!.content,
+                                type: 'alert',
+                              })}
+                              className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {leadAlertRule && saving && (
+                    <div className="px-5 py-2 text-[11px] text-slate-400 flex items-center gap-2">
+                      <Loader2 className="w-3 h-3 animate-spin" /> Saving…
+                    </div>
+                  )}
+                  {leadAlertRule && (
+                    <div className="px-5 py-3 border-t border-slate-100">
+                      {confirmDeleteAlert ? (
+                        <div className="bg-red-50 border border-red-100 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                          <div className="flex-1">
+                            <p className="text-xs font-bold text-red-700">Delete this rule?</p>
+                            <p className="text-[11px] text-red-500 mt-0.5">Toggle New Lead Alerts back on to create a fresh setup.</p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button onClick={() => setConfirmDeleteAlert(false)} className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-800 transition-colors">Cancel</button>
+                            <button onClick={deleteLeadAlertRule} disabled={deletingAlert} className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700 disabled:opacity-50 flex items-center gap-1">
+                              {deletingAlert ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />} Delete
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button onClick={() => setConfirmDeleteAlert(true)} className="text-xs font-semibold text-slate-400 hover:text-red-500 transition-colors flex items-center gap-1.5">
+                          <Trash2 className="w-3.5 h-3.5" /> Delete this rule and start over
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Reply Alerts ── */}
+                <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
+                  {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
+                  <div className={`flex items-center justify-between px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
+                    <div className="flex items-center gap-3">
+                      <Bell className="w-5 h-5 text-amber-500" />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-bold text-slate-800">Reply Alerts</h4>
+                          <TierBadge tier="engage" />
+                        </div>
+                        <p className="text-xs text-slate-400">Get notified when a quiet lead replies.</p>
+                      </div>
+                    </div>
+                    <label className={`inline-flex items-center ${canUseEngage ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                      <input type="checkbox" checked={reEngagementAlertOn} disabled={!canUseEngage} onChange={e => setReEngagementAlertOn(e.target.checked)} className="sr-only peer" />
+                      <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
+                    </label>
+                  </div>
+                  <div className={`px-5 py-4 space-y-3${!reEngagementAlertOn ? ' opacity-40 pointer-events-none select-none' : ''}`}>
+                    <p className="text-[11px] text-slate-500">Fires when a customer replies after follow-ups were sent.</p>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Reply Alert Template</label>
+                      <p className="text-[10px] text-slate-400 mb-2">
+                        Use {'{{lead.name}}'} for lead name and {'{{message}}'} for their reply text.
+                      </p>
+                      <textarea
+                        value={reEngagementTemplate}
+                        onChange={e => setReEngagementTemplate(e.target.value)}
+                        rows={2}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                        placeholder='Lead {{lead.name}} replied: "{{message}}"'
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── AI Human Takeover Alerts ── */}
+                <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
+                  {!canUseConvert && <LockedFeatureOverlay ctaLabel="Upgrade to Convert · $139/mo" />}
+                  <div className={`px-5 py-4 bg-slate-50/50${!canUseConvert ? ' opacity-60' : ''}`}>
+                    <div className="flex items-center gap-3">
+                      <Zap className="w-5 h-5 text-violet-600" />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-bold text-slate-800">AI Human Takeover Alerts</h4>
+                          <TierBadge tier="convert" />
+                        </div>
+                        <p className="text-xs text-slate-400">Get notified when AI detects a manager should take over.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`px-5 py-4 space-y-3${!canUseConvert ? ' opacity-60 pointer-events-none' : ''}`}>
+                    <p className="text-[11px] text-slate-500">Fires during AI Conversation when the customer is ready to book, wants a call, or needs a human.</p>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Handoff Alert Template</label>
+                      <p className="text-[10px] text-slate-400 mb-2">
+                        Use {'{{lead.name}}'}, {'{{message}}'}, and {'{{intent}}'} ("ready to book" or "wants live call").
+                      </p>
+                      <textarea
+                        value={handoffAlertTemplate}
+                        onChange={e => setHandoffAlertTemplate(e.target.value)}
+                        rows={2}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-400"
+                        placeholder='Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"'
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      Auto-fires while AI Conversation is on. Also requires <span className="font-semibold text-slate-600">Reply Alerts</span> above to be enabled — the same backend toggle gates both paths.
+                    </p>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+            );
+          })()}
+
           {/* 0. AI Strategy — single source of truth used by Instant Reply (Auto mode), AI Conversation, and Follow-ups */}
           {selectedAccountId && (() => {
             const STRATEGIES: Array<{ key: 'auto' | 'hybrid' | 'price' | 'qualify' | 'convert' | 'phone'; emoji: string; label: string; desc: string }> = [
@@ -2558,39 +2768,33 @@ export function Services() {
               autoReplyUseAi,
               loading,
             });
-            const toPhoneMissing = !!leadAlertRule && !alertToPhone;
-            const templateMissing = !!leadAlertRule && !leadAlertRule.templateId && !leadAlertRule.messageTemplate;
-            const leadAlertsIncomplete = toPhoneMissing || templateMissing;
+            // Lead-alert completeness moved with the alert UI to top-level
+            // "Alerts & Notifications" card. The When-a-Lead-Arrives card now
+            // only gates on Instant Reply state.
             return (
           <ServiceCard
             icon={<Bell className="w-7 h-7" />}
             title="When a Lead Arrives"
             description="Choose what happens immediately when a new lead comes in."
-            enabled={autoReplyEnabled || (leadAlertRule?.enabled ?? false)}
+            enabled={autoReplyEnabled}
             onToggle={(on) => {
               if (on && noPhone) { setError('Set up a LeadBridge Number in Settings first.'); navigate('/settings'); return; }
-              // Optimistic: flip sub-switches immediately so the main toggle switches right away
               if (on) {
                 if (!autoReplyEnabled) setAutoReplyRules(prev => prev.length ? prev.map(r => ({ ...r, enabled: true })) : [{ id: '_pending', enabled: true } as any]);
-                if (!leadAlertRule?.enabled) setLeadAlertRule(leadAlertRule ? { ...leadAlertRule, enabled: true } : { id: '_pending', enabled: true } as any);
               } else {
                 setAutoReplyRules(prev => prev.map(r => ({ ...r, enabled: false })));
-                if (leadAlertRule) setLeadAlertRule({ ...leadAlertRule, enabled: false });
               }
               if (!expandedCard || expandedCard !== 'notifications') setExpandedCard('notifications');
-              // Persist to backend
               if (on) {
                 if (!autoReplyEnabled) toggleAutoReply(true);
-                if (!leadAlertRule?.enabled) toggleLeadAlerts(true);
               } else {
                 if (autoReplyEnabled) toggleAutoReply(false);
-                if (leadAlertRule?.enabled) toggleLeadAlerts(false);
               }
             }}
             expanded={expandedCard === 'notifications'}
             onExpand={() => toggleExpand('notifications')}
-            setupRequired={noPhone || leadAlertsIncomplete}
-            warningText={noPhone ? 'LeadBridge number required' : leadAlertsIncomplete ? (toPhoneMissing ? 'Phone number required' : 'Template required') : undefined}
+            setupRequired={noPhone}
+            warningText={noPhone ? 'LeadBridge number required' : undefined}
             statusText={undefined}
             iconBgColor="bg-amber-50"
             iconTextColor="text-amber-600"
@@ -2927,118 +3131,7 @@ export function Services() {
                 </div>
               </div>
 
-              {/* ── Lead Alerts sub-section ── */}
-              <div className="border border-slate-100 rounded-2xl overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 bg-slate-50/50">
-                  <div className="flex items-center gap-3">
-                    <MessageSquare className="w-5 h-5 text-amber-600" />
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-bold text-slate-800">Alerts</h4>
-                        <TierBadge tier="respond" />
-                      </div>
-                      <p className="text-xs text-slate-400">Get notified when a new lead arrives.</p>
-                    </div>
-                  </div>
-                  <label className="inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={leadAlertRule?.enabled ?? false}
-                      onChange={e => toggleLeadAlerts(e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
-                  </label>
-                </div>
-                <div className={`px-5 py-4 space-y-4${!(leadAlertRule?.enabled) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
-                  {/* Template */}
-                  {leadAlertRule && (
-                    <>
-                      <div>
-                        <label className={`text-[11px] font-bold uppercase tracking-widest mb-2 block ${templateMissing ? 'text-orange-500' : 'text-slate-400'}`}>
-                          Template{templateMissing && <span className="ml-1 text-orange-500">*</span>}
-                        </label>
-                        <select
-                          value={leadAlertRule.templateId || leadAlertRule.messageTemplate?.id || ''}
-                          onChange={e => {
-                            if (e.target.value === '__create_new__') {
-                              setTemplateEditor({ mode: 'create', ruleId: leadAlertRule.id, content: '', type: 'alert' });
-                            } else {
-                              changeAlertRuleTemplate(leadAlertRule.id, e.target.value);
-                            }
-                          }}
-                          disabled={saving}
-                          className={`w-full rounded-xl p-3 text-sm font-medium disabled:opacity-50 transition-colors ${
-                            templateMissing ? 'border-2 border-orange-300 bg-orange-50/40 focus:ring-orange-200' : 'bg-white border border-slate-200'
-                          }`}
-                        >
-                          <option value="">Select template</option>
-                          {templates.map(t => (
-                            <option key={t.id} value={t.id}>{t.name}</option>
-                          ))}
-                          <option value="__create_new__">+ Create New Template</option>
-                        </select>
-                        {templateMissing && (
-                          <p className="mt-1.5 text-xs text-orange-600 font-medium flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3 shrink-0" />
-                            Select or create a template to define the SMS message content
-                          </p>
-                        )}
-                        {leadAlertRule.messageTemplate && (
-                          <div className="mt-4 bg-white p-5 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed relative group">
-                            {leadAlertRule.messageTemplate.content}
-                            <button
-                              onClick={() => setTemplateEditor({
-                                mode: 'service-edit',
-                                ruleId: leadAlertRule.id,
-                                templateId: leadAlertRule.messageTemplate!.id,
-                                templateName: templates.find(t => t.id === (leadAlertRule.templateId || leadAlertRule.messageTemplate?.id))?.name || 'template',
-                                content: leadAlertRule.messageTemplate!.content,
-                                type: 'alert',
-                              })}
-                              className="absolute top-3 right-3 p-2 bg-slate-50 rounded-lg text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
-                            >
-                              <Pencil className="w-4 h-4" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-
-                    </>
-                  )}
-                </div>
-
-                {/* Auto-saves on change (debounced ~600ms). Saving indicator shown inline if needed. */}
-                {leadAlertRule && saving && (
-                  <div className="px-5 py-2 text-[11px] text-slate-400 flex items-center gap-2">
-                    <Loader2 className="w-3 h-3 animate-spin" /> Saving…
-                  </div>
-                )}
-
-                {/* Delete rule */}
-                {leadAlertRule && (
-                  <div className="px-5 py-3 border-t border-slate-100">
-                    {confirmDeleteAlert ? (
-                      <div className="bg-red-50 border border-red-100 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                        <div className="flex-1">
-                          <p className="text-xs font-bold text-red-700">Delete this rule?</p>
-                          <p className="text-[11px] text-red-500 mt-0.5">Toggle Lead Alerts back on to create a fresh setup.</p>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button onClick={() => setConfirmDeleteAlert(false)} className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-800 transition-colors">Cancel</button>
-                          <button onClick={deleteLeadAlertRule} disabled={deletingAlert} className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700 disabled:opacity-50 flex items-center gap-1">
-                            {deletingAlert ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />} Delete
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <button onClick={() => setConfirmDeleteAlert(true)} className="text-xs font-semibold text-slate-400 hover:text-red-500 transition-colors flex items-center gap-1.5">
-                        <Trash2 className="w-3.5 h-3.5" /> Delete this rule and start over
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+              {/* New Lead Alerts moved to top-level "Alerts & Notifications" card above. */}
 
               {/* ── Contact Immediately ── */}
               <div className="px-1 pt-2">
@@ -3318,12 +3411,15 @@ export function Services() {
           })()}
 
 
-          {/* 3. If the Lead Doesn't Respond — Follow-ups + Re-engagement Alerts */}
+          {/* 3. Follow-ups (was "If the Lead Doesn't Respond"). Flattened: the
+                 outer card now carries the tier badge + the Engage-gated toggle;
+                 the inner duplicate sub-card header/badge/toggle was removed. */}
           {selectedAccountId && (
             <ServiceCard
               icon={<Clock className="w-7 h-7" />}
-              title="If the Lead Doesn't Respond"
-              description="Control what happens after the first reply if the lead goes quiet."
+              title="Follow-ups"
+              titleBadge={<TierBadge tier="engage" />}
+              description="Automatically follow up with leads who stop responding."
               enabled={fuMode !== 'off'}
               onToggle={(on) => {
                 const next = on ? 'suggest' : 'off';
@@ -3339,27 +3435,13 @@ export function Services() {
               iconTextColor="text-red-600"
             >
 
-              {/* ── Follow-ups sub-section ── */}
-              <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
+              {/* Follow-up controls — flattened from the old inner sub-card.
+                  Tier gating moved to the outer ServiceCard's titleBadge; the
+                  Engage paywall overlay still wraps the controls below. */}
+              <div className="relative">
                 {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
-                <div className={`flex items-center justify-between px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
-                  <div className="flex items-center gap-3">
-                    <Clock className="w-5 h-5 text-red-600" />
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-bold text-slate-800">Follow-ups</h4>
-                        <TierBadge tier="engage" />
-                      </div>
-                      <p className="text-xs text-slate-400">Automated messages for leads who don't respond</p>
-                    </div>
-                  </div>
-                  <label className={`inline-flex items-center ${canUseEngage ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                    <input type="checkbox" checked={fuMode !== 'off'} disabled={!canUseEngage} onChange={e => setFuMode(e.target.checked ? 'suggest' : 'off')} className="sr-only peer" />
-                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
-                  </label>
-                </div>
                 {fuMode !== 'off' && (
-                  <div className="px-5 py-4 space-y-4">
+                  <div className={`space-y-4${!canUseEngage ? ' opacity-60 pointer-events-none' : ''}`}>
                     <div>
                       <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Mode</label>
                       <p className="text-[10px] text-slate-400 mb-2">Choose how follow-ups are delivered.</p>
@@ -3714,29 +3796,10 @@ export function Services() {
                       </div>
                     </label>
 
-                    {/* Urgent request handling — pulled out of the old "Smart
-                        Follow-up Rules" collapsible. Lifecycle stop checkboxes
-                        (opt-out, booked, archived) were removed from the UI per
-                        spec — they're shared automation rules, not follow-up-
-                        only. State (fuStopOnOptOut/Booked) still saves with its
-                        current value so no behavior changes. */}
-                    <div className="border border-slate-200 rounded-xl px-4 py-3 space-y-2">
-                      <div className="text-[11px] font-semibold text-slate-600">Urgent request handling</div>
-                      <p className="text-[10px] text-slate-400">How quickly can you serve customers who need service urgently?</p>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {([
-                          { value: 'same_day' as const, label: 'Same day', desc: 'Can serve today' },
-                          { value: '24h' as const, label: 'Within 24h', desc: 'Next business day' },
-                          { value: '48h' as const, label: 'Within 48h', desc: '1-2 days out' },
-                          { value: 'none' as const, label: 'Not available', desc: 'By appointment only' },
-                        ]).map(opt => (
-                          <button key={opt.value} onClick={() => setFuUrgentCapability(opt.value)}
-                            className={`py-2 px-2 rounded-lg text-[11px] font-semibold border-2 transition-all text-left ${fuUrgentCapability === opt.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-blue-200'}`}>
-                            {opt.label}<span className="block text-[9px] font-normal opacity-70">{opt.desc}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                    {/* Urgent request handling block removed — was not in the
+                        spec's "show follow-up controls directly" list. State
+                        (fuUrgentCapability) still saves its current value so
+                        backend behavior is unchanged. */}
                   </div>
                 )}
               </div>
@@ -3922,63 +3985,7 @@ export function Services() {
               </div>
               )}
 
-              {/* ── When the customer replies ──
-                  Single sub-section unifying the two reply behaviors:
-                    • Stop current follow-up sequence (always-on internal rule
-                      backed by hardcoded `fuStopOnReply = true`)
-                    • Notify manager (existing `reEngagementAlertEnabled` field —
-                      keeping the key for back-compat; UI label is "Reply Alerts")
-                  The same backend field still gates the AI-handoff path
-                  server-side (auto-gated on aiConversationEnabled); that flow
-                  is exposed in AI Conversation → Human Takeover. */}
-              <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
-                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
-                <div className={`px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
-                  <div className="flex items-center gap-3 mb-2">
-                    <Bell className="w-5 h-5 text-amber-500" />
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-bold text-slate-800">When the customer replies</h4>
-                        <TierBadge tier="engage" />
-                      </div>
-                      <p className="text-xs text-slate-400">A customer reply pauses the current follow-up sequence. Optionally notify your team so someone can jump back into the conversation quickly.</p>
-                    </div>
-                  </div>
-                </div>
-                <div className={`px-5 py-4 space-y-3${!canUseEngage ? ' opacity-60 pointer-events-none' : ''}`}>
-                  <div className="text-[11px] font-semibold text-slate-600 mb-1">When a lead replies after follow-ups:</div>
-                  <div className="space-y-1.5">
-                    <label className="flex items-center gap-2 text-sm text-slate-600 cursor-not-allowed" title="Internal rule — always on. A customer reply pauses the active follow-up sequence.">
-                      <input type="checkbox" checked readOnly disabled className="accent-blue-600 w-3.5 h-3.5" />
-                      Stop current follow-up sequence
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                      <input type="checkbox" checked={reEngagementAlertOn} disabled={!canUseEngage}
-                        onChange={e => setReEngagementAlertOn(e.target.checked)}
-                        className="accent-blue-600 w-3.5 h-3.5" />
-                      <span>Notify manager <span className="text-[11px] font-semibold text-slate-400">(Reply Alerts)</span></span>
-                    </label>
-                  </div>
-                  {reEngagementAlertOn && (
-                    <div className="pt-2">
-                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Reply Alert Template</label>
-                      <p className="text-[10px] text-slate-400 mb-2">
-                        Use {'{{lead.name}}'} for lead name and {'{{message}}'} for their reply text.
-                      </p>
-                      <textarea
-                        value={reEngagementTemplate}
-                        onChange={e => setReEngagementTemplate(e.target.value)}
-                        rows={2}
-                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
-                        placeholder='Lead {{lead.name}} replied: "{{message}}"'
-                      />
-                    </div>
-                  )}
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Fires when a previously silent lead replies after follow-ups went out. AI handoff alerts (ready-to-book / wants-a-call) are configured in <span className="font-semibold text-slate-600">AI Conversation → Human Takeover</span>.
-                  </p>
-                </div>
-              </div>
+              {/* Reply Alerts moved to top-level "Alerts & Notifications" card. */}
 
               {/* Settings auto-save on change (debounced ~600ms). No Save button needed. */}
             </ServiceCard>
@@ -4183,19 +4190,7 @@ export function Services() {
                               Customer asks for call/live contact
                             </label>
                           </div>
-                          <div>
-                            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Handoff Alert Template</label>
-                            <p className="text-[10px] text-slate-400 mb-2">
-                              Use {'{{lead.name}}'}, {'{{message}}'}, and {'{{intent}}'} ("ready to book" or "wants live call").
-                            </p>
-                            <textarea
-                              value={handoffAlertTemplate}
-                              onChange={e => setHandoffAlertTemplate(e.target.value)}
-                              rows={2}
-                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-400"
-                              placeholder='Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"'
-                            />
-                          </div>
+                          {/* Handoff Alert Template moved to top-level "Alerts & Notifications" → AI Human Takeover Alerts. */}
                           <div>
                             <div className="text-[11px] font-semibold text-slate-600 mb-1">Max AI replies per conversation</div>
                             <p className="text-[10px] text-slate-400 mb-2">Limit how many times AI replies before handing off to a manager. 0 = unlimited.</p>
