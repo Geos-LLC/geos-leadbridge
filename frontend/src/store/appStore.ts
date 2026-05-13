@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { Lead, Business, Platform, SavedAccount, AccountDiagnostics } from '../types';
 import { thumbtackApi, platformsApi, analyticsApi, monitoringApi, type AnalyticsData } from '../services/api';
 
-export interface DashboardStats {
+export interface PlatformDashboardStats {
   leadsToday: number;
   automatedReplies: number;
   avgResponseTime: string;
@@ -12,6 +12,18 @@ export interface DashboardStats {
   engagement: number;
   lifetimeReplies: number;
   messagesSent: number;
+  hasAccounts: boolean;
+}
+
+/**
+ * Per-platform dashboard stats. The Dashboard renders Yelp and Thumbtack
+ * side-by-side, with each platform contributing its own 7-day snapshot and
+ * top-line summary. Platforms with no connected accounts render with
+ * hasAccounts=false so the UI can hide their column.
+ */
+export interface DashboardStats {
+  yelp: PlatformDashboardStats;
+  thumbtack: PlatformDashboardStats;
 }
 
 interface AppState {

@@ -20,18 +20,26 @@ export function Dashboard() {
   const { user, impersonatingUser } = useAuthStore();
   const { savedAccounts, setSavedAccounts, dashboardStats: cachedStats, setDashboardStats, accountDiagnostics, loadDiagnostics, systemHealth, systemHealthLoading } = useAppStore();
 
-  const [stats, setStats] = useState<DashboardStats>(
-    cachedStats ?? {
-      leadsToday: 0,
-      automatedReplies: 0,
-      avgResponseTime: '—',
-      conversionRate: 0,
-      weeklyLeads: 0,
-      engagement: 0,
-      lifetimeReplies: 0,
-      messagesSent: 0,
-    }
-  );
+  // Per-platform empty stats. The Dashboard splits Yelp and Thumbtack into
+  // two independent summaries, each with its own top KPIs + 7-day snapshot.
+  const EMPTY_PLATFORM_STATS = {
+    leadsToday: 0,
+    automatedReplies: 0,
+    avgResponseTime: '—',
+    conversionRate: 0,
+    weeklyLeads: 0,
+    engagement: 0,
+    lifetimeReplies: 0,
+    messagesSent: 0,
+    hasAccounts: false,
+  };
+  // Tolerate older cached payloads that pre-date the split (flat shape) so a
+  // mid-deploy refresh doesn't crash — fall through to the empty per-platform
+  // shape and let loadDashboardStats re-populate on next tick.
+  const seededStats: DashboardStats = (cachedStats && typeof cachedStats === 'object' && (cachedStats as any).yelp && (cachedStats as any).thumbtack)
+    ? (cachedStats as DashboardStats)
+    : { yelp: { ...EMPTY_PLATFORM_STATS }, thumbtack: { ...EMPTY_PLATFORM_STATS } };
+  const [stats, setStats] = useState<DashboardStats>(seededStats);
   const [loading, setLoading] = useState(!cachedStats);
   const [refreshing, setRefreshing] = useState(false);
   const [connectionModalOpen, setConnectionModalOpen] = useState(false);
@@ -153,56 +161,76 @@ export function Dashboard() {
       const sevenDaysAgo = new Date(now);
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-      const [todayData, weekData, allTimeData, allRules] = await Promise.all([
-        analyticsApi.getBasicAnalytics({
-          startDate: todayStart.toISOString(),
-          endDate: now.toISOString(),
-        }).catch(() => ({ data: { totalLeads: 0 } })),
-        analyticsApi.getBasicAnalytics({
-          startDate: sevenDaysAgo.toISOString(),
-          endDate: now.toISOString(),
-        }).catch(() => ({ data: { totalLeads: 0, customerEngagement: { engagementRate: 0 } } })),
-        analyticsApi.getAnalytics({}).catch(() => ({
-          data: {
-            totalLeads: 0,
-            connectionTime: { averageMinutes: 0 },
-            customerEngagement: { engagementRate: 0 },
-            messagesPerLead: { average: 0 },
-          },
-        })),
+      // Six platform-filtered fetches in parallel (today / 7d / all-time × yelp / thumbtack).
+      // analyticsApi.getBasicAnalytics + getAnalytics already accept `platform`,
+      // so this is a pure-frontend split — no backend changes.
+      const platforms = ['yelp', 'thumbtack'] as const;
+      const safeBasic = { data: { totalLeads: 0, customerEngagement: { engagementRate: 0 } } } as any;
+      const safeFull = { data: { totalLeads: 0, connectionTime: { averageMinutes: 0 }, customerEngagement: { engagementRate: 0 }, messagesPerLead: { average: 0 } } } as any;
+      const [todayYelp, todayTT, weekYelp, weekTT, allYelp, allTT, allRules] = await Promise.all([
+        analyticsApi.getBasicAnalytics({ platform: platforms[0], startDate: todayStart.toISOString(), endDate: now.toISOString() }).catch(() => safeBasic),
+        analyticsApi.getBasicAnalytics({ platform: platforms[1], startDate: todayStart.toISOString(), endDate: now.toISOString() }).catch(() => safeBasic),
+        analyticsApi.getBasicAnalytics({ platform: platforms[0], startDate: sevenDaysAgo.toISOString(), endDate: now.toISOString() }).catch(() => safeBasic),
+        analyticsApi.getBasicAnalytics({ platform: platforms[1], startDate: sevenDaysAgo.toISOString(), endDate: now.toISOString() }).catch(() => safeBasic),
+        analyticsApi.getAnalytics({ platform: platforms[0] }).catch(() => safeFull),
+        analyticsApi.getAnalytics({ platform: platforms[1] }).catch(() => safeFull),
         notificationsApi.getAllRules().catch(() => ({ success: false, count: 0, rules: [] as any[] })),
       ]);
 
       const formatDuration = (minutes: number): string => {
         if (!minutes || minutes <= 0) return '—';
-        if (minutes < 1) {
-          const seconds = Math.round(minutes * 60);
-          return `${seconds}s`;
-        }
-        if (minutes < 60) {
-          return `${Math.round(minutes)}m`;
-        }
+        if (minutes < 1) return `${Math.round(minutes * 60)}s`;
+        if (minutes < 60) return `${Math.round(minutes)}m`;
         const hours = Math.floor(minutes / 60);
         const mins = Math.round(minutes % 60);
         return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
       };
 
-      const rules = allRules.rules || [];
-      const autoReplyRules = rules.filter((r: any) => r.sendToCustomer === true);
-      const alertRules = rules.filter((r: any) => !r.sendToCustomer);
-      const totalAutoReplies = autoReplyRules.reduce((sum: number, r: any) => sum + (r.triggerCount || 0), 0);
-      const totalAlertsSent = alertRules.reduce((sum: number, r: any) => sum + (r.triggerCount || 0), 0);
-      const totalMessagesSent = totalAutoReplies + totalAlertsSent;
+      // Build account-id → platform lookup so we can split notification-rule
+      // trigger counts (auto-reply / alert) by the originating account's
+      // platform. Rules without a savedAccountId fall back to neither bucket.
+      const accountPlatform: Record<string, 'yelp' | 'thumbtack'> = {};
+      for (const a of savedAccounts) {
+        if (a.platform === 'yelp' || a.platform === 'thumbtack') {
+          accountPlatform[a.id] = a.platform;
+        }
+      }
+      const rules = (allRules as any).rules || [];
+      const replyCount: Record<'yelp' | 'thumbtack', number> = { yelp: 0, thumbtack: 0 };
+      const alertCount: Record<'yelp' | 'thumbtack', number> = { yelp: 0, thumbtack: 0 };
+      for (const r of rules) {
+        const p = accountPlatform[r.savedAccountId];
+        if (!p) continue;
+        if (r.sendToCustomer === true) replyCount[p] += r.triggerCount || 0;
+        else alertCount[p] += r.triggerCount || 0;
+      }
 
-      const freshStats = {
-        leadsToday: todayData.data.totalLeads || 0,
-        automatedReplies: totalAutoReplies,
-        avgResponseTime: formatDuration(allTimeData.data.connectionTime?.averageMinutes || 0),
-        conversionRate: Math.round(allTimeData.data.customerEngagement?.engagementRate || 0),
-        weeklyLeads: weekData.data.totalLeads || 0,
-        engagement: Math.round(weekData.data.customerEngagement?.engagementRate || 0),
-        lifetimeReplies: totalAutoReplies,
-        messagesSent: totalMessagesSent,
+      const yelpHas = savedAccounts.some(a => a.platform === 'yelp');
+      const ttHas = savedAccounts.some(a => a.platform === 'thumbtack');
+
+      const freshStats: DashboardStats = {
+        yelp: {
+          leadsToday: todayYelp.data.totalLeads || 0,
+          automatedReplies: replyCount.yelp,
+          avgResponseTime: formatDuration(allYelp.data.connectionTime?.averageMinutes || 0),
+          conversionRate: Math.round(allYelp.data.customerEngagement?.engagementRate || 0),
+          weeklyLeads: weekYelp.data.totalLeads || 0,
+          engagement: Math.round(weekYelp.data.customerEngagement?.engagementRate || 0),
+          lifetimeReplies: replyCount.yelp,
+          messagesSent: replyCount.yelp + alertCount.yelp,
+          hasAccounts: yelpHas,
+        },
+        thumbtack: {
+          leadsToday: todayTT.data.totalLeads || 0,
+          automatedReplies: replyCount.thumbtack,
+          avgResponseTime: formatDuration(allTT.data.connectionTime?.averageMinutes || 0),
+          conversionRate: Math.round(allTT.data.customerEngagement?.engagementRate || 0),
+          weeklyLeads: weekTT.data.totalLeads || 0,
+          engagement: Math.round(weekTT.data.customerEngagement?.engagementRate || 0),
+          lifetimeReplies: replyCount.thumbtack,
+          messagesSent: replyCount.thumbtack + alertCount.thumbtack,
+          hasAccounts: ttHas,
+        },
       };
 
       setStats(freshStats);
@@ -386,7 +414,7 @@ export function Dashboard() {
           Overview
         </h2>
         <p style={{ margin: 0, fontSize: 13, color: 'var(--lb-ink-5)' }}>
-          Leadbridge captured {stats.leadsToday} new lead{stats.leadsToday !== 1 ? 's' : ''} today.
+          Leadbridge captured {stats.yelp.leadsToday + stats.thumbtack.leadsToday} new lead{(stats.yelp.leadsToday + stats.thumbtack.leadsToday) !== 1 ? 's' : ''} today.
         </p>
       </div>
 
@@ -410,38 +438,63 @@ export function Dashboard() {
             Updating...
           </div>
         )}
-        <div
-          className="grid grid-cols-2 md:grid-cols-4"
-          style={{
-            background: 'var(--lb-surface)',
-            border: '1px solid var(--lb-line)',
-            borderRadius: 'var(--lb-radius-lg)',
-          }}
-        >
-          <Kpi
-            label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Leads today</span>}
-            value={loading ? '—' : stats.leadsToday}
-            loading={loading}
-          />
-          <Kpi
-            label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Send size={12} /> Auto replies</span>}
-            value={loading ? '—' : stats.automatedReplies}
-            loading={loading}
-          />
-          <Kpi
-            label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Clock size={12} /> Avg response</span>}
-            value={loading ? '—' : stats.avgResponseTime}
-            loading={loading}
-          />
-          <Kpi
-            label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Engagement</span>}
-            value={loading ? '—' : `${stats.conversionRate}%`}
-            delta={loading ? undefined : 'of leads replied'}
-            deltaDir="up"
-            loading={loading}
-            muted
-          />
-        </div>
+        {/* Top summary, split by platform. Each platform that has at least
+            one connected account renders its own 4-KPI row. If only one
+            platform is connected, only that row shows. */}
+        {(() => {
+          const platformBlocks: Array<{ key: 'yelp' | 'thumbtack'; label: string; dot: string }> = [
+            { key: 'yelp',      label: 'Yelp',      dot: '🔴' },
+            { key: 'thumbtack', label: 'Thumbtack', dot: '🔵' },
+          ];
+          const visible = platformBlocks.filter(b => stats[b.key].hasAccounts);
+          // If neither platform has accounts yet (fresh install), still show
+          // the Thumbtack row so the loading skeleton has something to render.
+          const rows = visible.length > 0 ? visible : [platformBlocks[1]];
+          return rows.map((p, i) => {
+            const s = stats[p.key];
+            return (
+              <div
+                key={p.key}
+                style={{
+                  background: 'var(--lb-surface)',
+                  border: '1px solid var(--lb-line)',
+                  borderRadius: 'var(--lb-radius-lg)',
+                  marginTop: i > 0 ? 12 : 0,
+                  overflow: 'hidden',
+                }}
+              >
+                <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--lb-line-soft)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontWeight: 600, fontFamily: 'var(--lb-font-mono)', color: 'var(--lb-ink-3)', textTransform: 'uppercase', letterSpacing: 0.08 }}>
+                  <span>{p.dot} {p.label}</span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4">
+                  <Kpi
+                    label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Users size={12} /> Leads today</span>}
+                    value={loading ? '—' : s.leadsToday}
+                    loading={loading}
+                  />
+                  <Kpi
+                    label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Send size={12} /> Auto replies</span>}
+                    value={loading ? '—' : s.automatedReplies}
+                    loading={loading}
+                  />
+                  <Kpi
+                    label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Clock size={12} /> Avg response</span>}
+                    value={loading ? '—' : s.avgResponseTime}
+                    loading={loading}
+                  />
+                  <Kpi
+                    label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={12} /> Engagement</span>}
+                    value={loading ? '—' : `${s.conversionRate}%`}
+                    delta={loading ? undefined : 'of leads replied'}
+                    deltaDir="up"
+                    loading={loading}
+                    muted
+                  />
+                </div>
+              </div>
+            );
+          });
+        })()}
       </div>
 
       {/* 2-col main grid */}
@@ -640,14 +693,34 @@ export function Dashboard() {
             )}
           </Card>
 
-          {/* Weekly snapshot */}
+          {/* Weekly snapshot — split per platform. Same 4 KPIs (Leads /
+              Engagement / Lifetime replies / Messages sent) for each
+              platform that has connected accounts. */}
           <Card title="7-day snapshot" padding={0}>
-            <div className="grid grid-cols-2 md:grid-cols-4">
-              <Kpi label="Leads" value={loading ? '—' : stats.weeklyLeads} loading={loading} />
-              <Kpi label="Engagement" value={loading ? '—' : `${stats.engagement}%`} loading={loading} />
-              <Kpi label="Lifetime replies" value={loading ? '—' : stats.lifetimeReplies} loading={loading} />
-              <Kpi label="Messages sent" value={loading ? '—' : stats.messagesSent} loading={loading} muted />
-            </div>
+            {(() => {
+              const platformBlocks: Array<{ key: 'yelp' | 'thumbtack'; label: string; dot: string }> = [
+                { key: 'yelp',      label: 'Yelp',      dot: '🔴' },
+                { key: 'thumbtack', label: 'Thumbtack', dot: '🔵' },
+              ];
+              const visible = platformBlocks.filter(b => stats[b.key].hasAccounts);
+              const rows = visible.length > 0 ? visible : [platformBlocks[1]];
+              return rows.map((p, i) => {
+                const s = stats[p.key];
+                return (
+                  <div key={p.key} style={{ borderTop: i > 0 ? '1px solid var(--lb-line-soft)' : 'none' }}>
+                    <div style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontWeight: 600, fontFamily: 'var(--lb-font-mono)', color: 'var(--lb-ink-3)', textTransform: 'uppercase', letterSpacing: 0.08, borderBottom: '1px solid var(--lb-line-soft)' }}>
+                      {p.dot} {p.label}
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4">
+                      <Kpi label="Leads" value={loading ? '—' : s.weeklyLeads} loading={loading} />
+                      <Kpi label="Engagement" value={loading ? '—' : `${s.engagement}%`} loading={loading} />
+                      <Kpi label="Lifetime replies" value={loading ? '—' : s.lifetimeReplies} loading={loading} />
+                      <Kpi label="Messages sent" value={loading ? '—' : s.messagesSent} loading={loading} muted />
+                    </div>
+                  </div>
+                );
+              });
+            })()}
             <div
               style={{
                 padding: '10px 14px',
