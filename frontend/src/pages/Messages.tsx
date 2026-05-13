@@ -1867,40 +1867,67 @@ export function Messages() {
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-slate-500 truncate">
-                      {selectedLead.category || 'Service Request'}
-                      {(() => {
-                        const accountName = getAccountNameForLead(selectedLead);
-                        return accountName ? <span className="text-slate-400"> · {accountName}</span> : null;
-                      })()}
-                    </p>
+                    {/* Lead meta — all on one horizontal line with thin vertical
+                        rules between items. Items: category · account · phone ·
+                        date · estimate. Pieces with no value are skipped so
+                        consecutive rules don't double up. */}
+                    {(() => {
+                      const accountName = getAccountNameForLead(selectedLead);
+                      const items: React.ReactNode[] = [];
+                      items.push(
+                        <span key="cat" className="text-slate-500 whitespace-nowrap">
+                          {selectedLead.category || 'Service Request'}
+                        </span>
+                      );
+                      if (accountName) {
+                        items.push(
+                          <span key="acct" className="text-slate-400 whitespace-nowrap">{accountName}</span>
+                        );
+                      }
+                      items.push(
+                        selectedLead.customerPhone ? (
+                          <a key="phone" href={`tel:${selectedLead.customerPhone}`} className="flex items-center gap-1.5 text-slate-600 hover:text-blue-600 whitespace-nowrap">
+                            <Phone size={14} />
+                            {formatPhoneNumber(selectedLead.customerPhone)}
+                          </a>
+                        ) : (
+                          <span key="phone" className="flex items-center gap-1.5 text-slate-400 whitespace-nowrap">
+                            <Phone size={14} />
+                            No phone
+                          </span>
+                        )
+                      );
+                      items.push(
+                        <span key="date" className="hidden md:flex items-center gap-1.5 text-slate-600 whitespace-nowrap">
+                          <Calendar size={14} />
+                          {formatDate(selectedLead.createdAt)}
+                        </span>
+                      );
+                      if (selectedLead.raw?.estimate?.total) {
+                        items.push(
+                          <span key="est" className="hidden md:flex items-center gap-1.5 text-slate-600 whitespace-nowrap">
+                            <DollarSign size={14} />
+                            {selectedLead.raw.estimate.total}
+                          </span>
+                        );
+                      }
+                      return (
+                        <div className="flex items-center gap-2 text-xs flex-wrap mt-0.5">
+                          {items.map((item, i) => (
+                            <span key={i} className="flex items-center gap-2">
+                              {i > 0 && <span className="w-px h-3 bg-slate-300 shrink-0" aria-hidden />}
+                              {item}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
                 <div className="flex items-center gap-1 sm:gap-3 shrink-0">
-                  {/* Desktop-only meta details — same format for TT and Yelp */}
-                  <div className="hidden md:flex items-center gap-3 flex-wrap">
-                    {selectedLead.customerPhone ? (
-                      <a href={`tel:${selectedLead.customerPhone}`} className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-blue-600">
-                        <Phone size={14} />
-                        {formatPhoneNumber(selectedLead.customerPhone)}
-                      </a>
-                    ) : (
-                      <span className="flex items-center gap-1.5 text-xs text-slate-400">
-                        <Phone size={14} />
-                        No phone available
-                      </span>
-                    )}
-                    <span className="flex items-center gap-1.5 text-xs text-slate-600">
-                      <Calendar size={14} />
-                      {formatDate(selectedLead.createdAt)}
-                    </span>
-                    {selectedLead.raw?.estimate?.total && (
-                      <span className="flex items-center gap-1.5 text-xs text-slate-600">
-                        <DollarSign size={14} />
-                        {selectedLead.raw.estimate.total}
-                      </span>
-                    )}
-                  </div>
+                  {/* Desktop meta (phone / date / estimate) merged into the
+                      single-line meta row above. This wrapper now only holds
+                      the action buttons. */}
                   <button
                     className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-lg transition-colors disabled:opacity-50"
                     onClick={handleResyncMessages}
