@@ -60,6 +60,7 @@ function buildSvc() {
     /* trial */ {} as any,
     leadStatusService,
     /* followUpEngine */ {} as any,
+    /* notifications */ {} as any,
   );
 
   return { svc, writeStatus };

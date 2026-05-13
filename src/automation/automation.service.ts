@@ -860,8 +860,19 @@ export class AutomationService implements OnModuleInit {
           }
           return;
         }
-        if (intent === 'agreed' && aiRules.aiStopOnPriceAgreed) {
-          this.logger.log(`[AUTOMATION] ✗ AI Conversation paused — classifier=agreed conf=${classification.confidence.toFixed(2)} (manager handoff)`);
+        // `agreed` and `wants_live_contact` are handoff intents:
+        // maybeFireHandoffAlert above just paged the operator. The AI must
+        // stop so the human takes over cleanly — having both reply at once
+        // is the Savanna 2026-05-13 regression: customer said "Yes, I
+        // believe I already confirmed the cleaning for 5/21 at 10am" and
+        // the AI followed with "Thanks for confirming, all set!" because
+        // `aiStopOnPriceAgreed` defaulted falsy. Switched to `!== false` to
+        // match every other terminal-intent stop (aiStopOnOptOut,
+        // aiStopOnBooked, aiStopOnDeferral), and folded wants_live_contact
+        // into the same gate — both are "human takes over now" signals.
+        if ((intent === 'agreed' || intent === 'wants_live_contact')
+            && aiRules.aiStopOnPriceAgreed !== false) {
+          this.logger.log(`[AUTOMATION] ✗ AI Conversation handed off — classifier=${intent} conf=${classification.confidence.toFixed(2)} (manager paged)`);
           return;
         }
         if (intent === 'deferring' && aiRules.aiStopOnDeferral !== false) {
@@ -928,9 +939,10 @@ export class AutomationService implements OnModuleInit {
         }
       }
 
-      // Rule: stop on price agreed — hand off to manager
-      if (aiRules.aiStopOnPriceAgreed && context.customerMessage) {
-        const agreedPhrases = ['sounds good', 'let\'s do it', 'i\'ll take it', 'book it', 'schedule it', 'let\'s go', 'perfect, when', 'great, when', 'yes please', 'i\'m in'];
+      // Rule: stop on price agreed — hand off to manager. Default ON to
+      // mirror the classifier-driven short-circuit above (Savanna 2026-05-13).
+      if (aiRules.aiStopOnPriceAgreed !== false && context.customerMessage) {
+        const agreedPhrases = ['sounds good', 'let\'s do it', 'i\'ll take it', 'book it', 'schedule it', 'let\'s go', 'perfect, when', 'great, when', 'yes please', 'i\'m in', 'i already confirmed', 'already confirmed'];
         const msgLower = context.customerMessage.toLowerCase();
         if (agreedPhrases.some(p => msgLower.includes(p))) {
           this.logger.log(`[AUTOMATION] ✗ AI Conversation paused — customer agreed on price, handing off to manager`);

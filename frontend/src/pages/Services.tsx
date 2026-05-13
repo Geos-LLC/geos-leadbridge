@@ -501,7 +501,7 @@ export function Services() {
   const [aiShowRules, setAiShowRules] = useState(false);
   const [aiStopOnOptOut, setAiStopOnOptOut] = useState(true);
   const [aiStopOnBooked, setAiStopOnBooked] = useState(true);
-  const [aiStopOnPriceAgreed, setAiStopOnPriceAgreed] = useState(false);
+  const [aiStopOnPriceAgreed, setAiStopOnPriceAgreed] = useState(true);
   const [aiMaxReplies, setAiMaxReplies] = useState(0); // 0 = unlimited
   // Customer-reply trigger follow-ups (deferral / hired-competitor).
   // Toggles default ON; the backend looks for the per-account
