@@ -61,7 +61,8 @@ export default function SettingsPage() {
     const raw = (h || '').replace(/^#/, '').toLowerCase();
     if (!raw) return 'general';
     if (raw.startsWith('communication')) return 'communication';
-    if (raw.startsWith('marketplace')) return 'marketplace';
+    // Marketplace was folded into General. Old #marketplace hash → General.
+    if (raw.startsWith('marketplace')) return 'general';
     if (raw.startsWith('ai')) return 'ai';
     if (raw.startsWith('pricing')) return 'pricing';
     if (raw.startsWith('billing') || raw === 'invoices' || raw === 'subscription') return 'billing';
@@ -95,9 +96,8 @@ export default function SettingsPage() {
   const [savingPhone, setSavingPhone] = useState(false);
 
   // Per-business phone override editing
-  const [editingOverrideId, setEditingOverrideId] = useState<string | null>(null);
-  const [overrideValue, setOverrideValue] = useState('');
-  const [savingOverride, setSavingOverride] = useState(false);
+  // editingOverrideId / overrideValue / savingOverride — moved with the
+  // "Phone Numbers Per Business" table to SettingsCommunicationSection.
 
   // Change password state
   const [changingPassword, setChangingPassword] = useState(false);
@@ -123,7 +123,12 @@ export default function SettingsPage() {
   const [reimportResult, setReimportResult] = useState<string | null>(null);
 
   // Tenant phone numbers (bot numbers)
-  const [tenantPhones, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
+  // tenantPhones is loaded for cache parity but its only renderer (the Phone
+  // Numbers Per Business table) moved to SettingsCommunicationSection. The
+  // load call remains so the legacy fetch flow is unchanged; the value is
+  // intentionally unread here.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [, setTenantPhones] = useState<TenantPhoneNumber[]>([]);
   const [missingCount, setMissingCount] = useState<number | null>(null);
   const [needsScrapeCount, setNeedsScrapeCount] = useState<number | null>(null);
 
@@ -430,22 +435,8 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSaveOverride = async (accountId: string) => {
-    const trimmed = overrideValue.trim();
-    setSavingOverride(true);
-    try {
-      // Empty string or same as default → clear override (use default)
-      const value = (!trimmed || trimmed === (user?.businessPhone || '')) ? null : trimmed;
-      await thumbtackApi.updateSavedAccount(accountId, { agentPhoneOverride: value });
-      setAccounts(prev => prev.map(a => a.id === accountId ? { ...a, agentPhoneOverride: value } : a));
-      notify.success('Updated', value ? 'Custom phone set for this business' : 'Reset to default phone');
-      setEditingOverrideId(null);
-    } catch (error: any) {
-      notify.error('Error', error.response?.data?.message || 'Failed to update phone');
-    } finally {
-      setSavingOverride(false);
-    }
-  };
+  // handleSaveOverride moved to SettingsCommunicationSection along with the
+  // "Phone Numbers Per Business" table.
 
   const handleChangePassword = async () => {
     setPasswordError('');
@@ -677,7 +668,6 @@ export default function SettingsPage() {
         {([
           { key: 'general',       label: 'General' },
           { key: 'communication', label: 'Communication' },
-          { key: 'marketplace',   label: 'Marketplace' },
           { key: 'ai',            label: 'AI' },
           { key: 'pricing',       label: 'Pricing' },
           { key: 'billing',       label: 'Billing' },
@@ -779,78 +769,7 @@ export default function SettingsPage() {
           </div>
           </div>
 
-          {/* Per-business phone details */}
-          {accounts.length > 0 && (
-            <div className="mt-6 pt-6 border-t border-slate-100">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Phone Numbers Per Business</p>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-xs text-slate-400 uppercase tracking-wider">
-                      <th className="pb-2 pr-4 font-semibold">Business Name</th>
-                      <th className="pb-2 pr-4 font-semibold">Agent Phone</th>
-                      <th className="pb-2 font-semibold">Bot Number</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {accounts.map(acct => {
-                      const botPhone = tenantPhones.find(p => p.savedAccountId === acct.id)
-                        || tenantPhones.find(p => !p.savedAccountId)
-                        || tenantPhones[0];
-                      const agentPhone = acct.agentPhoneOverride || user?.businessPhone || null;
-                      return (
-                        <tr key={acct.id}>
-                          <td className="py-2 pr-4 font-semibold text-slate-900">{acct.businessName}</td>
-                          <td className="py-2 pr-4">
-                            {editingOverrideId === acct.id ? (
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="tel"
-                                  value={overrideValue}
-                                  onChange={(e) => setOverrideValue(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') handleSaveOverride(acct.id);
-                                    if (e.key === 'Escape') setEditingOverrideId(null);
-                                  }}
-                                  autoFocus
-                                  placeholder={user?.businessPhone || '(555) 123-4567'}
-                                  className="w-40 px-2 py-1 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                                />
-                                <button className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg" onClick={() => handleSaveOverride(acct.id)} disabled={savingOverride} title="Save">
-                                  {savingOverride ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check size={14} />}
-                                </button>
-                                <button className="p-1 text-slate-400 hover:bg-slate-50 rounded-lg" onClick={() => setEditingOverrideId(null)} title="Cancel">
-                                  <X size={14} />
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1.5 cursor-pointer group" onClick={() => { setOverrideValue(acct.agentPhoneOverride || ''); setEditingOverrideId(acct.id); }}>
-                                <span className={`font-mono ${acct.agentPhoneOverride ? 'text-slate-900 font-semibold' : 'text-slate-400'}`}>
-                                  {agentPhone || 'Not set'}
-                                </span>
-                                {!acct.agentPhoneOverride && agentPhone && <span className="text-[10px] text-slate-300">(default)</span>}
-                                <Pencil size={12} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
-                              </div>
-                            )}
-                          </td>
-                          <td className="py-2">
-                            {botPhone ? (
-                              <span className="font-mono text-slate-900 font-semibold">
-                                {botPhone.phoneNumber}
-                                {botPhone.savedAccountId && botPhone.savedAccountId !== acct.id && <span className="text-[10px] text-slate-400 font-normal ml-1">(shared)</span>}
-                              </span>
-                            ) : (
-                              <span className="text-slate-400 text-xs">No bot number</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          {/* "Phone Numbers Per Business" table moved to Communication tab. */}
 
           {/* Change Password */}
           <div className="mt-8 pt-8 border-t border-slate-100">
@@ -968,7 +887,7 @@ export default function SettingsPage() {
 
       </>)}
 
-      {activeTab === 'marketplace' && (
+      {activeTab === 'general' && (
       <>
       {/* Section 2: Marketplace Connections */}
       <div className="space-y-4">

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Bell, Phone, PhoneCall, MessageSquare, Zap, ArrowLeft, Loader2, AlertCircle,
-  AlertTriangle, CheckCircle, X, Send, ChevronDown,
+  AlertTriangle, CheckCircle, X, Send, ChevronDown, Pencil, Check,
 } from 'lucide-react';
 import {
   notificationsApi, templatesApi, followUpApi, callConnectApi, thumbtackApi, authApi,
@@ -68,6 +68,7 @@ type TestStatus = 'idle' | 'sending' | 'delivered' | 'failed';
  */
 export function SettingsCommunicationSection() {
   const accounts = useAppStore(s => s.savedAccounts);
+  const setSavedAccounts = useAppStore(s => s.setSavedAccounts);
   const user = useAuthStore(s => s.user);
   const setAuth = useAuthStore(s => s.setAuth);
   const authToken = useAuthStore(s => s.token);
@@ -88,6 +89,12 @@ export function SettingsCommunicationSection() {
   const [businessPhoneInput, setBusinessPhoneInput] = useState('');
   const [editingBusinessPhone, setEditingBusinessPhone] = useState(false);
   const savingBusinessPhoneRef = useRef(false);
+
+  // Per-business agent-phone override editing — used by the
+  // "Phone Numbers Per Business" table moved out of /settings General tab.
+  const [editingOverrideId, setEditingOverrideId] = useState<string | null>(null);
+  const [overrideValue, setOverrideValue] = useState('');
+  const [savingOverride, setSavingOverride] = useState(false);
 
   // Alert templates
   const [reEngagementAlertOn, setReEngagementAlertOn] = useState(true);
@@ -206,6 +213,25 @@ export function SettingsCommunicationSection() {
   function showSuccess(msg: string) {
     setSuccess(msg);
     setTimeout(() => setSuccess(null), 3000);
+  }
+
+  // Per-business override save — mirrors the SettingsPage handler but writes
+  // the updated account list back to the shared appStore so other pages
+  // (Automation, Dashboard) see the change.
+  async function handleSaveOverride(accountId: string) {
+    const trimmed = overrideValue.trim();
+    setSavingOverride(true);
+    try {
+      const value = (!trimmed || trimmed === (user?.businessPhone || '')) ? null : trimmed;
+      await thumbtackApi.updateSavedAccount(accountId, { agentPhoneOverride: value });
+      setSavedAccounts(accounts.map(a => a.id === accountId ? { ...a, agentPhoneOverride: value } as any : a));
+      notify.success('Updated', value ? 'Custom phone set for this business' : 'Reset to default phone');
+      setEditingOverrideId(null);
+    } catch (err: any) {
+      notify.error('Error', err?.response?.data?.message || 'Failed to update phone');
+    } finally {
+      setSavingOverride(false);
+    }
   }
 
   async function saveBusinessPhone(rawValue: string) {
@@ -634,6 +660,88 @@ export function SettingsCommunicationSection() {
               </div>
             </div>
           </div>
+
+          {/* Phone Numbers Per Business — moved from /settings General tab.
+              Same per-account override edit flow; saves write back to the
+              shared appStore so other pages see the change. */}
+          {accounts.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
+                <Phone className="w-5 h-5 text-blue-600" />
+                <div className="flex-1">
+                  <h2 className="text-sm font-bold text-slate-800">Phone Numbers Per Business</h2>
+                  <p className="text-xs text-slate-400">Per-business agent phone override and the assigned LeadBridge bot number for each saved account.</p>
+                </div>
+              </div>
+              <div className="px-5 py-4 overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-slate-400 uppercase tracking-wider">
+                      <th className="pb-2 pr-4 font-semibold">Business Name</th>
+                      <th className="pb-2 pr-4 font-semibold">Agent Phone</th>
+                      <th className="pb-2 font-semibold">Bot Number</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {accounts.map(acct => {
+                      const botPhone = tenantPhones.find(p => p.savedAccountId === acct.id)
+                        || tenantPhones.find(p => !p.savedAccountId)
+                        || tenantPhones[0];
+                      const agentOverride = (acct as any).agentPhoneOverride as string | null | undefined;
+                      const agentPhone = agentOverride || user?.businessPhone || null;
+                      return (
+                        <tr key={acct.id}>
+                          <td className="py-2 pr-4 font-semibold text-slate-900">{acct.businessName}</td>
+                          <td className="py-2 pr-4">
+                            {editingOverrideId === acct.id ? (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="tel"
+                                  value={overrideValue}
+                                  onChange={e => setOverrideValue(e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') handleSaveOverride(acct.id);
+                                    if (e.key === 'Escape') setEditingOverrideId(null);
+                                  }}
+                                  autoFocus
+                                  placeholder={user?.businessPhone || '(555) 123-4567'}
+                                  className="w-40 px-2 py-1 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
+                                />
+                                <button className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg" onClick={() => handleSaveOverride(acct.id)} disabled={savingOverride} title="Save">
+                                  {savingOverride ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check size={14} />}
+                                </button>
+                                <button className="p-1 text-slate-400 hover:bg-slate-50 rounded-lg" onClick={() => setEditingOverrideId(null)} title="Cancel">
+                                  <X size={14} />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5 cursor-pointer group" onClick={() => { setOverrideValue(agentOverride || ''); setEditingOverrideId(acct.id); }}>
+                                <span className={`font-mono ${agentOverride ? 'text-slate-900 font-semibold' : 'text-slate-400'}`}>
+                                  {agentPhone || 'Not set'}
+                                </span>
+                                {!agentOverride && agentPhone && <span className="text-[10px] text-slate-300">(default)</span>}
+                                <Pencil size={12} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-2">
+                            {botPhone ? (
+                              <span className="font-mono text-slate-900 font-semibold">
+                                {botPhone.phoneNumber}
+                                {botPhone.savedAccountId && botPhone.savedAccountId !== acct.id && <span className="text-[10px] text-slate-400 font-normal ml-1">(shared)</span>}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-xs">No bot number</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Alerts & Notifications */}
           <div className="bg-white rounded-2xl border border-amber-100 overflow-hidden">
