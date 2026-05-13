@@ -314,15 +314,13 @@ export function Services() {
     if (acc?.businessId) localStorage.setItem('lb_last_account_filter', acc.businessId);
   };
 
-  // Apply-to-all toggles (separate per platform), persisted in localStorage.
-  // When checked, save handlers fan out the change to every account on that platform.
-  const [applyToAllYelp, _setApplyToAllYelp] = useState<boolean>(() => localStorage.getItem('lb_apply_all_yelp') === '1');
-  const [applyToAllTT, _setApplyToAllTT] = useState<boolean>(() => localStorage.getItem('lb_apply_all_tt') === '1');
-  // "All accounts" mode — when on, save handlers fan out to every account on every platform.
-  // Form continues to render data from `selectedAccountId` (the last real account picked).
+  // "All accounts" mode — when on, save handlers fan out to every account.
+  // Form continues to render data from `selectedAccountId` (the last real
+  // account picked). The per-platform 'All Yelp' / 'All Thumbtack' checkbox
+  // toggles were removed; the account dropdown is now the single control:
+  //   • pick 'All accounts'  → save fans out to every account
+  //   • pick one account     → save only that account
   const [allAccountsMode, _setAllAccountsMode] = useState<boolean>(() => localStorage.getItem('lb_all_accounts_mode') === '1');
-  const setApplyToAllYelp = (v: boolean) => { _setApplyToAllYelp(v); localStorage.setItem('lb_apply_all_yelp', v ? '1' : '0'); };
-  const setApplyToAllTT = (v: boolean) => { _setApplyToAllTT(v); localStorage.setItem('lb_apply_all_tt', v ? '1' : '0'); };
   const setAllAccountsMode = (v: boolean) => { _setAllAccountsMode(v); localStorage.setItem('lb_all_accounts_mode', v ? '1' : '0'); };
   const ALL_ACCOUNTS_SENTINEL = '__ALL_ACCOUNTS__';
   const getApplyTargets = (): string[] => {
@@ -330,12 +328,7 @@ export function Services() {
       const ids = accounts.map(a => a.id);
       return ids.length > 0 ? ids : (selectedAccountId ? [selectedAccountId] : []);
     }
-    const platform = accounts.find(a => a.id === selectedAccountId)?.platform;
-    if (!platform || !selectedAccountId) return selectedAccountId ? [selectedAccountId] : [];
-    const apply = platform === 'yelp' ? applyToAllYelp : platform === 'thumbtack' ? applyToAllTT : false;
-    if (!apply) return [selectedAccountId];
-    const ids = accounts.filter(a => a.platform === platform).map(a => a.id);
-    return ids.length > 0 ? ids : [selectedAccountId];
+    return selectedAccountId ? [selectedAccountId] : [];
   };
   const fanoutOthers = (): string[] => getApplyTargets().filter(id => id !== selectedAccountId);
   const sc = _svcCache.get(initialAccountId); // cached service data for this account
@@ -2114,71 +2107,10 @@ export function Services() {
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
-          {(() => {
-            const yelpCount = accounts.filter(a => a.platform === 'yelp').length;
-            const ttCount = accounts.filter(a => a.platform === 'thumbtack').length;
-            if (yelpCount === 0 && ttCount === 0) return null;
-            return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--lb-ink-3)', alignItems: 'flex-start', whiteSpace: 'nowrap' }}>
-                {yelpCount > 0 && (() => {
-                  const disabled = yelpCount < 2 || allAccountsMode;
-                  const title = allAccountsMode
-                    ? '"All accounts" mode is active — every account is already a save target'
-                    : (yelpCount < 2 ? 'Connect more Yelp accounts to use apply-to-all' : `Save changes to all ${yelpCount} Yelp accounts at once`);
-                  return (
-                    <label
-                      title={title}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        cursor: disabled ? 'not-allowed' : 'pointer',
-                        userSelect: 'none',
-                        opacity: disabled ? 0.45 : 1,
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={!allAccountsMode && applyToAllYelp && yelpCount >= 2}
-                        disabled={disabled}
-                        onChange={e => setApplyToAllYelp(e.target.checked)}
-                        style={{ cursor: disabled ? 'not-allowed' : 'pointer', accentColor: '#dc2626' }}
-                      />
-                      <span>{'🔴 All Yelp (' + yelpCount + ')'}</span>
-                    </label>
-                  );
-                })()}
-                {ttCount > 0 && (() => {
-                  const disabled = ttCount < 2 || allAccountsMode;
-                  const title = allAccountsMode
-                    ? '"All accounts" mode is active — every account is already a save target'
-                    : (ttCount < 2 ? 'Connect more Thumbtack accounts to use apply-to-all' : `Save changes to all ${ttCount} Thumbtack accounts at once`);
-                  return (
-                    <label
-                      title={title}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        cursor: disabled ? 'not-allowed' : 'pointer',
-                        userSelect: 'none',
-                        opacity: disabled ? 0.45 : 1,
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={!allAccountsMode && applyToAllTT && ttCount >= 2}
-                        disabled={disabled}
-                        onChange={e => setApplyToAllTT(e.target.checked)}
-                        style={{ cursor: disabled ? 'not-allowed' : 'pointer', accentColor: '#2563eb' }}
-                      />
-                      <span>{'🔵 All Thumbtack (' + ttCount + ')'}</span>
-                    </label>
-                  );
-                })()}
-              </div>
-            );
-          })()}
+          {/* Per-platform 'All Yelp' / 'All Thumbtack' checkboxes removed —
+              fan-out is now driven solely by the account dropdown:
+              pick 'All accounts' to save everywhere, or pick a single account
+              to save only there. */}
           <div style={{ position: 'relative', minWidth: 240, flexShrink: 0 }}>
             <select
               value={allAccountsMode ? ALL_ACCOUNTS_SENTINEL : selectedAccountId}
