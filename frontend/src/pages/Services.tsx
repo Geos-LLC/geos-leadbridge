@@ -478,6 +478,17 @@ export function Services() {
   const [aiStopOnBooked, setAiStopOnBooked] = useState(true);
   const [aiStopOnPriceAgreed, setAiStopOnPriceAgreed] = useState(true);
   const [aiMaxReplies, setAiMaxReplies] = useState(0); // 0 = unlimited
+  // Human Takeover trigger toggles — per-account flags stored in
+  // followUpSettingsJson. Default true so existing accounts keep firing
+  // on agreed / wants_live_contact without a UI visit. The three new
+  // reasons (provided_phone_number, provided_square_footage,
+  // qualification_complete) also default ON but are strategy-gated on
+  // the backend (only fire when the AI Strategy makes them actionable).
+  const [handoffTriggerAgreed, setHandoffTriggerAgreed] = useState(true);
+  const [handoffTriggerWantsLiveContact, setHandoffTriggerWantsLiveContact] = useState(true);
+  const [handoffTriggerProvidedPhone, setHandoffTriggerProvidedPhone] = useState(true);
+  const [handoffTriggerProvidedSquareFootage, setHandoffTriggerProvidedSquareFootage] = useState(true);
+  const [handoffTriggerQualificationComplete, setHandoffTriggerQualificationComplete] = useState(true);
   // Customer-reply trigger follow-ups (deferral / hired-competitor).
   // Toggles default ON; the backend looks for the per-account
   // FollowUpSequenceTemplate (lazy-seeded if missing) and enrolls a
@@ -707,6 +718,12 @@ export function Services() {
         if (s.aiStopOnBooked !== undefined) setAiStopOnBooked(s.aiStopOnBooked);
         if (s.aiStopOnPriceAgreed !== undefined) setAiStopOnPriceAgreed(s.aiStopOnPriceAgreed);
         if (s.aiMaxReplies !== undefined) setAiMaxReplies(s.aiMaxReplies);
+        // Human Takeover trigger toggles (default true if unset).
+        if (s.handoffTriggerAgreed !== undefined) setHandoffTriggerAgreed(!!s.handoffTriggerAgreed);
+        if (s.handoffTriggerWantsLiveContact !== undefined) setHandoffTriggerWantsLiveContact(!!s.handoffTriggerWantsLiveContact);
+        if (s.handoffTriggerProvidedPhone !== undefined) setHandoffTriggerProvidedPhone(!!s.handoffTriggerProvidedPhone);
+        if (s.handoffTriggerProvidedSquareFootage !== undefined) setHandoffTriggerProvidedSquareFootage(!!s.handoffTriggerProvidedSquareFootage);
+        if (s.handoffTriggerQualificationComplete !== undefined) setHandoffTriggerQualificationComplete(!!s.handoffTriggerQualificationComplete);
         if (s.aiDeferralCheckIn !== undefined) setAiDeferralCheckIn(s.aiDeferralCheckIn);
         if (s.aiDeferralDelay) setAiDeferralDelay(s.aiDeferralDelay);
         if (s.aiDeferralMessage) setAiDeferralMessage(s.aiDeferralMessage);
@@ -779,6 +796,12 @@ export function Services() {
         aiStopOnBooked,
         aiStopOnPriceAgreed,
         aiMaxReplies,
+        // Human Takeover trigger toggles — per-account, default true.
+        handoffTriggerAgreed,
+        handoffTriggerWantsLiveContact,
+        handoffTriggerProvidedPhone,
+        handoffTriggerProvidedSquareFootage,
+        handoffTriggerQualificationComplete,
         aiDeferralCheckIn,
         aiDeferralDelay,
         aiDeferralMessage,
@@ -814,6 +837,8 @@ export function Services() {
     fuQuietHoursEnabled, fuQuietHoursStart, fuQuietHoursEnd,
     // aiConversationOn intentionally omitted — see note in payload.
     aiStopOnOptOut, aiStopOnBooked, aiStopOnPriceAgreed, aiMaxReplies,
+    handoffTriggerAgreed, handoffTriggerWantsLiveContact, handoffTriggerProvidedPhone,
+    handoffTriggerProvidedSquareFootage, handoffTriggerQualificationComplete,
     aiDeferralCheckIn, aiDeferralDelay, aiDeferralMessage,
     aiHiredReengage, aiHiredDelay, aiHiredMessage,
     reEngagementAlertOn, reEngagementTemplate, handoffAlertTemplate,
@@ -3740,27 +3765,47 @@ export function Services() {
                           </div>
                         </div>
 
-                        {/* ── Human Takeover (visual block — exposes existing
-                            `handoffAlertTemplate` field, no new settings keys).
-                            The trigger checkboxes are display-only: the backend
-                            classifier always fires on agreed + wants_live_contact;
-                            per-intent gating is planned future work. */}
+                        {/* ── Human Takeover — five per-account trigger toggles.
+                            Each maps to a backend handoff reason. Three of them
+                            (provided_phone_number, provided_square_footage,
+                            qualification_complete) are also strategy-gated on
+                            the backend (only fire when the active AI Strategy
+                            makes the data point actionable). The alert template
+                            itself lives in Settings → Communication so this
+                            block stays focused on WHEN to hand off, not HOW the
+                            SMS reads. */}
                         <div className="rounded-xl border border-violet-100 bg-violet-50/30 px-4 py-3 space-y-3">
                           <div>
                             <div className="text-[11px] font-bold text-violet-700 uppercase tracking-widest">Human Takeover</div>
-                            <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">Human takeover happens during active AI Conversation when the customer is ready for a manager. This is different from <span className="font-semibold text-slate-600">Reply Alerts</span>, which simply notify you when a quiet lead replies.</p>
+                            <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
+                              Notify manager when AI detects the customer needs a human. These rules only apply while <span className="font-semibold text-slate-600">AI Conversation</span> is active. Alert templates are managed in <Link to="/settings#communication-alerts" className="font-semibold text-blue-600 hover:underline">Settings → Communication</Link>.
+                            </p>
                           </div>
                           <div className="space-y-1.5">
-                            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-not-allowed" title="Always on — fires automatically while AI Conversation is on.">
-                              <input type="checkbox" checked readOnly disabled className="accent-violet-600 w-3.5 h-3.5" />
-                              Customer ready to book
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={handoffTriggerAgreed} onChange={e => setHandoffTriggerAgreed(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
+                              Ready to book
                             </label>
-                            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-not-allowed" title="Always on — fires automatically while AI Conversation is on.">
-                              <input type="checkbox" checked readOnly disabled className="accent-violet-600 w-3.5 h-3.5" />
-                              Customer asks for call/live contact
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={handoffTriggerWantsLiveContact} onChange={e => setHandoffTriggerWantsLiveContact(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
+                              Wants live contact
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer" title="Only fires when AI Strategy is set to Phone, or the lead has no usable phone number yet.">
+                              <input type="checkbox" checked={handoffTriggerProvidedPhone} onChange={e => setHandoffTriggerProvidedPhone(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
+                              Provided phone number
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer" title="Only fires when AI Strategy is set to Qualify, or price quote mode is Exact.">
+                              <input type="checkbox" checked={handoffTriggerProvidedSquareFootage} onChange={e => setHandoffTriggerProvidedSquareFootage(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
+                              Provided square footage
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer" title="Fires when the customer has answered enough details (cleaning type, beds, baths, size, date) for the dispatcher to act.">
+                              <input type="checkbox" checked={handoffTriggerQualificationComplete} onChange={e => setHandoffTriggerQualificationComplete(e.target.checked)} className="accent-violet-600 w-3.5 h-3.5" />
+                              Qualification complete
                             </label>
                           </div>
-                          {/* Handoff Alert Template moved to top-level "Alerts & Notifications" → AI Human Takeover Alerts. */}
+                          <Link to="/settings#communication-alerts" className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline">
+                            Edit alert template →
+                          </Link>
                           <div>
                             <div className="text-[11px] font-semibold text-slate-600 mb-1">Max AI replies per conversation</div>
                             <p className="text-[10px] text-slate-400 mb-2">Limit how many times AI replies before handing off to a manager. 0 = unlimited.</p>
@@ -3777,9 +3822,6 @@ export function Services() {
                             <span className="text-emerald-500 text-xs">&#10003;</span>
                             Manager can always take over by sending a message manually
                           </div>
-                          <p className="text-[10px] text-slate-400 leading-relaxed">
-                            During AI Conversation, LeadBridge alerts your team when the customer is ready to book, asks for a live call, or otherwise needs a human to take over. Gated by <span className="font-semibold text-slate-600">Reply Alerts</span> in "If the Lead Doesn't Respond".
-                          </p>
                         </div>
                       </div>
                     )}

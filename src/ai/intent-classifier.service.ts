@@ -24,6 +24,39 @@ export type CustomerIntent =
   | 'asking'             // active question that needs an AI reply
   | 'engaged';           // continuing conversation, neither closing nor pausing
 
+/**
+ * Distinct from CustomerIntent. A customer can be intent='engaged' AND
+ * trigger a handoff because they just provided a phone number in the same
+ * message. The two signals are orthogonal — intent drives the AI reply
+ * decision, handoff drives the dispatcher SMS.
+ */
+export type HandoffReason =
+  | 'agreed'
+  | 'wants_live_contact'
+  | 'provided_phone_number'
+  | 'provided_square_footage'
+  | 'qualification_complete';
+
+export interface HandoffSignal {
+  shouldHandoff: boolean;
+  reason: HandoffReason;
+  /**
+   * Structured data the classifier pulled out of the message. Populated
+   * opportunistically so future code (or future template variables) can
+   * surface them. Today only used for logging.
+   */
+  extracted?: {
+    phoneNumber?: string;
+    squareFootage?: number;
+    cleaningType?: string;
+    bedrooms?: number;
+    bathrooms?: number;
+    preferredDateTime?: string;
+  };
+  /** Short rationale for logs and admin review. */
+  explanation: string;
+}
+
 export interface IntentClassification {
   intent: CustomerIntent;
   confidence: number; // 0..1
@@ -42,6 +75,14 @@ export interface IntentClassification {
    * schedule a follow-up years out.
    */
   suggestedReengageInDays?: number;
+  /**
+   * Handoff signal — orthogonal to intent. Present only when the classifier
+   * detected a handoff-worthy event in the message (booking agreed, request
+   * for a call, phone number shared, sq-ft provided, or qualification fully
+   * answered). Consumed by automation.service.maybeFireHandoffAlert which
+   * applies per-account trigger toggles + strategy gates before firing SMS.
+   */
+  handoff?: HandoffSignal;
 }
 
 export interface ClassifyContext {
@@ -56,7 +97,14 @@ export interface ClassifyContext {
 
 const SYSTEM_PROMPT = `You classify a customer's reply to a service-business (cleaning, home services) lead conversation.
 
-Return JSON: {"intent": "...", "confidence": 0..1, "reason": "...", "suggestedReengageInDays": number|null}
+Return JSON:
+{
+  "intent": "...",
+  "confidence": 0..1,
+  "reason": "...",
+  "suggestedReengageInDays": number|null,
+  "handoff": { "shouldHandoff": boolean, "reason": "...", "extracted": {...}|null, "explanation": "..." } | null
+}
 
 Intents (pick exactly one):
 
@@ -98,7 +146,25 @@ suggestedReengageInDays:
 - Cap at 180 days. Anything longer → 180.
 - This is the customer's stated re-engagement window; the system uses it to schedule the next outreach instead of the configured default cadence.
 
-Reason field: 8-15 words, factual. Used in logs.`;
+handoff field (independent of intent above — return null when nothing applies):
+
+A customer can be intent='engaged' AND simultaneously trigger a handoff (e.g. answering a question while also sharing their phone number). Inspect the LATEST customer message for any of these signals and pick the single most actionable reason. Set handoff.shouldHandoff=true only when you see clear, dispatcher-worthy evidence; otherwise return handoff: null.
+
+Allowed handoff.reason values (priority order — pick the highest one that applies):
+1. "agreed" — same trigger as intent='agreed'. Customer accepted the quote / booking.
+2. "wants_live_contact" — same trigger as intent='wants_live_contact'. Customer wants a call/meeting now.
+3. "qualification_complete" — customer answered enough booking/pricing questions that the dispatcher can act. Heuristic: the message (combined with what's already in recent history) contains at least THREE of {cleaning type, bedrooms, bathrooms, square footage, frequency, preferred date/time}. Examples that fire: "Move-out cleaning, 2 bedrooms, 1 bathroom, about 900 sqft, Friday works", "Standard cleaning, 4 bed 3 bath, every two weeks". Do NOT fire on a single partial answer.
+4. "provided_phone_number" — customer shared a phone number in this message. Extract digits to extracted.phoneNumber as a plain string. Examples: "My number is 248-555-1234", "Call me at 313 555 9911". Do NOT fire when they're ASKING about a phone number ("do you have a number?", "what's your number?") — that's a question, not a hand-off.
+5. "provided_square_footage" — customer mentioned home/space size in sq ft. Extract digits to extracted.squareFootage as a number (e.g. "2,100 sq ft" → 2100). Examples: "about 2100 sq ft", "the house is 1800 square feet", "around 950 sqft".
+
+extracted (object, all fields optional — return null on the parent when nothing extracted):
+- phoneNumber: digits as a single string when reason is provided_phone_number.
+- squareFootage: integer sqft when reason is provided_square_footage OR mentioned alongside qualification_complete.
+- cleaningType / bedrooms / bathrooms / preferredDateTime: populate when the customer named them, especially for qualification_complete.
+
+explanation: 6-12 words describing why this reason was picked. Used for logs.
+
+Reason field (top-level): 8-15 words, factual. Used in logs.`;
 
 @Injectable()
 export class IntentClassifierService {
@@ -163,14 +229,51 @@ export class IntentClassifierService {
       // treats terminal_defer as stop_and_lost (per follow-up-gate.service.ts);
       // there's no auto-re-engage to schedule.
 
-      const daysBit = suggestedReengageInDays != null ? ` reengage_in=${suggestedReengageInDays}d` : '';
-      this.logger.log(`[classifier] intent=${intent} conf=${confidence.toFixed(2)}${daysBit} reason="${reason}" msg="${this.truncate(ctx.message, 80)}"`);
+      // Handoff signal — orthogonal to intent. Optional; absent or malformed
+      // payloads fall through to undefined so callers can treat it as
+      // "no handoff signaled" without a separate flag.
+      let handoff: HandoffSignal | undefined;
+      const rawHandoff: any = (parsed as any).handoff;
+      if (rawHandoff && typeof rawHandoff === 'object' && rawHandoff.shouldHandoff === true) {
+        const reasonOk = this.coerceHandoffReason(rawHandoff.reason);
+        if (reasonOk) {
+          const extractedIn = (rawHandoff.extracted && typeof rawHandoff.extracted === 'object')
+            ? rawHandoff.extracted : null;
+          const extracted: HandoffSignal['extracted'] | undefined = extractedIn ? {
+            phoneNumber: typeof extractedIn.phoneNumber === 'string' ? extractedIn.phoneNumber.trim() : undefined,
+            squareFootage: typeof extractedIn.squareFootage === 'number' && Number.isFinite(extractedIn.squareFootage)
+              ? Math.round(extractedIn.squareFootage) : undefined,
+            cleaningType: typeof extractedIn.cleaningType === 'string' ? extractedIn.cleaningType.trim() : undefined,
+            bedrooms: typeof extractedIn.bedrooms === 'number' && Number.isFinite(extractedIn.bedrooms)
+              ? Math.round(extractedIn.bedrooms) : undefined,
+            bathrooms: typeof extractedIn.bathrooms === 'number' && Number.isFinite(extractedIn.bathrooms)
+              ? Math.round(extractedIn.bathrooms) : undefined,
+            preferredDateTime: typeof extractedIn.preferredDateTime === 'string'
+              ? extractedIn.preferredDateTime.trim() : undefined,
+          } : undefined;
+          const explanation = typeof rawHandoff.explanation === 'string' ? rawHandoff.explanation : '';
+          handoff = { shouldHandoff: true, reason: reasonOk, extracted, explanation };
+        }
+      }
 
-      return { intent, confidence, reason, fromLlm: true, suggestedReengageInDays };
+      const daysBit = suggestedReengageInDays != null ? ` reengage_in=${suggestedReengageInDays}d` : '';
+      const handoffBit = handoff ? ` handoff=${handoff.reason}` : '';
+      this.logger.log(`[classifier] intent=${intent} conf=${confidence.toFixed(2)}${daysBit}${handoffBit} reason="${reason}" msg="${this.truncate(ctx.message, 80)}"`);
+
+      return { intent, confidence, reason, fromLlm: true, suggestedReengageInDays, handoff };
     } catch (err: any) {
       this.logger.warn(`[classifier] failed (${err.message}) — falling back to engaged for msg="${this.truncate(ctx.message, 80)}"`);
       return { intent: 'engaged', confidence: 0, reason: `classifier_failed: ${err.message}`, fromLlm: false };
     }
+  }
+
+  private coerceHandoffReason(value: unknown): HandoffReason | null {
+    const allowed: HandoffReason[] = [
+      'agreed', 'wants_live_contact',
+      'provided_phone_number', 'provided_square_footage', 'qualification_complete',
+    ];
+    if (typeof value !== 'string') return null;
+    return (allowed as string[]).includes(value) ? (value as HandoffReason) : null;
   }
 
   private buildUserPrompt(ctx: ClassifyContext): string {

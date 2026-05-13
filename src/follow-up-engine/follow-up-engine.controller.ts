@@ -630,6 +630,15 @@ export class FollowUpEngineController {
     // power users / future customization. Falls back to a default in
     // automation.service when unset.
     if (body.handoffAlertTemplate !== undefined) extendedSettings.handoffAlertTemplate = body.handoffAlertTemplate;
+    // Human Takeover trigger toggles — per-account flags that gate which
+    // handoff reasons fire dispatcher SMS. Each defaults true on the read
+    // side (in automation.service.ts), so accounts that never visit the new
+    // UI keep firing on agreed / wants_live_contact exactly as before.
+    if (body.handoffTriggerAgreed !== undefined) extendedSettings.handoffTriggerAgreed = body.handoffTriggerAgreed;
+    if (body.handoffTriggerWantsLiveContact !== undefined) extendedSettings.handoffTriggerWantsLiveContact = body.handoffTriggerWantsLiveContact;
+    if (body.handoffTriggerProvidedPhone !== undefined) extendedSettings.handoffTriggerProvidedPhone = body.handoffTriggerProvidedPhone;
+    if (body.handoffTriggerProvidedSquareFootage !== undefined) extendedSettings.handoffTriggerProvidedSquareFootage = body.handoffTriggerProvidedSquareFootage;
+    if (body.handoffTriggerQualificationComplete !== undefined) extendedSettings.handoffTriggerQualificationComplete = body.handoffTriggerQualificationComplete;
 
     // Use `undefined` (not nullish-coalesce-default) for fields that weren't
     // sent so partial saves from the central AI Strategy panel don't reset

@@ -254,3 +254,264 @@ describe('AutomationService.applyCustomerReplyStatusTransition', () => {
     });
   });
 });
+
+/**
+ * maybeFireHandoffAlert — strategy-aware AI Human Takeover rules.
+ *
+ * Pins the gating contract:
+ *   • fromLlm + confidence ≥ 0.7 + aiConversationEnabled are absolute safety gates
+ *   • Each reason has a per-account enable flag (default true) read out of
+ *     followUpSettingsJson
+ *   • provided_phone_number gates on AI Strategy=phone OR lead has no usable phone
+ *   • provided_square_footage gates on AI Strategy=qualify OR priceQuoteMode=exact
+ *   • {{intent}} renders the friendly label, not the internal reason key
+ */
+describe('AutomationService.maybeFireHandoffAlert', () => {
+  function buildHandoffSvc(opts: { leadCustomerPhone?: string | null } = {}) {
+    const sendHandoffAlert = jest.fn().mockResolvedValue(undefined);
+    const notifications = { sendHandoffAlert } as any;
+    const prisma = {
+      lead: {
+        findUnique: jest.fn().mockResolvedValue({ customerPhone: opts.leadCustomerPhone ?? null }),
+      },
+    } as any;
+    const svc = new AutomationService(
+      prisma,
+      /* templates */ {} as any,
+      /* leads */ {} as any,
+      /* config */ {} as any,
+      /* ai */ {} as any,
+      /* intentClassifier */ {} as any,
+      /* monitoring */ {} as any,
+      /* conversationContext */ {} as any,
+      /* trial */ {} as any,
+      /* leadStatusService */ {} as any,
+      /* followUpEngine */ {} as any,
+      notifications,
+    );
+    return { svc, sendHandoffAlert, prisma };
+  }
+
+  function classification(overrides: any = {}) {
+    return {
+      intent: 'engaged',
+      confidence: 0.9,
+      reason: 'test',
+      fromLlm: true,
+      ...overrides,
+    };
+  }
+
+  function settings(extra: Record<string, any> = {}) {
+    return JSON.stringify({ ...extra });
+  }
+
+  function account(extra: Record<string, any> = {}) {
+    return {
+      id: 'sa-1',
+      followUpSettingsJson: settings(),
+      aiConversationEnabled: true,
+      businessName: 'Test Co',
+      ...extra,
+    };
+  }
+
+  function fire(svc: AutomationService, cls: any, acct: any, message = 'test message') {
+    return (svc as any).maybeFireHandoffAlert(cls, ctx(message), acct);
+  }
+
+  describe('safety gates', () => {
+    it('does not fire when fromLlm=false (phrase-list fallback)', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      await fire(svc, classification({ intent: 'agreed', fromLlm: false }), account());
+      expect(sendHandoffAlert).not.toHaveBeenCalled();
+    });
+
+    it('does not fire below confidence threshold (0.7)', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      await fire(svc, classification({ intent: 'agreed', confidence: 0.65 }), account());
+      expect(sendHandoffAlert).not.toHaveBeenCalled();
+    });
+
+    it('does not fire when aiConversationEnabled is false', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      await fire(svc, classification({ intent: 'agreed' }), account({ aiConversationEnabled: false }));
+      expect(sendHandoffAlert).not.toHaveBeenCalled();
+    });
+
+    it('does not fire when reEngagementAlertEnabled (master alerts) is false', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      const acct = account({ followUpSettingsJson: settings({ reEngagementAlertEnabled: false }) });
+      await fire(svc, classification({ intent: 'agreed' }), acct);
+      expect(sendHandoffAlert).not.toHaveBeenCalled();
+    });
+
+    it('does not fire when no handoff reason is detected (no agreed/wants_live_contact intent, no handoff signal)', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      await fire(svc, classification({ intent: 'engaged' }), account());
+      expect(sendHandoffAlert).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('intent-based legacy path', () => {
+    it('fires on intent=agreed with friendly label "ready to book"', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      await fire(svc, classification({ intent: 'agreed' }), account(), 'yes let\'s book it');
+      expect(sendHandoffAlert).toHaveBeenCalledTimes(1);
+      const rendered = sendHandoffAlert.mock.calls[0][2];
+      expect(rendered).toContain('ready to book');
+    });
+
+    it('fires on intent=wants_live_contact with friendly label "wants live contact"', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      await fire(svc, classification({ intent: 'wants_live_contact' }), account(), 'call me at 6pm');
+      expect(sendHandoffAlert).toHaveBeenCalledTimes(1);
+      expect(sendHandoffAlert.mock.calls[0][2]).toContain('wants live contact');
+    });
+  });
+
+  describe('handoff-signal path (new reasons)', () => {
+    it('fires provided_phone_number when AI Strategy=phone', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc({ leadCustomerPhone: '+18005551111' });
+      const acct = account({ followUpSettingsJson: settings({ followUpStrategy: 'phone' }) });
+      const cls = classification({
+        intent: 'engaged',
+        handoff: { shouldHandoff: true, reason: 'provided_phone_number', explanation: 'shared number' },
+      });
+      await fire(svc, cls, acct, 'My number is 248-555-1234');
+      expect(sendHandoffAlert).toHaveBeenCalledTimes(1);
+      expect(sendHandoffAlert.mock.calls[0][2]).toContain('provided phone number');
+    });
+
+    it('fires provided_phone_number when lead has no phone (strategy != phone)', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc({ leadCustomerPhone: null });
+      const acct = account({ followUpSettingsJson: settings({ followUpStrategy: 'hybrid' }) });
+      const cls = classification({
+        intent: 'engaged',
+        handoff: { shouldHandoff: true, reason: 'provided_phone_number', explanation: 'shared number' },
+      });
+      await fire(svc, cls, acct);
+      expect(sendHandoffAlert).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT fire provided_phone_number when strategy != phone AND lead already has phone', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc({ leadCustomerPhone: '+18005551111' });
+      const acct = account({ followUpSettingsJson: settings({ followUpStrategy: 'hybrid' }) });
+      const cls = classification({
+        intent: 'engaged',
+        handoff: { shouldHandoff: true, reason: 'provided_phone_number', explanation: 'shared number' },
+      });
+      await fire(svc, cls, acct);
+      expect(sendHandoffAlert).not.toHaveBeenCalled();
+    });
+
+    it('fires provided_square_footage when AI Strategy=qualify', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      const acct = account({ followUpSettingsJson: settings({ followUpStrategy: 'qualify' }) });
+      const cls = classification({
+        intent: 'engaged',
+        handoff: { shouldHandoff: true, reason: 'provided_square_footage', extracted: { squareFootage: 2100 }, explanation: 'sqft shared' },
+      });
+      await fire(svc, cls, acct, 'about 2100 sq ft');
+      expect(sendHandoffAlert).toHaveBeenCalledTimes(1);
+      expect(sendHandoffAlert.mock.calls[0][2]).toContain('provided square footage');
+    });
+
+    it('fires provided_square_footage when priceQuoteMode=exact (any strategy)', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      const acct = account({ followUpSettingsJson: settings({ followUpStrategy: 'hybrid', priceQuoteMode: 'exact' }) });
+      const cls = classification({
+        intent: 'engaged',
+        handoff: { shouldHandoff: true, reason: 'provided_square_footage', extracted: { squareFootage: 1800 }, explanation: '' },
+      });
+      await fire(svc, cls, acct);
+      expect(sendHandoffAlert).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT fire provided_square_footage when neither strategy=qualify nor priceQuoteMode=exact', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      const acct = account({ followUpSettingsJson: settings({ followUpStrategy: 'hybrid', priceQuoteMode: 'range' }) });
+      const cls = classification({
+        intent: 'engaged',
+        handoff: { shouldHandoff: true, reason: 'provided_square_footage', explanation: '' },
+      });
+      await fire(svc, cls, acct);
+      expect(sendHandoffAlert).not.toHaveBeenCalled();
+    });
+
+    it('fires qualification_complete regardless of strategy', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      const cls = classification({
+        intent: 'engaged',
+        handoff: { shouldHandoff: true, reason: 'qualification_complete', extracted: { bedrooms: 4, bathrooms: 3 }, explanation: 'enough details' },
+      });
+      await fire(svc, cls, account(), 'standard, 4 bed 3 bath, every two weeks');
+      expect(sendHandoffAlert).toHaveBeenCalledTimes(1);
+      expect(sendHandoffAlert.mock.calls[0][2]).toContain('qualification complete');
+    });
+  });
+
+  describe('per-account trigger toggles', () => {
+    it('disabled handoffTriggerAgreed blocks intent=agreed', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      const acct = account({ followUpSettingsJson: settings({ handoffTriggerAgreed: false }) });
+      await fire(svc, classification({ intent: 'agreed' }), acct);
+      expect(sendHandoffAlert).not.toHaveBeenCalled();
+    });
+
+    it('disabled handoffTriggerProvidedPhone blocks provided_phone_number even when strategy=phone', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc({ leadCustomerPhone: null });
+      const acct = account({
+        followUpSettingsJson: settings({ followUpStrategy: 'phone', handoffTriggerProvidedPhone: false }),
+      });
+      const cls = classification({
+        intent: 'engaged',
+        handoff: { shouldHandoff: true, reason: 'provided_phone_number', explanation: '' },
+      });
+      await fire(svc, cls, acct);
+      expect(sendHandoffAlert).not.toHaveBeenCalled();
+    });
+
+    it('disabled handoffTriggerQualificationComplete blocks qualification_complete', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      const acct = account({
+        followUpSettingsJson: settings({ handoffTriggerQualificationComplete: false }),
+      });
+      const cls = classification({
+        intent: 'engaged',
+        handoff: { shouldHandoff: true, reason: 'qualification_complete', explanation: '' },
+      });
+      await fire(svc, cls, acct);
+      expect(sendHandoffAlert).not.toHaveBeenCalled();
+    });
+
+    it('undefined toggle defaults to enabled (back-compat for accounts that never visited the UI)', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      // followUpSettingsJson has zero handoff toggles set
+      await fire(svc, classification({ intent: 'agreed' }), account());
+      expect(sendHandoffAlert).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('template rendering', () => {
+    it('uses the custom handoffAlertTemplate from settings', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      const acct = account({
+        followUpSettingsJson: settings({ handoffAlertTemplate: 'HANDOFF: {{lead.name}} | {{intent}} | {{message}}' }),
+      });
+      await fire(svc, classification({ intent: 'agreed' }), acct, 'book it');
+      const rendered = sendHandoffAlert.mock.calls[0][2];
+      expect(rendered).toContain('HANDOFF:');
+      expect(rendered).toContain('Customer');
+      expect(rendered).toContain('ready to book');
+      expect(rendered).toContain('book it');
+    });
+
+    it('falls back to default template when handoffAlertTemplate is empty', async () => {
+      const { svc, sendHandoffAlert } = buildHandoffSvc();
+      const acct = account({ followUpSettingsJson: settings({ handoffAlertTemplate: '   ' }) });
+      await fire(svc, classification({ intent: 'agreed' }), acct);
+      expect(sendHandoffAlert.mock.calls[0][2]).toMatch(/ready for handoff/);
+    });
+  });
+});

@@ -11,7 +11,7 @@ import { LeadsService } from '../leads/leads.service';
 import { LeadStatusService } from '../leads/lead-status.service';
 import { ConfigService } from '@nestjs/config';
 import { AiService } from '../ai/ai.service';
-import { IntentClassifierService, IntentClassification } from '../ai/intent-classifier.service';
+import { IntentClassifierService, IntentClassification, HandoffReason } from '../ai/intent-classifier.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { TrialService } from '../trial/trial.service';
@@ -311,24 +311,39 @@ export class AutomationService implements OnModuleInit {
   ): Promise<void> {
     if (!classification || !classification.fromLlm) return;
     if (classification.confidence < AutomationService.CLASSIFIER_CONFIDENCE_THRESHOLD) return;
-    const intent = classification.intent;
-    if (intent !== 'agreed' && intent !== 'wants_live_contact') return;
 
-    // Auto-gate: handoff only makes sense when AI is actively conversing
-    // with the customer. With AI off, the follow-up + re-engagement path
-    // covers customer replies.
+    // Auto-gate: handoff only makes sense when AI is actively conversing.
     if (!savedAccount.aiConversationEnabled) {
-      this.logger.log(`[Handoff] skipped — AI Conversation off (intent=${intent})`);
+      this.logger.log(`[Handoff] skipped — AI Conversation off`);
       return;
     }
 
-    // Master alerts toggle: the same `reEngagementAlertEnabled` switch the
-    // user sees in the UI ("Re-engagement Alerts"). One switch governs
-    // both Re-engagement and Handoff. Default ON. Empty / whitespace-only
-    // handoff template falls back to the hard-coded default so blanking
-    // the field doesn't silently lose all handoff alerts.
+    // Resolve handoff reason. Prefer the explicit handoff signal from the
+    // classifier; fall back to intent-based detection so existing 'agreed' /
+    // 'wants_live_contact' classifications keep firing during the rollout
+    // window even if the LLM doesn't populate the new `handoff` field.
+    let reason: HandoffReason | null = null;
+    if (classification.handoff?.shouldHandoff && classification.handoff.reason) {
+      reason = classification.handoff.reason;
+    } else if (classification.intent === 'agreed' || classification.intent === 'wants_live_contact') {
+      reason = classification.intent;
+    }
+    if (!reason) return;
+
+    // Parse per-account settings — single source of truth for trigger toggles,
+    // strategy, price quote mode, master alerts toggle, and template body.
     let alertsEnabled = true;
     let template = 'Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"';
+    let strategy: string = 'hybrid';
+    let priceQuoteMode: string = 'range';
+    const triggerDefault = true;
+    const triggers: Record<HandoffReason, boolean> = {
+      agreed: triggerDefault,
+      wants_live_contact: triggerDefault,
+      provided_phone_number: triggerDefault,
+      provided_square_footage: triggerDefault,
+      qualification_complete: triggerDefault,
+    };
     if (savedAccount.followUpSettingsJson) {
       try {
         const s = JSON.parse(savedAccount.followUpSettingsJson);
@@ -336,14 +351,60 @@ export class AutomationService implements OnModuleInit {
         if (typeof s.handoffAlertTemplate === 'string' && s.handoffAlertTemplate.trim()) {
           template = s.handoffAlertTemplate;
         }
+        if (typeof s.followUpStrategy === 'string') strategy = s.followUpStrategy;
+        if (typeof s.priceQuoteMode === 'string') priceQuoteMode = s.priceQuoteMode;
+        // Per-reason toggles — undefined means "default ON" so back-compat is
+        // preserved for accounts that have never seen the new UI.
+        if (s.handoffTriggerAgreed === false) triggers.agreed = false;
+        if (s.handoffTriggerWantsLiveContact === false) triggers.wants_live_contact = false;
+        if (s.handoffTriggerProvidedPhone === false) triggers.provided_phone_number = false;
+        if (s.handoffTriggerProvidedSquareFootage === false) triggers.provided_square_footage = false;
+        if (s.handoffTriggerQualificationComplete === false) triggers.qualification_complete = false;
       } catch { /* invalid JSON — fall through to defaults */ }
     }
     if (!alertsEnabled) {
-      this.logger.log(`[Handoff] skipped — alerts toggle off (intent=${intent})`);
+      this.logger.log(`[Handoff] skipped — alerts toggle off (reason=${reason})`);
+      return;
+    }
+    if (!triggers[reason]) {
+      this.logger.log(`[Handoff] skipped — trigger '${reason}' disabled per-account`);
       return;
     }
 
-    const intentLabel = intent === 'wants_live_contact' ? 'wants live call' : 'ready to book';
+    // Strategy-aware gates:
+    // - provided_phone_number fires only when strategy=phone OR the lead has
+    //   no usable phone yet (the dispatcher actually needs a callback number).
+    // - provided_square_footage fires only when strategy=qualify OR the price
+    //   quote mode is 'exact' (the dispatcher needs sqft to quote precisely).
+    if (reason === 'provided_phone_number' && strategy !== 'phone') {
+      try {
+        const lead = await this.prisma.lead.findUnique({
+          where: { id: context.leadId },
+          select: { customerPhone: true },
+        });
+        const usable = !!lead?.customerPhone && lead.customerPhone.replace(/\D/g, '').length >= 7;
+        if (usable) {
+          this.logger.log(`[Handoff] skipped — provided_phone_number not actionable (strategy=${strategy} and lead already has phone)`);
+          return;
+        }
+      } catch (err: any) {
+        // Lookup failure isn't fatal — fall through (better to alert than miss).
+        this.logger.warn(`[Handoff] lead lookup failed for phone gate (${err?.message}); firing anyway`);
+      }
+    }
+    if (reason === 'provided_square_footage' && strategy !== 'qualify' && priceQuoteMode !== 'exact') {
+      this.logger.log(`[Handoff] skipped — provided_square_footage not actionable (strategy=${strategy} priceQuoteMode=${priceQuoteMode})`);
+      return;
+    }
+
+    const FRIENDLY: Record<HandoffReason, string> = {
+      agreed: 'ready to book',
+      wants_live_contact: 'wants live contact',
+      provided_phone_number: 'provided phone number',
+      provided_square_footage: 'provided square footage',
+      qualification_complete: 'qualification complete',
+    };
+    const intentLabel = FRIENDLY[reason];
     const message = (context.customerMessage || '').substring(0, 200);
     const rendered = template
       .replace(/\{\{lead\.name\}\}/g, context.customerName || 'Unknown')
@@ -351,7 +412,7 @@ export class AutomationService implements OnModuleInit {
       .replace(/\{\{intent\}\}/g, intentLabel);
 
     await this.notifications.sendHandoffAlert(context.userId, savedAccount.id, rendered);
-    this.logger.log(`[Handoff] fired for ${context.customerName} — intent=${intent} conf=${classification.confidence.toFixed(2)}`);
+    this.logger.log(`[Handoff] fired for ${context.customerName} — reason=${reason} conf=${classification.confidence.toFixed(2)}`);
   }
 
   /**
