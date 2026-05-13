@@ -12,7 +12,6 @@ import ConnectionModal from '../components/ConnectionModal';
 import ServicePricingForm from '../components/ServicePricingForm';
 import AccountFaqForm from '../components/AccountFaqForm';
 import TeamSection from '../components/TeamSection';
-import { LeadBridgeNumberManager } from '../components/LeadBridgeNumberManager';
 import { SettingsCommunicationSection } from './SettingsCommunication';
 
 const tierNames: Record<string, string> = {
@@ -1921,23 +1920,8 @@ export default function SettingsPage() {
 
       </>)}
 
-      {activeTab === 'communication' && (
-      <>
-      {/* Section 3.5: LeadBridge Numbers */}
-      <div className="space-y-3">
-        <h3 className="text-xl font-bold text-slate-900 px-2">LeadBridge Numbers</h3>
-        <p className="text-sm text-slate-500 px-2">Dedicated phone numbers used for texting and calling leads. First number is included with Engage and Convert plans; additional numbers are billed as add-ons.</p>
-        <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-6">
-          <LeadBridgeNumberManager
-            accounts={accounts}
-            canPurchase={subscription?.trial?.isActive || subscription?.tier === 'PRO' || subscription?.tier === 'ENTERPRISE'}
-            onSuccess={msg => notify.success('Success', msg)}
-            onError={msg => notify.error('Error', msg)}
-          />
-        </div>
-      </div>
-
-      </>)}
+      {/* Section 3.5 (LeadBridge Numbers) merged into the Communication tab's
+          Phone Setup card inside SettingsCommunicationSection. */}
 
       {activeTab === 'ai' && (
       <>

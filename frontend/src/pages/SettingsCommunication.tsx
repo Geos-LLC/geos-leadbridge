@@ -12,6 +12,8 @@ import type { NotificationRule, MessageTemplate, CallConnectSettings } from '../
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
 import { TierBadge, LockedFeatureOverlay } from '../components/TierBadges';
+import { LeadBridgeNumberManager } from '../components/LeadBridgeNumberManager';
+import { notify } from '../store/notificationStore';
 
 const THUMBTACK_ALERT_TEMPLATE =
   'New lead for {account.name}\n' +
@@ -539,33 +541,19 @@ export function SettingsCommunicationSection() {
                 </div>
               </div>
 
-              {/* Row 2: LeadBridge Number + Test Number (Engage). */}
+              {/* Row 2: Test Number with Test Text / Test Call (Engage). The
+                  read-only LeadBridge Number column was folded into the
+                  LeadBridge Numbers manager below — one canonical surface for
+                  the per-account number. */}
               <div className="relative">
                 {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
-                <div className={`grid grid-cols-1 md:grid-cols-2 gap-4${!canUseEngage ? ' opacity-60 pointer-events-none' : ''}`}>
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🤖 LeadBridge Number</span>
-                      <TierBadge tier="engage" />
-                    </div>
-                    <p className="text-[11px] text-slate-400 mb-2">Used for texting and calling leads. Manage numbers in <Link to="/settings" className="text-blue-600 hover:underline">Settings</Link>.</p>
-                    <div className="rounded-xl px-3 py-2.5 text-sm font-mono bg-blue-50/30 border-2 border-blue-200 text-blue-700">
-                      {accountPhone ? (
-                        <>
-                          {accountPhone.phoneNumber}
-                          {accountPhone.friendlyName && accountPhone.friendlyName !== accountPhone.phoneNumber && (
-                            <span className="ml-2 text-xs font-normal text-slate-500">— {accountPhone.friendlyName}</span>
-                          )}
-                        </>
-                      ) : <span className="text-slate-400">No active number assigned</span>}
-                    </div>
+                <div className={!canUseEngage ? 'opacity-60 pointer-events-none' : ''}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🧪 Test Number</span>
+                    <TierBadge tier="engage" />
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🧪 Test Number</span>
-                      <TierBadge tier="engage" />
-                    </div>
-                    <p className="text-[11px] text-slate-400 mb-2">Used to test SMS and calls from your LeadBridge Number.</p>
+                  <p className="text-[11px] text-slate-400 mb-2">Used to test SMS and calls from your LeadBridge Number.</p>
+                  <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2 items-start">
                     <input
                       type="tel"
                       value={testPhone}
@@ -579,47 +567,69 @@ export function SettingsCommunicationSection() {
                           : 'bg-slate-50 border border-slate-200 focus:ring-blue-500'
                       }`}
                     />
-                    {testPhone && !isValidPhoneE164(testPhone) && (
-                      <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3 shrink-0" /> Must be E.164 format, e.g. +12125550100
-                      </p>
-                    )}
-                    {ccSamePhone && (
-                      <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
-                        <AlertTriangle size={12} /> Test phone cannot be the same as the bot number or business phone.
-                      </p>
-                    )}
-                    <div className="flex gap-2 flex-wrap mt-3">
-                      <button
-                        onClick={sendTestText}
-                        disabled={testTextStatus === 'sending' || !ctEnabled || !testPhoneValid || tenantPhones.length === 0 || ccSamePhone}
-                        title={!ctEnabled ? 'Enable Instant Text on the Automation page first' : !testPhoneValid ? 'Enter a valid test phone' : ''}
-                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
-                          testTextStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
-                          testTextStatus === 'failed' ? 'bg-red-100 text-red-700' :
-                          testTextStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
-                          'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
-                        }`}
-                      >
-                        {testTextStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
-                         testTextStatus === 'delivered' ? <CheckCircle size={14} /> :
-                         testTextStatus === 'failed' ? <X size={14} /> :
-                         <Send size={14} />}
-                        {testTextStatus === 'sending' ? 'Sending…' : testTextStatus === 'delivered' ? 'Sent' : testTextStatus === 'failed' ? 'Failed' : 'Test Text'}
-                      </button>
-                      <button
-                        onClick={sendTestCall}
-                        disabled={callTesting || !ccEnabled || ccSamePhone || !testPhoneValid}
-                        title={!ccEnabled ? 'Enable Instant Call on the Automation page first' : !testPhoneValid ? 'Enter a valid test phone' : ''}
-                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
-                          callTesting ? 'bg-slate-100 text-slate-500' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
-                        }`}
-                      >
-                        {callTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
-                        {callTesting ? 'Calling…' : 'Test Call'}
-                      </button>
-                    </div>
+                    <button
+                      onClick={sendTestText}
+                      disabled={testTextStatus === 'sending' || !ctEnabled || !testPhoneValid || tenantPhones.length === 0 || ccSamePhone}
+                      title={!ctEnabled ? 'Enable Instant Text on the Automation page first' : !testPhoneValid ? 'Enter a valid test phone' : ''}
+                      className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                        testTextStatus === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+                        testTextStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                        testTextStatus === 'sending' ? 'bg-slate-100 text-slate-500' :
+                        'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
+                      }`}
+                    >
+                      {testTextStatus === 'sending' ? <Loader2 size={14} className="animate-spin" /> :
+                       testTextStatus === 'delivered' ? <CheckCircle size={14} /> :
+                       testTextStatus === 'failed' ? <X size={14} /> :
+                       <Send size={14} />}
+                      {testTextStatus === 'sending' ? 'Sending…' : testTextStatus === 'delivered' ? 'Sent' : testTextStatus === 'failed' ? 'Failed' : 'Test Text'}
+                    </button>
+                    <button
+                      onClick={sendTestCall}
+                      disabled={callTesting || !ccEnabled || ccSamePhone || !testPhoneValid}
+                      title={!ccEnabled ? 'Enable Instant Call on the Automation page first' : !testPhoneValid ? 'Enter a valid test phone' : ''}
+                      className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap disabled:cursor-not-allowed ${
+                        callTesting ? 'bg-slate-100 text-slate-500' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50'
+                      }`}
+                    >
+                      {callTesting ? <Loader2 size={14} className="animate-spin" /> : <PhoneCall size={14} />}
+                      {callTesting ? 'Calling…' : 'Test Call'}
+                    </button>
                   </div>
+                  {testPhone && !isValidPhoneE164(testPhone) && (
+                    <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" /> Must be E.164 format, e.g. +12125550100
+                    </p>
+                  )}
+                  {ccSamePhone && (
+                    <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
+                      <AlertTriangle size={12} /> Test phone cannot be the same as the bot number or business phone.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* LeadBridge Numbers — dedicated phone numbers manager.
+                  Folded into Phone Setup so users have one place for every
+                  phone-related setting. Replaces the previous read-only
+                  LeadBridge Number display + the standalone Section 3.5
+                  block that used to live further down the Settings page. */}
+              <div className="relative pt-2 border-t border-slate-100">
+                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
+                <div className={!canUseEngage ? 'opacity-60 pointer-events-none' : ''}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">🤖 LeadBridge Numbers</span>
+                    <TierBadge tier="engage" />
+                  </div>
+                  <p className="text-[11px] text-slate-400 mb-3">
+                    Dedicated phone numbers used for texting and calling leads. First number is included with Engage and Convert plans; additional numbers are billed as add-ons.
+                  </p>
+                  <LeadBridgeNumberManager
+                    accounts={accounts as any}
+                    canPurchase={canUseEngage}
+                    onSuccess={msg => notify.success('Success', msg)}
+                    onError={msg => notify.error('Error', msg)}
+                  />
                 </div>
               </div>
             </div>
