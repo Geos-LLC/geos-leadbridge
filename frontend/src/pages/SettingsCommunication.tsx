@@ -239,6 +239,19 @@ export function SettingsCommunicationSection() {
     showSuccess('Business phone saved');
   }
 
+  // Find existing platform-named template, or create it. Returns the id.
+  async function ensurePlatformAlertTemplate(): Promise<string | null> {
+    if (!selectedAccount) return null;
+    const platform = selectedAccount.platform || 'thumbtack';
+    const templateName = platform === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack';
+    const defaultBody = platform === 'yelp' ? YELP_ALERT_TEMPLATE : THUMBTACK_ALERT_TEMPLATE;
+    const existing = templates.find(t => t.name === templateName);
+    if (existing) return existing.id;
+    const { template } = await templatesApi.createTemplate(templateName, defaultBody);
+    setTemplates(prev => [template, ...prev]);
+    return template.id;
+  }
+
   // Platform-specific lead alert rule seeding — mirrors the Services
   // toggleLeadAlerts logic so Yelp and Thumbtack get correct defaults.
   async function createLeadAlertRule(): Promise<void> {
@@ -248,12 +261,7 @@ export function SettingsCommunicationSection() {
       const platform = selectedAccount.platform || 'thumbtack';
       const templateName = platform === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack';
       const defaultBody = platform === 'yelp' ? YELP_ALERT_TEMPLATE : THUMBTACK_ALERT_TEMPLATE;
-      let templateId = templates.find(t => t.name === templateName)?.id;
-      if (!templateId) {
-        const { template } = await templatesApi.createTemplate(templateName, defaultBody);
-        templateId = template.id;
-        setTemplates(prev => [template, ...prev]);
-      }
+      const templateId = await ensurePlatformAlertTemplate();
       const toPhone = businessPhoneInput || user?.businessPhone || '';
       const { rule } = await notificationsApi.createRule(selectedAccountId, {
         name: templateName,
@@ -278,7 +286,16 @@ export function SettingsCommunicationSection() {
     setError(null);
     try {
       if (leadAlertRule && leadAlertRule.id !== '_pending') {
-        const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { enabled: on });
+        // If we're turning the rule on AND it has no template assigned, seed
+        // the platform default in the same update so the user is never left
+        // looking at an enabled-but-blank alert.
+        const needsTemplate = on && !leadAlertRule.templateId && !leadAlertRule.messageTemplate;
+        const updates: any = { enabled: on };
+        if (needsTemplate) {
+          const tid = await ensurePlatformAlertTemplate();
+          if (tid) updates.templateId = tid;
+        }
+        const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, updates);
         setLeadAlertRule(rule);
       } else if (on) {
         await createLeadAlertRule();
@@ -289,6 +306,29 @@ export function SettingsCommunicationSection() {
       setSavingAlertRule(false);
     }
   }
+
+  // Self-heal: if a leadAlertRule loads enabled-but-without-a-template, assign
+  // the platform default automatically. Covers rules created by older flows
+  // (or rules whose template was deleted) so the user never sees an enabled
+  // alert with a blank dropdown.
+  useEffect(() => {
+    if (!selectedAccountId || !leadAlertRule || !leadAlertRule.enabled) return;
+    if (leadAlertRule.templateId || leadAlertRule.messageTemplate) return;
+    if (savingAlertRule) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const tid = await ensurePlatformAlertTemplate();
+        if (!tid || cancelled) return;
+        const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { templateId: tid });
+        if (!cancelled) setLeadAlertRule(rule);
+      } catch {
+        // surfaces in normal save-failure paths; no toast spam here
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAccountId, leadAlertRule?.id, leadAlertRule?.enabled, leadAlertRule?.templateId, leadAlertRule?.messageTemplate]);
 
   const changeAlertTemplate = useCallback(async (templateId: string) => {
     if (!selectedAccountId || !leadAlertRule) return;
