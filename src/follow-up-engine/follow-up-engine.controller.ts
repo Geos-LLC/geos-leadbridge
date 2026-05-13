@@ -618,14 +618,17 @@ export class FollowUpEngineController {
     if (body.aiHiredCompetitorReengage !== undefined) extendedSettings.aiHiredCompetitorReengage = body.aiHiredCompetitorReengage;
     if (body.aiHiredCompetitorDelay !== undefined) extendedSettings.aiHiredCompetitorDelay = body.aiHiredCompetitorDelay;
     if (body.aiHiredCompetitorMessage !== undefined) extendedSettings.aiHiredCompetitorMessage = body.aiHiredCompetitorMessage;
-    // Re-engagement alerts
+    // Customer Reply Alerts — single user-facing toggle gating BOTH:
+    //   1. Re-engagement (customer replies after follow-ups, any intent)
+    //   2. Handoff       (customer signals high intent during AI Conversation)
+    // The Handoff path auto-gates on aiConversationEnabled separately, so
+    // there's no `handoffAlertEnabled` field — the split between the two
+    // firing modes is internal architecture, not a user choice.
     if (body.reEngagementAlertEnabled !== undefined) extendedSettings.reEngagementAlertEnabled = body.reEngagementAlertEnabled;
     if (body.reEngagementTemplate !== undefined) extendedSettings.reEngagementTemplate = body.reEngagementTemplate;
-    // Handoff alerts — fires when the classifier detects high intent
-    // (intent='agreed' or 'wants_live_contact') during an AI Conversation.
-    // Distinct from re-engagement (which fires on replies AFTER follow-ups
-    // went out and requires an active enrollment).
-    if (body.handoffAlertEnabled !== undefined) extendedSettings.handoffAlertEnabled = body.handoffAlertEnabled;
+    // Handoff message template stays editable via direct API (no UI) for
+    // power users / future customization. Falls back to a default in
+    // automation.service when unset.
     if (body.handoffAlertTemplate !== undefined) extendedSettings.handoffAlertTemplate = body.handoffAlertTemplate;
 
     // Use `undefined` (not nullish-coalesce-default) for fields that weren't

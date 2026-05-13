@@ -288,44 +288,58 @@ export class AutomationService implements OnModuleInit {
    * false-positive cost (paging the owner for nothing) is higher than for
    * status transitions.
    *
-   * Honors the per-account toggle `handoffAlertEnabled` (in
-   * followUpSettingsJson; defaults ON) and template `handoffAlertTemplate`
-   * (defaults to a sensible "Lead {{lead.name}} ready for handoff…").
+   * Single-toggle UX: there's ONE user-facing alerts switch (the existing
+   * `reEngagementAlertEnabled`, surfaced in the UI as "Re-engagement
+   * Alerts"). Handoff is auto-gated on `aiConversationEnabled`:
+   *   - AI on  + alerts on → Handoff fires on high-intent
+   *   - AI off + alerts on → Handoff doesn't fire (Re-engagement covers
+   *                          customer replies via the follow-up path)
+   *   - Alerts off         → neither fires
+   * The split between Re-engagement and Handoff is internal architecture,
+   * not a user choice.
    *
    * Distinct from Re-engagement Alert: re-engagement fires when a previously
    * silent lead replies after follow-ups went out (requires an active
    * FollowUpEnrollment). Handoff fires the moment the customer signals
    * "I want a human now" inside an active AI Conversation. The two are
-   * complementary, not redundant.
+   * complementary; both can fire on the same reply when both conditions hit.
    */
   private async maybeFireHandoffAlert(
     classification: IntentClassification | undefined,
     context: CustomerReplyContext,
-    savedAccount: { id: string; followUpSettingsJson: string | null; businessName?: string | null },
+    savedAccount: { id: string; followUpSettingsJson: string | null; aiConversationEnabled?: boolean | null; businessName?: string | null },
   ): Promise<void> {
     if (!classification || !classification.fromLlm) return;
     if (classification.confidence < AutomationService.CLASSIFIER_CONFIDENCE_THRESHOLD) return;
     const intent = classification.intent;
     if (intent !== 'agreed' && intent !== 'wants_live_contact') return;
 
-    // Per-account toggle + template. Default ON so accounts that pre-date
-    // this feature still get paged on high-intent signals without an
-    // explicit migration. Empty / whitespace-only templates fall back to
-    // the default so a user who blanks the field doesn't silently lose
-    // all handoff alerts.
-    let handoffEnabled = true;
+    // Auto-gate: handoff only makes sense when AI is actively conversing
+    // with the customer. With AI off, the follow-up + re-engagement path
+    // covers customer replies.
+    if (!savedAccount.aiConversationEnabled) {
+      this.logger.log(`[Handoff] skipped — AI Conversation off (intent=${intent})`);
+      return;
+    }
+
+    // Master alerts toggle: the same `reEngagementAlertEnabled` switch the
+    // user sees in the UI ("Re-engagement Alerts"). One switch governs
+    // both Re-engagement and Handoff. Default ON. Empty / whitespace-only
+    // handoff template falls back to the hard-coded default so blanking
+    // the field doesn't silently lose all handoff alerts.
+    let alertsEnabled = true;
     let template = 'Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"';
     if (savedAccount.followUpSettingsJson) {
       try {
         const s = JSON.parse(savedAccount.followUpSettingsJson);
-        if (s.handoffAlertEnabled === false) handoffEnabled = false;
+        if (s.reEngagementAlertEnabled === false) alertsEnabled = false;
         if (typeof s.handoffAlertTemplate === 'string' && s.handoffAlertTemplate.trim()) {
           template = s.handoffAlertTemplate;
         }
       } catch { /* invalid JSON — fall through to defaults */ }
     }
-    if (!handoffEnabled) {
-      this.logger.log(`[Handoff] skipped — disabled per account settings (intent=${intent})`);
+    if (!alertsEnabled) {
+      this.logger.log(`[Handoff] skipped — alerts toggle off (intent=${intent})`);
       return;
     }
 
