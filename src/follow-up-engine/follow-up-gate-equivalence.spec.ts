@@ -124,13 +124,36 @@ const MATRIX: MatrixRow[] = [
     expectedSideEffect: 'none',
   },
   {
-    name: 're-engagement bypass: completed on customer_deferred → pass_re_engagement',
+    // Savanna 2026-05-12 regression: pre-fix, `completed` on a re-engagement
+    // sequence bypassed the gate and let 3 follow-ups blast a customer who
+    // had just confirmed a booking with "Thank you!". The narrow bypass only
+    // applies to `deferring` now — `completed` on a re-engagement is treated
+    // the same as on a regular sequence: stop, mark lost.
+    name: 're-engagement BLOCKS completed: completed on customer_deferred → block_terminal',
     customerMessage: "we're done with it",
     classifier: { intent: 'completed', confidence: 0.9, reason: 'job done', fromLlm: true },
     triggerState: 'customer_deferred',
-    expectedShouldBlock: false,
-    expectedAction: 'pass_re_engagement',
-    expectedSideEffect: 'none',
+    expectedShouldBlock: true,
+    expectedAction: 'block_terminal',
+    expectedSideEffect: 'stop_and_lost',
+  },
+  {
+    name: 're-engagement BLOCKS agreed: agreed on customer_hired_competitor → block_terminal',
+    customerMessage: 'yes book it',
+    classifier: { intent: 'agreed', confidence: 0.95, reason: 'accepted', fromLlm: true },
+    triggerState: 'customer_hired_competitor',
+    expectedShouldBlock: true,
+    expectedAction: 'block_terminal',
+    expectedSideEffect: 'stop_and_booked',
+  },
+  {
+    name: 're-engagement BLOCKS hired_elsewhere: hired_elsewhere on customer_hired_competitor → block_terminal',
+    customerMessage: 'we went with another company',
+    classifier: { intent: 'hired_elsewhere', confidence: 0.9, reason: 'hired other', fromLlm: true },
+    triggerState: 'customer_hired_competitor',
+    expectedShouldBlock: true,
+    expectedAction: 'block_terminal',
+    expectedSideEffect: 'stop_and_lost',
   },
   {
     name: 're-engagement still blocks opt_out: opt_out on customer_hired_competitor',

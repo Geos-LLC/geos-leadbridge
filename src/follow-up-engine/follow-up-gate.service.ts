@@ -44,7 +44,7 @@ export type GateAction =
   | 'pass_no_message'      // no customer message yet → nothing to classify (initial outreach)
   | 'pass_low_confidence'  // classifier returned but below threshold
   | 'pass_classifier_failed' // classifier threw or LLM unavailable → fail open
-  | 'pass_re_engagement';  // re-engagement sequence on non-opt_out terminal intent (sequence purpose IS to message paused/lost customers)
+  | 'pass_re_engagement';  // re-engagement sequence on `deferring` intent (bounded pause is the recoverable case the sequence is designed for)
 
 export type GateSideEffect = 'stop_and_lost' | 'stop_and_booked' | 'stop_only' | 'none';
 
@@ -55,8 +55,10 @@ export interface GateInput {
   /** Lead id for status flip in caller's side-effect handling */
   leadId?: string | null;
   /** Re-engagement sequences (`customer_deferred`, `customer_hired_competitor`)
-   *  bypass the gate for non-opt_out terminal intents because their entire
-   *  purpose is to message paused/lost customers. */
+   *  bypass the gate ONLY on `deferring` intent — a bounded pause is the
+   *  exact case the sequence is designed for. All other terminal intents
+   *  (completed/agreed/hired_elsewhere/opt_out/terminal_defer) stop the
+   *  re-engagement just like a regular sequence. */
   triggerState?: string | null;
 }
 
@@ -204,17 +206,29 @@ export class FollowUpGateService {
     }
 
     // Re-engagement bypass: sequences whose entire purpose is to message
-    // paused/lost customers must NOT be stopped on deferring/completed/hired/
-    // agreed intents — those represent recoverable signals during the
-    // re-engagement window. They DO still stop on:
-    //   - opt_out (explicit unsubscribe — non-recoverable)
-    //   - terminal_defer (Task 3, 2026-05-09): unbounded "maybe later"
-    //     deflection. By definition the customer is NOT committing to a
-    //     return window; sending another re-engagement attempt is the
-    //     same creepy-follow-up anti-pattern this gate exists to prevent.
+    // paused/lost customers should still send when the customer's most recent
+    // signal is a BOUNDED pause (`deferring`) — that's a real recoverable case
+    // ("back next month") and the whole point of the sequence is to land at
+    // the stated return time.
+    //
+    // Other terminal intents do NOT bypass — they stop the re-engagement:
+    //   - opt_out: explicit unsubscribe, never recoverable.
+    //   - terminal_defer: unbounded "maybe later"; sending another attempt is
+    //     the creepy-follow-up anti-pattern this gate exists to prevent.
+    //   - completed: customer is signaling we're done (booking ran, job done,
+    //     "thanks!"). Continuing to re-engage them after they've confirmed
+    //     completion is the Savanna-class bug (2026-05-12): customer's
+    //     dispatcher-confirmed booking + "Thank you!" reply got 3 AI follow-ups
+    //     in succession because the gate let `completed` pass through.
+    //   - agreed: customer accepted a booking. They are NOT a re-engagement
+    //     target anymore — they converted. Handoff to the operator, don't
+    //     keep messaging.
+    //   - hired_elsewhere: a customer in a `customer_hired_competitor`
+    //     sequence saying "still hired someone" is a stronger no than what
+    //     enrolled them, not a recovery. Stop.
     const isReEngagementSequence = input.triggerState === 'customer_deferred'
       || input.triggerState === 'customer_hired_competitor';
-    const bypassableInReEngagement = intent !== 'opt_out' && intent !== 'terminal_defer';
+    const bypassableInReEngagement = intent === 'deferring';
     if (isReEngagementSequence && bypassableInReEngagement) {
       this.logger.log(`[FollowUpGate] re-engagement bypass: intent=${intent} conf=${classification.confidence.toFixed(2)} triggerState=${input.triggerState}`);
       return {

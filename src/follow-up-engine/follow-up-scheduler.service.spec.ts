@@ -872,18 +872,33 @@ describe('FollowUpSchedulerService', () => {
       expect(generatorService.generateMessage).toHaveBeenCalled();
     });
 
-    it('passes through re-engagement (customer_deferred) sequence on completed intent', async () => {
-      // The deferred re-engagement sequence exists PRECISELY to message
-      // customers in this state. Stopping it on completed/deferring/etc.
-      // would defeat its purpose.
+    it('passes through re-engagement (customer_deferred) sequence on deferring intent (bounded pause)', async () => {
+      // The narrow bypass: a customer in a re-engagement sequence who says
+      // "back in 2 weeks" is exactly the case the sequence was designed for.
+      // Let the scheduled message land.
       const now = setUpHappyPath(
-        { intent: 'completed', confidence: 0.9, reason: 'job done', fromLlm: true },
+        { intent: 'deferring', confidence: 0.9, reason: 'bounded pause', fromLlm: true },
       );
 
       await (service as any).processEnrollment(happyPathEnrollment({ triggerState: 'customer_deferred' }), now);
 
       expect(engineService.stopEnrollment).not.toHaveBeenCalled();
       expect(generatorService.generateMessage).toHaveBeenCalled();
+    });
+
+    it('STOPS re-engagement on completed intent (Savanna 2026-05-12 regression)', async () => {
+      // Pre-fix: completed on a re-engagement sequence bypassed the gate, and
+      // a customer who confirmed a booking + replied "Thank you!" got blasted
+      // with follow-ups. Post-fix: completed always stops, even in a
+      // re-engagement sequence.
+      const now = setUpHappyPath(
+        { intent: 'completed', confidence: 0.9, reason: 'job done', fromLlm: true },
+      );
+
+      await (service as any).processEnrollment(happyPathEnrollment({ triggerState: 'customer_hired_competitor' }), now);
+
+      expect(engineService.stopEnrollment).toHaveBeenCalledWith(ENROLLMENT_ID, 'classifier_completed');
+      expect(generatorService.generateMessage).not.toHaveBeenCalled();
     });
 
     it('STOPS re-engagement (customer_hired_competitor) sequence on opt_out — explicit unsubscribe overrides', async () => {

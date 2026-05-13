@@ -183,19 +183,81 @@ describe('FollowUpGateService', () => {
     });
   });
 
-  describe('evaluate() — re-engagement bypass', () => {
-    it('passes through completed on customer_deferred re-engagement (sequence purpose)', async () => {
-      const prisma = buildPrisma({ customerMessage: "we're done with it" });
-      const classifier = buildClassifier({ intent: 'completed', confidence: 0.9, reason: 'job done', fromLlm: true });
+  describe('evaluate() — re-engagement bypass (narrow: deferring only)', () => {
+    it('passes through deferring on customer_deferred re-engagement (bounded pause is the recoverable case)', async () => {
+      const prisma = buildPrisma({ customerMessage: "back in 2 weeks" });
+      const classifier = buildClassifier({ intent: 'deferring', confidence: 0.9, reason: 'bounded pause', fromLlm: true });
       const service = new FollowUpGateService(prisma, classifier);
       const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD, triggerState: 'customer_deferred' });
       expect(decision.action).toBe('pass_re_engagement');
       expect(decision.shouldBlock).toBe(false);
     });
 
+    it('passes through deferring on customer_hired_competitor re-engagement', async () => {
+      const prisma = buildPrisma({ customerMessage: "let me think about it for a couple weeks" });
+      const classifier = buildClassifier({ intent: 'deferring', confidence: 0.85, reason: 'bounded pause', fromLlm: true });
+      const service = new FollowUpGateService(prisma, classifier);
+      const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD, triggerState: 'customer_hired_competitor' });
+      expect(decision.action).toBe('pass_re_engagement');
+      expect(decision.shouldBlock).toBe(false);
+    });
+
+    it('BLOCKS completed on customer_hired_competitor re-engagement (Savanna 2026-05-12 regression)', async () => {
+      // Customer confirms "Thank you!" after a booking confirmation — the
+      // classifier returns completed @ 0.90. Pre-fix this bypassed the gate and
+      // 3 follow-ups fired anyway. Post-fix: stop_and_lost, no follow-up.
+      const prisma = buildPrisma({ customerMessage: 'Thank you!' });
+      const classifier = buildClassifier({ intent: 'completed', confidence: 0.9, reason: 'job confirmed', fromLlm: true });
+      const service = new FollowUpGateService(prisma, classifier);
+      const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD, triggerState: 'customer_hired_competitor' });
+      expect(decision.action).toBe('block_terminal');
+      expect(decision.shouldBlock).toBe(true);
+      expect(decision.sideEffect).toBe('stop_and_lost');
+    });
+
+    it('BLOCKS completed on customer_deferred re-engagement', async () => {
+      const prisma = buildPrisma({ customerMessage: "we're done with it" });
+      const classifier = buildClassifier({ intent: 'completed', confidence: 0.9, reason: 'job done', fromLlm: true });
+      const service = new FollowUpGateService(prisma, classifier);
+      const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD, triggerState: 'customer_deferred' });
+      expect(decision.action).toBe('block_terminal');
+      expect(decision.shouldBlock).toBe(true);
+      expect(decision.sideEffect).toBe('stop_and_lost');
+    });
+
+    it('BLOCKS agreed on re-engagement (customer converted — handoff, do not keep messaging)', async () => {
+      const prisma = buildPrisma({ customerMessage: "yes book it" });
+      const classifier = buildClassifier({ intent: 'agreed', confidence: 0.95, reason: 'accepted', fromLlm: true });
+      const service = new FollowUpGateService(prisma, classifier);
+      const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD, triggerState: 'customer_hired_competitor' });
+      expect(decision.action).toBe('block_terminal');
+      expect(decision.shouldBlock).toBe(true);
+      expect(decision.sideEffect).toBe('stop_and_booked');
+    });
+
+    it('BLOCKS hired_elsewhere on customer_hired_competitor re-engagement (still no = stronger no)', async () => {
+      const prisma = buildPrisma({ customerMessage: 'we went with another company' });
+      const classifier = buildClassifier({ intent: 'hired_elsewhere', confidence: 0.9, reason: 'hired other', fromLlm: true });
+      const service = new FollowUpGateService(prisma, classifier);
+      const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD, triggerState: 'customer_hired_competitor' });
+      expect(decision.action).toBe('block_terminal');
+      expect(decision.shouldBlock).toBe(true);
+      expect(decision.sideEffect).toBe('stop_and_lost');
+    });
+
     it('STILL blocks opt_out on customer_hired_competitor re-engagement', async () => {
       const prisma = buildPrisma({ customerMessage: 'stop' });
       const classifier = buildClassifier({ intent: 'opt_out', confidence: 0.99, reason: 'unsubscribe', fromLlm: true });
+      const service = new FollowUpGateService(prisma, classifier);
+      const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD, triggerState: 'customer_hired_competitor' });
+      expect(decision.action).toBe('block_terminal');
+      expect(decision.shouldBlock).toBe(true);
+      expect(decision.sideEffect).toBe('stop_and_lost');
+    });
+
+    it('STILL blocks terminal_defer on customer_hired_competitor re-engagement', async () => {
+      const prisma = buildPrisma({ customerMessage: 'maybe later' });
+      const classifier = buildClassifier({ intent: 'terminal_defer', confidence: 0.9, reason: 'unbounded deflection', fromLlm: true });
       const service = new FollowUpGateService(prisma, classifier);
       const decision = await service.evaluate({ conversationId: CONV, leadId: LEAD, triggerState: 'customer_hired_competitor' });
       expect(decision.action).toBe('block_terminal');
