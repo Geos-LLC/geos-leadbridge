@@ -14,14 +14,15 @@ import OpenAI from 'openai';
  * on phrase lists is a losing game; let an LLM read the message instead.
  */
 export type CustomerIntent =
-  | 'opt_out'         // explicit unsubscribe / "stop messaging me" / "remove my info"
-  | 'hired_elsewhere' // they got someone else / hired another company
-  | 'completed'       // job done by us or another party — no longer needed
-  | 'agreed'          // "book it" / "sounds good" — handoff to manager
-  | 'deferring'       // BOUNDED pause with intent to return: "back next week" / "let me think for a couple days" / "check with my husband"
-  | 'terminal_defer'  // UNBOUNDED / indefinite deflection: "maybe later" / "someday" / "not now, hard to say" / "we'll see"
-  | 'asking'          // active question that needs an AI reply
-  | 'engaged';        // continuing conversation, neither closing nor pausing
+  | 'opt_out'            // explicit unsubscribe / "stop messaging me" / "remove my info"
+  | 'hired_elsewhere'    // they got someone else / hired another company
+  | 'completed'          // job done by us or another party — no longer needed
+  | 'agreed'             // "book it" / "sounds good" — handoff to manager
+  | 'wants_live_contact' // customer wants a live call/meeting/Zoom — high-intent handoff signal
+  | 'deferring'          // BOUNDED pause with intent to return: "back next week" / "let me think for a couple days" / "check with my husband"
+  | 'terminal_defer'     // UNBOUNDED / indefinite deflection: "maybe later" / "someday" / "not now, hard to say" / "we'll see"
+  | 'asking'             // active question that needs an AI reply
+  | 'engaged';           // continuing conversation, neither closing nor pausing
 
 export interface IntentClassification {
   intent: CustomerIntent;
@@ -66,6 +67,8 @@ Intents (pick exactly one):
 - completed — The work is done. Could be done by us or by another, the customer is signaling they no longer need anything. Examples: "It's already done, thanks", "all set", "all done", "taken care of already", "we don't need it anymore", "I sold the place / moved out".
 
 - agreed — Customer accepts a proposal/quote and is ready to book. Examples: "sounds good", "let's do it", "book it", "yes please", "I'm in", "perfect, when can you come?". Active forward motion.
+
+- wants_live_contact — Customer is requesting a live phone call, video call, Zoom, or in-person meeting at a specific time / soon. This is a high-intent handoff signal: they want a HUMAN, not a chat. Examples: "Can we talk by 6pm today?", "Let's hop on a call", "What's a good time to call you?", "Can you Zoom at 3?", "Give me a call when you're free", "I'd like to schedule a call", "Can we get on a call to discuss?", "what's your number — I want to call you", "would love to set up a meeting". Distinguish from 'asking' (where the customer is asking an information question that AI can answer in text). If the message is fundamentally "let's move this off chat onto a call/meeting", it's wants_live_contact.
 
 - deferring — Customer is pausing the conversation BUT clearly intends to return, with either an explicit return window or a concrete decision-making step. Examples: "back in 2 weeks", "I'll reach out next month", "let me check with my husband and get back to you", "I'm traveling, will be in touch when I'm home in 10 days", "shopping around — will let you know by Friday". The pause is bounded by a stated time, a stated decision, or a clear come-back signal.
 
@@ -188,7 +191,7 @@ export class IntentClassifierService {
 
   private coerceIntent(value: unknown): CustomerIntent | null {
     const allowed: CustomerIntent[] = [
-      'opt_out', 'hired_elsewhere', 'completed', 'agreed', 'deferring', 'terminal_defer', 'asking', 'engaged',
+      'opt_out', 'hired_elsewhere', 'completed', 'agreed', 'wants_live_contact', 'deferring', 'terminal_defer', 'asking', 'engaged',
     ];
     if (typeof value !== 'string') return null;
     return (allowed as string[]).includes(value) ? (value as CustomerIntent) : null;

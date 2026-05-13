@@ -1188,6 +1188,57 @@ export class NotificationsService {
   }
 
   /**
+   * Send a handoff alert SMS to the business owner.
+   * Called when the AI classifier detects a high-intent signal — customer is
+   * ready to book (intent='agreed') OR wants a live call/meeting
+   * (intent='wants_live_contact'). This sits between the new-lead alert and
+   * the re-engagement alert: it fires DURING an AI conversation, the moment
+   * the customer signals "I want a human now". Distinct from re-engagement
+   * (which fires when an inactive lead replies after follow-ups went out).
+   *
+   * `alertMessage` is the already-rendered template (caller is responsible
+   * for substituting {{lead.name}} / {{message}} / {{intent}}).
+   */
+  async sendHandoffAlert(userId: string, savedAccountId: string, alertMessage: string): Promise<void> {
+    try {
+      const settings = await this.prisma.notificationSettings.findUnique({
+        where: { savedAccountId },
+      });
+      if (!settings?.sigcoreApiKey) {
+        this.logger.warn(`[Handoff] No Sigcore API key for account ${savedAccountId}`);
+        return;
+      }
+
+      const [agentPhone, fromPhone] = await Promise.all([
+        this.resolveAgentPhone(userId, savedAccountId),
+        this.resolveBotPhone(userId, savedAccountId),
+      ]);
+      if (!agentPhone || !fromPhone) {
+        this.logger.warn(`[Handoff] Missing phone — agent: ${!!agentPhone}, from: ${!!fromPhone}`);
+        return;
+      }
+      const nF = fromPhone.replace(/\D/g, '').slice(-10);
+      const nT = agentPhone.replace(/\D/g, '').slice(-10);
+      if (nF === nT) {
+        this.logger.warn(`[Handoff] from=${fromPhone} equals to=${agentPhone} — skipping`);
+        return;
+      }
+
+      await this.sendViaSigcore({
+        to: agentPhone,
+        body: alertMessage,
+        fromPhone,
+        apiKey: settings.sigcoreApiKey,
+        sigcoreWorkspaceId: settings.sigcoreWorkspaceId,
+        metadata: { type: 'handoff', userId, savedAccountId },
+      });
+      this.logger.log(`[Handoff] Alert sent to ${agentPhone}: ${alertMessage.substring(0, 80)}...`);
+    } catch (err: any) {
+      this.logger.error(`[Handoff] Failed to send alert: ${err.message}`);
+    }
+  }
+
+  /**
    * Send a re-engagement alert SMS to the business owner.
    * Called when a customer replies after being in a follow-up sequence.
    */

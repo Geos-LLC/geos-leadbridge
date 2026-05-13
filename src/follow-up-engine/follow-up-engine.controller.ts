@@ -621,6 +621,12 @@ export class FollowUpEngineController {
     // Re-engagement alerts
     if (body.reEngagementAlertEnabled !== undefined) extendedSettings.reEngagementAlertEnabled = body.reEngagementAlertEnabled;
     if (body.reEngagementTemplate !== undefined) extendedSettings.reEngagementTemplate = body.reEngagementTemplate;
+    // Handoff alerts — fires when the classifier detects high intent
+    // (intent='agreed' or 'wants_live_contact') during an AI Conversation.
+    // Distinct from re-engagement (which fires on replies AFTER follow-ups
+    // went out and requires an active enrollment).
+    if (body.handoffAlertEnabled !== undefined) extendedSettings.handoffAlertEnabled = body.handoffAlertEnabled;
+    if (body.handoffAlertTemplate !== undefined) extendedSettings.handoffAlertTemplate = body.handoffAlertTemplate;
 
     // Use `undefined` (not nullish-coalesce-default) for fields that weren't
     // sent so partial saves from the central AI Strategy panel don't reset

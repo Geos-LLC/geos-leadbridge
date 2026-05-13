@@ -517,6 +517,14 @@ export function Services() {
   const [aiHiredMessage, setAiHiredMessage] = useState(DEFAULT_HIRED_MSG);
   const [reEngagementAlertOn, setReEngagementAlertOn] = useState(true);
   const [reEngagementTemplate, setReEngagementTemplate] = useState('Lead {{lead.name}} replied: "{{message}}"');
+  // Handoff Alerts — fires when the AI classifier detects a high-intent
+  // signal during an active AI Conversation (customer says "let's book",
+  // "can we hop on a call", "give me your number to call", etc.). Distinct
+  // from Re-engagement: re-engagement fires on replies after follow-ups
+  // went out; handoff fires the moment the customer signals "I want a
+  // human now" mid-AI-conversation.
+  const [handoffAlertOn, setHandoffAlertOn] = useState(true);
+  const [handoffAlertTemplate, setHandoffAlertTemplate] = useState('Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"');
   // Track which saved template is currently loaded in each CC message field (for edit button)
   const [ccWhisperTemplateId, setCcWhisperTemplateId] = useState<string | null>(sc?.ccWhisperTemplateId ?? null);
   const [ccGreetingTemplateId, setCcGreetingTemplateId] = useState<string | null>(sc?.ccGreetingTemplateId ?? null);
@@ -733,6 +741,9 @@ export function Services() {
         // Re-engagement alerts
         if (s.reEngagementAlertEnabled !== undefined) setReEngagementAlertOn(s.reEngagementAlertEnabled);
         if (s.reEngagementTemplate) setReEngagementTemplate(s.reEngagementTemplate);
+        // Handoff alerts (classifier-driven, mid-AI-conversation)
+        if (s.handoffAlertEnabled !== undefined) setHandoffAlertOn(s.handoffAlertEnabled);
+        if (s.handoffAlertTemplate) setHandoffAlertTemplate(s.handoffAlertTemplate);
       }
     }).catch(() => {}).finally(() => {
       // Mark hydration complete so auto-save can run for subsequent state changes.
@@ -803,6 +814,9 @@ export function Services() {
         // Re-engagement alerts
         reEngagementAlertEnabled: reEngagementAlertOn,
         reEngagementTemplate,
+        // Handoff alerts
+        handoffAlertEnabled: handoffAlertOn,
+        handoffAlertTemplate,
         // NOTE: aiConversationEnabled is intentionally NOT in this payload.
         // The toggle handler is the sole writer of that field — including
         // it here re-introduces a race: a toggle save may land first, then
@@ -831,6 +845,7 @@ export function Services() {
     aiDeferralCheckIn, aiDeferralDelay, aiDeferralMessage,
     aiHiredReengage, aiHiredDelay, aiHiredMessage,
     reEngagementAlertOn, reEngagementTemplate,
+    handoffAlertOn, handoffAlertTemplate,
   ]);
 
   // Debounced auto-save for Lead Alerts. Fires when alertDirty flips true.
@@ -3976,6 +3991,47 @@ export function Services() {
                     </div>
                     <p className="text-[10px] text-slate-400 leading-relaxed">
                       When a customer replies after follow-ups were sent, you'll receive an SMS alert with their message so you can respond quickly.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Handoff Alerts sub-section ── */}
+              <div className="relative border border-slate-100 rounded-2xl overflow-hidden">
+                {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
+                <div className={`flex items-center justify-between px-5 py-4 bg-slate-50/50${!canUseEngage ? ' opacity-60' : ''}`}>
+                  <div className="flex items-center gap-3">
+                    <Bell className="w-5 h-5 text-violet-500" />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-bold text-slate-800">Handoff Alerts</h4>
+                        <TierBadge tier="engage" />
+                      </div>
+                      <p className="text-xs text-slate-400">Get pinged when AI detects the customer is ready to book or wants a live call.</p>
+                    </div>
+                  </div>
+                  <label className={`inline-flex items-center ${canUseEngage ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                    <input type="checkbox" checked={handoffAlertOn} disabled={!canUseEngage} onChange={e => setHandoffAlertOn(e.target.checked)} className="sr-only peer" />
+                    <div className="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
+                  </label>
+                </div>
+                {handoffAlertOn && (
+                  <div className="px-5 py-4 space-y-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Alert Message Template</label>
+                      <p className="text-[10px] text-slate-400 mb-2">
+                        Use {'{{lead.name}}'} for lead name, {'{{message}}'} for their reply, and {'{{intent}}'} for the detected signal (e.g. "ready to book" / "wants live call").
+                      </p>
+                      <textarea
+                        value={handoffAlertTemplate}
+                        onChange={e => setHandoffAlertTemplate(e.target.value)}
+                        rows={2}
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                        placeholder='Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"'
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      During an active AI Conversation, when the customer signals they're ready to book or asks for a live call/Zoom/meeting, the dispatcher gets an SMS so a human can take over before the lead cools off.
                     </p>
                   </div>
                 )}

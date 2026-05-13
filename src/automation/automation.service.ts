@@ -18,6 +18,7 @@ import { TrialService } from '../trial/trial.service';
 import { buildPriceRangeInstruction } from '../ai/price-range';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 import { ensureCustomerReplyPresets } from '../follow-up-engine/follow-up-seed';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /**
  * Customer-reply phrase sets used by both:
@@ -206,6 +207,7 @@ export class AutomationService implements OnModuleInit {
     private leadStatusService: LeadStatusService,
     @Inject(forwardRef(() => FollowUpEngineService))
     private followUpEngine: FollowUpEngineService,
+    private notifications: NotificationsService,
   ) {}
 
   /**
@@ -273,6 +275,69 @@ export class AutomationService implements OnModuleInit {
     } catch (err: any) {
       this.logger.error(`[AUTOMATION] ${triggerState} enrollment failed for ${threadId}: ${err.message}`);
     }
+  }
+
+  /**
+   * Manager-handoff SMS alert, classifier-driven. Fires once per inbound
+   * customer message when the LLM intent classifier returns a high-intent
+   * signal:
+   *   - intent='agreed'             → "ready to book" (yes please / let's do it / book it)
+   *   - intent='wants_live_contact' → "wants a live call/meeting/Zoom"
+   * Only fires when confidence ≥ CLASSIFIER_CONFIDENCE_THRESHOLD (0.7) and
+   * fromLlm=true — phrase-list fallbacks don't trigger handoff because the
+   * false-positive cost (paging the owner for nothing) is higher than for
+   * status transitions.
+   *
+   * Honors the per-account toggle `handoffAlertEnabled` (in
+   * followUpSettingsJson; defaults ON) and template `handoffAlertTemplate`
+   * (defaults to a sensible "Lead {{lead.name}} ready for handoff…").
+   *
+   * Distinct from Re-engagement Alert: re-engagement fires when a previously
+   * silent lead replies after follow-ups went out (requires an active
+   * FollowUpEnrollment). Handoff fires the moment the customer signals
+   * "I want a human now" inside an active AI Conversation. The two are
+   * complementary, not redundant.
+   */
+  private async maybeFireHandoffAlert(
+    classification: IntentClassification | undefined,
+    context: CustomerReplyContext,
+    savedAccount: { id: string; followUpSettingsJson: string | null; businessName?: string | null },
+  ): Promise<void> {
+    if (!classification || !classification.fromLlm) return;
+    if (classification.confidence < AutomationService.CLASSIFIER_CONFIDENCE_THRESHOLD) return;
+    const intent = classification.intent;
+    if (intent !== 'agreed' && intent !== 'wants_live_contact') return;
+
+    // Per-account toggle + template. Default ON so accounts that pre-date
+    // this feature still get paged on high-intent signals without an
+    // explicit migration. Empty / whitespace-only templates fall back to
+    // the default so a user who blanks the field doesn't silently lose
+    // all handoff alerts.
+    let handoffEnabled = true;
+    let template = 'Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"';
+    if (savedAccount.followUpSettingsJson) {
+      try {
+        const s = JSON.parse(savedAccount.followUpSettingsJson);
+        if (s.handoffAlertEnabled === false) handoffEnabled = false;
+        if (typeof s.handoffAlertTemplate === 'string' && s.handoffAlertTemplate.trim()) {
+          template = s.handoffAlertTemplate;
+        }
+      } catch { /* invalid JSON — fall through to defaults */ }
+    }
+    if (!handoffEnabled) {
+      this.logger.log(`[Handoff] skipped — disabled per account settings (intent=${intent})`);
+      return;
+    }
+
+    const intentLabel = intent === 'wants_live_contact' ? 'wants live call' : 'ready to book';
+    const message = (context.customerMessage || '').substring(0, 200);
+    const rendered = template
+      .replace(/\{\{lead\.name\}\}/g, context.customerName || 'Unknown')
+      .replace(/\{\{message\}\}/g, message)
+      .replace(/\{\{intent\}\}/g, intentLabel);
+
+    await this.notifications.sendHandoffAlert(context.userId, savedAccount.id, rendered);
+    this.logger.log(`[Handoff] fired for ${context.customerName} — intent=${intent} conf=${classification.confidence.toFixed(2)}`);
   }
 
   /**
@@ -681,6 +746,18 @@ export class AutomationService implements OnModuleInit {
       this.logger.warn(`[AUTOMATION] ✗ No saved account found for businessId: ${context.businessId}`);
       return;
     }
+
+    // ── Handoff Alert ────────────────────────────────────────────────────
+    // Classifier-driven manager notification. Fires when the customer
+    // signals high intent — ready to book ('agreed') OR wants a live
+    // call/meeting ('wants_live_contact'). Sits between the new-lead alert
+    // and the re-engagement alert: it fires DURING an active AI
+    // conversation, the moment the customer says "I want a human now."
+    // Re-engagement covers the AI-off / follow-up-running case; handoff
+    // covers the AI-conversation-in-progress case.
+    await this.maybeFireHandoffAlert(classification, context, savedAccount).catch(err => {
+      this.logger.warn(`[Handoff] alert failed: ${err.message}`);
+    });
 
     // Find enabled customer_reply rules for this account
     const rules = await this.prisma.automationRule.findMany({
@@ -1520,6 +1597,26 @@ export class AutomationService implements OnModuleInit {
           strategyUsed: (rule.promptTemplate as any)?.name || undefined,
           isAutoFollowUp: (rule as any).delayMinutes > 0,
         }).catch(err => this.logger.warn(`Failed to record outbound in context: ${err.message}`));
+      }
+
+      // Proactively evaluate follow-up enrollment after we send a pro/AI
+      // message. The webhook handler in webhooks.service.ts also calls
+      // evaluateThread on inbound `sender='pro'` echoes — but TT/Yelp don't
+      // always echo our own outbound messages back promptly (TT batches
+      // them; for Padma's lead the AI Instant Reply at 19:10:28 wasn't
+      // echoed back as MessageCreatedV4 until her customer reply arrived
+      // 80 min later, and only via lazy backfill). That delay meant the
+      // FollowUpEnrollment wasn't active when the customer replied →
+      // re-engagement returned null → owner never got the SMS.
+      //
+      // Calling evaluateThread directly from the outbound path arms the
+      // enrollment immediately so re-engagement can fire on the next
+      // customer reply. evaluateThread is idempotent — running both here
+      // and on the eventual webhook echo is safe.
+      if (lead.threadId) {
+        this.followUpEngine.evaluateThread(lead.threadId, lead.platform).catch(err =>
+          this.logger.warn(`[evaluateThread] outbound-send hook failed for ${lead.threadId}: ${err.message}`),
+        );
       }
 
       // Mark as sent (skip for synthetic AI Conversation rules — no DB row)
