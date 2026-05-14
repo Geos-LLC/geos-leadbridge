@@ -387,7 +387,13 @@ export function Analytics() {
             />
             <select
               value={timeRange}
-              onChange={(e) => setFilter('range', e.target.value)}
+              onChange={(e) => {
+                // Don't use setFilter — it deletes the param on value==='all',
+                // which would collide with the '365d' default and prevent the
+                // user from ever selecting "All time".
+                searchParams.set('range', e.target.value);
+                setSearchParams(searchParams);
+              }}
               style={{
                 appearance: 'none',
                 padding: '6px 30px 6px 28px',
