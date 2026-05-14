@@ -164,6 +164,10 @@ export class AnalyticsService {
 
     // Use tli.leadDate ("Feb 23") with year inference as the canonical lead date.
     // leads.createdAt and tli.capturedAt are both the import/capture timestamp (same day for bulk imports).
+    // Year inference: anchor to the import timestamp, NOT to NOW(). This lets dates
+    // older than 12 months resolve correctly when leads were backfilled later via the
+    // Chrome extension. A lead string "Nov 15" captured 2025-05-01 resolves to 2024-11-15,
+    // not 2025-11-15 (which would be in the future relative to capture).
     // leadPrice from rawJson is the cost Thumbtack charged the pro per lead (estimate.total is typically null).
     const sqlStr = `
       WITH raw_leads AS (
@@ -199,10 +203,25 @@ export class AnalyticsService {
           CASE
             WHEN date_str IS NOT NULL AND date_str <> ''
             THEN
+              -- Anchor year inference to the import timestamp (capturedAt / createdAt).
+              -- The lead date cannot be after we first saw the lead, so pick the latest
+              -- year Y such that "Mon DD Y" <= import timestamp.
               CASE
-                WHEN TO_DATE(date_str || ' ' || EXTRACT(YEAR FROM NOW())::text, 'Mon DD YYYY') > CURRENT_DATE
-                THEN TO_DATE(date_str || ' ' || (EXTRACT(YEAR FROM NOW())::int - 1)::text, 'Mon DD YYYY')::timestamptz
-                ELSE TO_DATE(date_str || ' ' || EXTRACT(YEAR FROM NOW())::text, 'Mon DD YYYY')::timestamptz
+                WHEN TO_DATE(
+                       date_str || ' ' ||
+                       EXTRACT(YEAR FROM COALESCE(tli_captured_at, l_created_at, NOW()))::text,
+                       'Mon DD YYYY'
+                     ) > COALESCE(tli_captured_at, l_created_at, NOW())::date
+                THEN TO_DATE(
+                       date_str || ' ' ||
+                       (EXTRACT(YEAR FROM COALESCE(tli_captured_at, l_created_at, NOW()))::int - 1)::text,
+                       'Mon DD YYYY'
+                     )::timestamptz
+                ELSE TO_DATE(
+                       date_str || ' ' ||
+                       EXTRACT(YEAR FROM COALESCE(tli_captured_at, l_created_at, NOW()))::text,
+                       'Mon DD YYYY'
+                     )::timestamptz
               END
             ELSE COALESCE(tli_captured_at, l_created_at)
           END AS lead_date

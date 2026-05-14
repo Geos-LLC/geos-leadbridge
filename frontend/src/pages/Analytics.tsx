@@ -57,14 +57,15 @@ export function Analytics() {
   //   'all_yelp'        — all Yelp accounts
   //   <real businessId> — single account
   const businessId = searchParams.get('businessId') || 'all';
-  const timeRange = searchParams.get('range') || 'all';
+  const timeRange = searchParams.get('range') || '365d';
   const customStart = searchParams.get('startDate') || '';
   const customEnd = searchParams.get('endDate') || '';
 
   // Time range options
   const timeRanges = [
     { value: '7d', label: 'Last 7 days' },
-    { value: '30d', label: 'Last 30 days' },
+    { value: '30d', label: 'Past month' },
+    { value: '365d', label: 'Past year' },
     { value: 'all', label: 'All time' },
     { value: 'custom', label: 'Custom range' },
   ];
@@ -111,8 +112,8 @@ export function Analytics() {
       setAnalytics(fullData);
       if (ts) setCalculatedAt(ts);
 
-      // Only cache default filter (all accounts, 30d) for preload
-      const isDefaultFilter = businessId === 'all' && timeRange === '30d';
+      // Only cache default filter (all accounts, 365d) for preload
+      const isDefaultFilter = businessId === 'all' && timeRange === '365d';
       if (isDefaultFilter) {
         setAnalyticsCache(fullData);
       }
