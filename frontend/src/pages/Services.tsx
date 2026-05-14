@@ -451,8 +451,12 @@ export function Services() {
   });
   const [fuSmartSteps, setFuSmartSteps] = useState<FuStep[]>(SMART_DEFAULTS.map(s => ({ ...s })));
   const [fuAvailability, setFuAvailability] = useState<'always' | 'active_hours'>('active_hours');
-  const [fuStart, setFuStart] = useState('18:00');
-  const [fuEnd, setFuEnd] = useState('09:00');
+  // Active hours window — defaults to standard business hours 09:00–18:00.
+  // Earlier defaults were inverted (18:00 start / 09:00 end), which read as
+  // "active overnight, blocked all day" and silently delayed every daytime
+  // follow-up to 18:00 local. See backfill-fix-inverted-active-hours.js.
+  const [fuStart, setFuStart] = useState('09:00');
+  const [fuEnd, setFuEnd] = useState('18:00');
   const [fuTz, setFuTz] = useState('America/New_York');
   const [fuExtraWindows, setFuExtraWindows] = useState<{ start: string; end: string }[]>([]);
   const fuStopOnReply = true; // always on — internal rule, not user-configurable
