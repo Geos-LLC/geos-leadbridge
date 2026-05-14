@@ -57,7 +57,10 @@ function buildPrismaMock() {
       findUnique: jest.fn().mockResolvedValue({ id: LEAD_ID, threadId: CONVERSATION_ID, userId: USER_ID, businessId: 'biz-1' }),
     },
     savedAccount: {
-      findFirst: jest.fn().mockResolvedValue({ followUpMode: 'auto_send', followUpSettingsJson: null }),
+      findFirst: jest.fn().mockResolvedValue({ followUpMode: 'auto_send', followUpSettingsJson: null, followUpTimezone: 'America/New_York' }),
+    },
+    user: {
+      findUnique: jest.fn().mockResolvedValue({ businessHoursTimezone: 'America/New_York' }),
     },
     message: {
       findFirst: jest.fn().mockResolvedValue(null),

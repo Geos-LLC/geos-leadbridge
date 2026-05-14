@@ -9,6 +9,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '../../generated/prisma';
 import { PrismaService } from '../common/utils/prisma.service';
+import { resolveTimezone } from '../common/utils/account-timezone';
 import { ConversationContextService } from '../conversation-context/conversation-context.service';
 import { FollowUpStateService, FollowUpState } from './follow-up-state.service';
 
@@ -248,7 +249,13 @@ export class FollowUpEngineService {
     // for "Standard — After Price") even though the user set the first step to
     // "2 min". The scheduler already honors user steps at send time; this keeps
     // enrollInSequence consistent with that.
+    //
+    // Same pass also pulls the account's followUpTimezone so the initial
+    // computeNextDueAt call below can resolve it instead of falling back to a
+    // hardcoded 'America/New_York'. Bundled into one savedAccount.findFirst
+    // (vs a separate lookup) to avoid an extra round-trip per enrollment.
     let userSteps: Array<{ delayMinutes: number; [k: string]: any }> | null = null;
+    let resolvedTimezone: string | null = null;
     if (leadId) {
       const leadForSteps = await this.prisma.lead.findUnique({
         where: { id: leadId },
@@ -257,7 +264,7 @@ export class FollowUpEngineService {
       if (leadForSteps?.businessId) {
         const acctForSteps = await this.prisma.savedAccount.findFirst({
           where: { userId: leadForSteps.userId, businessId: leadForSteps.businessId },
-          select: { followUpSettingsJson: true },
+          select: { followUpSettingsJson: true, followUpTimezone: true },
         }).catch(() => null);
         if (acctForSteps?.followUpSettingsJson) {
           try {
@@ -270,6 +277,13 @@ export class FollowUpEngineService {
               }));
             }
           } catch {}
+        }
+        if (acctForSteps) {
+          const userForTz = await this.prisma.user.findUnique({
+            where: { id: leadForSteps.userId },
+            select: { businessHoursTimezone: true },
+          }).catch(() => null);
+          resolvedTimezone = resolveTimezone(acctForSteps, userForTz);
         }
       }
     }
@@ -363,7 +377,7 @@ export class FollowUpEngineService {
       effectiveDelay,
       null,
       null,
-      'America/New_York',
+      resolvedTimezone ?? resolveTimezone(),
     );
     // If the computed due time is in the past (last message was long ago), use now + small buffer
     const now = new Date();
@@ -621,11 +635,14 @@ export class FollowUpEngineService {
     if (!enrollment || enrollment.status !== 'active') return;
 
     // Resolve steps: prefer user-configured (Services UI) over the template seed.
+    // Same lookup also pulls followUpTimezone so the next computeNextDueAt below
+    // resolves through the canonical helper instead of a hardcoded literal.
     let steps: Array<{ delayMinutes: number; [k: string]: any }> = [];
+    let acctTimezone: string | null = null;
     if (enrollment.lead?.businessId) {
       const acct = await this.prisma.savedAccount.findFirst({
         where: { userId: enrollment.lead.userId, businessId: enrollment.lead.businessId },
-        select: { followUpSettingsJson: true },
+        select: { followUpSettingsJson: true, followUpTimezone: true },
       });
       if (acct?.followUpSettingsJson) {
         try {
@@ -639,6 +656,13 @@ export class FollowUpEngineService {
           }
         } catch {}
       }
+      if (acct) {
+        const userForTz = await this.prisma.user.findUnique({
+          where: { id: enrollment.lead.userId },
+          select: { businessHoursTimezone: true },
+        }).catch(() => null);
+        acctTimezone = resolveTimezone(acct, userForTz);
+      }
     }
     if (steps.length === 0) {
       steps = ((enrollment.sequenceTemplate.stepsJson as any)?.steps || []) as any;
@@ -650,7 +674,7 @@ export class FollowUpEngineService {
 
     if (nextStep) {
       const nextDue = this.computeNextDueAt(
-        now, nextStep.delayMinutes, null, null, 'America/New_York',
+        now, nextStep.delayMinutes, null, null, acctTimezone ?? resolveTimezone(),
       );
       await this.prisma.followUpEnrollment.update({
         where: { id: enrollmentId },

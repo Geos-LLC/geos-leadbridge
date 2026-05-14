@@ -42,6 +42,9 @@ function buildPrismaMock() {
     savedAccount: {
       findFirst: jest.fn().mockResolvedValue({ followUpSettingsJson: null, followUpTimezone: 'America/New_York' }),
     },
+    user: {
+      findUnique: jest.fn().mockResolvedValue({ businessHoursTimezone: 'America/New_York' }),
+    },
     message: {
       findFirst: jest.fn().mockResolvedValue(null),
     },
