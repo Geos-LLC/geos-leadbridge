@@ -300,3 +300,385 @@ describe('WebhooksService.handleInboundSms — P2002-tolerant persistence', () =
     );
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * Yelp NEW_EVENT — first chat row write contract
+ *
+ * Stan G regression (2026-05-14): a brand-new Yelp lead's initial chat
+ * message must come from `leadData.message` (= project.additional_info)
+ * — never the raw event_content.text boilerplate ("Hi there… Here are
+ * my answers… <full survey Q&A>").
+ *
+ * Path A = classifyYelpNewEvent + persist `latestCustomerMessage`
+ *          (event_content.text). Runs for existing-lead replies only.
+ * Path B = persist initial chat row from `leadData.message` (additional_info)
+ *          on a brand-new lead.
+ *
+ * The clean separation: Path A NEVER persists when isNewLead=true; Path B
+ * owns the first chat row exclusively. classifyYelpNewEvent itself still
+ * runs for both new and existing leads — its result is observational on
+ * new leads, used for echo classification + automation decisions on
+ * existing-lead replies.
+ * ------------------------------------------------------------------ */
+
+type ChatRow = {
+  externalMessageId: string | null;
+  content: string;
+  sender: 'customer' | 'pro' | 'system';
+};
+
+function buildYelpHarness(opts: {
+  // What classifyYelpNewEvent should return (controlled via getLeadEvents mock)
+  events?: any[];
+  // What yelp.getLead returns
+  leadData: any;
+  // Whether the lead already exists in DB (controls isNewLead branch)
+  existingLead?: { id: string; createdAt: Date } | null;
+}) {
+  const ensureMessagePersisted = jest.fn().mockImplementation(async (input: any) => {
+    // Mirror the real dedup contract: same (platform, externalMessageId) returns
+    // the existing row without overwriting content. Each new pair creates.
+    const key = `${input.platform}::${input.externalMessageId}`;
+    if (input.externalMessageId && persistedKeys.has(key)) {
+      return { id: persistedKeys.get(key)!, created: false };
+    }
+    const id = `msg-${persistedRows.length + 1}`;
+    persistedRows.push({
+      externalMessageId: input.externalMessageId,
+      content: input.content,
+      sender: input.sender,
+    });
+    if (input.externalMessageId) persistedKeys.set(key, id);
+    return { id, created: true };
+  });
+  const persistedRows: ChatRow[] = [];
+  const persistedKeys = new Map<string, string>();
+
+  const getLeadEvents = jest.fn().mockResolvedValue(opts.events ?? []);
+  const getLead = jest.fn().mockResolvedValue(opts.leadData);
+
+  const svc = Object.create(WebhooksService.prototype);
+  svc.logger = new Logger('WebhooksServiceTest');
+  svc._recentWebhookEventIds = new Map();
+  svc.platformFactory = { getAdapter: jest.fn().mockReturnValue({ getLead, getLeadEvents }) };
+
+  const conversation = { id: 'conv-yelp-1' };
+  const upsertedLead = {
+    id: 'lead-yelp-1',
+    userId: 'user-1',
+    threadId: conversation.id,
+    customerName: opts.leadData.customerName ?? 'Customer',
+    customerPhone: opts.leadData.customerPhone ?? null,
+    category: opts.leadData.category ?? null,
+    city: opts.leadData.city ?? null,
+    state: opts.leadData.state ?? null,
+    postcode: opts.leadData.postcode ?? null,
+    message: opts.leadData.message ?? '',
+    rawJson: '{}',
+    createdAt: new Date(),
+  };
+
+  svc.prisma = {
+    savedAccount: {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'acct-1',
+        userId: 'user-1',
+        platform: 'yelp',
+        businessName: 'Test Biz',
+        credentialsJson: null,
+      }),
+    },
+    lead: {
+      findUnique: jest.fn().mockResolvedValue(opts.existingLead ?? null),
+      upsert: jest.fn().mockResolvedValue(upsertedLead),
+      update: jest.fn().mockResolvedValue(upsertedLead),
+      count: jest.fn().mockResolvedValue(1),
+    },
+    conversation: {
+      upsert: jest.fn().mockResolvedValue(conversation),
+      update: jest.fn().mockResolvedValue(conversation),
+    },
+    message: {
+      count: jest.fn().mockResolvedValue(2),
+    },
+    systemErrorLog: { create: jest.fn().mockResolvedValue({}) },
+    webhookEvent: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      update: jest.fn().mockResolvedValue({}),
+    },
+  };
+
+  svc.configService = {
+    get: jest.fn().mockImplementation((key: string) => {
+      if (key === 'features.yelpWebhookPersistFullThread') return true;
+      if (key === 'yelp.apiKey') return 'test-key';
+      if (key === 'encryption.key') return 'a'.repeat(64);
+      return undefined;
+    }),
+  };
+
+  svc.conversationContextService = { ensureMessagePersisted };
+
+  const automationService = {
+    handleNewLead: jest.fn().mockResolvedValue(undefined),
+    handleCustomerReply: jest.fn().mockResolvedValue(undefined),
+  };
+  svc.automationService = automationService;
+
+  const notificationsService = {
+    sendLeadNotification: jest.fn().mockResolvedValue(undefined),
+    handleCustomerReply: jest.fn().mockResolvedValue(undefined),
+    sendReEngagementAlert: jest.fn().mockResolvedValue(undefined),
+  };
+  svc.notificationsService = notificationsService;
+
+  svc.callConnectService = { triggerForLead: jest.fn().mockResolvedValue(undefined) };
+  svc.followUpEngine = {
+    handleCustomerReply: jest.fn().mockResolvedValue({ reEngagementAlert: null }),
+    evaluateThread: jest.fn().mockResolvedValue(undefined),
+  };
+  svc.eventEmitter = { emit: jest.fn() };
+  svc.crmWebhookService = { emit: jest.fn().mockResolvedValue(undefined) };
+  svc.leadCache = { invalidateLeadMessagesAndList: jest.fn().mockResolvedValue(undefined) };
+
+  return {
+    svc,
+    ensureMessagePersisted,
+    persistedRows,
+    getLeadEvents,
+    automationService,
+    notificationsService,
+    upsertedLead,
+  };
+}
+
+describe('WebhooksService.handleYelpNewEventInner — first chat row contract', () => {
+  // Yelp's first TEXT event for any RAQ submission carries this boilerplate
+  // text, regardless of what the customer actually typed.
+  const YELP_FIRST_TEXT_BOILERPLATE =
+    'Hi there, here are my answers:\n' +
+    'Q: When do you require this service?\n' +
+    'A: As soon as possible\n' +
+    'Q: Where would you like the service?\n' +
+    'A: 32256\n' +
+    'Additional details: My faucet is leaking under the sink.';
+
+  const FIRST_TEXT_EVENT = {
+    id: 'yelp-evt-text-1',
+    user_type: 'CONSUMER',
+    event_type: 'TEXT',
+    time_created: '2026-05-14T13:00:00Z',
+    event_content: { text: YELP_FIRST_TEXT_BOILERPLATE },
+  };
+
+  it('brand-new lead with additional_info persists ONLY additional_info — not the boilerplate', async () => {
+    const { svc, persistedRows, automationService } = buildYelpHarness({
+      events: [FIRST_TEXT_EVENT],
+      leadData: {
+        platform: 'yelp',
+        externalRequestId: 'yelp-lead-1',
+        customerName: 'Stan G.',
+        message: 'My faucet is leaking under the sink.', // = project.additional_info
+        city: 'Jacksonville',
+        state: 'FL',
+        postcode: '32256',
+        category: 'Plumbing',
+        status: 'new',
+        createdAt: new Date('2026-05-14T13:00:00Z'),
+        updatedAt: new Date('2026-05-14T13:00:00Z'),
+        raw: { project: { additional_info: 'My faucet is leaking under the sink.' } },
+      },
+      existingLead: null, // brand-new
+    });
+
+    await svc.handleYelpNewEventInner(
+      'biz-yelp-1',
+      { lead_id: 'yelp-lead-1', event_id: 'yelp-evt-raq-1' },
+      'yelp-lead-1',
+      'yelp-evt-raq-1',
+    );
+
+    // The chat thread received exactly one customer row, and its content is
+    // additional_info — NOT the "Hi there… Here are my answers…" boilerplate.
+    const customerRows = persistedRows.filter(r => r.sender === 'customer');
+    expect(customerRows).toHaveLength(1);
+    expect(customerRows[0].content).toBe('My faucet is leaking under the sink.');
+    expect(customerRows[0].content).not.toContain('Here are my answers');
+
+    // New-lead automation ran (not customer-reply).
+    expect(automationService.handleNewLead).toHaveBeenCalledTimes(1);
+    expect(automationService.handleCustomerReply).not.toHaveBeenCalled();
+  });
+
+  it('brand-new lead with empty additional_info does not persist boilerplate as the first chat row', async () => {
+    const { svc, persistedRows, automationService } = buildYelpHarness({
+      events: [FIRST_TEXT_EVENT],
+      leadData: {
+        platform: 'yelp',
+        externalRequestId: 'yelp-lead-2',
+        customerName: 'Stan G.',
+        message: '', // no project.additional_info
+        category: 'Plumbing',
+        status: 'new',
+        createdAt: new Date('2026-05-14T13:00:00Z'),
+        updatedAt: new Date('2026-05-14T13:00:00Z'),
+        raw: { project: {} },
+      },
+      existingLead: null,
+    });
+
+    await svc.handleYelpNewEventInner(
+      'biz-yelp-1',
+      { lead_id: 'yelp-lead-2', event_id: 'yelp-evt-raq-2' },
+      'yelp-lead-2',
+      'yelp-evt-raq-2',
+    );
+
+    // Zero customer rows — chat is empty (matches Thumbtack when the customer
+    // submits the form without writing anything in the additional details box).
+    const customerRows = persistedRows.filter(r => r.sender === 'customer');
+    expect(customerRows).toHaveLength(0);
+    // New-lead automation still fired so the business owner gets the SMS.
+    expect(automationService.handleNewLead).toHaveBeenCalledTimes(1);
+  });
+
+  it('existing-lead customer reply persists the actual event_content.text (Path A unchanged)', async () => {
+    const realReply = "Hi! I'd like a quote for Tuesday afternoon if possible.";
+    const REPLY_EVENT = {
+      id: 'yelp-evt-text-2',
+      user_type: 'CONSUMER',
+      event_type: 'TEXT',
+      time_created: '2026-05-14T15:00:00Z',
+      event_content: { text: realReply },
+    };
+
+    const { svc, persistedRows, automationService } = buildYelpHarness({
+      events: [FIRST_TEXT_EVENT, REPLY_EVENT],
+      leadData: {
+        platform: 'yelp',
+        externalRequestId: 'yelp-lead-3',
+        customerName: 'Stan G.',
+        message: 'original additional info',
+        category: 'Plumbing',
+        status: 'new',
+        createdAt: new Date('2026-05-14T13:00:00Z'),
+        updatedAt: new Date('2026-05-14T15:00:00Z'),
+        raw: {},
+      },
+      existingLead: { id: 'lead-yelp-1', createdAt: new Date(Date.now() - 60_000) },
+    });
+
+    await svc.handleYelpNewEventInner(
+      'biz-yelp-1',
+      { lead_id: 'yelp-lead-3', event_id: 'yelp-evt-text-2' },
+      'yelp-lead-3',
+      'yelp-evt-text-2',
+    );
+
+    // The single-message persist path wrote the real reply text.
+    const replyRows = persistedRows.filter(r => r.externalMessageId === 'yelp-evt-text-2');
+    expect(replyRows).toHaveLength(1);
+    expect(replyRows[0].content).toBe(realReply);
+    expect(replyRows[0].sender).toBe('customer');
+
+    // Customer-reply automation fired (not new-lead).
+    expect(automationService.handleCustomerReply).toHaveBeenCalledTimes(1);
+    expect(automationService.handleNewLead).not.toHaveBeenCalled();
+  });
+
+  it('BIZ echo on existing lead does NOT create a customer message and does NOT trigger customer-reply automation', async () => {
+    const BIZ_EVENT = {
+      id: 'yelp-evt-biz-1',
+      user_type: 'BIZ',
+      event_type: 'TEXT',
+      time_created: '2026-05-14T16:00:00Z',
+      event_content: { text: "Thanks — we'd be happy to help. What's your address?" },
+    };
+
+    const {
+      svc,
+      persistedRows,
+      automationService,
+      notificationsService,
+    } = buildYelpHarness({
+      events: [FIRST_TEXT_EVENT, BIZ_EVENT],
+      leadData: {
+        platform: 'yelp',
+        externalRequestId: 'yelp-lead-4',
+        customerName: 'Stan G.',
+        message: 'additional info',
+        status: 'new',
+        createdAt: new Date('2026-05-14T13:00:00Z'),
+        updatedAt: new Date('2026-05-14T16:00:00Z'),
+        raw: {},
+      },
+      existingLead: { id: 'lead-yelp-1', createdAt: new Date(Date.now() - 60_000) },
+    });
+
+    await svc.handleYelpNewEventInner(
+      'biz-yelp-1',
+      { lead_id: 'yelp-lead-4', event_id: 'yelp-evt-biz-1' },
+      'yelp-lead-4',
+      'yelp-evt-biz-1',
+    );
+
+    // Echo path returns AFTER full-thread persist runs, so the consumer's
+    // historical TEXT event still gets persisted (sender=customer) and the BIZ
+    // echo gets persisted (sender=pro). Neither is treated as a fresh customer
+    // reply: no customer-reply automation, no customer-reply SMS notification.
+    const customerReplyRows = persistedRows.filter(
+      r => r.sender === 'customer' && r.externalMessageId === 'yelp-evt-biz-1',
+    );
+    expect(customerReplyRows).toHaveLength(0);
+
+    expect(automationService.handleCustomerReply).not.toHaveBeenCalled();
+    expect(automationService.handleNewLead).not.toHaveBeenCalled();
+    expect(notificationsService.handleCustomerReply).not.toHaveBeenCalled();
+  });
+
+  it('dedup by externalMessageId: replaying the same webhook event does not write a second customer row', async () => {
+    const REPLY_EVENT = {
+      id: 'yelp-evt-text-9',
+      user_type: 'CONSUMER',
+      event_type: 'TEXT',
+      time_created: '2026-05-14T17:00:00Z',
+      event_content: { text: 'Same reply, replayed' },
+    };
+    const { svc, persistedRows, ensureMessagePersisted } = buildYelpHarness({
+      events: [REPLY_EVENT],
+      leadData: {
+        platform: 'yelp',
+        externalRequestId: 'yelp-lead-5',
+        customerName: 'Stan G.',
+        message: 'add info',
+        status: 'new',
+        createdAt: new Date('2026-05-14T13:00:00Z'),
+        updatedAt: new Date('2026-05-14T17:00:00Z'),
+        raw: {},
+      },
+      existingLead: { id: 'lead-yelp-1', createdAt: new Date(Date.now() - 60_000) },
+    });
+
+    // First webhook delivery
+    await svc.handleYelpNewEventInner(
+      'biz-yelp-1',
+      { lead_id: 'yelp-lead-5', event_id: 'yelp-evt-text-9' },
+      'yelp-lead-5',
+      'yelp-evt-text-9',
+    );
+    // Second webhook delivery (same eventId) — at-least-once retry from Yelp.
+    await svc.handleYelpNewEventInner(
+      'biz-yelp-1',
+      { lead_id: 'yelp-lead-5', event_id: 'yelp-evt-text-9' },
+      'yelp-lead-5',
+      'yelp-evt-text-9',
+    );
+
+    // ensureMessagePersisted was called multiple times (full-thread + single-message
+    // persist on each delivery) but the harness mirrors the real dedup contract
+    // so only one Message row exists for that externalMessageId.
+    expect(ensureMessagePersisted.mock.calls.length).toBeGreaterThan(1);
+    const rowsForEvent = persistedRows.filter(r => r.externalMessageId === 'yelp-evt-text-9');
+    expect(rowsForEvent).toHaveLength(1);
+  });
+});

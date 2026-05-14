@@ -1894,16 +1894,26 @@ export class WebhooksService {
     // more than 10s ago (another instance just created it), skip new-lead notifications.
     const isNewLead = !existingLead && (Date.now() - new Date(lead.createdAt).getTime()) < 10_000;
 
+    // Classify once at the top — runs for both new and existing leads so the same
+    // echo detection, event type, and latest-customer metadata is available to
+    // either branch and to future automation decisions. Yelp NEW_EVENT carries no
+    // user_type at the webhook layer, so the same event_id can represent a
+    // customer message OR our own outbound echo without a fetch.
+    //
+    // Fail-open policy (Decision 4 in FOLLOW_UP_AND_CONVERSATION_FIX_PLAN.md):
+    // if the fetch fails or returns empty, treat as customer reply AND mark the
+    // WebhookEvent row for reconciliation. Missing a real reply keeps follow-ups
+    // firing against an engaged customer (user-visible). Misclassifying an echo
+    // stops one enrollment that was going to fire anyway (invisible cost).
+    //
+    // On a brand-new lead the classification is observational: there's no BIZ
+    // history to echo from, so the new-lead branch never persists from
+    // classification.latestCustomerMessage (which is the raw event_content.text
+    // boilerplate "Hi there… Here are my answers…"). Path B writes from
+    // leadData.message (= project.additional_info) instead.
+    const classification = await this.classifyYelpNewEvent(leadId, eventId, accessToken);
+
     if (!isNewLead && existingLead) {
-      // Yelp sends NEW_EVENT for BOTH customer messages AND our own outbound echoes.
-      // Classify by fetching /leads/{id}/events and checking the latest user_type.
-      //
-      // Fail-open policy (Decision 4 in FOLLOW_UP_AND_CONVERSATION_FIX_PLAN.md):
-      // if the fetch fails or returns empty, treat as customer reply AND mark the
-      // WebhookEvent row for reconciliation. Missing a real reply keeps follow-ups
-      // firing against an engaged customer (user-visible). Misclassifying an echo
-      // stops one enrollment that was going to fire anyway (invisible cost).
-      const classification = await this.classifyYelpNewEvent(leadId, eventId, accessToken);
 
       // Full-thread persistence runs FIRST — even when the event is an echo
       // (i.e. a BIZ message). Without this, a message the business owner sends
