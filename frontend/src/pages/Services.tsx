@@ -2947,8 +2947,7 @@ export function Services() {
                   Engage paywall overlay still wraps the controls below. */}
               <div className="relative">
                 {!canUseEngage && <LockedFeatureOverlay ctaLabel="Upgrade to Engage · $89/mo" />}
-                {fuMode !== 'off' && (
-                  <div className={`space-y-4${!canUseEngage ? ' opacity-60 pointer-events-none' : ''}`}>
+                <div className={`space-y-4${!canUseEngage ? ' opacity-60 pointer-events-none' : ''}`}>
                     {selectedAccountId && <AccountHoursControl accountId={selectedAccountId} feature="applyQuietHours" />}
                     <div>
                       <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Follow-up Mode</label>
@@ -3274,7 +3273,6 @@ export function Services() {
                         (fuUrgentCapability) still saves its current value so
                         backend behavior is unchanged. */}
                   </div>
-                )}
               </div>
 
               {/* ── AI Conversation subsection relocated to its own ServiceCard below. Legacy block hidden to preserve state hooks. ── */}
@@ -3526,8 +3524,7 @@ export function Services() {
                   </Link>
                 </div>
               )}
-              {(aiConversationOn || !canUseConvert) && (
-                <div className={`space-y-4 relative${!canUseConvert ? ' opacity-60 pointer-events-none select-none' : ''}`}>
+              <div className={`space-y-4 relative${!canUseConvert ? ' opacity-60 pointer-events-none select-none' : ''}`}>
                   {/* AI Strategy editor — moved here from the top of the page.
                       Single source of truth for AI-generated messages across
                       AI Conversation, Follow-up AI mode, and Instant Reply
@@ -3754,7 +3751,6 @@ export function Services() {
                     )}
                   </div>
                 </div>
-              )}
             </ServiceCard>
           )}
 
