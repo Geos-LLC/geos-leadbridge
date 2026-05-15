@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Bell, Phone, PhoneCall, MessageSquare, Zap, ArrowLeft, Loader2, AlertCircle,
@@ -56,33 +56,60 @@ type TestStatus = 'idle' | 'sending' | 'delivered' | 'failed';
 // Phone Numbers, Call Connect, Reply Alerts, AI Takeover) are hidden.
 const ALL_ACCOUNTS = '__ALL__';
 
-// Inline body editor used in ALL_ACCOUNTS mode. Keeps its own draft state
-// so typing doesn't trigger a cascade on every keystroke; commits on blur.
-function CascadeBodyEditor({
-  initialBody, mixed, disabled, onSave,
+// Template-backed editor. Owner SMS bodies always come from a named
+// MessageTemplate; users can switch the linked template or edit the body.
+// Editing the body saves it back to the MessageTemplate (so the same
+// template's edits persist) AND fires onSave for the consumer to cascade
+// to whichever accounts are in scope (single or all).
+function TemplateDropdownEditor({
+  label, templates, preferredTemplateName, currentBody, mixed, disabled,
+  rows = 9, onSave,
 }: {
-  initialBody: string;
+  label: string;
+  templates: MessageTemplate[];
+  preferredTemplateName: string;
+  currentBody: string;
   mixed: boolean;
   disabled: boolean;
+  rows?: number;
   onSave: (body: string) => Promise<void>;
 }) {
-  const [draft, setDraft] = useState(initialBody);
+  const preferred = templates.find(t => t.name === preferredTemplateName);
+  const matchByBody = templates.find(t => t.content === currentBody);
+  const initialId = matchByBody?.id || preferred?.id || templates[0]?.id || '';
+  const [selectedId, setSelectedId] = useState(initialId);
+  const [draft, setDraft] = useState(currentBody || preferred?.content || '');
   const [saving, setSaving] = useState(false);
   const [savedTick, setSavedTick] = useState(false);
-  const lastSavedRef = useRef(initialBody);
+  const lastSavedRef = useRef(currentBody || preferred?.content || '');
 
+  // Resync when the cascade/load supplies new body or template list.
   useEffect(() => {
-    setDraft(initialBody);
-    lastSavedRef.current = initialBody;
-  }, [initialBody]);
+    const next = currentBody || preferred?.content || '';
+    setDraft(next);
+    lastSavedRef.current = next;
+    const newMatch = templates.find(t => t.content === next);
+    if (newMatch) setSelectedId(newMatch.id);
+    else if (preferred) setSelectedId(preferred.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentBody, templates.length]);
 
-  async function commit() {
+  // commit(body, persistToTemplateId?) — when persistToTemplateId is set,
+  // also writes the body back to that MessageTemplate so the saved template
+  // matches the cascaded body. We pass an explicit id (instead of reading
+  // `selectedId` from state) so picking a new template doesn't write the
+  // new template's body back to the OLD selectedId.
+  async function commit(body: string, persistToTemplateId?: string) {
     if (saving || disabled) return;
-    if (draft === lastSavedRef.current) return;
+    if (body === lastSavedRef.current) return;
     setSaving(true);
     try {
-      await onSave(draft);
-      lastSavedRef.current = draft;
+      await onSave(body);
+      lastSavedRef.current = body;
+      const tid = persistToTemplateId ?? selectedId;
+      if (tid) {
+        try { await templatesApi.updateTemplate(tid, { content: body }); } catch { /* non-fatal */ }
+      }
       setSavedTick(true);
       setTimeout(() => setSavedTick(false), 1500);
     } finally {
@@ -90,10 +117,31 @@ function CascadeBodyEditor({
     }
   }
 
+  async function pickTemplate(id: string) {
+    setSelectedId(id);
+    const tpl = templates.find(t => t.id === id);
+    if (!tpl) return;
+    setDraft(tpl.content);
+    // Cascade the picked template's body to all in-scope accounts. We do
+    // NOT write back to the template here — the body already matches the
+    // template, so there's nothing to persist.
+    if (tpl.content !== lastSavedRef.current) {
+      setSaving(true);
+      try {
+        await onSave(tpl.content);
+        lastSavedRef.current = tpl.content;
+        setSavedTick(true);
+        setTimeout(() => setSavedTick(false), 1500);
+      } finally {
+        setSaving(false);
+      }
+    }
+  }
+
   return (
-    <div>
-      <div className="flex items-center gap-2 mb-2">
-        <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">SMS body sent to business owner</label>
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">{label}</label>
         {mixed && (
           <span className="text-[10px] font-bold uppercase tracking-widest text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
             Mixed across accounts
@@ -102,16 +150,27 @@ function CascadeBodyEditor({
         {saving && <Loader2 className="w-3 h-3 animate-spin text-slate-400" />}
         {savedTick && <CheckCircle className="w-3 h-3 text-emerald-500" />}
       </div>
+      <select
+        value={selectedId}
+        onChange={e => pickTemplate(e.target.value)}
+        disabled={disabled}
+        className="w-full rounded-xl p-3 text-sm font-medium bg-white border border-slate-200 disabled:opacity-50"
+      >
+        {!selectedId && <option value="">Pick a template…</option>}
+        {templates.map(t => (
+          <option key={t.id} value={t.id}>{t.name}</option>
+        ))}
+      </select>
       <textarea
         value={draft}
         onChange={e => setDraft(e.target.value)}
-        onBlur={commit}
+        onBlur={() => commit(draft)}
         disabled={disabled}
-        rows={9}
+        rows={rows}
         className="w-full font-mono px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 disabled:opacity-50 disabled:bg-slate-50"
       />
-      <p className="text-[10px] text-slate-400 mt-1.5">
-        Click outside the box to save this body to every enabled account.
+      <p className="text-[10px] text-slate-400">
+        Edits save back to the picked template and cascade to all in-scope accounts.
         {disabled && ' Enable the toggle above to edit.'}
       </p>
     </div>
@@ -205,9 +264,14 @@ export function SettingsCommunicationSection() {
     }).catch(() => {});
   }, [authToken, setAuth]);
 
-  // Pick first account by default.
+  // Default the picker. With multiple accounts we land in ALL_ACCOUNTS mode
+  // (the common case is cascading the same alert config everywhere); with a
+  // single account, pick that one so the per-account UI surfaces.
   useEffect(() => {
-    if (!selectedAccountId && accounts.length > 0) {
+    if (selectedAccountId) return;
+    if (accounts.length > 1) {
+      setSelectedAccountId(ALL_ACCOUNTS);
+    } else if (accounts.length === 1) {
       setSelectedAccountId(accounts[0].id);
     }
   }, [accounts, selectedAccountId]);
@@ -337,7 +401,6 @@ export function SettingsCommunicationSection() {
       || null;
   })();
   const ccBotNumber = accountPhone?.phoneNumber || '';
-  const templateMissing = !!leadAlertRule && !leadAlertRule.templateId && !leadAlertRule.messageTemplate && !leadAlertRule.template;
   const ccSamePhone = !!testPhone.trim() && isValidPhoneE164(testPhone) && (
     ccBotNumber === testPhone.trim() || businessPhoneInput === testPhone.trim()
   );
@@ -532,19 +595,25 @@ export function SettingsCommunicationSection() {
     }
   }
 
-  async function cascadeTemplateBodyAllAccounts(body: string) {
+  // Cascade the inline body for New Lead Alerts. When platformFilter is set,
+  // only rules belonging to accounts of that platform receive the update —
+  // used for the per-platform Thumbtack/Yelp editor blocks in ALL_ACCOUNTS
+  // mode (each platform has a different default body).
+  async function cascadeTemplateBodyAllAccounts(body: string, platformFilter?: string) {
     setSavingAlertRule(true);
     setError(null);
     try {
-      const results = await Promise.allSettled(accounts.map(async acc => {
+      const targets = platformFilter
+        ? accounts.filter(a => ((a as any).platform || 'thumbtack') === platformFilter)
+        : accounts;
+      const results = await Promise.allSettled(targets.map(async acc => {
         const existing = allAccountRules[acc.id];
         if (!existing || existing.id === '_pending') {
           return { accountId: acc.id, rule: existing };
         }
-        // Writing the inline body explicitly clears any linked MessageTemplate
-        // dependency for the alert — `template` is the source of truth used
-        // by the backend when no `templateId` is set, and the rule still
-        // honors `templateId` if it stays linked. We only update `template`.
+        // `template` is the source of truth used by the backend when no
+        // `templateId` is set; we only update `template` and leave any
+        // existing templateId link alone.
         const { rule } = await notificationsApi.updateRule(acc.id, existing.id, { template: body });
         return { accountId: acc.id, rule };
       }));
@@ -653,14 +722,22 @@ export function SettingsCommunicationSection() {
     const allOn = totalCount > 0 && enabledCount === totalCount;
     const allOff = enabledCount === 0;
     const mixed = !allOn && !allOff;
-    // Pick the dominant inline template body. If all enabled rules share the
-    // same `template`, surface it; otherwise mark as mixed for the UI.
-    const bodies = ruleEntries.filter(r => r?.enabled).map(r => r!.template || '');
-    const allSameBody = bodies.length > 0 && bodies.every(b => b === bodies[0]);
-    const dominantBody = allSameBody ? bodies[0] : '';
-    const bodiesMixed = bodies.length > 1 && !allSameBody;
-    return { enabledCount, totalCount, allOn, allOff, mixed, dominantBody, bodiesMixed };
+    return { enabledCount, totalCount, allOn, allOff, mixed };
   })();
+
+  // Per-platform aggregate for New Lead Alerts so each platform group has
+  // its own template + body editor (Thumbtack and Yelp ship with different
+  // default templates).
+  function aggregateForPlatform(platform: string) {
+    const platformAccounts = accounts.filter(a => ((a as any).platform || 'thumbtack') === platform);
+    const rules = platformAccounts.map(a => allAccountRules[a.id] || null).filter(r => !!r) as NotificationRule[];
+    const bodies = rules.map(r => r.template || '');
+    const allSameBody = bodies.length > 0 && bodies.every(b => b === bodies[0]);
+    const dominantBody = allSameBody ? bodies[0] : (bodies[0] || '');
+    const bodiesMixed = bodies.length > 1 && !allSameBody;
+    return { count: platformAccounts.length, dominantBody, bodiesMixed };
+  }
+  const platformsPresent = Array.from(new Set(accounts.map(a => (a as any).platform || 'thumbtack')));
 
   // Aggregate Reply Alerts (followUp.reEngagementAlertEnabled + template)
   // across all accounts.
@@ -714,19 +791,6 @@ export function SettingsCommunicationSection() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAccountId, leadAlertRule?.id, leadAlertRule?.enabled, leadAlertRule?.templateId, leadAlertRule?.messageTemplate, leadAlertRule?.template]);
-
-  const changeAlertTemplate = useCallback(async (templateId: string) => {
-    if (!selectedAccountId || !leadAlertRule) return;
-    setSavingAlertRule(true);
-    try {
-      const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { templateId });
-      setLeadAlertRule(rule);
-    } catch (err: any) {
-      setError(err?.response?.data?.message || err?.message || 'Failed to change template');
-    } finally {
-      setSavingAlertRule(false);
-    }
-  }, [selectedAccountId, leadAlertRule]);
 
   async function sendTestAlert() {
     if (!leadAlertRule || !selectedAccountId) return;
@@ -1158,24 +1222,41 @@ export function SettingsCommunicationSection() {
                     <div className={`relative w-11 h-6 ${isAllMode && aggregate.mixed ? 'bg-amber-300' : 'bg-slate-200'} peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600`} />
                   </label>
                 </div>
-                <div className="px-5 py-4 space-y-3">
-                  {/* ALL_ACCOUNTS mode — single shared body editor that
-                      cascades to every account on blur. */}
-                  {isAllMode && (
-                    <CascadeBodyEditor
-                      key={`cascade-${aggregate.totalCount}-${aggregate.enabledCount}`}
-                      initialBody={aggregate.dominantBody || defaultAlertBodyFor(accounts[0]?.platform)}
-                      mixed={aggregate.bodiesMixed}
-                      disabled={savingAlertRule || aggregate.enabledCount === 0}
-                      onSave={cascadeTemplateBodyAllAccounts}
-                    />
-                  )}
-                  {/* Per-account mode (existing) */}
+                <div className="px-5 py-4 space-y-4">
+                  {/* ALL_ACCOUNTS mode — one editor per platform present
+                      (Thumbtack and Yelp have different default bodies). */}
+                  {isAllMode && platformsPresent.map(platform => {
+                    const agg = aggregateForPlatform(platform);
+                    if (agg.count === 0) return null;
+                    const platformLabel = platform === 'yelp' ? 'Yelp' : 'Thumbtack';
+                    const preferredTpl = platform === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack';
+                    return (
+                      <div key={platform} className="border border-slate-100 rounded-xl p-4 bg-slate-50/30 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[11px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${
+                            platform === 'yelp' ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'
+                          }`}>{platformLabel} · {agg.count}</span>
+                          <span className="text-[11px] text-slate-400">
+                            {agg.count === 1 ? '1 account' : `${agg.count} accounts`}
+                          </span>
+                        </div>
+                        <TemplateDropdownEditor
+                          key={`new-lead-${platform}-${agg.count}`}
+                          label="SMS body sent to business owner"
+                          templates={templates}
+                          preferredTemplateName={preferredTpl}
+                          currentBody={agg.dominantBody || defaultAlertBodyFor(platform)}
+                          mixed={agg.bodiesMixed}
+                          disabled={savingAlertRule || aggregate.enabledCount === 0}
+                          onSave={(body) => cascadeTemplateBodyAllAccounts(body, platform)}
+                        />
+                      </div>
+                    );
+                  })}
+                  {/* Per-account mode: template dropdown + editable body.
+                      Pre-creation (no rule yet), preview the platform default;
+                      after toggle-on, the editor wires into the live rule. */}
                   {!isAllMode && !leadAlertRule && (() => {
-                    // Show the platform default template up-front so the user
-                    // sees what the first message alert will look like before
-                    // enabling. Toggling on uses the same template via
-                    // createLeadAlertRule.
                     const platform = selectedAccount?.platform || 'thumbtack';
                     const defaultBody = defaultAlertBodyFor(platform);
                     const platformLabel = platform === 'yelp' ? 'Yelp' : 'Thumbtack';
@@ -1184,41 +1265,30 @@ export function SettingsCommunicationSection() {
                         <label className="text-[11px] font-bold uppercase tracking-widest mb-2 block text-slate-400">
                           Default {platformLabel} Template
                         </label>
-                        <div className="bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed whitespace-pre-wrap">
+                        <div className="bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed whitespace-pre-wrap font-mono">
                           {defaultBody}
                         </div>
                         <p className="text-[10px] text-slate-400 mt-2">
-                          Toggle on above to create this alert rule. You can edit the template after it's created.
+                          Toggle on above to create this alert rule. You can pick a different template and edit the body after it's created.
                         </p>
                       </div>
                     );
                   })()}
                   {!isAllMode && leadAlertRule && (
                     <div className={!(leadAlertRule.enabled) ? ' opacity-40 pointer-events-none select-none' : ''}>
-                      <label className={`text-[11px] font-bold uppercase tracking-widest mb-2 block ${templateMissing ? 'text-orange-500' : 'text-slate-400'}`}>
-                        Template{templateMissing && <span className="ml-1">*</span>}
-                      </label>
-                      <select
-                        value={leadAlertRule.templateId || leadAlertRule.messageTemplate?.id || ''}
-                        onChange={e => changeAlertTemplate(e.target.value)}
+                      <TemplateDropdownEditor
+                        key={`new-lead-${selectedAccountId}-${leadAlertRule.id}`}
+                        label="SMS body sent to business owner"
+                        templates={templates}
+                        preferredTemplateName={(selectedAccount?.platform || 'thumbtack') === 'yelp' ? 'Lead Alert - Yelp' : 'Lead Alert - Thumbtack'}
+                        currentBody={leadAlertRule.template || leadAlertRule.messageTemplate?.content || ''}
+                        mixed={false}
                         disabled={savingAlertRule}
-                        className={`w-full rounded-xl p-3 text-sm font-medium disabled:opacity-50 ${
-                          templateMissing ? 'border-2 border-orange-300 bg-orange-50/40' : 'bg-white border border-slate-200'
-                        }`}
-                      >
-                        <option value="">Select template (uses inline body below)</option>
-                        {templates.map(t => (
-                          <option key={t.id} value={t.id}>{t.name}</option>
-                        ))}
-                      </select>
-                      {/* Show the active body: linked MessageTemplate wins,
-                          else the inline `rule.template` so users always see
-                          what will actually be sent. */}
-                      {(leadAlertRule.messageTemplate || leadAlertRule.template) && (
-                        <div className="mt-3 bg-white p-4 rounded-xl border border-dashed border-slate-200 text-slate-600 text-sm leading-relaxed whitespace-pre-wrap">
-                          {leadAlertRule.messageTemplate?.content || leadAlertRule.template}
-                        </div>
-                      )}
+                        onSave={async (body) => {
+                          const { rule } = await notificationsApi.updateRule(selectedAccountId, leadAlertRule.id, { template: body });
+                          setLeadAlertRule(rule);
+                        }}
+                      />
                     </div>
                   )}
                 </div>
@@ -1266,27 +1336,18 @@ export function SettingsCommunicationSection() {
                 </div>
                 <div className={`px-5 py-4 space-y-3${(!isAllMode && (!reEngagementAlertOn || !canUseEngage)) || (isAllMode && !canUseEngage) ? ' opacity-40 pointer-events-none select-none' : ''}`}>
                   <p className="text-[11px] text-slate-500">Fires when a customer replies after follow-ups were sent.</p>
-                  {isAllMode ? (
-                    <CascadeBodyEditor
-                      key={`reply-cascade-${replyAggregate.enabledCount}`}
-                      initialBody={replyAggregate.dominantBody || 'Lead {{lead.name}} replied: "{{message}}"'}
-                      mixed={replyAggregate.bodiesMixed}
-                      disabled={savingAlertRule || !canUseEngage}
-                      onSave={cascadeReEngagementTemplateAllAccounts}
-                    />
-                  ) : (
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Reply Alert Template</label>
-                      <p className="text-[10px] text-slate-400 mb-2">Use {'{{lead.name}}'} for lead name and {'{{message}}'} for their reply text.</p>
-                      <textarea
-                        value={reEngagementTemplate}
-                        onChange={e => setReEngagementTemplate(e.target.value)}
-                        rows={2}
-                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
-                        placeholder='Lead {{lead.name}} replied: "{{message}}"'
-                      />
-                    </div>
-                  )}
+                  <p className="text-[10px] text-slate-400">Use {'{{lead.name}}'} for the lead's name and {'{{message}}'} for their reply text.</p>
+                  <TemplateDropdownEditor
+                    key={`reply-${isAllMode ? `cascade-${replyAggregate.enabledCount}` : selectedAccountId}`}
+                    label="SMS body sent to business owner"
+                    templates={templates}
+                    preferredTemplateName="Reply Alert"
+                    currentBody={isAllMode ? replyAggregate.dominantBody : reEngagementTemplate}
+                    mixed={isAllMode && replyAggregate.bodiesMixed}
+                    disabled={savingAlertRule || !canUseEngage}
+                    rows={3}
+                    onSave={isAllMode ? cascadeReEngagementTemplateAllAccounts : (async (body) => { setReEngagementTemplate(body); })}
+                  />
                 </div>
               </div>
 
@@ -1316,29 +1377,20 @@ export function SettingsCommunicationSection() {
                 </div>
                 <div className={`px-5 py-4 space-y-3${!canUseConvert ? ' opacity-60 pointer-events-none' : ''}`}>
                   <p className="text-[11px] text-slate-500">Fires during AI Conversation when the customer is ready to book, wants a call, or needs a human.</p>
-                  {isAllMode ? (
-                    <CascadeBodyEditor
-                      key={`handoff-cascade-${accounts.length}`}
-                      initialBody={handoffAggregate.dominantBody || 'Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"'}
-                      mixed={handoffAggregate.bodiesMixed}
-                      disabled={savingAlertRule || !canUseConvert}
-                      onSave={cascadeHandoffTemplateAllAccounts}
-                    />
-                  ) : (
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Handoff Alert Template</label>
-                      <p className="text-[10px] text-slate-400 mb-2">
-                        Use {'{{lead.name}}'}, {'{{message}}'}, and {'{{intent}}'} ("ready to book" or "wants live call").
-                      </p>
-                      <textarea
-                        value={handoffAlertTemplate}
-                        onChange={e => setHandoffAlertTemplate(e.target.value)}
-                        rows={2}
-                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-400"
-                        placeholder='Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"'
-                      />
-                    </div>
-                  )}
+                  <p className="text-[10px] text-slate-400">
+                    Use {'{{lead.name}}'}, {'{{message}}'}, and {'{{intent}}'} ("ready to book" or "wants live call").
+                  </p>
+                  <TemplateDropdownEditor
+                    key={`handoff-${isAllMode ? `cascade-${accounts.length}` : selectedAccountId}`}
+                    label="SMS body sent to business owner"
+                    templates={templates}
+                    preferredTemplateName="Handoff Alert"
+                    currentBody={isAllMode ? handoffAggregate.dominantBody : handoffAlertTemplate}
+                    mixed={isAllMode && handoffAggregate.bodiesMixed}
+                    disabled={savingAlertRule || !canUseConvert}
+                    rows={3}
+                    onSave={isAllMode ? cascadeHandoffTemplateAllAccounts : (async (body) => { setHandoffAlertTemplate(body); })}
+                  />
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     Auto-fires while AI Conversation is on (configured on the <Link to="/automation" className="text-blue-600 hover:underline">Automation page</Link>). Also requires <span className="font-semibold text-slate-600">Reply Alerts</span> above to be enabled — the same backend toggle gates both paths.
                   </p>

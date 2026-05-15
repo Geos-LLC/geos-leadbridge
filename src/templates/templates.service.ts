@@ -68,6 +68,23 @@ export class TemplatesService {
       isDefault: false,
     },
     {
+      // Owner SMS sent when a quiet lead replies after follow-ups. Surfaced
+      // in the "Reply Alerts" picker on Settings → Communication & Alerts.
+      name: 'Reply Alert',
+      content: 'Lead {{lead.name}} replied: "{{message}}"',
+      type: 'message',
+      isDefault: false,
+    },
+    {
+      // Owner SMS sent during AI Conversation when handoff intent is
+      // detected (ready to book / wants live call). Surfaced in the "AI
+      // Human Takeover Alerts" picker on Settings → Communication & Alerts.
+      name: 'Handoff Alert',
+      content: 'Lead {{lead.name}} ready for handoff ({{intent}}): "{{message}}"',
+      type: 'message',
+      isDefault: false,
+    },
+    {
       name: 'Auto Reply - Welcome',
       content: 'Welcome to {accountName}! Thanks for choosing us for your {category} needs. We\'ll be in touch soon to discuss your project. Feel free to reply with any questions!',
       type: 'message',
