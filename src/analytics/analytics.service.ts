@@ -162,15 +162,16 @@ export class AnalyticsService {
       'done', 'closed', 'completed', 'job complete', 'booked',
     ]);
 
-    // Use tli.leadDate as the canonical lead date when possible.
-    // - New extension versions emit "May 7, 2025" (with year) — parse it directly.
-    // - Older versions emit "Feb 23" (no year) — infer year by anchoring to lead.createdAt
-    //   (the webhook event time, which is reliable) and rolling back when the
-    //   candidate date would be after that anchor. Never use NOW() — it caps
-    //   the chart at the past 12 months.
-    // - When tli.leadDate is missing entirely, fall back to lead.createdAt.
-    //   tli.capturedAt is unreliable here because extension re-captures rebase it
-    //   to "now"; lead.createdAt stays anchored to the original webhook event.
+    // Canonical lead date selection:
+    // 1) When tli.leadDate has an explicit year ("May 7, 2025") — parse it. This is
+    //    the only signal that can correctly place leads >12 months old.
+    // 2) Otherwise use lead.createdAt — the webhook event time, accurate to the day.
+    //
+    // We tried "Mon DD" year inference against lead.createdAt as a middle step, but
+    // it misfires near the boundary: a lead with leadDate="Jun 18" and createdAt=
+    // 2025-06-15 has "Jun 18 2025 > Jun 15 2025", which rolls back to 2024. The
+    // leadDate prefix without a year is too coarse to ever override createdAt.
+    //
     // leadPrice from rawJson is the cost Thumbtack charged the pro per lead (estimate.total is typically null).
     const sqlStr = `
       WITH raw_leads AS (
@@ -184,8 +185,9 @@ export class AnalyticsService {
           tli."thumbtackStatus" AS tli_status,
           tli."capturedAt"      AS tli_captured_at,
           l."createdAt"         AS l_created_at,
-          -- 1) Try to extract a full "Mon D[D], YYYY" date (new extension format).
-          --    Optional comma; 1- or 2-digit day; 4-digit year.
+          -- Try to extract a full "Mon D[D], YYYY" date (new extension format).
+          -- Optional comma; 1- or 2-digit day; 4-digit year. If absent, we ignore
+          -- tli.leadDate entirely and fall back to lead.createdAt.
           CASE
             WHEN tli."leadDate" ~ '^[A-Za-z]{3}\\s+[0-9]{1,2},?\\s+[0-9]{4}'
             THEN regexp_replace(
@@ -193,15 +195,7 @@ export class AnalyticsService {
               ',', '', 'g'
             )
             ELSE NULL
-          END AS full_date_str,
-          -- 2) Fallback: just the "Mon DD" prefix (old extension format).
-          CASE WHEN tli."leadDate" IS NOT NULL
-            THEN regexp_replace(
-              SUBSTRING(tli."leadDate" FROM '^[A-Za-z]{3}\\s+[0-9]{1,2}'),
-              '\\s+', ' '
-            )
-            ELSE NULL
-          END AS date_str
+          END AS full_date_str
         FROM leads l
         LEFT JOIN thumbtack_lead_ids tli
           ON tli."thumbtackId" = l."externalRequestId"
@@ -214,31 +208,12 @@ export class AnalyticsService {
         SELECT
           id, "userId", "businessId", "thumbtackStatus", lead_status, "rawJson", tli_status,
           CASE
-            -- 1) Full date with year, parsed directly. Most accurate.
+            -- Full date with year, parsed directly. Only signal that can place
+            -- leads >12 months in the past correctly.
             WHEN full_date_str IS NOT NULL
             THEN TO_DATE(full_date_str, 'Mon DD YYYY')::timestamptz
-            -- 2) "Mon DD" only — anchor year inference to lead.createdAt, the
-            --    webhook event time (stable across extension re-captures).
-            WHEN date_str IS NOT NULL AND date_str <> ''
-            THEN
-              CASE
-                WHEN TO_DATE(
-                       date_str || ' ' ||
-                       EXTRACT(YEAR FROM COALESCE(l_created_at, tli_captured_at, NOW()))::text,
-                       'Mon DD YYYY'
-                     ) > COALESCE(l_created_at, tli_captured_at, NOW())::date
-                THEN TO_DATE(
-                       date_str || ' ' ||
-                       (EXTRACT(YEAR FROM COALESCE(l_created_at, tli_captured_at, NOW()))::int - 1)::text,
-                       'Mon DD YYYY'
-                     )::timestamptz
-                ELSE TO_DATE(
-                       date_str || ' ' ||
-                       EXTRACT(YEAR FROM COALESCE(l_created_at, tli_captured_at, NOW()))::text,
-                       'Mon DD YYYY'
-                     )::timestamptz
-              END
-            -- 3) No leadDate — fall back to lead.createdAt (webhook time).
+            -- Otherwise use lead.createdAt — the webhook event time, accurate to
+            -- the day. Falls through to tli.capturedAt if createdAt is missing.
             ELSE COALESCE(l_created_at, tli_captured_at)
           END AS lead_date
         FROM raw_leads
