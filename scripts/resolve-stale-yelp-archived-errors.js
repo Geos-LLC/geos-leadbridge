@@ -22,7 +22,7 @@ const { PrismaClient } = require('../generated/prisma');
   const p = new PrismaClient();
   try {
     const yelpAccounts = await p.savedAccount.findMany({
-      where: { platform: 'YELP' },
+      where: { platform: 'yelp' },
       select: { id: true, businessId: true, businessName: true },
     });
     const yelpIds = yelpAccounts.map(a => a.id);
@@ -58,7 +58,7 @@ const { PrismaClient } = require('../generated/prisma');
 
     const res = await p.systemErrorLog.updateMany({
       where: { id: { in: stale.map(x => x.id) } },
-      data: { resolved: true, resolvedAt: new Date() },
+      data: { resolved: true },
     });
     console.log(`\nResolved ${res.count} entries.`);
   } finally {
