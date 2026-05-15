@@ -130,6 +130,11 @@ export class BusinessHoursService {
    * always-defined — defaults (22:00–08:00 NY) apply when fields are null.
    * The user-level `quietHoursEnabled` flag is no longer consulted;
    * `SavedAccount.followUpsApplyQuietHours` is the sole gating mechanism.
+   *
+   * TZ resolution falls back through `businessHoursTimezone` before the
+   * literal default so a user who set ONE master TZ via Settings doesn't see
+   * quiet-hours interpreted in a different wall clock than business-hours.
+   * Matches the convergence direction of `resolveTimezone` in account-timezone.ts.
    */
   async isInQuietHours(userId: string): Promise<boolean> {
     const user = await this.prisma.user.findUnique({
@@ -138,13 +143,17 @@ export class BusinessHoursService {
         quietHoursStart: true,
         quietHoursEnd: true,
         quietHoursTimezone: true,
+        businessHoursTimezone: true,
       },
     });
     const rawStart = user?.quietHoursStart;
     const rawEnd = user?.quietHoursEnd;
     const start = rawStart && /^\d{1,2}:\d{2}$/.test(rawStart) ? rawStart : DEFAULT_QH_START;
     const end = rawEnd && /^\d{1,2}:\d{2}$/.test(rawEnd) ? rawEnd : DEFAULT_QH_END;
-    const tz = user?.quietHoursTimezone || DEFAULT_TZ;
+    const tz =
+      (user?.quietHoursTimezone && user.quietHoursTimezone.trim()) ||
+      (user?.businessHoursTimezone && user.businessHoursTimezone.trim()) ||
+      DEFAULT_TZ;
     return BusinessHoursService.isInTimeRange(new Date(), start, end, tz);
   }
 }

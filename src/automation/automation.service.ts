@@ -7,6 +7,7 @@ import { Injectable, NotFoundException, OnModuleInit, Inject, forwardRef, Logger
 import { createHash } from 'crypto';
 import { PrismaService } from '../common/utils/prisma.service';
 import { BusinessHoursService } from '../common/utils/business-hours.service';
+import { resolveTimezone } from '../common/utils/account-timezone';
 import { TemplatesService } from '../templates/templates.service';
 import { LeadsService } from '../leads/leads.service';
 import { LeadStatusService } from '../leads/lead-status.service';
@@ -899,7 +900,16 @@ export class AutomationService implements OnModuleInit {
         const aiAvailability = aiRules.followUpAvailability ?? aiRules.availability;
         const ahStart = savedAccount.followUpActiveHoursStart;
         const ahEnd = savedAccount.followUpActiveHoursEnd;
-        const ahTz = savedAccount.followUpTimezone || 'America/New_York';
+        // Canonical TZ resolution chain (matches enrollInSequence + scheduler):
+        // SavedAccount.followUpTimezone → User.businessHoursTimezone → DEFAULT.
+        // The old literal fallback caused this gate to interpret active-hours
+        // in NY for any account where followUpTimezone was null even though
+        // the user had a non-NY master timezone set.
+        const userForTz = await this.prisma.user.findUnique({
+          where: { id: context.userId },
+          select: { businessHoursTimezone: true },
+        }).catch(() => null);
+        const ahTz = resolveTimezone(savedAccount, userForTz);
         if (aiAvailability === 'active_hours' && ahStart && ahEnd) {
           if (!this.isInActiveHours(ahStart, ahEnd, ahTz)) {
             this.logger.log(`[AUTOMATION] ✗ AI Conversation skipped — outside active hours (${ahStart}-${ahEnd} ${ahTz}) [legacy mode]`);

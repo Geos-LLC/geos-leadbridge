@@ -104,7 +104,15 @@ describe('FollowUpSchedulerService', () => {
     // shape of classifyAndMaybeStop.
     const { FollowUpGateService } = require('./follow-up-gate.service');
     const gateService = new FollowUpGateService(prisma, intentClassifier);
-    service = new FollowUpSchedulerService(prisma, contextService, leadsService, engineService, generatorService, eventEmitter, configService, trialService, platformFactory, intentClassifier, leadStatusService, gateService);
+    // BusinessHoursService — minimal mock. Quiet-hours/business-hours gates
+    // default to "not in window" so existing scheduler tests aren't suddenly
+    // intercepted by the new master-quiet-hours block in processEnrollment.
+    // Tests that exercise those gates can override .mockResolvedValueOnce(true).
+    const businessHoursService = {
+      isInBusinessHours: jest.fn().mockResolvedValue(true),
+      isInQuietHours: jest.fn().mockResolvedValue(false),
+    } as any;
+    service = new FollowUpSchedulerService(prisma, contextService, leadsService, engineService, generatorService, eventEmitter, configService, trialService, platformFactory, intentClassifier, leadStatusService, gateService, businessHoursService);
     jest.clearAllMocks();
     // Reset mocks after construction
     prisma.followUpEnrollment.findUnique.mockResolvedValue({
